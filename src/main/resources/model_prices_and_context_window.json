@@ -1,0 +1,22 @@
+{
+    "openai": {
+      "gpt-4": {
+        "input_cost_per_token": 0.03,
+        "output_cost_per_token": 0.06
+      },
+      "gpt-3.5": {
+        "input_cost_per_token": 0.002,
+        "output_cost_per_token": 0.004
+      }
+    },
+    "azure": {
+      "gpt-4": {
+        "input_cost_per_token": 0.035,
+        "output_cost_per_token": 0.07
+      },
+      "gpt-3.5": {
+        "input_cost_per_token": 0.0025,
+        "output_cost_per_token": 0.005
+      }
+    }
+  }

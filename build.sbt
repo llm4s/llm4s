@@ -1,5 +1,3 @@
-import Dependencies._
-
 ThisBuild / scalaVersion     := "2.13.12"
 ThisBuild / version          := "0.1.0-SNAPSHOT"
 ThisBuild / organization     := "org.llm4s"
@@ -11,7 +9,8 @@ lazy val root = (project in file("."))
     name := "llm4s",
     libraryDependencies ++= List(
       "com.azure" % "azure-ai-openai" % "1.0.0-beta.14",
-      munit       % Test
+      "com.typesafe.play" %% "play-json" % "2.9.4",  // ✅ Play JSON dependency added
+      "org.scalameta" %% "munit" % "0.7.29" % Test   // ✅ Fixed munit dependency
     )
   )
 
