@@ -23,7 +23,7 @@ class AzureOpenAIClient(config: AzureConfig, client: OpenAIClient) extends LLMCl
       val chatOptions = new ChatCompletionsOptions(chatMessages)
 
       // Set options
-      chatOptions.setTemperature(options.temperature.floatValue())
+      chatOptions.setTemperature(options.temperature.doubleValue)
       options.maxTokens.foreach(mt => chatOptions.setMaxTokens(mt))
 
       // Add tools if specified

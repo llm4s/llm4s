@@ -30,11 +30,11 @@ class OpenAIClient(config: OpenAIConfig) extends LLMClient {
       val chatOptions = new ChatCompletionsOptions(chatMessages)
 
       // Set options
-      chatOptions.setTemperature(options.temperature.floatValue())
+      chatOptions.setTemperature(options.temperature.doubleValue())
       options.maxTokens.foreach(mt => chatOptions.setMaxTokens(mt))
-      chatOptions.setPresencePenalty(options.presencePenalty.floatValue())
-      chatOptions.setFrequencyPenalty(options.frequencyPenalty.floatValue())
-      chatOptions.setTopP(options.topP.floatValue())
+      chatOptions.setPresencePenalty(options.presencePenalty.doubleValue())
+      chatOptions.setFrequencyPenalty(options.frequencyPenalty.doubleValue())
+      chatOptions.setTopP(options.topP.doubleValue())
 
       // Add tools if specified
       if (options.tools.nonEmpty) {

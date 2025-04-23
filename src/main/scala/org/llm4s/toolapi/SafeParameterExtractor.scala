@@ -1,6 +1,8 @@
 package org.llm4s.toolapi
 
 import ujson._
+import scala.util.boundary
+import scala.util.boundary.break
 
 /**
  * Safe parameter extraction with type checking and path navigation
@@ -27,27 +29,32 @@ case class SafeParameterExtractor(params: ujson.Value) {
   // Generic extractor with type validation
   private def extract[T](path: String, extractor: ujson.Value => Option[T], expectedType: String): Either[String, T] =
     try {
-      val pathParts = path.split('.')
-      var current   = params
+      boundary {
+        val pathParts = path.split('.')
+        var current = params
 
-      // Navigate through nested path
-      for (part <- pathParts.dropRight(1))
-        current.obj.get(part) match {
-          case Some(value) => current = value
-          case None        => return Left(s"Path '$path' not found: missing '$part' segment")
+        // Navigate through nested path
+        for (part <- pathParts.dropRight(1)) {
+          current.obj.get(part) match {
+            case Some(value) => current =
+              value
+            case None =>
+              break(Left(s"Path '$path' not found: missing '$part' segment"))
+          }
         }
 
-      // Extract the final value
-      val finalPart = pathParts.last
-      current.obj.get(finalPart) match {
-        case Some(value) =>
-          extractor(value) match {
-            case Some(result) => Right(result)
-            case None         => Left(s"Value at '$path' is not of expected type '$expectedType'")
-          }
-        case None => Left(s"Parameter '$finalPart' not found")
+        // Extract the final value
+        val finalPart = pathParts.last
+        current.obj.get(finalPart) match {
+          case Some(value) =>
+            extractor(value) match {
+              case Some(result) => Right(result)
+              case None => Left(s"Value at '$path' is not of expected type '$expectedType'")
+            }
+           case None => Left(s"Parameter '$finalPart' not found")
+        }
       }
-    } catch {
-      case e: Exception => Left(s"Error extracting parameter at '$path': ${e.getMessage}")
-    }
+   } catch {
+     case e: Exception => Left(s"Error extracting parameter at '$path': ${e.getMessage}")
+   }
 }

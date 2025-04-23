@@ -2,7 +2,7 @@ import xerial.sbt.Sonatype.sonatypeCentralHost
 
 inThisBuild(
   List(
-    scalaVersion           := "2.13.16",
+    scalaVersion           := "3.3.3",
     version                := "0.1.0-SNAPSHOT",
     organization           := "org.llm4s",
     organizationName       := "llm4s",
@@ -28,11 +28,21 @@ inThisBuild(
 
 sonatypeRepository := "https://s01.oss.sonatype.org/service/local"
 
+// Common Scala 3 settings for all projects
+lazy val scala3Settings = List(
+  scalacOptions ++= List(
+    "-explain",          // Explain errors in more detail
+    "-Xfatal-warnings",  // Fail on warnings
+    "-source:3.3",       // Ensure Scala 3 syntax
+  )
+)
+
 lazy val root = (project in file("."))
   .aggregate(shared, workspaceRunner)
   .dependsOn(shared)
   .settings(
     name := "llm4s",
+    scala3Settings,
     libraryDependencies ++= List(
       "com.azure"      % "azure-ai-openai" % "1.0.0-beta.16",
       "com.anthropic"  % "anthropic-java"  % "1.1.0",
@@ -47,6 +57,7 @@ lazy val root = (project in file("."))
 lazy val shared = (project in file("shared"))
   .settings(
     name := "shared",
+    scala3Settings,
     libraryDependencies ++= List(
       "com.lihaoyi"   %% "upickle"         % "4.1.0",
       "ch.qos.logback" % "logback-classic" % "1.5.18",
@@ -64,6 +75,7 @@ lazy val workspaceRunner = (project in file("workspaceRunner"))
     dockerBaseImage     := "eclipse-temurin:21-jdk",
 //    Compile / mainClass := Some("com.llm4s.runner.RunnerMain"),
     name := "workspace-runner",
+    scala3Settings,
     libraryDependencies ++= List(
       "ch.qos.logback" % "logback-classic" % "1.5.18",
       "com.lihaoyi"   %% "upickle"         % "4.1.0",
@@ -79,6 +91,7 @@ lazy val samples = (project in file("samples"))
   .dependsOn(shared, root)
   .settings(
     name := "samples",
+    scala3Settings,
     libraryDependencies ++= List(
       "ch.qos.logback" % "logback-classic" % "1.5.18",
       "org.scalatest" %% "scalatest"       % "3.2.19" % Test
