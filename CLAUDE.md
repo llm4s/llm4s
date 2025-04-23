@@ -2,14 +2,26 @@
 
 ## Build & Test Commands
 ```bash
-# Build the project
+# Build the project (Scala 3)
 sbt compile
 
-# Run a specific sample
+# Build for all Scala versions (2.13 and 3)
+sbt +compile
+
+# Build and test all versions
+sbt buildAll
+
+# Run a specific sample 
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 
-# Run tests
+# Run a sample with Scala 2.13
+sbt ++2.13.12 "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
+
+# Run tests for the current Scala version
 sbt test
+
+# Run tests for all Scala versions
+sbt +test
 
 # Run a single test
 sbt "testOnly org.llm4s.shared.WorkspaceAgentInterfaceTest"
@@ -17,6 +29,14 @@ sbt "testOnly org.llm4s.shared.WorkspaceAgentInterfaceTest"
 # Format code
 sbt scalafmtAll
 ```
+
+## Cross Compilation Guidelines
+- The project supports both Scala 2.13 and Scala 3
+- Common code goes in `src/main/scala`
+- Scala 2.13-specific code goes in `src/main/scala-2.13`
+- Scala 3-specific code goes in `src/main/scala-3`
+- Always test with both versions: `sbt +test`
+- Use the cross-building commands: `buildAll`, `testAll`, `compileAll`
 
 ## Code Style Guidelines
 - **Formatting**: Follow `.scalafmt.conf` settings (120 char line length)

@@ -1,22 +1,27 @@
 import xerial.sbt.Sonatype.sonatypeCentralHost
 
+// Define supported Scala versions
+val scala213 = "2.13.12"
+val scala3 = "3.3.3"
+
 inThisBuild(
   List(
-    scalaVersion           := "3.3.3",
-    version                := "0.1.0-SNAPSHOT",
-    organization           := "org.llm4s",
-    organizationName       := "llm4s",
-    versionScheme          := Some("early-semver"),
+    crossScalaVersions    := List(scala213, scala3),
+    scalaVersion          := scala3,
+    version               := "0.1.0-SNAPSHOT",
+    organization          := "org.llm4s",
+    organizationName      := "llm4s",
+    versionScheme         := Some("early-semver"),
     sonatypeCredentialHost := sonatypeCentralHost,
     // Scalafmt configuration
 //    scalafmtOnCompile := true,
     // Maven central repository deployment
-    homepage               := Some(url("https://github.com/llm4s/")),
+    homepage              := Some(url("https://github.com/llm4s/")),
     sonatypeCredentialHost := "s01.oss.sonatype.org",
-    sonatypeRepository     := "https://s01.oss.sonatype.org/service/local",
-    pgpPublicRing          := file("/tmp/public.asc"),
-    pgpSecretRing          := file("/tmp/secret.asc"),
-    pgpPassphrase          := sys.env.get("PGP_PASSPHRASE").map(_.toArray),
+    sonatypeRepository    := "https://s01.oss.sonatype.org/service/local",
+    pgpPublicRing         := file("/tmp/public.asc"),
+    pgpSecretRing         := file("/tmp/secret.asc"),
+    pgpPassphrase         := sys.env.get("PGP_PASSPHRASE").map(_.toArray),
     scmInfo := Some(
       ScmInfo(
         url("https://github.com/llm4s/llm4s/"),
@@ -28,13 +33,46 @@ inThisBuild(
 
 sonatypeRepository := "https://s01.oss.sonatype.org/service/local"
 
-// Common Scala 3 settings for all projects
-lazy val scala3Settings = List(
-  scalacOptions ++= List(
-    "-explain",          // Explain errors in more detail
-    "-Xfatal-warnings",  // Fail on warnings
-    "-source:3.3",       // Ensure Scala 3 syntax
-  )
+// Scala options based on Scala version
+def scalacOptionsForVersion(scalaVersion: String): Seq[String] = 
+  CrossVersion.partialVersion(scalaVersion) match {
+    case Some((2, 13)) => Seq(
+      // "-Xfatal-warnings",   // Temporarily disabled for cross-compilation
+      "-deprecation",       // Emit warning and location for usages of deprecated APIs
+      "-feature",           // Emit warning for feature usage
+      "-unchecked"          // Enable warnings where generated code depends on assumptions
+      // "-Wunused:imports"    // Temporarily disabled for cross-compilation
+    )
+    case Some((3, _)) => Seq(
+      "-explain",           // Explain errors in more detail
+      "-Xfatal-warnings",   // Fail on warnings
+      "-source:3.3"         // Ensure Scala 3 syntax
+    )
+    case _ => Seq.empty
+  }
+
+// Common settings that apply to both Scala versions
+lazy val commonSettings = Seq(
+  Compile / scalacOptions := scalacOptionsForVersion(scalaVersion.value),
+  
+  // Source directories for cross-compilation
+  Compile / unmanagedSourceDirectories ++= {
+    val sourceDir = (Compile / sourceDirectory).value
+    CrossVersion.partialVersion(scalaVersion.value) match {
+      case Some((2, 13)) => Seq(sourceDir / "scala-2.13")
+      case Some((3, _))  => Seq(sourceDir / "scala-3")
+      case _             => Nil
+    }
+  },
+  
+  Test / unmanagedSourceDirectories ++= {
+    val sourceDir = (Test / sourceDirectory).value
+    CrossVersion.partialVersion(scalaVersion.value) match {
+      case Some((2, 13)) => Seq(sourceDir / "scala-2.13")
+      case Some((3, _))  => Seq(sourceDir / "scala-3")
+      case _             => Nil
+    }
+  }
 )
 
 lazy val root = (project in file("."))
@@ -42,7 +80,7 @@ lazy val root = (project in file("."))
   .dependsOn(shared)
   .settings(
     name := "llm4s",
-    scala3Settings,
+    commonSettings,
     libraryDependencies ++= List(
       "com.azure"      % "azure-ai-openai" % "1.0.0-beta.16",
       "com.anthropic"  % "anthropic-java"  % "1.1.0",
@@ -57,7 +95,7 @@ lazy val root = (project in file("."))
 lazy val shared = (project in file("shared"))
   .settings(
     name := "shared",
-    scala3Settings,
+    commonSettings,
     libraryDependencies ++= List(
       "com.lihaoyi"   %% "upickle"         % "4.1.0",
       "ch.qos.logback" % "logback-classic" % "1.5.18",
@@ -75,7 +113,7 @@ lazy val workspaceRunner = (project in file("workspaceRunner"))
     dockerBaseImage     := "eclipse-temurin:21-jdk",
 //    Compile / mainClass := Some("com.llm4s.runner.RunnerMain"),
     name := "workspace-runner",
-    scala3Settings,
+    commonSettings,
     libraryDependencies ++= List(
       "ch.qos.logback" % "logback-classic" % "1.5.18",
       "com.lihaoyi"   %% "upickle"         % "4.1.0",
@@ -91,7 +129,7 @@ lazy val samples = (project in file("samples"))
   .dependsOn(shared, root)
   .settings(
     name := "samples",
-    scala3Settings,
+    commonSettings,
     libraryDependencies ++= List(
       "ch.qos.logback" % "logback-classic" % "1.5.18",
       "org.scalatest" %% "scalatest"       % "3.2.19" % Test
@@ -100,3 +138,14 @@ lazy val samples = (project in file("samples"))
   .settings(
     publish / skip := true
   )
+
+// Convenience commands for cross-building
+addCommandAlias("buildAll", ";clean;+compile;+test")
+addCommandAlias("publishAll", ";clean;+publish")
+addCommandAlias("testAll", ";+test")
+addCommandAlias("compileAll", ";+compile")
+
+// MiMa binary compatibility settings
+mimaPreviousArtifacts := Set(
+  organization.value %% "llm4s" % "0.1.0-SNAPSHOT"
+)
