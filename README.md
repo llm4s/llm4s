@@ -53,7 +53,14 @@ To get started with the LLM4S project, check out this teaser talk presented by *
 ### Building the Project
 
 ```bash
+# For the default Scala version (3.3.3)
 sbt compile
+
+# For all supported Scala versions (2.13 and 3.3)
+sbt +compile
+
+# Build and test all versions
+sbt buildAll
 ```
 
 ### Setup your LLM Environment
@@ -79,6 +86,7 @@ Thia will allow you to run the non-containerized examples.
 ### Running the Examples
 
 ```bash
+# Using Scala 3.3.3
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
@@ -87,8 +95,50 @@ sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```bash
 sbt docker:publishLocal
 sbt "samples/runMain org.llm4s.samples.workspace.ContainerisedWorkspaceDemo"
+
+# Using Scala 2.13
+sbt ++2.13.14 "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
+### Cross Compilation
+
+LLM4S supports both Scala 2.13 and Scala 3.3. The codebase is set up to handle version-specific code through source directories:
+
+- `src/main/scala` - Common code for both Scala 2.13 and 3.3
+- `src/main/scala-2.13` - Scala 2.13 specific code
+- `src/main/scala-3` - Scala 3 specific code
+
+When you need to use version-specific features, place the code in the appropriate directory.
+
+We've added convenient aliases for cross-compilation:
+
+```bash
+# Compile for all Scala versions
+sbt compileAll
+
+# Test all Scala versions
+sbt testAll
+
+# Both compile and test
+sbt buildAll
+
+# Publish for all versions
+sbt publishAll
+```
+### Cross-Compilation Testing
+
+We use specialized test projects to verify cross-version compatibility against the published artifacts. These tests ensure that the library works correctly across different Scala versions by testing against actual published JARs rather than local target directories.
+
+```bash
+# Run tests for both Scala 2 and 3 against published JARs
+sbt testCross
+
+# Full clean, publish, and test verification
+sbt fullCrossTest
+```
+
+> **Note:** For detailed information about our cross-testing strategy and setup, see [crosstest/README.md](crosstest/README.md)
+>
 ## Roadmap
 
 Our goal is to implement Scala equivalents of popular Python LLM frameworks:

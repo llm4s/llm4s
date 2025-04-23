@@ -84,9 +84,6 @@ class WorkspaceAgentInterfaceTest extends AnyFlatSpec with Matchers {
           totalMatches = 1
         )
 
-      case _ =>
-        WorkspaceAgentErrorResponse("unknown", "Unhandled command", "UNKNOWN_COMMAND")
-
     }
 
     val interface: WorkspaceAgentInterface = new WorkspaceAgentInterfaceRemote(handler)
@@ -138,6 +135,8 @@ class WorkspaceAgentInterfaceTest extends AnyFlatSpec with Matchers {
           totalLines = 1,
           returnedLines = 1
         )
+      case cmd =>
+        throw new Exception(s"Unexpected command: ${cmd.commandId}")
     }
 
     val interface: WorkspaceAgentInterface = new WorkspaceAgentInterfaceRemote(handler)
@@ -158,14 +157,15 @@ class WorkspaceAgentInterfaceTest extends AnyFlatSpec with Matchers {
 
   it should "throw exception for unexpected response types" in {
     // Create a handler that returns the wrong response type
-    val handler: WorkspaceAgentCommand => WorkspaceAgentResponse = { case cmd: ReadFileCommand =>
-      // Return wrong response type
-      WriteFileResponse(
-        commandId = cmd.commandId,
-        success = true,
-        path = cmd.path,
-        bytesWritten = 100
-      )
+    val handler: WorkspaceAgentCommand => WorkspaceAgentResponse = {
+      case _ =>
+        // Return a wrong response type
+        WriteFileResponse(
+          commandId = "n/a",
+          success = true,
+          path = "test.txt",
+          bytesWritten = 100
+        )
     }
 
     val interface: WorkspaceAgentInterface = new WorkspaceAgentInterfaceRemote(handler)
