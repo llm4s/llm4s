@@ -97,7 +97,7 @@ sbt docker:publishLocal
 sbt "samples/runMain org.llm4s.samples.workspace.ContainerisedWorkspaceDemo"
 
 # Using Scala 2.13
-sbt ++2.13.12 "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
+sbt ++2.13.14 "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
 ### Cross Compilation
@@ -125,7 +125,20 @@ sbt buildAll
 # Publish for all versions
 sbt publishAll
 ```
+### Cross-Compilation Testing
 
+We use specialized test projects to verify cross-version compatibility against the published artifacts. These tests ensure that the library works correctly across different Scala versions by testing against actual published JARs rather than local target directories.
+
+```bash
+# Run tests for both Scala 2 and 3 against published JARs
+sbt testCross
+
+# Full clean, publish, and test verification
+sbt fullCrossTest
+```
+
+> **Note:** For detailed information about our cross-testing strategy and setup, see [crosstest/README.md](crosstest/README.md)
+>
 ## Roadmap
 
 Our goal is to implement Scala equivalents of popular Python LLM frameworks:

@@ -1,7 +1,7 @@
 import xerial.sbt.Sonatype.sonatypeCentralHost
 
 // Define supported Scala versions
-val scala213 = "2.13.12"
+val scala213 = "2.13.14"
 val scala3 = "3.3.3"
 
 inThisBuild(
@@ -34,7 +34,7 @@ inThisBuild(
 sonatypeRepository := "https://s01.oss.sonatype.org/service/local"
 
 // Scala options based on Scala version
-def scalacOptionsForVersion(scalaVersion: String): Seq[String] = 
+def scalacOptionsForVersion(scalaVersion: String): Seq[String] =
   CrossVersion.partialVersion(scalaVersion) match {
     case Some((2, 13)) => Seq(
       // "-Xfatal-warnings",   // Temporarily disabled for cross-compilation
@@ -54,7 +54,7 @@ def scalacOptionsForVersion(scalaVersion: String): Seq[String] =
 // Common settings that apply to both Scala versions
 lazy val commonSettings = Seq(
   Compile / scalacOptions := scalacOptionsForVersion(scalaVersion.value),
-  
+
   // Source directories for cross-compilation
   Compile / unmanagedSourceDirectories ++= {
     val sourceDir = (Compile / sourceDirectory).value
@@ -64,7 +64,7 @@ lazy val commonSettings = Seq(
       case _             => Nil
     }
   },
-  
+
   Test / unmanagedSourceDirectories ++= {
     val sourceDir = (Test / sourceDirectory).value
     CrossVersion.partialVersion(scalaVersion.value) match {
@@ -139,13 +139,49 @@ lazy val samples = (project in file("samples"))
     publish / skip := true
   )
 
-// Convenience commands for cross-building
+val crossLibDependencies = Seq(
+  "org.llm4s" %% "llm4s" % "0.1.0-SNAPSHOT",
+  "org.scalatest" %% "scalatest" % "3.2.19" % Test
+)
+
+lazy val crossTestScala2 = (project in file("crosstest/scala2"))
+  .settings(
+    name := "crosstest-scala2",
+    scalaVersion := scala213,
+    crossScalaVersions := Seq(scala213),
+    resolvers += Resolver.mavenLocal,
+    resolvers += Resolver.defaultLocal,
+    libraryDependencies ++= crossLibDependencies
+  )
+
+
+lazy val crossTestScala3 = (project in file("crosstest/scala3"))
+  .settings(
+    name := "crosstest-scala3",
+    scalaVersion := scala3,
+    crossScalaVersions := Seq(scala3),
+    resolvers += Resolver.mavenLocal,
+    resolvers += Resolver.defaultLocal,
+    scalacOptions ++= Seq(
+      "-language:strictEquality",
+      "-Ysafe-init",
+      "-deprecation",
+      "-Wunused:imports",
+      "-Xfatal-warnings"
+    ),
+    libraryDependencies ++= crossLibDependencies
+  )
+
+// Commands remain the same
 addCommandAlias("buildAll", ";clean;+compile;+test")
 addCommandAlias("publishAll", ";clean;+publish")
 addCommandAlias("testAll", ";+test")
 addCommandAlias("compileAll", ";+compile")
+addCommandAlias("testCross", ";crossTestScala2/test;crossTestScala3/test")
+// Add this to your build.sbt
+addCommandAlias("fullCrossTest", ";clean ;crossTestScala2/clean ;crossTestScala3/clean ;+publishLocal ;testCross")
 
-// MiMa binary compatibility settings
+// MiMa settings remain the same
 mimaPreviousArtifacts := Set(
   organization.value %% "llm4s" % "0.1.0-SNAPSHOT"
 )
