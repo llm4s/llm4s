@@ -9,6 +9,9 @@
         <img src="https://img.shields.io/static/v1?label=Chat%20on&message=Discord&color=blue&logo=Discord&style=flat-square" alt="Discord">
     </a>
 </h4>
+<h4 align="center">
+    <img src="assets/llm4s_logo.png" width="100pt" alt="LLM4S Logo">
+</h4>
 
 
 ## Overview
