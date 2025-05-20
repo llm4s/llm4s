@@ -107,19 +107,28 @@ curl https://api.anthropic.com/v1/messages \
     // Track if we've seen a system message
     var hasSystemMessage = false
 
+
+    println("\n\n********************************************************************************************")
+    println("********************************************************************************************")
+    println("Got conversation: " + conversation.messages.size + " messages to encode")
     // Process messages in order
     conversation.messages.foreach {
       case SystemMessage(content) =>
+
+        println("\n\nXXXX Adding system message: " + content)
         paramsBuilder.system(content)
         hasSystemMessage = true
 
       case UserMessage(content) =>
+        println("\n\nXXXX Adding user message: " + content)
         paramsBuilder.addUserMessage(content)
 
       case AssistantMessage(content, _) =>
+        println("\n\nXXXXAdding assistant message: " + content)
         paramsBuilder.addAssistantMessage(content)
 
       case ToolMessage(toolCallId, content) =>
+        println("\n\nXXXXAdding tool response message: " + content)
         // Anthropic doesn't have a direct equivalent to tool messages
         // We'll add it as a user message with a prefix
         paramsBuilder.addUserMessage(s"Tool result for $toolCallId: $content")
@@ -137,7 +146,7 @@ curl https://api.anthropic.com/v1/messages \
 
     val objectSchema = toolFunction.schema.asInstanceOf[ObjectSchema[_]]
     val jsonSchema: JsonObject =
-      ObjectMappers.jsonMapper().readValue(objectSchema.toJsonSchema.render(), classOf[JsonObject])
+      ObjectMappers.jsonMapper().readValue(objectSchema.toJsonSchema(false).render(), classOf[JsonObject])
     val jsonSchemaMap   = jsonSchema.values()
     val inputProperties = jsonSchemaMap.get("properties")
 

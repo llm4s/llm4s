@@ -157,15 +157,14 @@ class WorkspaceAgentInterfaceTest extends AnyFlatSpec with Matchers with OptionV
 
   it should "throw exception for unexpected response types" in {
     // Create a handler that returns the wrong response type
-    val handler: WorkspaceAgentCommand => WorkspaceAgentResponse = {
-      case _ =>
-        // Return a wrong response type
-        WriteFileResponse(
-          commandId = "n/a",
-          success = true,
-          path = "test.txt",
-          bytesWritten = 100
-        )
+    val handler: WorkspaceAgentCommand => WorkspaceAgentResponse = { case _ =>
+      // Return a wrong response type
+      WriteFileResponse(
+        commandId = "n/a",
+        success = true,
+        path = "test.txt",
+        bytesWritten = 100
+      )
     }
 
     val interface: WorkspaceAgentInterface = new WorkspaceAgentInterfaceRemote(handler)

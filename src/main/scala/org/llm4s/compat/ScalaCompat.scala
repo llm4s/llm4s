@@ -13,11 +13,10 @@ object ScalaCompat {
     import scala.util.Properties
     Properties.versionNumberString.startsWith("2.13")
   }
-  
+
   def isScala3: Boolean = !isScala213
-  
+
   // Simple helper for version-dependent code
-  def onScala213[T](ifScala213: => T, ifScala3: => T): T = {
+  def onScala213[T](ifScala213: => T, ifScala3: => T): T =
     if (isScala213) ifScala213 else ifScala3
-  }
 }

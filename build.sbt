@@ -1,4 +1,5 @@
 import xerial.sbt.Sonatype.sonatypeCentralHost
+import com.typesafe.sbt.packager.docker.Cmd
 
 // Define supported Scala versions
 val scala213 = "2.13.14"
@@ -119,6 +120,19 @@ lazy val workspaceRunner = (project in file("workspaceRunner"))
       "com.lihaoyi"   %% "upickle"         % "4.1.0",
       "com.lihaoyi"   %% "cask"            % "0.10.2",
       "org.scalatest" %% "scalatest"       % "3.2.19" % Test
+    ),
+    Docker / dockerBuildOptions := Seq("--platform=linux/amd64"),
+    dockerCommands ++= Seq(
+      Cmd("USER", "root"),
+      Cmd("RUN", "apt-get update && apt-get install -y curl gnupg apt-transport-https ca-certificates zip unzip"),
+      // Install SBT
+      Cmd("RUN", "echo 'deb https://repo.scala-sbt.org/scalasbt/debian all main' | tee /etc/apt/sources.list.d/sbt.list"),
+      Cmd("RUN", "curl -sL 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823' | apt-key add"),
+      Cmd("RUN", "apt-get update && apt-get install -y sbt"),
+      // Install SDKMAN and use it to install Scala
+      Cmd("RUN", "curl -s 'https://get.sdkman.io' | bash"),
+      Cmd("RUN", "bash -c 'source /root/.sdkman/bin/sdkman-init.sh && sdk install scala " + scala3 + " && sdk install scala " + scala213 + "'"),
+      Cmd("ENV", "PATH=/root/.sdkman/candidates/scala/current/bin:$PATH")
     )
   )
   .settings(

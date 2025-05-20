@@ -22,7 +22,7 @@ case class ToolFunction[T, R: ReadWriter](
       "function" -> ujson.Obj(
         "name"        -> ujson.Str(name),
         "description" -> ujson.Str(description),
-        "parameters"  -> schema.toJsonSchema,
+        "parameters"  -> schema.toJsonSchema(strict),
         "strict"      -> ujson.Bool(strict)
       )
     )

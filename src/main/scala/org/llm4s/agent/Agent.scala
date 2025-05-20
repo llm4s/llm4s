@@ -133,10 +133,162 @@ class Agent(client: LLMClient) {
   }
 
   /**
-   * Runs the agent until completion, failure, or step limit is reached
+   * Formats the agent state as a markdown document for tracing
+   * 
+   * @param state The agent state to format as markdown
+   * @return A markdown string representation of the agent state
    */
-  def run(query: String, tools: ToolRegistry, maxSteps: Option[Int] = None): Either[LLMError, AgentState] = {
+  def formatStateAsMarkdown(state: AgentState): String = {
+    val sb = new StringBuilder()
+    
+    // Add header
+    sb.append("# Agent Execution Trace\n\n")
+    sb.append(s"**Query:** ${state.userQuery}\n")
+    sb.append(s"**Status:** ${state.status}\n")
+    sb.append(s"**Tools Available:** ${state.tools.tools.map(_.name).mkString(", ")}\n\n")
+    
+    // Add conversation
+    sb.append("## Conversation Flow\n\n")
+    
+    state.conversation.messages.zipWithIndex.foreach { case (message, index) =>
+      val step = index + 1
+      
+      message.role match {
+        case "system" =>
+          sb.append(s"### Step $step: System Message\n\n")
+          sb.append("```\n")
+          sb.append(message.content)
+          sb.append("\n```\n\n")
+          
+        case "user" =>
+          sb.append(s"### Step $step: User Message\n\n")
+          sb.append(message.content)
+          sb.append("\n\n")
+          
+        case "assistant" =>
+          sb.append(s"### Step $step: Assistant Message\n\n")
+          
+          message match {
+            case msg: AssistantMessage if msg.toolCalls.nonEmpty =>
+              // Show content if it exists
+              if(msg.content != null)
+                if (msg.content.trim.nonEmpty) {
+                  sb.append(msg.content)
+                  sb.append("\n\n")
+                }
+                else
+                    sb.append("--NO CONTENT--\n\n")
+              
+              sb.append("**Tool Calls:**\n\n")
+              
+              msg.toolCalls.foreach { tc =>
+                sb.append(s"Tool: **${tc.name}**\n\n")
+                sb.append("Arguments:\n")
+                sb.append("```json\n")
+                sb.append(tc.arguments)
+                sb.append("\n```\n\n")
+              }
+              
+            case _ =>
+              sb.append(message.content)
+              sb.append("\n\n")
+          }
+          
+        case "tool" =>
+          message match {
+            case msg: ToolMessage =>
+              sb.append(s"### Step $step: Tool Response\n\n")
+              sb.append(s"Tool Call ID: `${msg.toolCallId}`\n\n")
+              sb.append("Result:\n")
+              sb.append("```json\n")
+              sb.append(msg.content)
+              sb.append("\n```\n\n")
+              
+            case _ =>
+              sb.append(s"### Step $step: Tool Response\n\n")
+              sb.append("```\n")
+              sb.append(message.content)
+              sb.append("\n```\n\n")
+          }
+          
+        case _ =>
+          sb.append(s"### Step $step: ${message.role.capitalize} Message\n\n")
+          sb.append("```\n")
+          sb.append(message.content)
+          sb.append("\n```\n\n")
+      }
+    }
+    
+    // Add logs
+    if (state.logs.nonEmpty) {
+      sb.append("## Execution Logs\n\n")
+      
+      state.logs.zipWithIndex.foreach { case (log, index) =>
+        sb.append(s"${index + 1}. ")
+        
+        // Format logs with code blocks for tool outputs
+        log match {
+          case l if l.startsWith("[assistant]") => 
+            sb.append(s"**Assistant:** ${l.stripPrefix("[assistant] ")}\n")
+            
+          case l if l.startsWith("[tool]") => 
+            val content = l.stripPrefix("[tool] ")
+            sb.append(s"**Tool Output:** ${content}\n")
+            
+          case l if l.startsWith("[tools]") => 
+            sb.append(s"**Tools:** ${l.stripPrefix("[tools] ")}\n")
+            
+          case l if l.startsWith("[system]") => 
+            sb.append(s"**System:** ${l.stripPrefix("[system] ")}\n")
+            
+          case _ => 
+            sb.append(s"$log\n")
+        }
+      }
+    }
+    
+    sb.toString
+  }
+  
+  /**
+   * Writes the current state to a markdown trace file
+   * 
+   * @param state The agent state to write to the trace log
+   * @param traceLogPath The path to write the trace log to
+   */
+  def writeTraceLog(state: AgentState, traceLogPath: String): Unit = {
+    import java.nio.file.{Paths, Files}
+    import java.nio.charset.StandardCharsets
+    
+    try {
+      val content = formatStateAsMarkdown(state)
+      Files.write(Paths.get(traceLogPath), content.getBytes(StandardCharsets.UTF_8))
+    } catch {
+      case e: Exception =>
+        e.printStackTrace()
+        println(s"Warning: Failed to write trace log to $traceLogPath: ${e.getMessage}")
+    }
+  }
+
+  /**
+   * Runs the agent until completion, failure, or step limit is reached
+   * 
+   * @param query The user query to process
+   * @param tools The registry of available tools
+   * @param maxSteps Optional limit on the number of steps to execute
+   * @param traceLogPath Optional path to write a markdown trace file
+   * @return Either an error or the final agent state
+   */
+  def run(
+      query: String, 
+      tools: ToolRegistry, 
+      maxSteps: Option[Int] = None,
+      traceLogPath: Option[String] = None
+  ): Either[LLMError, AgentState] = {
     val initialState = initialize(query, tools)
+    
+    // Write initial state if tracing is enabled
+    traceLogPath.foreach(path => writeTraceLog(initialState, path))
 
     @tailrec
     def runUntilCompletion(state: AgentState, stepsRemaining: Option[Int] = maxSteps): Either[LLMError, AgentState] =
@@ -144,7 +296,11 @@ class Agent(client: LLMClient) {
         // Check for step limit before executing either type of step
         case (s, Some(0)) if s == AgentStatus.InProgress || s == AgentStatus.WaitingForTools =>
           // Step limit reached
-          Right(state.log("[system] Step limit reached").withStatus(AgentStatus.Failed("Maximum step limit reached")))
+          val updatedState = state.log("[system] Step limit reached").withStatus(AgentStatus.Failed("Maximum step limit reached"))
+          
+          // Write final state if tracing is enabled
+          traceLogPath.foreach(path => writeTraceLog(updatedState, path))
+          Right(updatedState)
 
         // Continue if we're in progress or waiting for tools
         case (s, _) if s == AgentStatus.InProgress || s == AgentStatus.WaitingForTools =>
@@ -157,6 +313,10 @@ class Agent(client: LLMClient) {
                   (state.status == AgentStatus.WaitingForTools && newState.status == AgentStatus.InProgress)
 
               val nextSteps = if (shouldDecrementStep) stepsRemaining.map(_ - 1) else stepsRemaining
+              
+              // Write updated state if tracing is enabled
+              traceLogPath.foreach(path => writeTraceLog(newState, path))
+              
               runUntilCompletion(newState, nextSteps)
 
             case Left(error) =>
@@ -164,6 +324,8 @@ class Agent(client: LLMClient) {
           }
 
         case (_, _) =>
+          // Write final state if tracing is enabled
+          traceLogPath.foreach(path => writeTraceLog(state, path))
           Right(state) // Complete or Failed
       }
 

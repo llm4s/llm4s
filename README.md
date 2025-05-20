@@ -44,6 +44,7 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
 - **Containerized Workspace**: Secure execution environment for LLM-driven operations
 - **Workspace Agent Interface**: Standardized protocol for file operations and command execution
 - **Multi-Provider Support**: Planned support for multiple LLM providers (OpenAI, Anthropic, etc.)
+- **Agent Trace Logging**: Detailed markdown logs of agent execution for debugging and analysis
 
 ## Project Structure
 
@@ -157,12 +158,24 @@ sbt fullCrossTest
 
 Our goal is to implement Scala equivalents of popular Python LLM frameworks:
 
-- [ ] Single API access to multiple LLM providers (like LiteLLM)
-- [ ] A comprehensive toolchain for building LLM apps (like LangChain/LangGraph)
-- [ ] An agentic framework (like PydanticAI, CrewAI)
+- [ ] * Single API access to multiple LLM providers (like LiteLLM) - llmconnect
+- [ ] A comprehensive toolchain for building LLM apps (like LangChain/LangGraph) 
+  - [ ] * RAG search
+  - [ ] * tool calling
+  - [ ] * logging/tracking/monitoring
+- [ ] * An agentic framework (like PydanticAI, CrewAI)
+  - [ ] Single agent
+  - [ ] Multi-agent
 - [ ] Tokenization utilities (port of tiktoken)
-- [ ] Full ReAct loop implementation
-- [ ] Simple tool calling mechanism
+- [ ] Examples/ support
+   - [ ] * Standard tool calling libraries
+   - [ ] * examples of all use-cases
+- [ ] stable platform -tests etc
+- [ ] Scala Coding SWE Agent - an agent that can do SWE bench type tasks on Scala codebases.
+   - [ ]  codemaps 
+   - [ ]  generation 
+   - [ ]  templates for library use?
+
 
 ## Tool Calling
 
@@ -194,6 +207,48 @@ Mapping LLM tool call requests to actual method invocations through:
 ### Secure Execution
 
 Tools run in a protected Docker container environment to prevent accidental system damage or data leakage.
+
+## Agent Trace Logging
+
+LLM4S provides detailed trace logging capabilities for debugging and analyzing agent executions:
+
+### Using Trace Logs
+
+```scala
+// Create an agent with a client
+val agent = new Agent(client)
+
+// Run the agent with trace logging
+agent.run(
+  query = "What's the weather like in London?",
+  tools = toolRegistry,
+  maxSteps = None,  // optional step limit
+  traceLogPath = Some("/path/to/trace-log.md")  // optional trace log path
+)
+```
+
+The trace log output is formatted as a readable markdown document containing:
+- Full conversation history with all messages
+- Tool calls and their arguments
+- Tool responses
+- Agent execution logs
+- Current agent status
+
+You can also manually write trace logs at specific points during agent execution:
+
+```scala
+// Initialize agent
+val state = agent.initialize(query, tools)
+
+// Manually write the state to a trace log
+agent.writeTraceLog(state, "/path/to/manual-trace.md")
+```
+
+This feature is particularly useful for:
+- Debugging complex agent executions
+- Understanding tool usage patterns
+- Visualizing conversation flow
+- Documenting agent behavior for analysis
 
 
 ## 📢 Talks & Presentations

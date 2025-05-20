@@ -32,28 +32,29 @@ case class SafeParameterExtractor(params: ujson.Value) {
 
       // Navigate to the value using a recursive approach instead of boundary
       @tailrec
-      def navigatePath(current: ujson.Value, remainingParts: List[String]): Either[String, ujson.Value] = {
+      def navigatePath(current: ujson.Value, remainingParts: List[String]): Either[String, ujson.Value] =
         if (remainingParts.isEmpty) {
           Right(current)
         } else {
           val part = remainingParts.head
           if (!current.isInstanceOf[ujson.Obj]) {
-            Left(s"Path '$path': Expected object at '${pathParts.dropRight(remainingParts.size).mkString(".")}' but found ${current.getClass.getSimpleName}")
+            Left(
+              s"Path '$path': Expected object at '${pathParts.dropRight(remainingParts.size).mkString(".")}' but found ${current.getClass.getSimpleName}"
+            )
           } else {
             current.obj.get(part) match {
               case Some(value) => navigatePath(value, remainingParts.tail)
-              case None => Left(s"Path '$path' not found: missing '$part' segment")
+              case None        => Left(s"Path '$path' not found: missing '$part' segment")
             }
           }
         }
-      }
 
       // Get the value at the path
       navigatePath(params, pathParts.toList).flatMap { value =>
         val finalPart = pathParts.last
         extractor(value) match {
           case Some(result) => Right(result)
-          case None => Left(s"Value at '$path' is not of expected type '$expectedType'")
+          case None         => Left(s"Value at '$path' is not of expected type '$expectedType'")
         }
       }
     } catch {

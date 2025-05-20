@@ -6,7 +6,7 @@ import ujson._
  * Base trait for all schema definitions
  */
 sealed trait SchemaDefinition[T] {
-  def toJsonSchema: ujson.Value
+  def toJsonSchema(strict: Boolean): ujson.Value
 }
 
 /**
@@ -18,7 +18,7 @@ case class StringSchema(
   minLength: Option[Int] = None,
   maxLength: Option[Int] = None
 ) extends SchemaDefinition[String] {
-  def toJsonSchema: ujson.Value = {
+  def toJsonSchema(strict: Boolean): ujson.Value = {
     val base = ujson.Obj(
       "type"        -> ujson.Str("string"),
       "description" -> ujson.Str(description)
@@ -48,7 +48,7 @@ case class NumberSchema(
   exclusiveMaximum: Option[Double] = None,
   multipleOf: Option[Double] = None
 ) extends SchemaDefinition[Double] {
-  def toJsonSchema: ujson.Value = {
+  def toJsonSchema(strict: Boolean): ujson.Value = {
     val base = ujson.Obj(
       "type"        -> ujson.Str(if (isInteger) "integer" else "number"),
       "description" -> ujson.Str(description)
@@ -84,7 +84,7 @@ case class IntegerSchema(
   exclusiveMaximum: Option[Int] = None,
   multipleOf: Option[Int] = None
 ) extends SchemaDefinition[Int] {
-  def toJsonSchema: ujson.Value = {
+  def toJsonSchema(strict: Boolean): ujson.Value = {
     val base = ujson.Obj(
       "type"        -> ujson.Str("integer"),
       "description" -> ujson.Str(description)
@@ -115,7 +115,7 @@ case class IntegerSchema(
 case class BooleanSchema(
   description: String
 ) extends SchemaDefinition[Boolean] {
-  def toJsonSchema: ujson.Value =
+  def toJsonSchema(strict: Boolean): ujson.Value =
     ujson.Obj(
       "type"        -> ujson.Str("boolean"),
       "description" -> ujson.Str(description)
@@ -132,11 +132,11 @@ case class ArraySchema[A](
   maxItems: Option[Int] = None,
   uniqueItems: Boolean = false
 ) extends SchemaDefinition[Seq[A]] {
-  def toJsonSchema: ujson.Value = {
+  def toJsonSchema(strict: Boolean): ujson.Value = {
     val base = ujson.Obj(
       "type"        -> ujson.Str("array"),
       "description" -> ujson.Str(description),
-      "items"       -> itemSchema.toJsonSchema
+      "items"       -> itemSchema.toJsonSchema(strict)
     )
 
     minItems.foreach(min => base("minItems") = ujson.Num(min))
@@ -170,11 +170,13 @@ case class ObjectSchema[T](
   properties: Seq[PropertyDefinition[_]],
   additionalProperties: Boolean = false
 ) extends SchemaDefinition[T] {
-  def toJsonSchema: ujson.Value = {
+  def toJsonSchema(strict: Boolean): ujson.Value = {
     val props    = ujson.Obj()
-    val required = properties.filter(_.required).map(_.name)
 
-    properties.foreach(prop => props(prop.name) = prop.schema.toJsonSchema)
+    // in strict mode all properties are required 
+    val required = (if(strict) properties else properties.filter(_.required)).map(_.name)
+
+    properties.foreach(prop => props(prop.name) = prop.schema.toJsonSchema(strict))
 
     ujson.Obj(
       "type"                 -> ujson.Str("object"),
@@ -195,8 +197,8 @@ case class ObjectSchema[T](
 case class NullableSchema[T](
   underlying: SchemaDefinition[T]
 ) extends SchemaDefinition[Option[T]] {
-  def toJsonSchema: ujson.Value = {
-    val schema    = underlying.toJsonSchema.obj
+  def toJsonSchema(strict: Boolean): ujson.Value = {
+    val schema    = underlying.toJsonSchema(strict).obj
     val typeField = schema.get("type")
 
     typeField match {
