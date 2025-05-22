@@ -162,8 +162,7 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String) extends WorkspaceAgentI
         isTruncated = isTruncated,
         totalFound = filteredFiles.size
       )
-    } finally
-      stream.close()
+    } finally stream.close()
   }
 
   /**

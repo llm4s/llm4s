@@ -3,7 +3,7 @@ import com.typesafe.sbt.packager.docker.Cmd
 
 // Define supported Scala versions
 val scala213 = "2.13.14"
-val scala3 = "3.3.3"
+val scala3 = "3.3.6"
 
 inThisBuild(
   List(

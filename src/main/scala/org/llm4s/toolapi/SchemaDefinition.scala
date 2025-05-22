@@ -171,10 +171,10 @@ case class ObjectSchema[T](
   additionalProperties: Boolean = false
 ) extends SchemaDefinition[T] {
   def toJsonSchema(strict: Boolean): ujson.Value = {
-    val props    = ujson.Obj()
+    val props = ujson.Obj()
 
-    // in strict mode all properties are required 
-    val required = (if(strict) properties else properties.filter(_.required)).map(_.name)
+    // in strict mode all properties are required
+    val required = (if (strict) properties else properties.filter(_.required)).map(_.name)
 
     properties.foreach(prop => props(prop.name) = prop.schema.toJsonSchema(strict))
 

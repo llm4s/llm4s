@@ -15,7 +15,7 @@ object CodeGenExample {
 
     // Create a CodeWorker instance
     val codeWorker = new CodeWorker(workspaceDir)
-    
+
     // Define the trace log path
     val traceLogPath = "/Users/rory.graves/workspace/home/llm4s/log/codegen-trace.md"
     logger.info(s"Trace log will be written to: $traceLogPath")
@@ -26,9 +26,9 @@ object CodeGenExample {
         logger.info("CodeWorker initialized successfully")
 
         // Define a code task - could be creating a new file, modifying code, etc.
-        val task = "Create a simple sbt project containing a hello world example that prints the current date and time.  Use 'sbt compile' and 'sbt run' to test the generated code.  You can assume you have sbt and java already installed." +
-          "Run the program and show the result. "
-
+        val task =
+          "Create a simple sbt project containing a hello world example that prints the current date and time.  Use 'sbt compile' and 'sbt run' to test the generated code.  You can assume you have sbt and java already installed." +
+            "Run the program and show the result. "
 
         // Execute the task with trace logging - increase step limit to 20
         codeWorker.executeTask(task, maxSteps = Some(20), traceLogPath = Some(traceLogPath)) match {

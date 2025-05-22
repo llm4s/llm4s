@@ -1,10 +1,13 @@
 .idea
 .venv
 .env
+.bloop/
+project/.bloop/
 .env.local
 /.bsp/
 target/
 .aider*
 CLAUDE.md
-
+.metals
+.vscode
 **/.claude/settings.local.json
