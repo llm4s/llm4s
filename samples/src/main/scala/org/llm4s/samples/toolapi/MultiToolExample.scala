@@ -1,12 +1,15 @@
 package org.llm4s.samples.toolapi
 
 import org.llm4s.toolapi._
+import org.slf4j.LoggerFactory
 import upickle.default._
 
 /**
  * Example demonstrating multiple tools with different parameter types
  */
 object MultiToolExample {
+  private val logger = LoggerFactory.getLogger(getClass)
+  
   // Result types
   case class CalculationResult(result: Double)
   case class SearchResult(query: String, results: Seq[String])
@@ -118,20 +121,30 @@ object MultiToolExample {
     )
 
     // Execute tool calls
-    println("Calculator result:")
+    logger.info("Executing calculator tool...")
+    val startTime1 = System.currentTimeMillis()
     toolRegistry.execute(calcRequest) match {
-      case Right(json) => println(json.render(indent = 2))
-      case Left(error) => println(s"Error: $error")
+      case Right(json) => 
+        val duration = System.currentTimeMillis() - startTime1
+        logger.info("Calculator tool completed in {}ms. Result: {}", duration, json.render(indent = 2))
+      case Left(error) => 
+        val duration = System.currentTimeMillis() - startTime1
+        logger.error("Calculator tool failed in {}ms with error: {}", duration, error)
     }
 
-    println("\nSearch result:")
+    logger.info("Executing search tool...")
+    val startTime2 = System.currentTimeMillis()
     toolRegistry.execute(searchRequest) match {
-      case Right(json) => println(json.render(indent = 2))
-      case Left(error) => println(s"Error: $error")
+      case Right(json) => 
+        val duration = System.currentTimeMillis() - startTime2
+        logger.info("Search tool completed in {}ms. Result: {}", duration, json.render(indent = 2))
+      case Left(error) => 
+        val duration = System.currentTimeMillis() - startTime2
+        logger.error("Search tool failed in {}ms with error: {}", duration, error)
     }
 
     // Generate OpenAI tool definitions
-    println("\nTool definitions for OpenAI:")
-    println(toolRegistry.getToolDefinitions("openai").render(indent = 2))
+    logger.info("Tool definitions for OpenAI:")
+    logger.info(toolRegistry.getToolDefinitions("openai").render(indent = 2))
   }
 }

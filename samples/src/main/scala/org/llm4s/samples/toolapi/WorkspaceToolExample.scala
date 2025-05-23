@@ -136,12 +136,11 @@ object WorkspaceToolExample {
       case Right(completion) =>
         val assistantMessage = completion.message
 
-        println(s"\n===== LLM Response (Step ${depth + 1}) =====")
-        println(assistantMessage.content)
+        logger.info("LLM Response (Step {}): {}", depth + 1, assistantMessage.content)
 
         // Check if there are tool calls
         if (assistantMessage.toolCalls.nonEmpty) {
-          println(s"\n===== Tool Calls (${assistantMessage.toolCalls.length}) =====")
+          logger.info("Processing {} tool calls", assistantMessage.toolCalls.length)
           
           // Process each tool call and create tool messages
           val toolMessages = processToolCalls(assistantMessage.toolCalls, toolRegistry)
@@ -151,27 +150,25 @@ object WorkspaceToolExample {
             .addMessage(assistantMessage)
             .addMessages(toolMessages)
 
-          println("\n===== Sending follow-up request with tool results =====")
+          logger.info("Sending follow-up request with tool results")
 
           // Make the follow-up API request
           processLLMRequest(client, updatedConversation, options, toolRegistry, depth + 1)
         } else {
           // If no tool calls, we're done
-          println("\n===== Final Response (no more tool calls) =====")
+          logger.info("Final response received (no more tool calls)")
 
           // Print token usage if available
           completion.usage.foreach { usage =>
-            println(
-              s"\nTokens used: ${usage.totalTokens} (${usage.promptTokens} prompt, ${usage.completionTokens} completion)"
-            )
+            logger.info("Tokens used: {} ({} prompt, {} completion)", 
+              usage.totalTokens, usage.promptTokens, usage.completionTokens)
           }
         }
 
       case Left(UnknownError(throwable)) =>
-        println(s"Error: ${throwable.getMessage}")
-        throwable.printStackTrace()
+        logger.error("Unknown error occurred: {}", throwable.getMessage, throwable)
       case Left(error) =>
-        println(s"Error: $error")
+        logger.error("Error occurred: {}", error)
     }
 
   /**
@@ -179,20 +176,24 @@ object WorkspaceToolExample {
    */
   private def processToolCalls(toolCalls: Seq[ToolCall], toolRegistry: ToolRegistry): Seq[ToolMessage] =
     toolCalls.map { toolCall =>
-      println(s"\nExecuting tool: ${toolCall.name}")
-      println(s"Arguments: ${toolCall.arguments}")
+      val startTime = System.currentTimeMillis()
+      
+      logger.info("Executing tool: {} with arguments: {}", toolCall.name, toolCall.arguments)
 
       val request = ToolCallRequest(toolCall.name, toolCall.arguments)
       val toolResult = toolRegistry.execute(request)
+      
+      val endTime = System.currentTimeMillis()
+      val duration = endTime - startTime
 
       val resultContent = toolResult match {
         case Right(json) => 
           val formatted = json.render(indent = 2)
-          println(s"Tool execution result: $formatted")
+          logger.info("Tool {} completed successfully in {}ms. Result: {}", toolCall.name, duration, formatted)
           formatted
         case Left(error) => 
           val errorJson = s"""{ "isError": true, "message": "$error" }"""
-          println(s"Tool execution error: $error")
+          logger.warn("Tool {} failed in {}ms with error: {}", toolCall.name, duration, error)
           errorJson
       }
 

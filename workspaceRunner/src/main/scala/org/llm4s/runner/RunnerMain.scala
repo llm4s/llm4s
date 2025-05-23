@@ -1,12 +1,12 @@
 package org.llm4s.runner
 
 import cask.model.Response
-import org.llm4s.shared._
+import org.llm4s.shared.*
 import org.slf4j.LoggerFactory
 
-import java.nio.file.{ Files, Paths }
+import java.nio.file.{Files, Paths}
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.{ Executors, ScheduledExecutorService, TimeUnit }
+import java.util.concurrent.{ExecutorService, Executors, ScheduledExecutorService, TimeUnit}
 
 /**
  * Main entry point for the Workspace Runner service.
@@ -29,6 +29,14 @@ object RunnerMain extends cask.MainRoutes {
   private val watchdogExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
   private val lastHeartbeatTime                          = new AtomicLong(System.currentTimeMillis())
   private val heartbeatTimeoutMs                         = 10000L // 10 seconds in milliseconds
+
+  //Use the same underlying executor for both virtual and non-virtual threads
+  private val executor = Executors.newFixedThreadPool(4)
+
+  override protected def handlerExecutor(): Option[ExecutorService] = {
+    super.handlerExecutor().orElse(Some(executor))
+  }
+
 
   // Get workspace path from environment variable or use default
   private val workspacePath = sys.env.getOrElse("WORKSPACE_PATH", "/workspace")
@@ -179,6 +187,7 @@ object RunnerMain extends cask.MainRoutes {
    */
   @cask.get("/heartbeat")
   def heartbeat(): String = {
+    logger.info("HEARTTBEAT")
     updateHeartbeat()
     "ok"
   }

@@ -14,6 +14,7 @@ import scala.util.{ Failure, Success, Try }
  */
 object WorkspaceTools {
 
+  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
   /**
    * Create an explore files tool that lists files and directories.
    *
@@ -334,8 +335,8 @@ object WorkspaceTools {
     workspace: ContainerisedWorkspace
   ): Either[String, ujson.Value] = {
     val path      = params.getString("path").getOrElse("")
-    val startLine = params.getInt("start_line").toOption.map(Some(_)).getOrElse(None)
-    val endLine   = params.getInt("end_line").toOption.map(Some(_)).getOrElse(None)
+    val startLine = params.getInt("start_line").toOption.flatMap(Some(_))
+    val endLine   = params.getInt("end_line").toOption.flatMap(Some(_))
 
     Try(workspace.readFile(path, startLine, endLine)) match {
       case Success(response) =>
@@ -403,10 +404,15 @@ object WorkspaceTools {
   ): Either[String, ujson.Value] = {
     val command    = params.getString("command").getOrElse("")
     val workingDir = params.getString("working_directory").getOrElse("/workspace")
-    val timeout    = params.getInt("timeout").toOption.map(Some(_)).getOrElse(None)
+    val timeout    = params.getInt("timeout").toOption.flatMap(Some(_))
 
     try {
+      logger.info(s"Executing command: $command in directory: $workingDir with timeout: $timeout")
       val execResult = workspace.executeCommand(command, workingDirectory = Some(workingDir), timeout = timeout)
+      logger.info("Command execution complete - exitCode: " + execResult.exitCode +
+        " stdout: " + execResult.stdout.length + " stderr: " + execResult.stderr.length + "b")
+      println(execResult.stdout)
+        println(execResult.stderr)
       Right(
         ujson.Obj(
           "exit_code" -> execResult.exitCode,

@@ -117,8 +117,8 @@ lazy val workspaceRunner = (project in file("workspaceRunner"))
     commonSettings,
     libraryDependencies ++= List(
       "ch.qos.logback" % "logback-classic" % "1.5.18",
-      "com.lihaoyi"   %% "upickle"         % "4.1.0",
-      "com.lihaoyi"   %% "cask"            % "0.10.2",
+      "com.lihaoyi"   %% "upickle"         % "4.2.1",
+      "com.lihaoyi"   %% "cask"            % "0.9.7",
       "org.scalatest" %% "scalatest"       % "3.2.19" % Test
     ),
     Docker / dockerBuildOptions := Seq("--platform=linux/amd64"),

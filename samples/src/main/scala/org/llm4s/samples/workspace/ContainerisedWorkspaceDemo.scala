@@ -33,6 +33,12 @@ object ContainerisedWorkspaceDemo extends App {
       val touchResult = workspace.executeCommand("touch /workspace/test_file.txt")
       logger.info(s"Touch command exit code: ${touchResult.exitCode}")
 
+
+      // Create a new file
+      val sbtVersionResult = workspace.executeCommand("sbt --version")
+      logger.info(s"SBT Version Result exit code: ${sbtVersionResult.exitCode}")
+      logger.info(s"SBT Version Result exit code: ${sbtVersionResult.stdout}")
+
       // List the directory again to see the new file
       val updatedContents = workspace.exploreFiles("/workspace")
       logger.info(s"Updated directory contents: ${updatedContents.files.map(_.path).mkString(", ")}")

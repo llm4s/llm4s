@@ -3,6 +3,7 @@ package org.llm4s.agent
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi._
+import org.slf4j.LoggerFactory
 
 import scala.annotation.tailrec
 import scala.util.{ Failure, Success, Try }
@@ -11,6 +12,7 @@ import scala.util.{ Failure, Success, Try }
  * Basic Agent implementation.
  */
 class Agent(client: LLMClient) {
+  private val logger = LoggerFactory.getLogger(getClass)
 
   /**
    * Initializes a new agent state with the given query
@@ -44,7 +46,7 @@ class Agent(client: LLMClient) {
         // Get tools from registry and create completion options
         val options = CompletionOptions(tools = state.tools.tools)
 
-        println(f"Running completion step with ${state.tools.tools.map(_.name).mkString(",")}...")
+        logger.debug("Running completion step with tools: {}", state.tools.tools.map(_.name).mkString(", "))
         // Request next step from LLM
         client.complete(state.conversation, options) match {
           case Right(completion) =>
@@ -66,7 +68,7 @@ class Agent(client: LLMClient) {
 
               case toolCalls =>
                 // Don't process tools yet, just mark as waiting
-                println("Tool calls identified, setting state to waiting for tools...")
+                logger.debug("Tool calls identified, setting state to waiting for tools")
                 Right(updatedState.withStatus(AgentStatus.WaitingForTools))
             }
 
@@ -88,13 +90,14 @@ class Agent(client: LLMClient) {
 
             // Process the tool calls
             Try {
-              println("Processing tool calls...")
+              logger.debug("Processing {} tool calls", assistantMessage.toolCalls.size)
               processToolCalls(stateWithLog, assistantMessage.toolCalls)
             } match {
               case Success(newState) =>
-                println("Tool processing successful - continuing")
+                logger.debug("Tool processing successful - continuing")
                 Right(newState.withStatus(AgentStatus.InProgress))
               case Failure(error) =>
+                logger.error("Tool processing failed: {}", error.getMessage)
                 Right(stateWithLog.withStatus(AgentStatus.Failed(error.getMessage)))
             }
 
@@ -116,15 +119,28 @@ class Agent(client: LLMClient) {
 
     // Process each tool call and create tool messages
     val toolMessages = toolCalls.map { toolCall =>
+      val startTime = System.currentTimeMillis()
+
+      logger.info("Executing tool: {} with arguments: {}", toolCall.name, toolCall.arguments)
+
       val request = ToolCallRequest(toolCall.name, toolCall.arguments)
       val result  = toolRegistry.execute(request)
 
+      val endTime  = System.currentTimeMillis()
+      val duration = endTime - startTime
+
       val resultContent = result match {
-        case Right(json) => json.render()
-        case Left(error) => s"""{ "isError": true, "message": "$error" }"""
+        case Right(json) =>
+          val jsonStr = json.render()
+          logger.info("Tool {} completed successfully in {}ms. Result: {}", toolCall.name, duration, jsonStr)
+          jsonStr
+        case Left(error) =>
+          val errorJson = s"""{ "isError": true, "message": "$error" }"""
+          logger.warn("Tool {} failed in {}ms with error: {}", toolCall.name, duration, error)
+          errorJson
       }
 
-      state.log(s"[tool] ${toolCall.name}: $resultContent")
+      state.log(s"[tool] ${toolCall.name} (${duration}ms): $resultContent")
       ToolMessage(toolCall.id, resultContent)
     }
 
@@ -264,8 +280,7 @@ class Agent(client: LLMClient) {
       Files.write(Paths.get(traceLogPath), content.getBytes(StandardCharsets.UTF_8))
     } catch {
       case e: Exception =>
-        e.printStackTrace()
-        println(s"Warning: Failed to write trace log to $traceLogPath: ${e.getMessage}")
+        logger.error("Failed to write trace log to {}: {}", traceLogPath, e.getMessage, e)
     }
   }
 
