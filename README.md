@@ -108,6 +108,14 @@ or Anthropic:
 LLM_MODEL=anthropic/claude-3-7-sonnet-latest
 ANTHROPIC_API_KEY=<your_anthropic_api_key>
 ```
+or OpenRouter:
+
+```
+LLM_MODEL=openai/gpt-4o
+OPENAI_API_KEY=<your_openai_api_key>
+OPENAI_BASE_URL=https://openrouter.ai/api/v1
+```
+
 
 This will allow you to run the non-containerized examples.
 
@@ -223,49 +231,41 @@ Mapping LLM tool call requests to actual method invocations through:
 
 Tools run in a protected Docker container environment to prevent accidental system damage or data leakage.
 
-## Agent Trace Logging
+## Comprehensive Tracing System
 
-LLM4S provides detailed trace logging capabilities for debugging and analyzing agent executions:
+LLM4S provides a powerful, configurable tracing system for monitoring, debugging, and analyzing your LLM applications with support for multiple backends.
 
-### Using Trace Logs
+### Tracing Modes
 
-```scala
-// Create an agent with a client
-val agent = new Agent(client)
+Configure tracing behavior using the `TRACING_MODE` environment variable:
 
-// Run the agent with trace logging
-agent.run(
-  query = "What's the weather like in London?",
-  tools = toolRegistry,
-  maxSteps = None,  // optional step limit
-  traceLogPath = Some("/path/to/trace-log.md")  // optional trace log path
-)
+```bash
+# Send traces to Langfuse (default)
+TRACING_MODE=langfuse
+LANGFUSE_PUBLIC_KEY=pk-lf-your-key
+LANGFUSE_SECRET_KEY=sk-lf-your-secret
+
+# Print detailed traces to console with colors and token usage
+TRACING_MODE=print
+
+# Disable tracing completely
+TRACING_MODE=none
 ```
 
-The trace log output is formatted as a readable markdown document containing:
-
-- Full conversation history with all messages
-- Tool calls and their arguments
-- Tool responses
-- Agent execution logs
-- Current agent status
-
-You can also manually write trace logs at specific points during agent execution:
+### Basic Usage
 
 ```scala
-// Initialize agent
-val state = agent.initialize(query, tools)
+import org.llm4s.trace.Tracing
 
-// Manually write the state to a trace log
-agent.writeTraceLog(state, "/path/to/manual-trace.md")
+// Create tracer based on TRACING_MODE environment variable
+val tracer = Tracing.create()
+
+// Trace events, completions, and token usage
+tracer.traceEvent("Starting LLM operation")
+tracer.traceCompletion(completion, model)
+tracer.traceTokenUsage(tokenUsage, model, "chat-completion")
+tracer.traceAgentState(agentState)
 ```
-
-This feature is particularly useful for:
-
-- Debugging complex agent executions
-- Understanding tool usage patterns
-- Visualizing conversation flow
-- Documenting agent behavior for analysis
 
 ## 📢 Talks & Presentations
 
