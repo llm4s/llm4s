@@ -221,5 +221,3 @@ addCommandAlias("fullCrossTest", ";clean ;crossTestScala2/clean ;crossTestScala3
 mimaPreviousArtifacts := Set(
   organization.value %% "llm4s" % "0.0.1"
 )
-
-libraryDependencies += "com.lihaoyi" %% "requests" % "0.8.0"
