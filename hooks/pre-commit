@@ -1,0 +1,38 @@
+#!/bin/bash
+
+# Git pre-commit hook for LLM4S project
+# Ensures code formatting and passes tests before committing
+
+set -e
+
+echo "Running pre-commit checks..."
+
+# Check if sbt is available
+if ! command -v sbt &> /dev/null; then
+    echo "Error: sbt is not installed or not in PATH"
+    exit 1
+fi
+
+# Run scalafmt check
+echo "Checking code formatting with scalafmt..."
+if ! sbt scalafmtCheckAll; then
+    echo "Error: Code is not properly formatted!"
+    echo "Please run 'sbt scalafmtAll' to format your code"
+    exit 1
+fi
+
+# Run compilation for all Scala versions
+echo "Compiling for all Scala versions..."
+if ! sbt +compile; then
+    echo "Error: Compilation failed!"
+    exit 1
+fi
+
+# Run tests for all Scala versions
+echo "Running tests for all Scala versions..."
+if ! sbt +test; then
+    echo "Error: Tests failed!"
+    exit 1
+fi
+
+echo "All pre-commit checks passed!"

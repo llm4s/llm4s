@@ -70,6 +70,22 @@ To get started with the LLM4S project, check out this teaser talk presented by *
 
 <br>
 
+### Setting Up Pre-commit Hooks
+
+To ensure code quality, we use a Git pre-commit hook that automatically checks code formatting and runs tests before allowing commits:
+
+```bash
+# Install the pre-commit hook
+./hooks/install.sh
+
+# The hook will automatically:
+# - Check code formatting with scalafmt
+# - Compile code for both Scala 2.13 and 3
+# - Run tests for both Scala versions
+
+# To skip the hook temporarily (not recommended):
+# git commit --no-verify
+```
 
 ### Prerequisites
 

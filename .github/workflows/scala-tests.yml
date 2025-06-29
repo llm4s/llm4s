@@ -31,14 +31,18 @@ jobs:
           cache: 'sbt'
       - name: Setup sbt launcher
         uses: sbt/setup-sbt@v1
+      
+      - name: Check code formatting
+        run: sbt scalafmtCheckAll
+      
       - name: Run tests (Linux)
         if: runner.os == 'Linux'
-        run: sbt clean test
+        run: sbt clean +test
       
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
         shell: bash
-        run: sbt clean test
+        run: sbt clean +test
       
       - name: Upload test reports
         if: always()
