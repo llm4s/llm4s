@@ -118,7 +118,7 @@ curl https://api.anthropic.com/v1/messages \
 
       case AssistantMessage(content, _) =>
         println("\n\nXXXXAdding assistant message: " + content)
-        paramsBuilder.addAssistantMessage(content)
+        paramsBuilder.addAssistantMessage(content.getOrElse(""))
 
       case ToolMessage(toolCallId, content) =>
         println("\n\nXXXXAdding tool response message: " + content)
@@ -160,13 +160,15 @@ curl https://api.anthropic.com/v1/messages \
   // Convert Anthropic response to our model
   private def convertFromAnthropicResponse(response: Message): Completion = {
     // Extract content
-    val content = response
-      .content()
-      .asScala
-      .toList
-      .filter(_.isText)
-      .map(_.asText().text())
-      .mkString
+    val content: Option[String] = Some(
+      response
+        .content()
+        .asScala
+        .toList
+        .filter(_.isText)
+        .map(_.asText().text())
+        .mkString
+    )
 
     // Extract tool calls if present
     val toolCalls = extractToolCalls(response)
@@ -176,7 +178,7 @@ curl https://api.anthropic.com/v1/messages \
       id = response.id(),
       created = System.currentTimeMillis() / 1000, // Use current time as created timestamp
       message = AssistantMessage(
-        content = content,
+        contentOpt = content,
         toolCalls = toolCalls
       ),
       usage = Some(

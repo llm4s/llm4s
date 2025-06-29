@@ -22,7 +22,7 @@ object ToolCallError {
  * Registry for tool functions with execution capabilities
  */
 class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
-  
+
   def tools: Seq[ToolFunction[_, _]] = initialTools
 
   // Get a specific tool by name

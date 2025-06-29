@@ -17,9 +17,9 @@ class LangfuseTracing(
   release: String = sys.env.getOrElse("LANGFUSE_RELEASE", "1.0.0"),
   version: String = sys.env.getOrElse("LANGFUSE_VERSION", "1.0.0")
 ) extends Tracing {
-  private val logger = LoggerFactory.getLogger(getClass)
+  private val logger         = LoggerFactory.getLogger(getClass)
   private def nowIso: String = DateTimeFormatter.ISO_INSTANT.format(Instant.now())
-  private def uuid: String = UUID.randomUUID().toString
+  private def uuid: String   = UUID.randomUUID().toString
 
   private def sendBatch(events: Seq[ujson.Obj]): Unit = {
     if (publicKey.isEmpty || secretKey.isEmpty) {
@@ -28,26 +28,26 @@ class LangfuseTracing(
       logger.warn(s"[Langfuse] Current URL: $langfuseUrl")
       return
     }
-    
+
     logger.debug(s"[Langfuse] Sending batch to URL: $langfuseUrl")
     logger.debug(s"[Langfuse] Using public key: ${publicKey.take(10)}...")
     logger.debug(s"[Langfuse] Events in batch: ${events.length}")
-    
+
     val batchPayload = ujson.Obj("batch" -> ujson.Arr(events: _*))
-    
+
     Try {
       val response = requests.post(
         langfuseUrl,
         data = batchPayload.render(),
         headers = Map(
           "Content-Type" -> "application/json",
-          "User-Agent" -> "llm4s-scala/1.0.0"
+          "User-Agent"   -> "llm4s-scala/1.0.0"
         ),
         auth = (publicKey, secretKey),
         readTimeout = 30000,
         connectTimeout = 30000
       )
-      
+
       if (response.statusCode == 207 || (response.statusCode >= 200 && response.statusCode < 300)) {
         logger.info(s"[Langfuse] Batch export successful: ${response.statusCode}")
         if (response.statusCode == 207) {
@@ -69,35 +69,38 @@ class LangfuseTracing(
 
   override def traceAgentState(state: AgentState): Unit = {
     logger.info("[LangfuseTracing] Exporting agent state to Langfuse.")
-    val traceId = uuid
-    val now = nowIso
+    val traceId     = uuid
+    val now         = nowIso
     val batchEvents = scala.collection.mutable.ArrayBuffer[ujson.Obj]()
 
     // Trace-create event
-    val traceInput = if (state.userQuery.nonEmpty) state.userQuery else "No user query"
+    val traceInput  = if (state.userQuery.nonEmpty) state.userQuery else "No user query"
     val traceOutput = state.conversation.messages.lastOption.map(_.content).filter(_.nonEmpty).getOrElse("No output")
-    val modelName = state.conversation.messages.collectFirst {
-      case am: AssistantMessage if am.toolCalls.nonEmpty => am
-    }.flatMap(_.toolCalls.headOption.map(_.name)).getOrElse("unknown-model")
+    val modelName = state.conversation.messages
+      .collectFirst {
+        case am: AssistantMessage if am.toolCalls.nonEmpty => am
+      }
+      .flatMap(_.toolCalls.headOption.map(_.name))
+      .getOrElse("unknown-model")
     val traceEvent = ujson.Obj(
-      "id" -> uuid,
+      "id"        -> uuid,
       "timestamp" -> now,
-      "type" -> "trace-create",
+      "type"      -> "trace-create",
       "body" -> ujson.Obj(
-        "id" -> traceId,
-        "timestamp" -> now,
+        "id"          -> traceId,
+        "timestamp"   -> now,
         "environment" -> environment,
-        "release" -> release,
-        "version" -> version,
-        "public" -> true,
-        "name" -> "LLM4S Agent Run",
-        "input" -> traceInput,
-        "output" -> traceOutput,
-        "userId" -> "llm4s-user",
-        "sessionId" -> s"session-${System.currentTimeMillis()}",
-        "model" -> modelName,
+        "release"     -> release,
+        "version"     -> version,
+        "public"      -> true,
+        "name"        -> "LLM4S Agent Run",
+        "input"       -> traceInput,
+        "output"      -> traceOutput,
+        "userId"      -> "llm4s-user",
+        "sessionId"   -> s"session-${System.currentTimeMillis()}",
+        "model"       -> modelName,
         "metadata" -> ujson.Obj(
-          "framework" -> "llm4s",
+          "framework"    -> "llm4s",
           "messageCount" -> state.conversation.messages.length
         ),
         "tags" -> ujson.Arr("llm4s", "agent")
@@ -110,21 +113,21 @@ class LangfuseTracing(
       msg match {
         case am: AssistantMessage if am.toolCalls.nonEmpty =>
           val generationEvent = ujson.Obj(
-            "id" -> uuid,
+            "id"        -> uuid,
             "timestamp" -> now,
-            "type" -> "generation-create",
+            "type"      -> "generation-create",
             "body" -> ujson.Obj(
-              "id" -> s"${traceId}-gen-$idx",
-              "traceId" -> traceId,
-              "name" -> s"Assistant Response $idx",
-              "startTime" -> now,
-              "endTime" -> now,
-              "input" -> ujson.Obj("content" -> (if (am.content.nonEmpty) am.content else "No content")),
-              "output" -> ujson.Obj("toolCalls" -> am.toolCalls.length),
-              "model" -> modelName,
+              "id"              -> s"${traceId}-gen-$idx",
+              "traceId"         -> traceId,
+              "name"            -> s"Assistant Response $idx",
+              "startTime"       -> now,
+              "endTime"         -> now,
+              "input"           -> ujson.Obj("content" -> (if (am.content.nonEmpty) am.content else "No content")),
+              "output"          -> ujson.Obj("toolCalls" -> am.toolCalls.length),
+              "model"           -> modelName,
               "modelParameters" -> ujson.Obj(),
               "metadata" -> ujson.Obj(
-                "role" -> am.role,
+                "role"          -> am.role,
                 "toolCallCount" -> am.toolCalls.length
               )
             )
@@ -132,19 +135,19 @@ class LangfuseTracing(
           batchEvents += generationEvent
         case tm: ToolMessage =>
           val spanEvent = ujson.Obj(
-            "id" -> uuid,
+            "id"        -> uuid,
             "timestamp" -> now,
-            "type" -> "span-create",
+            "type"      -> "span-create",
             "body" -> ujson.Obj(
-              "id" -> s"${traceId}-span-$idx",
-              "traceId" -> traceId,
-              "name" -> s"Tool Execution: ${tm.toolCallId}",
+              "id"        -> s"${traceId}-span-$idx",
+              "traceId"   -> traceId,
+              "name"      -> s"Tool Execution: ${tm.toolCallId}",
               "startTime" -> now,
-              "endTime" -> now,
-              "input" -> ujson.Obj("toolCallId" -> tm.toolCallId),
-              "output" -> ujson.Obj("content" -> (if (tm.content.nonEmpty) tm.content.take(500) else "No content")),
+              "endTime"   -> now,
+              "input"     -> ujson.Obj("toolCallId" -> tm.toolCallId),
+              "output"    -> ujson.Obj("content" -> (if (tm.content.nonEmpty) tm.content.take(500) else "No content")),
               "metadata" -> ujson.Obj(
-                "role" -> tm.role,
+                "role"       -> tm.role,
                 "toolCallId" -> tm.toolCallId
               )
             )
@@ -152,15 +155,15 @@ class LangfuseTracing(
           batchEvents += spanEvent
         case userMsg: UserMessage =>
           val eventEvent = ujson.Obj(
-            "id" -> uuid,
+            "id"        -> uuid,
             "timestamp" -> now,
-            "type" -> "event-create",
+            "type"      -> "event-create",
             "body" -> ujson.Obj(
-              "id" -> s"${traceId}-event-$idx",
-              "traceId" -> traceId,
-              "name" -> s"User Input $idx",
+              "id"        -> s"${traceId}-event-$idx",
+              "traceId"   -> traceId,
+              "name"      -> s"User Input $idx",
               "startTime" -> now,
-              "input" -> ujson.Obj("content" -> userMsg.content),
+              "input"     -> ujson.Obj("content" -> userMsg.content),
               "metadata" -> ujson.Obj(
                 "role" -> userMsg.role
               )
@@ -169,15 +172,15 @@ class LangfuseTracing(
           batchEvents += eventEvent
         case sysMsg: SystemMessage =>
           val eventEvent = ujson.Obj(
-            "id" -> uuid,
+            "id"        -> uuid,
             "timestamp" -> now,
-            "type" -> "event-create",
+            "type"      -> "event-create",
             "body" -> ujson.Obj(
-              "id" -> s"${traceId}-event-$idx",
-              "traceId" -> traceId,
-              "name" -> s"System Message $idx",
+              "id"        -> s"${traceId}-event-$idx",
+              "traceId"   -> traceId,
+              "name"      -> s"System Message $idx",
               "startTime" -> now,
-              "input" -> ujson.Obj("content" -> sysMsg.content),
+              "input"     -> ujson.Obj("content" -> sysMsg.content),
               "metadata" -> ujson.Obj(
                 "role" -> sysMsg.role
               )
@@ -186,15 +189,15 @@ class LangfuseTracing(
           batchEvents += eventEvent
         case _ =>
           val eventEvent = ujson.Obj(
-            "id" -> uuid,
+            "id"        -> uuid,
             "timestamp" -> now,
-            "type" -> "event-create",
+            "type"      -> "event-create",
             "body" -> ujson.Obj(
-              "id" -> s"${traceId}-event-$idx",
-              "traceId" -> traceId,
-              "name" -> s"Message $idx: ${msg.role}",
+              "id"        -> s"${traceId}-event-$idx",
+              "traceId"   -> traceId,
+              "name"      -> s"Message $idx: ${msg.role}",
               "startTime" -> now,
-              "input" -> ujson.Obj("content" -> msg.content),
+              "input"     -> ujson.Obj("content" -> msg.content),
               "metadata" -> ujson.Obj(
                 "role" -> msg.role
               )
@@ -209,15 +212,15 @@ class LangfuseTracing(
   override def traceEvent(event: String): Unit = {
     logger.info(s"[LangfuseTracing] Event: $event")
     val eventObj = ujson.Obj(
-      "id" -> uuid,
+      "id"        -> uuid,
       "timestamp" -> nowIso,
-      "type" -> "event-create",
+      "type"      -> "event-create",
       "body" -> ujson.Obj(
-        "id" -> uuid,
+        "id"        -> uuid,
         "timestamp" -> nowIso,
-        "name" -> "Custom Event",
-        "input" -> event,
-        "metadata" -> ujson.Obj("source" -> "traceEvent")
+        "name"      -> "Custom Event",
+        "input"     -> event,
+        "metadata"  -> ujson.Obj("source" -> "traceEvent")
       )
     )
     sendBatch(Seq(eventObj))
@@ -226,16 +229,16 @@ class LangfuseTracing(
   override def traceToolCall(toolName: String, input: String, output: String): Unit = {
     logger.info(s"[LangfuseTracing] Tool call: $toolName, input: $input, output: $output")
     val eventObj = ujson.Obj(
-      "id" -> uuid,
+      "id"        -> uuid,
       "timestamp" -> nowIso,
-      "type" -> "span-create",
+      "type"      -> "span-create",
       "body" -> ujson.Obj(
-        "id" -> uuid,
+        "id"        -> uuid,
         "timestamp" -> nowIso,
-        "name" -> s"Tool Call: $toolName",
-        "input" -> input,
-        "output" -> output,
-        "metadata" -> ujson.Obj("toolName" -> toolName)
+        "name"      -> s"Tool Call: $toolName",
+        "input"     -> input,
+        "output"    -> output,
+        "metadata"  -> ujson.Obj("toolName" -> toolName)
       )
     )
     sendBatch(Seq(eventObj))
@@ -244,15 +247,15 @@ class LangfuseTracing(
   override def traceError(error: Throwable): Unit = {
     logger.error("[LangfuseTracing] Error occurred", error)
     val eventObj = ujson.Obj(
-      "id" -> uuid,
+      "id"        -> uuid,
       "timestamp" -> nowIso,
-      "type" -> "event-create",
+      "type"      -> "event-create",
       "body" -> ujson.Obj(
-        "id" -> uuid,
+        "id"        -> uuid,
         "timestamp" -> nowIso,
-        "name" -> "Error",
-        "input" -> error.getMessage,
-        "metadata" -> ujson.Obj("stackTrace" -> error.getStackTrace.mkString("\n"))
+        "name"      -> "Error",
+        "input"     -> error.getMessage,
+        "metadata"  -> ujson.Obj("stackTrace" -> error.getStackTrace.mkString("\n"))
       )
     )
     sendBatch(Seq(eventObj))
@@ -260,31 +263,33 @@ class LangfuseTracing(
 
   override def traceCompletion(completion: org.llm4s.llmconnect.model.Completion, model: String): Unit = {
     logger.info(s"[LangfuseTracing] Completion: model=$model, id=${completion.id}")
-    
+
     val now = nowIso
     val generationEvent = ujson.Obj(
-      "id" -> uuid,
+      "id"        -> uuid,
       "timestamp" -> now,
-      "type" -> "generation-create",
+      "type"      -> "generation-create",
       "body" -> ujson.Obj(
-        "id" -> uuid,
+        "id"        -> uuid,
         "timestamp" -> now,
-        "name" -> "LLM Completion",
+        "name"      -> "LLM Completion",
         "startTime" -> now,
-        "endTime" -> now,
-        "model" -> model,
-        "input" -> ujson.Obj("messageCount" -> 1), // This could be enhanced with actual input
-        "output" -> ujson.Obj("content" -> completion.message.content),
-        "usage" -> completion.usage.map { usage =>
-          ujson.Obj(
-            "promptTokens" -> usage.promptTokens,
-            "completionTokens" -> usage.completionTokens,
-            "totalTokens" -> usage.totalTokens
-          )
-        }.getOrElse(ujson.Null),
+        "endTime"   -> now,
+        "model"     -> model,
+        "input"     -> ujson.Obj("messageCount" -> 1), // This could be enhanced with actual input
+        "output"    -> ujson.Obj("content" -> completion.message.content),
+        "usage" -> completion.usage
+          .map { usage =>
+            ujson.Obj(
+              "promptTokens"     -> usage.promptTokens,
+              "completionTokens" -> usage.completionTokens,
+              "totalTokens"      -> usage.totalTokens
+            )
+          }
+          .getOrElse(ujson.Null),
         "metadata" -> ujson.Obj(
-          "completionId" -> completion.id,
-          "created" -> completion.created,
+          "completionId"  -> completion.id,
+          "created"       -> completion.created,
           "toolCallCount" -> completion.message.toolCalls.length
         )
       )
@@ -294,26 +299,26 @@ class LangfuseTracing(
 
   override def traceTokenUsage(usage: org.llm4s.llmconnect.model.TokenUsage, model: String, operation: String): Unit = {
     logger.info(s"[LangfuseTracing] Token usage: $operation with $model - ${usage.totalTokens} tokens")
-    
+
     val eventObj = ujson.Obj(
-      "id" -> uuid,
+      "id"        -> uuid,
       "timestamp" -> nowIso,
-      "type" -> "event-create",
+      "type"      -> "event-create",
       "body" -> ujson.Obj(
-        "id" -> uuid,
+        "id"        -> uuid,
         "timestamp" -> nowIso,
-        "name" -> s"Token Usage - $operation",
+        "name"      -> s"Token Usage - $operation",
         "input" -> ujson.Obj(
-          "model" -> model,
+          "model"     -> model,
           "operation" -> operation
         ),
         "output" -> ujson.Obj(
-          "promptTokens" -> usage.promptTokens,
+          "promptTokens"     -> usage.promptTokens,
           "completionTokens" -> usage.completionTokens,
-          "totalTokens" -> usage.totalTokens
+          "totalTokens"      -> usage.totalTokens
         ),
         "metadata" -> ujson.Obj(
-          "model" -> model,
+          "model"     -> model,
           "operation" -> operation,
           "tokenType" -> "usage"
         )
@@ -321,4 +326,4 @@ class LangfuseTracing(
     )
     sendBatch(Seq(eventObj))
   }
-} 
+}

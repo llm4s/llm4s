@@ -18,6 +18,7 @@ object BasicLLMCallingExample {
     // Get a client using environment variables
     val client = LLM.client()
 
+    
     // Complete the conversation
     client.complete(conversation) match {
       case Right(completion) =>

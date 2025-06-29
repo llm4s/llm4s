@@ -4,11 +4,11 @@ import org.llm4s.shared._
 import org.slf4j.LoggerFactory
 import upickle.default._
 
-import java.nio.file.{Files, Paths}
+import java.nio.file.{ Files, Paths }
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.{ConcurrentHashMap, Executors, ScheduledExecutorService, TimeUnit}
-import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Failure, Success, Try}
+import java.util.concurrent.{ ConcurrentHashMap, Executors, ScheduledExecutorService, TimeUnit }
+import scala.concurrent.{ ExecutionContext, Future }
+import scala.util.{ Failure, Success, Try }
 
 /**
  * WebSocket-based Workspace Runner service using Cask's native WebSocket support.
@@ -21,22 +21,22 @@ import scala.util.{Failure, Success, Try}
  */
 object RunnerMain extends cask.MainRoutes {
 
-  private val logger = LoggerFactory.getLogger(getClass)
-  private val executor = Executors.newCachedThreadPool()
-  private implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(executor)
-  
+  private val logger                        = LoggerFactory.getLogger(getClass)
+  private val executor                      = Executors.newCachedThreadPool()
+  implicit private val ec: ExecutionContext = ExecutionContext.fromExecutor(executor)
+
   // Get workspace path from environment variable or use default
   private val workspacePath = sys.env.getOrElse("WORKSPACE_PATH", "/workspace")
-  
+
   // Initialize workspace interface
   private val workspaceInterface = new WorkspaceAgentInterfaceImpl(workspacePath)
-  
+
   // Track active connections and their last heartbeat
-  private val connections = new ConcurrentHashMap[cask.WsChannelActor, AtomicLong]()
+  private val connections                                 = new ConcurrentHashMap[cask.WsChannelActor, AtomicLong]()
   private val heartbeatExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
-  
+
   // Constants
-  private val HeartbeatTimeoutMs = 30000L // 30 seconds timeout
+  private val HeartbeatTimeoutMs            = 30000L // 30 seconds timeout
   private val HeartbeatCheckIntervalSeconds = 10L
 
   // Default host binding - 0.0.0.0 to be accessible from outside container
@@ -52,32 +52,31 @@ object RunnerMain extends cask.MainRoutes {
    * WebSocket endpoint for workspace agent communication.
    */
   @cask.websocket("/ws")
-  def websocketHandler(): cask.WebsocketResult = {
+  def websocketHandler(): cask.WebsocketResult =
     cask.WsHandler { channel =>
       logger.info(s"WebSocket connection opened")
       connections.put(channel, new AtomicLong(System.currentTimeMillis()))
-      
+
       cask.WsActor {
         case cask.Ws.Text(message) =>
           handleWebSocketMessage(channel, message)
-          
+
         case cask.Ws.Close(code, reason) =>
           logger.info(s"WebSocket connection closed: code=$code, reason=$reason")
           connections.remove(channel)
-          
+
         case cask.Ws.Error(ex) =>
           logger.error(s"WebSocket error: ${ex.getMessage}", ex)
           connections.remove(channel)
       }
     }
-  }
 
   private def handleWebSocketMessage(channel: cask.WsChannelActor, message: String): Unit = {
     logger.debug(s"Received WebSocket message: $message")
-    
+
     // Update heartbeat timestamp for this connection
     Option(connections.get(channel)).foreach(_.set(System.currentTimeMillis()))
-    
+
     Try(read[WebSocketMessage](message)) match {
       case Success(msg) => handleMessage(channel, msg)
       case Failure(ex) =>
@@ -86,71 +85,80 @@ object RunnerMain extends cask.MainRoutes {
     }
   }
 
-  private def handleMessage(channel: cask.WsChannelActor, message: WebSocketMessage): Unit = {
+  private def handleMessage(channel: cask.WsChannelActor, message: WebSocketMessage): Unit =
     message match {
       case CommandMessage(command) =>
         handleCommand(channel, command)
-        
+
       case HeartbeatMessage(timestamp) =>
         logger.debug(s"Received heartbeat at timestamp $timestamp")
         sendMessage(channel, HeartbeatResponseMessage(System.currentTimeMillis()))
-        
+
       case _ =>
         logger.warn(s"Unexpected message type received: ${message.getClass.getSimpleName}")
         sendError(channel, s"Unexpected message type: ${message.getClass.getSimpleName}", "INVALID_MESSAGE_TYPE")
     }
-  }
 
-  private def handleCommand(channel: cask.WsChannelActor, command: WorkspaceAgentCommand): Unit = {
+  private def handleCommand(channel: cask.WsChannelActor, command: WorkspaceAgentCommand): Unit =
     // Handle commands asynchronously to avoid blocking the WebSocket thread
     Future {
       try {
         logger.debug(s"Processing command: ${command.getClass.getSimpleName} with ID: ${command.commandId}")
-        
+
         command match {
           case cmd: ExploreFilesCommand =>
-            val response = workspaceInterface.exploreFiles(
-              cmd.path,
-              cmd.recursive,
-              cmd.excludePatterns,
-              cmd.maxDepth,
-              cmd.returnMetadata
-            ).copy(commandId = cmd.commandId)
+            val response = workspaceInterface
+              .exploreFiles(
+                cmd.path,
+                cmd.recursive,
+                cmd.excludePatterns,
+                cmd.maxDepth,
+                cmd.returnMetadata
+              )
+              .copy(commandId = cmd.commandId)
             sendMessage(channel, ResponseMessage(response))
 
           case cmd: ReadFileCommand =>
-            val response = workspaceInterface.readFile(
-              cmd.path,
-              cmd.startLine,
-              cmd.endLine
-            ).copy(commandId = cmd.commandId)
+            val response = workspaceInterface
+              .readFile(
+                cmd.path,
+                cmd.startLine,
+                cmd.endLine
+              )
+              .copy(commandId = cmd.commandId)
             sendMessage(channel, ResponseMessage(response))
 
           case cmd: WriteFileCommand =>
-            val response = workspaceInterface.writeFile(
-              cmd.path,
-              cmd.content,
-              cmd.mode,
-              cmd.createDirectories
-            ).copy(commandId = cmd.commandId)
+            val response = workspaceInterface
+              .writeFile(
+                cmd.path,
+                cmd.content,
+                cmd.mode,
+                cmd.createDirectories
+              )
+              .copy(commandId = cmd.commandId)
             sendMessage(channel, ResponseMessage(response))
 
           case cmd: ModifyFileCommand =>
-            val response = workspaceInterface.modifyFile(
-              cmd.path,
-              cmd.operations
-            ).copy(commandId = cmd.commandId)
+            val response = workspaceInterface
+              .modifyFile(
+                cmd.path,
+                cmd.operations
+              )
+              .copy(commandId = cmd.commandId)
             sendMessage(channel, ResponseMessage(response))
 
           case cmd: SearchFilesCommand =>
-            val response = workspaceInterface.searchFiles(
-              cmd.paths,
-              cmd.query,
-              cmd.`type`,
-              cmd.recursive,
-              cmd.excludePatterns,
-              cmd.contextLines
-            ).copy(commandId = cmd.commandId)
+            val response = workspaceInterface
+              .searchFiles(
+                cmd.paths,
+                cmd.query,
+                cmd.`type`,
+                cmd.recursive,
+                cmd.excludePatterns,
+                cmd.contextLines
+              )
+              .copy(commandId = cmd.commandId)
             sendMessage(channel, ResponseMessage(response))
 
           case cmd: ExecuteCommandCommand =>
@@ -161,7 +169,7 @@ object RunnerMain extends cask.MainRoutes {
             val response = workspaceInterface.getWorkspaceInfo().copy(commandId = cmd.commandId)
             sendMessage(channel, ResponseMessage(response))
         }
-        
+
       } catch {
         case e: WorkspaceAgentException =>
           logger.error(s"Workspace agent error processing command ${command.commandId}: ${e.getMessage}", e)
@@ -172,7 +180,7 @@ object RunnerMain extends cask.MainRoutes {
             details = e.details
           )
           sendMessage(channel, ResponseMessage(errorResponse))
-          
+
         case e: Exception =>
           logger.error(s"Unexpected error processing command ${command.commandId}: ${e.getMessage}", e)
           val errorResponse = WorkspaceAgentErrorResponse(
@@ -184,23 +192,22 @@ object RunnerMain extends cask.MainRoutes {
           sendMessage(channel, ResponseMessage(errorResponse))
       }
     }(using ec)
-  }
 
-  private def handleExecuteCommand(channel: cask.WsChannelActor, cmd: ExecuteCommandCommand): Unit = {
+  private def handleExecuteCommand(channel: cask.WsChannelActor, cmd: ExecuteCommandCommand): Unit =
     Future {
       try {
         // Send command started message
         sendMessage(channel, CommandStartedMessage(cmd.commandId, cmd.command))
-        
+
         // Execute command with streaming output
         val response = executeCommandWithStreaming(cmd)
-        
+
         // Send final response
         sendMessage(channel, ResponseMessage(response))
-        
+
         // Send command completed message
         sendMessage(channel, CommandCompletedMessage(cmd.commandId, response.exitCode, response.durationMs))
-        
+
       } catch {
         case e: WorkspaceAgentException =>
           logger.error(s"Error executing command ${cmd.commandId}: ${e.getMessage}", e)
@@ -211,7 +218,7 @@ object RunnerMain extends cask.MainRoutes {
             details = e.details
           )
           sendMessage(channel, ResponseMessage(errorResponse))
-          
+
         case e: Exception =>
           logger.error(s"Unexpected error executing command ${cmd.commandId}: ${e.getMessage}", e)
           val errorResponse = WorkspaceAgentErrorResponse(
@@ -223,19 +230,19 @@ object RunnerMain extends cask.MainRoutes {
           sendMessage(channel, ResponseMessage(errorResponse))
       }
     }(using ec)
-  }
 
-  private def executeCommandWithStreaming(cmd: ExecuteCommandCommand): ExecuteCommandResponse = {
+  private def executeCommandWithStreaming(cmd: ExecuteCommandCommand): ExecuteCommandResponse =
     // For now, use the existing implementation but we can enhance this later to provide real streaming
-    workspaceInterface.executeCommand(
-      cmd.command,
-      cmd.workingDirectory,
-      cmd.timeout,
-      cmd.environment
-    ).copy(commandId = cmd.commandId)
-  }
+    workspaceInterface
+      .executeCommand(
+        cmd.command,
+        cmd.workingDirectory,
+        cmd.timeout,
+        cmd.environment
+      )
+      .copy(commandId = cmd.commandId)
 
-  private def sendMessage(channel: cask.WsChannelActor, message: WebSocketMessage): Unit = {
+  private def sendMessage(channel: cask.WsChannelActor, message: WebSocketMessage): Unit =
     try {
       val json = write(message)
       channel.send(cask.Ws.Text(json))
@@ -244,23 +251,26 @@ object RunnerMain extends cask.MainRoutes {
       case ex: Exception =>
         logger.error(s"Failed to send WebSocket message: ${ex.getMessage}", ex)
     }
-  }
 
-  private def sendError(channel: cask.WsChannelActor, error: String, code: String, commandId: Option[String] = None): Unit = {
+  private def sendError(
+    channel: cask.WsChannelActor,
+    error: String,
+    code: String,
+    commandId: Option[String] = None
+  ): Unit =
     sendMessage(channel, ErrorMessage(error, code, commandId))
-  }
 
-  private def startHeartbeatMonitor(): Unit = {
+  private def startHeartbeatMonitor(): Unit =
     heartbeatExecutor.scheduleAtFixedRate(
       () => {
         val currentTime = System.currentTimeMillis()
-        val iterator = connections.entrySet().iterator()
-        
+        val iterator    = connections.entrySet().iterator()
+
         while (iterator.hasNext) {
-          val entry = iterator.next()
-          val channel = entry.getKey
+          val entry         = iterator.next()
+          val channel       = entry.getKey
           val lastHeartbeat = entry.getValue.get()
-          
+
           if (currentTime - lastHeartbeat > HeartbeatTimeoutMs) {
             logger.warn(s"WebSocket connection timed out - no heartbeat for ${currentTime - lastHeartbeat}ms")
             try {
@@ -277,7 +287,6 @@ object RunnerMain extends cask.MainRoutes {
       HeartbeatCheckIntervalSeconds,
       TimeUnit.SECONDS
     )
-  }
 
   // Initialize the service
   private def initializeService(): Unit = {
@@ -287,7 +296,7 @@ object RunnerMain extends cask.MainRoutes {
       logger.info(s"Creating workspace directory: $workspacePath")
       Files.createDirectories(workspaceDir)
     }
-    
+
     startHeartbeatMonitor()
     logger.info(s"Using workspace path: $workspacePath")
     logger.info(s"Heartbeat timeout: ${HeartbeatTimeoutMs}ms")
@@ -295,7 +304,7 @@ object RunnerMain extends cask.MainRoutes {
 
   // Call initialize when the object is created
   initializeService()
-  
+
   // Make this object available to be called from the old RunnerMain for backward compatibility
   initialize()
 
@@ -308,7 +317,7 @@ object RunnerMain extends cask.MainRoutes {
       logger.info("Shutdown hook triggered")
       shutdown()
     }))
-    
+
     logger.info(s"WebSocket Runner service starting on ${host}:${port}")
     super.main(args)
   }
@@ -318,7 +327,7 @@ object RunnerMain extends cask.MainRoutes {
    */
   def shutdown(): Unit = {
     logger.info("Shutting down WebSocket Runner service")
-    
+
     try {
       heartbeatExecutor.shutdown()
       if (!heartbeatExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
@@ -327,7 +336,7 @@ object RunnerMain extends cask.MainRoutes {
     } catch {
       case _: InterruptedException => heartbeatExecutor.shutdownNow()
     }
-    
+
     try {
       executor.shutdown()
       if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {

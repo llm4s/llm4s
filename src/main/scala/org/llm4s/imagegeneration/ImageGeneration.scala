@@ -11,11 +11,11 @@ sealed trait ImageGenerationError {
   def message: String
 }
 
-case class AuthenticationError(message: String) extends ImageGenerationError
-case class RateLimitError(message: String) extends ImageGenerationError
-case class ServiceError(message: String, code: Int) extends ImageGenerationError
-case class ValidationError(message: String) extends ImageGenerationError
-case class InvalidPromptError(message: String) extends ImageGenerationError
+case class AuthenticationError(message: String)        extends ImageGenerationError
+case class RateLimitError(message: String)             extends ImageGenerationError
+case class ServiceError(message: String, code: Int)    extends ImageGenerationError
+case class ValidationError(message: String)            extends ImageGenerationError
+case class InvalidPromptError(message: String)         extends ImageGenerationError
 case class InsufficientResourcesError(message: String) extends ImageGenerationError
 case class UnknownError(throwable: Throwable) extends ImageGenerationError {
   def message: String = throwable.getMessage
@@ -32,19 +32,19 @@ sealed trait ImageSize {
 
 object ImageSize {
   case object Square512 extends ImageSize {
-    val width = 512
+    val width  = 512
     val height = 512
   }
   case object Square1024 extends ImageSize {
-    val width = 1024
+    val width  = 1024
     val height = 1024
   }
   case object Landscape768x512 extends ImageSize {
-    val width = 768
+    val width  = 768
     val height = 512
   }
   case object Portrait512x768 extends ImageSize {
-    val width = 512
+    val width  = 512
     val height = 768
   }
 }
@@ -58,11 +58,11 @@ sealed trait ImageFormat {
 object ImageFormat {
   case object PNG extends ImageFormat {
     val extension = "png"
-    val mimeType = "image/png"
+    val mimeType  = "image/png"
   }
   case object JPEG extends ImageFormat {
     val extension = "jpg"
-    val mimeType = "image/jpeg"
+    val mimeType  = "image/jpeg"
   }
 }
 
@@ -74,14 +74,14 @@ case class ImageGenerationOptions(
   guidanceScale: Double = 7.5,
   inferenceSteps: Int = 20,
   negativePrompt: Option[String] = None,
-  samplerName: Option[String] = None  // Optional sampler name
+  samplerName: Option[String] = None // Optional sampler name
 )
 
 /** Service health status */
 sealed trait HealthStatus
 object HealthStatus {
-  case object Healthy extends HealthStatus
-  case object Degraded extends HealthStatus
+  case object Healthy   extends HealthStatus
+  case object Degraded  extends HealthStatus
   case object Unhealthy extends HealthStatus
 }
 
@@ -111,24 +111,23 @@ case class GeneratedImage(
   /** Optional file path if saved to disk */
   filePath: Option[Path] = None
 ) {
-  
+
   /** Get the image data as bytes */
   def asBytes: Array[Byte] = {
     import java.util.Base64
     Base64.getDecoder.decode(data)
   }
-  
+
   /** Save image to file and return updated GeneratedImage with file path */
-  def saveToFile(path: Path): Either[ImageGenerationError, GeneratedImage] = {
+  def saveToFile(path: Path): Either[ImageGenerationError, GeneratedImage] =
     try {
       import java.nio.file.Files
       Files.write(path, asBytes)
       Right(copy(filePath = Some(path)))
     } catch {
-      case e: Exception => 
+      case e: Exception =>
         Left(UnknownError(e))
     }
-  }
 }
 
 // ===== CONFIGURATION =====
@@ -138,9 +137,9 @@ sealed trait ImageGenerationProvider
 
 object ImageGenerationProvider {
   case object StableDiffusion extends ImageGenerationProvider
-  case object DALLE extends ImageGenerationProvider
-  case object Midjourney extends ImageGenerationProvider
-  case object HuggingFace extends ImageGenerationProvider
+  case object DALLE           extends ImageGenerationProvider
+  case object Midjourney      extends ImageGenerationProvider
+  case object HuggingFace     extends ImageGenerationProvider
 }
 
 sealed trait ImageGenerationConfig {
@@ -181,20 +180,20 @@ case class HuggingFaceConfig(
 // ===== CLIENT INTERFACE =====
 
 trait ImageGenerationClient {
-  
+
   /** Generate an image from a text prompt */
   def generateImage(
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, GeneratedImage]
-  
+
   /** Generate multiple images from a text prompt */
   def generateImages(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, Seq[GeneratedImage]]
-  
+
   /** Check the health/status of the image generation service */
   def health(): Either[ImageGenerationError, ServiceStatus]
 }
@@ -204,23 +203,21 @@ trait ImageGenerationClient {
 object ImageGeneration {
 
   /** Factory method for getting a client with the right configuration */
-  def client(config: ImageGenerationConfig): ImageGenerationClient = {
+  def client(config: ImageGenerationConfig): ImageGenerationClient =
     config match {
-      case sdConfig: StableDiffusionConfig => 
+      case sdConfig: StableDiffusionConfig =>
         new StableDiffusionClient(sdConfig)
-      case hfConfig: HuggingFaceConfig => 
+      case hfConfig: HuggingFaceConfig =>
         new HuggingFaceClient(hfConfig)
     }
-  }
 
   /** Convenience method for quick image generation */
   def generateImage(
     prompt: String,
     config: ImageGenerationConfig,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, GeneratedImage] = {
+  ): Either[ImageGenerationError, GeneratedImage] =
     client(config).generateImage(prompt, options)
-  }
 
   /** Convenience method for generating multiple images */
   def generateImages(
@@ -228,9 +225,8 @@ object ImageGeneration {
     count: Int,
     config: ImageGenerationConfig,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
     client(config).generateImages(prompt, count, options)
-  }
 
   /** Get a Stable Diffusion client with default local configuration */
   def stableDiffusionClient(
@@ -270,7 +266,6 @@ object ImageGeneration {
   }
 
   /** Check service health */
-  def healthCheck(config: ImageGenerationConfig): Either[ImageGenerationError, ServiceStatus] = {
+  def healthCheck(config: ImageGenerationConfig): Either[ImageGenerationError, ServiceStatus] =
     client(config).health()
-  }
-} 
+}

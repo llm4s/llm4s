@@ -54,7 +54,7 @@ object LLMWeatherExample {
           println("\nTool calls detected, processing...")
 
           // Process each tool call and create tool messages
-          val toolMessages = processToolCalls(assistantMessage.toolCalls, toolRegistry)
+          val toolMessages: Seq[ToolMessage] = processToolCalls(assistantMessage.toolCalls, toolRegistry)
 
           // Create updated conversation with assistant message and tool responses
           val updatedConversation = conversation

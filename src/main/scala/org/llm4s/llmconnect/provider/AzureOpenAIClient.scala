@@ -59,7 +59,7 @@ class AzureOpenAIClient(config: AzureConfig, client: OpenAIClient) extends LLMCl
       case SystemMessage(content) =>
         messages.add(new ChatRequestSystemMessage(content))
       case AssistantMessage(content, toolCalls) =>
-        val msg = new ChatRequestAssistantMessage(content)
+        val msg = new ChatRequestAssistantMessage(content.getOrElse(""))
         // Add tool calls if needed
         if (toolCalls.nonEmpty) {
           val azureToolCalls = new java.util.ArrayList[ChatCompletionsToolCall]()
@@ -92,7 +92,7 @@ class AzureOpenAIClient(config: AzureConfig, client: OpenAIClient) extends LLMCl
       id = completions.getId,
       created = completions.getCreatedAt.toEpochSecond,
       message = AssistantMessage(
-        content = message.getContent,
+        contentOpt = Some(message.getContent),
         toolCalls = toolCalls
       ),
       usage = Some(

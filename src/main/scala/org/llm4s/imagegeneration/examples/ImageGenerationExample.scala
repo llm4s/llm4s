@@ -6,7 +6,7 @@ import java.nio.file.Paths
 
 /**
  * Example demonstrating the Image Generation API for Stable Diffusion.
- * 
+ *
  * This shows how to:
  * - Generate single and multiple images
  * - Use custom options (size, seed, etc.)
@@ -34,18 +34,16 @@ object ImageGenerationExample {
 
   def basicExample(): Unit = {
     logger.info("\n--- Basic Example ---")
-    
+
     val prompt = "A beautiful sunset over mountains, digital art"
 
     ImageGeneration.generateWithStableDiffusion(prompt) match {
       case Right(image) =>
         logger.info(s"✓ Generated image: ${image.size.description}")
-        
+
         // Save to file
         val outputPath = Paths.get("sunset.png")
-        image.saveToFile(outputPath).foreach { savedImage =>
-          logger.info(s"✓ Saved to: ${savedImage.filePath.get}")
-        }
+        image.saveToFile(outputPath).foreach(savedImage => logger.info(s"✓ Saved to: ${savedImage.filePath.get}"))
 
       case Left(error) =>
         logger.error(s"✗ Generation failed: ${error.message}")
@@ -72,11 +70,9 @@ object ImageGenerationExample {
     ImageGeneration.generateImage(prompt, config, options) match {
       case Right(image) =>
         logger.info(s"✓ Generated cyberpunk image with seed: ${image.seed.get}")
-        
+
         val filename = s"cyberpunk_${image.seed.get}.png"
-        image.saveToFile(Paths.get(filename)).foreach { _ =>
-          logger.info(s"✓ Saved: $filename")
-        }
+        image.saveToFile(Paths.get(filename)).foreach(_ => logger.info(s"✓ Saved: $filename"))
 
       case Left(error) =>
         logger.error(s"✗ Advanced generation failed: ${error.message}")
@@ -92,12 +88,10 @@ object ImageGenerationExample {
     ImageGeneration.generateImages(prompt, 3, config) match {
       case Right(images) =>
         logger.info(s"✓ Generated ${images.length} robot images")
-        
+
         images.zipWithIndex.foreach { case (image, index) =>
           val filename = s"robot_${index + 1}.png"
-          image.saveToFile(Paths.get(filename)).foreach { _ =>
-            logger.info(s"✓ Saved: $filename")
-          }
+          image.saveToFile(Paths.get(filename)).foreach(_ => logger.info(s"✓ Saved: $filename"))
         }
 
       case Left(error) =>
@@ -115,7 +109,7 @@ object ImageGenerationExample {
     ) match {
       case Right(_) =>
         logger.info("Unexpected success!")
-        
+
       case Left(error) =>
         error match {
           case ServiceError(msg, code) =>
@@ -136,4 +130,4 @@ object ImageGenerationExample {
         logger.info(s"✓ Health check failed as expected: ${error.message}")
     }
   }
-} 
+}

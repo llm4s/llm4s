@@ -33,8 +33,8 @@ class HuggingFaceClientTest extends AnyFlatSpec with Matchers {
 
   it should "create a payload with minimal options" in {
     // Arrange
-    val client = new HuggingFaceClient(HuggingFaceConfig("test-key", "test-model"))
-    val prompt = "A minimalist landscape"
+    val client  = new HuggingFaceClient(HuggingFaceConfig("test-key", "test-model"))
+    val prompt  = "A minimalist landscape"
     val options = ImageGenerationOptions() // Default options
 
     // Act
@@ -44,15 +44,15 @@ class HuggingFaceClientTest extends AnyFlatSpec with Matchers {
     val parsedPayload = read[HuggingClientPayload](payload)
     parsedPayload.inputs shouldBe prompt
     parsedPayload.parameters.guidance_scale shouldBe 7.5 // Default value
-    parsedPayload.parameters.inferenceSteps shouldBe 20 // Default value
+    parsedPayload.parameters.inferenceSteps shouldBe 20  // Default value
     parsedPayload.parameters.negative_prompt shouldBe None
     parsedPayload.parameters.seed shouldBe None
   }
 
   it should "handle special characters in the prompt" in {
     // Arrange
-    val client = new HuggingFaceClient(HuggingFaceConfig("test-key", "test-model"))
-    val prompt = "A scene with \"quotes\" and special ch@r@cters!"
+    val client  = new HuggingFaceClient(HuggingFaceConfig("test-key", "test-model"))
+    val prompt  = "A scene with \"quotes\" and special ch@r@cters!"
     val options = ImageGenerationOptions()
 
     // Act

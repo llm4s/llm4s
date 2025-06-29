@@ -14,38 +14,38 @@ class OpenRouterClient(config: OpenAIConfig) extends LLMClient {
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Either[LLMError, Completion] = {
+  ): Either[LLMError, Completion] =
     try {
       // Convert conversation to OpenRouter format
       val requestBody = createRequestBody(conversation, options)
-      
+
       // Make API call
-      val request = HttpRequest.newBuilder()
+      val request = HttpRequest
+        .newBuilder()
         .uri(URI.create(s"${config.baseUrl}/chat/completions"))
         .header("Content-Type", "application/json")
         .header("Authorization", s"Bearer ${config.apiKey}")
         .header("HTTP-Referer", "https://github.com/llm4s/llm4s") // Required by OpenRouter
-        .header("X-Title", "LLM4S") // Required by OpenRouter
+        .header("X-Title", "LLM4S")                               // Required by OpenRouter
         .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
         .build()
-      
+
       val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-      
+
       // Handle response status
       response.statusCode() match {
-        case 200 => 
+        case 200 =>
           // Parse successful response
           val responseJson = ujson.read(response.body())
           Right(parseCompletion(responseJson))
-          
-        case 401 => Left(AuthenticationError("Invalid API key"))
-        case 429 => Left(RateLimitError("Rate limit exceeded"))
+
+        case 401    => Left(AuthenticationError("Invalid API key"))
+        case 429    => Left(RateLimitError("Rate limit exceeded"))
         case status => Left(ServiceError(s"OpenRouter API error: ${response.body()}", status))
       }
     } catch {
       case e: Exception => Left(UnknownError(e))
     }
-  }
 
   override def streamComplete(
     conversation: Conversation,
@@ -57,19 +57,19 @@ class OpenRouterClient(config: OpenAIConfig) extends LLMClient {
 
   private def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val messages = conversation.messages.map {
-      case UserMessage(content) => 
+      case UserMessage(content) =>
         ujson.Obj("role" -> "user", "content" -> content)
-      case SystemMessage(content) => 
+      case SystemMessage(content) =>
         ujson.Obj("role" -> "system", "content" -> content)
       case AssistantMessage(content, toolCalls) =>
         val base = ujson.Obj("role" -> "assistant", "content" -> content)
         if (toolCalls.nonEmpty) {
           base("tool_calls") = ujson.Arr.from(toolCalls.map { tc =>
             ujson.Obj(
-              "id" -> tc.id,
+              "id"   -> tc.id,
               "type" -> "function",
               "function" -> ujson.Obj(
-                "name" -> tc.name,
+                "name"      -> tc.name,
                 "arguments" -> tc.arguments
               )
             )
@@ -78,17 +78,17 @@ class OpenRouterClient(config: OpenAIConfig) extends LLMClient {
         base
       case ToolMessage(toolCallId, content) =>
         ujson.Obj(
-          "role" -> "tool",
+          "role"         -> "tool",
           "tool_call_id" -> toolCallId,
-          "content" -> content
+          "content"      -> content
         )
     }
 
     val base = ujson.Obj(
-      "model" -> config.model,
-      "messages" -> ujson.Arr.from(messages),
+      "model"       -> config.model,
+      "messages"    -> ujson.Arr.from(messages),
       "temperature" -> options.temperature,
-      "top_p" -> options.topP
+      "top_p"       -> options.topP
     )
 
     options.maxTokens.foreach(mt => base("max_tokens") = mt)
@@ -104,19 +104,21 @@ class OpenRouterClient(config: OpenAIConfig) extends LLMClient {
   }
 
   private def parseCompletion(json: ujson.Value): Completion = {
-    val choice = json("choices")(0)
+    val choice  = json("choices")(0)
     val message = choice("message")
-    
+
     // Extract tool calls if present
-    val toolCalls = Option(message.obj.get("tool_calls")).map { tc =>
-      tc.arr.map { call =>
-        ToolCall(
-          id = call("id").str,
-          name = call("function")("name").str,
-          arguments = call("function")("arguments")
-        )
-      }.toSeq
-    }.getOrElse(Seq.empty)
+    val toolCalls = Option(message.obj.get("tool_calls"))
+      .map { tc =>
+        tc.arr.map { call =>
+          ToolCall(
+            id = call("id").str,
+            name = call("function")("name").str,
+            arguments = call("function")("arguments")
+          )
+        }.toSeq
+      }
+      .getOrElse(Seq.empty)
 
     val usage = Option(json.obj.get("usage")).flatMap { u =>
       val usageObjOpt =
@@ -134,10 +136,10 @@ class OpenRouterClient(config: OpenAIConfig) extends LLMClient {
       id = json("id").str,
       created = json("created").num.toLong,
       message = AssistantMessage(
-        content = message("content").str,
+        contentOpt = message("content").strOpt,
         toolCalls = toolCalls
       ),
       usage = usage
     )
   }
-} 
+}

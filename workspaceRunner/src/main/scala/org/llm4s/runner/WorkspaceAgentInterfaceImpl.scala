@@ -550,10 +550,10 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String) extends WorkspaceAgentI
    * Execute a shell command in the workspace.
    */
   override def executeCommand(
-                               command: String,
-                               workingDirectory: Option[String] = None,
-                               timeoutSeconds: Option[Int] = None,
-                               environment: Option[Map[String, String]] = None
+    command: String,
+    workingDirectory: Option[String] = None,
+    timeoutSeconds: Option[Int] = None,
+    environment: Option[Map[String, String]] = None
   ): ExecuteCommandResponse = {
     val workDir = workingDirectory
       .map(dir => resolvePath(dir).toFile)
@@ -567,7 +567,7 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String) extends WorkspaceAgentI
       )
     }
 
-    val timeoutMs = (timeoutSeconds.getOrElse(30/* Default 30 seconds */ ) * 1000).toLong
+    val timeoutMs = (timeoutSeconds.getOrElse(30 /* Default 30 seconds */ ) * 1000).toLong
     val env       = environment.getOrElse(Map.empty)
 
     val cmd = if (System.getProperty("os.name").contains("Windows")) {
