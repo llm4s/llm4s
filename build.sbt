@@ -72,6 +72,7 @@ inThisBuild(
   )
 )
 
+// Scala options based on Scala version
 def scalacOptionsForVersion(scalaVersion: String): Seq[String] =
   CrossVersion.partialVersion(scalaVersion) match {
     case Some((2, 13)) =>
@@ -81,9 +82,11 @@ def scalacOptionsForVersion(scalaVersion: String): Seq[String] =
     case _ => Seq.empty
   }
 
+// Common settings that apply to both Scala versions
 lazy val commonSettings = Seq(
   Compile / scalacOptions := scalacOptionsForVersion(scalaVersion.value),
 
+  // Source directories for cross-compilation
   Compile / unmanagedSourceDirectories ++= {
     val sourceDir = (Compile / sourceDirectory).value
     CrossVersion.partialVersion(scalaVersion.value) match {
@@ -121,6 +124,9 @@ lazy val root = (project in file("."))
       "org.java-websocket" % "Java-WebSocket"  % "1.5.3",
       "org.scalatest"     %% "scalatest"       % "3.2.19" % Test,
       "org.scalamock"     %% "scalamock"       % "7.3.3"  % Test,
+      "com.softwaremill.sttp.client4" %% "core" % "4.0.0-M10",
+      "com.lihaoyi" %% "ujson" % "4.2.1",
+
     )
   )
 
@@ -149,6 +155,7 @@ lazy val workspaceRunner = (project in file("workspaceRunner"))
     dockerCommands ++= Seq(
       Cmd("USER", "root"),
       Cmd("RUN", "apt-get update && apt-get install -y curl gnupg apt-transport-https ca-certificates zip unzip"),
+      // Install SBT
       Cmd(
         "RUN",
         "echo 'deb https://repo.scala-sbt.org/scalasbt/debian all main' | tee /etc/apt/sources.list.d/sbt.list"
@@ -158,6 +165,7 @@ lazy val workspaceRunner = (project in file("workspaceRunner"))
         "curl -sL 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823' | apt-key add"
       ),
       Cmd("RUN", "apt-get update && apt-get install -y sbt"),
+      // Install SDKMAN and use it to install Scala
       Cmd("RUN", "curl -s 'https://get.sdkman.io' | bash"),
       Cmd(
         "RUN",
@@ -194,7 +202,7 @@ lazy val crossTestScala2 = (project in file("crosstest/scala2"))
     resolvers += Resolver.mavenLocal,
     resolvers += Resolver.defaultLocal,
     libraryDependencies ++= crossLibDependencies.value
-  )
+    )
 
 lazy val crossTestScala3 = (project in file("crosstest/scala3"))
   .settings(
@@ -206,13 +214,16 @@ lazy val crossTestScala3 = (project in file("crosstest/scala3"))
     scalacOptions ++= scala3CompilerOptions
   )
 
+// Commands remain the same
 addCommandAlias("buildAll", ";clean;+compile;+test")
 addCommandAlias("publishAll", ";clean;+publish")
 addCommandAlias("testAll", ";+test")
 addCommandAlias("compileAll", ";+compile")
 addCommandAlias("testCross", ";crossTestScala2/test;crossTestScala3/test")
+// Add this to your build.sbt
 addCommandAlias("fullCrossTest", ";clean ;crossTestScala2/clean ;crossTestScala3/clean ;+publishLocal ;testCross")
 
+// MiMa settings remain the same
 mimaPreviousArtifacts := Set(
   organization.value %% "llm4s" % "0.1.4"
 )

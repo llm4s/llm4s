@@ -1,12 +1,33 @@
 package org.llm4s.runner
 
-import org.llm4s.shared._
+import org.llm4s.shared.{
+  WebSocketMessage,
+  CommandMessage,
+  HeartbeatMessage,
+  HeartbeatResponseMessage,
+  ResponseMessage,
+  ErrorMessage,
+  CommandStartedMessage,
+  CommandCompletedMessage,
+  WorkspaceAgentCommand,
+  WorkspaceAgentErrorResponse,
+  ExploreFilesCommand,
+  ReadFileCommand,
+  WriteFileCommand,
+  ModifyFileCommand,
+  SearchFilesCommand,
+  ExecuteCommandCommand,
+  GetWorkspaceInfoCommand,
+  ExecuteCommandResponse,
+  WorkspaceAgentException
+}
 import org.slf4j.LoggerFactory
-import upickle.default._
+import upickle.default.{ read, write }
 
 import java.nio.file.{ Files, Paths }
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.{ ConcurrentHashMap, Executors, ScheduledExecutorService, TimeUnit }
+import scala.annotation.unused
 import scala.concurrent.{ ExecutionContext, Future }
 import scala.util.{ Failure, Success, Try }
 
@@ -200,7 +221,7 @@ object RunnerMain extends cask.MainRoutes {
         sendMessage(channel, CommandStartedMessage(cmd.commandId, cmd.command))
 
         // Execute command with streaming output
-        val response = executeCommandWithStreaming(cmd)
+        val response = executeCommandWithStreaming(channel, cmd)
 
         // Send final response
         sendMessage(channel, ResponseMessage(response))
@@ -231,7 +252,10 @@ object RunnerMain extends cask.MainRoutes {
       }
     }(using ec)
 
-  private def executeCommandWithStreaming(cmd: ExecuteCommandCommand): ExecuteCommandResponse =
+  private def executeCommandWithStreaming(
+    @unused channel: cask.WsChannelActor,
+    cmd: ExecuteCommandCommand
+  ): ExecuteCommandResponse =
     // For now, use the existing implementation but we can enhance this later to provide real streaming
     workspaceInterface
       .executeCommand(

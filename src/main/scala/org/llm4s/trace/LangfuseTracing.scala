@@ -1,7 +1,7 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.AgentState
-import org.llm4s.llmconnect.model.{ AssistantMessage, SystemMessage, ToolMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, ToolMessage, UserMessage, SystemMessage }
 import org.slf4j.LoggerFactory
 
 import java.time.Instant
