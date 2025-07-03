@@ -1,12 +1,13 @@
 package org.llm4s.llmconnect.provider
 
 import sttp.client4._
+import ujson._
 import org.llm4s.llmconnect.config.EmbeddingConfig
 import org.llm4s.llmconnect.model._
 
 object OpenAIEmbeddingProvider extends EmbeddingProvider {
   override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] = {
-    val cfg     = EmbeddingConfig.openAI
+    val cfg = EmbeddingConfig.openAI
     val backend = DefaultSyncBackend()
 
     val response = basicRequest
@@ -18,17 +19,17 @@ object OpenAIEmbeddingProvider extends EmbeddingProvider {
 
     response.body match {
       case Right(body) =>
-        val json    = ujson.read(body)
-        val vectors = json("data").arr.map(record => record("embedding").arr.map(_.num.toDouble).toVector).toSeq
+        val json = ujson.read(body)
+        val vectors = json("data").arr.map { record =>
+          record("embedding").arr.map(_.num.toDouble).toVector
+        }.toSeq
         Right(EmbeddingResponse(vectors))
       case Left(error) =>
-        Left(
-          EmbeddingError(
-            code = None,
-            message = error,
-            provider = "openai"
-          )
-        )
+        Left(EmbeddingError(
+          code = None,
+          message = error,
+          provider = "openai"
+        ))
 
     }
   }
