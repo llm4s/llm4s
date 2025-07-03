@@ -1,34 +1,35 @@
 package org.llm4s.samples.embeddingsupport
 
 import org.llm4s.llmconnect.EmbeddingClient
-import org.llm4s.llmconnect.config.{EmbeddingConfig, EmbeddingModelConfig}
+import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.EmbeddingRequest
 
-object EmbeddingExample extends App {
+import scala.io.StdIn.readLine
 
-  val activeProvider = EmbeddingConfig.activeProvider.toLowerCase
-  val model = activeProvider match {
-    case "openai" =>
-      EmbeddingModelConfig(EmbeddingConfig.openAI.model, 1536) 
-      EmbeddingModelConfig(EmbeddingConfig.voyage.model, 1024)
-    case other =>
-      throw new RuntimeException(s"Unsupported provider: $other")
+object EmbeddingExample extends App {
+  println("Select provider [openai/voyage]:")
+  val providerInput = readLine().toLowerCase.trim
+
+  val client = EmbeddingClient.fromProvider(providerInput)
+
+  val model = providerInput match {
+    case "openai" => EmbeddingModelConfig("text-embedding-3-small", 1536)
+    case "voyage" => EmbeddingModelConfig("voyage-2", 1024)
+    case other    => throw new RuntimeException(s"Unsupported provider: $other")
   }
 
-  val inputText = Seq("Gopi is contributing to Google Summer of Code 2025.")
+  val input = Seq("Gopi is contributing to GSoC 2025.")
+  val request = EmbeddingRequest(input, model)
 
-  val request = EmbeddingRequest(inputText, model)
-  val provider = EmbeddingClient.fromConfig()
-
-  provider.embed(request) match {
+  client.embed(request) match {
     case Right(response) =>
-      println(s"Embedding received from [$activeProvider]:")
+      println(s"Embeddings from [$providerInput]:")
       response.vectors.zipWithIndex.foreach { case (vec, i) =>
-        println(s"[$i] -> [${vec.mkString(", ")}]")
+        println(s"[$i]: ${vec.take(10).mkString(", ")} ...") // print partial vector
       }
 
     case Left(error) =>
-      println(s"Embedding failed from [${error.provider}]: ${error.message}")
+      println(s"Embedding failed for [$providerInput]: ${error.message}")
       error.code.foreach(code => println(s"Status code: $code"))
   }
 }
