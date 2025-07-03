@@ -5,6 +5,8 @@ import org.scalatest.matchers.should.Matchers
 
 import java.nio.file.Files
 import java.util.Base64
+import java.util.concurrent.Executors
+import scala.concurrent.{ ExecutionContext, Future }
 
 /**
  * Comprehensive test suite for the Image Generation API.
@@ -13,6 +15,9 @@ import java.util.Base64
  * and a mock implementation for testing without a real server.
  */
 class ImageGenerationTest extends AnyFunSuite with Matchers {
+  implicit val executionContext: ExecutionContext = ExecutionContext.fromExecutorService(
+    Executors.newSingleThreadExecutor()
+  )
 
   // ===== MOCK CLIENT FOR TESTING =====
 
@@ -24,20 +29,22 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     override def generateImage(
       prompt: String,
       options: ImageGenerationOptions = ImageGenerationOptions()
-    ): Either[ImageGenerationError, GeneratedImage] = {
+    ): Future[Either[ImageGenerationError, GeneratedImage]] = {
       if (prompt.trim.isEmpty) {
-        return Left(ValidationError("Prompt cannot be empty"))
+        return Future.successful(Left(ValidationError("Prompt cannot be empty")))
       }
       if (prompt.toLowerCase.contains("inappropriate")) {
-        return Left(InvalidPromptError("Prompt contains inappropriate content"))
+        return Future.successful(Left(InvalidPromptError("Prompt contains inappropriate content")))
       }
-      Right(
-        GeneratedImage(
-          data = mockImageData,
-          format = options.format,
-          size = options.size,
-          prompt = prompt,
-          seed = options.seed
+      Future.successful(
+        Right(
+          GeneratedImage(
+            data = mockImageData,
+            format = options.format,
+            size = options.size,
+            prompt = prompt,
+            seed = options.seed
+          )
         )
       )
     }
@@ -46,11 +53,12 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       prompt: String,
       count: Int,
       options: ImageGenerationOptions = ImageGenerationOptions()
-    ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
-      if (count <= 0) return Left(ValidationError("Count must be positive"))
-      if (count > 10) return Left(InsufficientResourcesError("Cannot generate more than 10 images at once"))
+    ): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] = {
+      if (count <= 0) return Future.successful(Left(ValidationError("Count must be positive")))
+      if (count > 10)
+        return Future.successful(Left(InsufficientResourcesError("Cannot generate more than 10 images at once")))
 
-      generateImage(prompt, options) match {
+      generateImage(prompt, options).map {
         case Right(singleImage) =>
           val images = (1 to count).map(i => singleImage.copy(seed = options.seed.map(_ + i)))
           Right(images)
@@ -213,7 +221,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
   test("Mock client generates image successfully") {
     val result = mockClient.generateImage("A beautiful landscape")
 
-    result match {
+    result.map {
       case Right(image) =>
         image.prompt shouldBe "A beautiful landscape"
         image.format shouldBe ImageFormat.PNG
@@ -234,10 +242,9 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       negativePrompt = Some("blurry")
     )
 
-    val result: Either[ImageGenerationError, GeneratedImage] =
-      mockClient.generateImage("Test prompt", options)
+    val result = mockClient.generateImage("Test prompt", options)
 
-    result match {
+    result.map {
       case Right(image) =>
         image.size shouldBe ImageSize.Landscape768x512
         image.format shouldBe ImageFormat.JPEG
@@ -250,7 +257,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
   test("Mock client validates prompts") {
     // Empty prompt
     val result1 = mockClient.generateImage("")
-    result1 match {
+    result1.map {
       case Left(_: ValidationError) => succeed
       case Left(other)              => fail(s"Expected ValidationError, got $other")
       case Right(img)               => fail(s"Expected error, but got image: $img")
@@ -258,7 +265,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
 
     // Inappropriate content
     val result2 = mockClient.generateImage("inappropriate content")
-    result2 match {
+    result2.map {
       case Left(_: InvalidPromptError) => succeed
       case Left(other)                 => fail(s"Expected InvalidPromptError, got $other")
       case Right(img)                  => fail(s"Expected error, but got image: $img")
@@ -268,7 +275,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
   test("Mock client generates multiple images") {
     val result = mockClient.generateImages("Test prompt", 3)
 
-    result match {
+    result.map {
       case Right(images) =>
         (images should have).length(3)
         images.foreach { image =>
@@ -283,11 +290,11 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
 
   test("Mock client validates image count") {
     // Test negative/zero count
-    mockClient.generateImages("Test", -1) should matchPattern { case Left(_: ValidationError) => }
-    mockClient.generateImages("Test", 0) should matchPattern { case Left(_: ValidationError) => }
+    mockClient.generateImages("Test", -1).map(result => result should matchPattern { case Left(_: ValidationError) => })
+    mockClient.generateImages("Test", 0).map(result => result should matchPattern { case Left(_: ValidationError) => })
 
     // Test too many images
-    mockClient.generateImages("Test", 15) match {
+    mockClient.generateImages("Test", 15).map {
       case Left(_: InsufficientResourcesError) => succeed
       case Left(other)                         => fail(s"Expected InsufficientResourcesError, but got $other")
       case Right(_)                            => fail("Expected failure, but got success")
@@ -332,7 +339,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       baseUrl = "http://localhost:99999"
     )
 
-    result match {
+    result.map {
       case Left(_)      => succeed
       case Right(value) => fail(s"Expected failure but got: $value")
     }

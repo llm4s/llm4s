@@ -4,6 +4,8 @@ import java.time.Instant
 import java.nio.file.Path
 import org.llm4s.imagegeneration.provider.{ HttpClient, HuggingFaceClient, StableDiffusionClient }
 
+import scala.concurrent.Future
+
 // ===== ERROR HANDLING =====
 
 sealed trait ImageGenerationError {
@@ -184,14 +186,14 @@ trait ImageGenerationClient {
   def generateImage(
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, GeneratedImage]
+  ): Future[Either[ImageGenerationError, GeneratedImage]]
 
   /** Generate multiple images from a text prompt */
   def generateImages(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]]
+  ): Future[Either[ImageGenerationError, Seq[GeneratedImage]]]
 
   /** Check the health/status of the image generation service */
   def health(): Either[ImageGenerationError, ServiceStatus]
@@ -216,7 +218,7 @@ object ImageGeneration {
     prompt: String,
     config: ImageGenerationConfig,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, GeneratedImage] =
+  ): Future[Either[ImageGenerationError, GeneratedImage]] =
     client(config).generateImage(prompt, options)
 
   /** Convenience method for generating multiple images */
@@ -225,7 +227,7 @@ object ImageGeneration {
     count: Int,
     config: ImageGenerationConfig,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
+  ): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
     client(config).generateImages(prompt, count, options)
 
   /** Get a Stable Diffusion client with default local configuration */
@@ -260,7 +262,7 @@ object ImageGeneration {
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions(),
     baseUrl: String = "http://localhost:7860"
-  ): Either[ImageGenerationError, GeneratedImage] = {
+  ): Future[Either[ImageGenerationError, GeneratedImage]] = {
     val config = StableDiffusionConfig(baseUrl = baseUrl)
     generateImage(prompt, config, options)
   }

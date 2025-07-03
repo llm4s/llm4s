@@ -3,7 +3,6 @@ package org.llm4s.samples.actions
 import org.llm4s.llmconnect.LLM
 import org.llm4s.llmconnect.model._
 import org.llm4s.tokens.Tokenizer
-import org.llm4s.identity.TokenizerId
 import org.llm4s.identity.TokenizerId.O200K_BASE
 
 /**

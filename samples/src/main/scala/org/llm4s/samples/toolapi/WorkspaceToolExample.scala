@@ -4,14 +4,12 @@ import org.llm4s.llmconnect.{ LLM, LLMClient }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.config.{ AnthropicConfig, OpenAIConfig }
 import org.llm4s.llmconnect.provider.LLMProvider
-import org.llm4s.shared._
 import org.llm4s.toolapi._
 import org.llm4s.workspace.ContainerisedWorkspace
 import org.slf4j.LoggerFactory
 
 import scala.annotation.tailrec
 import upickle.default._
-import ujson._
 
 /**
  * Example demonstrating how to use workspace tools with different LLM models

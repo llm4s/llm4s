@@ -1,6 +1,5 @@
 package org.llm4s.samples.tokens
 
-import org.llm4s.identity.TokenizerId
 import org.llm4s.identity.TokenizerId.{ CL100K_BASE, O200K_BASE, R50K_BASE }
 import org.llm4s.tokens.Tokenizer
 

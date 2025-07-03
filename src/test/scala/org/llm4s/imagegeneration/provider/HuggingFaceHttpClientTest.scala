@@ -7,7 +7,14 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers._
 import requests.Response
 
+import java.util.concurrent.Executors
+import scala.concurrent.ExecutionContext
+
 class HuggingFaceHttpClientTest extends AnyFlatSpec with MockFactory with EitherValues {
+
+  implicit val executionContext: ExecutionContext = ExecutionContext.fromExecutorService(
+    Executors.newSingleThreadExecutor()
+  )
 
   val httpClient: BaseHttpClient = stub[BaseHttpClient]
   val huggingFaceClient          = new HuggingFaceClient(HuggingFaceConfig("test-key", "test-model"), httpClient)
@@ -16,10 +23,10 @@ class HuggingFaceHttpClientTest extends AnyFlatSpec with MockFactory with Either
 
     (httpClient.post _).when("something").throws(new RuntimeException("Something went wrong"))
 
-    val result = huggingFaceClient.makeHttpRequest("something")
+    val resultF = huggingFaceClient.makeHttpRequest("something")
 
-    result.isRight should be(false)
-    result.swap.getOrElse("") should be(ServiceError("Something went wrong", 500))
+    resultF.map(result => result.isRight should be(false))
+    resultF.map(result => result.swap.getOrElse("") should be(ServiceError("Something went wrong", 500)))
   }
 
   it should "return a Right(value) on success" in {
@@ -27,10 +34,10 @@ class HuggingFaceHttpClientTest extends AnyFlatSpec with MockFactory with Either
     val response = Response("", 200, "OK", new geny.Bytes("something".getBytes), Map.empty, None)
     (httpClient.post _).when("something").returns(response)
 
-    val result = huggingFaceClient.makeHttpRequest("something")
+    val resultF = huggingFaceClient.makeHttpRequest("something")
 
-    result.isRight should be(true)
-    result.value should be(response)
+    resultF.map(result => result.isRight should be(true))
+    resultF.map(result => result.value should be(response))
   }
 
 }

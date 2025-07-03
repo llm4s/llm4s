@@ -1,10 +1,15 @@
 package org.llm4s.imagegeneration.provider
 
 import org.llm4s.imagegeneration._
+import cats.data._
+import cats.implicits._
+import requests.Response
 
 import java.time.Instant
 import java.util.Base64
+import scala.concurrent.Future
 import scala.util.Try
+import scala.concurrent.ExecutionContext.Implicits.global
 
 /**
  * HuggingFace Inference API client for image generation.
@@ -43,8 +48,8 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
   override def generateImage(
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, GeneratedImage] =
-    generateImages(prompt, 1, options).map(_.head)
+  ): Future[Either[ImageGenerationError, GeneratedImage]] =
+    generateImages(prompt, 1, options).map(images => images.map(_.head))
 
   /**
    * Validates the provided prompt to ensure it is not empty or blank.
@@ -130,18 +135,20 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+  ): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] = {
 
-    val result: Either[ImageGenerationError, IndexedSeq[GeneratedImage]] = for {
-      prompt     <- validatePrompt(prompt)
-      count      <- validateCount(count)
-      payload    <- buildPayload(prompt, options)
-      response   <- makeHttpRequest(payload)
-      base64Data <- convertToBase64(response)
-      images     <- generateAllImages(prompt, count, options, base64Data)
+    val resultT: EitherT[Future, ImageGenerationError, Seq[GeneratedImage]] = for {
+      prompt     <- EitherT(Future.successful(validatePrompt(prompt)))
+      count      <- EitherT(Future.successful(validateCount(count)))
+      payload    <- EitherT(Future.successful(buildPayload(prompt, options)))
+      response   <- EitherT(makeHttpRequest(payload))
+      base64Data <- EitherT(Future.successful(convertToBase64(response)))
+      images     <- EitherT(Future.successful(generateAllImages(prompt, count, options, base64Data)))
     } yield images
 
-    result.left.foreach(error => logger.error("Error generating images: {}", error.message))
+    val result = resultT.value
+
+    resultT.leftMap(error => logger.error("Error generating images: {}", error.message))
 
     result
   }
@@ -214,7 +221,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
    * @param payload The JSON payload to send with the HTTP request.
    * @return Either an ImageGenerationError if the request fails or a successful `requests.Response` object.
    */
-  def makeHttpRequest(payload: String): Either[ImageGenerationError, requests.Response] = {
+  def makeHttpRequest(payload: String): Future[Either[ServiceError, Response]] = Future {
     val result = Try(httpClient.post(payload)).toEither.left.map(exception => ServiceError(exception.getMessage, 500))
     result.flatMap { response =>
       if (response.statusCode == 200) {

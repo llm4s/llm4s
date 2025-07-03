@@ -1,6 +1,6 @@
 package org.llm4s.samples.workspace
 
-import org.llm4s.shared.{ FileOperation, ReplaceOperation }
+import org.llm4s.shared.ReplaceOperation
 import org.llm4s.workspace.ContainerisedWorkspace
 import org.slf4j.LoggerFactory
 

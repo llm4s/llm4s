@@ -2,7 +2,6 @@ package org.llm4s.samples.toolapi
 
 import org.llm4s.toolapi._
 import org.llm4s.toolapi.tools.WeatherTool
-import upickle.default._
 
 /**
  * Example demonstrating how to use the weather tool
