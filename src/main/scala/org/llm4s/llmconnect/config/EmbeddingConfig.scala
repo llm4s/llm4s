@@ -25,4 +25,5 @@ object EmbeddingConfig {
   val activeProvider: String = loadEnv("EMBEDDING_PROVIDER")
   val inputPath: String      = loadEnv("EMBEDDING_INPUT_PATH")
   val query: String          = loadEnv("EMBEDDING_QUERY")
+
 }

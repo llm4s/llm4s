@@ -128,8 +128,8 @@ lazy val root = (project in file("."))
       "org.apache.poi" % "poi-ooxml" % "5.2.3",
       "com.lihaoyi" %% "requests" % "0.8.0",
       "org.jsoup" % "jsoup" % "1.17.2"
-
     )
+
   )
 
 lazy val shared = (project in file("shared"))
@@ -198,7 +198,6 @@ lazy val crossLibDependencies = Def.setting {
     "org.apache.poi" % "poi-ooxml" % "5.2.3",
     "com.lihaoyi" %% "requests" % "0.8.0",
     "org.jsoup" % "jsoup" % "1.17.2"
-
   )
 }
 
