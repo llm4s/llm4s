@@ -31,7 +31,7 @@ val scala2CompilerOptions = Seq(
 inThisBuild(
   List(
     crossScalaVersions := List(scala213, scala3),
-    scalaVersion       := scala213,
+    scalaVersion       := scala3,
     organization       := "org.llm4s",
     organizationName   := "llm4s",
     versionScheme      := Some("early-semver"),
@@ -120,7 +120,7 @@ lazy val root = (project in file("."))
       "com.knuddels"       % "jtokkit"         % "1.1.0",
       "com.lihaoyi"       %% "requests"        % "0.9.0",
       "org.java-websocket" % "Java-WebSocket"  % "1.5.3",
-      "org.typelevel" %% "cats-core" % "2.13.0",
+      "org.typelevel"     %% "cats-core"       % "2.13.0",
       "org.scalatest"     %% "scalatest"       % "3.2.19" % Test,
       "org.scalamock"     %% "scalamock"       % "7.3.3"  % Test,
       "com.softwaremill.sttp.client4" %% "core"  % "4.0.0-M7",

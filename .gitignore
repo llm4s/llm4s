@@ -11,3 +11,4 @@ CLAUDE.md
 .metals
 .vscode
 **/.claude/settings.local.json
+**/*.iml
