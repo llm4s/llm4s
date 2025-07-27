@@ -68,8 +68,9 @@ jobs:
             ~/.cache/coursier
             ~/.ivy2/cache
             ~/.sbt
-          key: ${{ runner.os }}-sbt-${{ matrix.scala }}-${{ hashFiles('**/build.sbt', '**/project/**.scala', '**/project/build.properties') }}
+          key: ${{ runner.os }}-sbt-${{ matrix.scala }}-${{ matrix.java }}-${{ hashFiles('**/build.sbt', '**/project/**.scala', '**/project/build.properties') }}
           restore-keys: |
+            ${{ runner.os }}-sbt-${{ matrix.scala }}-${{ matrix.java }}-
             ${{ runner.os }}-sbt-${{ matrix.scala }}-
             ${{ runner.os }}-sbt-
       
@@ -116,8 +117,9 @@ jobs:
             ~/.cache/coursier
             ~/.ivy2/cache
             ~/.sbt
-          key: ${{ runner.os }}-g8-${{ matrix.scala }}-${{ hashFiles('**/build.sbt', '**/project/**.scala', '**/project/build.properties') }}
+          key: ${{ runner.os }}-g8-${{ matrix.scala }}-21-${{ hashFiles('**/build.sbt', '**/project/**.scala', '**/project/build.properties') }}
           restore-keys: |
+            ${{ runner.os }}-g8-${{ matrix.scala }}-21-
             ${{ runner.os }}-g8-${{ matrix.scala }}-
             ${{ runner.os }}-g8-
 
