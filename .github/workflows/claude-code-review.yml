@@ -36,7 +36,7 @@ jobs:
       review_type: 'trusted'
       pr_number: ${{ github.event.pull_request.number }}
     secrets:
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
 
   # Manual review via @claude comment
@@ -110,4 +110,4 @@ jobs:
       review_type: 'manual'
       pr_number: ${{ needs.claude-review-manual.outputs.pr_number }}
     secrets:
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
