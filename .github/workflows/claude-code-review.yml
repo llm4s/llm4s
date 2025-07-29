@@ -8,7 +8,7 @@ on:
 
 # Cancel in-progress Claude reviews for the same PR
 concurrency:
-  group: claude-review-${{ github.event.pull_request.number || github.event.issue.number }}
+  group: ${{ github.repository }}-claude-review-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
