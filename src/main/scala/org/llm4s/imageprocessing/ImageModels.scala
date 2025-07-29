@@ -14,22 +14,22 @@ sealed trait ImageFormat {
 object ImageFormat {
   case object PNG extends ImageFormat {
     override def extension: String = "png"
-    override def mimeType: String = "image/png"
+    override def mimeType: String  = "image/png"
   }
-  
+
   case object JPEG extends ImageFormat {
     override def extension: String = "jpg"
-    override def mimeType: String = "image/jpeg"
+    override def mimeType: String  = "image/jpeg"
   }
-  
+
   case object WEBP extends ImageFormat {
     override def extension: String = "webp"
-    override def mimeType: String = "image/webp"
+    override def mimeType: String  = "image/webp"
   }
-  
+
   case object GIF extends ImageFormat {
     override def extension: String = "gif"
-    override def mimeType: String = "image/gif"
+    override def mimeType: String  = "image/gif"
   }
 }
 
@@ -39,41 +39,42 @@ object ImageFormat {
 sealed trait ImageOperation
 
 object ImageOperation {
+
   /**
    * Resize operation with specific dimensions.
    */
   case class Resize(width: Int, height: Int, maintainAspectRatio: Boolean = true) extends ImageOperation
-  
+
   /**
    * Crop operation with coordinates and dimensions.
    */
   case class Crop(x: Int, y: Int, width: Int, height: Int) extends ImageOperation
-  
+
   /**
    * Rotate operation with angle in degrees.
    */
   case class Rotate(degrees: Double) extends ImageOperation
-  
+
   /**
    * Apply blur filter.
    */
   case class Blur(radius: Double) extends ImageOperation
-  
+
   /**
    * Adjust brightness (-100 to 100).
    */
   case class Brightness(level: Int) extends ImageOperation
-  
+
   /**
    * Adjust contrast (-100 to 100).
    */
   case class Contrast(level: Int) extends ImageOperation
-  
+
   /**
    * Convert to grayscale.
    */
   case object Grayscale extends ImageOperation
-  
+
   /**
    * Normalize image (0-255 pixel values).
    */
@@ -90,10 +91,11 @@ case class ProcessedImage(
   height: Int,
   metadata: ImageMetadata
 ) {
+
   /**
    * Save the processed image to a file.
    */
-  def saveToFile(path: Path): Either[Exception, Unit] = {
+  def saveToFile(path: Path): Either[Exception, Unit] =
     try {
       import java.nio.file.Files
       Files.write(path, data)
@@ -101,8 +103,7 @@ case class ProcessedImage(
     } catch {
       case e: Exception => Left(e)
     }
-  }
-  
+
   /**
    * Get image size in bytes.
    */
@@ -173,16 +174,17 @@ case class ImageEmbedding(
   imagePath: String,
   metadata: ImageMetadata
 ) {
+
   /**
    * Calculate cosine similarity with another embedding.
    */
   def cosineSimilarity(other: ImageEmbedding): Double = {
     require(this.dimensions == other.dimensions, "Embedding dimensions must match")
-    
+
     val dotProduct = vector.zip(other.vector).map { case (a, b) => a * b }.sum
-    val normA = math.sqrt(vector.map(x => x * x).sum)
-    val normB = math.sqrt(other.vector.map(x => x * x).sum)
-    
+    val normA      = math.sqrt(vector.map(x => x * x).sum)
+    val normB      = math.sqrt(other.vector.map(x => x * x).sum)
+
     dotProduct / (normA * normB)
   }
 }

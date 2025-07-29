@@ -7,7 +7,7 @@ sealed trait ImageProcessingConfig
 
 /**
  * Configuration for OpenAI Vision API.
- * 
+ *
  * @param apiKey OpenAI API key
  * @param model Vision model to use
  * @param baseUrl Base URL for OpenAI API (default: official OpenAI endpoint)
@@ -20,7 +20,7 @@ case class OpenAIVisionConfig(
 
 /**
  * Configuration for Anthropic Claude Vision API.
- * 
+ *
  * @param apiKey Anthropic API key
  * @param model Claude model to use
  * @param baseUrl Base URL for Anthropic API (default: official Anthropic endpoint)
