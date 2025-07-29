@@ -123,7 +123,11 @@ lazy val root = (project in file("."))
       "org.scalatest"     %% "scalatest"       % "3.2.19" % Test,
       "org.scalamock"     %% "scalamock"       % "7.3.3"  % Test,
       "com.softwaremill.sttp.client4" %% "core"  % "4.0.0-M7",
-      "com.lihaoyi"                   %% "ujson" % "4.2.1"
+      "com.lihaoyi"                   %% "ujson" % "4.2.1",
+      "org.apache.pdfbox" % "pdfbox" % "2.0.27",
+      "org.apache.poi" % "poi-ooxml" % "5.2.3",
+      "com.lihaoyi" %% "requests" % "0.8.0",
+      "org.jsoup" % "jsoup" % "1.17.2"
 
     )
   )
@@ -189,7 +193,11 @@ lazy val crossLibDependencies = Def.setting {
     "org.llm4s"     %% "llm4s"     % version.value,
     "org.scalatest" %% "scalatest" % "3.2.19" % Test,
     "com.softwaremill.sttp.client4" %% "core"  % "4.0.0-M7",
-    "com.lihaoyi"                   %% "ujson" % "4.2.1"
+    "com.lihaoyi"                   %% "ujson" % "4.2.1",
+    "org.apache.pdfbox" % "pdfbox" % "2.0.27",
+    "org.apache.poi" % "poi-ooxml" % "5.2.3",
+    "com.lihaoyi" %% "requests" % "0.8.0",
+    "org.jsoup" % "jsoup" % "1.17.2"
 
   )
 }

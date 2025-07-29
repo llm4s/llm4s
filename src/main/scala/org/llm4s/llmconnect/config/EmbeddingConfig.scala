@@ -7,7 +7,6 @@ case class EmbeddingProviderConfig(
 )
 
 object EmbeddingConfig {
-
   def loadEnv(name: String): String =
     sys.env.getOrElse(name, throw new RuntimeException(s"Missing env variable: $name"))
 
@@ -23,5 +22,7 @@ object EmbeddingConfig {
     apiKey = loadEnv("VOYAGE_API_KEY")
   )
 
-  val activeProvider: String = loadEnv("EMBEDDING_PROVIDER") // e.g. "openai" or "voyage"
+  val activeProvider: String = loadEnv("EMBEDDING_PROVIDER")
+  val inputPath: String      = loadEnv("EMBEDDING_INPUT_PATH")
+  val query: String          = loadEnv("EMBEDDING_QUERY")
 }

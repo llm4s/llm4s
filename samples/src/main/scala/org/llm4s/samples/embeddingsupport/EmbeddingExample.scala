@@ -2,38 +2,33 @@ package org.llm4s.samples.embeddingsupport
 
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.{EmbeddingConfig, EmbeddingModelConfig}
+import org.llm4s.llmconnect.extractors.UniversalExtractor
 import org.llm4s.llmconnect.model.EmbeddingRequest
-
+import org.llm4s.llmconnect.utils.SimilarityUtils
 
 object EmbeddingExample extends App {
 
-  // Load model name from active provider config (no hardcoding here)
   val activeProvider = EmbeddingConfig.activeProvider.toLowerCase
   val model = activeProvider match {
-    case "openai" =>
-      EmbeddingModelConfig(EmbeddingConfig.openAI.model, 1536)
-    case "voyage" =>
-      EmbeddingModelConfig(EmbeddingConfig.voyage.model, 1024)
-    case other =>
-      throw new RuntimeException(s"Unsupported provider: $other")
+    case "openai"  => EmbeddingModelConfig(EmbeddingConfig.openAI.model, 1536)
+    case "voyage"  => EmbeddingModelConfig(EmbeddingConfig.voyage.model, 1024)
+    case other     => throw new RuntimeException(s"Unsupported provider: $other")
   }
 
-  // Input to embed
-  val inputText = Seq("Gopi is contributing to Google Summer of Code 2025.")
+  val extractedText = UniversalExtractor.extract(EmbeddingConfig.inputPath)
+  val query = EmbeddingConfig.query
 
-  val request = EmbeddingRequest(inputText, model)
+  val request = EmbeddingRequest(Seq(extractedText, query), model)
   val provider = EmbeddingClient.fromConfig()
 
   provider.embed(request) match {
     case Right(response) =>
-      println(s"Embedding received from [$activeProvider]:")
+      val docVec = response.vectors.head
+      val queryVec = response.vectors.last
+      val score = SimilarityUtils.cosineSimilarity(docVec, queryVec)
 
-      // Print preview (first 10 values) to console
-      response.vectors.zipWithIndex.foreach { case (vec, i) =>
-        val preview = vec.take(10).mkString(", ")
-        println(s"[$i] -> [$preview ...] (total length: ${vec.length})")
-      }
-
+      println(s"Similarity Score: $score")
+      println(s"Top 10 values of docVec: ${docVec.take(10).mkString(", ")}")
 
     case Left(error) =>
       println(s"Embedding failed from [${error.provider}]: ${error.message}")

@@ -19,7 +19,7 @@ sbt buildAll
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 
 # Run a sample with Scala 2.13
-sbt ++2.13.12 "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
+sbt ++2.13.16 "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 
 # Run tests for the current Scala version
 sbt test

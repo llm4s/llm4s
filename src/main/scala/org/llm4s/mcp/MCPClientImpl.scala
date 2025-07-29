@@ -10,25 +10,82 @@ import scala.util.{ Failure, Success, Try }
 /**
  * Implementation of MCP client that connects to and communicates with MCP servers.
  * Handles JSON-RPC communication, tool discovery, and execution delegation.
+ * Supports both 2025-06-18 (Streamable HTTP) and 2024-11-05 (HTTP+SSE) transports.
  */
 class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
-  private val logger      = LoggerFactory.getLogger(getClass)
-  private val transport   = MCPTransport.create(config)
-  private val requestId   = new AtomicLong(0)
-  private var initialized = false
+  private val logger                              = LoggerFactory.getLogger(getClass)
+  private var transport: Option[MCPTransportImpl] = None
+  private val requestId                           = new AtomicLong(0)
+  private var initialized                         = false
+  private var protocolVersion                     = "2025-06-18" // Updated to latest version
 
   logger.info(s"MCPClientImpl created for server: ${config.name}")
 
-  // Performs MCP protocol handshake with the server
-  override def initialize(): Either[String, Unit] = {
-    if (initialized) return Right(())
+  // Initialize transport with backward compatibility detection
+  private def initializeTransport(): Either[String, MCPTransportImpl] =
+    transport match {
+      case Some(t) => Right(t)
+      case None =>
+        config.transport match {
+          case StreamableHTTPTransport(url, name) =>
+            tryHttpTransportWithFallback(url, name)
+          case SSETransport(url, name) =>
+            tryHttpTransportWithFallback(url, name)
+          case StdioTransport(command, name) =>
+            // Stdio transport remains unchanged
+            val stdioTransport = new StdioTransportImpl(command, name)
+            transport = Some(stdioTransport)
+            Right(stdioTransport)
+        }
+    }
 
-    val initRequest = JsonRpcRequest(
+  // Unified HTTP transport logic: try Streamable HTTP first, fallback to SSE
+  private def tryHttpTransportWithFallback(url: String, name: String): Either[String, MCPTransportImpl] = {
+    // Try new 2025-06-18 Streamable HTTP transport first
+    logger.info(s"Attempting to connect using Streamable HTTP transport (2025-06-18) to $url")
+    val newTransport = new StreamableHTTPTransportImpl(url, name)
+
+    // Test with a simple initialize request
+    val testRequest = createInitializeRequest("2025-06-18")
+    newTransport.sendRequest(testRequest) match {
+      case Right(_) =>
+        logger.info(s"Successfully connected using Streamable HTTP transport (2025-06-18)")
+        transport = Some(newTransport)
+        protocolVersion = "2025-06-18"
+        Right(newTransport)
+      case Left(error) if error.contains("405") || error.contains("404") =>
+        // Server doesn't support new transport, try fallback
+        logger.info(s"Server doesn't support Streamable HTTP, attempting fallback to HTTP+SSE (2024-11-05)")
+        newTransport.close()
+
+        // Try old transport
+        val oldTransport   = new SSETransportImpl(url, name)
+        val oldTestRequest = createInitializeRequest("2024-11-05")
+        oldTransport.sendRequest(oldTestRequest) match {
+          case Right(_) =>
+            logger.info(s"Successfully connected using HTTP+SSE transport (2024-11-05)")
+            transport = Some(oldTransport)
+            protocolVersion = "2024-11-05"
+            Right(oldTransport)
+          case Left(fallbackError) =>
+            logger.error(s"Both transport methods failed. New: $error, Old: $fallbackError")
+            oldTransport.close()
+            Left(s"Failed to connect with both transports. Latest error: $fallbackError")
+        }
+      case Left(error) =>
+        logger.error(s"Failed to connect using Streamable HTTP transport: $error")
+        newTransport.close()
+        Left(error)
+    }
+  }
+
+  private def createInitializeRequest(version: String): JsonRpcRequest =
+    JsonRpcRequest(
       id = generateId(),
-      method = "initialize", // method value for handshake/setup
+      method = "initialize",
       params = Some(
         ujson.Obj(
-          "protocolVersion" -> ujson.Str("2024-11-05"), // consider switching to 2025-03-26 (without sse)
+          "protocolVersion" -> ujson.Str(version),
           "capabilities" -> ujson.Obj(
             "tools" -> ujson.Obj()
           ),
@@ -40,72 +97,91 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
       )
     )
 
-    transport.sendRequest(initRequest) match {
-      case Right(response) =>
-        response.result match {
-          case Some(result) =>
-            Try {
-              val protocolVersion = result("protocolVersion").str
-              // Validate protocol version compatibility
-              if (protocolVersion.startsWith("2024-") || protocolVersion.startsWith("2025-")) {
-                initialized = true
-                Right(())
-              } else {
-                Left(s"Unsupported protocol version: $protocolVersion")
-              }
-            }.getOrElse(Left("Invalid initialization response format"))
-          case None =>
-            Left("Initialize request failed: no result in response")
+  // Performs MCP protocol handshake with the server
+  override def initialize(): Either[String, Unit] =
+    if (initialized) {
+      Right(())
+    } else {
+      initializeTransport().flatMap { transportImpl =>
+        val initRequest = createInitializeRequest(protocolVersion)
+
+        transportImpl.sendRequest(initRequest) match {
+          case Right(response) =>
+            response.result match {
+              case Some(result) =>
+                Try {
+                  val serverProtocolVersion = result("protocolVersion").str
+                  logger.info(s"Server supports protocol version: $serverProtocolVersion")
+
+                  // Validate protocol version compatibility
+                  if (serverProtocolVersion.startsWith("2024-") || serverProtocolVersion.startsWith("2025-")) {
+                    initialized = true
+                    logger.info(
+                      s"Successfully initialized MCP client for ${config.name} with protocol $serverProtocolVersion"
+                    )
+                    Right(())
+                  } else {
+                    Left(s"Unsupported protocol version: $serverProtocolVersion")
+                  }
+                }.getOrElse(Left("Invalid initialization response format"))
+              case None =>
+                Left("Initialize request failed: no result in response")
+            }
+          case Left(errorMsg) =>
+            Left(s"Initialize request failed: $errorMsg")
         }
-      case Left(errorMsg) =>
-        Left(s"Initialize request failed: $errorMsg")
+      }
     }
-  }
 
   // Retrieves and converts all available tools from the MCP server
-  override def getTools(): Seq[ToolFunction[_, _]] = {
+  override def getTools(): Seq[ToolFunction[_, _]] =
     // Ensure we're initialized
     initialize() match {
       case Left(errorMsg) =>
         logger.error(s"Failed to initialize MCP client for ${config.name}: $errorMsg")
-        return Seq.empty
-      case Right(_) => // Continue
-    }
+        Seq.empty
+      case Right(_) =>
+        transport match {
+          case Some(transportImpl) =>
+            val listRequest = JsonRpcRequest(
+              id = generateId(),
+              method = "tools/list", // method value for getting available tools
+              params = None
+            )
 
-    val listRequest = JsonRpcRequest(
-      id = generateId(),
-      method = "tools/list", // method value for getting available tools
-      params = None
-    )
-
-    transport.sendRequest(listRequest) match {
-      case Right(response) =>
-        response.result match {
-          case Some(result) =>
-            Try {
-              val toolsData = result("tools").arr
-              toolsData.map(convertMCPToolToToolFunction).toSeq
-            } match {
-              case Success(tools) =>
-                logger.info(s"Successfully retrieved ${tools.size} tools from ${config.name}")
-                tools
-              case Failure(exception) =>
-                logger.error(s"Failed to parse tools from ${config.name}: ${exception.getMessage}", exception)
+            transportImpl.sendRequest(listRequest) match {
+              case Right(response) =>
+                response.result match {
+                  case Some(result) =>
+                    Try {
+                      val toolsData = result("tools").arr
+                      toolsData.map(convertMCPToolToToolFunction).toSeq
+                    } match {
+                      case Success(tools) =>
+                        logger.info(s"Successfully retrieved ${tools.size} tools from ${config.name}")
+                        tools
+                      case Failure(exception) =>
+                        logger.error(s"Failed to parse tools from ${config.name}: ${exception.getMessage}", exception)
+                        Seq.empty
+                    }
+                  case None =>
+                    logger.warn(s"No tools result from ${config.name}")
+                    Seq.empty
+                }
+              case Left(errorMsg) =>
+                logger.error(s"Failed to fetch tools from ${config.name}: $errorMsg")
                 Seq.empty
             }
           case None =>
-            logger.warn(s"No tools result from ${config.name}")
+            logger.error(s"No transport available for ${config.name}")
             Seq.empty
         }
-      case Left(errorMsg) =>
-        logger.error(s"Failed to fetch tools from ${config.name}: $errorMsg")
-        Seq.empty
     }
-  }
 
   // Closes the transport connection and resets initialization state
   override def close(): Unit = {
-    transport.close()
+    transport.foreach(_.close())
+    transport = None
     initialized = false
   }
 
@@ -190,42 +266,47 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
 
   // Creates tool execution handler that delegates to MCP server
   private def createMCPToolHandler(toolName: String): SafeParameterExtractor => Either[String, Value] = { params =>
-    val callRequest = JsonRpcRequest(
-      id = generateId(),
-      method = "tools/call", // method value for executing a specific tool
-      params = Some(
-        ujson.Obj(
-          "name"      -> ujson.Str(toolName),
-          "arguments" -> params.params
+    transport match {
+      case Some(transportImpl) =>
+        val callRequest = JsonRpcRequest(
+          id = generateId(),
+          method = "tools/call", // method value for executing a specific tool
+          params = Some(
+            ujson.Obj(
+              "name"      -> ujson.Str(toolName),
+              "arguments" -> params.params
+            )
+          )
         )
-      )
-    )
 
-    transport.sendRequest(callRequest) match {
-      case Right(response) =>
-        response.result match {
-          case Some(result) =>
-            Try {
-              // MCP returns content array with text results
-              val content = result("content").arr
-              if (content.nonEmpty) {
-                val firstContent = content(0)
-                val text         = firstContent("text").str
+        transportImpl.sendRequest(callRequest) match {
+          case Right(response) =>
+            response.result match {
+              case Some(result) =>
+                Try {
+                  // MCP returns content array with text results
+                  val content = result("content").arr
+                  if (content.nonEmpty) {
+                    val firstContent = content(0)
+                    val text         = firstContent("text").str
 
-                // Try to parse as JSON, fallback to string result
-                Try(ujsonRead(text)).getOrElse(ujson.Str(text))
-              } else {
-                ujson.Obj("result" -> ujson.Str("No content returned"))
-              }
-            } match {
-              case Success(parsed) => Right(parsed)
-              case Failure(e)      => Left(s"Failed to parse tool result: ${e.getMessage}")
+                    // Try to parse as JSON, fallback to string result
+                    Try(ujsonRead(text)).getOrElse(ujson.Str(text))
+                  } else {
+                    ujson.Obj("result" -> ujson.Str("No content returned"))
+                  }
+                } match {
+                  case Success(parsed) => Right(parsed)
+                  case Failure(e)      => Left(s"Failed to parse tool result: ${e.getMessage}")
+                }
+              case None =>
+                Left("Tool call failed: no result")
             }
-          case None =>
-            Left("Tool call failed: no result")
+          case Left(errorMsg) =>
+            Left(s"Tool call failed: $errorMsg")
         }
-      case Left(errorMsg) =>
-        Left(s"Tool call failed: $errorMsg")
+      case None =>
+        Left("No transport available")
     }
   }
 }

@@ -161,15 +161,66 @@ case class ToolsCallResponse(
 )
 
 /**
- * Individual content item within a tool response.
+ * Enhanced content item within a tool response (PR #371 - Structured Tool Output).
+ * Supports text, resource links, and structured annotations.
  *
- * @param `type` Content type, typically "text"
- * @param text The actual content text
+ * @param `type` Content type: "text", "resource", "image", etc.
+ * @param text The actual content text (for text type)
+ * @param resource Resource reference (for resource type)
+ * @param annotations Optional structured metadata
  */
 case class MCPContent(
   `type`: String,
-  text: String
+  text: Option[String] = None,
+  resource: Option[ResourceReference] = None,
+  annotations: Option[ujson.Value] = None
 )
+
+/**
+ * Reference to an MCP resource (PR #603 - Resource links in tool results).
+ *
+ * @param uri URI of the referenced resource
+ * @param `type` Optional MIME type or resource type
+ */
+case class ResourceReference(
+  uri: String,
+  `type`: Option[String] = None
+)
+
+/**
+ * Standard JSON-RPC and MCP-specific error codes.
+ */
+object MCPErrorCodes {
+  // Standard JSON-RPC 2.0 error codes
+  val PARSE_ERROR      = -32700
+  val INVALID_REQUEST  = -32600
+  val METHOD_NOT_FOUND = -32601
+  val INVALID_PARAMS   = -32602
+  val INTERNAL_ERROR   = -32603
+
+  // MCP-specific error codes (range -32000 to -32099)
+  val INVALID_PROTOCOL_VERSION = -32000
+  val TOOL_NOT_FOUND           = -32001
+  val TOOL_EXECUTION_ERROR     = -32002
+  val SESSION_EXPIRED          = -32003
+  val UNAUTHORIZED             = -32004
+  val RESOURCE_NOT_FOUND       = -32005
+
+  def getErrorMessage(code: Int): String = code match {
+    case PARSE_ERROR              => "Parse error"
+    case INVALID_REQUEST          => "Invalid Request"
+    case METHOD_NOT_FOUND         => "Method not found"
+    case INVALID_PARAMS           => "Invalid params"
+    case INTERNAL_ERROR           => "Internal error"
+    case INVALID_PROTOCOL_VERSION => "Invalid protocol version"
+    case TOOL_NOT_FOUND           => "Tool not found"
+    case TOOL_EXECUTION_ERROR     => "Tool execution error"
+    case SESSION_EXPIRED          => "Session expired"
+    case UNAUTHORIZED             => "Unauthorized"
+    case RESOURCE_NOT_FOUND       => "Resource not found"
+    case _                        => s"Unknown error ($code)"
+  }
+}
 
 // Serialization support for JSON marshalling/unmarshalling
 object JsonRpcRequest {
@@ -222,4 +273,8 @@ object ToolsCallResponse {
 
 object MCPContent {
   implicit val rw: ReadWriter[MCPContent] = macroRW
+}
+
+object ResourceReference {
+  implicit val rw: ReadWriter[ResourceReference] = macroRW
 }
