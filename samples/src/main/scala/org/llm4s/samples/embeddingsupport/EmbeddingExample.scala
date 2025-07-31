@@ -1,41 +1,66 @@
 package org.llm4s.samples.embeddingsupport
 
-import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingConfig
 import org.llm4s.llmconnect.extractors.UniversalExtractor
-import org.llm4s.llmconnect.model.EmbeddingRequest
-import org.llm4s.llmconnect.utils.{ ModelSelector, SimilarityUtils }
+import org.llm4s.llmconnect.model.{EmbeddingRequest, ExtractorError}
+import org.llm4s.llmconnect.utils.{ChunkingUtils, SimilarityUtils, LoggerUtils}
+import org.llm4s.llmconnect.EmbeddingClient
 
-object EmbeddingExample extends App {
+object EmbeddingExample {
 
-  val provider = EmbeddingConfig.activeProvider.toLowerCase
+  def main(args: Array[String]): Unit = {
+    LoggerUtils.info("Starting embedding example...")
 
-  // Step 1: Extract input and query text
-  val extractedText = UniversalExtractor.extract(EmbeddingConfig.inputPath)
-  val query = EmbeddingConfig.query
+    val inputPath = EmbeddingConfig.inputPath
+    val query     = EmbeddingConfig.query
 
-  // Step 2: Dynamically select the model based on input text and provider
-  val selectedModel = ModelSelector.selectModel(provider, extractedText)
+    LoggerUtils.info(s"Extracting from: $inputPath")
+    val extractedEither = UniversalExtractor.extract(inputPath)
 
-  // Step 3: Create embedding request
-  val request = EmbeddingRequest(Seq(extractedText, query), model = selectedModel)
+    extractedEither match {
+      case Left(error: ExtractorError) =>
+        LoggerUtils.error(s"[ExtractorError] ${error.message} (type: ${error.`type`}, path: ${error.path})")
+        return
 
-  // Step 4: Load embedding provider and get response
-  val embeddingProvider = EmbeddingClient.fromConfig()
+      case Right(text) =>
+        val inputs: Seq[String] = if (EmbeddingConfig.chunkingEnabled) {
+          LoggerUtils.info(s"Chunking enabled. Using size=${EmbeddingConfig.chunkSize}, overlap=${EmbeddingConfig.chunkOverlap}")
+          ChunkingUtils.chunkText(text, EmbeddingConfig.chunkSize, EmbeddingConfig.chunkOverlap)
+        } else {
+          LoggerUtils.info("Chunking disabled. Proceeding with full text.")
+          Seq(text)
+        }
 
-  embeddingProvider.embed(request) match {
-    case Right(response) =>
-      val docVec = response.vectors.head
-      val queryVec = response.vectors.last
-      val score = SimilarityUtils.cosineSimilarity(docVec, queryVec)
+        LoggerUtils.info(s"Generating embedding for ${inputs.size} input(s)...")
 
-      println(s"\nProvider: $provider")
-      println(s"Model Used: ${selectedModel.name}")
-      println(f"Similarity Score: $score%.4f")
-      println(s"Top 10 values of docVec: ${docVec.take(10).mkString(", ")}")
+        val request = EmbeddingRequest(
+          input = inputs :+ query,  // include query for similarity
+          model = org.llm4s.llmconnect.utils.ModelSelector.selectModel()
+        )
 
-    case Left(error) =>
-      println(s"\nEmbedding failed from [${error.provider}]: ${error.message}")
-      error.code.foreach(code => println(s"Status code: $code"))
+        val client = EmbeddingClient.fromConfig()
+        val response = client.embed(request)
+
+        response match {
+          case Right(result) =>
+            LoggerUtils.info(s"Embedding response metadata:\n${result.metadata}")
+
+            // Log each embedding vector (first 10 dims only for brevity)
+            result.embeddings.zipWithIndex.foreach { case (vec, idx) =>
+              val label = if (idx < inputs.size) s"Chunk ${idx + 1}" else "Query"
+              LoggerUtils.info(s"[$label] Embedding: ${vec.take(10).mkString(", ")} ... [${vec.length} dims]")
+            }
+
+            // Log cosine similarity between first chunk and query
+            val similarity = SimilarityUtils.cosineSimilarity(
+              result.embeddings.head,
+              result.embeddings.last
+            )
+            LoggerUtils.info(f"Cosine similarity between first doc chunk and query: $similarity%.4f")
+
+          case Left(err) =>
+            LoggerUtils.error(s"[EmbeddingError] ${err.provider}: ${err.message}")
+        }
+    }
   }
 }
