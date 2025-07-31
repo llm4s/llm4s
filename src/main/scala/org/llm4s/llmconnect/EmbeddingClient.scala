@@ -3,16 +3,20 @@ package org.llm4s.llmconnect
 import org.llm4s.llmconnect.config.EmbeddingConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse, EmbeddingError }
 import org.llm4s.llmconnect.provider.{ EmbeddingProvider, OpenAIEmbeddingProvider, VoyageAIEmbeddingProvider }
-import org.llm4s.llmconnect.utils.LoggerUtils
+import org.slf4j.LoggerFactory
 
 class EmbeddingClient(provider: EmbeddingProvider) {
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] = {
-    LoggerUtils.info(s"[EmbeddingClient] Embedding input with model ${request.model.name}")
+    logger.info(s"[EmbeddingClient] Embedding input with model ${request.model.name}")
     provider.embed(request)
   }
 }
 
 object EmbeddingClient {
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def fromConfig(): EmbeddingClient = {
     val providerName = EmbeddingConfig.activeProvider.toLowerCase
 
@@ -21,11 +25,11 @@ object EmbeddingClient {
       case "voyage" => VoyageAIEmbeddingProvider
       case unknown =>
         val msg = s"[EmbeddingClient] Unsupported embedding provider: $unknown"
-        LoggerUtils.error(msg)
+        logger.error(msg)
         throw new RuntimeException(msg)
     }
 
-    LoggerUtils.info(s"[EmbeddingClient] Initialized with provider: $providerName")
+    logger.info(s"[EmbeddingClient] Initialized with provider: $providerName")
     new EmbeddingClient(provider)
   }
 }

@@ -9,7 +9,7 @@ case class EmbeddingProviderConfig(
 object EmbeddingConfig {
 
   def loadEnv(name: String): String =
-    sys.env.getOrElse(name, throw new RuntimeException(s"Missing env variable: $name"))
+    sys.env.getOrElse(name, throw new RuntimeException(s"\nMissing env variable: $name"))
 
   def loadOptionalEnv(name: String, default: String): String =
     sys.env.getOrElse(name, default)

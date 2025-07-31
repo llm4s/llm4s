@@ -20,7 +20,7 @@ object ModelDimensionRegistry {
       .getOrElse(
         model,
         throw new IllegalArgumentException(
-          s"[ModelDimensionRegistry] Unknown model '$model' for provider '$provider'"
+          s"\n[ModelDimensionRegistry] Unknown model '$model' for provider '$provider'"
         )
       )
 }
