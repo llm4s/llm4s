@@ -31,7 +31,7 @@ object MultiStepAgentExample {
 
     // Example 1: Run the agent with no step limit and trace logging
     println("Example 1: Running without a step limit, with trace logging")
-    agent.run(query, toolRegistry, None, Some(traceLogPath)) match {
+    agent.run(query, toolRegistry, None, Some(traceLogPath), None) match {
       case Right(finalState) =>
         println(s"Final status: ${finalState.status}")
 
@@ -80,7 +80,7 @@ object MultiStepAgentExample {
     
     val limitedTraceLogPath = "/Users/rory.graves/workspace/home/llm4s/log/agent-trace-limited.md"
 
-    agent.run(query, toolRegistry, Some(1), Some(limitedTraceLogPath)) match {
+    agent.run(query, toolRegistry, Some(1), Some(limitedTraceLogPath), None) match {
       case Right(finalState) =>
         println(s"Final status: ${finalState.status}")
 

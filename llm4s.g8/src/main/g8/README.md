@@ -29,6 +29,10 @@ Run the app
    ```bash
    export OPENAI_API_KEY=sk-xxxxxx
    ```
+   You can also set this in your IDE's run configuration or use a `.env.$name$` file (Optional to use library like `dotenv-scala`.)
+   ```bash
+   export \$(cat ".env.$name$" | xargs)
+   ```
 
 2. Run with default or custom prompt:
    ```bash
@@ -36,7 +40,7 @@ Run the app
    sbt run "Explain what a Monad is in Scala"
    ```
 
-3. Format & compile (afte making any changes):
+3. Format & compile (after making any changes):
    ```bash
    sbt scalafmtAll
    sbt compile

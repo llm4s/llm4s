@@ -1,7 +1,8 @@
-package $package; format = "package" $
+package $package;
+format = "package" $
 
 import com.typesafe.scalalogging.LazyLogging
-import org.llm4s.llmconnect.{ LLM, LLMClient }
+import org.llm4s.llmconnect.{LLM, LLMClient}
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model.{ Completion, Conversation, LLMError, SystemMessage, UserMessage }
 import org.llm4s.llmconnect.provider.LLMProvider
@@ -20,16 +21,18 @@ import org.llm4s.llmconnect.provider.LLMProvider
 
 object PromptExecutor extends LazyLogging {
   // Create the provider config
-  val config: OpenAIConfig = OpenAIConfig(
+  private val config: OpenAIConfig = OpenAIConfig(
     apiKey = sys.env.getOrElse("OPENAI_API_KEY", "your-api-key-here"),
     model = "gpt-3.5-turbo",
     baseUrl = sys.env.getOrElse("OPENAI_BASE_URL", "https://api.openai.com/v1"),
   )
 
-  // Build the client via LLM factory using provider enum
-  val client: LLMClient = LLM.client(LLMProvider.OpenAI, config)
+  // Default client using OpenAI; Build the client via LLM factory using provider enum
+  private val defaultClient: LLMClient = LLM.client(LLMProvider.OpenAI, config)
 
-  def run(prompt: String): String = {
+  def run(prompt: String, clientOpt: Option[LLMClient] = None): String = {
+    val client = clientOpt.getOrElse(defaultClient)
+
     // Build a conversation
     val conversation = Conversation(
       Seq(

@@ -1,37 +1,69 @@
 package org.llm4s.samples.embeddingsupport
 
-import org.llm4s.llmconnect.EmbeddingClient
-import org.llm4s.llmconnect.config.{EmbeddingConfig, EmbeddingModelConfig}
+import org.llm4s.llmconnect.config.EmbeddingConfig
 import org.llm4s.llmconnect.extractors.UniversalExtractor
-import org.llm4s.llmconnect.model.EmbeddingRequest
-import org.llm4s.llmconnect.utils.SimilarityUtils
+import org.llm4s.llmconnect.model.{EmbeddingRequest, ExtractorError}
+import org.llm4s.llmconnect.utils.{ChunkingUtils, SimilarityUtils}
+import org.llm4s.llmconnect.EmbeddingClient
+import org.slf4j.LoggerFactory
 
-object EmbeddingExample extends App {
+object EmbeddingExample {
 
-  val activeProvider = EmbeddingConfig.activeProvider.toLowerCase
-  val model = activeProvider match {
-    case "openai"  => EmbeddingModelConfig(EmbeddingConfig.openAI.model, 1536)
-    case "voyage"  => EmbeddingModelConfig(EmbeddingConfig.voyage.model, 1024)
-    case other     => throw new RuntimeException(s"Unsupported provider: $other")
-  }
+  private val logger = LoggerFactory.getLogger(getClass)
 
-  val extractedText = UniversalExtractor.extract(EmbeddingConfig.inputPath)
-  val query = EmbeddingConfig.query
+  def main(args: Array[String]): Unit = {
+    logger.info("Starting embedding example...")
 
-  val request = EmbeddingRequest(Seq(extractedText, query), model)
-  val provider = EmbeddingClient.fromConfig()
+    val inputPath = EmbeddingConfig.inputPath
+    val query     = EmbeddingConfig.query
 
-  provider.embed(request) match {
-    case Right(response) =>
-      val docVec = response.vectors.head
-      val queryVec = response.vectors.last
-      val score = SimilarityUtils.cosineSimilarity(docVec, queryVec)
+    logger.info(s"Extracting from: $inputPath")
+    val extractedEither = UniversalExtractor.extract(inputPath)
 
-      println(s"Similarity Score: $score")
-      println(s"Top 10 values of docVec: ${docVec.take(10).mkString(", ")}")
+    extractedEither match {
+      case Left(error: ExtractorError) =>
+        logger.error(s"[ExtractorError] ${error.message} (type: ${error.`type`}, path: ${error.path})")
+        return
 
-    case Left(error) =>
-      println(s"Embedding failed from [${error.provider}]: ${error.message}")
-      error.code.foreach(code => println(s"Status code: $code"))
+      case Right(text) =>
+        val inputs: Seq[String] = if (EmbeddingConfig.chunkingEnabled) {
+          logger.info(s"\nChunking enabled. Using size=${EmbeddingConfig.chunkSize}, overlap=${EmbeddingConfig.chunkOverlap}")
+          ChunkingUtils.chunkText(text, EmbeddingConfig.chunkSize, EmbeddingConfig.chunkOverlap)
+        } else {
+          logger.info("\nChunking disabled. Proceeding with full text.")
+          Seq(text)
+        }
+
+        logger.info(s"\nGenerating embedding for ${inputs.size} input(s)...")
+
+        val request = EmbeddingRequest(
+          input = inputs :+ query,  // include query for similarity
+          model = org.llm4s.llmconnect.utils.ModelSelector.selectModel()
+        )
+
+        val client = EmbeddingClient.fromConfig()
+        val response = client.embed(request)
+
+        response match {
+          case Right(result) =>
+            logger.info(s"\nEmbedding response metadata:\n${result.metadata}")
+
+            // Log each embedding vector (first 10 dims only for brevity)
+            result.embeddings.zipWithIndex.foreach { case (vec, idx) =>
+              val label = if (idx < inputs.size) s"Chunk ${idx + 1}" else "Query"
+              logger.info(s"\n[$label] Embedding: ${vec.take(10).mkString(", ")} ... [${vec.length} dims]")
+            }
+
+            // Log cosine similarity between first chunk and query
+            val similarity = SimilarityUtils.cosineSimilarity(
+              result.embeddings.head,
+              result.embeddings.last
+            )
+            logger.info(f"\nCosine similarity between first doc chunk and query: $similarity%.4f")
+
+          case Left(err) =>
+            logger.error(s"\n[EmbeddingError] ${err.provider}: ${err.message}")
+        }
+    }
   }
 }

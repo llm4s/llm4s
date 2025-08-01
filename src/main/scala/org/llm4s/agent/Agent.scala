@@ -16,17 +16,27 @@ class Agent(client: LLMClient) {
 
   /**
    * Initializes a new agent state with the given query
+   *
+   * @param query The user query to process
+   * @param tools The registry of available tools
+   * @param systemPromptAddition Optional additional text to append to the default system prompt
+   * @return A new AgentState initialized with the query and tools
    */
-  def initialize(query: String, tools: ToolRegistry): AgentState = {
-    val initialMessages = Seq(
-      SystemMessage(
-        """You are a helpful assistant with access to tools. 
+  def initialize(query: String, tools: ToolRegistry, systemPromptAddition: Option[String] = None): AgentState = {
+    val baseSystemPrompt = """You are a helpful assistant with access to tools. 
         |Follow these steps:
         |1. Analyze the user's question and determine which tools you need to use
         |2. Use the necessary tools to find the information needed
         |3. When you have enough information, provide a helpful final answer
         |4. Think step by step and be thorough""".stripMargin
-      ),
+
+    val fullSystemPrompt = systemPromptAddition match {
+      case Some(addition) => s"$baseSystemPrompt\n\n$addition"
+      case None           => baseSystemPrompt
+    }
+
+    val initialMessages = Seq(
+      SystemMessage(fullSystemPrompt),
       UserMessage(query)
     )
 
@@ -285,22 +295,18 @@ class Agent(client: LLMClient) {
   }
 
   /**
-   * Runs the agent until completion, failure, or step limit is reached
+   * Runs the agent from an existing state until completion, failure, or step limit is reached
    *
-   * @param query The user query to process
-   * @param tools The registry of available tools
+   * @param initialState The initial agent state to run from
    * @param maxSteps Optional limit on the number of steps to execute
    * @param traceLogPath Optional path to write a markdown trace file
    * @return Either an error or the final agent state
    */
   def run(
-    query: String,
-    tools: ToolRegistry,
+    initialState: AgentState,
     maxSteps: Option[Int] = None,
     traceLogPath: Option[String] = None
   ): Either[LLMError, AgentState] = {
-    val initialState = initialize(query, tools)
-
     // Write initial state if tracing is enabled
     traceLogPath.foreach(path => writeTraceLog(initialState, path))
 
@@ -345,5 +351,26 @@ class Agent(client: LLMClient) {
       }
 
     runUntilCompletion(initialState)
+  }
+
+  /**
+   * Runs the agent with a new query until completion, failure, or step limit is reached
+   *
+   * @param query The user query to process
+   * @param tools The registry of available tools
+   * @param maxSteps Optional limit on the number of steps to execute
+   * @param traceLogPath Optional path to write a markdown trace file
+   * @param systemPromptAddition Optional additional text to append to the default system prompt
+   * @return Either an error or the final agent state
+   */
+  def run(
+    query: String,
+    tools: ToolRegistry,
+    maxSteps: Option[Int],
+    traceLogPath: Option[String],
+    systemPromptAddition: Option[String]
+  ): Either[LLMError, AgentState] = {
+    val initialState = initialize(query, tools, systemPromptAddition)
+    run(initialState, maxSteps, traceLogPath)
   }
 }

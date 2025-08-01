@@ -12,7 +12,7 @@ import upickle.default._
  * @param params Optional parameters for the method
  */
 case class JsonRpcRequest(
-  jsonrpc: String = "2.0",
+  jsonrpc: String, // No default value to force explicit setting
   id: String,
   method: String,
   params: Option[ujson.Value] = None
@@ -79,12 +79,16 @@ case class ServerInfo(
  * @param logging Logging capabilities
  * @param prompts Prompt management capabilities
  * @param resources Resource access capabilities
+ * @param roots Root directory access capabilities
+ * @param sampling Sampling capabilities
  */
 case class MCPCapabilities(
   tools: Option[ujson.Value] = Some(ujson.Obj()),
   logging: Option[ujson.Value] = None,
   prompts: Option[ujson.Value] = None,
-  resources: Option[ujson.Value] = None
+  resources: Option[ujson.Value] = None,
+  roots: Option[ujson.Value] = Some(ujson.Obj("listChanged" -> ujson.Bool(false))),
+  sampling: Option[ujson.Value] = Some(ujson.Obj())
 )
 
 /**
@@ -205,6 +209,8 @@ object MCPErrorCodes {
   val SESSION_EXPIRED          = -32003
   val UNAUTHORIZED             = -32004
   val RESOURCE_NOT_FOUND       = -32005
+  val TRANSPORT_ERROR          = -32006
+  val TIMEOUT_ERROR            = -32007
 
   def getErrorMessage(code: Int): String = code match {
     case PARSE_ERROR              => "Parse error"
@@ -218,8 +224,27 @@ object MCPErrorCodes {
     case SESSION_EXPIRED          => "Session expired"
     case UNAUTHORIZED             => "Unauthorized"
     case RESOURCE_NOT_FOUND       => "Resource not found"
+    case TRANSPORT_ERROR          => "Transport error"
+    case TIMEOUT_ERROR            => "Timeout error"
     case _                        => s"Unknown error ($code)"
   }
+
+  // Create a proper JSON-RPC error response
+  def createError(code: Int, message: String, data: Option[ujson.Value] = None): JsonRpcError =
+    JsonRpcError(code, message, data)
+
+  // Helper methods for common errors
+  def transportError(message: String): JsonRpcError =
+    createError(TRANSPORT_ERROR, message)
+
+  def timeoutError(message: String): JsonRpcError =
+    createError(TIMEOUT_ERROR, message)
+
+  def toolNotFound(toolName: String): JsonRpcError =
+    createError(TOOL_NOT_FOUND, s"Tool not found: $toolName")
+
+  def toolExecutionError(toolName: String, error: String): JsonRpcError =
+    createError(TOOL_EXECUTION_ERROR, s"Tool execution failed: $toolName - $error")
 }
 
 // Serialization support for JSON marshalling/unmarshalling
