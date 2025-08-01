@@ -9,7 +9,7 @@
     </a>
 </h4>
 <h4 align="center">
-    <img src="assets/llm4s_logo.png" width="100pt" alt="LLM4S Logo">
+    <img src="assets/talks/LondonScalaTalks_LLM4S_talk_2025_Banner.png" width="100pt" alt="LLM4S Logo">
 </h4>
 
 ## Overview
