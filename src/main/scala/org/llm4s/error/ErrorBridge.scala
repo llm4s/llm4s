@@ -24,6 +24,12 @@ object ErrorBridge {
       error.LLMError.ValidationError(message, "unknown")
     case llmconnect.model.UnknownError(throwable) =>
       error.LLMError.fromThrowable(throwable)
+    case llmconnect.model.ProcessingError(message) =>
+      error.LLMError.ServiceError(message, 500, "unknown")
+    case llmconnect.model.InvalidInput(message) =>
+      error.LLMError.ValidationError(message, "input")
+    case llmconnect.model.APIError(message) =>
+      error.LLMError.ServiceError(message, 500, "unknown")
   }
 
   /**
