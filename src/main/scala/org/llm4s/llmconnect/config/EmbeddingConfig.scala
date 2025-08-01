@@ -7,8 +7,12 @@ case class EmbeddingProviderConfig(
 )
 
 object EmbeddingConfig {
+
   def loadEnv(name: String): String =
-    sys.env.getOrElse(name, throw new RuntimeException(s"Missing env variable: $name"))
+    sys.env.getOrElse(name, throw new RuntimeException(s"\nMissing env variable: $name"))
+
+  def loadOptionalEnv(name: String, default: String): String =
+    sys.env.getOrElse(name, default)
 
   val openAI: EmbeddingProviderConfig = EmbeddingProviderConfig(
     baseUrl = loadEnv("OPENAI_EMBEDDING_BASE_URL"),
@@ -25,4 +29,9 @@ object EmbeddingConfig {
   val activeProvider: String = loadEnv("EMBEDDING_PROVIDER")
   val inputPath: String      = loadEnv("EMBEDDING_INPUT_PATH")
   val query: String          = loadEnv("EMBEDDING_QUERY")
+
+  // 🔁 Chunking support (with default fallbacks)
+  val chunkSize: Int           = loadOptionalEnv("CHUNK_SIZE", "1000").toInt
+  val chunkOverlap: Int        = loadOptionalEnv("CHUNK_OVERLAP", "100").toInt
+  val chunkingEnabled: Boolean = loadOptionalEnv("CHUNKING_ENABLED", "true").toBoolean
 }

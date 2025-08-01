@@ -3,7 +3,9 @@ package org.llm4s.mcp
 import org.llm4s.toolapi._
 import org.slf4j.LoggerFactory
 
+import java.util.concurrent.ConcurrentHashMap
 import scala.concurrent.duration._
+import scala.jdk.CollectionConverters._
 import scala.util.{ Failure, Success, Try }
 
 // MCP-aware tool registry that integrates with the existing tool API
@@ -13,9 +15,9 @@ class MCPToolRegistry(
   cacheTTL: Duration = 10.minutes
 ) extends ToolRegistry(localTools) {
 
-  private val logger                              = LoggerFactory.getLogger(getClass)
-  private var mcpClients: Map[String, MCPClient]  = Map.empty
-  private var toolCache: Map[String, CachedTools] = Map.empty
+  private val logger                                            = LoggerFactory.getLogger(getClass)
+  private val mcpClients: ConcurrentHashMap[String, MCPClient]  = new ConcurrentHashMap()
+  private val toolCache: ConcurrentHashMap[String, CachedTools] = new ConcurrentHashMap()
 
   logger.info(s"Initializing MCPToolRegistry with ${mcpServers.size} MCP servers and ${localTools.size} local tools")
   logger.debug(s"Cache TTL set to ${cacheTTL}")
@@ -82,7 +84,7 @@ class MCPToolRegistry(
   // Get tools from a specific server (with caching)
   private def getToolsFromServer(server: MCPServerConfig): Seq[ToolFunction[_, _]] = {
     val now = System.currentTimeMillis()
-    toolCache.get(server.name) match {
+    Option(toolCache.get(server.name)) match {
       case Some(cached) if !cached.isExpired(now, cacheTTL) =>
         logger.debug(s"Cache hit for server ${server.name}, returning ${cached.tools.size} cached tools")
         cached.tools
@@ -101,33 +103,46 @@ class MCPToolRegistry(
     Try {
       val client = getOrCreateClient(server)
       val tools  = client.getTools()
-      toolCache = toolCache + (server.name -> CachedTools(tools, timestamp))
+      toolCache.put(server.name, CachedTools(tools, timestamp))
       logger.info(s"Successfully refreshed ${tools.size} tools from server ${server.name}")
       tools
     } match {
       case Success(tools) => tools
       case Failure(exception) =>
         logger.error(s"Failed to refresh tools from ${server.name}: ${exception.getMessage}", exception)
+
+        // Clean up failed client
+        Option(mcpClients.remove(server.name)).foreach { failedClient =>
+          Try(failedClient.close()).recover { case e =>
+            logger.debug(s"Error closing failed client for ${server.name}: ${e.getMessage}")
+          }
+        }
+
         Seq.empty
     }
   }
 
-  // Get or create MCP client for a server
+  // Get or create MCP client for a server (thread-safe)
   private def getOrCreateClient(server: MCPServerConfig): MCPClient =
-    mcpClients.getOrElse(
-      server.name, {
-        logger.info(s"Creating new MCP client for server: ${server.name}")
-        val client = new MCPClientImpl(server)
-        mcpClients = mcpClients + (server.name -> client)
-        logger.debug(s"MCP client created successfully for server: ${server.name}")
-        client
-      }
-    )
+    Option(mcpClients.get(server.name)) match {
+      case Some(client) => client
+      case None         =>
+        // Use computeIfAbsent for thread-safe client creation
+        mcpClients.computeIfAbsent(
+          server.name,
+          { _ =>
+            logger.info(s"Creating new MCP client for server: ${server.name}")
+            val client = new MCPClientImpl(server)
+            logger.debug(s"MCP client created successfully for server: ${server.name}")
+            client
+          }
+        )
+    }
 
   // Utility methods for cache management
   def clearCache(): Unit = {
     logger.info("Clearing all tool caches")
-    toolCache = Map.empty
+    toolCache.clear()
   }
 
   // Refresh cache for all servers
@@ -141,18 +156,71 @@ class MCPToolRegistry(
   // Close all MCP clients
   def closeMCPClients(): Unit = {
     logger.info(s"Closing ${mcpClients.size} MCP clients")
-    mcpClients.values.foreach(_.close())
-    mcpClients = Map.empty
+    mcpClients.values.asScala.foreach(_.close())
+    mcpClients.clear()
     logger.info("All MCP clients closed")
   }
 
-  // Initialize MCP tools after all methods are defined
+  // Health check for MCP servers
+  def healthCheck(): Map[String, Boolean] = {
+    logger.info("Performing health check on all MCP servers")
+    val results = mcpServers.map { server =>
+      val isHealthy = Try {
+        val client = getOrCreateClient(server)
+        client.initialize().isRight
+      }.getOrElse(false)
+
+      logger.debug(s"Health check for ${server.name}: ${if (isHealthy) "OK" else "FAILED"}")
+      server.name -> isHealthy
+    }.toMap
+
+    val healthyCount = results.values.count(identity)
+    logger.info(s"Health check completed: $healthyCount/${results.size} servers healthy")
+    results
+  }
+
+  // Initialize MCP tools after all methods are defined (with lazy initialization option)
   private def initializeMCPTools(): Unit = {
     logger.info("Initializing MCP tools for all configured servers")
-    mcpServers.foreach(server => refreshToolsFromServer(server, System.currentTimeMillis()))
-    logger.info("MCP tools initialization completed")
+
+    // Initialize servers in parallel for better performance
+    val results = mcpServers.map { server =>
+      Try {
+        refreshToolsFromServer(server, System.currentTimeMillis())
+        server.name -> "success"
+      }.recover { case e =>
+        logger.warn(s"Failed to initialize server ${server.name}: ${e.getMessage}")
+        server.name -> s"failed: ${e.getMessage}"
+      }.get
+    }
+
+    val successCount = results.count(_._2 == "success")
+    logger.info(s"MCP tools initialization completed: $successCount/${results.size} servers initialized successfully")
+
+    if (successCount == 0) {
+      logger.warn("No MCP servers were successfully initialized - all tools will be local only")
+    }
   }
+
+  // Initialize tools during construction
   initializeMCPTools()
+}
+
+object MCPToolRegistry {
+  // Create MCP server configuration for Playwright
+  // Using stdio transport to launch and communicate with Playwright MCP server
+  val mcpServerConfig = MCPServerConfig.stdio(
+    name = "playwright-mcp-server",
+    command = Seq("npx", "@playwright/mcp@latest"),
+    timeout = 60.seconds
+  )
+
+  def apply() =
+    new MCPToolRegistry(
+      mcpServers = Seq(mcpServerConfig),
+      localTools = Seq.empty, // No local tools, using only Playwright MCP tools
+      cacheTTL = 10.minutes
+    )
 }
 
 // Helper case class for cleaner caching

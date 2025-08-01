@@ -67,7 +67,8 @@ object MCPAgentExample {
       query = query,
       tools = registry,
       maxSteps = Some(5),
-      traceLogPath = Some("mcp-agent-example.md")
+      traceLogPath = Some("mcp-agent-example.md"),
+      systemPromptAddition = None
     ) match {
       case Right(finalState) =>
         val duration = System.currentTimeMillis() - startTime

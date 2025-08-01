@@ -6,11 +6,14 @@ on:
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+  workflow_call:
 
-# Cancel in-progress runs for the same branch
+# Concurrency settings to prevent conflicts
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # For PRs, cancel duplicate runs. For pushes to main/master, queue them.
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
+  # Only cancel in-progress runs for pull requests, not for pushes to main/master
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Quick checks that should fail fast

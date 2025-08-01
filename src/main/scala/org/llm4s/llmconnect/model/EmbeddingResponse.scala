@@ -5,11 +5,9 @@ package org.llm4s.llmconnect.model
  * embedding provider such as OpenAI or VoyageAI.
  *
  * @param embeddings A sequence of embedding vectors (one per input).
- * @param model Optional model name returned by the API.
- * @param objectType Optional object type (e.g., "embedding").
- * @param usage Optional usage statistics (e.g., token count).
+ * @param metadata   Optional metadata such as model name, provider, token count.
  */
 case class EmbeddingResponse(
-  vectors: Seq[Seq[Double]],
-  metadata: Map[String, String] = Map()
+  embeddings: Seq[Seq[Double]],
+  metadata: Map[String, String] = Map.empty
 )
