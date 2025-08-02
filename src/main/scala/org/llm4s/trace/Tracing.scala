@@ -1,6 +1,7 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.AgentState
+import org.llm4s.config.EnvLoader
 import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
 
 trait Tracing {
@@ -23,7 +24,7 @@ object Tracing {
    * - "none": Uses NoOpTracing (no tracing)
    */
   def create(): Tracing = {
-    val mode = sys.env.getOrElse("TRACING_MODE", "langfuse").toLowerCase
+    val mode = EnvLoader.getOrElse("TRACING_MODE", "langfuse").toLowerCase
 
     mode match {
       case "langfuse" => new LangfuseTracing()

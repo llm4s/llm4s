@@ -1,12 +1,14 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.config.EnvLoader
+
 sealed trait ProviderConfig {
   def model: String
 }
 
 object ProviderConfig {
   def readEnv(key: String): Option[String] =
-    sys.env.get(key)
+    EnvLoader.get(key)
 }
 
 case class OpenAIConfig(

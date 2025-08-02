@@ -1,6 +1,7 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.AgentState
+import org.llm4s.config.EnvLoader
 import org.llm4s.llmconnect.model.{ AssistantMessage, SystemMessage, ToolMessage, UserMessage }
 import org.slf4j.LoggerFactory
 
@@ -10,12 +11,12 @@ import java.util.UUID
 import scala.util.{ Failure, Success, Try }
 
 class LangfuseTracing(
-  langfuseUrl: String = sys.env.getOrElse("LANGFUSE_URL", "https://cloud.langfuse.com/api/public/ingestion"),
-  publicKey: String = sys.env.getOrElse("LANGFUSE_PUBLIC_KEY", ""),
-  secretKey: String = sys.env.getOrElse("LANGFUSE_SECRET_KEY", ""),
-  environment: String = sys.env.getOrElse("LANGFUSE_ENV", "production"),
-  release: String = sys.env.getOrElse("LANGFUSE_RELEASE", "1.0.0"),
-  version: String = sys.env.getOrElse("LANGFUSE_VERSION", "1.0.0")
+  langfuseUrl: String = EnvLoader.getOrElse("LANGFUSE_URL", "https://cloud.langfuse.com/api/public/ingestion"),
+  publicKey: String = EnvLoader.getOrElse("LANGFUSE_PUBLIC_KEY", ""),
+  secretKey: String = EnvLoader.getOrElse("LANGFUSE_SECRET_KEY", ""),
+  environment: String = EnvLoader.getOrElse("LANGFUSE_ENV", "production"),
+  release: String = EnvLoader.getOrElse("LANGFUSE_RELEASE", "1.0.0"),
+  version: String = EnvLoader.getOrElse("LANGFUSE_VERSION", "1.0.0")
 ) extends Tracing {
   private val logger         = LoggerFactory.getLogger(getClass)
   private def nowIso: String = DateTimeFormatter.ISO_INSTANT.format(Instant.now())

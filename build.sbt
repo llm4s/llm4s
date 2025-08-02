@@ -134,7 +134,8 @@ lazy val root = (project in file("."))
       "org.apache.tika" % "tika-core" % "3.2.1",
       "org.apache.poi" % "poi-ooxml" % "5.4.1",
       "com.lihaoyi" %% "requests" % "0.9.0",
-      "org.jsoup" % "jsoup" % "1.21.1"
+      "org.jsoup" % "jsoup" % "1.21.1",
+      "io.github.cdimascio" % "dotenv-java" % "3.0.0"
     )
 
   )

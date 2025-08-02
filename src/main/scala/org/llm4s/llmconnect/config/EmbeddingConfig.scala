@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.config.EnvLoader
+
 case class EmbeddingProviderConfig(
   baseUrl: String,
   model: String,
@@ -9,10 +11,10 @@ case class EmbeddingProviderConfig(
 object EmbeddingConfig {
 
   def loadEnv(name: String): String =
-    sys.env.getOrElse(name, throw new RuntimeException(s"\nMissing env variable: $name"))
+    EnvLoader.get(name).getOrElse(throw new RuntimeException(s"Missing env variable: $name"))
 
   def loadOptionalEnv(name: String, default: String): String =
-    sys.env.getOrElse(name, default)
+    EnvLoader.get(name).getOrElse(default)
 
   val openAI: EmbeddingProviderConfig = EmbeddingProviderConfig(
     baseUrl = loadEnv("OPENAI_EMBEDDING_BASE_URL"),

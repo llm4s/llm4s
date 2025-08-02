@@ -2,6 +2,7 @@ package org.llm4s.llmconnect
 
 import com.azure.ai.openai.{ OpenAIClientBuilder, OpenAIServiceVersion, OpenAIClient => AzureOpenAIClient }
 import com.azure.core.credential.AzureKeyCredential
+import org.llm4s.config.EnvLoader
 import org.llm4s.llmconnect.config.{ AnthropicConfig, AzureConfig, OpenAIConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.{
@@ -14,7 +15,7 @@ import org.llm4s.llmconnect.provider.{
 
 object LLMConnect {
   private def readEnv(key: String): Option[String] =
-    sys.env.get(key)
+    EnvLoader.get(key)
 
   /**
    * Get an LLMClient based on environment variables
