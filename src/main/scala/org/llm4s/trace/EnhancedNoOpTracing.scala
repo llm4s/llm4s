@@ -2,7 +2,6 @@ package org.llm4s.trace
 
 import org.llm4s.agent.AgentState
 import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
-import org.llm4s.error.LLMError
 import org.llm4s.types.Result
 
 /**
