@@ -3,6 +3,7 @@ package org.llm4s.trace
 import org.llm4s.error.LLMError
 import org.llm4s.agent.AgentState
 import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
+import org.llm4s.types.Result
 import scala.util.Try
 
 /**
@@ -37,7 +38,7 @@ class EnhancedConsoleTracing extends EnhancedTracing {
       json
     }
 
-  def traceEvent(event: TraceEvent): Either[LLMError, Unit] =
+  def traceEvent(event: TraceEvent): Result[Unit] =
     Try {
       event match {
         case e: TraceEvent.AgentInitialized =>
@@ -108,7 +109,7 @@ class EnhancedConsoleTracing extends EnhancedTracing {
       }
     }.toEither.left.map(error => LLMError.UnknownError(error.getMessage, error))
 
-  def traceAgentState(state: AgentState): Either[LLMError, Unit] = {
+  def traceAgentState(state: AgentState): Result[Unit] = {
     val event = TraceEvent.AgentStateUpdated(
       status = state.status.toString,
       messageCount = state.conversation.messages.length,
@@ -117,17 +118,17 @@ class EnhancedConsoleTracing extends EnhancedTracing {
     traceEvent(event)
   }
 
-  def traceToolCall(toolName: String, input: String, output: String): Either[LLMError, Unit] = {
+  def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
     val event = TraceEvent.ToolExecuted(toolName, input, output, 0, true)
     traceEvent(event)
   }
 
-  def traceError(error: Throwable, context: String): Either[LLMError, Unit] = {
+  def traceError(error: Throwable, context: String): Result[Unit] = {
     val event = TraceEvent.ErrorOccurred(error, context)
     traceEvent(event)
   }
 
-  def traceCompletion(completion: Completion, model: String): Either[LLMError, Unit] = {
+  def traceCompletion(completion: Completion, model: String): Result[Unit] = {
     val event = TraceEvent.CompletionReceived(
       id = completion.id,
       model = model,
@@ -137,7 +138,7 @@ class EnhancedConsoleTracing extends EnhancedTracing {
     traceEvent(event)
   }
 
-  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Either[LLMError, Unit] = {
+  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = {
     val event = TraceEvent.TokenUsageRecorded(usage, model, operation)
     traceEvent(event)
   }

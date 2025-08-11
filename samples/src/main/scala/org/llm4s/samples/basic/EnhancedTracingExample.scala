@@ -1,23 +1,21 @@
 package org.llm4s.samples.basic
 
-import org.llm4s.llmconnect.LLM
-import org.llm4s.llmconnect.model._
-import org.llm4s.agent.{Agent, AgentStatus}
-import org.llm4s.toolapi.ToolRegistry
-import org.llm4s.toolapi.tools.WeatherTool
+import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.trace.{EnhancedTracing, TracingComposer, TraceEvent, TracingMode}
-import org.llm4s.error.LLMError
+import org.slf4j.LoggerFactory
+import ujson._
 
 object EnhancedTracingExample {
+  private val logger = LoggerFactory.getLogger(getClass)
+  
   def main(args: Array[String]): Unit = {
-    println("🚀 Enhanced Tracing Example")
-    println("=" * 50)
+    logger.info("Enhanced Tracing Example")
+    logger.info("=" * 50)
     
     // Example 1: Basic enhanced tracing
-    println("\n1 Basic Enhanced Tracing")
+    logger.info("1. Basic Enhanced Tracing")
     val basicTracer = EnhancedTracing.create(TracingMode.Console)
     
-    // Create some test events
     val agentEvent = TraceEvent.AgentInitialized(
       query = "What's the weather like?",
       tools = Vector("weather", "calculator")
@@ -35,7 +33,7 @@ object EnhancedTracingExample {
     basicTracer.traceEvent(completionEvent)
     
     // Example 2: Composed tracing (multiple tracers)
-    println("\n2 Composed Tracing (Console + NoOp)")
+    logger.info("2. Composed Tracing (Console + NoOp)")
     val consoleTracer = EnhancedTracing.create(TracingMode.Console)
     val noOpTracer = EnhancedTracing.create(TracingMode.NoOp)
     val composedTracer = TracingComposer.combine(consoleTracer, noOpTracer)
@@ -43,7 +41,7 @@ object EnhancedTracingExample {
     composedTracer.traceEvent(agentEvent)
     
     // Example 3: Filtered tracing (only error events)
-    println("\n3 Filtered Tracing (Only Errors)")
+    logger.info("3. Filtered Tracing (Only Errors)")
     val errorOnlyTracer = TracingComposer.filter(consoleTracer) { event =>
       event.isInstanceOf[TraceEvent.ErrorOccurred]
     }
@@ -59,7 +57,7 @@ object EnhancedTracingExample {
     errorOnlyTracer.traceEvent(errorEvent)
     
     // Example 4: Transformed tracing (add metadata)
-    println("\n4 Transformed Tracing (Add Metadata)")
+    logger.info("4. Transformed Tracing (Add Metadata)")
     val transformedTracer = TracingComposer.transform(consoleTracer) { event =>
       event match {
         case e: TraceEvent.CustomEvent =>
@@ -75,7 +73,7 @@ object EnhancedTracingExample {
     transformedTracer.traceEvent(customEvent)
     
     // Example 5: Complex composition
-    println("\n5 Complex Composition")
+    logger.info("5. Complex Composition")
     val complexTracer = TracingComposer.combine(
       consoleTracer,
       TracingComposer.filter(noOpTracer) { _.isInstanceOf[TraceEvent.CompletionReceived] },
@@ -100,33 +98,33 @@ object EnhancedTracingExample {
     complexTracer.traceEvent(tokenEvent)
     
     // Example 6: Error handling
-    println("\n6 Error Handling")
+    logger.info("6. Error Handling")
     val result = basicTracer.traceEvent(agentEvent)
     result match {
-      case Right(_) => println("✅ Tracing successful")
-      case Left(error) => println(s"❌ Tracing failed: ${error.message}")
+      case Right(_) => logger.info("Tracing successful")
+      case Left(error) => logger.error(s"Tracing failed: ${error.message}")
     }
     
     // Example 7: Type-safe mode creation
-    println("\n7 Type-Safe Mode Creation")
+    logger.info("7. Type-Safe Mode Creation")
     val modes = Seq(TracingMode.Console, TracingMode.NoOp, TracingMode.Langfuse)
     modes.foreach { mode =>
       val tracer = EnhancedTracing.create(mode)
-      println(s"Created tracer for mode: $mode")
+      logger.info(s"Created tracer for mode: $mode - ${tracer.getClass.getSimpleName}")
     }
     
     // Example 8: Environment-based configuration
-    println("\n8 Environment-Based Configuration")
+    logger.info("8. Environment-Based Configuration")
     val envTracer = EnhancedTracing.create()
-    println(s"Created tracer from environment: ${envTracer.getClass.getSimpleName}")
+    logger.info(s"Created tracer from environment: ${envTracer.getClass.getSimpleName}")
     
-    println("\n✅ Enhanced Tracing Example Complete!")
-    println("=" * 50)
-    println("Key Benefits:")
-    println("• Type-safe events prevent typos")
-    println("• Composable tracers for complex scenarios")
-    println("• Filtering and transformation capabilities")
-    println("• Better error handling with Either[LLMError, Unit]")
-    println("• Backward compatibility maintained")
+    logger.info("Enhanced Tracing Example Complete!")
+    logger.info("=" * 50)
+    logger.info("Key Benefits:")
+    logger.info("• Type-safe events prevent typos")
+    logger.info("• Composable tracers for complex scenarios")
+    logger.info("• Filtering and transformation capabilities")
+    logger.info("• Better error handling with Result[Unit]")
+    logger.info("• Backward compatibility maintained")
   }
 }

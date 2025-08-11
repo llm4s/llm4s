@@ -3,22 +3,23 @@ package org.llm4s.trace
 import org.llm4s.error.LLMError
 import org.llm4s.agent.AgentState
 import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
+import org.llm4s.types.Result
 
 /**
  * Enhanced type-safe tracing interface using functional composition
  */
 trait EnhancedTracing {
-  def traceEvent(event: TraceEvent): Either[LLMError, Unit]
-  def traceAgentState(state: AgentState): Either[LLMError, Unit]
-  def traceToolCall(toolName: String, input: String, output: String): Either[LLMError, Unit]
-  def traceError(error: Throwable, context: String = ""): Either[LLMError, Unit]
-  def traceCompletion(completion: Completion, model: String): Either[LLMError, Unit]
-  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Either[LLMError, Unit]
+  def traceEvent(event: TraceEvent): Result[Unit]
+  def traceAgentState(state: AgentState): Result[Unit]
+  def traceToolCall(toolName: String, input: String, output: String): Result[Unit]
+  def traceError(error: Throwable, context: String = ""): Result[Unit]
+  def traceCompletion(completion: Completion, model: String): Result[Unit]
+  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit]
 
   // Convenience methods that delegate to traceEvent
-  final def traceEvent(event: String): Either[LLMError, Unit] = {
-    val traceEvent = TraceEvent.CustomEvent(event, ujson.Obj())
-    this.traceEvent(traceEvent)
+  final def traceEvent(event: String): Result[Unit] = {
+    val customEvent = TraceEvent.CustomEvent(event, ujson.Obj())
+    this.traceEvent(customEvent)
   }
 }
 
@@ -36,14 +37,14 @@ trait TracingComposer {
 object TracingComposer extends TracingComposer
 
 private class CompositeTracing(tracers: Vector[EnhancedTracing]) extends EnhancedTracing {
-  def traceEvent(event: TraceEvent): Either[LLMError, Unit] = {
+  def traceEvent(event: TraceEvent): Result[Unit] = {
     val results = tracers.map(_.traceEvent(event))
     // Collect all errors, succeed if at least one succeeds
     val errors = results.collect { case Left(error) => error }
     if (errors.size == results.size) Left(errors.head) else Right(())
   }
 
-  def traceAgentState(state: AgentState): Either[LLMError, Unit] = {
+  def traceAgentState(state: AgentState): Result[Unit] = {
     val event = TraceEvent.AgentStateUpdated(
       status = state.status.toString,
       messageCount = state.conversation.messages.length,
@@ -52,17 +53,17 @@ private class CompositeTracing(tracers: Vector[EnhancedTracing]) extends Enhance
     traceEvent(event)
   }
 
-  def traceToolCall(toolName: String, input: String, output: String): Either[LLMError, Unit] = {
+  def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
     val event = TraceEvent.ToolExecuted(toolName, input, output, 0, true)
     traceEvent(event)
   }
 
-  def traceError(error: Throwable, context: String): Either[LLMError, Unit] = {
+  def traceError(error: Throwable, context: String): Result[Unit] = {
     val event = TraceEvent.ErrorOccurred(error, context)
     traceEvent(event)
   }
 
-  def traceCompletion(completion: Completion, model: String): Either[LLMError, Unit] = {
+  def traceCompletion(completion: Completion, model: String): Result[Unit] = {
     val event = TraceEvent.CompletionReceived(
       id = completion.id,
       model = model,
@@ -72,38 +73,38 @@ private class CompositeTracing(tracers: Vector[EnhancedTracing]) extends Enhance
     traceEvent(event)
   }
 
-  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Either[LLMError, Unit] = {
+  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = {
     val event = TraceEvent.TokenUsageRecorded(usage, model, operation)
     traceEvent(event)
   }
 }
 
 private class FilteredTracing(underlying: EnhancedTracing, predicate: TraceEvent => Boolean) extends EnhancedTracing {
-  def traceEvent(event: TraceEvent): Either[LLMError, Unit] =
+  def traceEvent(event: TraceEvent): Result[Unit] =
     if (predicate(event)) underlying.traceEvent(event) else Right(())
 
-  def traceAgentState(state: AgentState): Either[LLMError, Unit] = underlying.traceAgentState(state)
-  def traceToolCall(toolName: String, input: String, output: String): Either[LLMError, Unit] =
+  def traceAgentState(state: AgentState): Result[Unit] = underlying.traceAgentState(state)
+  def traceToolCall(toolName: String, input: String, output: String): Result[Unit] =
     underlying.traceToolCall(toolName, input, output)
-  def traceError(error: Throwable, context: String): Either[LLMError, Unit] = underlying.traceError(error, context)
-  def traceCompletion(completion: Completion, model: String): Either[LLMError, Unit] =
+  def traceError(error: Throwable, context: String): Result[Unit] = underlying.traceError(error, context)
+  def traceCompletion(completion: Completion, model: String): Result[Unit] =
     underlying.traceCompletion(completion, model)
-  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Either[LLMError, Unit] =
+  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
     underlying.traceTokenUsage(usage, model, operation)
 }
 
 private class TransformedTracing(underlying: EnhancedTracing, transform: TraceEvent => TraceEvent)
     extends EnhancedTracing {
-  def traceEvent(event: TraceEvent): Either[LLMError, Unit] =
+  def traceEvent(event: TraceEvent): Result[Unit] =
     underlying.traceEvent(transform(event))
 
-  def traceAgentState(state: AgentState): Either[LLMError, Unit] = underlying.traceAgentState(state)
-  def traceToolCall(toolName: String, input: String, output: String): Either[LLMError, Unit] =
+  def traceAgentState(state: AgentState): Result[Unit] = underlying.traceAgentState(state)
+  def traceToolCall(toolName: String, input: String, output: String): Result[Unit] =
     underlying.traceToolCall(toolName, input, output)
-  def traceError(error: Throwable, context: String): Either[LLMError, Unit] = underlying.traceError(error, context)
-  def traceCompletion(completion: Completion, model: String): Either[LLMError, Unit] =
+  def traceError(error: Throwable, context: String): Result[Unit] = underlying.traceError(error, context)
+  def traceCompletion(completion: Completion, model: String): Result[Unit] =
     underlying.traceCompletion(completion, model)
-  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Either[LLMError, Unit] =
+  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
     underlying.traceTokenUsage(usage, model, operation)
 }
 

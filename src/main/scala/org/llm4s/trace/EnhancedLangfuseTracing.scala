@@ -4,6 +4,7 @@ import org.llm4s.agent.AgentState
 import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
 import org.llm4s.error.LLMError
 import org.llm4s.config.EnvLoader
+import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
 import java.time.Instant
@@ -26,7 +27,7 @@ class EnhancedLangfuseTracing(
   private def nowIso: String = DateTimeFormatter.ISO_INSTANT.format(Instant.now())
   private def uuid: String   = UUID.randomUUID().toString
 
-  private def sendBatch(events: Seq[ujson.Obj]): Either[LLMError, Unit] = {
+  private def sendBatch(events: Seq[ujson.Obj]): Result[Unit] = {
     if (publicKey.isEmpty || secretKey.isEmpty) {
       logger.warn("[Langfuse] Public or secret key not set in environment. Skipping export.")
       logger.warn(s"[Langfuse] Expected environment variables: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY")
@@ -73,7 +74,7 @@ class EnhancedLangfuseTracing(
     }
   }
 
-  def traceEvent(event: TraceEvent): Either[LLMError, Unit] = {
+  def traceEvent(event: TraceEvent): Result[Unit] = {
     val traceId     = uuid
     val now         = nowIso
     val batchEvents = scala.collection.mutable.ArrayBuffer[ujson.Obj]()
@@ -250,7 +251,7 @@ class EnhancedLangfuseTracing(
     sendBatch(batchEvents.toSeq)
   }
 
-  def traceAgentState(state: AgentState): Either[LLMError, Unit] = {
+  def traceAgentState(state: AgentState): Result[Unit] = {
     // Send hierarchical structure: one main trace with child spans for each message
     if (state.conversation.messages.nonEmpty) {
       val batchEvents = scala.collection.mutable.ArrayBuffer[ujson.Obj]()
@@ -339,17 +340,17 @@ class EnhancedLangfuseTracing(
     Right(())
   }
 
-  def traceToolCall(toolName: String, input: String, output: String): Either[LLMError, Unit] = {
+  def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
     val event = TraceEvent.ToolExecuted(toolName, input, output, 0, true)
     traceEvent(event)
   }
 
-  def traceError(error: Throwable, context: String): Either[LLMError, Unit] = {
+  def traceError(error: Throwable, context: String): Result[Unit] = {
     val event = TraceEvent.ErrorOccurred(error, context)
     traceEvent(event)
   }
 
-  def traceCompletion(completion: Completion, model: String): Either[LLMError, Unit] = {
+  def traceCompletion(completion: Completion, model: String): Result[Unit] = {
     val event = TraceEvent.CompletionReceived(
       id = completion.id,
       model = model,
@@ -359,7 +360,7 @@ class EnhancedLangfuseTracing(
     traceEvent(event)
   }
 
-  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Either[LLMError, Unit] = {
+  def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = {
     val event = TraceEvent.TokenUsageRecorded(usage, model, operation)
     traceEvent(event)
   }
