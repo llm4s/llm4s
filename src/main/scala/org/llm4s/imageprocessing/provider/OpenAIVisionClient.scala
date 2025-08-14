@@ -125,14 +125,9 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
 
   private def callOpenAIVisionAPI(base64Image: String, prompt: String): Try[String] =
     Try {
-      import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
-      import java.net.URI
+      import sttp.client4._
       import ujson._
-
-      val client = HttpClient
-        .newBuilder()
-        .connectTimeout(java.time.Duration.ofSeconds(config.connectTimeoutSeconds))
-        .build()
+      import scala.concurrent.duration._
 
       // Build request JSON using ujson
       val requestJson = Obj(
@@ -159,22 +154,52 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
 
       val requestBody = requestJson.toString()
 
-      val request = HttpRequest
-        .newBuilder()
-        .uri(URI.create(s"${config.baseUrl}/chat/completions"))
+      val backend = DefaultSyncBackend(
+        options = BackendOptions.Default.connectionTimeout(config.connectTimeoutSeconds.seconds)
+      )
+
+      val request = basicRequest
+        .post(uri"${config.baseUrl}/chat/completions")
         .header("Content-Type", "application/json")
         .header("Authorization", s"Bearer ${config.apiKey}")
-        .timeout(java.time.Duration.ofSeconds(config.requestTimeoutSeconds))
-        .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-        .build()
+        .body(requestBody)
+        .readTimeout(config.requestTimeoutSeconds.seconds)
 
-      val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+      val response = request.send(backend)
+      backend.close()
 
-      if (response.statusCode() == 200) {
-        val responseBody = response.body()
-        extractContentFromResponse(responseBody)
-      } else {
-        throw new RuntimeException(s"API call failed with status ${response.statusCode()}: ${response.body()}")
+      response.code.code match {
+        case 200 =>
+          response.body match {
+            case Right(responseBody) =>
+              extractContentFromResponse(responseBody)
+            case Left(errorBody) =>
+              throw new RuntimeException(s"Unexpected error parsing successful response: $errorBody")
+          }
+        case statusCode =>
+          val errorMessage = response.body match {
+            case Left(errorBody) =>
+              // Try to parse OpenAI error format
+              try {
+                val json      = read(errorBody)
+                val error     = json.obj.get("error")
+                val message   = error.flatMap(_.obj.get("message")).map(_.str)
+                val errorType = error.flatMap(_.obj.get("type")).map(_.str)
+                val errorCode = error.flatMap(_.obj.get("code")).map(_.str)
+                val details = (message, errorType, errorCode) match {
+                  case (Some(msg), _, Some(code)) => s"$code: $msg"
+                  case (Some(msg), Some(typ), _)  => s"$typ: $msg"
+                  case (Some(msg), _, _)          => msg
+                  case _                          => errorBody
+                }
+                s"Status $statusCode: $details"
+              } catch {
+                case _: Exception => s"Status $statusCode: $errorBody"
+              }
+            case Right(body) =>
+              s"Status $statusCode: $body"
+          }
+          throw new RuntimeException(s"OpenAI API call failed - $errorMessage")
       }
     }
 
