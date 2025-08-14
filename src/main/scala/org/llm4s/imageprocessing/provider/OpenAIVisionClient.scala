@@ -125,48 +125,52 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
 
   private def callOpenAIVisionAPI(base64Image: String, prompt: String): Try[String] =
     Try {
-      // This is a simplified implementation
-      // In a real implementation, you would use an HTTP client to call the OpenAI API
       import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
       import java.net.URI
+      import ujson._
 
-      val client = HttpClient.newHttpClient()
+      val client = HttpClient
+        .newBuilder()
+        .connectTimeout(java.time.Duration.ofSeconds(config.connectTimeoutSeconds))
+        .build()
 
-      val requestBody = s"""{
-        "model": "${config.model}",
-        "messages": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "text",
-                "text": "$prompt"
-              },
-              {
-                "type": "image_url",
-                "image_url": {
-                  "url": "data:image/jpeg;base64,$base64Image"
-                }
-              }
-            ]
-          }
-        ],
-        "max_tokens": 1000
-      }"""
+      // Build request JSON using ujson
+      val requestJson = Obj(
+        "model" -> config.model,
+        "messages" -> Arr(
+          Obj(
+            "role" -> "user",
+            "content" -> Arr(
+              Obj(
+                "type" -> "text",
+                "text" -> prompt
+              ),
+              Obj(
+                "type" -> "image_url",
+                "image_url" -> Obj(
+                  "url" -> s"data:image/jpeg;base64,$base64Image"
+                )
+              )
+            )
+          )
+        ),
+        "max_tokens" -> 1000
+      )
+
+      val requestBody = requestJson.toString()
 
       val request = HttpRequest
         .newBuilder()
         .uri(URI.create(s"${config.baseUrl}/chat/completions"))
         .header("Content-Type", "application/json")
         .header("Authorization", s"Bearer ${config.apiKey}")
+        .timeout(java.time.Duration.ofSeconds(config.requestTimeoutSeconds))
         .POST(HttpRequest.BodyPublishers.ofString(requestBody))
         .build()
 
       val response = client.send(request, HttpResponse.BodyHandlers.ofString())
 
       if (response.statusCode() == 200) {
-        // Parse JSON response to extract the content
-        // This is simplified - you'd want to use a proper JSON library
         val responseBody = response.body()
         extractContentFromResponse(responseBody)
       } else {
@@ -175,11 +179,18 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
     }
 
   private def extractContentFromResponse(jsonResponse: String): String = {
-    // Simplified JSON parsing - in practice, use a proper JSON library like Circe or Play JSON
-    val contentPattern = "\"content\"\\s*:\\s*\"([^\"]+)\"".r
-    contentPattern.findFirstMatchIn(jsonResponse) match {
-      case Some(m) => m.group(1).replace("\\n", "\n").replace("\\\"", "\"")
-      case None    => "Could not parse response from OpenAI Vision API"
+    import ujson._
+
+    try {
+      val json = read(jsonResponse)
+      // OpenAI's response format has content in choices[0].message.content
+      json("choices").arr.headOption
+        .flatMap(_.obj.get("message"))
+        .flatMap(_.obj.get("content"))
+        .map(_.str)
+        .getOrElse("Could not parse response from OpenAI Vision API")
+    } catch {
+      case _: Exception => "Could not parse response from OpenAI Vision API"
     }
   }
 

@@ -78,16 +78,12 @@ class AnthropicVisionClientTest extends AnyFlatSpec with Matchers with BeforeAnd
     // Note: This will fail in tests because we don't have a real API key
     // But we can test the error handling
     result.isLeft shouldBe true
-    result.isLeft shouldBe true
-    result.isLeft shouldBe true
   }
 
   it should "analyze image with custom prompt" in {
     val client = new AnthropicVisionClient(config)
 
     val result = client.analyzeImage(tempFile.toString, Some("Describe this image in detail"))
-    result.isLeft shouldBe true
-    result.isLeft shouldBe true
     result.isLeft shouldBe true
   }
 
@@ -96,8 +92,6 @@ class AnthropicVisionClientTest extends AnyFlatSpec with Matchers with BeforeAnd
 
     val result = client.extractText(tempFile.toString)
     result.isLeft shouldBe true
-    result.isLeft shouldBe true
-    result.isLeft shouldBe true
   }
 
   it should "detect objects in image" in {
@@ -105,16 +99,12 @@ class AnthropicVisionClientTest extends AnyFlatSpec with Matchers with BeforeAnd
 
     val result = client.detectObjects(tempFile.toString)
     result.isLeft shouldBe true
-    result.isLeft shouldBe true
-    result.isLeft shouldBe true
   }
 
   it should "generate tags for image" in {
     val client = new AnthropicVisionClient(config)
 
     val result = client.generateTags(tempFile.toString)
-    result.isLeft shouldBe true
-    result.isLeft shouldBe true
     result.isLeft shouldBe true
   }
 
@@ -156,8 +146,6 @@ class AnthropicVisionClientTest extends AnyFlatSpec with Matchers with BeforeAnd
     val client = new AnthropicVisionClient(config)
 
     val result = client.analyzeImage("/nonexistent/file.png", None)
-    result.isLeft shouldBe true
-    result.isLeft shouldBe true
     result.isLeft shouldBe true
   }
 

@@ -140,39 +140,41 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
     mediaType: MediaType
   ): Try[String] =
     Try {
-      // This is a simplified implementation
-      // In a real implementation, you would use an HTTP client to call the Anthropic API
       import java.net.URI
       import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
+      import ujson._
 
       val client = HttpClient
         .newBuilder()
-        .connectTimeout(java.time.Duration.ofSeconds(30))
+        .connectTimeout(java.time.Duration.ofSeconds(config.connectTimeoutSeconds))
         .build()
 
-      val requestBody = s"""{
-        "model": "${config.model}",
-        "max_tokens": 1000,
-        "messages": [
-          {
-            "role": "user",
-            "content": [
-              {
-                "type": "text",
-                "text": "$prompt"
-              },
-              {
-                "type": "image",
-                "source": {
-                  "type": "base64",
-                  "media_type": "${mediaType.value}",
-                  "data": "$base64Image"
-                }
-              }
-            ]
-          }
-        ]
-      }"""
+      // Build request JSON using ujson
+      val requestJson = Obj(
+        "model"      -> config.model,
+        "max_tokens" -> 1000,
+        "messages" -> Arr(
+          Obj(
+            "role" -> "user",
+            "content" -> Arr(
+              Obj(
+                "type" -> "text",
+                "text" -> prompt
+              ),
+              Obj(
+                "type" -> "image",
+                "source" -> Obj(
+                  "type"       -> "base64",
+                  "media_type" -> mediaType.value,
+                  "data"       -> base64Image
+                )
+              )
+            )
+          )
+        )
+      )
+
+      val requestBody = requestJson.toString()
 
       val request = HttpRequest
         .newBuilder()
@@ -180,15 +182,13 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
         .header("Content-Type", "application/json")
         .header("x-api-key", config.apiKey)
         .header("anthropic-version", "2023-06-01")
-        .timeout(java.time.Duration.ofSeconds(60))
+        .timeout(java.time.Duration.ofSeconds(config.requestTimeoutSeconds))
         .POST(HttpRequest.BodyPublishers.ofString(requestBody))
         .build()
 
       val response = client.send(request, HttpResponse.BodyHandlers.ofString())
 
       if (response.statusCode() == 200) {
-        // Parse JSON response to extract the content
-        // This is simplified - you'd want to use a proper JSON library
         val responseBody = response.body()
         extractContentFromResponse(responseBody)
       } else {
@@ -197,11 +197,17 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
     }
 
   private def extractContentFromResponse(jsonResponse: String): String = {
-    // Simplified JSON parsing for Anthropic response format
-    val contentPattern = "\"text\"\\s*:\\s*\"([^\"]+)\"".r
-    contentPattern.findFirstMatchIn(jsonResponse) match {
-      case Some(m) => m.group(1).replace("\\n", "\n").replace("\\\"", "\"")
-      case None    => "Could not parse response from Anthropic Vision API"
+    import ujson._
+
+    try {
+      val json = read(jsonResponse)
+      // Anthropic's response format has content in messages[0].content[0].text
+      json("content").arr.headOption
+        .flatMap(_.obj.get("text"))
+        .map(_.str)
+        .getOrElse("Could not parse response from Anthropic Vision API")
+    } catch {
+      case _: Exception => "Could not parse response from Anthropic Vision API"
     }
   }
 

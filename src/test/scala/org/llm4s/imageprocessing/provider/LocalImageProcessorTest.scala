@@ -243,8 +243,6 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
   it should "fail with invalid file path" in {
     val result = processor.analyzeImage("/nonexistent/file.png", None)
     result.isLeft shouldBe true
-    result.isLeft shouldBe true
-    result.isLeft shouldBe true
   }
 
   it should "fail with invalid image file" in {
