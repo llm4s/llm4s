@@ -17,6 +17,13 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
 
   private val localProcessor = new LocalImageProcessor()
 
+  /**
+   * Analyzes an image using OpenAI's GPT-4 Vision API.
+   *
+   * @param imagePath Path to the image file to analyze
+   * @param prompt Optional custom prompt for the analysis. If not provided, uses a default comprehensive prompt
+   * @return Either an LLMError if the analysis fails, or an ImageAnalysisResult with the analysis details
+   */
   override def analyzeImage(
     imagePath: String,
     prompt: Option[String] = None
@@ -54,6 +61,13 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
         Left(LLMError.processingFailed("process", s"Error analyzing image with OpenAI Vision: ${e.getMessage}"))
     }
 
+  /**
+   * Preprocesses an image by applying a sequence of operations.
+   *
+   * @param imagePath Path to the image file to preprocess
+   * @param operations List of image operations to apply (resize, crop, rotate, etc.)
+   * @return Either an LLMError if preprocessing fails, or a ProcessedImage with the result
+   */
   override def preprocessImage(
     imagePath: String,
     operations: List[ImageOperation]
@@ -61,6 +75,13 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
     // Delegate preprocessing to local processor
     localProcessor.preprocessImage(imagePath, operations)
 
+  /**
+   * Converts an image from one format to another.
+   *
+   * @param imagePath Path to the source image file
+   * @param targetFormat The desired output format (JPEG, PNG, GIF, BMP)
+   * @return Either an LLMError if conversion fails, or a ProcessedImage in the new format
+   */
   override def convertFormat(
     imagePath: String,
     targetFormat: ImageFormat
@@ -68,6 +89,15 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
     // Delegate format conversion to local processor
     localProcessor.convertFormat(imagePath, targetFormat)
 
+  /**
+   * Resizes an image to specified dimensions.
+   *
+   * @param imagePath Path to the image file to resize
+   * @param width Target width in pixels
+   * @param height Target height in pixels
+   * @param maintainAspectRatio If true, maintains the original aspect ratio (default: true)
+   * @return Either an LLMError if resizing fails, or a ProcessedImage with new dimensions
+   */
   override def resizeImage(
     imagePath: String,
     width: Int,
@@ -80,7 +110,11 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
   // Additional methods specific to OpenAI Vision
 
   /**
-   * Performs Optical Character Recognition (OCR) on the image.
+   * Performs Optical Character Recognition (OCR) on the image using GPT-4 Vision.
+   * Extracts and transcribes all visible text from the image.
+   *
+   * @param imagePath Path to the image file containing text
+   * @return Either an LLMError if extraction fails, or the extracted text as a String
    */
   def extractText(imagePath: String): Either[LLMError, String] = {
     val ocrPrompt = "Extract and transcribe all text visible in this image. " +
@@ -91,6 +125,10 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
 
   /**
    * Identifies and describes objects in the image with confidence scores.
+   * Uses GPT-4 Vision to detect and locate objects within the image.
+   *
+   * @param imagePath Path to the image file to analyze
+   * @return Either an LLMError if detection fails, or a List of DetectedObject with labels and confidence scores
    */
   def detectObjects(imagePath: String): Either[LLMError, List[DetectedObject]] = {
     val objectDetectionPrompt = "Identify all objects in this image. For each object, provide: " +
@@ -103,6 +141,10 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
 
   /**
    * Generates descriptive tags for the image content.
+   * Creates semantic tags that categorize and describe the image's content, style, and mood.
+   *
+   * @param imagePath Path to the image file to analyze
+   * @return Either an LLMError if tagging fails, or a List of descriptive tags
    */
   def generateTags(imagePath: String): Either[LLMError, List[String]] = {
     val taggingPrompt = "Generate descriptive tags for this image. Include tags for: " +
@@ -117,6 +159,12 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
 
   // Private helper methods
 
+  /**
+   * Encodes an image file to Base64 format for API transmission.
+   *
+   * @param imagePath Path to the image file to encode
+   * @return Try containing the Base64-encoded string, or failure if encoding fails
+   */
   def encodeImageToBase64(imagePath: String): Try[String] =
     Try {
       val imageBytes = Files.readAllBytes(Paths.get(imagePath))
