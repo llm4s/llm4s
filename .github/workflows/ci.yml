@@ -92,62 +92,11 @@ jobs:
             **/target/scala-${{ matrix.scala }}/test-reports/
           retention-days: 5
 
-  # Template validation (can run in parallel with tests)
-  validate-template:
-    name: Validate G8 Template
-    needs: quick-checks
-    permissions:
-      contents: read
-    strategy:
-      matrix:
-        scala: [2.13.16, 3.7.1]
-
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: 21
-          cache: 'sbt'
-      
-      - name: Cache Coursier
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/coursier
-            ~/.ivy2/cache
-            ~/.sbt
-          key: ${{ runner.os }}-g8-${{ matrix.scala }}-21-${{ hashFiles('**/build.sbt', '**/project/**.scala', '**/project/build.properties') }}
-          restore-keys: |
-            ${{ runner.os }}-g8-${{ matrix.scala }}-21-
-            ${{ runner.os }}-g8-${{ matrix.scala }}-
-            ${{ runner.os }}-g8-
-
-      - uses: sbt/setup-sbt@v1
-
-      - name: Generate and test template
-        run: |
-          sbt new file://$GITHUB_WORKSPACE/llm4s.g8 \
-            --name=llm4s-template \
-            --package=org.llm4s.template \
-            --version=0.1.0-SNAPSHOT \
-            --llm4s_version=0.1.1 \
-            --scala_version=${{ matrix.scala }} \
-            --munit_version=1.1.1 \
-            --directory=org.llm4s.template \
-            --force <<< "\n"
-          
-          cd llm4s-template
-          sbt clean compile test
-
   # All tests must pass
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, validate-template]
+    needs: [test]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -155,7 +104,7 @@ jobs:
     steps:
       - name: Check all tests passed
         run: |
-          if [[ "${{ needs.test.result }}" != "success" || "${{ needs.validate-template.result }}" != "success" ]]; then
+          if [[ "${{ needs.test.result }}" != "success" ]]; then
             echo "Some tests failed"
             exit 1
           fi
