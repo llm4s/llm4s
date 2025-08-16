@@ -175,7 +175,7 @@ object LLM {
     config: ProviderConfig
   ): LLMClient = provider match {
     case LLMProvider.OpenAI => new OpenAIClient(config.asInstanceOf[OpenAIConfig])
-    case LLMProvider.Azure => new AzureOpenAIClient(config.asInstanceOf[AzureConfig])
+    case LLMProvider.Azure => new OpenAIClient(config.asInstanceOf[AzureConfig])  // OpenAIClient handles both
     case LLMProvider.Anthropic => new AnthropicClient(config.asInstanceOf[AnthropicConfig])
     // Other providers...
   }
@@ -311,17 +311,29 @@ class OpenAIClient(config: OpenAIConfig) extends LLMClient {
 }
 ```
 
-### Azure OpenAI Client Implementation 
+### Unified OpenAI Client Implementation (handles both OpenAI and Azure)
 
 ```scala
-class AzureOpenAIClient(config: AzureConfig) extends LLMClient {
-  // Initialize Azure OpenAI client using existing LLMConnect utility
-  private val llmConnection = LLMConnect.getClient(
-    endpoint = config.endpoint,
-    apiKey = config.apiKey,
-    defaultModel = config.model
+class OpenAIClient private (private val model: String, private val client: AzureOpenAIClient) extends LLMClient {
+  
+  // Constructor for OpenAI
+  def this(config: OpenAIConfig) = this(
+    config.model,
+    new OpenAIClientBuilder()
+      .credential(new KeyCredential(config.apiKey))
+      .endpoint(config.baseUrl)
+      .buildClient()
   )
-  private val client = llmConnection.client
+  
+  // Constructor for Azure
+  def this(config: AzureConfig) = this(
+    config.model,
+    new OpenAIClientBuilder()
+      .credential(new AzureKeyCredential(config.apiKey))
+      .endpoint(config.endpoint)
+      .serviceVersion(OpenAIServiceVersion.valueOf(config.apiVersion))
+      .buildClient()
+  )
   
   override def complete(
     conversation: Conversation, 
@@ -344,8 +356,8 @@ class AzureOpenAIClient(config: AzureConfig) extends LLMClient {
         AzureToolHelper.addToolsToOptions(toolRegistry, chatOptions)
       }
       
-      // Make API call
-      val completions = client.getChatCompletions(config.model, chatOptions)
+      // Make API call (model passed from constructor)
+      val completions = client.getChatCompletions(model, chatOptions)
       
       // Convert response to our model
       Right(convertFromAzureCompletion(completions))
@@ -526,12 +538,12 @@ For users of the current LLM4S API, a compatibility layer can be provided:
 object LLM4SCompat {
   /** Convert the current API response to the new model */
   def convertFromAzureResponse(completions: ChatCompletions): Completion = {
-    // Implementation similar to AzureOpenAIClient.convertFromAzureCompletion
+    // Implementation similar to OpenAIClient.convertFromAzureCompletion
   }
   
   /** Convert new model conversation to current API messages */
   def convertToAzureMessages(conversation: Conversation): java.util.ArrayList[ChatRequestMessage] = {
-    // Implementation similar to AzureOpenAIClient.convertToAzureMessages
+    // Implementation similar to OpenAIClient.convertToAzureMessages
   }
   
   // More compatibility helpers...
