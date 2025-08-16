@@ -1,21 +1,35 @@
 package org.llm4s.llmconnect.provider
 
-import com.azure.ai.openai.OpenAIClientBuilder
+import com.azure.ai.openai.{ OpenAIClient => AzureOpenAIClient, OpenAIClientBuilder, OpenAIServiceVersion }
 import com.azure.ai.openai.models._
-import com.azure.core.credential.KeyCredential
+import com.azure.core.credential.{ AzureKeyCredential, KeyCredential }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.config.OpenAIConfig
+import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ AzureToolHelper, ToolRegistry }
 
 import scala.jdk.CollectionConverters._
 
-class OpenAIClient(config: OpenAIConfig) extends LLMClient {
-  // Initialize Azure OpenAI client with OpenAI credentials
-  private val client = new OpenAIClientBuilder()
-    .credential(new KeyCredential(config.apiKey))
-    .endpoint(config.baseUrl)
-    .buildClient()
+class OpenAIClient private (private val model: String, private val client: AzureOpenAIClient) extends LLMClient {
+
+  // Constructor for OpenAI
+  def this(config: OpenAIConfig) = this(
+    config.model,
+    new OpenAIClientBuilder()
+      .credential(new KeyCredential(config.apiKey))
+      .endpoint(config.baseUrl)
+      .buildClient()
+  )
+
+  // Constructor for Azure
+  def this(config: AzureConfig) = this(
+    config.model,
+    new OpenAIClientBuilder()
+      .credential(new AzureKeyCredential(config.apiKey))
+      .endpoint(config.endpoint)
+      .serviceVersion(OpenAIServiceVersion.valueOf(config.apiVersion))
+      .buildClient()
+  )
 
   override def complete(
     conversation: Conversation,
@@ -46,7 +60,7 @@ class OpenAIClient(config: OpenAIConfig) extends LLMClient {
       // This would need to be handled differently if organization header is required
 
       // Make API call
-      val completions = client.getChatCompletions(config.model, chatOptions)
+      val completions = client.getChatCompletions(model, chatOptions)
 
       // Convert response to our model
       Right(convertFromAzureCompletion(completions))
