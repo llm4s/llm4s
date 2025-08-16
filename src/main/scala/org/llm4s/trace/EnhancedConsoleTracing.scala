@@ -107,7 +107,7 @@ class EnhancedConsoleTracing extends EnhancedTracing {
           println(s"${YELLOW}Data: ${e.data}$RESET")
           println()
       }
-    }.toEither.left.map(error => LLMError.UnknownError(error.getMessage, error))
+    }.toEither.left.map(error => LLMError.UnknownError(error.getMessage, Some(error)))
 
   def traceAgentState(state: AgentState): Result[Unit] = {
     val event = TraceEvent.AgentStateUpdated(

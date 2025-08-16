@@ -46,8 +46,10 @@ object ErrorBridge {
       llmconnect.model.ValidationError(message)
     case error.LLMError.NetworkError(message, Some(cause), _) =>
       llmconnect.model.UnknownError(cause)
-    case error.LLMError.UnknownError(message, cause) =>
+    case error.LLMError.UnknownError(message, Some(cause)) =>
       llmconnect.model.UnknownError(cause)
+    case error.LLMError.UnknownError(message, None) =>
+      llmconnect.model.UnknownError(new RuntimeException(message))
     case other =>
       llmconnect.model.UnknownError(new RuntimeException(other.message))
   }

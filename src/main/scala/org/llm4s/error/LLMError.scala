@@ -32,10 +32,9 @@ sealed abstract class LLMError extends Product with Serializable {
 
   /** Converts to a formatted error message with context */
   def formatted: String = {
-    val contextStr = context
-      .getOrElse("details", "No additional context")
-      .map(c => s" [Context Details: $c]")
-      .mkString(", ")
+    val contextStr = if (context.nonEmpty) {
+      s" [${context.map { case (k, v) => s"$k: $v" }.mkString(", ")}]"
+    } else ""
 
     val codeStr = code.map(c => s" (Code: $c)").getOrElse("")
     s"${getClass.getSimpleName}: $message$codeStr$contextStr"
@@ -135,12 +134,16 @@ object LLMError {
    */
   final case class UnknownError(
     override val message: String,
-    cause: Throwable
+    cause: Option[Throwable] = None
   ) extends LLMError {
-    override val context: Map[String, String] = Map(
-      "exceptionType" -> cause.getClass.getSimpleName,
-      "stackTrace"    -> cause.getStackTrace.take(3).mkString("; ")
-    )
+    override val context: Map[String, String] = cause match {
+      case Some(ex) =>
+        Map(
+          "exceptionType" -> ex.getClass.getSimpleName,
+          "stackTrace"    -> ex.getStackTrace.take(3).mkString("; ")
+        )
+      case None => Map.empty
+    }
   }
 
   // Smart constructors
@@ -166,6 +169,6 @@ object LLMError {
     case ex if ex.getMessage != null && ex.getMessage.contains("429") =>
       RateLimitError("Rate limited", None, "Unknown Provider")
     case ex =>
-      UnknownError(Option(ex.getMessage).getOrElse("Unknown error"), ex)
+      UnknownError(Option(ex.getMessage).getOrElse("Unknown error"), Some(ex))
   }
 }

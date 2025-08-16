@@ -64,13 +64,13 @@ class EnhancedLangfuseTracing(
         logger.error(s"[Langfuse] Batch export failed: ${response.statusCode}")
         logger.error(s"[Langfuse] Response body: ${response.text()}")
         val runtimeException = new RuntimeException(s"Langfuse export failed: ${response.statusCode}")
-        Left(LLMError.UnknownError(runtimeException.getMessage, runtimeException))
+        Left(LLMError.UnknownError(runtimeException.getMessage, Some(runtimeException)))
       }
     } catch {
       case e: Exception =>
         logger.error(s"[Langfuse] Batch export failed with exception: ${e.getMessage}", e)
         logger.error(s"[Langfuse] Request URL: $langfuseUrl")
-        Left(LLMError.UnknownError(e.getMessage, e))
+        Left(LLMError.UnknownError(e.getMessage, Some(e)))
     }
   }
 
