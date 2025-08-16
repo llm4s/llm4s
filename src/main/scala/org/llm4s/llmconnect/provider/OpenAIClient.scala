@@ -7,12 +7,20 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ AzureToolHelper, ToolRegistry }
+import org.llm4s.types.Result
+import org.llm4s.error.LLMError
 
 import scala.jdk.CollectionConverters._
 
+/**
+ * OpenAIClient implementation for both OpenAI and Azure OpenAI.
+ *
+ * This client supports both OpenAI's API and Azure's OpenAI service.
+ * It handles message conversion, completion requests, and tool calls.
+ */
 class OpenAIClient private (private val model: String, private val client: AzureOpenAIClient) extends LLMClient {
 
-  // Constructor for OpenAI
+  /* * Constructor for OpenAI (non-Azure) */
   def this(config: OpenAIConfig) = this(
     config.model,
     new OpenAIClientBuilder()
@@ -21,7 +29,7 @@ class OpenAIClient private (private val model: String, private val client: Azure
       .buildClient()
   )
 
-  // Constructor for Azure
+  /** Constructor for Azure OpenAI */
   def this(config: AzureConfig) = this(
     config.model,
     new OpenAIClientBuilder()
@@ -34,10 +42,10 @@ class OpenAIClient private (private val model: String, private val client: Azure
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Either[LLMError, Completion] =
+  ): Result[Completion] =
     try {
       // Convert conversation to Azure format
-      val chatMessages = convertToAzureMessages(conversation)
+      val chatMessages = convertToOpenAIMessages(conversation)
 
       // Create chat options
       val chatOptions = new ChatCompletionsOptions(chatMessages)
@@ -63,21 +71,20 @@ class OpenAIClient private (private val model: String, private val client: Azure
       val completions = client.getChatCompletions(model, chatOptions)
 
       // Convert response to our model
-      Right(convertFromAzureCompletion(completions))
+      Right(convertFromOpenAIFormat(completions))
     } catch {
-      case e: Exception => Left(UnknownError(e))
+      case e: Exception => Left(LLMError.fromThrowable(e))
     }
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Either[LLMError, Completion] =
+  ): Result[Completion] =
     // Simplified implementation for now
     complete(conversation, options)
 
-  // Convert our Conversation to Azure's message format
-  private def convertToAzureMessages(conversation: Conversation): java.util.ArrayList[ChatRequestMessage] = {
+  private def convertToOpenAIMessages(conversation: Conversation): java.util.ArrayList[ChatRequestMessage] = {
     val messages = new java.util.ArrayList[ChatRequestMessage]()
 
     conversation.messages.foreach {
@@ -89,13 +96,13 @@ class OpenAIClient private (private val model: String, private val client: Azure
         val msg = new ChatRequestAssistantMessage(content.getOrElse(""))
         // Add tool calls if needed
         if (toolCalls.nonEmpty) {
-          val azureToolCalls = new java.util.ArrayList[ChatCompletionsToolCall]()
+          val openAIToolCools = new java.util.ArrayList[ChatCompletionsToolCall]()
           toolCalls.foreach { tc =>
             val function = new FunctionCall(tc.name, tc.arguments.render())
             val toolCall = new ChatCompletionsFunctionToolCall(tc.id, function)
-            azureToolCalls.add(toolCall)
+            openAIToolCools.add(toolCall)
           }
-          msg.setToolCalls(azureToolCalls)
+          msg.setToolCalls(openAIToolCools)
         }
         messages.add(msg)
       case ToolMessage(toolCallId, content) =>
@@ -105,8 +112,7 @@ class OpenAIClient private (private val model: String, private val client: Azure
     messages
   }
 
-  // Convert Azure completion to our model
-  private def convertFromAzureCompletion(completions: ChatCompletions): Completion = {
+  private def convertFromOpenAIFormat(completions: ChatCompletions): Completion = {
     val choice  = completions.getChoices.get(0)
     val message = choice.getMessage
 

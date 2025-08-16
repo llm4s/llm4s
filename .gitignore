@@ -1,6 +1,7 @@
 .idea
 .venv
-.env
+.env*
+.DS_Store
 .bloop/
 project/.bloop/
 .env.local

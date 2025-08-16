@@ -72,7 +72,7 @@ object LLMConnect {
   def complete(
     messages: Seq[Message],
     options: CompletionOptions = CompletionOptions()
-  ): Either[LLMError, Completion] = {
+  ): org.llm4s.types.Result[Completion] = {
     val conversation = Conversation(messages)
     getClient().complete(conversation, options)
   }

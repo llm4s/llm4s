@@ -1,6 +1,8 @@
 package org.llm4s.llmconnect
 
 import org.llm4s.llmconnect.model._
+import org.llm4s.types.Result
+import org.llm4s.Result
 
 trait LLMClient {
 
@@ -8,12 +10,18 @@ trait LLMClient {
   def complete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions()
-  ): Either[LLMError, Completion]
+  ): Result[Completion]
 
   /** Stream a completion with callback for chunks */
   def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Either[LLMError, Completion]
+  ): Result[Completion]
+
+  /** Validate client configuration */
+  def validate(): Result[Unit] = Result.success(())
+
+  /** Close client and cleanup resources */
+  def close(): Unit = ()
 }

@@ -200,7 +200,8 @@ object PlaywrightExample {
     maxSteps: Option[Int],
     traceLogPath: Option[String]
   ) = {
-    import org.llm4s.llmconnect.model.LLMError
+    import org.llm4s.error.LLMError
+    import org.llm4s.types.Result
 
     import scala.annotation.tailrec
 
@@ -208,7 +209,7 @@ object PlaywrightExample {
     traceLogPath.foreach(path => agent.writeTraceLog(initialState, path))
 
     @tailrec
-    def runUntilCompletion(state: AgentState, stepsRemaining: Option[Int] = maxSteps): Either[LLMError, AgentState] =
+    def runUntilCompletion(state: AgentState, stepsRemaining: Option[Int] = maxSteps): Result[AgentState] =
       (state.status, stepsRemaining) match {
         case (s, Some(0))
             if s == org.llm4s.agent.AgentStatus.InProgress || s == org.llm4s.agent.AgentStatus.WaitingForTools =>
