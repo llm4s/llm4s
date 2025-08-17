@@ -2,7 +2,7 @@ package org.llm4s.imagegeneration
 
 import java.time.Instant
 import java.nio.file.Path
-import org.llm4s.imagegeneration.provider.{ HttpClient, HuggingFaceClient, StableDiffusionClient }
+import org.llm4s.imagegeneration.provider.{ HttpClient, HuggingFaceClient, StableDiffusionClient, OpenAIImageClient }
 
 // ===== ERROR HANDLING =====
 
@@ -176,6 +176,24 @@ case class HuggingFaceConfig(
   def provider: ImageGenerationProvider = ImageGenerationProvider.HuggingFace
 }
 
+/**
+ * Configuration for OpenAI DALL-E API.
+ *
+ * @param apiKey Your OpenAI API key. This is required for authentication.
+ * @param model The DALL-E model version to use (dall-e-2 or dall-e-3).
+ * @param timeout Request timeout in milliseconds.
+ */
+case class OpenAIConfig(
+  /** OpenAI API key */
+  apiKey: String,
+  /** Model to use (dall-e-2 or dall-e-3) */
+  model: String = "dall-e-2",
+  /** Request timeout in milliseconds */
+  override val timeout: Int = 30000 // 30 seconds for image generation
+) extends ImageGenerationConfig {
+  def provider: ImageGenerationProvider = ImageGenerationProvider.DALLE
+}
+
 // ===== CLIENT INTERFACE =====
 
 trait ImageGenerationClient {
@@ -209,6 +227,8 @@ object ImageGeneration {
       case hfConfig: HuggingFaceConfig =>
         val httpClient = HttpClient.createHttpClient(hfConfig)
         new HuggingFaceClient(hfConfig, httpClient)
+      case openAIConfig: OpenAIConfig =>
+        new OpenAIImageClient(openAIConfig)
     }
 
   /** Convenience method for quick image generation */
@@ -255,6 +275,24 @@ object ImageGeneration {
     client(config)
   }
 
+  /**
+   * Get an OpenAI DALL-E client with the required API key.
+   *
+   * This is a convenience method for creating a client that connects to the
+   * OpenAI API for DALL-E image generation.
+   *
+   * @param apiKey Your OpenAI API key (required).
+   * @param model The DALL-E model version to use. Defaults to dall-e-2.
+   * @return An `ImageGenerationClient` instance configured for OpenAI DALL-E.
+   */
+  def openAIClient(
+    apiKey: String,
+    model: String = "dall-e-2"
+  ): ImageGenerationClient = {
+    val config = OpenAIConfig(apiKey = apiKey, model = model)
+    client(config)
+  }
+
   /** Convenience method for quick Stable Diffusion image generation */
   def generateWithStableDiffusion(
     prompt: String,
@@ -262,6 +300,17 @@ object ImageGeneration {
     baseUrl: String = "http://localhost:7860"
   ): Either[ImageGenerationError, GeneratedImage] = {
     val config = StableDiffusionConfig(baseUrl = baseUrl)
+    generateImage(prompt, config, options)
+  }
+
+  /** Convenience method for quick OpenAI DALL-E image generation */
+  def generateWithOpenAI(
+    prompt: String,
+    apiKey: String,
+    options: ImageGenerationOptions = ImageGenerationOptions(),
+    model: String = "dall-e-2"
+  ): Either[ImageGenerationError, GeneratedImage] = {
+    val config = OpenAIConfig(apiKey = apiKey, model = model)
     generateImage(prompt, config, options)
   }
 

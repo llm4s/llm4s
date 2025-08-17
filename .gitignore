@@ -1,6 +1,7 @@
 .idea
 .venv
-.env
+.env*
+.DS_Store
 .bloop/
 project/.bloop/
 .env.local
@@ -11,3 +12,4 @@ CLAUDE.md
 .metals
 .vscode
 **/.claude/settings.local.json
+.DS_Store

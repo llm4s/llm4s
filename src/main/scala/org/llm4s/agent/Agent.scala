@@ -4,6 +4,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi._
 import org.slf4j.LoggerFactory
+import org.llm4s.types.Result
 
 import scala.annotation.tailrec
 import scala.util.{ Failure, Success, Try }
@@ -50,7 +51,7 @@ class Agent(client: LLMClient) {
   /**
    * Runs a single step of the agent's reasoning process
    */
-  def runStep(state: AgentState): Either[LLMError, AgentState] =
+  def runStep(state: AgentState): Result[AgentState] =
     state.status match {
       case AgentStatus.InProgress =>
         // Get tools from registry and create completion options
@@ -306,12 +307,12 @@ class Agent(client: LLMClient) {
     initialState: AgentState,
     maxSteps: Option[Int] = None,
     traceLogPath: Option[String] = None
-  ): Either[LLMError, AgentState] = {
+  ): Result[AgentState] = {
     // Write initial state if tracing is enabled
     traceLogPath.foreach(path => writeTraceLog(initialState, path))
 
     @tailrec
-    def runUntilCompletion(state: AgentState, stepsRemaining: Option[Int] = maxSteps): Either[LLMError, AgentState] =
+    def runUntilCompletion(state: AgentState, stepsRemaining: Option[Int] = maxSteps): Result[AgentState] =
       (state.status, stepsRemaining) match {
         // Check for step limit before executing either type of step
         case (s, Some(0)) if s == AgentStatus.InProgress || s == AgentStatus.WaitingForTools =>
@@ -369,7 +370,7 @@ class Agent(client: LLMClient) {
     maxSteps: Option[Int],
     traceLogPath: Option[String],
     systemPromptAddition: Option[String]
-  ): Either[LLMError, AgentState] = {
+  ): Result[AgentState] = {
     val initialState = initialize(query, tools, systemPromptAddition)
     run(initialState, maxSteps, traceLogPath)
   }

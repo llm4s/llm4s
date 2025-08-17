@@ -2,10 +2,11 @@ package org.llm4s.codegen
 
 import org.llm4s.agent.{ Agent, AgentState, AgentStatus }
 import org.llm4s.llmconnect.LLM
-import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi._
 import org.llm4s.workspace.ContainerisedWorkspace
 import org.slf4j.LoggerFactory
+import org.llm4s.types.Result
+import org.llm4s.error.LLMError
 
 /**
  * A worker for code generation and manipulation tasks.
@@ -44,10 +45,10 @@ class CodeWorker(sourceDirectory: String) {
     task: String,
     maxSteps: Option[Int] = None,
     traceLogPath: Option[String] = None
-  ): Either[LLMError, AgentState] = {
+  ): Result[AgentState] = {
     val infoResponse = workspace.getWorkspaceInfo()
     if (infoResponse.root.isEmpty) {
-      return Left(ValidationError("Workspace is not initialized"))
+      return Left(LLMError.ValidationError("Workspace is not initialized", "workspace"))
     }
 
     logger.info(s"Executing code task: $task")

@@ -2,6 +2,9 @@ package org.llm4s.imageprocessing
 
 import java.nio.file.Path
 import java.time.Instant
+import org.llm4s.error.LLMError
+import cats.data.Validated
+import cats.syntax.validated._
 
 /**
  * Represents different image formats supported by the system.
@@ -95,14 +98,43 @@ case class ProcessedImage(
   /**
    * Save the processed image to a file.
    */
-  def saveToFile(path: Path): Either[Exception, Unit] =
-    try {
-      import java.nio.file.Files
-      Files.write(path, data)
-      Right(())
-    } catch {
-      case e: Exception => Left(e)
+  def saveToFile(path: Path): Either[LLMError, Unit] = {
+    import java.nio.file.Files
+
+    // Use cats Validated for path validation
+    validatePath(path).toEither.flatMap { normalizedPath =>
+      try {
+        Files.write(normalizedPath, data)
+        Right(())
+      } catch {
+        case e: java.nio.file.AccessDeniedException =>
+          Left(LLMError.processingFailed("save", s"Access denied: ${e.getMessage}", Some(e)))
+        case e: java.nio.file.NoSuchFileException =>
+          Left(LLMError.processingFailed("save", s"Directory does not exist: ${e.getMessage}", Some(e)))
+        case e: java.nio.file.FileSystemException =>
+          Left(LLMError.processingFailed("save", s"File system error: ${e.getMessage}", Some(e)))
+        case e: Exception =>
+          Left(LLMError.processingFailed("save", s"Unexpected error: ${e.getMessage}", Some(e)))
+      }
     }
+  }
+
+  /**
+   * Validate path for security using cats Validated.
+   */
+  private def validatePath(path: Path): Validated[LLMError, Path] = {
+    val normalizedPath = path.normalize()
+    val currentDir     = path.getFileSystem.getPath(".").normalize()
+
+    if (
+      normalizedPath.startsWith(currentDir.resolve("..")) ||
+      normalizedPath.startsWith(currentDir.resolve("../"))
+    ) {
+      LLMError.invalidImageInput("path", path.toString, "Path traversal detected").invalid
+    } else {
+      normalizedPath.valid
+    }
+  }
 
   /**
    * Get image size in bytes.

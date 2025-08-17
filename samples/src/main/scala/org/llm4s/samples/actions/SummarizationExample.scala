@@ -2,6 +2,8 @@ package org.llm4s.samples.actions
 
 import org.llm4s.llmconnect.LLM
 import org.llm4s.llmconnect.model._
+import org.llm4s.types.Result
+import org.llm4s.error.LLMError
 import org.llm4s.tokens.Tokenizer
 import org.llm4s.identity.TokenizerId
 import org.llm4s.identity.TokenizerId.O200K_BASE
@@ -100,14 +102,14 @@ object SummarizationExample {
         }
 
       case Left(error) =>
-        println(s"Error generating summary: ${error.message}")
+        println(s"Error generating summary: ${error.formatted}")
     }
 
     // Call the helper method like this to use summarization logic elsewhere
     val summaryResult = summarizeText(textToSummarize2, Some("50 words"))
     summaryResult match {
       case Right(summary) => println(summary)
-      case Left(error)    => println(s"Error: ${error.message}")
+      case Left(error)    => println(s"Error: ${error.formatted}")
     }
   }
 
@@ -118,7 +120,7 @@ object SummarizationExample {
    * @param maxLength Optional target maximum length (e.g., "100 words" or "2 paragraphs")
    * @return Either an error or the summarized text
    */
-  def summarizeText(text: String, maxLength: Option[String] = None): Either[LLMError, String] = {
+  def summarizeText(text: String, maxLength: Option[String] = None): Result[String] = {
     // Create system prompt with optional length constraint
     val lengthConstraint = maxLength.map(len => s"Ensure the summary is no longer than $len.").getOrElse("")
     val systemPrompt = s"""Summarize the following text concisely while preserving the key information and main points.

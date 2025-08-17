@@ -45,7 +45,7 @@ sbt scalafmtAll
 ## Code Style Guidelines
 - **Formatting**: Follow `.scalafmt.conf` settings (120 char line length)
 - **Imports**: Use curly braces for imports (`import { x, y }`)
-- **Error Handling**: Use `Either[LLMError, T]` for operations that may fail
+- **Error Handling**: Use `Result[T]` type (alias for `Either[LLMError, T]`) for operations that may fail
 - **Types**: Prefer immutable data structures and pure functions
 - **Naming**: Use camelCase for variables/methods, PascalCase for classes/objects
 - **Documentation**: Use Asterisk style (`/** ... */`) for ScalaDoc comments

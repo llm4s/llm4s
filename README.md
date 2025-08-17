@@ -337,9 +337,14 @@ tracer.traceAgentState(agentState)
 ```
 ### Usage using starter kit `llm4s.g8`
 #### A carefully crafted starter kit to unlock the power of llm4s
-llm4s.g8 is a starter kit for building AI-powered applications using [llm4s].
-Improved SDK usability and developer ergonomics. You can now spin up a fully working scala project with a single `sbt` command.
+
+> **Note:** The LLM4S template has moved to its own repository for better maintainability and independent versioning.
+
+The llm4s.g8 starter kit helps you quickly create AI-powered applications using llm4s.
+It is a starter kit for building AI-powered applications using [llm4s] with improved SDK usability and developer ergonomics. You can now spin up a fully working scala project with a single `sbt` command.
 The starter kit comes pre-configured with best practices, prompt execution examples, CI, formatting hooks, unit testing, documentation, and cross-platform support.
+
+**Template Repository:** [github.com/llm4s/llm4s.g8](https://github.com/llm4s/llm4s.g8)
 
 Using `sbt`, do:
 ```
@@ -354,7 +359,9 @@ sbt new llm4s/llm4s.g8 \
 --force
 ```
 to create new project.
-Use the comprehensive [documentation](docs/llm4s-g8-starter-kit.md) to get started with the project using started kit.
+
+For more information about the template, including compatibility matrix and documentation, visit the [template repository](https://github.com/llm4s/llm4s.g8).
+Use the comprehensive [documentation](docs/llm4s-g8-starter-kit.md) to get started with the project using starter kit.
 
 ----
 

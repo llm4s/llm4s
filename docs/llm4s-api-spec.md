@@ -110,30 +110,90 @@ case class CompletionOptions(
 ### 6. Error Types
 
 ```scala
-sealed trait LLMError
-case class AuthenticationError(message: String) extends LLMError
-case class RateLimitError(message: String) extends LLMError
-case class ServiceError(message: String, code: Int) extends LLMError
-case class ValidationError(message: String) extends LLMError
-case class UnknownError(throwable: Throwable) extends LLMError
+// Enhanced error hierarchy in org.llm4s.error
+sealed trait LLMError {
+  def message: String
+  def formatted: String
+}
+
+object LLMError {
+  case class AuthenticationError(
+    message: String,
+    provider: String,
+    details: Map[String, String] = Map.empty
+  ) extends LLMError
+  
+  case class RateLimitError(
+    message: String,
+    retryAfter: Option[Duration],
+    provider: String,
+    limit: Option[Int] = None,
+    remaining: Option[Int] = None
+  ) extends LLMError
+  
+  case class ServiceError(
+    message: String,
+    statusCode: Int,
+    provider: String,
+    requestId: Option[String] = None
+  ) extends LLMError
+  
+  case class ValidationError(
+    message: String,
+    field: String,
+    constraints: Map[String, String] = Map.empty
+  ) extends LLMError
+  
+  case class NetworkError(
+    message: String,
+    cause: Option[Throwable],
+    retryable: Boolean = true
+  ) extends LLMError
+  
+  case class ConfigurationError(
+    message: String,
+    missingFields: List[String]
+  ) extends LLMError
+  
+  case class UnknownError(
+    message: String,
+    cause: Option[Throwable] = None
+  ) extends LLMError
+  
+  // Factory method for exceptions
+  def fromThrowable(throwable: Throwable): LLMError = {
+    UnknownError(throwable.getMessage, Some(throwable))
+  }
+}
+
+// Result type alias for cleaner APIs
+type Result[+A] = Either[LLMError, A]
 ```
 
 ## LLM Client Interface
 
 ```scala
+import org.llm4s.types.Result
+
 trait LLMClient {
   /** Complete a conversation and get a response */
   def complete(
     conversation: Conversation, 
     options: CompletionOptions = CompletionOptions()
-  ): Either[LLMError, Completion]
+  ): Result[Completion]
   
   /** Stream a completion with callback for chunks */
   def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Either[LLMError, Completion]
+  ): Result[Completion]
+  
+  /** Validate client configuration */
+  def validate(): Result[Unit] = Result.success(())
+  
+  /** Close client and cleanup resources */
+  def close(): Unit = ()
 }
 ```
 
@@ -175,7 +235,7 @@ object LLM {
     config: ProviderConfig
   ): LLMClient = provider match {
     case LLMProvider.OpenAI => new OpenAIClient(config.asInstanceOf[OpenAIConfig])
-    case LLMProvider.Azure => new AzureOpenAIClient(config.asInstanceOf[AzureConfig])
+    case LLMProvider.Azure => new OpenAIClient(config.asInstanceOf[AzureConfig])  // OpenAIClient handles both
     case LLMProvider.Anthropic => new AnthropicClient(config.asInstanceOf[AnthropicConfig])
     // Other providers...
   }
@@ -186,7 +246,7 @@ object LLM {
     provider: LLMProvider,
     config: ProviderConfig,
     options: CompletionOptions = CompletionOptions()
-  ): Either[LLMError, Completion] = {
+  ): Result[Completion] = {
     val conversation = Conversation(messages)
     client(provider, config).complete(conversation, options)
   }
@@ -265,7 +325,7 @@ class OpenAIClient(config: OpenAIConfig) extends LLMClient {
   override def complete(
     conversation: Conversation, 
     options: CompletionOptions
-  ): Either[LLMError, Completion] = {
+  ): Result[Completion] = {
     try {
       // Convert to OpenAI format
       val requestBody = createRequestBody(conversation, options)
@@ -287,12 +347,12 @@ class OpenAIClient(config: OpenAIConfig) extends LLMClient {
           val responseJson = ujson.read(response.body())
           Right(parseCompletion(responseJson))
           
-        case 401 => Left(AuthenticationError("Invalid API key"))
-        case 429 => Left(RateLimitError("Rate limit exceeded"))
-        case status => Left(ServiceError(s"OpenAI API error: ${response.body()}", status))
+        case 401 => Left(LLMError.AuthenticationError("Invalid API key", "openai"))
+        case 429 => Left(LLMError.RateLimitError("Rate limit exceeded", None, "openai"))
+        case status => Left(LLMError.ServiceError(s"OpenAI API error: ${response.body()}", status, "openai"))
       }
     } catch {
-      case e: Exception => Left(UnknownError(e))
+      case e: Exception => Left(LLMError.fromThrowable(e))
     }
   }
   
@@ -311,17 +371,29 @@ class OpenAIClient(config: OpenAIConfig) extends LLMClient {
 }
 ```
 
-### Azure OpenAI Client Implementation 
+### Unified OpenAI Client Implementation (handles both OpenAI and Azure)
 
 ```scala
-class AzureOpenAIClient(config: AzureConfig) extends LLMClient {
-  // Initialize Azure OpenAI client using existing LLMConnect utility
-  private val llmConnection = LLMConnect.getClient(
-    endpoint = config.endpoint,
-    apiKey = config.apiKey,
-    defaultModel = config.model
+class OpenAIClient private (private val model: String, private val client: AzureOpenAIClient) extends LLMClient {
+  
+  // Constructor for OpenAI
+  def this(config: OpenAIConfig) = this(
+    config.model,
+    new OpenAIClientBuilder()
+      .credential(new KeyCredential(config.apiKey))
+      .endpoint(config.baseUrl)
+      .buildClient()
   )
-  private val client = llmConnection.client
+  
+  // Constructor for Azure
+  def this(config: AzureConfig) = this(
+    config.model,
+    new OpenAIClientBuilder()
+      .credential(new AzureKeyCredential(config.apiKey))
+      .endpoint(config.endpoint)
+      .serviceVersion(OpenAIServiceVersion.valueOf(config.apiVersion))
+      .buildClient()
+  )
   
   override def complete(
     conversation: Conversation, 
@@ -344,8 +416,8 @@ class AzureOpenAIClient(config: AzureConfig) extends LLMClient {
         AzureToolHelper.addToolsToOptions(toolRegistry, chatOptions)
       }
       
-      // Make API call
-      val completions = client.getChatCompletions(config.model, chatOptions)
+      // Make API call (model passed from constructor)
+      val completions = client.getChatCompletions(model, chatOptions)
       
       // Convert response to our model
       Right(convertFromAzureCompletion(completions))
@@ -526,12 +598,12 @@ For users of the current LLM4S API, a compatibility layer can be provided:
 object LLM4SCompat {
   /** Convert the current API response to the new model */
   def convertFromAzureResponse(completions: ChatCompletions): Completion = {
-    // Implementation similar to AzureOpenAIClient.convertFromAzureCompletion
+    // Implementation similar to OpenAIClient.convertFromAzureCompletion
   }
   
   /** Convert new model conversation to current API messages */
   def convertToAzureMessages(conversation: Conversation): java.util.ArrayList[ChatRequestMessage] = {
-    // Implementation similar to AzureOpenAIClient.convertToAzureMessages
+    // Implementation similar to OpenAIClient.convertToAzureMessages
   }
   
   // More compatibility helpers...
