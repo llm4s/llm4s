@@ -6,7 +6,7 @@ import org.llm4s.toolapi._
 import org.llm4s.workspace.ContainerisedWorkspace
 import org.slf4j.LoggerFactory
 import org.llm4s.types.Result
-import org.llm4s.error.LLMError
+import org.llm4s.error.ValidationError
 
 /**
  * A worker for code generation and manipulation tasks.
@@ -48,7 +48,7 @@ class CodeWorker(sourceDirectory: String) {
   ): Result[AgentState] = {
     val infoResponse = workspace.getWorkspaceInfo()
     if (infoResponse.root.isEmpty) {
-      return Left(LLMError.ValidationError("Workspace is not initialized", "workspace"))
+      return Left(ValidationError("workspace", "Workspace is not initialized"))
     }
 
     logger.info(s"Executing code task: $task")

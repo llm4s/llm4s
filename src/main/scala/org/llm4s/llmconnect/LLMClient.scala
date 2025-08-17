@@ -2,7 +2,6 @@ package org.llm4s.llmconnect
 
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
-import org.llm4s.Result
 
 trait LLMClient {
 
@@ -20,7 +19,7 @@ trait LLMClient {
   ): Result[Completion]
 
   /** Validate client configuration */
-  def validate(): Result[Unit] = Result.success(())
+  def validate(): Result[Unit] = Right(())
 
   /** Close client and cleanup resources */
   def close(): Unit = ()

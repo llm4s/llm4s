@@ -89,4 +89,19 @@ object LLMError {
   }
 
   implicit val llmErrorShow: Show[LLMError] = Show.show(_.formatted)
+
+  // Smart constructors for backward compatibility
+  def processingFailed(operation: String, message: String, cause: Option[Throwable] = None): ProcessingError =
+    ProcessingError(operation, message, cause)
+
+  def invalidImageInput(field: String, value: String, reason: String): InvalidInputError =
+    InvalidInputError(field, value, reason)
+
+  def apiCallFailed(
+    provider: String,
+    message: String,
+    statusCode: Option[Int] = None,
+    responseBody: Option[String] = None
+  ): APIError =
+    APIError(provider, message, statusCode, responseBody)
 }

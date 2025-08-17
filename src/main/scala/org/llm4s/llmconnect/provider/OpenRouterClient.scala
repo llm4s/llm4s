@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
-import org.llm4s.error.LLMError
+import org.llm4s.error.{ LLMError, AuthenticationError, RateLimitError, ServiceError }
 
 import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
@@ -41,9 +41,9 @@ class OpenRouterClient(config: OpenAIConfig) extends LLMClient {
           val responseJson = ujson.read(response.body())
           Right(parseCompletion(responseJson))
 
-        case 401    => Left(LLMError.AuthenticationError("Invalid API key", "openrouter"))
-        case 429    => Left(LLMError.RateLimitError("Rate limit exceeded", None, "openrouter"))
-        case status => Left(LLMError.ServiceError(s"OpenRouter API error: ${response.body()}", status, "openrouter"))
+        case 401    => Left(AuthenticationError("openrouter", "Invalid API key"))
+        case 429    => Left(RateLimitError("openrouter"))
+        case status => Left(ServiceError(status, "openrouter", s"OpenRouter API error: ${response.body()}"))
       }
     } catch {
       case e: Exception => Left(LLMError.fromThrowable(e))

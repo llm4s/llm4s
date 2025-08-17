@@ -8,7 +8,7 @@ import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
-import org.llm4s.error.LLMError
+import org.llm4s.error.{ LLMError, AuthenticationError, RateLimitError, ValidationError, ServiceError }
 
 import scala.jdk.CollectionConverters._
 
@@ -56,11 +56,11 @@ class AnthropicClient(config: AnthropicConfig) extends LLMClient {
       Right(convertFromAnthropicResponse(response))
     } catch {
       case e: com.anthropic.errors.UnauthorizedException =>
-        Left(LLMError.AuthenticationError(e.getMessage, "anthropic"))
+        Left(AuthenticationError("anthropic", e.getMessage))
       case e: com.anthropic.errors.RateLimitException =>
-        Left(LLMError.RateLimitError(e.getMessage, None, "anthropic"))
+        Left(RateLimitError("anthropic"))
       case e: com.anthropic.errors.AnthropicInvalidDataException =>
-        Left(LLMError.ValidationError(e.getMessage, "input"))
+        Left(ValidationError("input", e.getMessage))
       case e: Exception =>
         Left(LLMError.fromThrowable(e))
     }
@@ -94,7 +94,7 @@ curl https://api.anthropic.com/v1/messages \
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
-    Left(LLMError.ServiceError("Streaming with anthropic not supported", 501, "anthropic"))
+    Left(ServiceError(501, "anthropic", "Streaming with anthropic not supported"))
 
   // Add messages from conversation to the parameters builder
   private def addMessagesToParams(
