@@ -1,6 +1,6 @@
 package org.llm4s
 
-import org.llm4s.error.{ ConfigurationError, ValidationError }
+import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.model.StreamedChunk
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.{ AsyncResult, Result }
@@ -55,10 +55,6 @@ package object types {
 
   /** Streaming result for real-time data */
   type StreamResult[+A] = Result[Iterator[A]]
-
-  // Legacy compatibility (will be removed in later versions)
-  @deprecated("Use org.llm4s.types.Result instead", "0.1.1")
-  type LegacyResult[+A] = Either[org.llm4s.llmconnect.model.LLMError, A]
 
   /**
    * Identifiers and newtypes for type safety.
@@ -660,18 +656,6 @@ package object types {
   /** Type alias for percentage (0.0 to 100.0) */
   type Percentage = Double
 
-  /**
-   * Backwards compatibility types.
-   */
-
-  @deprecated("Use Result instead", "0.1.1")
-  type LLMResult[+A] = Result[A]
-
-  @deprecated("Use AsyncResult instead", "0.1.1")
-  type FutureResult[+A] = AsyncResult[A]
-
-  @deprecated("Use CompletionStream instead", "0.1.1")
-  type StreamingResult = CompletionStream
 }
 
 /**

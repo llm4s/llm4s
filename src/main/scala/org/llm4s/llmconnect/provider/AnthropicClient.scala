@@ -104,26 +104,19 @@ curl https://api.anthropic.com/v1/messages \
     // Track if we've seen a system message
     var hasSystemMessage = false
 
-    println("\n\n********************************************************************************************")
-    println("********************************************************************************************")
-    println("Got conversation: " + conversation.messages.size + " messages to encode")
     // Process messages in order
     conversation.messages.foreach {
       case SystemMessage(content) =>
-        println("\n\nXXXX Adding system message: " + content)
         paramsBuilder.system(content)
         hasSystemMessage = true
 
       case UserMessage(content) =>
-        println("\n\nXXXX Adding user message: " + content)
         paramsBuilder.addUserMessage(content)
 
       case AssistantMessage(content, _) =>
-        println("\n\nXXXXAdding assistant message: " + content)
         paramsBuilder.addAssistantMessage(content.getOrElse(""))
 
       case ToolMessage(toolCallId, content) =>
-        println("\n\nXXXXAdding tool response message: " + content)
         // Anthropic doesn't have a direct equivalent to tool messages
         // We'll add it as a user message with a prefix
         paramsBuilder.addUserMessage(s"Tool result for $toolCallId: $content")
@@ -155,7 +148,6 @@ curl https://api.anthropic.com/v1/messages \
       .description(toolFunction.description)
       .inputSchema(inputSchemaBuilder.build().validate())
       .build()
-    println("Tool:" + tool)
     tool
   }
 
