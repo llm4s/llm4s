@@ -2,7 +2,7 @@ package org.llm4s.samples.migration
 
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
-import org.llm4s.error.LLMError
+import org.llm4s.error._
 import org.llm4s.types.Result
 
 object ErrorMigration {
@@ -30,19 +30,19 @@ object ErrorMigration {
 
         // Enhanced error handling with recovery logic
         error match {
-          case LLMError.RateLimitError(_, retryAfter, provider, _, _) =>
-            println(s"Rate limited by $provider, retrying in ${retryAfter.getOrElse(60)} seconds")
+          case e: RateLimitError =>
+            println(s"Rate limited by ${e.provider}, retrying in ${e.retryAfter.getOrElse(60)} seconds")
           // Implement retry logic
 
-          case LLMError.AuthenticationError(_, provider, _) =>
-            println(s"Authentication failed for $provider - check API key")
+          case e: AuthenticationError =>
+            println(s"Authentication failed for ${e.provider} - check API key")
 
-          case LLMError.ServiceError(_, status, provider, requestId) =>
-            println(s"Service error from $provider (status: $status)")
-            requestId.foreach(id => println(s"Request ID: $id"))
+          case e: ServiceError =>
+            println(s"Service error from ${e.provider} (status: ${e.httpStatus})")
+            e.requestId.foreach(id => println(s"Request ID: $id"))
 
-          case LLMError.NetworkError(_, _, endpoint) =>
-            println(s"Network error connecting to $endpoint")
+          case e: NetworkError =>
+            println(s"Network error connecting to ${e.endpoint}")
             if (error.isRecoverable) {
               println("Will retry with exponential backoff")
             }

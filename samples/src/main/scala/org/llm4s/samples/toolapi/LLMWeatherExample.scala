@@ -77,11 +77,8 @@ object LLMWeatherExample {
           }
         }
 
-      case Left(UnknownError(throwable)) =>
-        println(s"Error: ${throwable.getMessage}")
-        throwable.printStackTrace()
       case Left(error) =>
-        println(s"Error: $error")
+        println(s"Error: ${error.formatted}")
     }
 
   /**

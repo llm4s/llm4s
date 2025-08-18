@@ -1,7 +1,8 @@
 package org.llm4s.samples.types
 
+import org.llm4s.types._
 import org.llm4s.AsyncResult
-import org.llm4s.types.{ AgentId, ApiKey, AsyncResult, ImagePrompt, ModelName, ProviderName, Result, WorkflowId }
+import org.llm4s.error.ConfigurationError
 
 import scala.concurrent.Future
 
@@ -18,7 +19,7 @@ object TypeUsage {
   def exampleTypeSafeIds(): Unit = {
     val modelName = ModelName.GPT_4
     val provider  = ProviderName.OPENAI
-    val apiKey    = ApiKey.create("sk-...").getOrElse(throw new RuntimeException("Invalid API key"))
+    val apiKey    = ApiKey("sk-test123").getOrElse(throw new RuntimeException("Invalid API key"))
 
     println(s"Using model $modelName from provider $provider")
     println(s"API key: $apiKey") // Safely prints masked version
@@ -27,7 +28,7 @@ object TypeUsage {
   // Example: Using Result types
   def exampleResultTypes(): Result[String] =
     for {
-      modelName <- ModelName.create("gpt-4")
+      modelName <- ModelName("gpt-4")
       provider  <- ProviderName.create("openai")
       apiKey    <- ApiKey.fromEnvironment("OPENAI_API_KEY")
     } yield s"Configuration: $provider/$modelName with key ${apiKey.masked}"

@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.trace.Tracing
 import org.llm4s.agent.{AgentState, AgentStatus}
 import org.llm4s.toolapi.ToolRegistry
-import org.llm4s.error.LLMError
+import org.llm4s.error._
 
 object BasicLLMCallingWithTrace {
   def main(args: Array[String]): Unit = {
@@ -57,17 +57,8 @@ object BasicLLMCallingWithTrace {
         }
 
       case Left(error) =>
-        tracer.traceError(error match {
-          case LLMError.UnknownError(_, Some(cause)) => cause
-          case other => new RuntimeException(other.formatted)
-        })
-        error match {
-          case LLMError.UnknownError(message, Some(cause)) =>
-            println(s"Error: ${cause.getMessage}")
-            cause.printStackTrace()
-          case _ =>
-            println(s"Error: ${error.formatted}")
-        }
+        tracer.traceError(new RuntimeException(error.formatted))
+        println(s"Error: ${error.formatted}")
     }
     tracer.traceEvent("LLM conversation finished")
   }

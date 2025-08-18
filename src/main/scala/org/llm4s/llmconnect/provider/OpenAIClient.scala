@@ -6,6 +6,7 @@ import com.azure.core.credential.{ AzureKeyCredential, KeyCredential }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig }
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.streaming._
 import org.llm4s.toolapi.{ AzureToolHelper, ToolRegistry }
 import org.llm4s.types.Result
 import org.llm4s.error.LLMError
@@ -18,7 +19,11 @@ import scala.jdk.CollectionConverters._
  * This client supports both OpenAI's API and Azure's OpenAI service.
  * It handles message conversion, completion requests, and tool calls.
  */
-class OpenAIClient private (private val model: String, private val client: AzureOpenAIClient) extends LLMClient {
+class OpenAIClient private (
+  private val model: String,
+  private val client: AzureOpenAIClient,
+  private val config: Either[OpenAIConfig, AzureConfig]
+) extends LLMClient {
 
   /* * Constructor for OpenAI (non-Azure) */
   def this(config: OpenAIConfig) = this(
@@ -26,7 +31,8 @@ class OpenAIClient private (private val model: String, private val client: Azure
     new OpenAIClientBuilder()
       .credential(new KeyCredential(config.apiKey))
       .endpoint(config.baseUrl)
-      .buildClient()
+      .buildClient(),
+    Left(config)
   )
 
   /** Constructor for Azure OpenAI */
@@ -36,7 +42,8 @@ class OpenAIClient private (private val model: String, private val client: Azure
       .credential(new AzureKeyCredential(config.apiKey))
       .endpoint(config.endpoint)
       .serviceVersion(OpenAIServiceVersion.valueOf(config.apiVersion))
-      .buildClient()
+      .buildClient(),
+    Right(config)
   )
 
   override def complete(
@@ -81,8 +88,88 @@ class OpenAIClient private (private val model: String, private val client: Azure
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
-    // Simplified implementation for now
-    complete(conversation, options)
+    try {
+      // Convert conversation to Azure format
+      val chatMessages = convertToOpenAIMessages(conversation)
+
+      // Create chat options with streaming enabled
+      val chatOptions = new ChatCompletionsOptions(chatMessages)
+
+      // Set options
+      chatOptions.setTemperature(options.temperature.doubleValue())
+      options.maxTokens.foreach(mt => chatOptions.setMaxTokens(mt))
+      chatOptions.setPresencePenalty(options.presencePenalty.doubleValue())
+      chatOptions.setFrequencyPenalty(options.frequencyPenalty.doubleValue())
+      chatOptions.setTopP(options.topP.doubleValue())
+
+      // Add tools if specified
+      if (options.tools.nonEmpty) {
+        val toolRegistry = new ToolRegistry(options.tools)
+        AzureToolHelper.addToolsToOptions(toolRegistry, chatOptions)
+      }
+
+      // Use the SDK's streaming method
+      val stream = client.getChatCompletionsStream(model, chatOptions)
+
+      // Create accumulator for building the final completion
+      val accumulator = StreamingAccumulator.create()
+
+      // Process the stream
+      stream.forEach { chatCompletions =>
+        if (chatCompletions.getChoices != null && !chatCompletions.getChoices.isEmpty) {
+          val choice = chatCompletions.getChoices.get(0)
+          val delta  = choice.getDelta
+
+          // Create StreamedChunk from delta
+          val chunk = StreamedChunk(
+            id = Option(chatCompletions.getId).getOrElse(""),
+            content = Option(delta.getContent),
+            toolCall = extractStreamingToolCall(delta),
+            finishReason = Option(choice.getFinishReason).map(_.toString)
+          )
+
+          // Add to accumulator
+          accumulator.addChunk(chunk)
+
+          // Call the callback
+          onChunk(chunk)
+
+          // Check if streaming is complete
+          if (choice.getFinishReason != null) {
+            // Extract usage if available
+            Option(chatCompletions.getUsage).foreach { usage =>
+              accumulator.updateTokens(usage.getPromptTokens, usage.getCompletionTokens)
+            }
+          }
+        }
+      }
+
+      // Return the accumulated completion
+      accumulator.toCompletion()
+    } catch {
+      case e: Exception => Left(LLMError.fromThrowable(e))
+    }
+
+  private def extractStreamingToolCall(delta: ChatResponseMessage): Option[ToolCall] =
+    Option(delta.getToolCalls).flatMap { toolCalls =>
+      if (!toolCalls.isEmpty) {
+        val tc = toolCalls.get(0)
+        tc match {
+          case ftc: ChatCompletionsFunctionToolCall =>
+            Some(
+              ToolCall(
+                id = ftc.getId,
+                name = Option(ftc.getFunction).map(_.getName).getOrElse(""),
+                arguments = Option(ftc.getFunction)
+                  .flatMap(f => Option(f.getArguments))
+                  .map(args => ujson.read(args))
+                  .getOrElse(ujson.Null)
+              )
+            )
+          case _ => None
+        }
+      } else None
+    }
 
   private def convertToOpenAIMessages(conversation: Conversation): java.util.ArrayList[ChatRequestMessage] = {
     val messages = new java.util.ArrayList[ChatRequestMessage]()

@@ -165,10 +165,8 @@ object WorkspaceToolExample {
           }
         }
 
-      case Left(UnknownError(throwable)) =>
-        logger.error("Unknown error occurred: {}", throwable.getMessage, throwable)
       case Left(error) =>
-        logger.error("Error occurred: {}", error)
+        logger.error("Error occurred: {}", error.formatted)
     }
 
   /**
