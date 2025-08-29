@@ -1,9 +1,9 @@
 package org.llm4s.llmconnect
 
 import org.llm4s.config.EnvLoader
-import org.llm4s.llmconnect.config.{ AnthropicConfig, AzureConfig, OpenAIConfig, ProviderConfig }
+import org.llm4s.llmconnect.config.{ AnthropicConfig, AzureConfig, OpenAIConfig, ProviderConfig, OllamaConfig }
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.provider.{ AnthropicClient, LLMProvider, OpenAIClient, OpenRouterClient }
+import org.llm4s.llmconnect.provider.{ AnthropicClient, LLMProvider, OpenAIClient, OpenRouterClient, OllamaClient }
 
 object LLMConnect {
   private def readEnv(key: String): Option[String] =
@@ -42,9 +42,16 @@ object LLMConnect {
       val modelName = model.replace("anthropic/", "")
       val config    = AnthropicConfig.fromEnv(modelName)
       new AnthropicClient(config)
+    } else if (model.startsWith("ollama/")) {
+      val modelName = model.replace("ollama/", "")
+      OllamaConfig.fromEnv(modelName).fold(
+        throw new IllegalArgumentException("Failed to parse Ollama config from environment variables. Please set OLLAMA_BASE_URL.")
+      )(
+        config => new OllamaClient(config)
+      )
     } else {
       throw new IllegalArgumentException(
-        s"Model $model is not supported. Supported formats are: 'openai/model-name', 'openrouter/model-name', 'azure/model-name', or 'anthropic/model-name'."
+        s"Model $model is not supported. Supported formats are: 'openai/...', 'openrouter/...', 'azure/...', 'anthropic/...', or 'ollama/...'."
       )
     }
   }
@@ -64,6 +71,9 @@ object LLMConnect {
       case LLMProvider.Anthropic =>
         val anthropicConfig = config.asInstanceOf[AnthropicConfig]
         new AnthropicClient(anthropicConfig)
+      case LLMProvider.Ollama =>
+        val ollamaConfig = config.asInstanceOf[OllamaConfig]
+        new OllamaClient(ollamaConfig)
     }
 
   /**
