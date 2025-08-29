@@ -20,9 +20,9 @@ class OllamaClient(config: OllamaConfig) extends LLMClient {
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] =
-    try {
+    try
       connect(conversation, options)
-    } catch {
+    catch {
       case e: Exception =>
         Left(LLMError.fromThrowable(e))
     }
@@ -109,8 +109,10 @@ class OllamaClient(config: OllamaConfig) extends LLMClient {
           }
         }
       } finally {
-        try reader.close() catch { case _: Throwable => () }
-        try response.body().close() catch { case _: Throwable => () }
+        try reader.close()
+        catch { case _: Throwable => () }
+        try response.body().close()
+        catch { case _: Throwable => () }
       }
 
       accumulator.toCompletion()
@@ -124,8 +126,8 @@ class OllamaClient(config: OllamaConfig) extends LLMClient {
     stream: Boolean
   ): ujson.Obj = {
     val msgs = ujson.Arr.from(conversation.messages.collect {
-      case SystemMessage(content)    => ujson.Obj("role" -> "system", "content" -> content)
-      case UserMessage(content)      => ujson.Obj("role" -> "user", "content" -> content)
+      case SystemMessage(content)       => ujson.Obj("role" -> "system", "content" -> content)
+      case UserMessage(content)         => ujson.Obj("role" -> "user", "content" -> content)
       case AssistantMessage(content, _) => ujson.Obj("role" -> "assistant", "content" -> content)
       // Tool messages are not supported by Ollama chat API; drop them
     })
@@ -166,4 +168,3 @@ class OllamaClient(config: OllamaConfig) extends LLMClient {
     )
   }
 }
-

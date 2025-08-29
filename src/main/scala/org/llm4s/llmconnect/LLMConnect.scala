@@ -44,15 +44,19 @@ object LLMConnect {
       new AnthropicClient(config)
     } else if (model.startsWith("ollama/")) {
       val modelName = model.replace("ollama/", "")
-      OllamaConfig.fromEnv(modelName).fold(
-        throw new IllegalArgumentException("Failed to parse Ollama config from environment variables. Please set OLLAMA_BASE_URL.")
-      )(
-        config => new OllamaClient(config)
-      )
+      OllamaConfig
+        .fromEnv(modelName)
+        .fold(
+          throw new IllegalArgumentException(
+            "Failed to parse Ollama config from environment variables. " +
+              "Please set OLLAMA_BASE_URL."
+          )
+        )(config => new OllamaClient(config))
     } else {
-      throw new IllegalArgumentException(
-        s"Model $model is not supported. Supported formats are: 'openai/...', 'openrouter/...', 'azure/...', 'anthropic/...', or 'ollama/...'."
-      )
+      val msg =
+        s"Model $model is not supported. Supported formats are: " +
+          "'openai/...', 'openrouter/...', 'azure/...', 'anthropic/...', or 'ollama/...'."
+      throw new IllegalArgumentException(msg)
     }
   }
 

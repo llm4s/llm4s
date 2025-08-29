@@ -99,13 +99,12 @@ case class OllamaConfig(
 ) extends ProviderConfig
 
 object OllamaConfig {
-  
+
   def fromEnv(modelName: String): Option[OllamaConfig] =
-    ProviderConfig.readEnv("OLLAMA_BASE_URL").map{
-      baseUrl =>
-        OllamaConfig(
-          model = modelName,
-          baseUrl = baseUrl
-        )
+    ProviderConfig.readEnv("OLLAMA_BASE_URL").map { baseUrl =>
+      OllamaConfig(
+        model = modelName,
+        baseUrl = baseUrl
+      )
     }
 }
