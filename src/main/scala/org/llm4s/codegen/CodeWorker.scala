@@ -1,6 +1,7 @@
 package org.llm4s.codegen
 
 import org.llm4s.agent.{ Agent, AgentState, AgentStatus }
+import org.llm4s.config.ConfigReader
 import org.llm4s.llmconnect.LLM
 import org.llm4s.toolapi._
 import org.llm4s.workspace.ContainerisedWorkspace
@@ -15,10 +16,10 @@ import org.llm4s.error.ValidationError
  *
  * @param sourceDirectory The directory containing the codebase to work with
  */
-class CodeWorker(sourceDirectory: String) {
+class CodeWorker(sourceDirectory: String)(reader: ConfigReader) {
   private val logger    = LoggerFactory.getLogger(getClass)
   private val workspace = new ContainerisedWorkspace(sourceDirectory)
-  private val client    = LLM.client()
+  private val client    = LLM.client(reader)
   private val agent     = new Agent(client)
 
   // Custom tool definitions for working with code

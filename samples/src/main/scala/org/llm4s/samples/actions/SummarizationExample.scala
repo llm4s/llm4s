@@ -1,12 +1,11 @@
 package org.llm4s.samples.actions
 
-import org.llm4s.llmconnect.LLM
-import org.llm4s.llmconnect.model._
-import org.llm4s.types.Result
-import org.llm4s.error.LLMError
-import org.llm4s.tokens.Tokenizer
-import org.llm4s.identity.TokenizerId
+import org.llm4s.config.EnvLoader
 import org.llm4s.identity.TokenizerId.O200K_BASE
+import org.llm4s.llmconnect.LLM
+import org.llm4s.llmconnect.model.*
+import org.llm4s.tokens.Tokenizer
+import org.llm4s.types.Result
 
 /**
  * Example demonstrating how to use LLM4S for text summarization.
@@ -58,7 +57,7 @@ object SummarizationExample {
     )
 
     // Get a client using environment variables
-    val client = LLM.client()
+    val client = LLM.client(EnvLoader)
 
     println("Original text:")
     println("--------------")
@@ -136,7 +135,7 @@ object SummarizationExample {
     )
 
     // Get client and complete
-    val client = LLM.client()
+    val client = LLM.client(EnvLoader)
     client.complete(conversation).map(_.message.content.trim)
   }
 }

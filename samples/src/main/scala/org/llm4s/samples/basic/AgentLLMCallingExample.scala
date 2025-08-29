@@ -2,13 +2,14 @@ package org.llm4s.samples.basic
 
 import org.llm4s.llmconnect.LLM
 import org.llm4s.agent.{Agent, AgentState, AgentStatus}
+import org.llm4s.config.EnvLoader
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.tools.CalculatorTool
-import org.llm4s.trace.{EnhancedTracing, TracingMode, TraceEvent, TracingComposer}
+import org.llm4s.trace.{EnhancedTracing, TraceEvent, TracingComposer, TracingMode}
 import org.llm4s.samples.util.{BenchmarkUtil, TracingUtil}
-
 import org.slf4j.LoggerFactory
-import scala.util.{Try, Success, Failure}
+
+import scala.util.{Failure, Success, Try}
 
 /**
  * Enhanced example demonstrating the difference between basic LLM calls and the Agent framework
@@ -107,7 +108,7 @@ object AgentLLMCallingExample {
     }
     
     // Create agent with LLM client
-    val llmClient = LLM.client()
+    val llmClient = LLM.client(EnvLoader)
     val agent = new Agent(llmClient)
     
     // Initialize agent state with tools and query

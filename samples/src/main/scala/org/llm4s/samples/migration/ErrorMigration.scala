@@ -1,6 +1,7 @@
 package org.llm4s.samples.migration
 
 import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.config.EnvLoader
 import org.llm4s.llmconnect.model._
 import org.llm4s.error._
 import org.llm4s.types.Result
@@ -11,7 +12,7 @@ object ErrorMigration {
    * CURRENT CODE (uses enhanced error types):
    */
   def currentApproach(): Unit = {
-    val client = LLMConnect.getClient()
+    val client = LLMConnect.getClient(EnvLoader)
     val conversation = Conversation(
       Seq(
         SystemMessage("You are helpful"),
