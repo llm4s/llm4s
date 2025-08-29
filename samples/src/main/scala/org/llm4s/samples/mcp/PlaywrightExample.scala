@@ -2,6 +2,7 @@ package org.llm4s.samples.mcp
 
 import cats.implicits._
 import org.llm4s.agent.{Agent, AgentState}
+import org.llm4s.config.EnvLoader
 import org.llm4s.llmconnect.model.{Conversation, SystemMessage, UserMessage}
 import org.llm4s.llmconnect.{LLM, LLMClient}
 import org.llm4s.mcp._
@@ -102,7 +103,7 @@ object PlaywrightExample {
       _ <- checkCommand("npx", "npx")
     } yield {
       logger.info("✅ Prerequisites validated and LLM client initialized")
-      LLM.client()
+      LLM.client(EnvLoader)
     }
 
   // Run multiple browser automation queries to test different capabilities

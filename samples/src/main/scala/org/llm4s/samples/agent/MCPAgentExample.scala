@@ -1,6 +1,7 @@
 package org.llm4s.samples.agent
 
 import org.llm4s.agent.Agent
+import org.llm4s.config.EnvLoader
 import org.llm4s.llmconnect.LLM
 import org.llm4s.mcp._
 import org.llm4s.toolapi.tools.WeatherTool
@@ -54,7 +55,7 @@ object MCPAgentExample {
   }
   
   private def runAgentExample(registry: MCPToolRegistry): Unit = {
-    val client = LLM.client()
+    val client = LLM.client(EnvLoader)
     val agent = new Agent(client)
     
     val query = "Convert 100 USD to EUR and then check the weather in Paris"

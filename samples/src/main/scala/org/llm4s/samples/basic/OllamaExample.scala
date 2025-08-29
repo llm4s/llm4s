@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.config.EnvLoader
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 
@@ -11,7 +12,7 @@ object OllamaExample {
       UserMessage("Name three facts about Scala.")
     )
 
-    val result = LLMConnect.complete(messages)
+    val result = LLMConnect.complete(messages)(EnvLoader)
     result match {
       case Right(completion) =>
         println("Assistant:\n" + completion.message.content)
