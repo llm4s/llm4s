@@ -2,7 +2,7 @@ package org.llm4s.config
 
 import io.github.cdimascio.dotenv.Dotenv
 
-object EnvLoader extends ConfigReader {
+private[config] object EnvLoader extends ConfigReader {
   private lazy val dotenv = Dotenv
     .configure()
     .ignoreIfMissing()

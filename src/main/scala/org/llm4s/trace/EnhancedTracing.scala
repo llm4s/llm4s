@@ -130,19 +130,19 @@ object TracingMode {
  * Enhanced factory for creating tracing instances
  */
 object EnhancedTracing {
-  def create(mode: TracingMode): EnhancedTracing = mode match {
-    case TracingMode.Langfuse => EnhancedLangfuseTracing(ConfigReader.LLMConfig())
+  def create(mode: TracingMode)(config: ConfigReader): EnhancedTracing = mode match {
+    case TracingMode.Langfuse => EnhancedLangfuseTracing(config)
     case TracingMode.Console  => new EnhancedConsoleTracing()
     case TracingMode.NoOp     => new EnhancedNoOpTracing()
   }
 
-  def create(): EnhancedTracing = {
+  def create()(config: ConfigReader): EnhancedTracing = {
     val mode = sys.env
       .get("TRACING_MODE")
       .map(TracingMode.fromString)
       .getOrElse(TracingMode.Console)
-    create(mode)
+    create(mode)(config)
   }
 
-  def create(mode: String): EnhancedTracing = create(TracingMode.fromString(mode))
+  def create(mode: String)(config: ConfigReader): EnhancedTracing = create(TracingMode.fromString(mode))(config)
 }

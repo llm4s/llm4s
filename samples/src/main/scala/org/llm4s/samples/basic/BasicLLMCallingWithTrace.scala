@@ -9,7 +9,8 @@ import org.llm4s.trace.Tracing
 
 object BasicLLMCallingWithTrace {
   def main(args: Array[String]): Unit = {
-    val tracer = Tracing.create()
+    val config = LLMConfig()
+    val tracer = Tracing.create()(config)
 
     // Create a conversation with messages
     val conversation = Conversation(
@@ -22,7 +23,7 @@ object BasicLLMCallingWithTrace {
     )
 
 
-    val client    = LLM.client(LLMConfig())
+    val client    = LLM.client(config)
 
     // Trace the start of the agent run
     tracer.traceEvent("Starting LLM conversation")

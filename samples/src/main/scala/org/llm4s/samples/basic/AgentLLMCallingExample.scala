@@ -1,15 +1,16 @@
 package org.llm4s.samples.basic
 
-import org.llm4s.agent.{ Agent, AgentState, AgentStatus }
+import org.llm4s.agent.{Agent, AgentState, AgentStatus}
+import org.llm4s.config.ConfigReader
 import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.LLM
-import org.llm4s.samples.util.{ BenchmarkUtil, TracingUtil }
+import org.llm4s.samples.util.{BenchmarkUtil, TracingUtil}
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.tools.CalculatorTool
-import org.llm4s.trace.{ EnhancedTracing, TracingComposer, TracingMode }
+import org.llm4s.trace.{EnhancedTracing, TracingComposer, TracingMode}
 import org.slf4j.LoggerFactory
 
-import scala.util.{ Failure, Success, Try }
+import scala.util.{Failure, Success, Try}
 
 /**
  * Enhanced example demonstrating the difference between basic LLM calls and the Agent framework
@@ -34,9 +35,9 @@ object AgentLLMCallingExample {
   def main(args: Array[String]): Unit = {
     logger.info("🧮 Calculator Tool Agent Demo with Tracing")
     logger.info("=" * 50)
-
+    val config:ConfigReader = ConfigReader.LLMConfig()
     // Create tracing based on environment variable
-    val tracing = createComprehensiveTracing()
+    val tracing = createComprehensiveTracing()(config)
 
     // Log the tracing configuration
     logger.info("🔍 Tracing Configuration:")
@@ -51,7 +52,7 @@ object AgentLLMCallingExample {
     logger.info("🧪 Tracing initialized successfully")
 
     // Calculator Agent Demo
-    demonstrateCalculatorAgent(tracing)
+    demonstrateCalculatorAgent(tracing)(config)
 
     logger.info("=" * 50)
     logger.info("✨ Calculator Demo Complete!")
@@ -60,12 +61,12 @@ object AgentLLMCallingExample {
   /**
    * Create comprehensive tracing with all three modes combined
    */
-  private def createComprehensiveTracing(): EnhancedTracing = {
+  private def createComprehensiveTracing()(config: ConfigReader): EnhancedTracing = {
     val tracingAttempt = Try {
       // Create individual tracers
-      val langfuseTracing = EnhancedTracing.create(TracingMode.Langfuse)
-      val consoleTracing  = EnhancedTracing.create(TracingMode.Console)
-      val noOpTracing     = EnhancedTracing.create(TracingMode.NoOp)
+      val langfuseTracing = EnhancedTracing.create(TracingMode.Langfuse)(config)
+      val consoleTracing  = EnhancedTracing.create(TracingMode.Console)(config)
+      val noOpTracing     = EnhancedTracing.create(TracingMode.NoOp)(config)
 
       logger.info("✅ All tracing modes initialized successfully")
 
@@ -85,14 +86,14 @@ object AgentLLMCallingExample {
       case Failure(e) =>
         logger.warn("⚠️  Some tracing modes failed: {}", e.getMessage)
         logger.info("🔄 Falling back to console tracing only")
-        EnhancedTracing.create(TracingMode.Console)
+        EnhancedTracing.create(TracingMode.Console)(config)
     }
   }
 
   /**
    * Simple Calculator Agent Demo
    */
-  private def demonstrateCalculatorAgent(tracing: EnhancedTracing): Unit = {
+  private def demonstrateCalculatorAgent(tracing: EnhancedTracing)(config:ConfigReader): Unit = {
     logger.info("🧮 Calculator Agent Demo")
     logger.info("Testing calculator tool with agent framework")
 
@@ -106,7 +107,7 @@ object AgentLLMCallingExample {
       tools.foreach(tool => logger.info("• {}: {}", tool.name, tool.description))
 
       // Create agent with LLM client
-      val llmClient = LLM.client(LLMConfig())
+      val llmClient = LLM.client(config)
       val agent     = new Agent(llmClient)
 
       // Initialize agent state with tools and query

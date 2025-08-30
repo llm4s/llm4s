@@ -1,10 +1,11 @@
 package org.llm4s.samples.mcp
 
 import cats.implicits._
-import org.llm4s.agent.{ Agent, AgentState }
+import org.llm4s.agent.{Agent, AgentState}
+import org.llm4s.config.ConfigReader
 import org.llm4s.config.ConfigReader.LLMConfig
-import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
-import org.llm4s.llmconnect.{ LLM, LLMClient }
+import org.llm4s.llmconnect.model.{Conversation, SystemMessage, UserMessage}
+import org.llm4s.llmconnect.{LLM, LLMClient}
 import org.llm4s.mcp._
 import org.llm4s.toolapi.ToolFunction
 import org.slf4j.LoggerFactory
@@ -71,7 +72,7 @@ object PlaywrightExample {
     logger.info("🌐 Demonstrating browser automation with MCP integration")
 
     val result = for {
-      client <- validatePrerequisites()
+      client <- validatePrerequisites()(LLMConfig())
       mcpRegistry = MCPToolRegistry()
       _ <- checkForTools(mcpRegistry)
       _ <- runQueries(client, mcpRegistry)
@@ -97,13 +98,13 @@ object PlaywrightExample {
       }
     }.toEither.leftMap(ex => ex.getMessage)
 
-  private def validatePrerequisites(): Either[String, LLMClient] =
+  private def validatePrerequisites()(config:ConfigReader): Either[String, LLMClient] =
     for {
       _ <- checkCommand("node", "Node.js")
       _ <- checkCommand("npx", "npx")
     } yield {
       logger.info("✅ Prerequisites validated and LLM client initialized")
-      LLM.client(LLMConfig())
+      LLM.client(config)
     }
 
   // Run multiple browser automation queries to test different capabilities

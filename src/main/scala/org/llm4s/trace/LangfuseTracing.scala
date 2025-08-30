@@ -1,7 +1,7 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.AgentState
-import org.llm4s.config.{ ConfigKeys, ConfigReader, EnvLoader }
+import org.llm4s.config.{ ConfigKeys, ConfigReader }
 import org.llm4s.llmconnect.model.{ AssistantMessage, SystemMessage, ToolMessage, UserMessage }
 import org.slf4j.LoggerFactory
 import ConfigKeys._
@@ -12,12 +12,12 @@ import java.util.UUID
 import scala.util.{ Failure, Success, Try }
 
 class LangfuseTracing(
-  langfuseUrl: String = EnvLoader.getOrElse(LANGFUSE_URL, DEFAULT_LANGFUSE_URL),
-  publicKey: String = EnvLoader.getOrElse(LANGFUSE_PUBLIC_KEY, ""),
-  secretKey: String = EnvLoader.getOrElse(LANGFUSE_SECRET_KEY, ""),
-  environment: String = EnvLoader.getOrElse(LANGFUSE_ENV, DEFAULT_LANGFUSE_ENV),
-  release: String = EnvLoader.getOrElse(LANGFUSE_RELEASE, DEFAULT_LANGFUSE_RELEASE),
-  version: String = EnvLoader.getOrElse(LANGFUSE_VERSION, DEFAULT_LANGFUSE_VERSION)
+  langfuseUrl: String,
+  publicKey: String,
+  secretKey: String,
+  environment: String,
+  release: String,
+  version: String
 ) extends Tracing {
 
   // Factory to build from any ConfigReader without internal fallbacks

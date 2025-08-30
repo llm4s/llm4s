@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
-import org.llm4s.config.EnvLoader
+import org.llm4s.config.{ ConfigKeys, ConfigReader }
+import ConfigKeys._
 
 case class EmbeddingProviderConfig(
   baseUrl: String,
@@ -10,30 +11,30 @@ case class EmbeddingProviderConfig(
 
 object EmbeddingConfig {
 
-  def loadEnv(name: String): String =
-    EnvLoader.get(name).getOrElse(throw new RuntimeException(s"Missing env variable: $name"))
+  def loadEnv(name: String)(config: ConfigReader): String =
+    config.get(name).getOrElse(throw new RuntimeException(s"Missing env variable: $name"))
 
-  def loadOptionalEnv(name: String, default: String): String =
-    EnvLoader.get(name).getOrElse(default)
+  def loadOptionalEnv(name: String, default: String)(config: ConfigReader): String =
+    config.get(name).getOrElse(default)
 
-  val openAI: EmbeddingProviderConfig = EmbeddingProviderConfig(
-    baseUrl = loadEnv("OPENAI_EMBEDDING_BASE_URL"),
-    model = loadEnv("OPENAI_EMBEDDING_MODEL"),
-    apiKey = loadEnv("OPENAI_API_KEY")
+  def openAI(config: ConfigReader): EmbeddingProviderConfig = EmbeddingProviderConfig(
+    baseUrl = loadEnv(OPENAI_EMBEDDING_BASE_URL)(config),
+    model = loadEnv(OPENAI_EMBEDDING_MODEL)(config),
+    apiKey = loadEnv(OPENAI_API_KEY)(config)
   )
 
-  val voyage: EmbeddingProviderConfig = EmbeddingProviderConfig(
-    baseUrl = loadEnv("VOYAGE_EMBEDDING_BASE_URL"),
-    model = loadEnv("VOYAGE_EMBEDDING_MODEL"),
-    apiKey = loadEnv("VOYAGE_API_KEY")
+  def voyage(config: ConfigReader): EmbeddingProviderConfig = EmbeddingProviderConfig(
+    baseUrl = loadEnv(VOYAGE_EMBEDDING_BASE_URL)(config),
+    model = loadEnv(VOYAGE_EMBEDDING_MODEL)(config),
+    apiKey = loadEnv(VOYAGE_API_KEY)(config)
   )
 
-  val activeProvider: String = loadEnv("EMBEDDING_PROVIDER")
-  val inputPath: String      = loadEnv("EMBEDDING_INPUT_PATH")
-  val query: String          = loadEnv("EMBEDDING_QUERY")
+  def activeProvider(config: ConfigReader): String = loadEnv(EMBEDDING_PROVIDER)(config)
+  def inputPath(config: ConfigReader): String      = loadEnv(EMBEDDING_INPUT_PATH)(config)
+  def query(config: ConfigReader): String          = loadEnv(EMBEDDING_QUERY)(config)
 
   // 🔁 Chunking support (with default fallbacks)
-  val chunkSize: Int           = loadOptionalEnv("CHUNK_SIZE", "1000").toInt
-  val chunkOverlap: Int        = loadOptionalEnv("CHUNK_OVERLAP", "100").toInt
-  val chunkingEnabled: Boolean = loadOptionalEnv("CHUNKING_ENABLED", "true").toBoolean
+  def chunkSize(config: ConfigReader): Int           = loadOptionalEnv(CHUNK_SIZE, "1000")(config).toInt
+  def chunkOverlap(config: ConfigReader): Int        = loadOptionalEnv(CHUNK_OVERLAP, "100")(config).toInt
+  def chunkingEnabled(config: ConfigReader): Boolean = loadOptionalEnv(CHUNKING_ENABLED, "true")(config).toBoolean
 }

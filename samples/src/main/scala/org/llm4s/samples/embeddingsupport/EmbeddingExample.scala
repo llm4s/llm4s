@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.model.{EmbeddingRequest, ExtractorError}
 import org.llm4s.llmconnect.utils.{ChunkingUtils, SimilarityUtils}
 import org.llm4s.llmconnect.EmbeddingClient
 import org.slf4j.LoggerFactory
+import org.llm4s.config.ConfigReader.LLMConfig
 
 object EmbeddingExample {
 
@@ -14,8 +15,9 @@ object EmbeddingExample {
   def main(args: Array[String]): Unit = {
     logger.info("Starting embedding example...")
 
-    val inputPath = EmbeddingConfig.inputPath
-    val query     = EmbeddingConfig.query
+    val config = LLMConfig()
+    val inputPath = EmbeddingConfig.inputPath(config)
+    val query     = EmbeddingConfig.query(config)
 
     logger.info(s"Extracting from: $inputPath")
     val extractedEither = UniversalExtractor.extract(inputPath)
@@ -26,9 +28,9 @@ object EmbeddingExample {
         return
 
       case Right(text) =>
-        val inputs: Seq[String] = if (EmbeddingConfig.chunkingEnabled) {
-          logger.info(s"\nChunking enabled. Using size=${EmbeddingConfig.chunkSize}, overlap=${EmbeddingConfig.chunkOverlap}")
-          ChunkingUtils.chunkText(text, EmbeddingConfig.chunkSize, EmbeddingConfig.chunkOverlap)
+        val inputs: Seq[String] = if (EmbeddingConfig.chunkingEnabled(config)) {
+          logger.info(s"\nChunking enabled. Using size=${EmbeddingConfig.chunkSize(config)}, overlap=${EmbeddingConfig.chunkOverlap(config)}")
+          ChunkingUtils.chunkText(text, EmbeddingConfig.chunkSize(config), EmbeddingConfig.chunkOverlap(config))
         } else {
           logger.info("\nChunking disabled. Proceeding with full text.")
           Seq(text)
@@ -38,10 +40,10 @@ object EmbeddingExample {
 
         val request = EmbeddingRequest(
           input = inputs :+ query,  // include query for similarity
-          model = org.llm4s.llmconnect.utils.ModelSelector.selectModel()
+          model = org.llm4s.llmconnect.utils.ModelSelector.selectModel(config)
         )
 
-        val client = EmbeddingClient.fromConfig()
+        val client = EmbeddingClient.fromConfig(config)
         val response = client.embed(request)
 
         response match {
