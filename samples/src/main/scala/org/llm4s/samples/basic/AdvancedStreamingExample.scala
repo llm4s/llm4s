@@ -1,8 +1,9 @@
 package org.llm4s.samples.basic
 
-import org.llm4s.config.EnvLoader
+import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.LLM
 import org.llm4s.llmconnect.model._
+
 import scala.collection.mutable
 
 /**
@@ -56,7 +57,7 @@ object AdvancedStreamingExample {
       )
     )
 
-    val client = LLM.client(EnvLoader)
+    val client = LLM.client(LLMConfig())
 
     println("🎨 Advanced Streaming Example - Story Generation")
     println("=" * 60)

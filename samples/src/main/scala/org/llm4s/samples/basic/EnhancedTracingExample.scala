@@ -3,7 +3,6 @@ package org.llm4s.samples.basic
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.trace.{EnhancedTracing, TracingComposer, TraceEvent, TracingMode}
 import org.slf4j.LoggerFactory
-import ujson._
 
 object EnhancedTracingExample {
   private val logger = LoggerFactory.getLogger(getClass)

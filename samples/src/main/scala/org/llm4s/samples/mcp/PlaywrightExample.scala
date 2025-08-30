@@ -1,10 +1,10 @@
 package org.llm4s.samples.mcp
 
 import cats.implicits._
-import org.llm4s.agent.{Agent, AgentState}
-import org.llm4s.config.EnvLoader
-import org.llm4s.llmconnect.model.{Conversation, SystemMessage, UserMessage}
-import org.llm4s.llmconnect.{LLM, LLMClient}
+import org.llm4s.agent.{ Agent, AgentState }
+import org.llm4s.config.ConfigReader.LLMConfig
+import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
+import org.llm4s.llmconnect.{ LLM, LLMClient }
 import org.llm4s.mcp._
 import org.llm4s.toolapi.ToolFunction
 import org.slf4j.LoggerFactory
@@ -103,7 +103,7 @@ object PlaywrightExample {
       _ <- checkCommand("npx", "npx")
     } yield {
       logger.info("✅ Prerequisites validated and LLM client initialized")
-      LLM.client(EnvLoader)
+      LLM.client(LLMConfig())
     }
 
   // Run multiple browser automation queries to test different capabilities
@@ -201,7 +201,6 @@ object PlaywrightExample {
     maxSteps: Option[Int],
     traceLogPath: Option[String]
   ) = {
-    import org.llm4s.error.LLMError
     import org.llm4s.types.Result
 
     import scala.annotation.tailrec

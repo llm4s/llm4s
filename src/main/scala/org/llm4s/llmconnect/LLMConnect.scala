@@ -1,25 +1,26 @@
 package org.llm4s.llmconnect
 
-import org.llm4s.config.ConfigReader
+import org.llm4s.config.{ ConfigKeys, ConfigReader }
 import org.llm4s.llmconnect.config._
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider._
 import org.llm4s.types.Result
-
+import ConfigKeys.OPENAI_BASE_URL
+import ConfigKeys.LLM_MODEL
+import org.llm4s.config.DefaultConfig.DEFAULT_OPENAI_BASE_URL
 object LLMConnect {
 
   def getClient(reader: ConfigReader): LLMClient = {
-    val llmModelKey = "LLM_MODEL"
     val model = reader
-      .get(llmModelKey)
+      .get(LLM_MODEL)
       .getOrElse(
         throw new IllegalArgumentException(
-          s"Please set the `$llmModelKey` environment variable to specify the default model"
+          s"Please set the `$LLM_MODEL` environment variable to specify the default model"
         )
       )
 
     // Always use OpenRouterClient if OPENAI_BASE_URL contains 'openrouter.ai'
-    val openaiBaseUrl = reader.get("OPENAI_BASE_URL").getOrElse("https://api.openai.com/v1")
+    val openaiBaseUrl = reader.get(OPENAI_BASE_URL).getOrElse(DEFAULT_OPENAI_BASE_URL)
     if (openaiBaseUrl.contains("openrouter.ai")) {
       val modelName = if (model.startsWith("openai/")) model.replace("openai/", "") else model
       val config    = OpenAIConfig.from(modelName, reader)

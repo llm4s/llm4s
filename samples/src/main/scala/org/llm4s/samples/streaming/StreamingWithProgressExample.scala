@@ -1,9 +1,9 @@
 package org.llm4s.samples.streaming
 
-import org.llm4s.config.EnvLoader
+import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.LLM
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.streaming.{StreamingAccumulator, StreamingOptions}
+import org.llm4s.llmconnect.streaming.StreamingAccumulator
 
 /**
  * Example showing streaming with progress indicators and accumulation.
@@ -38,7 +38,7 @@ object StreamingWithProgressExample {
     )
     
     // Get a client
-    val client = LLM.client(EnvLoader)
+    val client    = LLM.client(LLMConfig())
     
     // Create an accumulator to collect the response
     val accumulator = StreamingAccumulator.create()

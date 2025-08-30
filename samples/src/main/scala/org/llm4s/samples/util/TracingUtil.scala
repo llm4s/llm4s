@@ -4,7 +4,6 @@ import org.llm4s.trace.{EnhancedTracing, TraceEvent}
 import org.llm4s.agent.{AgentState, AgentStatus}
 import ujson._
 import scala.util.Try
-import scala.reflect.Selectable.reflectiveSelectable
 
 /**
  * Utility class for tracing operations

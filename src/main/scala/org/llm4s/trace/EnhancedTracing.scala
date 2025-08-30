@@ -1,7 +1,8 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.AgentState
-import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
+import org.llm4s.config.ConfigReader
+import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.types.Result
 
 /**
@@ -130,7 +131,7 @@ object TracingMode {
  */
 object EnhancedTracing {
   def create(mode: TracingMode): EnhancedTracing = mode match {
-    case TracingMode.Langfuse => new EnhancedLangfuseTracing()
+    case TracingMode.Langfuse => EnhancedLangfuseTracing(ConfigReader.LLMConfig())
     case TracingMode.Console  => new EnhancedConsoleTracing()
     case TracingMode.NoOp     => new EnhancedNoOpTracing()
   }

@@ -1,9 +1,9 @@
 package org.llm4s.samples.actions
 
-import org.llm4s.config.EnvLoader
+import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.identity.TokenizerId.O200K_BASE
 import org.llm4s.llmconnect.LLM
-import org.llm4s.llmconnect.model.*
+import org.llm4s.llmconnect.model._
 import org.llm4s.tokens.Tokenizer
 import org.llm4s.types.Result
 
@@ -57,7 +57,7 @@ object SummarizationExample {
     )
 
     // Get a client using environment variables
-    val client = LLM.client(EnvLoader)
+    val client    = LLM.client(LLMConfig())
 
     println("Original text:")
     println("--------------")
@@ -135,7 +135,7 @@ object SummarizationExample {
     )
 
     // Get client and complete
-    val client = LLM.client(EnvLoader)
+    val client = LLM.client(LLMConfig())
     client.complete(conversation).map(_.message.content.trim)
   }
 }

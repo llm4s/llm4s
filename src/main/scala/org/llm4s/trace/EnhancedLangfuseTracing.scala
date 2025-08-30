@@ -1,9 +1,11 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.AgentState
-import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
+import org.llm4s.config.ConfigKeys._
+import org.llm4s.config.DefaultConfig._
+import org.llm4s.config.ConfigReader
 import org.llm4s.error.UnknownError
-import org.llm4s.config.EnvLoader
+import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -15,12 +17,12 @@ import java.util.UUID
  * Enhanced Langfuse tracing with type-safe events
  */
 class EnhancedLangfuseTracing(
-  langfuseUrl: String = EnvLoader.getOrElse("LANGFUSE_URL", "https://cloud.langfuse.com/api/public/ingestion"),
-  publicKey: String = EnvLoader.getOrElse("LANGFUSE_PUBLIC_KEY", ""),
-  secretKey: String = EnvLoader.getOrElse("LANGFUSE_SECRET_KEY", ""),
-  environment: String = EnvLoader.getOrElse("LANGFUSE_ENV", "production"),
-  release: String = EnvLoader.getOrElse("LANGFUSE_RELEASE", "1.0.0"),
-  version: String = EnvLoader.getOrElse("LANGFUSE_VERSION", "1.0.0")
+  langfuseUrl: String,
+  publicKey: String,
+  secretKey: String,
+  environment: String,
+  release: String,
+  version: String
 ) extends EnhancedTracing {
 
   private val logger         = LoggerFactory.getLogger(getClass)
@@ -364,4 +366,16 @@ class EnhancedLangfuseTracing(
     val event = TraceEvent.TokenUsageRecorded(usage, model, operation)
     traceEvent(event)
   }
+}
+
+object EnhancedLangfuseTracing {
+  def apply(reader: ConfigReader) =
+    new EnhancedLangfuseTracing(
+      langfuseUrl = reader.getOrElse(LANGFUSE_URL, DEFAULT_LANGFUSE_URL),
+      publicKey = reader.getOrElse(LANGFUSE_PUBLIC_KEY, ""),
+      secretKey = reader.getOrElse(LANGFUSE_SECRET_KEY, ""),
+      environment = reader.getOrElse(LANGFUSE_ENV, DEFAULT_LANGFUSE_ENV),
+      release = reader.getOrElse(LANGFUSE_RELEASE, DEFAULT_LANGFUSE_RELEASE),
+      version = reader.getOrElse(LANGFUSE_VERSION, DEFAULT_LANGFUSE_VERSION)
+    )
 }

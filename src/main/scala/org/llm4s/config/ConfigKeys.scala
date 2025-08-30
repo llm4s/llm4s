@@ -1,0 +1,34 @@
+package org.llm4s.config
+
+object ConfigKeys {
+  // Core model selection
+  val LLM_MODEL = "LLM_MODEL"
+
+  // OpenAI
+  val OPENAI_API_KEY  = "OPENAI_API_KEY"
+  val OPENAI_BASE_URL = "OPENAI_BASE_URL"
+  val OPENAI_ORG      = "OPENAI_ORGANIZATION"
+
+  // OpenRouter (OpenAI-compatible)
+  val OPENROUTER_BASE_URL = OPENAI_BASE_URL // alias via base URL
+
+  // Azure OpenAI
+  val AZURE_API_BASE    = "AZURE_API_BASE"
+  val AZURE_API_KEY     = "AZURE_API_KEY"
+  val AZURE_API_VERSION = "AZURE_API_VERSION"
+
+  // Anthropic
+  val ANTHROPIC_API_KEY  = "ANTHROPIC_API_KEY"
+  val ANTHROPIC_BASE_URL = "ANTHROPIC_BASE_URL"
+
+  // Ollama
+  val OLLAMA_BASE_URL = "OLLAMA_BASE_URL"
+
+  // Langfuse
+  val LANGFUSE_URL        = "LANGFUSE_URL"
+  val LANGFUSE_PUBLIC_KEY = "LANGFUSE_PUBLIC_KEY"
+  val LANGFUSE_SECRET_KEY = "LANGFUSE_SECRET_KEY"
+  val LANGFUSE_ENV        = "LANGFUSE_ENV"
+  val LANGFUSE_RELEASE    = "LANGFUSE_RELEASE"
+  val LANGFUSE_VERSION    = "LANGFUSE_VERSION"
+}

@@ -1,23 +1,35 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.AgentState
-import org.llm4s.config.EnvLoader
+import org.llm4s.config.{ ConfigKeys, ConfigReader, EnvLoader }
 import org.llm4s.llmconnect.model.{ AssistantMessage, SystemMessage, ToolMessage, UserMessage }
 import org.slf4j.LoggerFactory
-
+import ConfigKeys._
+import org.llm4s.config.DefaultConfig._
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 import scala.util.{ Failure, Success, Try }
 
 class LangfuseTracing(
-  langfuseUrl: String = EnvLoader.getOrElse("LANGFUSE_URL", "https://cloud.langfuse.com/api/public/ingestion"),
-  publicKey: String = EnvLoader.getOrElse("LANGFUSE_PUBLIC_KEY", ""),
-  secretKey: String = EnvLoader.getOrElse("LANGFUSE_SECRET_KEY", ""),
-  environment: String = EnvLoader.getOrElse("LANGFUSE_ENV", "production"),
-  release: String = EnvLoader.getOrElse("LANGFUSE_RELEASE", "1.0.0"),
-  version: String = EnvLoader.getOrElse("LANGFUSE_VERSION", "1.0.0")
+  langfuseUrl: String = EnvLoader.getOrElse(LANGFUSE_URL, DEFAULT_LANGFUSE_URL),
+  publicKey: String = EnvLoader.getOrElse(LANGFUSE_PUBLIC_KEY, ""),
+  secretKey: String = EnvLoader.getOrElse(LANGFUSE_SECRET_KEY, ""),
+  environment: String = EnvLoader.getOrElse(LANGFUSE_ENV, DEFAULT_LANGFUSE_ENV),
+  release: String = EnvLoader.getOrElse(LANGFUSE_RELEASE, DEFAULT_LANGFUSE_RELEASE),
+  version: String = EnvLoader.getOrElse(LANGFUSE_VERSION, DEFAULT_LANGFUSE_VERSION)
 ) extends Tracing {
+
+  // Factory to build from any ConfigReader without internal fallbacks
+  def this(reader: ConfigReader) =
+    this(
+      langfuseUrl = reader.getOrElse(LANGFUSE_URL, DEFAULT_LANGFUSE_URL),
+      publicKey = reader.getOrElse(LANGFUSE_PUBLIC_KEY, ""),
+      secretKey = reader.getOrElse(LANGFUSE_SECRET_KEY, ""),
+      environment = reader.getOrElse(LANGFUSE_ENV, DEFAULT_LANGFUSE_ENV),
+      release = reader.getOrElse(LANGFUSE_RELEASE, DEFAULT_LANGFUSE_RELEASE),
+      version = reader.getOrElse(LANGFUSE_VERSION, DEFAULT_LANGFUSE_VERSION)
+    )
   private val logger         = LoggerFactory.getLogger(getClass)
   private def nowIso: String = DateTimeFormatter.ISO_INSTANT.format(Instant.now())
   private def uuid: String   = UUID.randomUUID().toString

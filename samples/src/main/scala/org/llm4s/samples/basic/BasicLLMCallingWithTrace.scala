@@ -1,7 +1,7 @@
 package org.llm4s.samples.basic
 
 import org.llm4s.agent.{ AgentState, AgentStatus }
-import org.llm4s.config.EnvLoader
+import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.LLM
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
@@ -21,8 +21,8 @@ object BasicLLMCallingWithTrace {
       )
     )
 
-    // Get a client using environment variables
-    val client = LLM.client(EnvLoader)
+
+    val client    = LLM.client(LLMConfig())
 
     // Trace the start of the agent run
     tracer.traceEvent("Starting LLM conversation")

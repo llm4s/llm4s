@@ -1,6 +1,6 @@
 package org.llm4s.codegen
 
-import org.llm4s.config.EnvLoader
+import org.llm4s.config.ConfigReader.LLMConfig
 import org.slf4j.LoggerFactory
 
 /**
@@ -15,7 +15,7 @@ object CodeGenExample {
     logger.info(s"Using workspace directory: $workspaceDir")
 
     // Create a CodeWorker instance
-    val codeWorker = new CodeWorker(workspaceDir)(EnvLoader)
+    val codeWorker = new CodeWorker(workspaceDir)(LLMConfig())
 
     // Define the trace log path
     val traceLogPath = "/Users/rory.graves/workspace/home/llm4s/log/codegen-trace.md"

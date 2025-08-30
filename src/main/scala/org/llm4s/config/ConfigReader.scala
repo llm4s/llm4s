@@ -6,7 +6,11 @@ trait ConfigReader {
 }
 
 object ConfigReader {
+
   def from(map: Map[String, String]): ConfigReader = new ConfigReader {
     override def get(key: String): Option[String] = map.get(key)
   }
+
+  def LLMConfig(): ConfigReader =
+    EnvLoader
 }

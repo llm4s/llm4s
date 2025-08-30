@@ -1,8 +1,7 @@
 package org.llm4s.samples.types
 
-import org.llm4s.types._
 import org.llm4s.AsyncResult
-import org.llm4s.error.ConfigurationError
+import org.llm4s.types._
 
 import scala.concurrent.Future
 
