@@ -63,7 +63,6 @@ case class AgentState(
         case MessageRole.Assistant => "🤖 ASSISTANT"
         case MessageRole.System    => "⚙️ SYSTEM"
         case MessageRole.Tool      => "🛠️ TOOL"
-        case _                     => s"[${message.role.name.toUpperCase}]"
       }
 
       println(s"STEP $step: $roleMarker")

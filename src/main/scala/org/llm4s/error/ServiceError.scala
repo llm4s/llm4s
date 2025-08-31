@@ -7,7 +7,7 @@ final case class ServiceError private (
   override val message: String,
   httpStatus: Int,
   provider: String,
-  requestId: Option[String] = None
+  requestId: Option[String]
 ) extends LLMError
     with RecoverableError {
 

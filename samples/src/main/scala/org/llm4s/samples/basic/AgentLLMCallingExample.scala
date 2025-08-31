@@ -2,7 +2,6 @@ package org.llm4s.samples.basic
 
 import org.llm4s.agent.{Agent, AgentState, AgentStatus}
 import org.llm4s.config.ConfigReader
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.LLM
 import org.llm4s.samples.util.{BenchmarkUtil, TracingUtil}
 import org.llm4s.toolapi.ToolRegistry

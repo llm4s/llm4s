@@ -94,9 +94,9 @@ object BasicStreamingExample {
       case Left(error) =>
         println(s"\n❌ Streaming failed: ${error.message}")
         error match {
-          case e: org.llm4s.error.AuthenticationError =>
+          case _: org.llm4s.error.AuthenticationError =>
             println("Please check your API key configuration.")
-          case e: org.llm4s.error.RateLimitError =>
+          case _: org.llm4s.error.RateLimitError =>
             println("You've hit the rate limit. Please wait and try again.")
           case _ =>
             println(s"Error details: $error")

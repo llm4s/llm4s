@@ -127,6 +127,9 @@ lazy val root = (project in file("."))
   .settings(
     name := "llm4s",
     commonSettings,
+    // Library project: do not expose or auto-discover mains
+    Compile / mainClass := None,
+    Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= List(
       "com.azure"          % "azure-ai-openai" % "1.0.0-beta.16",
       "com.anthropic"      % "anthropic-java"  % "2.2.0",
@@ -151,7 +154,9 @@ lazy val root = (project in file("."))
 lazy val shared = (project in file("shared"))
   .settings(
     name := "shared",
-    commonSettings
+    commonSettings,
+    // Pure library: avoid main discovery noise
+    Compile / discoveredMainClasses := Seq.empty
   )
 
 lazy val workspaceRunner = (project in file("workspaceRunner"))

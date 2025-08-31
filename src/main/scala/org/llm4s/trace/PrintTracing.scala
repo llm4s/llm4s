@@ -68,7 +68,6 @@ class PrintTracing extends Tracing {
         case Assistant => GREEN
         case System    => YELLOW
         case Tool      => CYAN
-        case _         => GRAY
       }
 
       println(s"${BOLD}Message ${idx + 1} (${roleColor}${msg.role}${RESET}${BOLD}):$RESET")

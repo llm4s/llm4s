@@ -10,7 +10,7 @@ import org.slf4j.LoggerFactory
 
 import java.nio.file.{Files, Path, Paths}
 import java.time.{ZoneId, ZonedDateTime}
-import scala.jdk.CollectionConverters.*
+import scala.jdk.CollectionConverters._
 import scala.util.Try
 
 object EmbeddingExample {

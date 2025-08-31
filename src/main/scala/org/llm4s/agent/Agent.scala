@@ -239,11 +239,6 @@ class Agent(client: LLMClient) {
               sb.append("\n```\n\n")
           }
 
-        case _ =>
-          sb.append(s"### Step $step: ${message.role} Message\n\n")
-          sb.append("```\n")
-          sb.append(message.content)
-          sb.append("\n```\n\n")
       }
     }
 

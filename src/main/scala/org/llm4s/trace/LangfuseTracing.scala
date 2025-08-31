@@ -278,23 +278,6 @@ class LangfuseTracing(
             )
           )
           batchEvents += eventEvent
-        case _ =>
-          val eventEvent = ujson.Obj(
-            "id"        -> uuid,
-            "timestamp" -> now,
-            "type"      -> "event-create",
-            "body" -> ujson.Obj(
-              "id"        -> s"${traceId}-event-$idx",
-              "traceId"   -> traceId,
-              "name"      -> s"Message $idx: ${msg.role}",
-              "startTime" -> now,
-              "input"     -> ujson.Obj("content" -> msg.content),
-              "metadata" -> ujson.Obj(
-                "role" -> msg.role.name
-              )
-            )
-          )
-          batchEvents += eventEvent
       }
     }
     sendBatch(batchEvents.toSeq)

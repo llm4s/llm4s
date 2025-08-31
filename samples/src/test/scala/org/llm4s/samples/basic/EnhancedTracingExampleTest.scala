@@ -4,8 +4,6 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.trace.{EnhancedTracing, TracingComposer, TraceEvent, TracingMode}
 import org.llm4s.llmconnect.model.TokenUsage
-import org.llm4s.error.LLMError
-import ujson._
 import org.llm4s.config.ConfigReader.LLMConfig
 
 class EnhancedTracingExampleTest extends AnyFunSuite with Matchers {

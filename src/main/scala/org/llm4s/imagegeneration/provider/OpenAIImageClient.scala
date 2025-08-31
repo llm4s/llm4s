@@ -28,8 +28,8 @@ import java.time.Instant
  * )
  *
  * client.generateImage("a beautiful landscape", options) match {
- *   case Right(image) => println(s"Generated image: ${image.size}")
- *   case Left(error) => println(s"Error: ${error.message}")
+ *   case Right(image) => println(s"Generated image: $${image.size}")
+ *   case Left(error) => println(s"Error: $${error.message}")
  * }
  * }}}
  */
@@ -165,7 +165,6 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
       case ImageSize.Square1024       => "1024x1024"
       case ImageSize.Landscape768x512 => if (config.model == "dall-e-3") "1792x1024" else "512x512"
       case ImageSize.Portrait512x768  => if (config.model == "dall-e-3") "1024x1792" else "512x512"
-      case _                          => "1024x1024" // Default fallback
     }
 
   /**

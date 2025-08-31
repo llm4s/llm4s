@@ -12,7 +12,8 @@ trait ToolCallDeserializer {
 
 /**
  * OpenRouter-specific tool call deserializer
- * Handles OpenRouter's double-nested array structure: [[{...}]] instead of [{...}]
+ * Handles OpenRouter's double-nested array structure (array of arrays of tool calls)
+ * rather than a single-level array of tool calls.
  */
 object OpenRouterToolCallDeserializer extends ToolCallDeserializer {
 
