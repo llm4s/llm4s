@@ -1,57 +1,50 @@
 package org.llm4s.llmconnect
 
-import org.llm4s.config.EnvLoader
-import org.llm4s.llmconnect.config.{ AnthropicConfig, AzureConfig, OpenAIConfig, ProviderConfig, OllamaConfig }
+import org.llm4s.config.{ ConfigKeys, ConfigReader }
+import org.llm4s.llmconnect.config._
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.provider.{ AnthropicClient, LLMProvider, OpenAIClient, OpenRouterClient, OllamaClient }
-
+import org.llm4s.llmconnect.provider._
+import org.llm4s.types.Result
+import ConfigKeys.OPENAI_BASE_URL
+import ConfigKeys.LLM_MODEL
+import org.llm4s.config.DefaultConfig.DEFAULT_OPENAI_BASE_URL
 object LLMConnect {
-  private def readEnv(key: String): Option[String] =
-    EnvLoader.get(key)
 
-  /**
-   * Get an LLMClient based on environment variables
-   */
-  def getClient(): LLMClient = {
-    val LLM_MODEL_ENV_KEY = "LLM_MODEL"
-    val model = readEnv(LLM_MODEL_ENV_KEY).getOrElse(
-      throw new IllegalArgumentException(
-        s"Please set the `$LLM_MODEL_ENV_KEY` environment variable to specify the default model"
+  def getClient(reader: ConfigReader): LLMClient = {
+    val model = reader
+      .get(LLM_MODEL)
+      .getOrElse(
+        throw new IllegalArgumentException(
+          s"Please set the `$LLM_MODEL` environment variable to specify the default model"
+        )
       )
-    )
 
     // Always use OpenRouterClient if OPENAI_BASE_URL contains 'openrouter.ai'
-    val openaiBaseUrl = readEnv("OPENAI_BASE_URL").getOrElse("https://api.openai.com/v1")
+    val openaiBaseUrl = reader.get(OPENAI_BASE_URL).getOrElse(DEFAULT_OPENAI_BASE_URL)
     if (openaiBaseUrl.contains("openrouter.ai")) {
       val modelName = if (model.startsWith("openai/")) model.replace("openai/", "") else model
-      val config    = OpenAIConfig.fromEnv(modelName)
+      val config    = OpenAIConfig.from(modelName, reader)
       new OpenRouterClient(config)
     } else if (model.startsWith("openai/")) {
       val modelName = model.replace("openai/", "")
-      val config    = OpenAIConfig.fromEnv(modelName)
+      val config    = OpenAIConfig.from(modelName, reader)
       new OpenAIClient(config)
     } else if (model.startsWith("openrouter/")) {
       val modelName = model.replace("openrouter/", "")
-      val config    = OpenAIConfig.fromEnv(modelName)
+      val config    = OpenAIConfig.from(modelName, reader)
       new OpenRouterClient(config)
     } else if (model.startsWith("azure/")) {
       val modelName = model.replace("azure/", "")
-      val config    = AzureConfig.fromEnv(modelName)
+      val config    = AzureConfig.from(modelName, reader)
       new OpenAIClient(config)
     } else if (model.startsWith("anthropic/")) {
       val modelName = model.replace("anthropic/", "")
-      val config    = AnthropicConfig.fromEnv(modelName)
+      val config    = AnthropicConfig.from(modelName, reader)
       new AnthropicClient(config)
     } else if (model.startsWith("ollama/")) {
       val modelName = model.replace("ollama/", "")
-      OllamaConfig
-        .fromEnv(modelName)
-        .fold(
-          throw new IllegalArgumentException(
-            "Failed to parse Ollama config from environment variables. " +
-              "Please set OLLAMA_BASE_URL."
-          )
-        )(config => new OllamaClient(config))
+      val config    = OllamaConfig.from(modelName, reader)
+      new OllamaClient(config)
     } else {
       val msg =
         s"Model $model is not supported. Supported formats are: " +
@@ -64,20 +57,16 @@ object LLMConnect {
    * Get an LLMClient with explicit provider and configuration
    */
   def getClient(provider: LLMProvider, config: ProviderConfig): LLMClient =
-    provider match {
-      case LLMProvider.OpenAI =>
-        new OpenAIClient(config.asInstanceOf[OpenAIConfig])
-      case LLMProvider.OpenRouter =>
-        new OpenRouterClient(config.asInstanceOf[OpenAIConfig])
-      case LLMProvider.Azure =>
-        val azureConfig = config.asInstanceOf[AzureConfig]
-        new OpenAIClient(azureConfig)
-      case LLMProvider.Anthropic =>
-        val anthropicConfig = config.asInstanceOf[AnthropicConfig]
-        new AnthropicClient(anthropicConfig)
-      case LLMProvider.Ollama =>
-        val ollamaConfig = config.asInstanceOf[OllamaConfig]
-        new OllamaClient(ollamaConfig)
+    (provider, config) match {
+      case (LLMProvider.OpenAI, cfg: OpenAIConfig)       => new OpenAIClient(cfg)
+      case (LLMProvider.OpenRouter, cfg: OpenAIConfig)   => new OpenRouterClient(cfg)
+      case (LLMProvider.Azure, cfg: AzureConfig)         => new OpenAIClient(cfg)
+      case (LLMProvider.Anthropic, cfg: AnthropicConfig) => new AnthropicClient(cfg)
+      case (LLMProvider.Ollama, cfg: OllamaConfig)       => new OllamaClient(cfg)
+      case (prov, wrongCfg) =>
+        val cfgType = wrongCfg.getClass.getSimpleName
+        val msg     = s"Invalid config type $cfgType for provider $prov"
+        throw new IllegalArgumentException(msg)
     }
 
   /**
@@ -86,8 +75,8 @@ object LLMConnect {
   def complete(
     messages: Seq[Message],
     options: CompletionOptions = CompletionOptions()
-  ): org.llm4s.types.Result[Completion] = {
+  )(reader: ConfigReader): Result[Completion] = {
     val conversation = Conversation(messages)
-    getClient().complete(conversation, options)
+    getClient(reader).complete(conversation, options)
   }
 }

@@ -3,7 +3,6 @@ package org.llm4s.samples.basic
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.trace.{EnhancedTracing, TracingComposer, TraceEvent, TracingMode}
 import org.slf4j.LoggerFactory
-import ujson._
 
 object EnhancedTracingExample {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -11,10 +10,10 @@ object EnhancedTracingExample {
   def main(args: Array[String]): Unit = {
     logger.info("Enhanced Tracing Example")
     logger.info("=" * 50)
-    
+    val config = org.llm4s.config.ConfigReader.LLMConfig()
     // Example 1: Basic enhanced tracing
     logger.info("1. Basic Enhanced Tracing")
-    val basicTracer = EnhancedTracing.create(TracingMode.Console)
+    val basicTracer = EnhancedTracing.create(TracingMode.Console)(config)
     
     val agentEvent = TraceEvent.AgentInitialized(
       query = "What's the weather like?",
@@ -34,8 +33,8 @@ object EnhancedTracingExample {
     
     // Example 2: Composed tracing (multiple tracers)
     logger.info("2. Composed Tracing (Console + NoOp)")
-    val consoleTracer = EnhancedTracing.create(TracingMode.Console)
-    val noOpTracer = EnhancedTracing.create(TracingMode.NoOp)
+    val consoleTracer = EnhancedTracing.create(TracingMode.Console)(config)
+    val noOpTracer = EnhancedTracing.create(TracingMode.NoOp)(config)
     val composedTracer = TracingComposer.combine(consoleTracer, noOpTracer)
     
     composedTracer.traceEvent(agentEvent)
@@ -109,13 +108,13 @@ object EnhancedTracingExample {
     logger.info("7. Type-Safe Mode Creation")
     val modes = Seq(TracingMode.Console, TracingMode.NoOp, TracingMode.Langfuse)
     modes.foreach { mode =>
-      val tracer = EnhancedTracing.create(mode)
+      val tracer = EnhancedTracing.create(mode)(config)
       logger.info(s"Created tracer for mode: $mode - ${tracer.getClass.getSimpleName}")
     }
     
     // Example 8: Environment-based configuration
     logger.info("8. Environment-Based Configuration")
-    val envTracer = EnhancedTracing.create()
+    val envTracer = EnhancedTracing.create()(config)
     logger.info(s"Created tracer from environment: ${envTracer.getClass.getSimpleName}")
     
     logger.info("Enhanced Tracing Example Complete!")

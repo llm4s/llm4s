@@ -1,0 +1,53 @@
+package org.llm4s.config
+
+object ConfigKeys {
+  // Core model selection
+  val LLM_MODEL = "LLM_MODEL"
+
+  // OpenAI
+  val OPENAI_API_KEY  = "OPENAI_API_KEY"
+  val OPENAI_BASE_URL = "OPENAI_BASE_URL"
+  val OPENAI_ORG      = "OPENAI_ORGANIZATION"
+
+  // OpenRouter (OpenAI-compatible)
+  val OPENROUTER_BASE_URL = OPENAI_BASE_URL // alias via base URL
+
+  // Azure OpenAI
+  val AZURE_API_BASE    = "AZURE_API_BASE"
+  val AZURE_API_KEY     = "AZURE_API_KEY"
+  val AZURE_API_VERSION = "AZURE_API_VERSION"
+
+  // Anthropic
+  val ANTHROPIC_API_KEY  = "ANTHROPIC_API_KEY"
+  val ANTHROPIC_BASE_URL = "ANTHROPIC_BASE_URL"
+
+  // Ollama
+  val OLLAMA_BASE_URL = "OLLAMA_BASE_URL"
+
+  // Langfuse
+  val LANGFUSE_URL        = "LANGFUSE_URL"
+  val LANGFUSE_PUBLIC_KEY = "LANGFUSE_PUBLIC_KEY"
+  val LANGFUSE_SECRET_KEY = "LANGFUSE_SECRET_KEY"
+  val LANGFUSE_ENV        = "LANGFUSE_ENV"
+  val LANGFUSE_RELEASE    = "LANGFUSE_RELEASE"
+  val LANGFUSE_VERSION    = "LANGFUSE_VERSION"
+
+  // Embeddings: providers and settings
+  val EMBEDDING_PROVIDER   = "EMBEDDING_PROVIDER"
+  val EMBEDDING_INPUT_PATH = "EMBEDDING_INPUT_PATH"
+  val EMBEDDING_QUERY      = "EMBEDDING_QUERY"
+
+  // Embeddings: OpenAI
+  val OPENAI_EMBEDDING_BASE_URL = "OPENAI_EMBEDDING_BASE_URL"
+  val OPENAI_EMBEDDING_MODEL    = "OPENAI_EMBEDDING_MODEL"
+
+  // Embeddings: VoyageAI
+  val VOYAGE_API_KEY            = "VOYAGE_API_KEY"
+  val VOYAGE_EMBEDDING_BASE_URL = "VOYAGE_EMBEDDING_BASE_URL"
+  val VOYAGE_EMBEDDING_MODEL    = "VOYAGE_EMBEDDING_MODEL"
+
+  // Embeddings: chunking options
+  val CHUNK_SIZE       = "CHUNK_SIZE"
+  val CHUNK_OVERLAP    = "CHUNK_OVERLAP"
+  val CHUNKING_ENABLED = "CHUNKING_ENABLED"
+}

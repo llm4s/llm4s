@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 
@@ -9,7 +10,7 @@ object OllamaStreamingExample {
     // Env example:
     //   export LLM_MODEL=ollama/llama3.1
     //   export OLLAMA_BASE_URL=http://localhost:11434
-    val client = LLMConnect.getClient()
+    val client    = LLMConnect.getClient(LLMConfig())
 
     val conversation = Conversation(
       Seq(
@@ -42,4 +43,3 @@ object OllamaStreamingExample {
     client.close()
   }
 }
-

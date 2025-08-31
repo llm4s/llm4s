@@ -286,8 +286,9 @@ Test the complete streaming flow with mocked responses:
 ```scala
 import org.llm4s.llmconnect.LLM
 import org.llm4s.llmconnect.model._
+import org.llm4s.config.ConfigReader.LLMConfig
 
-val client = LLM.client()
+val client = LLM.client(LLMConfig())
 val conversation = Conversation(Seq(
   UserMessage("Write a story about a robot")
 ))

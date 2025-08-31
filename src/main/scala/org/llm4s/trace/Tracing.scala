@@ -1,7 +1,8 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.AgentState
-import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
+import org.llm4s.config.ConfigReader
+import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 
 /**
  * Legacy Tracing interface for backward compatibility
@@ -67,8 +68,8 @@ object Tracing {
    *
    * @deprecated Use EnhancedTracing.create() for new code
    */
-  def create(): Tracing = {
-    val enhanced = EnhancedTracing.create()
+  def create()(config: ConfigReader): Tracing = {
+    val enhanced = EnhancedTracing.create()(config)
     new TracingBridge(enhanced)
   }
 
@@ -77,8 +78,8 @@ object Tracing {
    *
    * @deprecated Use EnhancedTracing.create(mode) for new code
    */
-  def create(mode: String): Tracing = {
-    val enhanced = EnhancedTracing.create(mode)
+  def create(mode: String)(config: ConfigReader): Tracing = {
+    val enhanced = EnhancedTracing.create(mode)(config)
     new TracingBridge(enhanced)
   }
 }

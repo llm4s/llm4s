@@ -1,17 +1,16 @@
 package org.llm4s.samples.migration
 
+import org.llm4s.config.ConfigReader
+import org.llm4s.error._
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
-import org.llm4s.error._
 import org.llm4s.types.Result
 
 object ErrorMigration {
 
-  /**
-   * CURRENT CODE (uses enhanced error types):
-   */
-  def currentApproach(): Unit = {
-    val client = LLMConnect.getClient()
+  //TODO this is not used any where. Should be removed
+  def currentApproach()(config:ConfigReader): Unit = {
+    val client    = LLMConnect.getClient(config)
     val conversation = Conversation(
       Seq(
         SystemMessage("You are helpful"),

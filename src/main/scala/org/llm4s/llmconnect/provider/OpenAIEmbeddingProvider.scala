@@ -1,18 +1,19 @@
 package org.llm4s.llmconnect.provider
 
-import sttp.client4._
-import ujson.{ Obj, Arr, read }
+import org.llm4s.config.ConfigReader
 import org.llm4s.llmconnect.config.EmbeddingConfig
 import org.llm4s.llmconnect.model._
 import org.slf4j.LoggerFactory
+import sttp.client4._
+import ujson.{ Arr, Obj, read }
 
-object OpenAIEmbeddingProvider extends EmbeddingProvider {
+class OpenAIEmbeddingProvider(config: ConfigReader) extends EmbeddingProvider {
 
   private val backend = DefaultSyncBackend()
   private val logger  = LoggerFactory.getLogger(getClass)
 
   override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] = {
-    val cfg   = EmbeddingConfig.openAI
+    val cfg   = EmbeddingConfig.openAI(config)
     val model = request.model.name
     val input = request.input
 
@@ -60,4 +61,8 @@ object OpenAIEmbeddingProvider extends EmbeddingProvider {
         Left(EmbeddingError(None, errorMsg, "openai"))
     }
   }
+}
+
+object OpenAIEmbeddingProvider {
+  def apply(config: ConfigReader): OpenAIEmbeddingProvider = new OpenAIEmbeddingProvider(config)
 }

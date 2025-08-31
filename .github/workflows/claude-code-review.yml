@@ -1,168 +1,54 @@
-name: Claude code review (Main)
+name: Claude Code Review
 
 on:
   pull_request:
-    types: [ opened, synchronize ]
-  issue_comment:
-    types: [ created ]
-
-# Prevent multiple Claude reviews for the same PR from running simultaneously
-concurrency:
-  group: ${{ github.repository }}-claude-review-${{ github.event.pull_request.number || github.event.issue.number }}
-  cancel-in-progress: false
+    types: [opened, synchronize]
+    # Optional: Only run on specific file changes
+    # paths:
+    #   - "src/**/*.ts"
+    #   - "src/**/*.tsx"
+    #   - "src/**/*.js"
+    #   - "src/**/*.jsx"
 
 jobs:
-  # Auto-review for trusted PRs
-  claude-review-trusted:
-    if: |
-      github.event_name == 'pull_request' && 
-      github.event.pull_request.draft == false && 
-      (
-        github.event.pull_request.head.repo.full_name == github.repository ||
-        github.event.pull_request.author_association == 'COLLABORATOR' ||
-        github.event.pull_request.author_association == 'MEMBER' ||
-        github.event.pull_request.author_association == 'OWNER'
-      )
-
-    uses: ./.github/workflows/claude.yml
-    with:
-      pr_head_sha: ${{ github.event.pull_request.head.sha }}
-      review_type: 'trusted'
-      pr_number: ${{ github.event.pull_request.number }}
-    secrets:
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-
-  # Info comment for external PRs
-  claude-review-external-info:
-    if: |
-      github.event_name == 'pull_request' && 
-      github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.full_name != github.repository &&
-      github.event.pull_request.author_association != 'COLLABORATOR' &&
-      github.event.pull_request.author_association != 'MEMBER' &&
-      github.event.pull_request.author_association != 'OWNER'
-
+  claude-review:
+    # Optional: Filter by PR author
+    # if: |
+    #   github.event.pull_request.user.login == 'external-contributor' ||
+    #   github.event.pull_request.user.login == 'new-developer' ||
+    #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
+    
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
-
-
-    # Manual review via @claude comment
-  claude-review-manual:
-    if: |
-      github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request &&
-      contains(github.event.comment.body, '@claude') &&
-      github.event.comment.user.login != 'github-actions[bot]' &&
-      (
-        github.event.comment.author_association == 'COLLABORATOR' ||
-        github.event.comment.author_association == 'MEMBER' ||
-        github.event.comment.author_association == 'OWNER'
-      )
-
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
+      pull-requests: read
       issues: read
       id-token: write
-
-    outputs:
-      pr_head_sha: ${{ steps.pr-info.outputs.head_sha }}
-      pr_number: ${{ github.event.issue.number }}
-
-    steps:
-      - name: Get PR details
-        id: pr-info
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const pr = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number
-            });
-            
-            core.setOutput('head_sha', pr.data.head.sha);
-            
-            core.setOutput('is_external', pr.data.head.repo.full_name !== pr.data.base.repo.full_name);
-            
-            return pr.data;
-
-      - name: React to comment
-        uses: actions/github-script@v7
-        continue-on-error: true
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            await github.rest.reactions.createForIssueComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              comment_id: context.payload.comment.id,
-              content: 'rocket'
-            });
-
-    steps:
-      - name: Log External PR Info
-        run: |
-          echo "::notice::External PR detected - Claude review skipped for security"
-          echo "## 🔒 External PR - Claude review skipped for security reasons" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "This PR is from an external repository (\`${{ github.event.pull_request.head.repo.full_name }}\`)." >> $GITHUB_STEP_SUMMARY
-          echo "Automated Claude review is disabled for security reasons." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### For Maintainers:" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "To get Claude review for this PR, comment \`@claude\` to trigger manual review via the regular workflow." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Or, run:" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "gh workflow run claude-code-review.yml -f pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "### PR Summary:" >> $GITHUB_STEP_SUMMARY
-          echo "- **Files changed:** ${{ github.event.pull_request.changed_files }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Additions:** +${{ github.event.pull_request.additions }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Deletions:** -${{ github.event.pull_request.deletions }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Author:** @${{ github.event.pull_request.user.login }}" >> $GITHUB_STEP_SUMMARY
-
-      - name: Comment on External PR
-        uses: actions/github-script@v7
-        continue-on-error: true
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const comment = `## 🔒 Claude Code Review Status
-            
-            Thank you for your contribution! This PR is from an external repository, so automated Claude review is disabled for security reasons.
-            
-            **For maintainers:** To get Claude review for this PR, comment \`@claude\` and I'll trigger a manual review.
-            
-            **PR Summary:**
-            - Files changed: ${{ github.event.pull_request.changed_files }}
-            - Additions: +${{ github.event.pull_request.additions }}
-            - Deletions: -${{ github.event.pull_request.deletions }}
-            - Author: @${{ github.event.pull_request.user.login }}
-            `;
-            
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: comment
-            });
-
-
-  # Call reusable workflow for manual review
-  claude-review-manual-execute:
-    needs: claude-review-manual
-    if: needs.claude-review-manual.result == 'success' 37ed6c2 (Refactored claude code review -)
     
-    uses: ./.github/workflows/claude.yml
-    with:
-      pr_head_sha: ${{ needs.claude-review-manual.outputs.pr_head_sha }}
-      review_type: 'manual'
-      pr_number: ${{ needs.claude-review-manual.outputs.pr_number }}
-    secrets:
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code Review
+        id: claude-review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            Please review this pull request and provide feedback on:
+            - Code quality and best practices
+            - Potential bugs or issues
+            - Performance considerations
+            - Security concerns
+            - Test coverage
+            
+            Use the repository's CLAUDE.md for guidance on style and conventions. Be constructive and helpful in your feedback.
+
+            Use `gh pr comment` with your Bash tool to leave your review as a comment on the PR.
+          
+          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
+          # or https://docs.anthropic.com/en/docs/claude-code/sdk#command-line for available options
+          claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
+

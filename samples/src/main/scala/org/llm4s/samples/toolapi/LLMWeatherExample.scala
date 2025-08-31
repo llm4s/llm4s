@@ -1,7 +1,8 @@
 package org.llm4s.samples.toolapi
 
-import org.llm4s.llmconnect.{ LLM, LLMClient }
+import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.{ LLM, LLMClient }
 import org.llm4s.toolapi._
 import org.llm4s.toolapi.tools.WeatherTool
 
@@ -13,7 +14,7 @@ import scala.annotation.tailrec
 object LLMWeatherExample {
   def main(args: Array[String]): Unit = {
     // Get LLM client using environment variables
-    val client = LLM.client()
+    val client    = LLM.client(LLMConfig())
 
     // Create a tool registry with the weather tool
     val toolRegistry = new ToolRegistry(Seq(WeatherTool.tool))

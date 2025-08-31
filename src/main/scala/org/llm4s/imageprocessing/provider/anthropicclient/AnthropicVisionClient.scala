@@ -198,32 +198,14 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
       import ujson._
       import scala.concurrent.duration._
 
-      // Build request JSON using ujson
-      val requestJson = Obj(
-        "model"      -> config.model,
-        "max_tokens" -> 1000,
-        "messages" -> Arr(
-          Obj(
-            "role" -> "user",
-            "content" -> Arr(
-              Obj(
-                "type" -> "text",
-                "text" -> prompt
-              ),
-              Obj(
-                "type" -> "image",
-                "source" -> Obj(
-                  "type"       -> "base64",
-                  "media_type" -> mediaType.value,
-                  "data"       -> base64Image
-                )
-              )
-            )
-          )
-        )
+      // Use type-safe serialization
+      val requestBody = AnthropicRequestBody.serialize(
+        model = config.model,
+        maxTokens = 1000,
+        prompt = prompt,
+        base64Image = base64Image,
+        mediaType = mediaType
       )
-
-      val requestBody = requestJson.toString()
 
       val backend = DefaultSyncBackend(
         options = BackendOptions.Default.connectionTimeout(config.connectTimeoutSeconds.seconds)

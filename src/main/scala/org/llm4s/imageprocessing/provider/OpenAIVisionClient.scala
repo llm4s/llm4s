@@ -46,7 +46,10 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
           "Provide tags that categorize the image content."
       )
 
-      val visionResponse = callOpenAIVisionAPI(base64Image, analysisPrompt) match {
+      // Detect media type for proper API call
+      val mediaType = MediaType.fromPath(imagePath)
+
+      val visionResponse = callOpenAIVisionAPI(base64Image, analysisPrompt, mediaType) match {
         case Success(response) => response
         case Failure(exception) =>
           return Left(LLMError.apiCallFailed("OpenAI", s"OpenAI Vision API call failed: ${exception.getMessage}"))
@@ -171,36 +174,20 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
       Base64.getEncoder.encodeToString(imageBytes)
     }
 
-  private def callOpenAIVisionAPI(base64Image: String, prompt: String): Try[String] =
+  private def callOpenAIVisionAPI(base64Image: String, prompt: String, mediaType: MediaType): Try[String] =
     Try {
       import sttp.client4._
       import ujson._
       import scala.concurrent.duration._
 
-      // Build request JSON using ujson
-      val requestJson = Obj(
-        "model" -> config.model,
-        "messages" -> Arr(
-          Obj(
-            "role" -> "user",
-            "content" -> Arr(
-              Obj(
-                "type" -> "text",
-                "text" -> prompt
-              ),
-              Obj(
-                "type" -> "image_url",
-                "image_url" -> Obj(
-                  "url" -> s"data:image/jpeg;base64,$base64Image"
-                )
-              )
-            )
-          )
-        ),
-        "max_tokens" -> 1000
+      // Use type-safe serialization
+      val requestBody = OpenAIRequestBody.serialize(
+        model = config.model,
+        maxTokens = 1000,
+        prompt = prompt,
+        base64Image = base64Image,
+        mediaType = mediaType
       )
-
-      val requestBody = requestJson.toString()
 
       val backend = DefaultSyncBackend(
         options = BackendOptions.Default.connectionTimeout(config.connectTimeoutSeconds.seconds)

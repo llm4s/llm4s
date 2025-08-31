@@ -1,7 +1,8 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.AgentState
-import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
+import org.llm4s.config.ConfigReader
+import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.types.Result
 
 /**
@@ -129,19 +130,19 @@ object TracingMode {
  * Enhanced factory for creating tracing instances
  */
 object EnhancedTracing {
-  def create(mode: TracingMode): EnhancedTracing = mode match {
-    case TracingMode.Langfuse => new EnhancedLangfuseTracing()
+  def create(mode: TracingMode)(config: ConfigReader): EnhancedTracing = mode match {
+    case TracingMode.Langfuse => EnhancedLangfuseTracing(config)
     case TracingMode.Console  => new EnhancedConsoleTracing()
     case TracingMode.NoOp     => new EnhancedNoOpTracing()
   }
 
-  def create(): EnhancedTracing = {
+  def create()(config: ConfigReader): EnhancedTracing = {
     val mode = sys.env
       .get("TRACING_MODE")
       .map(TracingMode.fromString)
       .getOrElse(TracingMode.Console)
-    create(mode)
+    create(mode)(config)
   }
 
-  def create(mode: String): EnhancedTracing = create(TracingMode.fromString(mode))
+  def create(mode: String)(config: ConfigReader): EnhancedTracing = create(TracingMode.fromString(mode))(config)
 }

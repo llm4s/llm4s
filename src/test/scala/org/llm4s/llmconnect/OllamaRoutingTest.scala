@@ -16,10 +16,12 @@ class OllamaRoutingTest extends AnyFunSuite with Matchers {
     client.getClass.getSimpleName shouldBe "OllamaClient"
   }
 
-  // TODO some refactoring required to enable unit tests
-  // test("OllamaConfig.fromEnv uses default base URL when unset") {
-  //   val cfg = OllamaConfig.fromEnv("mistral:latest").get
-  //   cfg.baseUrl shouldBe "http://localhost:11434"
-  //   cfg.model shouldBe "mistral:latest"
-  // }
+  test("OllamaConfig.from(reader) uses provided base URL") {
+    val reader = org.llm4s.config.ConfigReader.from(
+      Map("OLLAMA_BASE_URL" -> "http://lan-host:11434")
+    )
+    val cfg = org.llm4s.llmconnect.config.OllamaConfig.from("mistral:latest", reader)
+    cfg.baseUrl shouldBe "http://lan-host:11434"
+    cfg.model shouldBe "mistral:latest"
+  }
 }

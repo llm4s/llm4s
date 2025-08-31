@@ -387,11 +387,14 @@ Automated AI-powered code review for pull requests:
 - **Manual Trigger**: Maintainers can request reviews with `@claude` comment
 
 #### Release Pipeline (`release.yml`)
-Automated release process triggered by version tags:
+Automated release process triggered by version tags (format: `v0.1.11`):
 
+- **Tag Format**: Must use `v` prefix (e.g., `v0.1.11`, not `0.1.11`)
 - **Pre-release Checks**: Runs full CI suite before publishing
 - **GPG Signing**: Artifacts are signed for security
 - **Maven Central**: Publishes to Sonatype/Maven Central
+
+See [RELEASE.md](RELEASE.md) for detailed release instructions.
 
 ### Running CI Locally
 

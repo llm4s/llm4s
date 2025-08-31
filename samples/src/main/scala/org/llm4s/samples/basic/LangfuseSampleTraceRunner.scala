@@ -1,16 +1,18 @@
 package org.llm4s.samples.basic
 
 import org.llm4s.trace.Tracing
-import org.llm4s.llmconnect.model.{AssistantMessage, ToolMessage, ToolCall, UserMessage, SystemMessage, Conversation}
+import org.llm4s.llmconnect.model.{AssistantMessage, Conversation, SystemMessage, ToolCall, ToolMessage, UserMessage}
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.agent.{AgentState, AgentStatus}
+import org.llm4s.config.ConfigReader
+import org.llm4s.config.ConfigReader.LLMConfig
 
 object LangfuseSampleTraceRunner {
   def main(args: Array[String]): Unit = {
-    exportSampleTrace()
+    exportSampleTrace()(LLMConfig())
   }
 
-  def exportSampleTrace(): Unit = {
+  def exportSampleTrace()(config:ConfigReader): Unit = {
     // Create a fake AgentState with a user query, assistant reply, and tool call
     val toolCall = ToolCall("tool-1", "search", ujson.Obj("query" -> "Scala Langfuse integration"))
     val assistantMsg = AssistantMessage("Let me search for that...", Seq(toolCall))
@@ -25,7 +27,7 @@ object LangfuseSampleTraceRunner {
       status = AgentStatus.Complete,
       logs = Seq("[assistant] tools: 1 tool calls requested (search)", "[tool] search (100ms): {\"result\":\"Here is what I found...\"}")
     )
-    val tracer = Tracing.create()
+    val tracer = Tracing.create()(config)
     tracer.traceAgentState(fakeState)
   }
 }

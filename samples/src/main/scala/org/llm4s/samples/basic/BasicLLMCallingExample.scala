@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.LLM
 import org.llm4s.llmconnect.model._
 
@@ -39,7 +40,7 @@ object BasicLLMCallingExample {
     )
 
     // Get a client using environment variables
-    val client = LLM.client()
+    val client    = LLM.client(LLMConfig())
 
     
     // Complete the conversation

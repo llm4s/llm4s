@@ -1,6 +1,7 @@
 package org.llm4s.samples.agent
 
-import org.llm4s.agent.{ AgentStatus, Agent }
+import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.LLM
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.tools.WeatherTool
@@ -11,7 +12,7 @@ import org.llm4s.toolapi.tools.WeatherTool
 object SingleStepAgentExample {
   def main(args: Array[String]): Unit = {
     // Get a client using environment variables
-    val client = LLM.client()
+    val client    = LLM.client(LLMConfig())
 
     // Create a tool registry
     val toolRegistry = new ToolRegistry(Seq(WeatherTool.tool))

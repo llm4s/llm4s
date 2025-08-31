@@ -1,12 +1,11 @@
 package org.llm4s.samples.actions
 
-import org.llm4s.llmconnect.LLM
-import org.llm4s.llmconnect.model._
-import org.llm4s.types.Result
-import org.llm4s.error.LLMError
-import org.llm4s.tokens.Tokenizer
-import org.llm4s.identity.TokenizerId
+import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.identity.TokenizerId.O200K_BASE
+import org.llm4s.llmconnect.{LLM, LLMClient}
+import org.llm4s.llmconnect.model._
+import org.llm4s.tokens.Tokenizer
+import org.llm4s.types.Result
 
 /**
  * Example demonstrating how to use LLM4S for text summarization.
@@ -58,7 +57,7 @@ object SummarizationExample {
     )
 
     // Get a client using environment variables
-    val client = LLM.client()
+    val client    = LLM.client(LLMConfig())
 
     println("Original text:")
     println("--------------")
@@ -106,7 +105,7 @@ object SummarizationExample {
     }
 
     // Call the helper method like this to use summarization logic elsewhere
-    val summaryResult = summarizeText(textToSummarize2, Some("50 words"))
+    val summaryResult = summarizeText(textToSummarize2, Some("50 words"))(client)
     summaryResult match {
       case Right(summary) => println(summary)
       case Left(error)    => println(s"Error: ${error.formatted}")
@@ -120,7 +119,7 @@ object SummarizationExample {
    * @param maxLength Optional target maximum length (e.g., "100 words" or "2 paragraphs")
    * @return Either an error or the summarized text
    */
-  def summarizeText(text: String, maxLength: Option[String] = None): Result[String] = {
+  def summarizeText(text: String, maxLength: Option[String] = None)(client: LLMClient): Result[String] = {
     // Create system prompt with optional length constraint
     val lengthConstraint = maxLength.map(len => s"Ensure the summary is no longer than $len.").getOrElse("")
     val systemPrompt = s"""Summarize the following text concisely while preserving the key information and main points.
@@ -134,9 +133,6 @@ object SummarizationExample {
         UserMessage(text)
       )
     )
-
-    // Get client and complete
-    val client = LLM.client()
     client.complete(conversation).map(_.message.content.trim)
   }
 }
