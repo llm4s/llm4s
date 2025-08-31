@@ -10,7 +10,7 @@ sealed trait ProviderConfig {
 case class OpenAIConfig(
   apiKey: String,
   model: String,
-  organization: Option[String] ,
+  organization: Option[String],
   baseUrl: String
 ) extends ProviderConfig
 
@@ -62,7 +62,7 @@ object AzureConfig {
 
 case class AnthropicConfig(
   apiKey: String,
-  model: String ,
+  model: String,
   baseUrl: String
 ) extends ProviderConfig
 

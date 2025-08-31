@@ -1,6 +1,5 @@
 package org.llm4s.sc3
 
-
 import org.llm4s.toolapi.SafeParameterExtractor
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -11,18 +10,18 @@ import scala.language.strictEquality // Enable strict equality checking
 class SafeParameterExtractorTest extends AnyFlatSpec with Matchers {
 
   // Add implicit CanEqual instances for ujson types
-  given CanEqual[ujson.Arr, ujson.Arr] = CanEqual.derived
-  given CanEqual[ujson.Obj, ujson.Obj] = CanEqual.derived
+  given CanEqual[ujson.Arr, ujson.Arr]                                               = CanEqual.derived
+  given CanEqual[ujson.Obj, ujson.Obj]                                               = CanEqual.derived
   given [T, U](using CanEqual[T, U]): CanEqual[Either[String, T], Either[String, U]] = CanEqual.derived
-  given [T, U](using CanEqual[T, U]): CanEqual[Right[String, T], Right[String, U]] = CanEqual.derived
+  given [T, U](using CanEqual[T, U]): CanEqual[Right[String, T], Right[String, U]]   = CanEqual.derived
 
   // Test fixtures
   val simpleJson = ujson.Obj(
     "stringValue" -> "test",
-    "intValue" -> 42,
+    "intValue"    -> 42,
     "doubleValue" -> 42.5,
-    "boolValue" -> true,
-    "arrayValue" -> ujson.Arr(1, 2, 3),
+    "boolValue"   -> true,
+    "arrayValue"  -> ujson.Arr(1, 2, 3),
     "objectValue" -> ujson.Obj("key" -> "value")
   )
 
@@ -31,7 +30,7 @@ class SafeParameterExtractorTest extends AnyFlatSpec with Matchers {
       "string" -> "nested",
       "number" -> 100,
       "level2" -> ujson.Obj(
-        "array" -> ujson.Arr("a", "b", "c"),
+        "array"   -> ujson.Arr("a", "b", "c"),
         "boolean" -> false
       )
     )
@@ -123,8 +122,12 @@ class SafeParameterExtractorTest extends AnyFlatSpec with Matchers {
     extractor.getBoolean("level1.level2.boolean") shouldBe Right(false)
 
     // Failure cases
-    extractor.getString("level1.nonexistent") shouldBe Left("Path 'level1.nonexistent' not found: missing 'nonexistent' segment")
-    extractor.getString("level1.string.invalid") shouldBe Left("Path 'level1.string.invalid': Expected object at 'level1.string' but found Str")
+    extractor.getString("level1.nonexistent") shouldBe Left(
+      "Path 'level1.nonexistent' not found: missing 'nonexistent' segment"
+    )
+    extractor.getString("level1.string.invalid") shouldBe Left(
+      "Path 'level1.string.invalid': Expected object at 'level1.string' but found Str"
+    )
   }
 
   it should "handle empty paths correctly" in {
@@ -150,6 +153,8 @@ class SafeParameterExtractorTest extends AnyFlatSpec with Matchers {
     val extractor = SafeParameterExtractor(jsonWithSpecialChars)
 
     extractor.getString("special.key") shouldBe Left("Path 'special.key' not found: missing 'special' segment")
-    extractor.getString("normal.special.nested") shouldBe Left("Path 'normal.special.nested' not found: missing 'special' segment")
+    extractor.getString("normal.special.nested") shouldBe Left(
+      "Path 'normal.special.nested' not found: missing 'special' segment"
+    )
   }
 }

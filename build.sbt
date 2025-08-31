@@ -244,10 +244,15 @@ addCommandAlias(
   "testAll",
   ";project root; +test; project shared; +test; project workspaceRunner; +test; project samples; +test; project root; +publishLocal; project crossTestScala2; test; project crossTestScala3; test"
 )
-// Clean all modules and then run all tests
+
 addCommandAlias(
   "cleanTestAll",
   ";project root; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project root; +publishLocal; testAll"
+)
+
+addCommandAlias(
+  "cleanTestAllAndFormat",
+  ";scalafmtAll;project root; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project root; +publishLocal; testAll"
 )
 addCommandAlias("compileAll", ";+compile")
 addCommandAlias("testCross", ";crossTestScala2/test;crossTestScala3/test")
