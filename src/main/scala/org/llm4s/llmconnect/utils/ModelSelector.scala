@@ -8,7 +8,7 @@ object ModelSelector {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
-  def selectModel(config:ConfigReader): EmbeddingModelConfig = {
+  def selectModel(config: ConfigReader): EmbeddingModelConfig = {
     val provider = EmbeddingConfig.activeProvider(config).toLowerCase
 
     val modelName = provider match {

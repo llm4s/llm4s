@@ -7,7 +7,7 @@ import org.slf4j.LoggerFactory
 import sttp.client4._
 import ujson.{ Arr, Obj, read }
 
-class OpenAIEmbeddingProvider(config:ConfigReader) extends EmbeddingProvider {
+class OpenAIEmbeddingProvider(config: ConfigReader) extends EmbeddingProvider {
 
   private val backend = DefaultSyncBackend()
   private val logger  = LoggerFactory.getLogger(getClass)
@@ -64,5 +64,5 @@ class OpenAIEmbeddingProvider(config:ConfigReader) extends EmbeddingProvider {
 }
 
 object OpenAIEmbeddingProvider {
-  def apply(config:ConfigReader): OpenAIEmbeddingProvider = new OpenAIEmbeddingProvider(config)
+  def apply(config: ConfigReader): OpenAIEmbeddingProvider = new OpenAIEmbeddingProvider(config)
 }

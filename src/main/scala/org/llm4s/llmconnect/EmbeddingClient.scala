@@ -18,7 +18,7 @@ class EmbeddingClient(provider: EmbeddingProvider) {
 object EmbeddingClient {
   private val logger = LoggerFactory.getLogger(getClass)
 
-  def fromConfig(config:ConfigReader): EmbeddingClient = {
+  def fromConfig(config: ConfigReader): EmbeddingClient = {
     val providerName = EmbeddingConfig.activeProvider(config).toLowerCase
 
     val provider: EmbeddingProvider = providerName match {
