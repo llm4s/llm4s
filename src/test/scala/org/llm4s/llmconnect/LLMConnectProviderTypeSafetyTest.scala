@@ -33,7 +33,8 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     val cfg: ProviderConfig = AzureConfig(
       endpoint = "https://example.azure.com",
       apiKey = "key",
-      model = "gpt-4o"
+      model = "gpt-4o",
+      apiVersion = "V2025_01_01_PREVIEW"
     )
     val client = LLMConnect.getClient(LLMProvider.Azure, cfg)
     client.getClass.getSimpleName shouldBe "OpenAIClient"
@@ -74,7 +75,8 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     val wrongCfg: ProviderConfig = AzureConfig(
       endpoint = "https://example.azure.com",
       apiKey = "key",
-      model = "gpt-4o"
+      model = "gpt-4o",
+      apiVersion = "V2025_01_01_PREVIEW"
     )
 
     assertThrows[IllegalArgumentException] {

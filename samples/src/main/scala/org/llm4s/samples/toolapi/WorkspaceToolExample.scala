@@ -66,7 +66,9 @@ object WorkspaceToolExample {
         logger.info(s"Testing with OpenAI's $gpt4oModelName...")
         val openaiConfig = OpenAIConfig(
           apiKey = sys.env.getOrElse("OPENAI_API_KEY", ""),
-          model = gpt4oModelName
+          model = gpt4oModelName,
+          organization = None,
+          baseUrl = "https://api.openai.com/v1"
         )
         
         val openaiClient = LLM.client(LLMProvider.OpenAI, openaiConfig)
@@ -76,7 +78,8 @@ object WorkspaceToolExample {
         logger.info(s"Testing with Anthropic's $sonnetModelName...")
         val anthropicConfig = AnthropicConfig(
           apiKey = sys.env.getOrElse("ANTHROPIC_API_KEY", ""),
-          model = sonnetModelName
+          model = sonnetModelName,
+          baseUrl = "https://api.anthropic.com"
         )
         
         val anthropicClient = LLM.client(LLMProvider.Anthropic, anthropicConfig)

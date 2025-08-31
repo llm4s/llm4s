@@ -9,23 +9,23 @@ sealed trait ProviderConfig {
 
 case class OpenAIConfig(
   apiKey: String,
-  model: String = "gpt-4o",
-  organization: Option[String] = None,
-  baseUrl: String = "https://api.openai.com/v1"
+  model: String,
+  organization: Option[String] ,
+  baseUrl: String
 ) extends ProviderConfig
 
 object OpenAIConfig {
 
-  def from(modelName: String, reader: ConfigReader): OpenAIConfig =
+  def from(modelName: String, config: ConfigReader): OpenAIConfig =
     OpenAIConfig(
-      apiKey = reader
+      apiKey = config
         .get(OPENAI_API_KEY)
         .getOrElse(
           throw new IllegalArgumentException("OPENAI_API_KEY not set, required when using openai/ model.")
         ),
       model = modelName,
-      organization = reader.get(OPENAI_ORG),
-      baseUrl = reader.getOrElse(OPENAI_BASE_URL, DEFAULT_OPENAI_BASE_URL)
+      organization = config.get(OPENAI_ORG),
+      baseUrl = config.getOrElse(OPENAI_BASE_URL, DEFAULT_OPENAI_BASE_URL)
     )
 }
 
@@ -33,23 +33,23 @@ case class AzureConfig(
   endpoint: String,
   apiKey: String,
   model: String,
-  apiVersion: String = "V2025_01_01_PREVIEW"
+  apiVersion: String
 ) extends ProviderConfig
 
 object AzureConfig {
 
-  def from(modelName: String, reader: ConfigReader): AzureConfig = {
-    val endpoint = reader
+  def from(modelName: String, config: ConfigReader): AzureConfig = {
+    val endpoint = config
       .get(AZURE_API_BASE)
       .getOrElse(
         throw new IllegalArgumentException("AZURE_API_BASE not set, required when using azure/ model.")
       )
-    val apiKey = reader
+    val apiKey = config
       .get(AZURE_API_KEY)
       .getOrElse(
         throw new IllegalArgumentException("AZURE_API_KEY not set, required when using azure/ model.")
       )
-    val apiVersion = reader.get(AZURE_API_VERSION).getOrElse(DEFAULT_AZURE_V2025_01_01_PREVIEW)
+    val apiVersion = config.get(AZURE_API_VERSION).getOrElse(DEFAULT_AZURE_V2025_01_01_PREVIEW)
 
     AzureConfig(
       endpoint = endpoint,
@@ -62,21 +62,21 @@ object AzureConfig {
 
 case class AnthropicConfig(
   apiKey: String,
-  model: String = "claude-3-opus-20240229",
-  baseUrl: String = "https://api.anthropic.com"
+  model: String ,
+  baseUrl: String
 ) extends ProviderConfig
 
 object AnthropicConfig {
 
-  def from(modelName: String, reader: ConfigReader): AnthropicConfig =
+  def from(modelName: String, config: ConfigReader): AnthropicConfig =
     AnthropicConfig(
-      apiKey = reader
+      apiKey = config
         .get(ANTHROPIC_API_KEY)
         .getOrElse(
           throw new IllegalArgumentException("ANTHROPIC_API_KEY not set, required when using anthropic/ model.")
         ),
       model = modelName,
-      baseUrl = reader.getOrElse(ANTHROPIC_BASE_URL, DEFAULT_ANTHROPIC_BASE_URL)
+      baseUrl = config.getOrElse(ANTHROPIC_BASE_URL, DEFAULT_ANTHROPIC_BASE_URL)
     )
 }
 
@@ -86,8 +86,8 @@ case class OllamaConfig(
 ) extends ProviderConfig
 
 object OllamaConfig {
-  def from(modelName: String, reader: ConfigReader): OllamaConfig = {
-    val baseUrl = reader
+  def from(modelName: String, config: ConfigReader): OllamaConfig = {
+    val baseUrl = config
       .get(OLLAMA_BASE_URL)
       .getOrElse(throw new IllegalArgumentException("OLLAMA_BASE_URL must be set for ollama provider"))
     OllamaConfig(model = modelName, baseUrl = baseUrl)
