@@ -71,9 +71,8 @@ object LLMError {
    */
 
   def isRecoverable(error: LLMError): Boolean = error match {
-    case _: RecoverableError        => true
-    case _: NonRecoverableError     => false
-    case serviceError: ServiceError => serviceError.isRecoverableStatus
+    case _: RecoverableError    => true
+    case _: NonRecoverableError => false
   }
 
   def recoverableErrors(errors: List[LLMError]): List[LLMError] =

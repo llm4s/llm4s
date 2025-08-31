@@ -16,7 +16,7 @@ final case class RateLimitError private (
   override val maxRetries: Int = 5
 
   // Intelligent retry delay calculation
-  override def retryDelay: Option[Long] = retryDelay.orElse {
+  override def retryDelay: Option[Long] = retryAfter.orElse {
     Some(Math.min(30000, 1000 * Math.pow(2, maxRetries).toLong)) // Exponential backoff, max 30s
   }
 

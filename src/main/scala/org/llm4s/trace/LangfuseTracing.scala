@@ -1,7 +1,7 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.AgentState
-import org.llm4s.config.{ ConfigKeys, ConfigReader, EnvLoader }
+import org.llm4s.config.{ ConfigKeys, ConfigReader }
 import org.llm4s.llmconnect.model.{ AssistantMessage, MessageRole, SystemMessage, ToolMessage, UserMessage }
 import org.slf4j.LoggerFactory
 import ConfigKeys._

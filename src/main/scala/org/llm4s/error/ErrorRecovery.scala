@@ -35,7 +35,7 @@ object ErrorRecovery {
               Thread.sleep(delay.toMillis)
               attempt(attemptNumber + 1)
 
-            case _: ServiceError if error.isRecoverable =>
+            case _: ServiceError with RecoverableError =>
               Thread.sleep(baseDelay.toMillis * attemptNumber)
               attempt(attemptNumber + 1)
 

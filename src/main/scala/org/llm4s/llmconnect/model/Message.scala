@@ -1,6 +1,5 @@
 package org.llm4s.llmconnect.model
 
-import org.llm4s.Result
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 import upickle.default.{ macroRW, read, readwriter, write, ReadWriter => RW }
@@ -19,9 +18,9 @@ sealed trait Message {
    */
   def validate: Result[Message] =
     if (content.trim.isEmpty) {
-      Result.failure(ValidationError(s"$role message content cannot be empty", "content"))
+      Left(ValidationError(s"$role message content cannot be empty", "content"))
     } else {
-      Result.success(this)
+      Right(this)
     }
 }
 
@@ -60,7 +59,7 @@ object Message {
    */
   def validateConversation(messages: List[Message]): Result[Unit] = {
     if (messages.isEmpty) {
-      return Result.success(())
+      return Right(())
     }
 
     val validationErrors = scala.collection.mutable.ListBuffer[String]()
@@ -80,14 +79,14 @@ object Message {
     validationErrors ++= validateToolCallConsistency(messages)
 
     if (validationErrors.nonEmpty) {
-      Result.failure(
+      Left(
         ValidationError(
           s"Conversation validation failed: ${validationErrors.mkString("; ")}",
           "conversation"
         ).withViolations(validationErrors.toList)
       )
     } else {
-      Result.success(())
+      Right(())
     }
   }
 
@@ -174,37 +173,37 @@ object Message {
   // Individual message constructors with validation
   def system(content: String): Result[SystemMessage] =
     if (content.trim.isEmpty) {
-      Result.failure(ValidationError("System message content cannot be empty", "content"))
+      Left(ValidationError("System message content cannot be empty", "content"))
     } else {
-      Result.success(SystemMessage(content = content))
+      Right(SystemMessage(content = content))
     }
 
   def user(content: String): Result[UserMessage] =
     if (content.trim.isEmpty) {
-      Result.failure(ValidationError("User message content cannot be empty", "content"))
+      Left(ValidationError("User message content cannot be empty", "content"))
     } else {
-      Result.success(UserMessage(content = content))
+      Right(UserMessage(content = content))
     }
 
   def assistant(content: String, toolCalls: List[ToolCall] = List.empty): Result[AssistantMessage] =
     if (content.trim.isEmpty && toolCalls.isEmpty) {
-      Result.failure(
+      Left(
         ValidationError(
           "Assistant message must have either content or tool calls",
           "content"
         )
       )
     } else {
-      Result.success(AssistantMessage(content = content, toolCalls = toolCalls))
+      Right(AssistantMessage(content = content, toolCalls = toolCalls))
     }
 
   def tool(content: String, toolCallId: String): Result[ToolMessage] =
     if (content.trim.isEmpty) {
-      Result.failure(ValidationError("Tool message content cannot be empty", "content"))
+      Left(ValidationError("Tool message content cannot be empty", "content"))
     } else if (toolCallId.trim.isEmpty) {
-      Result.failure(ValidationError("Tool call ID cannot be empty", "toolCallId"))
+      Left(ValidationError("Tool call ID cannot be empty", "toolCallId"))
     } else {
-      Result.success(ToolMessage(content = content, toolCallId = toolCallId))
+      Right(ToolMessage(content = content, toolCallId = toolCallId))
     }
 }
 
@@ -277,14 +276,14 @@ case class AssistantMessage(
 
   override def validate: Result[Message] =
     if (content.trim.isEmpty && toolCalls.isEmpty) {
-      Result.failure(
+      Left(
         ValidationError(
           "Assistant message must have either content or tool calls",
           "content"
         )
       )
     } else {
-      Result.success(this)
+      Right(this)
     }
 }
 
@@ -339,14 +338,14 @@ final case class ToolMessage(
     ).flatten
 
     if (validations.nonEmpty) {
-      Result.failure(
+      Left(
         ValidationError(
           validations.mkString("; "),
           "toolMessage"
         ).withViolations(validations)
       )
     } else {
-      Result.success(this)
+      Right(this)
     }
   }
 }
