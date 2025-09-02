@@ -1,5 +1,6 @@
 import com.typesafe.sbt.packager.docker.Cmd
 import sbt.Keys.{libraryDependencies, *}
+import scoverage.ScoverageKeys._
 
 
 // Define supported Scala versions
@@ -74,8 +75,33 @@ inThisBuild(
         case None =>
           "0.0.0-UNKNOWN"
       }
-    }
+    },
+
+    // ---- Test coverage (scoverage) ----
+    // Global defaults; tweak locally with: set coverageMinimumStmtTotal := 85
+    ThisBuild / coverageMinimumStmtTotal := 80,
+    ThisBuild / coverageFailOnMinimum    := false,
+    ThisBuild / coverageHighlighting     := true,
+    // Exclude non-library entry points and samples from coverage stats
+    ThisBuild / coverageExcludedPackages :=
+      """
+        |org\.llm4s\.runner\..*
+        |org\.llm4s\.samples\..*
+      """.stripMargin.replaceAll("\n", ";")
+    ,
+    // Generate HTML only at the current project (root when using aliases)
+    ThisBuild / (coverageReport / aggregate) := false
   )
+)
+
+// Handy aliases for coverage runs
+addCommandAlias(
+  "cov",
+  ";clean;coverage;test;coverageAggregate;coverageReport;coverageOff"
+)
+addCommandAlias(
+  "covReport",
+  ";clean;coverage;test;coverageReport;coverageOff"
 )
 
 def scalacOptionsForVersion(scalaVersion: String): Seq[String] =
