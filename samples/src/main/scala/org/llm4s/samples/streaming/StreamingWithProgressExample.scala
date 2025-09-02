@@ -100,8 +100,8 @@ object StreamingWithProgressExample {
         println(s"  Total time:        ${totalTime}ms (${totalTime/1000.0}s)")
         println(s"  Chunks received:   $chunkCount")
         println(s"  Characters:        $charCount")
-        println(s"  Avg chunk time:    ${avgChunkTime.formatted("%.2f")}ms")
-        println(s"  Throughput:        ${(charCount * 1000.0 / totalTime).formatted("%.1f")} chars/sec")
+        println(s"  Avg chunk time:    ${avgChunkTime.toString.format("%.2f")}ms")
+        println(s"  Throughput:        ${(charCount * 1000.0 / totalTime).toString.format("%.1f")} chars/sec")
         
         // Show accumulated content stats
         val fullContent = accumulator.getCurrentContent
@@ -111,7 +111,7 @@ object StreamingWithProgressExample {
         println(s"\n📝 Content Statistics:")
         println(s"  Words:             $wordCount")
         println(s"  Lines:             $lineCount")
-        println(s"  Avg words/line:    ${(wordCount.toDouble / lineCount).formatted("%.1f")}")
+        println(s"  Avg words/line:    ${(wordCount.toDouble / lineCount).toString.format("%.1f")}")
         
         // Show token usage if available
         completion.usage.foreach { usage =>
@@ -121,7 +121,7 @@ object StreamingWithProgressExample {
           println(s"  Total tokens:      ${usage.totalTokens}")
           
           val tokensPerSecond = usage.completionTokens * 1000.0 / totalTime
-          println(s"  Generation speed:  ${tokensPerSecond.formatted("%.1f")} tokens/sec")
+          println(s"  Generation speed:  ${tokensPerSecond.toString.format("%.1f")} tokens/sec")
         }
         
         // Demonstrate that we have the full content accumulated

@@ -8,8 +8,6 @@ val scala3   = "3.7.1"
 val scala3CompilerOptions = Seq(
   "-explain",
   "-explain-types",
-  "-Wconf:cat=unused:s",   // suppress unused warnings
-  "-Wconf:cat=deprecation:s", // suppress deprecation warnings
   "-Wunused:nowarn",
   "-feature",
   "-unchecked",
@@ -91,7 +89,7 @@ def scalacOptionsForVersion(scalaVersion: String): Seq[String] =
 
 lazy val commonSettings = Seq(
   Compile / scalacOptions := scalacOptionsForVersion(scalaVersion.value),
-
+  Compile / packageDoc / publishArtifact := false,
   Compile / unmanagedSourceDirectories ++= {
     val sourceDir = (Compile / sourceDirectory).value
     CrossVersion.partialVersion(scalaVersion.value) match {
@@ -111,7 +109,6 @@ lazy val commonSettings = Seq(
   libraryDependencies ++= List(
     "org.typelevel" %% "cats-core"       % "2.13.0",
     "com.lihaoyi"   %% "upickle"         % "4.2.1",
-    "com.lihaoyi"   %% "fansi"           % "0.5.0",
     "ch.qos.logback" % "logback-classic" % "1.5.18",
     "dev.optics" %% "monocle-core"  % "3.3.0",
     "dev.optics" %% "monocle-macro" % "3.3.0",
@@ -253,12 +250,12 @@ addCommandAlias(
 
 addCommandAlias(
   "cleanTestAll",
-  ";project root; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project root; +publishLocal; testAll"
+  ";project root; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project root; testAll"
 )
 
 addCommandAlias(
   "cleanTestAllAndFormat",
-  ";scalafmtAll;project root; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project root; +publishLocal; testAll"
+  ";scalafmtAll;project root; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project root; testAll"
 )
 addCommandAlias("compileAll", ";+compile")
 addCommandAlias("testCross", ";crossTestScala2/test;crossTestScala3/test")
