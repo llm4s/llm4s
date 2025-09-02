@@ -89,7 +89,7 @@ def scalacOptionsForVersion(scalaVersion: String): Seq[String] =
 
 lazy val commonSettings = Seq(
   Compile / scalacOptions := scalacOptionsForVersion(scalaVersion.value),
-  Compile / packageDoc / publishArtifact := false,
+  Compile / packageDoc / publishArtifact := !isSnapshot.value,
   Compile / unmanagedSourceDirectories ++= {
     val sourceDir = (Compile / sourceDirectory).value
     CrossVersion.partialVersion(scalaVersion.value) match {
