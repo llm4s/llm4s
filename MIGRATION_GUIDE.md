@@ -141,19 +141,26 @@ val model = EnvLoader.getOrElse("LLM_MODEL", "gpt-4")
 ```
 
 ### After (v0.2.0)
+
 ```scala
 import org.llm4s.config.ConfigReader
-import org.llm4s.config.ConfigReader.LLMConfig
+import org.llm4s.config.ConfigReader.{LLMConfig}
+import org.llm4s.llmconnect.LLMConnect
 
-// Use the default config (reads from environment)
-val config = LLMConfig()
-val apiKey = config.get("OPENAI_API_KEY")
-val model = config.getOrElse("LLM_MODEL", "gpt-4")
+// Result-first config and client acquisition
+val client = for {
+  reader <- LLMConfig() // Result[ConfigReader]
+  client <- LLMConnect.getClient(reader) // Result[LLMClient]
+} yield client
 
-// Or create a custom config
-val customConfig = ConfigReader.from(Map(
+// Access individual keys (Result)
+val apiKeyEither: org.llm4s.types.Result[String] =
+  LLMConfig().flatMap(_.require("OPENAI_API_KEY"))
+
+// Or create a custom config (pure, no env)
+val customConfig: ConfigReader = ConfigReader(Map(
   "OPENAI_API_KEY" -> "sk-...",
-  "LLM_MODEL" -> "gpt-4o"
+  "LLM_MODEL" -> "openai/gpt-4o"
 ))
 ```
 
@@ -175,7 +182,7 @@ val customConfig = ConfigReader.from(Map(
    EnvLoader.get("KEY")
    
    // After
-   LLMConfig().get("KEY")
+   LLMConfigResult().flatMap(_.require("KEY"))
    ```
 
 3. **Pass config to constructors**: Many classes now take an implicit ConfigReader
@@ -183,9 +190,13 @@ val customConfig = ConfigReader.from(Map(
    // Before
    val client = LLM.client()
    
-   // After
-   val client = LLM.client(LLMConfig())
-   // or with implicit
-   implicit val config: ConfigReader = LLMConfig()
-   val client = LLM.client
+   // After (Result-first)
+   val client = for {
+     reader <- LLMConfigResult()
+     client <- org.llm4s.llmconnect.LLMConnect.getClient(reader)
+   } yield client
+   
+   // Or, if you prefer implicits (kept for compatibility)
+   implicit val config: ConfigReader = ConfigReader.from(sys.env.view.mapValues(identity).toMap)
+   val client = org.llm4s.llmconnect.LLMConnect.getClientt(config)
    ```

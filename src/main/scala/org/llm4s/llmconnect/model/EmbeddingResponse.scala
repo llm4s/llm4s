@@ -17,12 +17,7 @@ final case class EmbeddingResponse(
   metadata: Map[String, String] = Map.empty,
   modality: Option[Modality] = None,
   dim: Option[Int] = None
-) {
-
-  /** Back-compat alias for older code paths that expect `vectors`. */
-  @deprecated("Use `embeddings` instead of `vectors` (Embedx-v2).", "embedx-v2")
-  def vectors: Seq[Seq[Double]] = embeddings
-}
+)
 
 object EmbeddingResponse {
 

@@ -2,7 +2,7 @@ package org.llm4s.samples.toolapi
 
 import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.{ LLM, LLMClient }
+import org.llm4s.llmconnect.{ LLMConnect, LLMClient }
 import org.llm4s.toolapi._
 import org.llm4s.toolapi.tools.WeatherTool
 
@@ -13,24 +13,20 @@ import scala.annotation.tailrec
  */
 object LLMWeatherExample {
   def main(args: Array[String]): Unit = {
-    // Get LLM client using environment variables
-    val client    = LLM.client(LLMConfig())
+    val result = for {
+      reader <- LLMConfig()
+      client <- LLMConnect.getClient(reader)
+      _ = {
+        val toolRegistry = new ToolRegistry(Seq(WeatherTool.tool))
+        val initialConversation = Conversation(Seq(UserMessage("What's the weather like in Paris, France?")))
+        val options = CompletionOptions(tools = Seq(WeatherTool.tool))
+        println("Sending request to LLM with weather tool...")
+        processLLMRequest(client, initialConversation, options, toolRegistry)
+      }
+    } yield ()
 
-    // Create a tool registry with the weather tool
-    val toolRegistry = new ToolRegistry(Seq(WeatherTool.tool))
-
-    // Create initial conversation with user question
-    val initialConversation = Conversation(Seq(UserMessage("What's the weather like in Paris, France?")))
-
-    // Create completion options with the weather tool
-    val options = CompletionOptions(
-      tools = Seq(WeatherTool.tool)
-    )
-
-    println("Sending request to LLM with weather tool...")
-
-    // Make the API request
-    processLLMRequest(client, initialConversation, options, toolRegistry)
+    result.fold(err => println(s"Error: ${err.formatted}"), identity)    
+    
   }
 
   /**

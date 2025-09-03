@@ -1,15 +1,15 @@
 package org.llm4s.samples.embeddingsupport
 
 import org.llm4s.config.ConfigReader
+import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.utils.{ ModelSelector, SimilarityUtils }
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.slf4j.LoggerFactory
 
-import java.nio.file.{Files, Path, Paths}
-import java.time.{ZoneId, ZonedDateTime}
+import java.nio.file.{ Files, Path, Paths }
+import java.time.{ ZoneId, ZonedDateTime }
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
@@ -44,72 +44,64 @@ object EmbeddingExample {
   def main(args: Array[String]): Unit = {
     logger.info("Starting embedding example...")
 
-    val config = LLMConfig()
-    
-    val targets = parseTargets(config)
-    if (targets.isEmpty) {
-      println(red("[ERR] No inputs. Set EMBEDDING_INPUT_PATH or EMBEDDING_INPUT_PATHS."))
-      return
-    }
+    val result = for {
+      config <- LLMConfig()
+      targets = parseTargets(config)
+      client <- EmbeddingClient.fromConfigEither(config)
+      _ = {
+        val query = EmbeddingConfig.query(config)
+        val queryVecOpt = for {
+          configQuery <- query
+          quertVect <- embedQueryOnce(client, configQuery, config)
+        } yield quertVect
+        // accumulate results
+        val perFileRows = collection.mutable.ArrayBuffer.empty[(String, Seq[Row])]
+        val globalText = collection.mutable.ArrayBuffer.empty[Row]
+        val errors = collection.mutable.ArrayBuffer.empty[String]
+        var fileCount = 0
+        var chunkTotal = 0
 
-    val client = EmbeddingClient.fromConfigEither(config) match {
-      case Left(err) =>
-        println(red(s"[ERR] config: ${err.provider} -> ${err.message}"))
-        return
-      case Right(c) => c
-    }
+        targets.foreach { p =>
+          fileCount += 1
+          client.encodePath(p) match {
+            case Left(err) =>
+              val msg = s"${p.getFileName}: ${err.context.get("provider")} -> ${err.message}"
+              errors += msg
+              println(red(s"[ERR] $msg"))
+            case Right(Nil) =>
+              println(yellow(s"[WARN] ${p.getFileName}: no embeddings."))
+            case Right(vecs) =>
+              val rows = toRows(p.getFileName.toString, vecs, queryVecOpt, TOP_DIMS_PER_ROW)
+              val clipped = rows.take(MAX_ROWS_PER_FILE)
+              perFileRows += ((p.getFileName.toString, clipped))
+              chunkTotal += clipped.size
+              clipped.filter(_.modality == "Text").foreach(globalText += _)
+          }
+        }
+        for {
+          query <- query
+        } yield println(renderHeader(provider = EmbeddingConfig.activeProvider(config), query = query, config))
 
-    val query       = EmbeddingConfig.query(config)
-    val queryVecOpt = for {
-      configQuery <- query
-      quertVect <- embedQueryOnce(client, configQuery, config)
-    } yield quertVect
+        perFileRows.foreach { case (name, rows) =>
+          println(renderFileSection(name, rows))
+        }
 
-    // accumulate results
-    val perFileRows = collection.mutable.ArrayBuffer.empty[(String, Seq[Row])]
-    val globalText  = collection.mutable.ArrayBuffer.empty[Row]
-    val errors      = collection.mutable.ArrayBuffer.empty[String]
-    var fileCount   = 0
-    var chunkTotal  = 0
+        if (SHOW_GLOBAL_TOP && globalText.nonEmpty) {
+          val top = globalText.sortBy(r => -r.similarity.getOrElse(Double.NegativeInfinity)).take(GLOBAL_TOPK).toSeq
+          println(renderGlobalTop(top))
+        }
 
-    targets.foreach { p =>
-      fileCount += 1
-      client.encodePath(p) match {
-        case Left(err) =>
-          val msg = s"${p.getFileName}: ${err.provider} -> ${err.message}"
-          errors += msg
-          println(red(s"[ERR] $msg"))
-        case Right(Nil) =>
-          println(yellow(s"[WARN] ${p.getFileName}: no embeddings."))
-        case Right(vecs) =>
-          val rows = toRows(p.getFileName.toString, vecs, queryVecOpt, TOP_DIMS_PER_ROW)
-          val clipped = rows.take(MAX_ROWS_PER_FILE)
-          perFileRows += ((p.getFileName.toString, clipped))
-          chunkTotal += clipped.size
-          clipped.filter(_.modality == "Text").foreach(globalText += _)
+        println(renderSummary(
+          files = fileCount,
+          chunks = chunkTotal,
+          errors = errors.toSeq,
+          perFileRows = perFileRows.flatMap(_._2).toSeq
+        ))
       }
-    }
+    } yield ()
 
-    // ---- print report ----
-    for {
-      query <- query
-    } yield println(renderHeader(provider = EmbeddingConfig.activeProvider(config), query = query, config))
+    result.fold(err => Console.println(err.toString), identity)
 
-    perFileRows.foreach { case (name, rows) =>
-      println(renderFileSection(name, rows))
-    }
-
-    if (SHOW_GLOBAL_TOP && globalText.nonEmpty) {
-      val top = globalText.sortBy(r => -r.similarity.getOrElse(Double.NegativeInfinity)).take(GLOBAL_TOPK).toSeq
-      println(renderGlobalTop(top))
-    }
-
-    println(renderSummary(
-      files = fileCount,
-      chunks = chunkTotal,
-      errors = errors.toSeq,
-      perFileRows = perFileRows.flatMap(_._2).toSeq
-    ))
   }
 
   // ---------------- Model for printing ----------------

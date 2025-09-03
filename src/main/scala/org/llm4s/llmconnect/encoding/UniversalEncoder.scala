@@ -1,14 +1,15 @@
 package org.llm4s.llmconnect.encoding
 
+import org.apache.tika.Tika
 import org.llm4s.config.ConfigReader
 import org.llm4s.config.ConfigReader.LLMConfig
-import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.config._
-import org.llm4s.llmconnect.utils.{ ChunkingUtils, ModelSelector }
-import org.llm4s.llmconnect.extractors.UniversalExtractor
 import org.llm4s.llmconnect.EmbeddingClient
+import org.llm4s.llmconnect.config._
+import org.llm4s.llmconnect.extractors.UniversalExtractor
+import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.utils.{ ChunkingUtils, ModelSelector }
+import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
-import org.apache.tika.Tika
 
 import java.io.File
 import java.nio.file.Path
@@ -22,15 +23,15 @@ object UniversalEncoder {
   private val MAX_STUB_DIMENSION = 8192
 
   /** Entry point: detect MIME → extract → encode → normalized vectors + metadata. */
-  def encodeFromPath(path: Path, client: EmbeddingClient): Either[EmbeddingError, Seq[EmbeddingVector]] =
-    encodeFromPath(path, client, LLMConfig())
+  def encodeFromPath(path: Path, client: EmbeddingClient): Result[Seq[EmbeddingVector]] =
+    LLMConfig().flatMap(cfg => encodeFromPath(path, client, cfg))
 
   /** Entry point with explicit config for better testability and error handling. */
   def encodeFromPath(
     path: Path,
     client: EmbeddingClient,
     config: ConfigReader
-  ): Either[EmbeddingError, Seq[EmbeddingVector]] = {
+  ): Result[Seq[EmbeddingVector]] = {
     val f = path.toFile
     if (!f.exists() || !f.isFile) return Left(EmbeddingError(None, s"File not found: $path", "extractor"))
 
@@ -51,7 +52,7 @@ object UniversalEncoder {
     mime: String,
     client: EmbeddingClient,
     config: ConfigReader
-  ): Either[EmbeddingError, Seq[EmbeddingVector]] =
+  ): Result[Seq[EmbeddingVector]] =
     UniversalExtractor.extract(file.getAbsolutePath) match {
       case Left(e) => Left(EmbeddingError(None, e.message, "extractor"))
       case Right(text) =>
@@ -103,7 +104,7 @@ object UniversalEncoder {
     file: File,
     mime: String,
     config: ConfigReader
-  ): Either[EmbeddingError, Seq[EmbeddingVector]] = {
+  ): Result[Seq[EmbeddingVector]] = {
     if (!experimentalOn) return notImpl("Image")
     val model = ModelSelector.selectModel(Image, config)
     val dim   = model.dimensions
@@ -130,7 +131,7 @@ object UniversalEncoder {
     file: File,
     mime: String,
     config: ConfigReader
-  ): Either[EmbeddingError, Seq[EmbeddingVector]] = {
+  ): Result[Seq[EmbeddingVector]] = {
     if (!experimentalOn) return notImpl("Audio")
     val model = ModelSelector.selectModel(Audio, config)
     val dim   = model.dimensions
@@ -157,7 +158,7 @@ object UniversalEncoder {
     file: File,
     mime: String,
     config: ConfigReader
-  ): Either[EmbeddingError, Seq[EmbeddingVector]] = {
+  ): Result[Seq[EmbeddingVector]] = {
     if (!experimentalOn) return notImpl("Video")
     val model = ModelSelector.selectModel(Video, config)
     val dim   = model.dimensions

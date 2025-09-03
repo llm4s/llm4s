@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.model
 
+import org.llm4s.error.LLMError
+
 /**
  * EmbeddingError represents a structured error returned from
  * an embedding provider (e.g., OpenAI or VoyageAI) or local encoders/extractors.
@@ -9,7 +11,9 @@ package org.llm4s.llmconnect.model
  * @param provider Source component ("openai", "voyage", "encoder", "extractor", etc.)
  */
 final case class EmbeddingError(
-  code: Option[String],
-  message: String,
+  override val code: Option[String],
+  override val message: String,
   provider: String
-)
+) extends LLMError {
+  override val context: Map[String, String] = Map("provider" -> provider)
+}

@@ -12,6 +12,7 @@ import org.llm4s.toolapi.{ AzureToolHelper, ToolRegistry }
 import org.llm4s.types.Result
 
 import scala.jdk.CollectionConverters._
+import scala.util.Try
 
 /**
  * OpenAIClient implementation for both OpenAI and Azure OpenAI.
@@ -229,4 +230,33 @@ class OpenAIClient private (
         )
       })
       .getOrElse(Seq.empty)
+}
+
+object OpenAIClient {
+  def create(config: OpenAIConfig): Result[OpenAIClient] =
+    org.llm4s.Result.fromTry {
+      Try {
+        new OpenAIClient(
+          config.model,
+          new OpenAIClientBuilder()
+            .credential(new KeyCredential(config.apiKey))
+            .endpoint(config.baseUrl)
+            .buildClient()
+        )
+      }
+    }
+
+  def create(config: AzureConfig): Result[OpenAIClient] =
+    org.llm4s.Result.fromTry {
+      Try {
+        new OpenAIClient(
+          config.model,
+          new OpenAIClientBuilder()
+            .credential(new AzureKeyCredential(config.apiKey))
+            .endpoint(config.endpoint)
+            .serviceVersion(OpenAIServiceVersion.valueOf(config.apiVersion))
+            .buildClient()
+        )
+      }
+    }
 }

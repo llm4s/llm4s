@@ -9,7 +9,14 @@ import org.llm4s.config.ConfigReader.LLMConfig
 
 object LangfuseSampleTraceRunner {
   def main(args: Array[String]): Unit = {
-    exportSampleTrace()(LLMConfig())
+    
+    val result = for {
+      config <- LLMConfig()
+      _ = exportSampleTrace()(config)
+    } yield ()
+    
+    result.fold(err => Console.err.println(s"Error: ${err.formatted}"), identity )
+    
   }
 
   def exportSampleTrace()(config:ConfigReader): Unit = {

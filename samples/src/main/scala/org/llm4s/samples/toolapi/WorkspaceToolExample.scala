@@ -3,7 +3,7 @@ package org.llm4s.samples.toolapi
 import org.llm4s.llmconnect.config.{ AnthropicConfig, OpenAIConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.LLMProvider
-import org.llm4s.llmconnect.{ LLM, LLMClient }
+import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.toolapi._
 import org.llm4s.workspace.ContainerisedWorkspace
 import org.slf4j.LoggerFactory
@@ -36,6 +36,7 @@ object WorkspaceToolExample {
     val gpt4oModelName = sys.env.getOrElse("LLM_MODEL_GPT4O", "gpt-4o")
     val sonnetModelName = "claude-3-7-sonnet-latest"
 
+    //TODO read from config
     // Sample workspace directory
     val workspaceDir = System.getProperty("user.home") + "/workspace-demo"
     logger.info(s"Using workspace directory: $workspaceDir")
@@ -71,7 +72,9 @@ object WorkspaceToolExample {
           baseUrl = "https://api.openai.com/v1"
         )
         
-        val openaiClient = LLM.client(LLMProvider.OpenAI, openaiConfig)
+        val openaiClient = LLMConnect
+          .getClient(LLMProvider.OpenAI, openaiConfig)
+          .fold(e => throw new IllegalArgumentException(e.message), identity)
         testLLMWithTools(openaiClient, toolRegistry, prompt)
 
         // Test with Claude
@@ -82,7 +85,9 @@ object WorkspaceToolExample {
           baseUrl = "https://api.anthropic.com"
         )
         
-        val anthropicClient = LLM.client(LLMProvider.Anthropic, anthropicConfig)
+        val anthropicClient = LLMConnect
+          .getClient(LLMProvider.Anthropic, anthropicConfig)
+          .fold(e => throw new IllegalArgumentException(e.message), identity)
         testLLMWithTools(anthropicClient, toolRegistry, prompt)
       } else {
         logger.error("Failed to start the workspace container")

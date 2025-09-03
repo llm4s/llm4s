@@ -1,8 +1,12 @@
 package org.llm4s.codegen
 
-import org.llm4s.llmconnect.model.MessageRole
+import org.llm4s.agent.AgentState
 import org.llm4s.config.ConfigReader.LLMConfig
+import org.llm4s.error.SimpleError
+import org.llm4s.llmconnect.model.MessageRole
 import org.slf4j.LoggerFactory
+
+import scala.util.Using
 
 /**
  * Example demonstrating how to use the CodeWorker to perform code tasks.
@@ -11,62 +15,50 @@ object CodeGenExample {
   private val logger = LoggerFactory.getLogger(getClass)
 
   def main(args: Array[String]): Unit = {
-    // Sample workspace directory - user's home directory or current directory
+    // TODO need to get workspace and traceLogPath dir from config/env vars
+
     val workspaceDir = System.getProperty("user.home") + "/code-workspace"
     logger.info(s"Using workspace directory: $workspaceDir")
 
-    // Create a CodeWorker instance
-    val codeWorker = new CodeWorker(workspaceDir)(LLMConfig())
-
-    // Define the trace log path
     val traceLogPath = "/Users/rory.graves/workspace/home/llm4s/log/codegen-trace.md"
     logger.info(s"Trace log will be written to: $traceLogPath")
 
-    try
-      // Initialize the workspace
-      if (codeWorker.initialize()) {
-        logger.info("CodeWorker initialized successfully")
+    val task =
+      """Create a simple sbt project containing a hello world example that prints the current date and time.
+        |Use 'sbt compile' and 'sbt run' to test the generated code.
+        |You can assume you have sbt and java already installed.
+        |Run the program and show the result.""".stripMargin
 
-        // Define a code task - could be creating a new file, modifying code, etc.
-        val task =
-          "Create a simple sbt project containing a hello world example that prints the current date and time.  Use 'sbt compile' and 'sbt run' to test the generated code.  You can assume you have sbt and java already installed." +
-            "Run the program and show the result. "
-
-        // Execute the task with trace logging - increase step limit to 20
-        codeWorker.executeTask(task, maxSteps = Some(20), traceLogPath = Some(traceLogPath)) match {
-          case Right(finalState) =>
-            logger.info(s"Task execution completed. Final status: ${finalState.status}")
-            logger.info(s"Trace log has been written to: $traceLogPath")
-
-            // Print the agent's final response
-            finalState.conversation.messages.last match {
-              case msg if msg.role == MessageRole.Assistant =>
-                logger.info(s"Final agent response: ${msg.content}")
-              case _ =>
-                logger.warn("No final assistant message found")
-            }
-
-            // Print execution logs for debugging
-            if (finalState.logs.nonEmpty) {
-              logger.info("Execution logs:")
-              finalState.logs.foreach(log => logger.info(log))
-            }
-
-          case Left(error) =>
-            logger.error(s"Task execution failed: ${error.message}")
-        }
-      } else {
-        logger.error("Failed to initialize CodeWorker")
+    val result = for {
+      config <- LLMConfig()
+      finalState <- Using.resource(new CodeWorker(workspaceDir)(config)) { codeWorker =>
+        for {
+          _          <- Either.cond(codeWorker.initialize(), (), SimpleError("Failed to initialize CodeWorker"))
+          finalState <- codeWorker.executeTask(task, Some(20), Some(traceLogPath))
+          _ = logFinalResponse(finalState, traceLogPath)
+        } yield finalState
       }
-    catch {
-      case e: Exception =>
-        logger.error(s"Error during code task execution: ${e.getMessage}", e)
-    } finally
-      // Clean up resources
-      if (codeWorker.shutdown()) {
-        logger.info("CodeWorker shutdown successfully")
-      } else {
-        logger.error("Failed to shutdown CodeWorker properly")
-      }
+    } yield finalState
+
+    result match {
+      case Right(finalState) =>
+        logger.info(s"Workflow completed successfully. Final status: ${finalState.status}")
+      case Left(err) =>
+        logger.error(s"Workflow failed: ${err.message}")
+    }
+  }
+
+  private def logFinalResponse(finalState: AgentState, traceLogPath: String): Unit = {
+    finalState.conversation.messages.lastOption match {
+      case Some(msg) if msg.role == MessageRole.Assistant =>
+        logger.info(s"Final agent response: ${msg.content}")
+      case _ =>
+        logger.warn("No final assistant message found")
+    }
+
+    if (finalState.logs.nonEmpty) {
+      logger.info(s"Execution logs (see also $traceLogPath):")
+      finalState.logs.foreach(logger.info)
+    }
   }
 }

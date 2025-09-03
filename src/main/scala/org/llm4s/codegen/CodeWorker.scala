@@ -2,7 +2,7 @@ package org.llm4s.codegen
 
 import org.llm4s.agent.{ Agent, AgentState, AgentStatus }
 import org.llm4s.config.ConfigReader
-import org.llm4s.llmconnect.LLM
+import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi._
 import org.llm4s.workspace.ContainerisedWorkspace
 import org.slf4j.LoggerFactory
@@ -16,11 +16,9 @@ import org.llm4s.error.ValidationError
  *
  * @param sourceDirectory The directory containing the codebase to work with
  */
-class CodeWorker(sourceDirectory: String)(reader: ConfigReader) {
+class CodeWorker(sourceDirectory: String)(reader: ConfigReader) extends AutoCloseable {
   private val logger    = LoggerFactory.getLogger(getClass)
   private val workspace = new ContainerisedWorkspace(sourceDirectory)
-  private val client    = LLM.client(reader)
-  private val agent     = new Agent(client)
 
   // Custom tool definitions for working with code
   private val workspaceTools = WorkspaceTools.createDefaultWorkspaceTools(workspace)
@@ -58,7 +56,11 @@ class CodeWorker(sourceDirectory: String)(reader: ConfigReader) {
     }
 
     // Run the agent to completion or until step limit is reached
-    val result = agent.run(task, toolRegistry, maxSteps, traceLogPath, None)
+    val result = for {
+      client <- LLMConnect.getClient(reader)
+      agent = new Agent(client)
+      state <- agent.run(task, toolRegistry, maxSteps, traceLogPath, None)
+    } yield state
 
     result match {
       case Right(finalState) =>
@@ -83,4 +85,6 @@ class CodeWorker(sourceDirectory: String)(reader: ConfigReader) {
     workspace.stopContainer()
   }
 
+  override def close(): Unit =
+    shutdown()
 }

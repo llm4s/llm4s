@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.encoding.UniversalEncoder
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.utils.ModelSelector
+import org.llm4s.types.Result
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -93,7 +94,7 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
   test("Non-text: image/audio/video → 501 by default (stubs disabled)") {
     if (experimentalOn) cancel("ENABLE_EXPERIMENTAL_STUBS=true in env; skipping default-501 test.")
 
-    val imgRes = withTempFile("embedx_png_", ".png") { png =>
+    val imgRes: Result[Seq[EmbeddingVector]] = withTempFile("embedx_png_", ".png") { png =>
       writeDummyPng(png)
       UniversalEncoder.encodeFromPath(png, stubClient)
     }
@@ -116,9 +117,9 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
     audRes.fold(_.code shouldBe (Some("501")), _ => fail("Expected LaudRes eft(501)"))
     vidRes.fold(_.code shouldBe (Some("501")), _ => fail("Expected vidRes Left(501)"))
 
-    imgRes.fold(_.provider shouldBe "encoder", _ => fail("Expected imgRes Left(encoder)"))
-    audRes.fold(_.provider shouldBe "encoder", _ => fail("Expected audRes Left(encoder)"))
-    vidRes.fold(_.provider shouldBe "encoder", _ => fail("Expected vidRes Left(encoder)"))
+    imgRes.fold(_.context.get("provider") shouldBe Some("encoder"), _ => fail("Expected imgRes Left(encoder)"))
+    audRes.fold(_.context.get("provider") shouldBe Some("encoder"), _ => fail("Expected audRes Left(encoder)"))
+    vidRes.fold(_.context.get("provider") shouldBe Some("encoder"), _ => fail("Expected vidRes Left(encoder)"))
 
   }
 
@@ -154,7 +155,7 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
   }
 
   test("Local model dimensions (Image/Audio/Video) match registry") {
-    val config   = LLMConfig()
+    val config   = LLMConfig().fold(err => fail(err.formatted), identity)
     val imgModel = ModelSelector.selectModel(Image, config)
     val audModel = ModelSelector.selectModel(Audio, config)
     val vidModel = ModelSelector.selectModel(Video, config)
@@ -162,10 +163,5 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
     imgModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", EmbeddingConfig.imageModel(config))
     audModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", EmbeddingConfig.audioModel(config))
     vidModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", EmbeddingConfig.videoModel(config))
-  }
-
-  test("EmbeddingResponse back-compat: vectors alias equals embeddings") {
-    val resp = EmbeddingResponse(embeddings = Seq(Seq(0.1, 0.2, 0.3)))
-    resp.vectors shouldBe resp.embeddings
   }
 }

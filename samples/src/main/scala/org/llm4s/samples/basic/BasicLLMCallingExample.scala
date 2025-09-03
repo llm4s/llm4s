@@ -1,7 +1,7 @@
 package org.llm4s.samples.basic
 
 import org.llm4s.config.ConfigReader.LLMConfig
-import org.llm4s.llmconnect.LLM
+import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 
 /**
@@ -39,13 +39,12 @@ object BasicLLMCallingExample {
       )
     )
 
-    // Get a client using environment variables
-    val client    = LLM.client(LLMConfig())
-
-    
-    // Complete the conversation
-    client.complete(conversation) match {
-      case Right(completion) =>
+    // Get a client using environment variables (Result-first)
+    val result = for {
+      reader <- LLMConfig()
+      client <- LLMConnect.getClient(reader)
+      completion <- client.complete(conversation)
+      _ = {
         println(s"Model ID=${completion.id} is created at ${completion.created}")
         println(s"Chat Role: ${completion.message.role}")
         println("Message:")
@@ -57,9 +56,8 @@ object BasicLLMCallingExample {
             s"Tokens used: ${usage.totalTokens} (${usage.promptTokens} prompt, ${usage.completionTokens} completion)"
           )
         }
-
-      case Left(error) =>
-        println(s"Error: ${error.message}")
-    }
+      }
+    } yield ()
+    result.fold(err => println(s"Error: ${err.formatted}"), identity)
   }
 }

@@ -2,12 +2,13 @@ package org.llm4s.samples.assistant
 
 import org.llm4s.assistant.AssistantAgent
 import org.llm4s.config.ConfigReader.LLMConfig
-import org.llm4s.llmconnect.LLM
-import org.llm4s.mcp.{ MCPServerConfig, MCPToolRegistry }
+import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.mcp.{MCPServerConfig, MCPToolRegistry}
 import org.llm4s.toolapi.tools.WeatherTool
 import org.slf4j.LoggerFactory
 
 import scala.concurrent.duration._
+import scala.util.Using
 
 /**
  * Example demonstrating the interactive AssistantAgent with MCP integration
@@ -57,60 +58,53 @@ object AssistantAgentExample {
   def main(args: Array[String]): Unit = {
     logger.info("Starting LLM4S Interactive Assistant Agent Example...")
     
-    // Get LLM client from environment variables
-    val client = LLM.client(LLMConfig())
-    
-    // Create MCP server configuration for Playwright
-    val playwrightServerConfig = MCPServerConfig.stdio(
-      name = "playwright-mcp-server",
-      command = Seq("npx", "@playwright/mcp@latest"),
-      timeout = 60.seconds
+    // Get LLM client from environment variables (Result-first)
+    val result = for {
+      config <- LLMConfig()
+      client <- LLMConnect.getClient(config)
+      playwrightServerConfig = MCPServerConfig.stdio(
+        name = "playwright-mcp-server",
+        command = Seq("npx", "@playwright/mcp@latest"),
+        timeout = 60.seconds
+      )
+      emailServerConfig = MCPServerConfig.stdio(
+        name = "claude-post-email-server",
+        command = Seq("bash", "-c", "cd claude-post && source .venv/bin/activate && arch -arm64 .venv/bin/email-client --enable-write-operations"),
+        timeout = 60.seconds
+      )
+      _ = Using.resource(new MCPToolRegistry(Seq(playwrightServerConfig, emailServerConfig), Seq(WeatherTool.tool), cacheTTL = 10.minutes)){
+        tools =>
+          val allTools = tools.getAllTools
+          logger.info("Available tools ({} total):", allTools.size)
+          allTools.zipWithIndex.foreach { case (tool, index) =>
+            val source = if (tool.name == "weather") "local"
+                        else if (tool.name.contains("gmail") || tool.name.contains("email")) "email-MCP"
+                        else "playwright-MCP"
+            logger.info("   {}. {} ({}): {}", index + 1, tool.name, source, tool.description)
+          }
+          val assistant = new AssistantAgent(
+            client = client,
+            tools = tools,
+            sessionDir = "./sessions" // Sessions will be saved here
+          )
+          // Start the interactive session
+          logger.info("Launching interactive assistant session")
+
+          assistant.startInteractiveSession() match {
+            case Right(_) =>
+              logger.info("Assistant session completed successfully")
+
+            case Left(error) =>
+              logger.error("Assistant session failed: {}", error)
+          }
+      }
+    } yield ()
+
+    result.fold(
+      err => {
+        logger.error("Error: {}", err.formatted)
+      },
+      identity
     )
-    
-    // Create MCP server configuration for Claude Post Email Server  
-    val emailServerConfig = MCPServerConfig.stdio(
-      name = "claude-post-email-server",
-      command = Seq("bash", "-c", "cd claude-post && source .venv/bin/activate && arch -arm64 .venv/bin/email-client --enable-write-operations"),
-      timeout = 60.seconds
-    )
-    
-    // Create tool registry combining local and MCP tools
-    val tools = new MCPToolRegistry(
-      mcpServers = Seq(playwrightServerConfig, emailServerConfig),
-      localTools = Seq(WeatherTool.tool),
-      cacheTTL = 10.minutes
-    )
-    
-    // Create the assistant agent
-    val assistant = new AssistantAgent(
-      client = client,
-      tools = tools,
-      sessionDir = "./sessions" // Sessions will be saved here
-    )
-    
-    // Display available tools
-    val allTools = tools.getAllTools
-    logger.info("Available tools ({} total):", allTools.size)
-    allTools.zipWithIndex.foreach { case (tool, index) =>
-      val source = if (tool.name == "weather") "local" 
-                  else if (tool.name.contains("gmail") || tool.name.contains("email")) "email-MCP"
-                  else "playwright-MCP"
-      logger.info("   {}. {} ({}): {}", index + 1, tool.name, source, tool.description)
-    }
-    
-    // Start the interactive session
-    logger.info("Launching interactive assistant session")
-    assistant.startInteractiveSession() match {
-      case Right(_) =>
-        logger.info("Assistant session completed successfully")
-        
-      case Left(error) =>
-        logger.error("Assistant session failed: {}", error)
-        System.exit(1)
-    }
-    
-    // Clean up MCP connections
-    logger.info("Cleaning up MCP connections...")
-    tools.closeMCPClients()
   }
 }

@@ -283,12 +283,15 @@ Test the complete streaming flow with mocked responses:
 ## Code Examples
 
 ### Basic Usage
+
 ```scala
-import org.llm4s.llmconnect.LLM
 import org.llm4s.llmconnect.model._
 import org.llm4s.config.ConfigReader.LLMConfig
 
-val client = LLM.client(LLMConfig())
+val client = for {
+  config <- org.llm4s.config.ConfigReader.LLMConfig()
+  client <- org.llm4s.llmconnect.LLMConnect.getClient(config)
+} yield client
 val conversation = Conversation(Seq(
   UserMessage("Write a story about a robot")
 ))

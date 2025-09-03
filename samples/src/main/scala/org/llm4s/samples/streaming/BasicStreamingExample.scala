@@ -1,7 +1,7 @@
 package org.llm4s.samples.streaming
 
 import org.llm4s.config.ConfigReader.LLMConfig
-import org.llm4s.llmconnect.LLM
+import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 
 /**
@@ -26,63 +26,51 @@ object BasicStreamingExample {
         UserMessage("Write a short story about a robot learning to paint. Make it about 3 paragraphs.")
       )
     )
-    
-    // Get a client using environment variables
-    val client    = LLM.client(LLMConfig())
-    
-    println("Streaming response from LLM...\n")
-    println("-" * 50)
-    
-    // Track timing
-    val startTime = System.currentTimeMillis()
     var firstChunkTime: Option[Long] = None
     var chunkCount = 0
-    
-    // Stream the completion with real-time output
-    val result = client.streamComplete(
-      conversation,
-      options = CompletionOptions(temperature = 0.7),
-      onChunk = chunk => {
-        // Record time to first chunk
-        if (firstChunkTime.isEmpty && chunk.content.isDefined) {
-          firstChunkTime = Some(System.currentTimeMillis() - startTime)
+    // Get a client using environment variables (Result-first)
+    val result = for {
+      reader <- LLMConfig()
+      client <- LLMConnect.getClient(reader)
+      startTime = System.currentTimeMillis()
+      completion  <- client.streamComplete(
+        conversation,
+        options = CompletionOptions(temperature = 0.7),
+        onChunk = chunk => {
+          // Record time to first chunk
+          if (firstChunkTime.isEmpty && chunk.content.isDefined) {
+            firstChunkTime = Some(System.currentTimeMillis() - startTime)
+          }
+
+          // Print content as it arrives
+          chunk.content.foreach(print)
+
+          // Track chunks
+          chunkCount += 1
+
+          // Show when we receive tool calls (if any)
+          chunk.toolCall.foreach { toolCall =>
+            println(s"\n[Tool Call: ${toolCall.name}]")
+          }
+
+          // Show finish reason
+          chunk.finishReason.foreach { reason =>
+            println(s"\n[Stream finished: $reason]")
+          }
         }
-        
-        // Print content as it arrives
-        chunk.content.foreach(print)
-        
-        // Track chunks
-        chunkCount += 1
-        
-        // Show when we receive tool calls (if any)
-        chunk.toolCall.foreach { toolCall =>
-          println(s"\n[Tool Call: ${toolCall.name}]")
-        }
-        
-        // Show finish reason
-        chunk.finishReason.foreach { reason =>
-          println(s"\n[Stream finished: $reason]")
-        }
-      }
-    )
-    
-    println("\n" + "-" * 50)
-    
-    // Calculate timing
-    val totalTime = System.currentTimeMillis() - startTime
-    
-    // Handle the final result
-    result match {
-      case Right(completion) =>
+      )
+      _ = {
+        val totalTime = System.currentTimeMillis() - startTime
+        println("\n" + "-" * 50)
         println("\n✅ Streaming completed successfully!")
         println(s"Message ID: ${completion.id}")
-        
+
         // Print timing statistics
         println(s"\n📊 Streaming Statistics:")
         println(s"  - Time to first chunk: ${firstChunkTime.getOrElse(0L)}ms")
         println(s"  - Total streaming time: ${totalTime}ms")
         println(s"  - Number of chunks: $chunkCount")
-        
+
         // Print usage information if available
         completion.usage.foreach { usage =>
           println(s"\n💰 Token Usage:")
@@ -90,19 +78,10 @@ object BasicStreamingExample {
           println(s"  - Completion tokens: ${usage.completionTokens}")
           println(s"  - Total tokens: ${usage.totalTokens}")
         }
-        
-      case Left(error) =>
-        println(s"\n❌ Streaming failed: ${error.message}")
-        error match {
-          case _: org.llm4s.error.AuthenticationError =>
-            println("Please check your API key configuration.")
-          case _: org.llm4s.error.RateLimitError =>
-            println("You've hit the rate limit. Please wait and try again.")
-          case _ =>
-            println(s"Error details: $error")
-        }
-    }
+      }
+    } yield ()
     
+    result.fold(err => println(s"Error: ${err.formatted}"), identity)
     println("\n=== Example Complete ===")
   }
 }

@@ -14,7 +14,8 @@ class MCPToolRegistry(
   mcpServers: Seq[MCPServerConfig],
   localTools: Seq[ToolFunction[_, _]] = Seq.empty,
   cacheTTL: Duration = 10.minutes
-) extends ToolRegistry(localTools) {
+) extends ToolRegistry(localTools)
+    with AutoCloseable {
 
   private val logger                                            = LoggerFactory.getLogger(getClass)
   private val mcpClients: ConcurrentHashMap[String, MCPClient]  = new ConcurrentHashMap()
@@ -205,6 +206,9 @@ class MCPToolRegistry(
 
   // Initialize tools during construction
   initializeMCPTools()
+
+  override def close(): Unit =
+    closeMCPClients()
 }
 
 object MCPToolRegistry {

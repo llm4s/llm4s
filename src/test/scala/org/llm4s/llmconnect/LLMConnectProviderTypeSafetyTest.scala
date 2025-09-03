@@ -14,8 +14,11 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       organization = None,
       baseUrl = "https://api.openai.com/v1"
     )
-    val client = LLMConnect.getClient(LLMProvider.OpenAI, cfg)
-    client.getClass.getSimpleName shouldBe "OpenAIClient"
+    val res = LLMConnect.getClient(LLMProvider.OpenAI, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "OpenAIClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
   }
 
   test("OpenRouter provider with OpenAIConfig returns OpenRouterClient") {
@@ -25,8 +28,11 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       organization = None,
       baseUrl = "https://openrouter.ai/api/v1"
     )
-    val client = LLMConnect.getClient(LLMProvider.OpenRouter, cfg)
-    client.getClass.getSimpleName shouldBe "OpenRouterClient"
+    val res = LLMConnect.getClient(LLMProvider.OpenRouter, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "OpenRouterClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
   }
 
   test("Azure provider with AzureConfig returns OpenAIClient (Azure-backed)") {
@@ -36,8 +42,11 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       model = "gpt-4o",
       apiVersion = "V2025_01_01_PREVIEW"
     )
-    val client = LLMConnect.getClient(LLMProvider.Azure, cfg)
-    client.getClass.getSimpleName shouldBe "OpenAIClient"
+    val res = LLMConnect.getClient(LLMProvider.Azure, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "OpenAIClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
   }
 
   test("Anthropic provider with AnthropicConfig returns AnthropicClient") {
@@ -46,8 +55,11 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       model = "claude-3-sonnet",
       baseUrl = "https://api.anthropic.com"
     )
-    val client = LLMConnect.getClient(LLMProvider.Anthropic, cfg)
-    client.getClass.getSimpleName shouldBe "AnthropicClient"
+    val res = LLMConnect.getClient(LLMProvider.Anthropic, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "AnthropicClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
   }
 
   test("Ollama provider with OllamaConfig returns OllamaClient") {
@@ -55,8 +67,11 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       model = "llama3.1",
       baseUrl = "http://localhost:11434"
     )
-    val client = LLMConnect.getClient(LLMProvider.Ollama, cfg)
-    client.getClass.getSimpleName shouldBe "OllamaClient"
+    val res = LLMConnect.getClient(LLMProvider.Ollama, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "OllamaClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
   }
 
   test("OpenAI provider with non-OpenAIConfig should throw IllegalArgumentException") {
@@ -66,9 +81,8 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       baseUrl = "https://api.anthropic.com"
     )
 
-    assertThrows[IllegalArgumentException] {
-      LLMConnect.getClient(LLMProvider.OpenAI, wrongCfg)
-    }
+    val res = LLMConnect.getClient(LLMProvider.OpenAI, wrongCfg)
+    res.isLeft shouldBe true
   }
 
   test("OpenRouter provider with non-OpenAIConfig should throw IllegalArgumentException") {
@@ -79,9 +93,8 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       apiVersion = "V2025_01_01_PREVIEW"
     )
 
-    assertThrows[IllegalArgumentException] {
-      LLMConnect.getClient(LLMProvider.OpenRouter, wrongCfg)
-    }
+    val res = LLMConnect.getClient(LLMProvider.OpenRouter, wrongCfg)
+    res.isLeft shouldBe true
   }
 
   test("Azure provider with non-AzureConfig should throw IllegalArgumentException") {
@@ -92,8 +105,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       baseUrl = "https://api.openai.com/v1"
     )
 
-    assertThrows[IllegalArgumentException] {
-      LLMConnect.getClient(LLMProvider.Azure, wrongCfg)
-    }
+    val res = LLMConnect.getClient(LLMProvider.Azure, wrongCfg)
+    res.isLeft shouldBe true
   }
 }
