@@ -37,7 +37,7 @@ object BasicLLMCallingWithTrace {
             println(completion.message.content)
 
             // Extract model name from environment
-            val model = sys.env.getOrElse("LLM_MODEL", "unknown-model")
+            val model = config.getOrElse("LLM_MODEL", "unknown-model")
 
             // Trace the completion with token usage
             tracer.traceCompletion(completion, model)

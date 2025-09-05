@@ -14,7 +14,8 @@ import org.llm4s.llmconnect.model._
  */
 object BasicStreamingExample {
   def main(args: Array[String]): Unit = {
-    val model = sys.env.getOrElse("LLM_MODEL", "unknown")
+    val config = LLMConfig().fold(err => throw new RuntimeException(err.formatted), identity)
+    val model = config.getOrElse("LLM_MODEL", "unknown")
     println("=== LLM4S Basic Streaming Example ===")
     println(s"Using model: $model")
     println("=" * 50 + "\n")

@@ -1,6 +1,7 @@
 package org.llm4s.samples.types
 
 import org.llm4s.AsyncResult
+import org.llm4s.config.ConfigReader
 import org.llm4s.types._
 
 import scala.concurrent.Future
@@ -25,11 +26,11 @@ object TypeUsage {
   }
 
   // Example: Using Result types
-  def exampleResultTypes(): Result[String] =
+  def exampleResultTypes()(config:ConfigReader): Result[String] =
     for {
       modelName <- ModelName("gpt-4")
       provider  <- ProviderName.create("openai")
-      apiKey    <- ApiKey.fromEnvironment("OPENAI_API_KEY")
+      apiKey    <- ApiKey.fromEnvironment("OPENAI_API_KEY")(config)
     } yield s"Configuration: $provider/$modelName with key ${apiKey.masked}"
 
   // Example: Using async patterns

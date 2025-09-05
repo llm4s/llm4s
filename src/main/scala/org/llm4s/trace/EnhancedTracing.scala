@@ -137,7 +137,7 @@ object EnhancedTracing {
   }
 
   def create()(config: ConfigReader): EnhancedTracing = {
-    val mode = sys.env
+    val mode = config
       .get("TRACING_MODE")
       .map(TracingMode.fromString)
       .getOrElse(TracingMode.Console)

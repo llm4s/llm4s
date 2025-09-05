@@ -1,5 +1,6 @@
 package embeddingsupport
 
+import org.llm4s.config.ConfigReader
 import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.{ EmbeddingConfig, ModelDimensionRegistry }
@@ -34,8 +35,8 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
       Left(EmbeddingError(Some("418"), "stub provider (not used in these tests)", "stub"))
   })
 
-  private def experimentalOn: Boolean =
-    sys.env.get("ENABLE_EXPERIMENTAL_STUBS").exists(_.trim.equalsIgnoreCase("true"))
+  private def experimentalOn(config: ConfigReader): Boolean =
+    config.get("ENABLE_EXPERIMENTAL_STUBS").exists(_.trim.equalsIgnoreCase("true"))
 
   private def withTempFile[T](prefix: String, suffix: String)(use: Path => T): T = {
     val p = Files.createTempFile(prefix, suffix)
@@ -92,7 +93,8 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
   // ----------------- Tests -----------------
 
   test("Non-text: image/audio/video → 501 by default (stubs disabled)") {
-    if (experimentalOn) cancel("ENABLE_EXPERIMENTAL_STUBS=true in env; skipping default-501 test.")
+    val config = LLMConfig().fold(err => fail(err.formatted), identity)
+    if (experimentalOn(config)) cancel("ENABLE_EXPERIMENTAL_STUBS=true in env; skipping default-501 test.")
 
     val imgRes: Result[Seq[EmbeddingVector]] = withTempFile("embedx_png_", ".png") { png =>
       writeDummyPng(png)
@@ -124,7 +126,8 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
   }
 
   test("Experimental stubs: image/audio/video produce vectors and experimental=true") {
-    if (!experimentalOn) cancel("ENABLE_EXPERIMENTAL_STUBS!=true; set it to run this test.")
+    val config = LLMConfig().fold(err => fail(err.formatted), identity)
+    if (!experimentalOn(config)) cancel("ENABLE_EXPERIMENTAL_STUBS!=true; set it to run this test.")
 
     val imgRes = withTempFile("embedx_png_", ".png") { png =>
       writeDummyPng(png)

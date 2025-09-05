@@ -68,28 +68,29 @@ object WorkspaceToolExample {
 
         // Test with GPT-4o
         logger.info(s"Testing with OpenAI's $gpt4oModelName...")
-
-        val configReader = org.llm4s.config.ConfigReader.LLMConfig()
-        val openaiConfig =
-          OpenAIConfig(gpt4oModelName, configReader).fold(e => throw new IllegalArgumentException(e.message), identity)
+        val openaiConfig = OpenAIConfig(
+          apiKey = config.getOrElse("OPENAI_API_KEY", ""),
+          model = gpt4oModelName,
+          organization = None,
+          baseUrl = "https://api.openai.com/v1"
+        )
 
         val openaiClient = LLMConnect
           .getClient(LLMProvider.OpenAI, openaiConfig)
           .fold(e => throw new IllegalArgumentException(e.message), identity)
-
         testLLMWithTools(openaiClient, toolRegistry, prompt)
 
         // Test with Claude
         logger.info(s"Testing with Anthropic's $sonnetModelName...")
-        val anthropicConfig = AnthropicConfig(sonnetModelName, configReader).fold(
-          e => throw new IllegalArgumentException(e.message),
-          identity
+        val anthropicConfig = AnthropicConfig(
+          apiKey = config.getOrElse("ANTHROPIC_API_KEY", ""),
+          model = sonnetModelName,
+          baseUrl = "https://api.anthropic.com"
         )
 
         val anthropicClient = LLMConnect
           .getClient(LLMProvider.Anthropic, anthropicConfig)
           .fold(e => throw new IllegalArgumentException(e.message), identity)
-
         testLLMWithTools(anthropicClient, toolRegistry, prompt)
       } else {
         logger.error("Failed to start the workspace container")

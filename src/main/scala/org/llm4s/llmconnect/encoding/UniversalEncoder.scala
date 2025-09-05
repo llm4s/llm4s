@@ -87,8 +87,8 @@ object UniversalEncoder {
     }
 
   // --------------- EXPERIMENTAL GATE ----------------
-  private def experimentalOn: Boolean =
-    sys.env.get("ENABLE_EXPERIMENTAL_STUBS").exists(_.trim.equalsIgnoreCase("true"))
+  private def experimentalOn(config: ConfigReader): Boolean =
+    config.get("ENABLE_EXPERIMENTAL_STUBS").exists(_.trim.equalsIgnoreCase("true"))
 
   private def notImpl(mod: String) =
     Left(
@@ -105,7 +105,7 @@ object UniversalEncoder {
     mime: String,
     config: ConfigReader
   ): Result[Seq[EmbeddingVector]] = {
-    if (!experimentalOn) return notImpl("Image")
+    if (!experimentalOn(config)) return notImpl("Image")
     val model = ModelSelector.selectModel(Image, config)
     val dim   = model.dimensions
     // Limit dimension to prevent OOM in tests (max 8K dimensions)
@@ -132,7 +132,7 @@ object UniversalEncoder {
     mime: String,
     config: ConfigReader
   ): Result[Seq[EmbeddingVector]] = {
-    if (!experimentalOn) return notImpl("Audio")
+    if (!experimentalOn(config)) return notImpl("Audio")
     val model = ModelSelector.selectModel(Audio, config)
     val dim   = model.dimensions
     // Limit dimension to prevent OOM in tests (max 8K dimensions)
@@ -159,7 +159,7 @@ object UniversalEncoder {
     mime: String,
     config: ConfigReader
   ): Result[Seq[EmbeddingVector]] = {
-    if (!experimentalOn) return notImpl("Video")
+    if (!experimentalOn(config)) return notImpl("Video")
     val model = ModelSelector.selectModel(Video, config)
     val dim   = model.dimensions
     // Limit dimension to prevent OOM in tests (max 8K dimensions)
