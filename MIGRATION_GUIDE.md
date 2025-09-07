@@ -197,6 +197,6 @@ val customConfig: ConfigReader = ConfigReader(Map(
    } yield client
    
    // Or, if you prefer implicits (kept for compatibility)
-   implicit val config: ConfigReader = ConfigReader().fold(_ => throws RuntimeException("faield to read onfig"), identity)
+   implicit val config: ConfigReader = ConfigReader().fold(_ => throws RuntimeException("failed to read config"), identity)
    val client = org.llm4s.llmconnect.LLMConnect.getClientt(config)
    ```

@@ -24,12 +24,6 @@ import org.llm4s.llmconnect.model._
  */
 object StreamingExample {
   def main(args: Array[String]): Unit = {
-    val config = LLMConfig().fold(err => throw new RuntimeException(err.formatted), identity)
-    val model = config.getOrElse("LLM_MODEL", "unknown")
-    println(s"=== Streaming Example ===")
-    println(s"Using model: $model")
-    println("=" * 40)
-
     // Create a conversation
     val conversation = Conversation(
       Seq(
