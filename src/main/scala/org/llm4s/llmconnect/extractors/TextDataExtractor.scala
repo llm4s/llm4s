@@ -103,6 +103,8 @@ object TextDataExtractor {
     val text: String = ext match {
       // Plain-like (include code/configs)
       case "txt" | "log" | "md" | "rst" | "adoc" | "asciidoc" | "tex" | "py" | "java" | "scala" | "kt" | "js" | "ts" |
+          "tsx" | "jsx" | "c" | "cpp" | "h" | "hpp" | "rs" | "go" | "rb" | "php" | "cs" | "swift" | "sh" | "bat" |
+          "ps1" | "sql" | "yaml" | "yml" | "ini" | "env" | "properties" =>
            "tsx" | "jsx" | "c" | "cpp" | "h" | "hpp" | "rs" | "go" | "rb" | "php" | "cs" | "swift" | "sh" | "bat" |
            "ps1" | "sql" | "yaml" | "yml" | "ini" | "env" | "properties" =>
         readPlain(path)
@@ -264,6 +266,10 @@ object TextDataExtractor {
   private def detectCharset(bytes: Array[Byte]): Option[Charset] =
     if (
       bytes.length >= 3 &&
+      bytes(0) == 0xef.toByte && bytes(1) == 0xbb.toByte && bytes(2) == 0xbf.toByte
+    )
+    if (
+      bytes.length >= 3 &&
         bytes(0) == 0xef.toByte && bytes(1) == 0xbb.toByte && bytes(2) == 0xbf.toByte
     )
       Some(StandardCharsets.UTF_8)
@@ -297,6 +303,10 @@ object TextDataExtractor {
 
   /** Best-effort MIME by extension (for metadata only). */
   private def guessMime(ext: String): String = ext match {
+    case "md" => "text/markdown"
+    case "txt" | "log" | "rst" | "adoc" | "asciidoc" | "tex" | "py" | "java" | "scala" | "kt" | "js" | "ts" | "tsx" |
+        "jsx" | "c" | "cpp" | "h" | "hpp" | "rs" | "go" | "rb" | "php" | "cs" | "swift" | "sh" | "bat" | "ps1" | "sql" |
+        "yaml" | "yml" | "ini" | "env" | "properties" =>
     case "md" => "text/markdown"
     case "txt" | "log" | "rst" | "adoc" | "asciidoc" | "tex" | "py" | "java" | "scala" | "kt" | "js" | "ts" | "tsx" |
          "jsx" | "c" | "cpp" | "h" | "hpp" | "rs" | "go" | "rb" | "php" | "cs" | "swift" | "sh" | "bat" | "ps1" | "sql" |
