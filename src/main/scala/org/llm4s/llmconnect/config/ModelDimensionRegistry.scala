@@ -1,38 +1,30 @@
 package org.llm4s.llmconnect.config
 
-object ModelDimensionRegistry {
+import org.slf4j.LoggerFactory
 
-  private val dimensions: Map[String, Map[String, Int]] = Map(
-    "openai" -> Map(
-      "text-embedding-3-small" -> 1536,
-      "text-embedding-3-large" -> 3072
-    ),
-    "voyage" -> Map(
-      "voyage-2"         -> 1024,
-      "voyage-3-large"   -> 1536,
-      "voyage-3.5"       -> 1024,
-      "voyage-3.5-lite"  -> 1024,
-      "voyage-code-3"    -> 1024,
-      "voyage-finance-2" -> 1024,
-      "voyage-law-2"     -> 1024,
-      "voyage-code-2"    -> 1536,
-      "voyage-context-3" -> 1024
-    ),
-    // NEW: local (non-text) "model" dims used by our stubs or future local encoders
-    "local" -> Map(
-      "openclip-vit-b32" -> 512,
-      "wav2vec2-base"    -> 768,
-      "timesformer-base" -> 768
-    )
+/**
+ * Small registry for known (provider, model) -> dimensions.
+ * Falls back to env-provided dims when unknown.
+ */
+object ModelDimensionRegistry {
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  private val table: Map[(String, String), Int] = Map(
+    // OpenAI
+    ("openai", "text-embedding-3-small") -> 1536,
+    ("openai", "text-embedding-3-large") -> 3072,
+    ("openai", "text-embedding-ada-002") -> 1536,
+    // Voyage
+    ("voyage", "voyage-3")      -> 1024,
+    ("voyage", "voyage-3-lite") -> 1024
   )
 
-  def getDimension(provider: String, model: String): Int =
-    dimensions
-      .getOrElse(provider.toLowerCase, Map.empty)
-      .getOrElse(
-        model,
-        throw new IllegalArgumentException(
-          s"[ModelDimensionRegistry] Unknown model '$model' for provider '$provider'"
-        )
-      )
+  def getDimension(provider: String, model: String, fallback: Int): Int = {
+    val p = Option(provider).map(_.toLowerCase).getOrElse("unknown")
+    val m = Option(model).getOrElse("")
+    table.get(p -> m).getOrElse {
+      logger.debug(s"[ModelDimensionRegistry] Unknown (provider=$p, model=$m). Using fallback=$fallback")
+      fallback
+    }
+  }
 }

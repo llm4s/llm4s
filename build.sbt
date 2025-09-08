@@ -141,7 +141,8 @@ lazy val commonSettings = Seq(
     "dev.optics" %% "monocle-macro" % "3.3.0",
     "org.scalatest" %% "scalatest"       % "3.2.19" % Test,
     "commons-io"     % "commons-io"      % "2.18.0",
-    "com.lihaoyi"   %% "fansi"           % "0.5.0"
+    "com.lihaoyi"   %% "fansi"           % "0.5.0",
+    "org.apache.pdfbox" % "pdfbox" % "2.0.31"
   )
 )
 
@@ -165,7 +166,7 @@ lazy val root = (project in file("."))
       "org.scalamock"     %% "scalamock"       % "7.4.0"  % Test,
       "com.softwaremill.sttp.client4" %% "core"  % "4.0.9",
       "com.lihaoyi"                   %% "ujson" % "4.2.1",
-      "org.apache.pdfbox" % "pdfbox" % "3.0.5",
+      "org.apache.pdfbox" % "pdfbox" % "2.0.31",
       "commons-io"        % "commons-io"      % "2.18.0",
       "org.apache.tika" % "tika-core" % "3.2.1",
       "org.apache.poi" % "poi-ooxml" % "5.4.1",
@@ -244,7 +245,7 @@ lazy val crossLibDependencies = Def.setting {
     "org.scalatest" %% "scalatest" % "3.2.19" % Test,
     "com.softwaremill.sttp.client4" %% "core"  % "4.0.9",
     "com.lihaoyi"                   %% "ujson" % "4.2.1",
-    "org.apache.pdfbox" % "pdfbox" % "3.0.5",
+    "org.apache.pdfbox" % "pdfbox" % "2.0.31",
     "org.apache.poi" % "poi-ooxml" % "5.4.1",
     "org.apache.tika" % "tika-core" % "3.2.1",
     "com.lihaoyi" %% "requests" % "0.9.0",

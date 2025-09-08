@@ -1,108 +1,73 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.config.ConfigReader
-import org.llm4s.llmconnect.config.{ EmbeddingConfig, EmbeddingProviderConfig }
-import org.llm4s.llmconnect.model._
-import org.slf4j.LoggerFactory
 import sttp.client4._
-import ujson.{ Arr, Obj, read }
+import ujson._
+import org.llm4s.llmconnect.config.EmbeddingConfig
+import org.llm4s.llmconnect.model._
+import org.llm4s.types.Result
+import org.llm4s.error.{LLMError => LErr} // <-- If your repo names differ, adjust this import.
 
-class OpenAIEmbeddingProvider(config: ConfigReader) extends EmbeddingProvider {
+object OpenAIEmbeddingProvider extends EmbeddingProvider {
 
-  private val backend = DefaultSyncBackend()
-  private val logger  = LoggerFactory.getLogger(getClass)
+  override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
+    val cfg     = EmbeddingConfig.openai
+    val backend = DefaultSyncBackend()
 
-  override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] = {
-    val model = request.model.name
-    val input = request.input
-
-    // Lazily read provider config; surface missing envs as a clean EmbeddingError
-    val cfgEither: Either[EmbeddingError, EmbeddingProviderConfig] =
-      try Right(EmbeddingConfig.openAI(config))
-      catch {
-        case e: Throwable =>
-          Left(
-            EmbeddingError(
-              code = Some("400"),
-              message = s"Missing OpenAI configuration: ${e.getMessage}",
-              provider = "openai"
-            )
-          )
-      }
-
-    cfgEither.flatMap { cfg =>
+    try {
       val payload = Obj(
-        "input" -> Arr.from(input),
-        "model" -> model
-      )
+        "model" -> Str(cfg.model),
+        "input" -> Arr.from(request.input.map(Str(_)))
+      ).render()
 
-      val url = uri"${cfg.baseUrl}/v1/embeddings"
+      val resp = basicRequest
+        .post(uri"${cfg.baseUrl}/embeddings")
+        .header("Authorization", s"Bearer ${cfg.apiKey}")
+        .header("Content-Type", "application/json")
+        .body(payload)
+        .send(backend)
 
-      logger.debug(s"[OpenAIEmbeddingProvider] POST $url model=$model inputs=${input.size}")
+      resp.body match {
+        case Right(body) =>
+          parseSuccess(body, cfg.model)
 
-      val respEither: Either[EmbeddingError, Response[Either[String, String]]] =
-        try
-          Right(
-            basicRequest
-              .post(url)
-              .header("Authorization", s"Bearer ${cfg.apiKey}")
-              .header("Content-Type", "application/json")
-              .body(payload.render())
-              .send(backend)
-          )
-        catch {
-          case e: Throwable =>
-            Left(
-              EmbeddingError(
-                code = Some("502"),
-                message = s"HTTP request failed: ${e.getMessage}",
-                provider = "openai"
-              )
-            )
-        }
-
-      respEither.flatMap { response =>
-        response.body match {
-          case Right(body) =>
-            try {
-              val json    = read(body)
-              val vectors = json("data").arr.map(r => r("embedding").arr.map(_.num).toVector).toSeq
-
-              val metadata = Map(
-                "provider" -> "openai",
-                "model"    -> model,
-                "count"    -> input.size.toString
-              )
-
-              logger.info(s"[OpenAIEmbeddingProvider] Received ${vectors.size} embeddings")
-              Right(EmbeddingResponse(embeddings = vectors, metadata = metadata))
-            } catch {
-              case ex: Exception =>
-                logger.error(s"[OpenAIEmbeddingProvider] Parse error: ${ex.getMessage}")
-                Left(
-                  EmbeddingError(
-                    code = Some("502"),
-                    message = s"Parsing error: ${ex.getMessage}",
-                    provider = "openai"
-                  )
-                )
-            }
-
-          case Left(errorMsg) =>
-            logger.error(s"[OpenAIEmbeddingProvider] HTTP error: $errorMsg")
-            Left(
-              EmbeddingError(
-                code = Some("502"),
-                message = errorMsg,
-                provider = "openai"
-              )
-            )
-        }
+        case Left(errText) =>
+          // If your error type has a different constructor, swap it here (e.g., HttpError)
+          Left(LErr.HttpError(status = resp.code.code, body = errText))
       }
+    } catch {
+      case e: ReadException =>
+        Left(LErr.Unexpected(message = s"Network/read error: ${e.getMessage}", cause = Some(e)))
+      case e: Throwable =>
+        Left(LErr.Unexpected(message = s"Unexpected error: ${e.getMessage}", cause = Some(e)))
     }
   }
-}
 
-object OpenAIEmbeddingProvider {
-  def apply(config: ConfigReader): OpenAIEmbeddingProvider = new OpenAIEmbeddingProvider(config)
+  /** Parse OpenAI /v1/embeddings JSON into EmbeddingResponse */
+  private def parseSuccess(body: String, model: String): Result[EmbeddingResponse] = {
+    try {
+      val json = ujson.read(body)
+
+      // OpenAI shape:
+      // { "data": [ { "embedding": [..], "index": 0 }, ... ], "model": "text-embedding-3-large", ... }
+      val dataArr = json("data").arr
+
+      val vectors: Vector[Array[Float]] =
+        dataArr.toVector.map { item =>
+          val emb = item("embedding").arr
+          val arr = new Array[Float](emb.length)
+          var i   = 0
+          while (i < emb.length) {
+            arr(i) = emb(i).num.toFloat
+            i += 1
+          }
+          arr
+        }
+
+      val dimension = if (vectors.nonEmpty) vectors.head.length else 0
+      Right(EmbeddingResponse(vectors = vectors, model = model, dimension = dimension))
+    } catch {
+      case e: Throwable =>
+        Left(LErr.ParseError(message = s"Failed to parse OpenAI embeddings: ${e.getMessage}"))
+    }
+  }
 }
