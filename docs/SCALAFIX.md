@@ -14,8 +14,8 @@ What's Included
 
 Running Scalafix
 - Lint on compile: Enabled per-project.
-  - Enabled: `root`, `samples`, `workspaceRunner`
-  - Disabled: `shared`
+  - Enabled: `root`, `samples`, `shared`
+  - Disabled: `workspaceRunner`
   - Violations are warnings and do not fail the build.
 - Manual run:
   - `sbt scalafixAll` to check all modules.
