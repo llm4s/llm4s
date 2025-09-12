@@ -151,7 +151,9 @@ lazy val commonSettings = Seq(
     "dev.optics" %% "monocle-macro" % "3.3.0",
     "org.scalatest" %% "scalatest"       % "3.2.19" % Test,
     "org.scalamock" %% "scalamock" %      "7.4.2" % Test,
-    "com.lihaoyi"   %% "fansi"           % "0.5.0"
+    "com.lihaoyi"   %% "fansi"           % "0.5.0",
+    "org.postgresql" % "postgresql" % "42.7.3",   // JDBC driver
+    "com.typesafe"   % "config"      % "1.4.3"    // loads reference.conf
   )
 )
 
@@ -188,7 +190,9 @@ lazy val root = (project in file("."))
       "io.github.cdimascio" % "dotenv-java" % "3.0.0",
           // Speech: Vosk for lightweight STT (replacing abandoned Sphinx4)
     "net.java.dev.jna" % "jna" % "5.13.0",
-    "com.alphacephei" % "vosk" % "0.3.45"
+    "com.alphacephei" % "vosk" % "0.3.45",
+      "org.postgresql" % "postgresql" % "42.7.3",   // JDBC driver
+      "com.typesafe"   % "config"      % "1.4.3"    // loads reference.conf
     )
 
   )
@@ -220,6 +224,8 @@ lazy val workspaceRunner = (project in file("workspaceRunner"))
     libraryDependencies ++= List(
       "com.lihaoyi"   %% "cask"            % "0.10.2",
       "com.lihaoyi"   %% "requests"        % "0.9.0",
+      "org.postgresql" % "postgresql" % "42.7.3",   // JDBC driver
+      "com.typesafe"   % "config"      % "1.4.3"
     ),
     Docker / dockerBuildOptions := Seq("--platform=linux/amd64"),
     dockerCommands ++= Seq(
@@ -267,7 +273,9 @@ lazy val crossLibDependencies = Def.setting {
     "org.apache.poi" % "poi-ooxml" % "5.4.1",
     "org.apache.tika" % "tika-core" % "3.2.1",
     "com.lihaoyi" %% "requests" % "0.9.0",
-    "org.jsoup" % "jsoup" % "1.21.1"
+    "org.jsoup" % "jsoup" % "1.21.1",
+    "org.postgresql" % "postgresql" % "42.7.3",   // JDBC driver
+    "com.typesafe"   % "config"      % "1.4.3"    // loads reference.conf
   )
 }
 
