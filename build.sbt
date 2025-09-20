@@ -153,7 +153,8 @@ lazy val commonSettings = Seq(
     "org.scalamock" %% "scalamock" %      "7.4.2" % Test,
     "com.lihaoyi"   %% "fansi"           % "0.5.0",
     "org.postgresql" % "postgresql" % "42.7.3",   // JDBC driver
-    "com.typesafe"   % "config"      % "1.4.3"    // loads reference.conf
+    "com.typesafe"   % "config"      % "1.4.3",   // loads reference.conf
+    "com.zaxxer"     % "HikariCP"    % "5.1.0"    // connection pooling
   )
 )
 
@@ -192,7 +193,8 @@ lazy val root = (project in file("."))
     "net.java.dev.jna" % "jna" % "5.13.0",
     "com.alphacephei" % "vosk" % "0.3.45",
       "org.postgresql" % "postgresql" % "42.7.3",   // JDBC driver
-      "com.typesafe"   % "config"      % "1.4.3"    // loads reference.conf
+      "com.typesafe"   % "config"      % "1.4.3",   // loads reference.conf
+      "com.zaxxer"     % "HikariCP"    % "5.1.0"    // connection pooling
     )
 
   )
@@ -225,7 +227,8 @@ lazy val workspaceRunner = (project in file("workspaceRunner"))
       "com.lihaoyi"   %% "cask"            % "0.10.2",
       "com.lihaoyi"   %% "requests"        % "0.9.0",
       "org.postgresql" % "postgresql" % "42.7.3",   // JDBC driver
-      "com.typesafe"   % "config"      % "1.4.3"
+      "com.typesafe"   % "config"      % "1.4.3",   // loads reference.conf
+      "com.zaxxer"     % "HikariCP"    % "5.1.0"    // connection pooling
     ),
     Docker / dockerBuildOptions := Seq("--platform=linux/amd64"),
     dockerCommands ++= Seq(
@@ -275,7 +278,8 @@ lazy val crossLibDependencies = Def.setting {
     "com.lihaoyi" %% "requests" % "0.9.0",
     "org.jsoup" % "jsoup" % "1.21.1",
     "org.postgresql" % "postgresql" % "42.7.3",   // JDBC driver
-    "com.typesafe"   % "config"      % "1.4.3"    // loads reference.conf
+    "com.typesafe"   % "config"      % "1.4.3",   // loads reference.conf
+    "com.zaxxer"     % "HikariCP"    % "5.1.0"    // connection pooling
   )
 }
 

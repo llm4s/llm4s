@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider.dbx
 
 import org.llm4s.llmconnect.model.dbx._
+import org.llm4s.llmconnect.utils.dbx.SqlSafetyUtils
 import java.sql.Connection
 
 object PGVectorProvider extends DbxProvider {
@@ -17,28 +18,49 @@ object PGVectorProvider extends DbxProvider {
   }
 
   override def ensureSchema(conn: Connection, schema: String): Either[DbxError, Unit] =
-    safeExec(conn, s"create schema if not exists \"$schema\"")
+    SqlSafetyUtils.validateIdentifier(schema) match {
+      case Left(err) => Left(err)
+      case Right(_) =>
+        val quotedSchema = SqlSafetyUtils.quoteIdentifier(schema)
+        safeExec(conn, s"create schema if not exists $quotedSchema")
+    }
 
-  override def ensureSystemTable(conn: Connection, schema: String, table: String): Either[DbxError, Unit] = {
-    val sql = s"""
-                 |create table if not exists "%s".%s (
-                 | pgvector_version text not null,
-                 | created_at timestamptz not null default now()
-                 |)
-                 |""".stripMargin.format(schema, table)
-    safeExec(conn, sql)
-  }
+  override def ensureSystemTable(conn: Connection, schema: String, table: String): Either[DbxError, Unit] =
+    for {
+      _             <- SqlSafetyUtils.validateIdentifiers(schema, table)
+      qualifiedName <- SqlSafetyUtils.qualifiedTableName(schema, table)
+      sql = s"""
+               |create table if not exists $qualifiedName (
+               | pgvector_version text not null,
+               | created_at timestamptz not null default now()
+               |)
+               |""".stripMargin
+      result <- safeExec(conn, sql)
+    } yield result
 
   override def recordVersion(
     conn: Connection,
     schema: String,
     table: String,
     version: String
-  ): Either[DbxError, Unit] = {
-    val count = queryInt(conn, s"select count(*) from \"$schema\".$table")
-    if (count == 0) safeExec(conn, s"insert into \"$schema\".$table(pgvector_version) values ('$version')")
-    else Right(())
-  }
+  ): Either[DbxError, Unit] =
+    SqlSafetyUtils.qualifiedTableName(schema, table) match {
+      case Left(err) => Left(err)
+      case Right(qualifiedName) =>
+        val count = queryInt(conn, s"select count(*) from $qualifiedName")
+        if (count == 0) {
+          // Use parameterized query for the version value
+          val sql = s"insert into $qualifiedName(pgvector_version) values (?)"
+          val ps  = conn.prepareStatement(sql)
+          try {
+            ps.setString(1, version)
+            ps.execute()
+            Right(())
+          } catch {
+            case e: Throwable => Left(WriteError(e.getMessage))
+          } finally ps.close()
+        } else Right(())
+    }
 
   // ---- helpers ----
   private def safeExec(conn: Connection, sql: String): Either[DbxError, Unit] = {

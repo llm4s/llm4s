@@ -27,6 +27,14 @@ object DbxConfig {
       if (v == null || v.trim.isEmpty) throw new IllegalArgumentException(s"Missing config: $path")
       v
     }
+
+    // Helper to safely get optional string with default
+    def getStringOpt(path: String, default: String): String =
+      if (c.hasPath(path)) {
+        val value = c.getString(path)
+        if (value != null && value.trim.nonEmpty) value else default
+      } else default
+
     val pg = PgConfig(
       host = must("dbx.pg.host"),
       port = c.getInt("dbx.pg.port"),
@@ -34,7 +42,7 @@ object DbxConfig {
       user = must("dbx.pg.user"),
       password = must("dbx.pg.password"),
       sslmode = must("dbx.pg.sslmode"),
-      schema = Option(c.getString("dbx.pg.schema")).filter(_.nonEmpty).getOrElse("dbx")
+      schema = getStringOpt("dbx.pg.schema", "dbx")
     )
     val core = CoreConfig(
       requirePgvector = c.getBoolean("dbx.core.requirePgvector"),
