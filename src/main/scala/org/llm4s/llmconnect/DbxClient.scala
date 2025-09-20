@@ -10,6 +10,15 @@ final class DbxClient(cfg: DbxConfig) extends AutoCloseable {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
+  // Validate configuration on initialization
+  cfg.validate() match {
+    case Left(error) =>
+      logger.error(s"Invalid DBx configuration: ${error.message}")
+      throw new IllegalArgumentException(s"Invalid DBx configuration: ${error.message}")
+    case Right(_) =>
+      logger.debug("DBx configuration validated successfully")
+  }
+
   private val connectionPool: ConnectionPool = ConnectionPool.create(cfg.pg)
 
   def initCore(): Either[DbxError, CoreHealthReport] = {

@@ -95,13 +95,66 @@ class ConnectionPool(pgConfig: PgConfig) extends AutoCloseable {
 
   /**
    * Gets pool statistics
+   * Returns default stats if pool is closed or unavailable
    */
-  def getPoolStats(): PoolStats = PoolStats(
-    activeConnections = dataSource.getHikariPoolMXBean.getActiveConnections,
-    idleConnections = dataSource.getHikariPoolMXBean.getIdleConnections,
-    totalConnections = dataSource.getHikariPoolMXBean.getTotalConnections,
-    threadsAwaitingConnection = dataSource.getHikariPoolMXBean.getThreadsAwaitingConnection
-  )
+  def getPoolStats(): PoolStats =
+    try
+      if (dataSource.isClosed) {
+        PoolStats(0, 0, 0, 0) // Return zeros if pool is closed
+      } else {
+        val mxBean = dataSource.getHikariPoolMXBean
+        PoolStats(
+          activeConnections = mxBean.getActiveConnections,
+          idleConnections = mxBean.getIdleConnections,
+          totalConnections = mxBean.getTotalConnections,
+          threadsAwaitingConnection = mxBean.getThreadsAwaitingConnection
+        )
+      }
+    catch {
+      case _: Exception => PoolStats(0, 0, 0, 0) // Return zeros on any error
+    }
+
+  /**
+   * Gets detailed connection pool metrics
+   * Useful for monitoring and performance tuning
+   * Returns safe defaults if pool is closed or metrics unavailable
+   */
+  def getDetailedMetrics(): ConnectionPoolMetrics =
+    try
+      if (dataSource.isClosed) {
+        ConnectionPoolMetrics(
+          poolStats = PoolStats(0, 0, 0, 0),
+          connectionAcquisitionTime = None,
+          connectionUsageTime = None,
+          connectionCreationTime = None,
+          totalConnectionsCreated = 0L,
+          totalConnectionsAcquired = 0L
+        )
+      } else {
+        val stats = getPoolStats()
+        // HikariCP MXBean provides basic metrics only
+        // Additional metrics would require custom implementation
+        ConnectionPoolMetrics(
+          poolStats = stats,
+          connectionAcquisitionTime = None, // Not available in current HikariCP version
+          connectionUsageTime = None,       // Not available in current HikariCP version
+          connectionCreationTime = None,    // Not available in current HikariCP version
+          totalConnectionsCreated = 0L,     // Would require custom tracking
+          totalConnectionsAcquired = 0L     // Would require custom tracking
+        )
+      }
+    catch {
+      case _: Exception =>
+        // Return safe defaults on any error
+        ConnectionPoolMetrics(
+          poolStats = PoolStats(0, 0, 0, 0),
+          connectionAcquisitionTime = None,
+          connectionUsageTime = None,
+          connectionCreationTime = None,
+          totalConnectionsCreated = 0L,
+          totalConnectionsAcquired = 0L
+        )
+    }
 }
 
 case class PoolStats(
@@ -109,6 +162,15 @@ case class PoolStats(
   idleConnections: Int,
   totalConnections: Int,
   threadsAwaitingConnection: Int
+)
+
+case class ConnectionPoolMetrics(
+  poolStats: PoolStats,
+  connectionAcquisitionTime: Option[Double], // milliseconds
+  connectionUsageTime: Option[Double],       // milliseconds
+  connectionCreationTime: Option[Double],    // milliseconds
+  totalConnectionsCreated: Long,
+  totalConnectionsAcquired: Long
 )
 
 object ConnectionPool {

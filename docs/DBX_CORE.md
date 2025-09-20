@@ -144,6 +144,104 @@ DbxError (sealed trait)
    - Proper resource cleanup
    - Connection returning to pool
 
+## Security Considerations
+
+### SQL Injection Prevention
+
+DBx Core implements comprehensive SQL injection prevention measures:
+
+1. **Identifier Validation**: All schema names, table names, and identifiers are validated using `SqlSafetyUtils`:
+   - Only alphanumeric characters, underscores, and dollar signs allowed
+   - Maximum 63 characters (PostgreSQL limit)
+   - No special characters that could break out of identifiers
+   - Proper quoting using PostgreSQL's quote_ident() equivalent
+
+2. **Parameterized Queries**: All user-provided values are passed as parameters, never concatenated:
+   ```scala
+   // Safe: Version is parameterized
+   val sql = s"insert into $qualifiedName(pgvector_version) values (?)"
+   ps.setString(1, version)
+
+   // Never do this:
+   // val sql = s"insert into table values ('$userInput')" // VULNERABLE!
+   ```
+
+3. **Schema/Table Name Safety**: Configuration validation ensures safe identifiers:
+   ```scala
+   // Validated on startup
+   SqlSafetyUtils.validateIdentifier(schema)  // Rejects dangerous input
+   SqlSafetyUtils.validateIdentifier(table)   // Prevents injection
+   ```
+
+### Required PostgreSQL Permissions
+
+The database user configured for DBx Core requires the following permissions:
+
+```sql
+-- Minimum required permissions
+GRANT CONNECT ON DATABASE your_database TO dbx_user;
+GRANT CREATE ON DATABASE your_database TO dbx_user;  -- For schema creation
+GRANT USAGE ON SCHEMA dbx TO dbx_user;               -- After schema exists
+GRANT CREATE ON SCHEMA dbx TO dbx_user;              -- For table creation
+GRANT ALL ON ALL TABLES IN SCHEMA dbx TO dbx_user;  -- For data operations
+
+-- For pgvector operations (when implemented)
+GRANT USAGE ON SCHEMA vector TO dbx_user;            -- If pgvector is in separate schema
+```
+
+### Connection Security
+
+1. **SSL/TLS Support**: Configure SSL mode via `PG_SSLMODE`:
+   - `require`: Always use SSL (recommended for production)
+   - `verify-ca`: Verify server certificate
+   - `verify-full`: Full certificate verification including hostname
+   - `disable`: No SSL (development only)
+
+2. **Connection Pool Security**:
+   - Connections are tested before use with `SELECT 1`
+   - Maximum lifetime of 30 minutes prevents stale connections
+   - Automatic cleanup of leaked connections
+   - Connection timeout prevents resource exhaustion
+
+3. **Credential Management**:
+   - Never log passwords or sensitive connection details
+   - Use environment variables for configuration
+   - Consider using credential rotation in production
+   - Use tools like HashiCorp Vault for secret management
+
+### Error Handling Security
+
+1. **Information Disclosure Prevention**:
+   - Database errors are categorized and sanitized
+   - Internal details are logged but not exposed to clients
+   - Generic error messages for authentication failures
+
+2. **Resource Exhaustion Protection**:
+   - Connection pool limits prevent connection exhaustion
+   - Transaction timeouts prevent long-running operations
+   - Automatic rollback on errors prevents data corruption
+
+### Configuration Security
+
+1. **Validation on Startup**: All configuration is validated before use:
+   - Port ranges checked (1-65535)
+   - SSL modes validated against allowed values
+   - Schema/table names checked for SQL injection risks
+
+2. **Fail-Safe Defaults**:
+   - Schema defaults to 'dbx' if not specified
+   - Connections auto-commit by default unless in transaction
+   - Pool automatically closes connections on shutdown
+
+### Best Practices
+
+1. **Principle of Least Privilege**: Grant only necessary database permissions
+2. **Network Isolation**: Use private networks or VPCs when possible
+3. **Audit Logging**: Enable PostgreSQL audit logging for sensitive operations
+4. **Regular Updates**: Keep PostgreSQL and pgvector extension updated
+5. **Monitor Connections**: Track active connections and unusual patterns
+6. **Backup Strategy**: Regular backups before schema changes
+
 ## Requirements
 
 - PostgreSQL 12+

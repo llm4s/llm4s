@@ -5,17 +5,34 @@ import org.llm4s.llmconnect.utils.dbx.SqlSafetyUtils
 import java.sql.Connection
 
 object PGVectorProvider extends DbxProvider {
-  override def probe(conn: Connection, expectedDb: String, requirePgvector: Boolean): Either[DbxError, String] = {
-    val dbName = queryString(conn, "select current_database()")
-    if (dbName != expectedDb) return Left(ConnectionError(s"Connected to '$dbName' not expected '$expectedDb'"))
-
-    val versionOpt = queryStringOpt(conn, "select extversion from pg_extension where extname = 'vector'")
-    (requirePgvector, versionOpt) match {
-      case (true, None)  => Left(PgvectorMissing("pgvector extension not enabled on this database"))
-      case (_, Some(v))  => Right(v)
-      case (false, None) => Right("unknown")
+  override def probe(conn: Connection, expectedDb: String, requirePgvector: Boolean): Either[DbxError, String] =
+    queryString(conn, "select current_database()") match {
+      case Left(err) => Left(err)
+      case Right(dbName) =>
+        if (dbName != expectedDb) {
+          Left(ConnectionError(s"Connected to '$dbName' not expected '$expectedDb'"))
+        } else {
+          queryStringOpt(conn, "select extversion from pg_extension where extname = 'vector'") match {
+            case Left(err) =>
+              // Permission errors on pg_extension are common - treat as missing
+              if (err.isInstanceOf[PermissionError]) {
+                if (requirePgvector) {
+                  Left(PgvectorMissing("Cannot verify pgvector extension (insufficient privileges)"))
+                } else {
+                  Right("unknown")
+                }
+              } else {
+                Left(err)
+              }
+            case Right(versionOpt) =>
+              (requirePgvector, versionOpt) match {
+                case (true, None)  => Left(PgvectorMissing("pgvector extension not enabled on this database"))
+                case (_, Some(v))  => Right(v)
+                case (false, None) => Right("unknown")
+              }
+          }
+        }
     }
-  }
 
   override def ensureSchema(conn: Connection, schema: String): Either[DbxError, Unit] =
     SqlSafetyUtils.validateIdentifier(schema) match {
@@ -47,44 +64,111 @@ object PGVectorProvider extends DbxProvider {
     SqlSafetyUtils.qualifiedTableName(schema, table) match {
       case Left(err) => Left(err)
       case Right(qualifiedName) =>
-        val count = queryInt(conn, s"select count(*) from $qualifiedName")
-        if (count == 0) {
-          // Use parameterized query for the version value
-          val sql = s"insert into $qualifiedName(pgvector_version) values (?)"
-          val ps  = conn.prepareStatement(sql)
-          try {
-            ps.setString(1, version)
-            ps.execute()
-            Right(())
-          } catch {
-            case e: Throwable => Left(WriteError(e.getMessage))
-          } finally ps.close()
-        } else Right(())
+        queryInt(conn, s"select count(*) from $qualifiedName") match {
+          case Left(err) => Left(err)
+          case Right(count) =>
+            if (count == 0) {
+              // Use parameterized query for the version value
+              val sql = s"insert into $qualifiedName(pgvector_version) values (?)"
+              withDbOperation("Record version") {
+                val ps = conn.prepareStatement(sql)
+                try {
+                  ps.setString(1, version)
+                  ps.execute()
+                  ()
+                } finally ps.close()
+              }
+            } else Right(())
+        }
     }
 
   // ---- helpers ----
-  private def safeExec(conn: Connection, sql: String): Either[DbxError, Unit] = {
-    val ps = conn.prepareStatement(sql)
-    try { ps.execute(); Right(()) }
-    catch { case e: Throwable => Left(PermissionError(e.getMessage)) }
-    finally ps.close()
+
+  /**
+   * Converts SQLException to appropriate DbxError based on the error message and context
+   */
+  private def handleSQLException(e: java.sql.SQLException, operation: String): DbxError = {
+    val message = Option(e.getMessage).getOrElse("Unknown SQL error")
+
+    // Check for common error patterns
+    if (
+      message.toLowerCase.contains("permission") || message.toLowerCase.contains("denied") ||
+      message.toLowerCase.contains("privilege")
+    ) {
+      PermissionError(s"$operation failed - permission denied: $message")
+    } else if (
+      message.toLowerCase.contains("connection") || message.toLowerCase.contains("timeout") ||
+      message.toLowerCase.contains("network")
+    ) {
+      ConnectionError(s"$operation failed - connection error: $message")
+    } else if (message.toLowerCase.contains("duplicate") || message.toLowerCase.contains("unique")) {
+      WriteError(s"$operation failed - duplicate entry: $message")
+    } else if (message.toLowerCase.contains("not found") || message.toLowerCase.contains("does not exist")) {
+      SchemaError(s"$operation failed - schema error: $message")
+    } else {
+      // Default to ConnectionError for unclassified SQL errors
+      ConnectionError(s"$operation failed: $message")
+    }
   }
 
-  private def queryString(conn: Connection, sql: String): String = {
-    val ps = conn.prepareStatement(sql)
-    try { val rs = ps.executeQuery(); rs.next(); val s = rs.getString(1); rs.close(); s }
-    finally ps.close()
-  }
+  /**
+   * Wraps a database operation and handles exceptions consistently
+   */
+  private def withDbOperation[T](operation: String)(block: => T): Either[DbxError, T] =
+    try
+      Right(block)
+    catch {
+      case e: java.sql.SQLException => Left(handleSQLException(e, operation))
+      case e: Throwable => Left(ConnectionError(s"$operation failed with unexpected error: ${e.getMessage}"))
+    }
 
-  private def queryStringOpt(conn: Connection, sql: String): Option[String] = {
-    val ps = conn.prepareStatement(sql)
-    try { val rs = ps.executeQuery(); val out = if (rs.next()) Option(rs.getString(1)) else None; rs.close(); out }
-    finally ps.close()
-  }
+  private def safeExec(conn: Connection, sql: String): Either[DbxError, Unit] =
+    withDbOperation("Execute SQL") {
+      val ps = conn.prepareStatement(sql)
+      try {
+        ps.execute()
+        ()
+      } finally ps.close()
+    }
 
-  private def queryInt(conn: Connection, sql: String): Int = {
-    val ps = conn.prepareStatement(sql)
-    try { val rs = ps.executeQuery(); rs.next(); val i = rs.getInt(1); rs.close(); i }
-    finally ps.close()
-  }
+  private def queryString(conn: Connection, sql: String): Either[DbxError, String] =
+    withDbOperation("Query string") {
+      val ps = conn.prepareStatement(sql)
+      try {
+        val rs = ps.executeQuery()
+        try
+          if (rs.next()) {
+            rs.getString(1)
+          } else {
+            throw new java.sql.SQLException(s"No results from query")
+          }
+        finally rs.close()
+      } finally ps.close()
+    }
+
+  private def queryStringOpt(conn: Connection, sql: String): Either[DbxError, Option[String]] =
+    withDbOperation("Query optional string") {
+      val ps = conn.prepareStatement(sql)
+      try {
+        val rs = ps.executeQuery()
+        try
+          if (rs.next()) Option(rs.getString(1)) else None
+        finally rs.close()
+      } finally ps.close()
+    }
+
+  private def queryInt(conn: Connection, sql: String): Either[DbxError, Int] =
+    withDbOperation("Query integer") {
+      val ps = conn.prepareStatement(sql)
+      try {
+        val rs = ps.executeQuery()
+        try
+          if (rs.next()) {
+            rs.getInt(1)
+          } else {
+            throw new java.sql.SQLException(s"No results from query")
+          }
+        finally rs.close()
+      } finally ps.close()
+    }
 }
