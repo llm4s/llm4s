@@ -297,14 +297,16 @@ lazy val crossTestScala2 = (project in file("crosstest/scala2"))
 
 
 lazy val crossTestScala3 = (project in file("crosstest/scala3"))
-  .dependsOn(root % "compile->compile;test->test") // fine: both are Scala 3
   .settings(
     name         := "crosstest-scala3",
     scalaVersion := scala3,
     Test / fork  := true,
     resolvers   += Resolver.mavenLocal,
     resolvers   += Resolver.defaultLocal,
-    libraryDependencies ++= crossLibDependencies.value,
+    // Test against the locally published artifact, not project sources
+    libraryDependencies ++= crossLibDependencies.value ++ Seq(
+      "org.llm4s" %% "llm4s" % (ThisBuild / version).value % Test
+    ),
     scalacOptions ++= scala3CompilerOptions
   )
 
