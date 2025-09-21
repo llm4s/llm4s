@@ -53,8 +53,12 @@ class SafeParameterExtractorTest extends AnyFlatSpec with Matchers {
     extractor.getString("stringValue") shouldBe Right("test")
 
     // Failure cases
-    extractor.getString("nonexistent") shouldBe Left("required parameter 'nonexistent' (type: string) is missing (available: arrayValue, boolValue, doubleValue, intValue, objectValue, stringValue)")
-    extractor.getString("intValue") shouldBe Left("parameter 'intValue' has wrong type - expected string but got number")
+    extractor.getString("nonexistent") shouldBe Left(
+      "required parameter 'nonexistent' (type: string) is missing (available: arrayValue, boolValue, doubleValue, intValue, objectValue, stringValue)"
+    )
+    extractor.getString("intValue") shouldBe Left(
+      "parameter 'intValue' has wrong type - expected string but got number"
+    )
   }
 
   it should "extract integer values correctly" in {
@@ -64,7 +68,9 @@ class SafeParameterExtractorTest extends AnyFlatSpec with Matchers {
     extractor.getInt("intValue") shouldBe Right(42)
 
     // Failure cases
-    extractor.getInt("stringValue") shouldBe Left("parameter 'stringValue' has wrong type - expected integer but got string")
+    extractor.getInt("stringValue") shouldBe Left(
+      "parameter 'stringValue' has wrong type - expected integer but got string"
+    )
     extractor.getInt("doubleValue") shouldBe Right(42) // Should work for whole numbers
   }
 
@@ -76,7 +82,9 @@ class SafeParameterExtractorTest extends AnyFlatSpec with Matchers {
     extractor.getDouble("intValue") shouldBe Right(42.0)
 
     // Failure cases
-    extractor.getDouble("stringValue") shouldBe Left("parameter 'stringValue' has wrong type - expected number but got string")
+    extractor.getDouble("stringValue") shouldBe Left(
+      "parameter 'stringValue' has wrong type - expected number but got string"
+    )
   }
 
   it should "extract boolean values correctly" in {
@@ -86,7 +94,9 @@ class SafeParameterExtractorTest extends AnyFlatSpec with Matchers {
     extractor.getBoolean("boolValue") shouldBe Right(true)
 
     // Failure cases
-    extractor.getBoolean("stringValue") shouldBe Left("parameter 'stringValue' has wrong type - expected boolean but got string")
+    extractor.getBoolean("stringValue") shouldBe Left(
+      "parameter 'stringValue' has wrong type - expected boolean but got string"
+    )
   }
 
   it should "extract array values correctly" in {
@@ -97,7 +107,9 @@ class SafeParameterExtractorTest extends AnyFlatSpec with Matchers {
     extractor.getArray("arrayValue") shouldBe Right(expectedArr)
 
     // Failure cases
-    extractor.getArray("stringValue") shouldBe Left("parameter 'stringValue' has wrong type - expected array but got string")
+    extractor.getArray("stringValue") shouldBe Left(
+      "parameter 'stringValue' has wrong type - expected array but got string"
+    )
   }
 
   it should "extract object values correctly" in {
@@ -108,7 +120,9 @@ class SafeParameterExtractorTest extends AnyFlatSpec with Matchers {
     extractor.getObject("objectValue") shouldBe Right(expectedObj)
 
     // Failure cases
-    extractor.getObject("stringValue") shouldBe Left("parameter 'stringValue' has wrong type - expected object but got string")
+    extractor.getObject("stringValue") shouldBe Left(
+      "parameter 'stringValue' has wrong type - expected object but got string"
+    )
   }
 
   it should "handle nested paths correctly" in {
@@ -132,7 +146,9 @@ class SafeParameterExtractorTest extends AnyFlatSpec with Matchers {
 
   it should "handle empty paths correctly" in {
     val extractor = SafeParameterExtractor(simpleJson)
-    extractor.getString("") shouldBe Left("required parameter '' (type: string) is missing (available: arrayValue, boolValue, doubleValue, intValue, objectValue, stringValue)")
+    extractor.getString("") shouldBe Left(
+      "required parameter '' (type: string) is missing (available: arrayValue, boolValue, doubleValue, intValue, objectValue, stringValue)"
+    )
   }
 
   it should "handle null values correctly" in {
@@ -140,7 +156,9 @@ class SafeParameterExtractorTest extends AnyFlatSpec with Matchers {
       "nullValue" -> ujson.Null
     )
     val extractor = SafeParameterExtractor(jsonWithNull)
-    extractor.getString("nullValue") shouldBe Left("parameter 'nullValue' (type: string) is required but value was null")
+    extractor.getString("nullValue") shouldBe Left(
+      "parameter 'nullValue' (type: string) is required but value was null"
+    )
   }
 
   it should "handle special characters in paths" in {
@@ -152,7 +170,9 @@ class SafeParameterExtractorTest extends AnyFlatSpec with Matchers {
     )
     val extractor = SafeParameterExtractor(jsonWithSpecialChars)
 
-    extractor.getString("special.key") shouldBe Left("required parameter 'special' (type: object) is missing (available: normal, special.key)")
+    extractor.getString("special.key") shouldBe Left(
+      "required parameter 'special' (type: object) is missing (available: normal, special.key)"
+    )
     extractor.getString("normal.special.nested") shouldBe Left(
       "required parameter 'normal.special' (type: object) is missing (available: special.nested)"
     )
