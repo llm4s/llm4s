@@ -160,11 +160,13 @@ lazy val commonSettings = Seq(
   )
 )
 
-lazy val root = (project in file("."))
+lazy val llm4s = (project in file(".")).aggregate(core, shared, workspaceRunner, samples)
+
+lazy val core = (project in file("modules/core"))
   .aggregate(shared, workspaceRunner)
   .dependsOn(shared)
   .settings(
-    name := "llm4s",
+    name := "core",
     commonSettings,
     // Enable scalafix on compile here (has ConfigReader)
     scalafixOnCompile := true,
@@ -201,17 +203,15 @@ lazy val root = (project in file("."))
 
   )
 
-lazy val shared = (project in file("shared"))
+lazy val shared = (project in file("modules/shared"))
   .settings(
     name := "shared",
     commonSettings,
-    // No ConfigReader here; keep scalafix off on compile
     scalafixOnCompile := true,
-    // Pure library: avoid main discovery noise
     Compile / discoveredMainClasses := Seq.empty
   )
 
-lazy val workspaceRunner = (project in file("workspaceRunner"))
+lazy val workspaceRunner = (project in file("modules/workspaceRunner"))
   .dependsOn(shared)
   .enablePlugins(JavaAppPackaging)
   .enablePlugins(DockerPlugin)
@@ -257,12 +257,11 @@ lazy val workspaceRunner = (project in file("workspaceRunner"))
     publish / skip := true
   )
 
-lazy val samples = (project in file("samples"))
-  .dependsOn(shared, root)
+lazy val samples = (project in file("modules/samples"))
+  .dependsOn(shared, core)
   .settings(
     name := "samples",
     commonSettings,
-    // Samples see ConfigReader via root; enable scalafix on compile
     scalafixOnCompile := true
   )
   .settings(
@@ -285,28 +284,29 @@ lazy val crossLibDependencies = Def.setting {
   )
 }
 
-lazy val crossTestScala2 = (project in file("crosstest/scala2"))
+lazy val crossTestScala2 = (project in file("modules/crosstest/scala2"))
+  // Depend on published binary of core for the matching Scala (2.13)
   .settings(
     name         := "crosstest-scala2",
     scalaVersion := scala213,
     Test / fork  := true,
+    resolvers   += Resolver.mavenLocal,
+    resolvers   += Resolver.defaultLocal,
     libraryDependencies ++= crossLibDependencies.value ++ Seq(
-      "org.llm4s" %% "llm4s" % (ThisBuild / version).value % Test
+      organization.value %% "core" % version.value
     )
   )
 
 
-lazy val crossTestScala3 = (project in file("crosstest/scala3"))
+lazy val crossTestScala3 = (project in file("modules/crosstest/scala3"))
+  .dependsOn(core % "compile->compile;test->test") // fine: both are Scala 3
   .settings(
     name         := "crosstest-scala3",
     scalaVersion := scala3,
     Test / fork  := true,
     resolvers   += Resolver.mavenLocal,
     resolvers   += Resolver.defaultLocal,
-    // Test against the locally published artifact, not project sources
-    libraryDependencies ++= crossLibDependencies.value ++ Seq(
-      "org.llm4s" %% "llm4s" % (ThisBuild / version).value % Test
-    ),
+    libraryDependencies ++= crossLibDependencies.value,
     scalacOptions ++= scala3CompilerOptions
   )
 
@@ -316,17 +316,17 @@ addCommandAlias("publishAll", ";clean;+publish")
 // Run tests across all modules, including samples and crossTest modules
 addCommandAlias(
   "testAll",
-  ";project root; +test; project shared; +test; project workspaceRunner; +test; project samples; +test; project root; +publishLocal; project crossTestScala2; test; project crossTestScala3; test"
+  ";project core; +test; project shared; +test; project workspaceRunner; +test; project samples; +test; project core; +publishLocal; project crossTestScala2; test; project crossTestScala3; test"
 )
 
 addCommandAlias(
   "cleanTestAll",
-  ";project root; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project root; testAll"
+  ";project core; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project core; testAll"
 )
 
 addCommandAlias(
   "cleanTestAllAndFormat",
-  ";scalafmtAll;project root; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project root; testAll"
+  ";scalafmtAll;project core; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project core; testAll"
 )
 addCommandAlias("compileAll", ";+compile")
 addCommandAlias("testCross", ";crossTestScala2/test;crossTestScala3/test")
