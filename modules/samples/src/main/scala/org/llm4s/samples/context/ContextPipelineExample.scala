@@ -2,11 +2,7 @@ package org.llm4s.samples.context
 
 import org.llm4s.config.ConfigReader
 import org.llm4s.config.ConfigReader.LLMConfig
-import org.llm4s.context.{
-  ContextManager, 
-  ContextConfig, 
-  ConversationTokenCounter
-}
+import org.llm4s.context.{ ContextManager, ContextConfig, ConversationTokenCounter }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.{ Result, TokenBudget }
@@ -65,13 +61,12 @@ object ContextPipelineExample {
     )
   }
 
-  private def getConfiguration(): Result[(String, ConfigReader)] = {
+  private def getConfiguration(): Result[(String, ConfigReader)] =
     for {
       config <- LLMConfig()
       modelName = config.getOrElse("LLM_MODEL", "openai/gpt-4o")
-      _ = logger.info(s"Using model: $modelName")
+      _         = logger.info(s"Using model: $modelName")
     } yield (modelName, config)
-  }
 
   private def createClient(config: ConfigReader): Result[org.llm4s.llmconnect.LLMClient] =
     LLMConnect.getClient(config).map { client =>
@@ -99,13 +94,13 @@ object ContextPipelineExample {
     tokenCounter: ConversationTokenCounter
   ): Result[PipelineDemoResults] = {
     val conversations = createTestConversations()
-    val budgets = Seq(5000, 10000, 20000)
+    val budgets       = Seq(5000, 10000, 20000)
     logger.info(s"Using aggressive budgets to force compression: ${budgets.mkString(", ")} tokens")
 
     val results = for {
       conversation <- conversations
-      budget <- budgets
-      result <- testPipelineWithScenario(contextManager, tokenCounter, conversation, budget).toOption
+      budget       <- budgets
+      result       <- testPipelineWithScenario(contextManager, tokenCounter, conversation, budget).toOption
     } yield result
 
     Right(PipelineDemoResults(results))
@@ -118,12 +113,12 @@ object ContextPipelineExample {
     budget: TokenBudget
   ): Result[ScenarioResult] = {
     val originalTokens = tokenCounter.countConversation(conversation)
-    
+
     logger.info(s"Testing pipeline: ${conversation.messages.length} messages, $originalTokens tokens → budget $budget")
 
     contextManager.manageContext(conversation, budget).map { managed =>
       logger.info(s"Pipeline result: ${managed.summary}")
-      
+
       ScenarioResult(
         originalTokens = originalTokens,
         budget = budget,
@@ -138,7 +133,7 @@ object ContextPipelineExample {
   private def createTestConversations(): Seq[Conversation] = Seq(
     // Scenario 1: Large realistic conversation (forces all compression steps)
     ConversationFixtures.largeRealistic,
-    
+
     // Scenario 2: Tool-heavy conversation (forces tool compression first)
     ConversationFixtures.toolHeavy
   )
@@ -146,27 +141,29 @@ object ContextPipelineExample {
   private def displayResults(results: PipelineDemoResults): Unit = {
     logger.info("\n🔄 Context Management Pipeline Example Results")
     logger.info("=" * 60)
-    
+
     results.scenarios.foreach { scenario =>
-      logger.info(f"\n📊 Scenario: ${scenario.originalTokens} → ${scenario.finalTokens} tokens (budget: ${scenario.budget})")
+      logger.info(
+        f"\n📊 Scenario: ${scenario.originalTokens} → ${scenario.finalTokens} tokens (budget: ${scenario.budget})"
+      )
       logger.info(f"   Compression: ${(scenario.compressionRatio * 100).toInt}%% remaining")
       logger.info(f"   Steps applied: ${scenario.stepsApplied.mkString(", ")}")
-      
+
       scenario.success match {
-        case true => logger.info("   ✅ Budget achieved")
+        case true  => logger.info("   ✅ Budget achieved")
         case false => logger.info("   ⚠️  Still over budget")
       }
     }
-    
+
     val successRate = results.scenarios.count(_.success).toDouble / results.scenarios.length * 100
     logger.info(f"\n🎯 Overall success rate: $successRate%.1f%% scenarios fit budget")
-    
+
     val avgCompression = results.scenarios.map(_.compressionRatio).sum / results.scenarios.length
     logger.info(f"📉 Average compression ratio: ${(avgCompression * 100).toInt}%%")
-    
+
     val stepsUsage = results.scenarios.flatMap(_.stepsApplied).groupBy(identity).view.mapValues(_.length)
     logger.info("🔧 Pipeline steps usage:")
-    stepsUsage.foreach { case (step, count) => 
+    stepsUsage.foreach { case (step, count) =>
       logger.info(f"   $step: $count times")
     }
   }

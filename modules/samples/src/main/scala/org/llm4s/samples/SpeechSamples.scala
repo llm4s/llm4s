@@ -1,21 +1,21 @@
 package org.llm4s.samples
 
 import org.llm4s.speech.AudioInput
-import org.llm4s.speech.stt.{STTOptions, VoskSpeechToText, WhisperSpeechToText}
-import org.llm4s.speech.tts.{TTSOptions, Tacotron2TextToSpeech}
+import org.llm4s.speech.stt.{ STTOptions, VoskSpeechToText, WhisperSpeechToText }
+import org.llm4s.speech.tts.{ TTSOptions, Tacotron2TextToSpeech }
 import org.llm4s.speech.util.PlatformCommands
 import org.slf4j.LoggerFactory
 
-import java.io.{DataOutputStream, FileOutputStream}
-import java.nio.file.{Files, Path, Paths}
+import java.io.{ DataOutputStream, FileOutputStream }
+import java.nio.file.{ Files, Path, Paths }
 import scala.util.chaining.scalaUtilChainingOps
-import scala.util.{Try, Using}
+import scala.util.{ Try, Using }
 
 object SpeechSamples {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
-   class RichDataOutputStream(val dos: DataOutputStream) {
+  class RichDataOutputStream(val dos: DataOutputStream) {
     def writeString(s: String): Try[Unit] = Try(dos.writeBytes(s)).tap { x =>
       x.fold(
         ex => logger.error("Failed to write string to audio file: {}", ex.getMessage),
@@ -52,20 +52,20 @@ object SpeechSamples {
   }
 
   def createTestWavFile(): Try[java.nio.file.Path] = {
-    val sampleRate = 8000
-    val channels = 1
-    val bitsPerSample = 16
+    val sampleRate     = 8000
+    val channels       = 1
+    val bitsPerSample  = 16
     val bytesPerSample = bitsPerSample / 8
-    val blockAlign = channels * bytesPerSample
-    val byteRate = sampleRate * blockAlign
-    val dataSize = sampleRate * channels * bytesPerSample
-    val fileSize = 36 + dataSize
+    val blockAlign     = channels * bytesPerSample
+    val byteRate       = sampleRate * blockAlign
+    val dataSize       = sampleRate * channels * bytesPerSample
+    val fileSize       = 36 + dataSize
 
     for {
       path <- makePath("whisper-test", ".wav")
       _ <- Using.Manager { use =>
-        val fos = use(new FileOutputStream(path.toFile))
-        val dos = use(new DataOutputStream(fos))
+        val fos     = use(new FileOutputStream(path.toFile))
+        val dos     = use(new DataOutputStream(fos))
         val richDos = new RichDataOutputStream(dos)
 
         val writeFileTry = for {
@@ -90,41 +90,41 @@ object SpeechSamples {
   }
 
   def signToneValuesGenerator(
-                               sampleRate: Int,
-                               duration: Int,
-                               frequency: Double = 440.0,
-                               amplitude: Double = 0.3
-                             ): LazyList[Int] = {
+    sampleRate: Int,
+    duration: Int,
+    frequency: Double = 440.0,
+    amplitude: Double = 0.3
+  ): LazyList[Int] = {
     require(sampleRate > 0, "Sample rate must be positive")
     require(duration >= 0, "Duration must be non-negative")
     require(amplitude >= 0.0 && amplitude <= 1.0, "Amplitude must be between 0.0 and 1.0")
 
     val totalSamples = sampleRate * duration
-    val maxValue = 32767.0 // 16-bit signed integer maximum
+    val maxValue     = 32767.0 // 16-bit signed integer maximum
 
     LazyList.range(0, totalSamples).map { sampleIndex =>
       val timePosition = sampleIndex.toDouble / sampleRate
-      val sineValue = Math.sin(2 * Math.PI * frequency * timePosition)
+      val sineValue    = Math.sin(2 * Math.PI * frequency * timePosition)
       (sineValue * amplitude * maxValue).toInt
     }
   }
 
   def createToneWavFile(): Try[java.nio.file.Path] = {
-    val sampleRate = 16000 // Higher sample rate for better quality
-    val channels = 1
-    val bitsPerSample = 16
+    val sampleRate     = 16000 // Higher sample rate for better quality
+    val channels       = 1
+    val bitsPerSample  = 16
     val bytesPerSample = bitsPerSample / 8
-    val blockAlign = channels * bytesPerSample
-    val byteRate = sampleRate * blockAlign
-    val duration = 2 // 2 seconds
-    val dataSize = sampleRate * duration * channels * bytesPerSample
-    val fileSize = 36 + dataSize
+    val blockAlign     = channels * bytesPerSample
+    val byteRate       = sampleRate * blockAlign
+    val duration       = 2     // 2 seconds
+    val dataSize       = sampleRate * duration * channels * bytesPerSample
+    val fileSize       = 36 + dataSize
 
     for {
       path <- makePath("whisper-test", ".wav")
       _ <- Using.Manager { use =>
-        val fos = use(new FileOutputStream(path.toFile))
-        val dos = use(new DataOutputStream(fos))
+        val fos     = use(new FileOutputStream(path.toFile))
+        val dos     = use(new DataOutputStream(fos))
         val richDos = new RichDataOutputStream(dos)
 
         val writeFileTry = for {
@@ -149,15 +149,15 @@ object SpeechSamples {
   }
 
   def speechLikeWavValuesGenerator(
-                                    sampleRate: Int,
-                                    duration: Int,
-                                  ): LazyList[Int] = {
+    sampleRate: Int,
+    duration: Int,
+  ): LazyList[Int] = {
     require(sampleRate > 0, "Sample rate must be positive")
     require(duration >= 0, "Duration must be non-negative")
 
     val totalSamples = sampleRate * duration
-    val baseFreq = 200.0 // Lower frequency, more speech-like
-    val amplitude = 0.2
+    val baseFreq     = 200.0 // Lower frequency, more speech-like
+    val amplitude    = 0.2
 
     LazyList.range(0, totalSamples).map { sampleIndex =>
       val timePosition = sampleIndex.toDouble / sampleRate
@@ -168,21 +168,21 @@ object SpeechSamples {
   }
 
   def createSpeechLikeWavFile(): Try[java.nio.file.Path] = {
-    val sampleRate = 16000 // Higher sample rate for better quality
-    val channels = 1
-    val bitsPerSample = 16
+    val sampleRate     = 16000 // Higher sample rate for better quality
+    val channels       = 1
+    val bitsPerSample  = 16
     val bytesPerSample = bitsPerSample / 8
-    val blockAlign = channels * bytesPerSample
-    val byteRate = sampleRate * blockAlign
-    val duration = 2 // 2 seconds
-    val dataSize = sampleRate * duration * channels * bytesPerSample
-    val fileSize = 36 + dataSize
+    val blockAlign     = channels * bytesPerSample
+    val byteRate       = sampleRate * blockAlign
+    val duration       = 2     // 2 seconds
+    val dataSize       = sampleRate * duration * channels * bytesPerSample
+    val fileSize       = 36 + dataSize
 
     for {
       path <- makePath("whisper-speech", ".wav")
       _ <- Using.Manager { use =>
-        val fos = use(new FileOutputStream(path.toFile))
-        val dos = use(new DataOutputStream(fos))
+        val fos     = use(new FileOutputStream(path.toFile))
+        val dos     = use(new DataOutputStream(fos))
         val richDos = new RichDataOutputStream(dos)
 
         val writeFileTry = for {
@@ -257,8 +257,8 @@ object SpeechSamples {
     println("\n--- Creating Test Audio Files ---")
     // Create all test files
     val result: Try[Unit] = for {
-      silenceWavFile <- createTestWavFile()
-      toneWavFile <- createToneWavFile()
+      silenceWavFile    <- createTestWavFile()
+      toneWavFile       <- createToneWavFile()
       speechLikeWavFile <- createSpeechLikeWavFile()
     } yield {
       println(
@@ -296,8 +296,6 @@ object SpeechSamples {
       Files.deleteIfExists(speechLikeWavFile)
       println("\n=== Demo Complete ===")
     }
-    result.tap { x =>
-      x.fold(ex => logger.error("Error '{}'", ex.getMessage), _ => logger.trace("Ran successfully"))
-    }
+    result.tap(x => x.fold(ex => logger.error("Error '{}'", ex.getMessage), _ => logger.trace("Ran successfully")))
   }
 }
