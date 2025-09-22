@@ -45,8 +45,14 @@ object AgentLLMCallingExample {
         logger.info("🔍 Tracing Configuration:")
         logger.info("   • Mode: {}", config.getOrElse("TRACING_MODE", "console"))
         logger.info("   • Langfuse URL: {}", config.getOrElse("LANGFUSE_URL", "default"))
-        logger.info("   • Langfuse Public Key: {}", if (config.get("LANGFUSE_PUBLIC_KEY").isDefined) "SET" else "NOT SET")
-        logger.info("   • Langfuse Secret Key: {}", if (config.get("LANGFUSE_SECRET_KEY").isDefined) "SET" else "NOT SET")
+        logger.info(
+          "   • Langfuse Public Key: {}",
+          if (config.get("LANGFUSE_PUBLIC_KEY").isDefined) "SET" else "NOT SET"
+        )
+        logger.info(
+          "   • Langfuse Secret Key: {}",
+          if (config.get("LANGFUSE_SECRET_KEY").isDefined) "SET" else "NOT SET"
+        )
 
         logger.info("🧪 Testing tracing...")
         TracingUtil.traceDemoStart(tracing, "Calculator Tool Agent")

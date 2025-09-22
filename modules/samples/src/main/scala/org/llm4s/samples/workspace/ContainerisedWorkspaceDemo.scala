@@ -19,14 +19,13 @@ object ContainerisedWorkspaceDemo extends App {
   val workspace = new ContainerisedWorkspace(workspaceDir)
 
   // Define a resource that manages the workspace container lifecycle
-  def withWorkspaceContainer[T](workspace: ContainerisedWorkspace)(f: ContainerisedWorkspace => T): Try[T] = {
+  def withWorkspaceContainer[T](workspace: ContainerisedWorkspace)(f: ContainerisedWorkspace => T): Try[T] =
     if (workspace.startContainer()) {
       logger.info("Container started successfully")
       Try(f(workspace))
     } else {
       throw new RuntimeException("Failed to start the workspace container")
     }
-  }
 
   val result = Using.resource(workspace) { ws =>
     withWorkspaceContainer(ws) { _ =>

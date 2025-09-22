@@ -22,23 +22,24 @@ object EmbeddingExample {
     config.get("MAX_ROWS_PER_FILE").flatMap(s => Try(s.toInt).toOption).getOrElse(200)
   private def TOP_DIMS_PER_ROW(config: ConfigReader): Int =
     config.get("TOP_DIMS_PER_ROW").flatMap(s => Try(s.toInt).toOption).getOrElse(6)
-  private def GLOBAL_TOPK(config:ConfigReader): Int =
+  private def GLOBAL_TOPK(config: ConfigReader): Int =
     config.get("GLOBAL_TOPK").flatMap(s => Try(s.toInt).toOption).getOrElse(10)
   private def SHOW_GLOBAL_TOP(config: ConfigReader): Boolean =
     config.get("SHOW_GLOBAL_TOP").exists(_.trim.equalsIgnoreCase("true"))
 
   // UI/formatting
-  private def COLOR_ENABLED(config:ConfigReader): Boolean =
+  private def COLOR_ENABLED(config: ConfigReader): Boolean =
     config.get("COLOR").forall(_.trim.equalsIgnoreCase("true")) // default ON
-  private def TABLE_WIDTH(config:ConfigReader): Int =
+  private def TABLE_WIDTH(config: ConfigReader): Int =
     config.get("TABLE_WIDTH").flatMap(s => Try(s.toInt).toOption).getOrElse(120)
 
   // Column widths
-  private val COL_IDX  = 4
-  private val COL_ID   = 56
-  private val COL_DIM  = 6
-  private val COL_SIM  = 28
-  private def COL_TOP(config:ConfigReader)  = math.max(18, TABLE_WIDTH(config) - (COL_IDX + 1 + COL_ID + 2 + COL_DIM + 2 + COL_SIM + 2 + 18))
+  private val COL_IDX = 4
+  private val COL_ID  = 56
+  private val COL_DIM = 6
+  private val COL_SIM = 28
+  private def COL_TOP(config: ConfigReader) =
+    math.max(18, TABLE_WIDTH(config) - (COL_IDX + 1 + COL_ID + 2 + COL_DIM + 2 + COL_SIM + 2 + 18))
   private val COL_META = 18
 
   def main(args: Array[String]): Unit = {
@@ -87,7 +88,8 @@ object EmbeddingExample {
         }
 
         if (SHOW_GLOBAL_TOP(config) && globalText.nonEmpty) {
-          val top = globalText.sortBy(r => -r.similarity.getOrElse(Double.NegativeInfinity)).take(GLOBAL_TOPK(config)).toSeq
+          val top =
+            globalText.sortBy(r => -r.similarity.getOrElse(Double.NegativeInfinity)).take(GLOBAL_TOPK(config)).toSeq
           println(renderGlobalTop(top)(config))
         }
 
@@ -255,15 +257,16 @@ object EmbeddingExample {
   }
 
   private def renderGlobalTop(rows: Seq[Row])(config: ConfigReader): String = {
-    val header = "\n" + magenta(bold("== Global Text Top ==")(config))(config) + "\n" + ("-" * TABLE_WIDTH(config)) + "\n" +
-      bold(
-        col("#", COL_IDX) + " " +
-          col("file:chunk", COL_ID) + "  " +
-          col("dim", COL_DIM) + "  " +
-          col("similarity", COL_SIM) + "  " +
-          col("top dims (idx:val)", COL_TOP(config)) + "  " +
-          col("meta", COL_META)
-      )(config)
+    val header =
+      "\n" + magenta(bold("== Global Text Top ==")(config))(config) + "\n" + ("-" * TABLE_WIDTH(config)) + "\n" +
+        bold(
+          col("#", COL_IDX) + " " +
+            col("file:chunk", COL_ID) + "  " +
+            col("dim", COL_DIM) + "  " +
+            col("similarity", COL_SIM) + "  " +
+            col("top dims (idx:val)", COL_TOP(config)) + "  " +
+            col("meta", COL_META)
+        )(config)
 
     val body = rows.zipWithIndex
       .map { case (r, i) =>
@@ -284,7 +287,9 @@ object EmbeddingExample {
     header + "\n" + body + "\n"
   }
 
-  private def renderSummary(files: Int, chunks: Int, errors: Seq[String], perFileRows: Seq[Row])(config: ConfigReader): String = {
+  private def renderSummary(files: Int, chunks: Int, errors: Seq[String], perFileRows: Seq[Row])(
+    config: ConfigReader
+  ): String = {
     val byMod  = perFileRows.groupBy(_.modality).map { case (m, rs) => s"$m=${rs.size}" }.toSeq.sorted.mkString(", ")
     val models = perFileRows.groupBy(_.model).map { case (m, rs) => s"$m(${rs.size})" }.toSeq.sorted.mkString(", ")
 
@@ -325,12 +330,13 @@ object EmbeddingExample {
   }
 
   // ANSI helpers
-  private def wrap(code: String, s: String)(config: ConfigReader): String = if (COLOR_ENABLED(config)) s"\u001b[${code}m$s\u001b[0m" else s
-  private def bold(s: String)(config: ConfigReader)                     = wrap("1", s)(config)
-  private def red(s: String)(config: ConfigReader)                        = wrap("31", s)(config)
-  private def green(s: String)(config: ConfigReader)                      = wrap("32", s)(config)
-  private def yellow(s: String)(config: ConfigReader)                     = wrap("33", s)(config)
-  private def magenta(s: String)(config: ConfigReader)                    = wrap("35", s)(config)
-  private def cyan(s: String)(config: ConfigReader)                       = wrap("36", s)(config)
-  private def gray(s: String)(config: ConfigReader)                       = wrap("90", s)(config)
+  private def wrap(code: String, s: String)(config: ConfigReader): String =
+    if (COLOR_ENABLED(config)) s"\u001b[${code}m$s\u001b[0m" else s
+  private def bold(s: String)(config: ConfigReader)    = wrap("1", s)(config)
+  private def red(s: String)(config: ConfigReader)     = wrap("31", s)(config)
+  private def green(s: String)(config: ConfigReader)   = wrap("32", s)(config)
+  private def yellow(s: String)(config: ConfigReader)  = wrap("33", s)(config)
+  private def magenta(s: String)(config: ConfigReader) = wrap("35", s)(config)
+  private def cyan(s: String)(config: ConfigReader)    = wrap("36", s)(config)
+  private def gray(s: String)(config: ConfigReader)    = wrap("90", s)(config)
 }

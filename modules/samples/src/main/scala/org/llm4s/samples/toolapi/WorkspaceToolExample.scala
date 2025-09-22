@@ -1,10 +1,10 @@
 package org.llm4s.samples.toolapi
 
 import org.llm4s.config.ConfigReader
-import org.llm4s.llmconnect.config.{AnthropicConfig, OpenAIConfig}
+import org.llm4s.llmconnect.config.{ AnthropicConfig, OpenAIConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.LLMProvider
-import org.llm4s.llmconnect.{LLMClient, LLMConnect}
+import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.toolapi._
 import org.llm4s.workspace.ContainerisedWorkspace
 import org.slf4j.LoggerFactory
@@ -35,8 +35,8 @@ object WorkspaceToolExample {
   implicit val commandResultRW: ReadWriter[CommandResult] = macroRW
 
   def main(args: Array[String]): Unit = {
-    val config = ConfigReader.LLMConfig().getOrElse(throw new IllegalArgumentException("Failed to read config"))
-    val gpt4oModelName  = config.getOrElse("LLM_MODEL_GPT4O", "gpt-4o")
+    val config         = ConfigReader.LLMConfig().getOrElse(throw new IllegalArgumentException("Failed to read config"))
+    val gpt4oModelName = config.getOrElse("LLM_MODEL_GPT4O", "gpt-4o")
     val sonnetModelName = "claude-3-7-sonnet-latest"
 
     // TODO read from config

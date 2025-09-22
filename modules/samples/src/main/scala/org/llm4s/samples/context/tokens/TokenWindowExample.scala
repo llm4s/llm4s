@@ -55,13 +55,12 @@ object TokenWindowExample {
     )
   }
 
-  private def getConfiguration(): Result[(String, ConfigReader)] = {
+  private def getConfiguration(): Result[(String, ConfigReader)] =
     for {
       config <- LLMConfig()
       modelName = config.getOrElse("LLM_MODEL", "openai/gpt-4o")
-      _ = logger.info(s"Configured model: $modelName")
+      _         = logger.info(s"Configured model: $modelName")
     } yield (modelName, config)
-  }
 
   private def createClient(config: ConfigReader): Result[org.llm4s.llmconnect.LLMClient] =
     LLMConnect.getClient(config).map { client =>
@@ -349,23 +348,23 @@ object TokenWindowExample {
     modelName: String
   ): BudgetDemoResults = {
     logger.info("=== Demonstrating Automatic Budget Derivation ===")
-    
-    val contextWindow = client.getContextWindow()
+
+    val contextWindow     = client.getContextWindow()
     val reserveCompletion = client.getReserveCompletion()
-    
+
     val budgets = Map(
-      "Standard (8% headroom)" -> client.getContextBudget(HeadroomPercent.Standard),
-      "Light (5% headroom)" -> client.getContextBudget(HeadroomPercent.Light),
+      "Standard (8% headroom)"      -> client.getContextBudget(HeadroomPercent.Standard),
+      "Light (5% headroom)"         -> client.getContextBudget(HeadroomPercent.Light),
       "Conservative (15% headroom)" -> client.getContextBudget(HeadroomPercent.Conservative)
     )
-    
+
     logger.info(s"Model: $modelName")
     logger.info(s"Context Window: $contextWindow tokens")
     logger.info(s"Reserve for Completion: $reserveCompletion tokens")
     budgets.foreach { case (name, budget) =>
       logger.info(s"  $name: $budget tokens")
     }
-    
+
     BudgetDemoResults(modelName, contextWindow, reserveCompletion, budgets)
   }
 }

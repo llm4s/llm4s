@@ -26,7 +26,7 @@ object TypeUsage {
   }
 
   // Example: Using Result types
-  def exampleResultTypes()(config:ConfigReader): Result[String] =
+  def exampleResultTypes()(config: ConfigReader): Result[String] =
     for {
       modelName <- ModelName("gpt-4")
       provider  <- ProviderName.create("openai")

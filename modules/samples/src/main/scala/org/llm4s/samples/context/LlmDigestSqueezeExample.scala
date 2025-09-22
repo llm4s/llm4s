@@ -2,10 +2,7 @@ package org.llm4s.samples.context
 
 import org.llm4s.config.ConfigReader
 import org.llm4s.config.ConfigReader.LLMConfig
-import org.llm4s.context.{
-  ConversationTokenCounter,
-  LLMCompressor
-}
+import org.llm4s.context.{ ConversationTokenCounter, LLMCompressor }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -24,7 +21,7 @@ import org.slf4j.LoggerFactory
  *   • Dense prose (e.g., BusinessAnalysis) may only compress modestly; structured logs compress more.
  *   • Only the digest is modified — recent messages stay untouched.
  *
- * Output: 
+ * Output:
  *   • Digest tokens before → after, % reduction
  *   • Whether the digest is ≤ cap (cap achieved or not)
  *   • Short preview of squeezed digest
@@ -60,13 +57,12 @@ object LlmDigestSqueezeExample {
     )
   }
 
-  private def getConfiguration(): Result[(String, ConfigReader)] = {
+  private def getConfiguration(): Result[(String, ConfigReader)] =
     for {
       config <- LLMConfig()
       modelName = config.getOrElse("LLM_MODEL", "openai/gpt-4o")
-      _ = logger.info(s"Using model: $modelName")
+      _         = logger.info(s"Using model: $modelName")
     } yield (modelName, config)
-  }
 
   private def createClient(config: ConfigReader): Result[org.llm4s.llmconnect.LLMClient] =
     LLMConnect.getClient(config).map { client =>
@@ -84,12 +80,12 @@ object LlmDigestSqueezeExample {
     client: org.llm4s.llmconnect.LLMClient,
     tokenCounter: ConversationTokenCounter
   ): Result[SqueezeResults] = {
-    val testScenarios = createTestScenarios()
+    val testScenarios    = createTestScenarios()
     val capTokensOptions = Seq(200, 400, 600) // Different squeeze targets
-    
+
     val allResults = for {
       (scenarioName, digestContent, recentMessages) <- testScenarios
-      capTokens <- capTokensOptions
+      capTokens                                     <- capTokensOptions
     } yield {
       val testName = s"$scenarioName (cap=$capTokens)"
       testDigestSqueeze(testName, digestContent, recentMessages, capTokens, client, tokenCounter)
@@ -102,7 +98,9 @@ object LlmDigestSqueezeExample {
   private def createTestScenarios(): Seq[(String, String, Seq[Message])] = {
     val recentMessages = Seq(
       UserMessage("What's the current system status?"),
-      AssistantMessage("Based on the latest metrics, the system is performing well with minor optimization opportunities."),
+      AssistantMessage(
+        "Based on the latest metrics, the system is performing well with minor optimization opportunities."
+      ),
       UserMessage("Any recommendations for the next steps?")
     )
 
@@ -113,7 +111,7 @@ object LlmDigestSqueezeExample {
     )
   }
 
-  private def createTechnicalDigest(): String = {
+  private def createTechnicalDigest(): String =
     """[HISTORY_SUMMARY]
 Technical architecture discussion covering distributed microservices implementation for e-commerce platform. 
 Key topics included service boundary design with 10 core services (User, Product, Order, Payment, Inventory, 
@@ -131,9 +129,8 @@ alerting strategy preventing alert fatigue through proper thresholds and escalat
 tracing implementation using Jaeger/Zipkin with OpenTelemetry standardized instrumentation, trace sampling 
 for performance balance, and service dependency mapping. ELK stack for centralized logging with structured 
 JSON format, correlation IDs for cross-service log linking, and proper retention policies."""
-  }
 
-  private def createBusinessDigest(): String = {
+  private def createBusinessDigest(): String =
     """[HISTORY_SUMMARY]
 Business requirements analysis and implementation strategy discussion. Initial requirement gathering covered 
 high-traffic e-commerce platform needs with distributed architecture supporting multiple geographic regions 
@@ -150,9 +147,8 @@ strategies discussed including spot instance utilization with on-demand fallback
 based on actual usage patterns, and automated scaling policies to minimize infrastructure costs while 
 maintaining performance standards. Integration requirements covered third-party payment processors, 
 inventory management systems, shipping providers, and marketing analytics platforms."""
-  }
 
-  private def createTroubleshootingDigest(): String = {
+  private def createTroubleshootingDigest(): String =
     """[HISTORY_SUMMARY]
 Production system troubleshooting and performance analysis session. Initial investigation triggered by 
 elevated error rates and increased response times across multiple microservices during peak traffic period. 
@@ -170,7 +166,6 @@ scaling from 100 to 200 maximum connections, memory allocation increases for hig
 emergency index creation on frequently queried columns. Long-term optimization recommendations included 
 database query optimization, connection pooling configuration review, and implementation of caching layers 
 to reduce database load during peak traffic periods."""
-  }
 
   private def testDigestSqueeze(
     testName: String,
@@ -181,53 +176,59 @@ to reduce database load during peak traffic periods."""
     tokenCounter: ConversationTokenCounter
   ): Result[SqueezeResult] = {
     // Create the conversation with the original digest + recent messages
-    val originalDigest = SystemMessage(originalDigestContent)
+    val originalDigest     = SystemMessage(originalDigestContent)
     val messagesWithDigest = originalDigest +: recentMessages
-    
+
     val originalDigestTokens = tokenCounter.countMessage(originalDigest)
-    val totalTokensBefore = messagesWithDigest.map(tokenCounter.countMessage).sum
-    
+    val totalTokensBefore    = messagesWithDigest.map(tokenCounter.countMessage).sum
+
     logger.info(s"Testing '$testName': digest=$originalDigestTokens tokens, cap=$capTokens tokens")
 
     LLMCompressor.squeezeDigest(messagesWithDigest, tokenCounter, client, capTokens) match {
       case Right(squeezedMessages) =>
-        val squeezedDigestOpt = squeezedMessages.find(_.content.contains("[HISTORY_SUMMARY]"))
+        val squeezedDigestOpt    = squeezedMessages.find(_.content.contains("[HISTORY_SUMMARY]"))
         val squeezedDigestTokens = squeezedDigestOpt.map(tokenCounter.countMessage).getOrElse(0)
-        val totalTokensAfter = squeezedMessages.map(tokenCounter.countMessage).sum
-        
+        val totalTokensAfter     = squeezedMessages.map(tokenCounter.countMessage).sum
+
         val digestReductionPercent = originalDigestTokens match {
-          case 0 => 0
+          case 0      => 0
           case tokens => ((tokens - squeezedDigestTokens).toDouble / tokens * 100).toInt
         }
-        
-        val capAchieved = squeezedDigestTokens <= capTokens
-        val digestPreview = squeezedDigestOpt.map(_.content.take(120) + "...").getOrElse("No digest found")
-        
-        logger.info(s"'$testName': digest $originalDigestTokens → $squeezedDigestTokens tokens ($digestReductionPercent% reduction), cap achieved: $capAchieved")
 
-        Right(SqueezeResult(
-          testName = testName,
-          originalDigestTokens = originalDigestTokens,
-          squeezedDigestTokens = squeezedDigestTokens,
-          totalTokensBefore = totalTokensBefore,
-          totalTokensAfter = totalTokensAfter,
-          digestReductionPercent = digestReductionPercent,
-          capAchieved = capAchieved,
-          digestPreview = digestPreview
-        ))
+        val capAchieved   = squeezedDigestTokens <= capTokens
+        val digestPreview = squeezedDigestOpt.map(_.content.take(120) + "...").getOrElse("No digest found")
+
+        logger.info(
+          s"'$testName': digest $originalDigestTokens → $squeezedDigestTokens tokens ($digestReductionPercent% reduction), cap achieved: $capAchieved"
+        )
+
+        Right(
+          SqueezeResult(
+            testName = testName,
+            originalDigestTokens = originalDigestTokens,
+            squeezedDigestTokens = squeezedDigestTokens,
+            totalTokensBefore = totalTokensBefore,
+            totalTokensAfter = totalTokensAfter,
+            digestReductionPercent = digestReductionPercent,
+            capAchieved = capAchieved,
+            digestPreview = digestPreview
+          )
+        )
 
       case Left(error) =>
         logger.warn(s"Digest squeeze failed for '$testName': $error")
-        Right(SqueezeResult(
-          testName = testName,
-          originalDigestTokens = originalDigestTokens,
-          squeezedDigestTokens = originalDigestTokens, // No reduction on failure
-          totalTokensBefore = totalTokensBefore,
-          totalTokensAfter = totalTokensBefore,
-          digestReductionPercent = 0,
-          capAchieved = false,
-          digestPreview = "Squeeze failed: " + error.toString.take(100) + "..."
-        ))
+        Right(
+          SqueezeResult(
+            testName = testName,
+            originalDigestTokens = originalDigestTokens,
+            squeezedDigestTokens = originalDigestTokens, // No reduction on failure
+            totalTokensBefore = totalTokensBefore,
+            totalTokensAfter = totalTokensBefore,
+            digestReductionPercent = 0,
+            capAchieved = false,
+            digestPreview = "Squeeze failed: " + error.toString.take(100) + "..."
+          )
+        )
     }
   }
 
@@ -240,9 +241,11 @@ to reduce database load during peak traffic periods."""
         case true  => "✅ Cap achieved"
         case false => "⚠️ Cap not achieved"
       }
-      
+
       logger.info(f"\n📊 ${result.testName}")
-      logger.info(f"   Digest compression: ${result.originalDigestTokens} → ${result.squeezedDigestTokens} tokens (${result.digestReductionPercent}%% reduction)")
+      logger.info(
+        f"   Digest compression: ${result.originalDigestTokens} → ${result.squeezedDigestTokens} tokens (${result.digestReductionPercent}%% reduction)"
+      )
       logger.info(f"   Total conversation: ${result.totalTokensBefore} → ${result.totalTokensAfter} tokens")
       logger.info(f"   $capStatus")
       logger.info(f"   Digest preview: ${result.digestPreview}")
@@ -250,22 +253,26 @@ to reduce database load during peak traffic periods."""
 
     // Group by scenario for better analysis
     val byScenario = results.results.groupBy(_.testName.split(" \\(cap=").head)
-    
+
     logger.info("\n📈 Analysis by Scenario:")
     byScenario.foreach { case (scenarioName, scenarioResults) =>
       val avgDigestReduction = scenarioResults.map(_.digestReductionPercent).sum.toDouble / scenarioResults.length
-      val successRate = scenarioResults.count(_.capAchieved).toDouble / scenarioResults.length * 100
-      logger.info(f"   • $scenarioName: ${avgDigestReduction}%.1f%% avg digest reduction, ${successRate}%.1f%% cap success rate")
+      val successRate        = scenarioResults.count(_.capAchieved).toDouble / scenarioResults.length * 100
+      logger.info(
+        f"   • $scenarioName: ${avgDigestReduction}%.1f%% avg digest reduction, ${successRate}%.1f%% cap success rate"
+      )
     }
 
     // Group by cap size for analysis
     val byCap = results.results.groupBy(r => r.testName.split("cap=").last.split("\\)").head.toInt)
-    
+
     logger.info("\n📊 Analysis by Cap Size:")
     byCap.toSeq.sortBy(_._1).foreach { case (capSize, capResults) =>
       val avgDigestReduction = capResults.map(_.digestReductionPercent).sum.toDouble / capResults.length
-      val successRate = capResults.count(_.capAchieved).toDouble / capResults.length * 100
-      logger.info(f"   • Cap $capSize tokens: ${avgDigestReduction}%.1f%% avg digest reduction, ${successRate}%.1f%% success rate")
+      val successRate        = capResults.count(_.capAchieved).toDouble / capResults.length * 100
+      logger.info(
+        f"   • Cap $capSize tokens: ${avgDigestReduction}%.1f%% avg digest reduction, ${successRate}%.1f%% success rate"
+      )
     }
 
     logger.info("\n💡 Key Observations:")
