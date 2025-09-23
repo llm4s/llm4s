@@ -23,11 +23,15 @@ import scala.util.{ Failure, Success, Try }
  * - Supporting real-time streaming of command output
  * - Eliminating thread pool blocking during long commands
  */
-class ContainerisedWorkspace(val workspaceDir: String) extends WorkspaceAgentInterface {
+class ContainerisedWorkspace(
+  val workspaceDir: String,
+  val imageName: String ,
+  val hostPort: Int
+) extends WorkspaceAgentInterface {
   private val logger        = LoggerFactory.getLogger(getClass)
   private val containerName = s"workspace-runner-${java.util.UUID.randomUUID().toString}"
-  private val port          = 8080
-  private val wsUrl         = s"ws://localhost:$port/ws"
+  private val containerPort = 8080
+  private val wsUrl         = s"ws://localhost:$hostPort/ws"
 
   // Constants
   private val HeartbeatIntervalSeconds = 5
@@ -142,7 +146,7 @@ class ContainerisedWorkspace(val workspaceDir: String) extends WorkspaceAgentInt
    * Starts the workspace runner docker container and establishes WebSocket connection
    */
   def startContainer(): Boolean = {
-    logger.info(s"Starting workspace runner container: $containerName")
+    logger.info(s"Starting workspace runner container: $containerName (hostPort=$hostPort, image=$imageName)")
 
     // Ensure the workspace directory exists
     val dir = new File(workspaceDir)
@@ -159,10 +163,10 @@ class ContainerisedWorkspace(val workspaceDir: String) extends WorkspaceAgentInt
         "--name",
         containerName,
         "-p",
-        s"$port:8080",
+        s"$hostPort:$containerPort",
         "-v",
         s"$workspaceDir:/workspace",
-        "docker.io/library/workspace-runner:0.1.0-SNAPSHOT"
+        imageName
       )
       val process  = pb.start()
       val exitCode = process.waitFor()
@@ -212,7 +216,7 @@ class ContainerisedWorkspace(val workspaceDir: String) extends WorkspaceAgentInt
     while (attempts < MaxStartupAttempts) {
       val ok = scala.util
         .Try {
-          val httpResponse = requests.get(s"http://localhost:$port/", readTimeout = 1000, connectTimeout = 1000)
+          val httpResponse = requests.get(s"http://localhost:$hostPort/", readTimeout = 1000, connectTimeout = 1000)
           httpResponse.statusCode == 200 && connectWebSocket()
         }
         .getOrElse(false)

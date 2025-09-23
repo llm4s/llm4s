@@ -29,7 +29,7 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
 
     // Only run tests if Docker is available
     if (isDockerAvailable) {
-      workspace = new ContainerisedWorkspace(tempDir)
+      workspace = new ContainerisedWorkspace(tempDir,"docker.io/library/workspace-runner:0.1.0-SNAPSHOT",8080)
 
       // Start the container - this may take some time
       val started = workspace.startContainer()
@@ -205,7 +205,7 @@ object ContainerisedWorkspaceTest {
    * Creates a test workspace for manual testing/debugging
    */
   def createTestWorkspace(workspaceDir: String): ContainerisedWorkspace =
-    new ContainerisedWorkspace(workspaceDir)
+    new ContainerisedWorkspace(workspaceDir,"docker.io/library/workspace-runner:0.1.0-SNAPSHOT",8080)
 
   /**
    * Manual test to demonstrate the fix for the original threading issue

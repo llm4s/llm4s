@@ -216,13 +216,8 @@ lazy val workspaceRunner = (project in file("modules/workspaceRunner"))
   .enablePlugins(JavaAppPackaging)
   .enablePlugins(DockerPlugin)
   .settings(
-    Docker / maintainer := "llm4s",
-    Docker / packageName := "llm4s/workspace-runner",
-    dockerExposedPorts  := Seq(8080),
-    dockerBaseImage     := "eclipse-temurin:21-jdk",
     Compile / mainClass := Some("org.llm4s.runner.RunnerMain"),
     name                := "workspaceRunner",
-    // Apply Scalafix warnings on compile for workspaceRunner
     scalafixOnCompile := true,
     commonSettings,
     libraryDependencies ++= List(
@@ -231,31 +226,12 @@ lazy val workspaceRunner = (project in file("modules/workspaceRunner"))
       "org.postgresql" % "postgresql" % "42.7.3",   // JDBC driver
       "com.typesafe"   % "config"      % "1.4.3",   // loads reference.conf
       "com.zaxxer"     % "HikariCP"    % "5.1.0"    // connection pooling
-    ),
-    Docker / dockerBuildOptions := Seq("--platform=linux/amd64"),
-    dockerCommands ++= Seq(
-      Cmd("USER", "root"),
-      Cmd("RUN", "apt-get update && apt-get install -y curl gnupg apt-transport-https ca-certificates zip unzip"),
-      Cmd(
-        "RUN",
-        "echo 'deb https://repo.scala-sbt.org/scalasbt/debian all main' | tee /etc/apt/sources.list.d/sbt.list"
-      ),
-      Cmd(
-        "RUN",
-        "curl -sL 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823' | apt-key add"
-      ),
-      Cmd("RUN", "apt-get update && apt-get install -y sbt"),
-      Cmd("RUN", "curl -s 'https://get.sdkman.io' | bash"),
-      Cmd(
-        "RUN",
-        "bash -c 'source /root/.sdkman/bin/sdkman-init.sh && sdk install scala " + scala3 + " && sdk install scala " + scala213 + "'"
-      ),
-      Cmd("ENV", "PATH=/root/.sdkman/candidates/scala/current/bin:$PATH")
     )
   )
   .settings(
     publish / skip := true
   )
+  .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules/samples"))
   .dependsOn(shared, core)

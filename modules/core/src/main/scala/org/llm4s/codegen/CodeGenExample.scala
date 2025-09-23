@@ -29,9 +29,13 @@ object CodeGenExample {
         |You can assume you have sbt and java already installed.
         |Run the program and show the result.""".stripMargin
 
+    //TODO refactor and get it from a config or pass it as command arg parameter 
+    val imageName: String = "docker.io/library/workspace-runner:0.1.0-SNAPSHOT"
+    val hostPort: Int = 8080
+    
     val result = for {
       config <- LLMConfig()
-      finalState <- Using.resource(new CodeWorker(workspaceDir)(config)) { codeWorker =>
+      finalState <- Using.resource(new CodeWorker(workspaceDir,imageName, hostPort)(config)) { codeWorker =>
         for {
           _          <- Either.cond(codeWorker.initialize(), (), SimpleError("Failed to initialize CodeWorker"))
           finalState <- codeWorker.executeTask(task, Some(20), Some(traceLogPath))
