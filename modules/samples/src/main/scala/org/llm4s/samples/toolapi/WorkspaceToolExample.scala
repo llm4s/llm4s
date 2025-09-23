@@ -45,7 +45,7 @@ object WorkspaceToolExample {
     logger.info(s"Using workspace directory: $workspaceDir")
 
     // Create a workspace
-    val workspace = new ContainerisedWorkspace(workspaceDir,"docker.io/library/workspace-runner:0.1.0-SNAPSHOT",8080)
+    val workspace = new ContainerisedWorkspace(workspaceDir, "docker.io/library/workspace-runner:0.1.0-SNAPSHOT", 8080)
 
     val result = Using.resource(workspace) { ws =>
       Try {
