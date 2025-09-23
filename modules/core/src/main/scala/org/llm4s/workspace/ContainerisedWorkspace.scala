@@ -25,7 +25,7 @@ import scala.util.{ Failure, Success, Try }
  */
 class ContainerisedWorkspace(
   val workspaceDir: String,
-  val imageName: String ,
+  val imageName: String,
   val hostPort: Int
 ) extends WorkspaceAgentInterface {
   private val logger        = LoggerFactory.getLogger(getClass)
