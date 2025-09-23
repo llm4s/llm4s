@@ -16,9 +16,11 @@ import org.llm4s.error.ValidationError
  *
  * @param sourceDirectory The directory containing the codebase to work with
  */
-class CodeWorker(sourceDirectory: String)(reader: ConfigReader) extends AutoCloseable {
+class CodeWorker(sourceDirectory: String,
+                 imageName: String,
+                 hostPort: Int)(reader: ConfigReader) extends AutoCloseable {
   private val logger    = LoggerFactory.getLogger(getClass)
-  private val workspace = new ContainerisedWorkspace(sourceDirectory)
+  private val workspace = new ContainerisedWorkspace(sourceDirectory,imageName, hostPort)
 
   // Custom tool definitions for working with code
   private val workspaceTools = WorkspaceTools.createDefaultWorkspaceTools(workspace)
