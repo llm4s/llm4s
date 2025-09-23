@@ -221,9 +221,9 @@ lazy val workspaceRunner = (project in file("modules/workspaceRunner"))
     dockerExposedPorts  := Seq(8080),
     dockerBaseImage     := "eclipse-temurin:21-jdk",
     Compile / mainClass := Some("org.llm4s.runner.RunnerMain"),
-    name                := "workspace-runner",
+    name                := "workspaceRunner",
     // Apply Scalafix warnings on compile for workspaceRunner
-    scalafixOnCompile := false,
+    scalafixOnCompile := true,
     commonSettings,
     libraryDependencies ++= List(
       "com.lihaoyi"   %% "cask"            % "0.10.2",
