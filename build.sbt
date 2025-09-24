@@ -1,35 +1,6 @@
-import com.typesafe.sbt.packager.docker.Cmd
-import sbt.Keys.{libraryDependencies, *}
+import sbt.Keys._
 import scoverage.ScoverageKeys._
-
-
-// Define supported Scala versions
-val scala213 = "2.13.16"
-val scala3   = "3.7.1"
-val scala3CompilerOptions = Seq(
-  "-explain",
-  "-explain-types",
-  "-Wunused:nowarn",
-  "-feature",
-  "-unchecked",
-  "-source:3.3",
-  "-Wsafe-init",
-  "-deprecation",
-  "-Wunused:all",
-  "-Werror"
-)
-val scala2CompilerOptions = Seq(
-  "-Xfatal-warnings",
-  "-feature",
-  "-unchecked",
-  "-deprecation",
-  "-Wunused:nowarn",
-  "-Wunused:imports",
-  "-Wunused:locals",
-  "-Wunused:patvars",
-  "-Wunused:params",
-  "-Wunused:linted"
-)
+import Common._
 
 inThisBuild(
   List(
@@ -48,7 +19,6 @@ inThisBuild(
         url("https://github.com/rorygraves")
       )
     ),
-
     ThisBuild / publishTo := {
       val centralSnapshots = "https://central.sonatype.com/repository/maven-snapshots/"
       if (isSnapshot.value) Some("central-snapshots".at(centralSnapshots))
@@ -66,101 +36,77 @@ inThisBuild(
     version := {
       dynverGitDescribeOutput.value match {
         case Some(out) if !out.isSnapshot() =>
-          // Strip the 'v' prefix if present
           out.ref.value.stripPrefix("v")
         case Some(out) =>
-          // Strip the 'v' prefix from snapshot versions too
           val baseVersion = out.ref.value.stripPrefix("v")
           s"$baseVersion+${out.commitSuffix.mkString("", "", "")}-SNAPSHOT"
         case None =>
           "0.0.0-UNKNOWN"
       }
     },
-
-    // ---- Test coverage (scoverage) ----
-    // Global defaults; tweak locally with: set coverageMinimumStmtTotal := 85
     ThisBuild / coverageMinimumStmtTotal := 80,
     ThisBuild / coverageFailOnMinimum    := false,
     ThisBuild / coverageHighlighting     := true,
-    // Exclude non-library entry points and samples from coverage stats
     ThisBuild / coverageExcludedPackages :=
       """
         |org\.llm4s\.runner\..*
         |org\.llm4s\.samples\..*
-      """.stripMargin.replaceAll("\n", ";")
-    ,
-    // Generate HTML only at the current project (root when using aliases)
+      """.stripMargin.replaceAll("\n", ";"),
     ThisBuild / (coverageReport / aggregate) := false,
-
-    // ---- Scalafix / SemanticDB ----
-    // Do not enable on-compile globally; we enable per-project where applicable
-    // Provide built-in rule implementations (e.g., Disable)
-    ThisBuild / scalafixDependencies += "ch.epfl.scala" %% "scalafix-rules" % "0.12.1"
+    // --- scalafix ---
+    ThisBuild / scalafixDependencies += "ch.epfl.scala" %% "scalafix-rules" % "0.12.1",
+    ThisBuild / scalafixOnCompile := true
   )
 )
 
-// Handy aliases for coverage runs
+// ---- Handy aliases ----
+addCommandAlias("cov", ";clean;coverage;test;coverageAggregate;coverageReport;coverageOff")
+addCommandAlias("covReport", ";clean;coverage;test;coverageReport;coverageOff")
+addCommandAlias("buildAll", ";clean;+compile;+test")
+addCommandAlias("publishAll", ";clean;+publish")
 addCommandAlias(
-  "cov",
-  ";clean;coverage;test;coverageAggregate;coverageReport;coverageOff"
+  "testAll",
+  ";project core; +test; project shared; +test; project workspaceRunner; +test; project samples; +test; project core; +publishLocal; project crossTestScala2; test; project crossTestScala3; test"
 )
 addCommandAlias(
-  "covReport",
-  ";clean;coverage;test;coverageReport;coverageOff"
+  "cleanTestAll",
+  ";project core; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project core; testAll"
 )
+addCommandAlias(
+  "cleanTestAllAndFormat",
+  ";scalafmtAll;project core; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project core; testAll"
+)
+addCommandAlias("compileAll", ";+compile")
+addCommandAlias("testCross", ";crossTestScala2/test;crossTestScala3/test")
+addCommandAlias("fullCrossTest", ";clean ;crossTestScala2/clean ;crossTestScala3/clean ;+publishLocal ;testCross")
 
-def scalacOptionsForVersion(scalaVersion: String): Seq[String] =
-  CrossVersion.partialVersion(scalaVersion) match {
-    case Some((2, 13)) =>
-      scala2CompilerOptions
-    case Some((3, _)) =>
-      scala3CompilerOptions
-    case _ => Seq.empty
-  }
 
+
+// ---- shared settings ----
 lazy val commonSettings = Seq(
   Compile / scalacOptions := scalacOptionsForVersion(scalaVersion.value),
   Test / scalacOptions    := scalacOptionsForVersion(scalaVersion.value),
-  // Enable SemanticDB only where supported; Disable rules do not require it.
-  semanticdbEnabled := (CrossVersion.partialVersion(scalaVersion.value) match {
-    case Some((3, _))  => true
-    case _             => false
-  }),
-  // Exclude test files from scalafix to avoid try-catch-finally rule violations
+  semanticdbEnabled       := CrossVersion.partialVersion(scalaVersion.value).exists(_._1 == 3),
   Test / scalafix / unmanagedSources := Seq.empty,
   Compile / packageDoc / publishArtifact := !isSnapshot.value,
-  Compile / unmanagedSourceDirectories ++= {
-    val sourceDir = (Compile / sourceDirectory).value
-    CrossVersion.partialVersion(scalaVersion.value) match {
-      case Some((2, 13)) => Seq(sourceDir / "scala-2.13")
-      case Some((3, _))  => Seq(sourceDir / "scala-3")
-      case _             => Nil
-    }
-  },
-  Test / unmanagedSourceDirectories ++= {
-    val sourceDir = (Test / sourceDirectory).value
-    CrossVersion.partialVersion(scalaVersion.value) match {
-      case Some((2, 13)) => Seq(sourceDir / "scala-2.13")
-      case Some((3, _))  => Seq(sourceDir / "scala-3")
-      case _             => Nil
-    }
-  },
-  libraryDependencies ++= List(
-    "org.typelevel" %% "cats-core"       % "2.13.0",
-    "com.lihaoyi"   %% "upickle"         % "4.2.1",
-    "ch.qos.logback" % "logback-classic" % "1.5.18",
-    "dev.optics" %% "monocle-core"  % "3.3.0",
-    "dev.optics" %% "monocle-macro" % "3.3.0",
-    "org.scalatest" %% "scalatest"       % "3.2.19" % Test,
-    "org.scalamock" %% "scalamock" %      "7.4.2" % Test,
-    "com.lihaoyi"   %% "fansi"           % "0.5.0",
-    "org.postgresql" % "postgresql" % "42.7.3",   // JDBC driver
-    "com.typesafe"   % "config"      % "1.4.3",   // loads reference.conf
-    "com.zaxxer"     % "HikariCP"    % "5.1.0"    // connection pooling
+  libraryDependencies ++= Seq(
+    Deps.cats,
+    Deps.upickle,
+    Deps.logback,
+    Deps.monocleCore,
+    Deps.monocleMacro,
+    Deps.scalatest % Test,
+    Deps.scalamock % Test,
+    Deps.fansi,
+    Deps.postgres,
+    Deps.config,
+    Deps.hikariCP
   )
 )
 
-lazy val llm4s = (project in file(".")).aggregate(core, shared, workspaceRunner, samples)
+// ---- projects ----
+lazy val llm4s = (project in file("."))
+  .aggregate(core, shared, workspaceRunner, samples)
 
 lazy val core = (project in file("modules/core"))
   .aggregate(shared, workspaceRunner)
@@ -168,67 +114,56 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "core",
     commonSettings,
-    // Enable scalafix on compile here (has ConfigReader)
-    scalafixOnCompile := true,
-    // Ensure consistent enhanced messages in root tests
     Test / fork := true,
-    // Library project: do not expose or auto-discover mains
     Compile / mainClass := None,
     Compile / discoveredMainClasses := Seq.empty,
     resolvers += "Vosk Repository" at "https://alphacephei.com/maven/",
-    libraryDependencies ++= List(
-      "com.azure"          % "azure-ai-openai" % "1.0.0-beta.16",
-      "com.anthropic"      % "anthropic-java"  % "2.2.0",
-      "com.knuddels"       % "jtokkit"         % "1.1.0",
-      "com.lihaoyi"       %% "requests"        % "0.9.0",
-      "org.java-websocket" % "Java-WebSocket"  % "1.6.0",
-      "org.scalatest"     %% "scalatest"       % "3.2.19" % Test,
-      "org.scalamock"     %% "scalamock"       % "7.4.0"  % Test,
-      "com.softwaremill.sttp.client4" %% "core"  % "4.0.9",
-      "com.lihaoyi"                   %% "ujson" % "4.2.1",
-      "org.apache.pdfbox" % "pdfbox" % "3.0.5",
-      "commons-io"        % "commons-io"      % "2.18.0",
-      "org.apache.tika" % "tika-core" % "3.2.1",
-      "org.apache.poi" % "poi-ooxml" % "5.4.1",
-      "com.lihaoyi" %% "requests" % "0.9.0",
-      "org.jsoup" % "jsoup" % "1.21.1",
-      "io.github.cdimascio" % "dotenv-java" % "3.0.0",
-          // Speech: Vosk for lightweight STT (replacing abandoned Sphinx4)
-    "net.java.dev.jna" % "jna" % "5.13.0",
-    "com.alphacephei" % "vosk" % "0.3.45",
-      "org.postgresql" % "postgresql" % "42.7.3",   // JDBC driver
-      "com.typesafe"   % "config"      % "1.4.3",   // loads reference.conf
-      "com.zaxxer"     % "HikariCP"    % "5.1.0"    // connection pooling
+    libraryDependencies ++= Seq(
+      Deps.azureOpenAI,
+      Deps.anthropic,
+      Deps.jtokkit,
+      Deps.requests,
+      Deps.websocket,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test,
+      Deps.sttp,
+      Deps.ujson,
+      Deps.pdfbox,
+      Deps.commonsIO,
+      Deps.tika,
+      Deps.poi,
+      Deps.requests,
+      Deps.jsoup,
+      Deps.dotenv,
+      Deps.jna,
+      Deps.vosk,
+      Deps.postgres,
+      Deps.config,
+      Deps.hikariCP
     )
-
   )
 
 lazy val shared = (project in file("modules/shared"))
   .settings(
     name := "shared",
     commonSettings,
-    scalafixOnCompile := true,
     Compile / discoveredMainClasses := Seq.empty
   )
 
 lazy val workspaceRunner = (project in file("modules/workspaceRunner"))
   .dependsOn(shared)
-  .enablePlugins(JavaAppPackaging)
-  .enablePlugins(DockerPlugin)
+  .enablePlugins(JavaAppPackaging, DockerPlugin)
   .settings(
-    Compile / mainClass := Some("org.llm4s.runner.RunnerMain"),
-    name                := "workspaceRunner",
-    scalafixOnCompile := true,
+    name := "workspaceRunner",
     commonSettings,
-    libraryDependencies ++= List(
-      "com.lihaoyi"   %% "cask"            % "0.10.2",
-      "com.lihaoyi"   %% "requests"        % "0.9.0",
-      "org.postgresql" % "postgresql" % "42.7.3",   // JDBC driver
-      "com.typesafe"   % "config"      % "1.4.3",   // loads reference.conf
-      "com.zaxxer"     % "HikariCP"    % "5.1.0"    // connection pooling
-    )
-  )
-  .settings(
+    Compile / mainClass := Some("org.llm4s.runner.RunnerMain"),
+    libraryDependencies ++= Seq(
+      Deps.cask,
+      Deps.requests,
+      Deps.postgres,
+      Deps.config,
+      Deps.hikariCP
+    ),
     publish / skip := true
   )
   .settings(WorkspaceRunnerDocker.settings)
@@ -238,30 +173,26 @@ lazy val samples = (project in file("modules/samples"))
   .settings(
     name := "samples",
     commonSettings,
-    scalafixOnCompile := true
-  )
-  .settings(
     publish / skip := true
   )
 
 lazy val crossLibDependencies = Def.setting {
   Seq(
-    "org.scalatest" %% "scalatest" % "3.2.19" % Test,
-    "com.softwaremill.sttp.client4" %% "core"  % "4.0.9",
-    "com.lihaoyi"                   %% "ujson" % "4.2.1",
-    "org.apache.pdfbox" % "pdfbox" % "3.0.5",
-    "org.apache.poi" % "poi-ooxml" % "5.4.1",
-    "org.apache.tika" % "tika-core" % "3.2.1",
-    "com.lihaoyi" %% "requests" % "0.9.0",
-    "org.jsoup" % "jsoup" % "1.21.1",
-    "org.postgresql" % "postgresql" % "42.7.3",   // JDBC driver
-    "com.typesafe"   % "config"      % "1.4.3",   // loads reference.conf
-    "com.zaxxer"     % "HikariCP"    % "5.1.0"    // connection pooling
+    Deps.scalatest % Test,
+    Deps.sttp,
+    Deps.ujson,
+    Deps.pdfbox,
+    Deps.poi,
+    Deps.tika,
+    Deps.requests,
+    Deps.jsoup,
+    Deps.postgres,
+    Deps.config,
+    Deps.hikariCP
   )
 }
 
 lazy val crossTestScala2 = (project in file("modules/crosstest/scala2"))
-  // Depend on published binary of core for the matching Scala (2.13)
   .settings(
     name         := "crosstest-scala2",
     scalaVersion := scala213,
@@ -273,9 +204,8 @@ lazy val crossTestScala2 = (project in file("modules/crosstest/scala2"))
     )
   )
 
-
 lazy val crossTestScala3 = (project in file("modules/crosstest/scala3"))
-  .dependsOn(core % "compile->compile;test->test") // fine: both are Scala 3
+  .dependsOn(core % "compile->compile;test->test")
   .settings(
     name         := "crosstest-scala3",
     scalaVersion := scala3,
@@ -285,28 +215,6 @@ lazy val crossTestScala3 = (project in file("modules/crosstest/scala3"))
     libraryDependencies ++= crossLibDependencies.value,
     scalacOptions ++= scala3CompilerOptions
   )
-
-
-addCommandAlias("buildAll", ";clean;+compile;+test")
-addCommandAlias("publishAll", ";clean;+publish")
-// Run tests across all modules, including samples and crossTest modules
-addCommandAlias(
-  "testAll",
-  ";project core; +test; project shared; +test; project workspaceRunner; +test; project samples; +test; project core; +publishLocal; project crossTestScala2; test; project crossTestScala3; test"
-)
-
-addCommandAlias(
-  "cleanTestAll",
-  ";project core; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project core; testAll"
-)
-
-addCommandAlias(
-  "cleanTestAllAndFormat",
-  ";scalafmtAll;project core; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project core; testAll"
-)
-addCommandAlias("compileAll", ";+compile")
-addCommandAlias("testCross", ";crossTestScala2/test;crossTestScala3/test")
-addCommandAlias("fullCrossTest", ";clean ;crossTestScala2/clean ;crossTestScala3/clean ;+publishLocal ;testCross")
 
 mimaPreviousArtifacts := Set(
   organization.value %% "llm4s" % "0.1.4"
