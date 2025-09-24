@@ -77,7 +77,7 @@ addCommandAlias(
   ";scalafmtAll;project core; clean; project workspaceShared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project core; testAll"
 )
 addCommandAlias("compileAll", ";+compile")
-addCommandAlias("testCross", ";crossTestScala2/test;crossTestScala3/test")
+addCommandAlias("testCross", ";++2.13.16 crossTestScala2/test;++3.7.1 crossTestScala3/test")
 addCommandAlias("fullCrossTest", ";clean ;crossTestScala2/clean ;crossTestScala3/clean ;+publishLocal ;testCross")
 
 
@@ -106,7 +106,7 @@ lazy val commonSettings = Seq(
 
 // ---- projects ----
 lazy val llm4s = (project in file("."))
-  .aggregate(core, workspaceShared, workspaceRunner, workspaceClient, samples)
+  .aggregate(core, samples, workspaceShared, workspaceRunner, workspaceClient, workspaceSamples)
 
 lazy val core = (project in file("modules/core"))
   .settings(
@@ -197,10 +197,18 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   )
   .settings(WorkspaceRunnerDocker.settings)
 
-lazy val samples = (project in file("modules/samples"))
-  .dependsOn(workspaceShared, core, workspaceClient)
+lazy val samples = (project in file("modules//samples"))
+  .dependsOn(core)
   .settings(
     name := "samples",
+    commonSettings,
+    publish / skip := true
+  )
+
+lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))
+  .dependsOn(workspaceShared, workspaceRunner, workspaceClient, samples)
+  .settings(
+    name := "workspaceSamples",
     commonSettings,
     publish / skip := true
   )
@@ -222,6 +230,7 @@ lazy val crossLibDependencies = Def.setting {
 }
 
 lazy val crossTestScala2 = (project in file("modules/crosstest/scala2"))
+  .dependsOn(core)
   .settings(
     name         := "crosstest-scala2",
     scalaVersion := scala213,
@@ -232,7 +241,7 @@ lazy val crossTestScala2 = (project in file("modules/crosstest/scala2"))
   )
 
 lazy val crossTestScala3 = (project in file("modules/crosstest/scala3"))
-  .dependsOn(core % "compile->compile;test->test")
+  .dependsOn(core)
   .settings(
     name         := "crosstest-scala3",
     scalaVersion := scala3,
