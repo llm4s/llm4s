@@ -109,8 +109,6 @@ lazy val llm4s = (project in file("."))
   .aggregate(core, shared, workspaceRunner, samples)
 
 lazy val core = (project in file("modules/core"))
-  .aggregate(shared, workspaceRunner)
-  .dependsOn(shared)
   .settings(
     name := "core",
     commonSettings,
@@ -143,14 +141,45 @@ lazy val core = (project in file("modules/core"))
     )
   )
 
-lazy val shared = (project in file("modules/shared"))
+lazy val shared = (project in file("modules/workspace/shared"))
   .settings(
     name := "shared",
     commonSettings,
     Compile / discoveredMainClasses := Seq.empty
   )
 
-lazy val workspaceRunner = (project in file("modules/workspaceRunner"))
+lazy val client = (project in file("modules/workspace/client"))
+  .dependsOn(shared, core)
+  .settings(
+    name := "client",
+    commonSettings,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.azureOpenAI,
+      Deps.anthropic,
+      Deps.jtokkit,
+      Deps.requests,
+      Deps.websocket,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test,
+      Deps.sttp,
+      Deps.ujson,
+      Deps.pdfbox,
+      Deps.commonsIO,
+      Deps.tika,
+      Deps.poi,
+      Deps.requests,
+      Deps.jsoup,
+      Deps.dotenv,
+      Deps.jna,
+      Deps.vosk,
+      Deps.postgres,
+      Deps.config,
+      Deps.hikariCP
+    )
+  )
+
+lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner"))
   .dependsOn(shared)
   .enablePlugins(JavaAppPackaging, DockerPlugin)
   .settings(
@@ -169,7 +198,7 @@ lazy val workspaceRunner = (project in file("modules/workspaceRunner"))
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules/samples"))
-  .dependsOn(shared, core)
+  .dependsOn(shared, core, client)
   .settings(
     name := "samples",
     commonSettings,
