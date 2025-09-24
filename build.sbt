@@ -66,15 +66,15 @@ addCommandAlias("buildAll", ";clean;+compile;+test")
 addCommandAlias("publishAll", ";clean;+publish")
 addCommandAlias(
   "testAll",
-  ";project core; +test; project shared; +test; project workspaceRunner; +test; project samples; +test; project core; +publishLocal; project crossTestScala2; test; project crossTestScala3; test"
+  ";project core; +test; project workspaceShared; +test; project workspaceRunner; +test; project samples; +test; project core; +publishLocal; project crossTestScala2; test; project crossTestScala3; test"
 )
 addCommandAlias(
   "cleanTestAll",
-  ";project core; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project core; testAll"
+  ";project core; clean; project workspaceShared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project core; testAll"
 )
 addCommandAlias(
   "cleanTestAllAndFormat",
-  ";scalafmtAll;project core; clean; project shared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project core; testAll"
+  ";scalafmtAll;project core; clean; project workspaceShared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project core; testAll"
 )
 addCommandAlias("compileAll", ";+compile")
 addCommandAlias("testCross", ";crossTestScala2/test;crossTestScala3/test")
@@ -106,7 +106,7 @@ lazy val commonSettings = Seq(
 
 // ---- projects ----
 lazy val llm4s = (project in file("."))
-  .aggregate(core, shared, workspaceRunner, samples)
+  .aggregate(core, workspaceShared, workspaceRunner, workspaceClient, samples)
 
 lazy val core = (project in file("modules/core"))
   .settings(
@@ -141,17 +141,17 @@ lazy val core = (project in file("modules/core"))
     )
   )
 
-lazy val shared = (project in file("modules/workspace/shared"))
+lazy val workspaceShared = (project in file("modules/workspace/workspaceShared"))
   .settings(
-    name := "shared",
+    name := "workspaceShared",
     commonSettings,
     Compile / discoveredMainClasses := Seq.empty
   )
 
-lazy val client = (project in file("modules/workspace/client"))
-  .dependsOn(shared, core)
+lazy val workspaceClient = (project in file("modules/workspace/workspaceClient"))
+  .dependsOn(workspaceShared, core)
   .settings(
-    name := "client",
+    name := "workspaceShared",
     commonSettings,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -180,7 +180,7 @@ lazy val client = (project in file("modules/workspace/client"))
   )
 
 lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner"))
-  .dependsOn(shared)
+  .dependsOn(workspaceShared)
   .enablePlugins(JavaAppPackaging, DockerPlugin)
   .settings(
     name := "workspaceRunner",
@@ -198,7 +198,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules/samples"))
-  .dependsOn(shared, core, client)
+  .dependsOn(workspaceShared, core, workspaceClient)
   .settings(
     name := "samples",
     commonSettings,
@@ -228,9 +228,7 @@ lazy val crossTestScala2 = (project in file("modules/crosstest/scala2"))
     Test / fork  := true,
     resolvers   += Resolver.mavenLocal,
     resolvers   += Resolver.defaultLocal,
-    libraryDependencies ++= crossLibDependencies.value ++ Seq(
-      organization.value %% "core" % version.value
-    )
+    libraryDependencies ++= crossLibDependencies.value
   )
 
 lazy val crossTestScala3 = (project in file("modules/crosstest/scala3"))
