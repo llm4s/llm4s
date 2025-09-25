@@ -2,8 +2,8 @@ package org.llm4s.samples.basic
 
 import org.llm4s.core.safety.Safety
 import org.llm4s.agent.{ Agent, AgentState, AgentStatus }
+import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.config.ConfigReader
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.samples.util.{ BenchmarkUtil, TracingUtil }
@@ -39,26 +39,20 @@ object AgentLLMCallingExample {
     logger.info("🧮 Calculator Tool Agent Demo with Tracing")
     logger.info("=" * 50)
     val result = for {
-      config  <- LLMConfig()
-      tracing <- createComprehensiveTracing()(config)
+      settings <- ConfigReader.TracingConf()
+      tracing  <- createComprehensiveTracing(settings)
       _ = {
         logger.info("🔍 Tracing Configuration:")
-        logger.info("   • Mode: {}", config.getOrElse("TRACING_MODE", "console"))
-        logger.info("   • Langfuse URL: {}", config.getOrElse("LANGFUSE_URL", "default"))
-        logger.info(
-          "   • Langfuse Public Key: {}",
-          if (config.get("LANGFUSE_PUBLIC_KEY").isDefined) "SET" else "NOT SET"
-        )
-        logger.info(
-          "   • Langfuse Secret Key: {}",
-          if (config.get("LANGFUSE_SECRET_KEY").isDefined) "SET" else "NOT SET"
-        )
+        logger.info(s"   • Mode: ${settings.mode}")
+        logger.info(s"   • Langfuse URL: ${settings.langfuse.url}")
+        logger.info(s"   • Langfuse Public Key: ${settings.langfuse.publicKey.fold("NOT SET")(_ => "SET")}")
+        logger.info(s"   • Langfuse Secret Key: ${settings.langfuse.secretKey.fold("NOT SET")(_ => "SET")}")
 
         logger.info("🧪 Testing tracing...")
         TracingUtil.traceDemoStart(tracing, "Calculator Tool Agent")
         logger.info("🧪 Tracing initialized successfully")
       }
-      _ <- demonstrateCalculatorAgent(tracing)(config)
+      _ <- demonstrateCalculatorAgent(tracing)
       _ = {
         logger.info("=" * 50)
         logger.info("✨ Calculator Demo Complete!")
@@ -72,12 +66,12 @@ object AgentLLMCallingExample {
   /**
    * Create comprehensive tracing with all three modes combined
    */
-  private def createComprehensiveTracing()(config: ConfigReader): Result[EnhancedTracing] = Safety.fromTry {
+  private def createComprehensiveTracing(settings: TracingSettings): Result[EnhancedTracing] = Safety.fromTry {
     Try {
-      // Create individual tracers
-      val langfuseTracing = EnhancedTracing.create(TracingMode.Langfuse)(config)
-      val consoleTracing  = EnhancedTracing.create(TracingMode.Console)(config)
-      val noOpTracing     = EnhancedTracing.create(TracingMode.NoOp)(config)
+      // Create individual tracers using typed settings
+      val langfuseTracing = EnhancedTracing.create(settings.copy(mode = TracingMode.Langfuse))
+      val consoleTracing  = EnhancedTracing.create(settings.copy(mode = TracingMode.Console))
+      val noOpTracing     = EnhancedTracing.create(settings.copy(mode = TracingMode.NoOp))
 
       logger.info("✅ All tracing modes initialized successfully")
 
@@ -96,14 +90,14 @@ object AgentLLMCallingExample {
   /**
    * Simple Calculator Agent Demo
    */
-  private def demonstrateCalculatorAgent(tracing: EnhancedTracing)(config: ConfigReader) = {
+  private def demonstrateCalculatorAgent(tracing: EnhancedTracing) = {
     logger.info("🧮 Calculator Agent Demo")
     logger.info("Testing calculator tool with agent framework")
 
     val benchmarkResult: BenchmarkUtil.BenchmarkResult[Either[LLMError, AgentExecutionResult]] =
       BenchmarkUtil.timeWithSteps { timer =>
         for {
-          llmClient <- LLMConnect.getClient(config)
+          llmClient <- LLMConnect.fromEnv()
           agent = new Agent(llmClient)
           agentExecutionResult = {
             val tools        = Seq(CalculatorTool.tool)

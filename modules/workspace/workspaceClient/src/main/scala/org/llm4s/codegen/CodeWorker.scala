@@ -1,8 +1,7 @@
 package org.llm4s.codegen
 
 import org.llm4s.agent.{ Agent, AgentState, AgentStatus }
-import org.llm4s.config.ConfigReader
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.toolapi._
 import org.llm4s.workspace.ContainerisedWorkspace
 import org.slf4j.LoggerFactory
@@ -16,8 +15,7 @@ import org.llm4s.error.ValidationError
  *
  * @param sourceDirectory The directory containing the codebase to work with
  */
-class CodeWorker(sourceDirectory: String, imageName: String, hostPort: Int)(reader: ConfigReader)
-    extends AutoCloseable {
+class CodeWorker(sourceDirectory: String, imageName: String, hostPort: Int, client: LLMClient) extends AutoCloseable {
   private val logger    = LoggerFactory.getLogger(getClass)
   private val workspace = new ContainerisedWorkspace(sourceDirectory, imageName, hostPort)
 
@@ -57,11 +55,8 @@ class CodeWorker(sourceDirectory: String, imageName: String, hostPort: Int)(read
     }
 
     // Run the agent to completion or until step limit is reached
-    val result = for {
-      client <- LLMConnect.getClient(reader)
-      agent = new Agent(client)
-      state <- agent.run(task, toolRegistry, maxSteps, traceLogPath, None)
-    } yield state
+    val agent  = new Agent(client)
+    val result = agent.run(task, toolRegistry, maxSteps, traceLogPath, None)
 
     result match {
       case Right(finalState) =>

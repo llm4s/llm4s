@@ -147,15 +147,11 @@ import org.llm4s.config.ConfigReader
 import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.LLMConnect
 
-// Result-first config and client acquisition
-val client = for {
-  reader <- LLMConfig() // Result[ConfigReader]
-  client <- LLMConnect.getClient(reader) // Result[LLMClient]
-} yield client
+// Preferred typed path (no ConfigReader at call sites)
+val client = org.llm4s.config.ConfigReader.Provider().flatMap(LLMConnect.getClient)
 
-// Access individual keys (Result)
-val apiKeyEither: org.llm4s.types.Result[String] =
-  LLMConfig().flatMap(_.require("OPENAI_API_KEY"))
+// Access individual keys (Result) — rarely needed in app code now
+val apiKeyEither: org.llm4s.types.Result[String] = LLMConfig().flatMap(_.require("OPENAI_API_KEY"))
 
 // Or create a custom config (pure, no env)
 val customConfig: ConfigReader = ConfigReader(Map(
@@ -185,19 +181,46 @@ val customConfig: ConfigReader = ConfigReader(Map(
    LLMConfigResult().flatMap(_.require("KEY"))
    ```
 
-3. **Pass config to constructors**: Many classes now take an implicit ConfigReader
+3. **Use typed loaders**: Prefer typed settings over passing ConfigReader
    ```scala
    // Before
    val client = LLM.client()
    
    // After (Result-first)
-   val client = for {
-     reader <- LLMConfig()
-     client <- org.llm4s.llmconnect.LLMConnect.getClient(reader)
-   } yield client
+   val client = org.llm4s.config.ConfigReader.Provider().flatMap(org.llm4s.llmconnect.LLMConnect.getClient)
    ```
-   ```scala
-    val client = LLMConfig().flatMap { reader =>
-      LLMConnect.getClient(reader)
-    }   
-   ```
+```scala
+    val client = org.llm4s.config.ConfigReader.Provider().flatMap(LLMConnect.getClient)
+  ```
+
+### Typed Config: recommended patterns
+
+- Tracing (typed):
+  ```scala
+  import org.llm4s.config.ConfigReader
+  import org.llm4s.trace.{ Tracing, EnhancedTracing, TracingMode }
+
+  val tracer: Tracing = ConfigReader.TracingConf()
+    .map(Tracing.create) // typed settings → Tracing
+    .getOrElse(Tracing.createFromEnhanced(new org.llm4s.trace.EnhancedConsoleTracing()))
+  ```
+
+- Provider model for display (typed):
+  ```scala
+  val modelName = ConfigReader.Provider().map(_.model).getOrElse("unknown-model")
+  // Prefer completion.model after the API call when available
+  ```
+
+- Workspace (samples):
+  ```scala
+  val ws = org.llm4s.codegen.WorkspaceSettings.load().getOrElse(
+    throw new IllegalArgumentException("Failed to load workspace settings")
+  )
+  ```
+
+- Embeddings (samples):
+  ```scala
+  val ui      = org.llm4s.samples.embeddingsupport.EmbeddingUiSettings.load(cfg)
+  val targets = org.llm4s.samples.embeddingsupport.EmbeddingTargets.load(cfg).targets
+  val query   = org.llm4s.samples.embeddingsupport.EmbeddingQuery.load(cfg).value
+  ```

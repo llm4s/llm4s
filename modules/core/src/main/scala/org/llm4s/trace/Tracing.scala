@@ -1,8 +1,8 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.AgentState
-import org.llm4s.config.ConfigReader
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
+import org.llm4s.llmconnect.config.TracingSettings
 
 /**
  * Legacy Tracing interface for backward compatibility
@@ -58,28 +58,21 @@ private class TracingBridge(enhanced: EnhancedTracing) extends Tracing {
 
 object Tracing {
 
+  /** Bridge helper: wrap an EnhancedTracing into legacy Tracing */
+  def createFromEnhanced(enhanced: EnhancedTracing): Tracing = new TracingBridge(enhanced)
+
   /**
-   * Creates a Tracing instance based on the TRACING_MODE environment variable.
-   *
-   * Supported modes:
-   * - "langfuse" (default): Uses LangfuseTracing to send traces to Langfuse
-   * - "print": Uses PrintTracing to print traces to console
-   * - "none": Uses NoOpTracing (no tracing)
-   *
-   * @deprecated Use EnhancedTracing.create() for new code
+   * Create a Tracing instance from typed settings (no ConfigReader required).
+   * This is the preferred API when you already resolved config into types.
    */
-  def create()(config: ConfigReader): Tracing = {
-    val enhanced = EnhancedTracing.create()(config)
+  def create(settings: TracingSettings): Tracing = {
+    val enhanced = EnhancedTracing.create(settings)
     new TracingBridge(enhanced)
   }
 
   /**
-   * Creates a Tracing instance with the specified mode
-   *
-   * @deprecated Use EnhancedTracing.create(mode) for new code
+   * Convenience: build Tracing from environment/config files without passing ConfigReader.
    */
-  def create(mode: String)(config: ConfigReader): Tracing = {
-    val enhanced = EnhancedTracing.create(mode)(config)
-    new TracingBridge(enhanced)
-  }
+  def createFromEnv(): org.llm4s.types.Result[Tracing] =
+    EnhancedTracing.createFromEnv().map(createFromEnhanced)
 }

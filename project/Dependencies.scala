@@ -28,7 +28,6 @@ object Versions {
   val tika        = "3.2.1"
   val poi         = "5.4.1"
   val jsoup       = "1.21.1"
-  val dotenv      = "3.0.0"
   val jna         = "5.13.0"
   val vosk        = "0.3.45"
 
@@ -61,7 +60,6 @@ object Deps {
   val tika        = "org.apache.tika" % "tika-core"     % Versions.tika
   val poi         = "org.apache.poi" % "poi-ooxml"      % Versions.poi
   val jsoup       = "org.jsoup"    % "jsoup"            % Versions.jsoup
-  val dotenv      = "io.github.cdimascio" % "dotenv-java" % Versions.dotenv
   val jna         = "net.java.dev.jna" % "jna"          % Versions.jna
   val vosk        = "com.alphacephei"  % "vosk"         % Versions.vosk
 

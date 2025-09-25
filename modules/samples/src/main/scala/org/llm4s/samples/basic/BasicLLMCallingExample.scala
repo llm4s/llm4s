@@ -1,6 +1,5 @@
 package org.llm4s.samples.basic
 
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 
@@ -41,8 +40,7 @@ object BasicLLMCallingExample {
 
     // Get a client using environment variables (Result-first)
     val result = for {
-      reader     <- LLMConfig()
-      client     <- LLMConnect.getClient(reader)
+      client     <- LLMConnect.fromEnv()
       completion <- client.complete(conversation)
       _ = {
         println(s"Model ID=${completion.id} is created at ${completion.created}")

@@ -1,6 +1,6 @@
 package org.llm4s.samples.streaming
 
-import org.llm4s.config.ConfigReader.LLMConfig
+import org.llm4s.config.ConfigReader
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
@@ -17,8 +17,8 @@ import org.llm4s.llmconnect.streaming.StreamingAccumulator
  */
 object StreamingWithProgressExample {
   def main(args: Array[String]): Unit = {
-    val config = LLMConfig().fold(err => throw new RuntimeException(err.formatted), identity)
-    val model  = config.getOrElse("LLM_MODEL", "unknown")
+    val provider = ConfigReader.Provider().fold(err => throw new RuntimeException(err.formatted), identity)
+    val model    = provider.model
     println("=== LLM4S Streaming with Progress Example ===")
     println(s"Using model: $model")
     println("=" * 50 + "\n")
@@ -42,8 +42,7 @@ object StreamingWithProgressExample {
     var spinnerIndex = 0
     // Get a client (Result-first)
     val result = for {
-      reader <- LLMConfig()
-      client <- LLMConnect.getClient(reader)
+      client <- LLMConnect.fromEnv()
       accumulator = StreamingAccumulator.create()
       startTime   = System.currentTimeMillis()
       spinner     = Array('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')

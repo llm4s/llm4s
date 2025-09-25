@@ -2,8 +2,6 @@ package org.llm4s.samples.mcp
 
 import cats.implicits._
 import org.llm4s.agent.{ Agent, AgentState }
-import org.llm4s.config.ConfigReader
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model.MessageRole.Assistant
 import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
@@ -70,8 +68,7 @@ object PlaywrightExample {
     logger.info("🌐 Demonstrating browser automation with MCP integration")
 
     val result = for {
-      cfg    <- LLMConfig().leftMap(_.formatted)
-      client <- validatePrerequisites()(cfg)
+      client <- validatePrerequisites()
       mcpRegistry = MCPToolRegistry()
       _ <- checkForTools(mcpRegistry)
       _ <- runQueries(client, mcpRegistry)
@@ -97,11 +94,11 @@ object PlaywrightExample {
       }
     }.toEither.leftMap(ex => ex.getMessage)
 
-  private def validatePrerequisites()(config: ConfigReader): Either[String, LLMClient] =
+  private def validatePrerequisites(): Either[String, LLMClient] =
     for {
       _      <- checkCommand("node", "Node.js")
       _      <- checkCommand("npx", "npx")
-      client <- LLMConnect.getClient(config).leftMap(_.formatted)
+      client <- LLMConnect.fromEnv().leftMap(_.formatted)
     } yield {
       logger.info("✅ Prerequisites validated and LLM client initialized")
       client

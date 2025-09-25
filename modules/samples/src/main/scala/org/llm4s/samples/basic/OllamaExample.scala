@@ -1,6 +1,5 @@
 package org.llm4s.samples.basic
 
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 
@@ -15,8 +14,7 @@ object OllamaExample {
     )
 
     val result = for {
-      config     <- LLMConfig()
-      client     <- LLMConnect.getClient(config)
+      client     <- LLMConnect.fromEnv()
       completion <- client.complete(conversation, CompletionOptions())
       _ = Console.println("Assistant:\n" + completion.message.content)
     } yield ()

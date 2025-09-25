@@ -30,6 +30,10 @@ object LLMConnect {
         Right(new OllamaClient(cfg))
     }
 
+  // Typed-config entry: build client directly from ProviderConfig
+  def getClient(config: ProviderConfig): Result[LLMClient] =
+    buildClient(config)
+
   def getClient(provider: LLMProvider, config: ProviderConfig): Result[LLMClient] =
     (provider, config) match {
       case (LLMProvider.OpenAI, cfg: OpenAIConfig)       => OpenAIClient.create(cfg)
@@ -48,5 +52,9 @@ object LLMConnect {
     options: CompletionOptions = CompletionOptions()
   )(config: ConfigReader): Result[Completion] =
     getClient(config).flatMap(_.complete(Conversation(messages), options))
+
+  // Convenience: build client from environment/config using typed ProviderConfig loader
+  def fromEnv(): Result[LLMClient] =
+    org.llm4s.config.ConfigReader.Provider().flatMap(getClient)
 
 }

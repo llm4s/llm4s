@@ -1,7 +1,6 @@
 package org.llm4s.samples.context
 
 import org.llm4s.config.ConfigReader
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.context.{ ContextManager, ContextConfig, ConversationTokenCounter }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
@@ -45,9 +44,9 @@ object ContextPipelineExample {
     logger.info("Starting Context Management Pipeline Example")
 
     val result = for {
-      config       <- getConfiguration()
-      client       <- createClient(config._2)
-      tokenCounter <- createTokenCounter(config._1)
+      modelName    <- ConfigReader.Provider().map(_.model)
+      client       <- LLMConnect.fromEnv()
+      tokenCounter <- ConversationTokenCounter.forModel(modelName)
       contextMgr   <- createContextManager(tokenCounter, client)
       results      <- runPipelineDemo(contextMgr, tokenCounter)
     } yield results
@@ -60,25 +59,6 @@ object ContextPipelineExample {
       }
     )
   }
-
-  private def getConfiguration(): Result[(String, ConfigReader)] =
-    for {
-      config <- LLMConfig()
-      modelName = config.getOrElse("LLM_MODEL", "openai/gpt-4o")
-      _         = logger.info(s"Using model: $modelName")
-    } yield (modelName, config)
-
-  private def createClient(config: ConfigReader): Result[org.llm4s.llmconnect.LLMClient] =
-    LLMConnect.getClient(config).map { client =>
-      logger.info("Created LLM client")
-      client
-    }
-
-  private def createTokenCounter(modelName: String): Result[ConversationTokenCounter] =
-    ConversationTokenCounter.forModel(modelName).map { counter =>
-      logger.info(s"Created token counter for: $modelName")
-      counter
-    }
 
   private def createContextManager(
     tokenCounter: ConversationTokenCounter,

@@ -1,6 +1,5 @@
 package org.llm4s.samples.actions
 
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.identity.TokenizerId.O200K_BASE
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model._
@@ -69,8 +68,7 @@ object SummarizationExample {
 
     // Get a client using environment variables (Result-first)
     val result = for {
-      reader     <- LLMConfig()
-      client     <- LLMConnect.getClient(reader)
+      client     <- LLMConnect.fromEnv()
       completion <- client.complete(conversation)
       _ = CompletionSummaryInfo(completion)
       summaryResult <- summarizeText(textToSummarize2, Some("50 words"))(client)

@@ -1,8 +1,8 @@
 package org.llm4s.codegen
 
 import org.llm4s.agent.AgentState
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.error.SimpleError
+import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole
 import org.slf4j.LoggerFactory
 
@@ -17,11 +17,7 @@ object CodeGenExample {
   def main(args: Array[String]): Unit = {
     // TODO need to get workspace and traceLogPath dir from config/env vars
 
-    val workspaceDir = System.getProperty("user.home") + "/code-workspace"
-    logger.info(s"Using workspace directory: $workspaceDir")
-
-    val traceLogPath = "/Users/rory.graves/workspace/home/llm4s/log/codegen-trace.md"
-    logger.info(s"Trace log will be written to: $traceLogPath")
+    // Trace log path comes from settings below
 
     val task =
       """Create a simple sbt project containing a hello world example that prints the current date and time.
@@ -30,16 +26,16 @@ object CodeGenExample {
         |Run the program and show the result.""".stripMargin
 
     // TODO refactor and get it from a config or pass it as command arg parameter
-    val imageName: String = "docker.io/library/workspace-runner:0.1.0-SNAPSHOT"
-    val hostPort: Int     = 8080
-
     val result = for {
-      config <- LLMConfig()
-      finalState <- Using.resource(new CodeWorker(workspaceDir, imageName, hostPort)(config)) { codeWorker =>
+      ws <- WorkspaceSettings.load()
+      _ = logger.info(s"Using workspace directory: ${ws.workspaceDir}")
+      _ = logger.info(s"Trace log will be written to: ${ws.traceLogPath}")
+      client <- LLMConnect.fromEnv()
+      finalState <- Using.resource(new CodeWorker(ws.workspaceDir, ws.imageName, ws.hostPort, client)) { codeWorker =>
         for {
           _          <- Either.cond(codeWorker.initialize(), (), SimpleError("Failed to initialize CodeWorker"))
-          finalState <- codeWorker.executeTask(task, Some(20), Some(traceLogPath))
-          _ = logFinalResponse(finalState, traceLogPath)
+          finalState <- codeWorker.executeTask(task, Some(20), Some(ws.traceLogPath))
+          _ = logFinalResponse(finalState, ws.traceLogPath)
         } yield finalState
       }
     } yield finalState

@@ -55,6 +55,10 @@ object OpenAIConfig {
       case _ => (8192, standardReserve)
     }
   }
+
+  /** Convenience: load from environment/config without passing ConfigReader at call site. */
+  def fromEnv(modelName: String): Result[OpenAIConfig] =
+    org.llm4s.config.ConfigReader.LLMConfig().flatMap(apply(modelName, _))
 }
 
 case class AzureConfig(
@@ -95,6 +99,10 @@ object AzureConfig {
       case _                                      => (8192, standardReserve)
     }
   }
+
+  /** Convenience: load from environment/config without passing ConfigReader at call site. */
+  def fromEnv(modelName: String): Result[AzureConfig] =
+    org.llm4s.config.ConfigReader.LLMConfig().flatMap(apply(modelName, _))
 }
 
 case class AnthropicConfig(
@@ -133,6 +141,10 @@ object AnthropicConfig {
       case _ => (200000, standardReserve)
     }
   }
+
+  /** Convenience: load from environment/config without passing ConfigReader at call site. */
+  def fromEnv(modelName: String): Result[AnthropicConfig] =
+    org.llm4s.config.ConfigReader.LLMConfig().flatMap(apply(modelName, _))
 }
 
 case class OllamaConfig(
@@ -163,6 +175,10 @@ object OllamaConfig {
       case _ => (8192, standardReserve)
     }
   }
+
+  /** Convenience: load from environment/config without passing ConfigReader at call site. */
+  def fromEnv(modelName: String): Result[OllamaConfig] =
+    org.llm4s.config.ConfigReader.LLMConfig().flatMap(apply(modelName, _))
 }
 
 /**

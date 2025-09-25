@@ -1,6 +1,5 @@
 package org.llm4s.trace
 
-import org.llm4s.config.ConfigReader
 import org.llm4s.llmconnect.model._
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
@@ -12,8 +11,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers with MockFactory {
   // ... existing tests ...
 
   "LangfuseTracing.createEvent" should "create observation event for system message" in {
-    val config      = stub[ConfigReader]
-    val mockTracing = new MockLangfuseTracing(config)
+    val mockTracing = new MockLangfuseTracing()
     val systemMsg   = SystemMessage("System instruction")
     val messages    = Seq(systemMsg)
     val now         = "2024-01-01T00:00:00Z"
@@ -29,8 +27,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "create observation event for user message" in {
-    val config      = stub[ConfigReader]
-    val mockTracing = new MockLangfuseTracing(config)
+    val mockTracing = new MockLangfuseTracing()
     val userMsg     = UserMessage("User question")
     val messages    = Seq(userMsg)
     val now         = "2024-01-01T00:00:00Z"
@@ -46,8 +43,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "create observation event for assistant message with tool calls" in {
-    val config       = stub[ConfigReader]
-    val mockTracing  = new MockLangfuseTracing(config)
+    val mockTracing  = new MockLangfuseTracing()
     val toolCall     = ToolCall("id1", "calculator", ujson.Obj("operation" -> "add", "a" -> 1, "b" -> 2))
     val assistantMsg = AssistantMessage(Some("Using calculator"), Seq(toolCall))
     val messages     = Seq(assistantMsg)
@@ -67,8 +63,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "create observation event for tool message" in {
-    val config      = stub[ConfigReader]
-    val mockTracing = new MockLangfuseTracing(config)
+    val mockTracing = new MockLangfuseTracing()
     val toolMsg     = ToolMessage("id1", """{"result": 3}""")
     val messages    = Seq(toolMsg)
     val now         = "2024-01-01T00:00:00Z"
@@ -85,8 +80,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "handle empty content in messages" in {
-    val config       = stub[ConfigReader]
-    val mockTracing  = new MockLangfuseTracing(config)
+    val mockTracing  = new MockLangfuseTracing()
     val assistantMsg = AssistantMessage(None, Seq.empty)
     val messages     = Seq(assistantMsg)
     val now          = "2024-01-01T00:00:00Z"
@@ -101,9 +95,14 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers with MockFactory {
 }
 
 // Update MockLangfuseTracing to expose createEvent for testing
-private class MockLangfuseTracing(configReader: ConfigReader)
+private class MockLangfuseTracing()
     extends LangfuseTracing(
-      configReader
+      langfuseUrl = "https://example.com/api",
+      publicKey = "",
+      secretKey = "",
+      environment = "test",
+      release = "test",
+      version = "test"
     ) {
   def testCreateEvent(
     msg: Message,

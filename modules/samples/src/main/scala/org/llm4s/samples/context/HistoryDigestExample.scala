@@ -1,7 +1,6 @@
 package org.llm4s.samples.context
 
 import org.llm4s.config.ConfigReader
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.context.{ ConversationTokenCounter, HistoryCompressor, SemanticBlocks }
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -41,8 +40,8 @@ object HistoryDigestExample {
     logger.info("Starting History Digest Compression Example")
 
     val result = for {
-      config       <- getConfiguration()
-      tokenCounter <- createTokenCounter(config._1)
+      modelName    <-  ConfigReader.Provider().map(_.model)
+      tokenCounter <- ConversationTokenCounter.forModel(modelName)
       demo         <- runHistoryDigestDemo(tokenCounter)
     } yield demo
 
@@ -54,21 +53,6 @@ object HistoryDigestExample {
       }
     )
   }
-
-  private def getConfiguration(): Result[(String, ConfigReader)] =
-    for {
-      config <- LLMConfig()
-      modelName = config.getOrElse("LLM_MODEL", "openai/gpt-4o")
-      _         = logger.info(s"Using model: $modelName")
-    } yield (modelName, config)
-
-  // Removed createClient - not needed for history digest demo
-
-  private def createTokenCounter(modelName: String): Result[ConversationTokenCounter] =
-    ConversationTokenCounter.forModel(modelName).map { counter =>
-      logger.info(s"Created token counter for: $modelName")
-      counter
-    }
 
   private def runHistoryDigestDemo(
     tokenCounter: ConversationTokenCounter

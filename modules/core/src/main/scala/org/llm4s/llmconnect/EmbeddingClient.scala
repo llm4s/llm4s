@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect
 
 import org.llm4s.config.ConfigReader
-import org.llm4s.llmconnect.config.EmbeddingConfig
+import org.llm4s.llmconnect.config.{ EmbeddingConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse, EmbeddingVector }
 import org.llm4s.llmconnect.provider.{ EmbeddingProvider, OpenAIEmbeddingProvider, VoyageAIEmbeddingProvider }
 import org.llm4s.llmconnect.encoding.UniversalEncoder
@@ -26,26 +26,6 @@ class EmbeddingClient(provider: EmbeddingProvider) {
 
 object EmbeddingClient {
   private val logger = LoggerFactory.getLogger(getClass)
-
-  /**
-   * Legacy factory (back-compat): throws on unsupported provider.
-   * Prefer [[fromConfigEither]] in new code to avoid exceptions on misconfig.
-   */
-  def fromConfig(config: ConfigReader): EmbeddingClient = {
-    val providerName = EmbeddingConfig.activeProvider(config).toLowerCase
-
-    val provider: EmbeddingProvider = providerName match {
-      case "openai" => OpenAIEmbeddingProvider(config)
-      case "voyage" => VoyageAIEmbeddingProvider(config)
-      case unknown =>
-        val msg = s"[EmbeddingClient] Unsupported embedding provider: $unknown"
-        logger.error(msg)
-        throw new RuntimeException(msg)
-    }
-
-    logger.info(s"[EmbeddingClient] Initialized with provider: $providerName")
-    new EmbeddingClient(provider)
-  }
 
   /**
    * Safe factory: returns Either instead of throwing on misconfiguration.
@@ -73,4 +53,31 @@ object EmbeddingClient {
         )
     }
   }
+
+  /**
+   * Typed factory: build client from resolved provider name and typed provider config.
+   * Avoids reading any additional configuration at runtime.
+   */
+  def from(provider: String, cfg: EmbeddingProviderConfig): Result[EmbeddingClient] = {
+    val p = provider.toLowerCase
+    p match {
+      case "openai" => Right(new EmbeddingClient(OpenAIEmbeddingProvider.fromConfig(cfg)))
+      case "voyage" => Right(new EmbeddingClient(VoyageAIEmbeddingProvider.fromConfig(cfg)))
+      case other =>
+        Left(
+          EmbeddingError(
+            code = Some("400"),
+            message = s"Unsupported embedding provider: $other",
+            provider = "config"
+          )
+        )
+    }
+  }
+
+  /**
+   * Convenience factory: reads provider + config via ConfigReader and returns a client.
+   * Uses the unified loader ConfigReader.Embeddings().
+   */
+  def fromEnv(): Result[EmbeddingClient] =
+    org.llm4s.config.ConfigReader.Embeddings().flatMap { case (provider, cfg) => from(provider, cfg) }
 }

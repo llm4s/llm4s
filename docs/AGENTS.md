@@ -35,5 +35,9 @@
 
 ## Security & Configuration Tips
 - Load configuration via `ConfigReader.LLMConfig()`; never read env vars directly. Example keys: `LLM_MODEL`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_BASE_URL`.
+- Prefer typed loaders where available:
+  - `ConfigReader.Provider()` for active provider + model
+  - `ConfigReader.TracingConf()` + `Tracing.create(settings)` for tracing
+  - `WorkspaceSettings.load()` (samples) for workspace params
+  - Embeddings (samples): `EmbeddingUiSettings.load`, `EmbeddingTargets.load`, `EmbeddingQuery.load`
 - Do not log secrets; prefer `.env` locally and documented env vars for CI.
-

@@ -1,7 +1,6 @@
 package org.llm4s.samples.basic
 
-import org.llm4s.config.ConfigKeys.LLM_MODEL
-import org.llm4s.config.ConfigReader.LLMConfig
+import org.llm4s.config.ConfigReader
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 
@@ -73,14 +72,14 @@ object AdvancedStreamingExample {
     val maxLineLength = 80
 
     val result = for {
-      config <- LLMConfig()
-      model  <- config.require(LLM_MODEL)
+      providerConf <- ConfigReader.Provider()
       _ = {
+        val model = providerConf.model
         println(s"🎨 Advanced Streaming Example - Story Generation")
         println(s"📍 Using model: $model")
         println("=" * 60)
       }
-      client <- LLMConnect.getClient(config)
+      client <- LLMConnect.fromEnv()
       completion <- {
         println("🎨 Advanced Streaming Example - Story Generation")
         println("=" * 60)

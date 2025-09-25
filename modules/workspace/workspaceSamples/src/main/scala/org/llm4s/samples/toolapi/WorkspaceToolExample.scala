@@ -1,6 +1,7 @@
 package org.llm4s.samples.toolapi
 
 import org.llm4s.config.ConfigReader
+import org.llm4s.codegen.WorkspaceSettings
 import org.llm4s.llmconnect.config.{ AnthropicConfig, OpenAIConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.LLMProvider
@@ -35,17 +36,15 @@ object WorkspaceToolExample {
   implicit val commandResultRW: ReadWriter[CommandResult] = macroRW
 
   def main(args: Array[String]): Unit = {
-    val config         = ConfigReader.LLMConfig().getOrElse(throw new IllegalArgumentException("Failed to read config"))
-    val gpt4oModelName = config.getOrElse("LLM_MODEL_GPT4O", "gpt-4o")
+    val gpt4oModelName  = "gpt-4o"
     val sonnetModelName = "claude-3-7-sonnet-latest"
 
-    // TODO read from config
-    // Sample workspace directory
-    val workspaceDir = System.getProperty("user.home") + "/workspace-demo"
-    logger.info(s"Using workspace directory: $workspaceDir")
+    // Typed workspace settings
+    val ws = WorkspaceSettings.load().getOrElse(throw new IllegalArgumentException("Failed to load workspace settings"))
+    logger.info(s"Using workspace directory: ${ws.workspaceDir}")
 
     // Create a workspace
-    val workspace = new ContainerisedWorkspace(workspaceDir, "docker.io/library/workspace-runner:0.1.0-SNAPSHOT", 8080)
+    val workspace = new ContainerisedWorkspace(ws.workspaceDir, ws.imageName, ws.hostPort)
 
     val result = Using.resource(workspace) { ws =>
       Try {
@@ -70,10 +69,24 @@ object WorkspaceToolExample {
             "and search for the word 'test' across all files. " +
             "Return a summary of what you found."
 
+          // Optional: run with the active provider from ConfigReader.Provider()
+          logger.info("Attempting active provider from configuration (LLM_MODEL)...")
+          val activeClientRes = ConfigReader.Provider().flatMap { provCfg =>
+            logger.info(s"Testing with active model: ${provCfg.model}")
+            LLMConnect.getClient(provCfg).map(client => (client, provCfg.model))
+          }
+          activeClientRes match {
+            case Right((client, model)) =>
+              logger.info(s"Running workspace tool demo with active model: $model")
+              testLLMWithTools(client, toolRegistry, prompt)
+            case Left(err) =>
+              logger.warn(s"Active provider client setup skipped: ${err.formatted}")
+          }
+
           // Test with GPT-4o
           logger.info(s"Testing with OpenAI's $gpt4oModelName...")
           val openaiClientRes = for {
-            cfg    <- OpenAIConfig(gpt4oModelName, config)
+            cfg    <- OpenAIConfig.fromEnv(gpt4oModelName)
             client <- LLMConnect.getClient(LLMProvider.OpenAI, cfg)
           } yield client
           openaiClientRes match {
@@ -86,7 +99,7 @@ object WorkspaceToolExample {
           // Test with Claude
           logger.info(s"Testing with Anthropic's $sonnetModelName...")
           val anthropicClientRes = for {
-            cfg    <- AnthropicConfig(sonnetModelName, config)
+            cfg    <- AnthropicConfig.fromEnv(sonnetModelName)
             client <- LLMConnect.getClient(LLMProvider.Anthropic, cfg)
           } yield client
           anthropicClientRes match {

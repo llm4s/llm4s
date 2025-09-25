@@ -1,7 +1,7 @@
 package org.llm4s.samples.basic
 
 import org.llm4s.config.ConfigReader
-import org.llm4s.config.ConfigReader.LLMConfig
+import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.trace.{ EnhancedTracing, TraceEvent, TracingComposer, TracingMode }
 import org.slf4j.LoggerFactory
@@ -13,10 +13,10 @@ object EnhancedTracingExample {
     logger.info("Enhanced Tracing Example")
     logger.info("=" * 50)
     val result = for {
-      config <- LLMConfig()
+      settings <- ConfigReader.TracingConf()
       _ = {
         logger.info("1. Basic Enhanced Tracing")
-        val basicTracer = EnhancedTracing.create(TracingMode.Console)(config)
+        val basicTracer = EnhancedTracing.create(settings.copy(mode = TracingMode.Console))
 
         val agentEvent = TraceEvent.AgentInitialized(
           query = "What's the weather like?",
@@ -34,24 +34,24 @@ object EnhancedTracingExample {
         basicTracer.traceEvent(agentEvent)
         basicTracer.traceEvent(completionEvent)
 
-        val (consoleTracer: EnhancedTracing, noOpTracer: EnhancedTracing) = example2(config, agentEvent)
+        val (consoleTracer: EnhancedTracing, noOpTracer: EnhancedTracing) = example2(settings, agentEvent)
 
         example3(agentEvent, consoleTracer)
         example4(consoleTracer)
         example5(consoleTracer, noOpTracer)
         example6(basicTracer, agentEvent)
-        example7(config)
-        example8(config)
+        example7(settings)
+        example8(settings)
       }
     } yield ()
     result.fold(err => logger.error(s"Error: ${err.formatted}"), identity)
   }
 
-  private def example2(config: ConfigReader, agentEvent: TraceEvent.AgentInitialized) = {
+  private def example2(settings: TracingSettings, agentEvent: TraceEvent.AgentInitialized) = {
     // Example 2: Composed tracing (multiple tracers)
     logger.info("2. Composed Tracing (Console + NoOp)")
-    val consoleTracer  = EnhancedTracing.create(TracingMode.Console)(config)
-    val noOpTracer     = EnhancedTracing.create(TracingMode.NoOp)(config)
+    val consoleTracer  = EnhancedTracing.create(settings.copy(mode = TracingMode.Console))
+    val noOpTracer     = EnhancedTracing.create(settings.copy(mode = TracingMode.NoOp))
     val composedTracer = TracingComposer.combine(consoleTracer, noOpTracer)
 
     composedTracer.traceEvent(agentEvent)
@@ -129,20 +129,22 @@ object EnhancedTracingExample {
     }
   }
 
-  private def example7(config: ConfigReader): Unit = {
+  private def example7(settings: TracingSettings): Unit = {
     // Example 7: Type-safe mode creation
     logger.info("7. Type-Safe Mode Creation")
     val modes = Seq(TracingMode.Console, TracingMode.NoOp, TracingMode.Langfuse)
     modes.foreach { mode =>
-      val tracer = EnhancedTracing.create(mode)(config)
+      val tracer = EnhancedTracing.create(settings.copy(mode = mode))
       logger.info(s"Created tracer for mode: $mode - ${tracer.getClass.getSimpleName}")
     }
   }
 
-  private def example8(config: ConfigReader): Unit = {
+  private def example8(settings: TracingSettings): Unit = {
     // Example 8: Environment-based configuration
     logger.info("8. Environment-Based Configuration")
-    val envTracer = EnhancedTracing.create()(config)
+    val envTracer = EnhancedTracing
+      .createFromEnv()
+      .fold(_ => EnhancedTracing.create(settings.copy(mode = TracingMode.NoOp)), identity)
     logger.info(s"Created tracer from environment: ${envTracer.getClass.getSimpleName}")
 
     logger.info("Enhanced Tracing Example Complete!")

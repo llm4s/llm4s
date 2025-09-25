@@ -1,19 +1,19 @@
 package org.llm4s.samples.basic
 
 import org.llm4s.agent.{ AgentState, AgentStatus }
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.trace.Tracing
+import org.llm4s.config.ConfigReader
 
 object BasicLLMCallingWithTrace {
   def main(args: Array[String]): Unit = {
     val result = for {
-      config <- LLMConfig()
-      client <- LLMConnect.getClient(config)
+      tracingSettings <- ConfigReader.TracingConf()
+      client          <- LLMConnect.fromEnv()
       _ = {
-        val tracer = Tracing.create()(config)
+        val tracer = Tracing.create(tracingSettings)
 
         // Create a conversation with messages
         val conversation = Conversation(
@@ -36,11 +36,8 @@ object BasicLLMCallingWithTrace {
             println("Message:")
             println(completion.message.content)
 
-            // Extract model name from environment
-            val model = config.getOrElse("LLM_MODEL", "unknown-model")
-
             // Trace the completion with token usage
-            tracer.traceCompletion(completion, model)
+            tracer.traceCompletion(completion, completion.model)
 
             // Trace the agent state after completion
             val agentState = AgentState(

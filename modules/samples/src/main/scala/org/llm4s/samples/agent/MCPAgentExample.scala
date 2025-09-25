@@ -1,7 +1,6 @@
 package org.llm4s.samples.agent
 
 import org.llm4s.agent.Agent
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole.Assistant
 import org.llm4s.mcp._
@@ -35,8 +34,7 @@ object MCPAgentExample {
 
     val startTime = System.currentTimeMillis()
     val agentState = for {
-      config <- LLMConfig()
-      client <- LLMConnect.getClient(config)
+      client <- LLMConnect.fromEnv()
       agent = new Agent(client)
       query = "Convert 100 USD to EUR and then check the weather in Paris"
       _     = logger.info(s"🎯 Running agent query: $query")

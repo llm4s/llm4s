@@ -1,7 +1,6 @@
 package org.llm4s.samples.context
 
 import org.llm4s.config.ConfigReader
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.context.{ ConversationTokenCounter, LLMCompressor }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
@@ -42,9 +41,9 @@ object LlmDigestSqueezeExample {
     logger.info("Starting LLM Digest Squeeze Example")
 
     val result = for {
-      config       <- getConfiguration()
-      client       <- createClient(config._2)
-      tokenCounter <- createTokenCounter(config._1)
+      modelName    <- ConfigReader.Provider().map(_.model)
+      client       <- LLMConnect.fromEnv()
+      tokenCounter <- ConversationTokenCounter.forModel(modelName)
       results      <- runSqueezeTests(client, tokenCounter)
     } yield results
 
@@ -56,25 +55,6 @@ object LlmDigestSqueezeExample {
       }
     )
   }
-
-  private def getConfiguration(): Result[(String, ConfigReader)] =
-    for {
-      config <- LLMConfig()
-      modelName = config.getOrElse("LLM_MODEL", "openai/gpt-4o")
-      _         = logger.info(s"Using model: $modelName")
-    } yield (modelName, config)
-
-  private def createClient(config: ConfigReader): Result[org.llm4s.llmconnect.LLMClient] =
-    LLMConnect.getClient(config).map { client =>
-      logger.info("Created LLM client for digest squeezing")
-      client
-    }
-
-  private def createTokenCounter(modelName: String): Result[ConversationTokenCounter] =
-    ConversationTokenCounter.forModel(modelName).map { counter =>
-      logger.info(s"Created token counter for: $modelName")
-      counter
-    }
 
   private def runSqueezeTests(
     client: org.llm4s.llmconnect.LLMClient,

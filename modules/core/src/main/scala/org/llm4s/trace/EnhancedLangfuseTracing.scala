@@ -1,9 +1,6 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.AgentState
-import org.llm4s.config.ConfigKeys._
-import org.llm4s.config.DefaultConfig._
-import org.llm4s.config.ConfigReader
 import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.types.Result
@@ -370,16 +367,4 @@ class EnhancedLangfuseTracing(
     val event = TraceEvent.TokenUsageRecorded(usage, model, operation)
     traceEvent(event)
   }
-}
-
-object EnhancedLangfuseTracing {
-  def apply(reader: ConfigReader) =
-    new EnhancedLangfuseTracing(
-      langfuseUrl = reader.getOrElse(LANGFUSE_URL, DEFAULT_LANGFUSE_URL),
-      publicKey = reader.getOrElse(LANGFUSE_PUBLIC_KEY, ""),
-      secretKey = reader.getOrElse(LANGFUSE_SECRET_KEY, ""),
-      environment = reader.getOrElse(LANGFUSE_ENV, DEFAULT_LANGFUSE_ENV),
-      release = reader.getOrElse(LANGFUSE_RELEASE, DEFAULT_LANGFUSE_RELEASE),
-      version = reader.getOrElse(LANGFUSE_VERSION, DEFAULT_LANGFUSE_VERSION)
-    )
 }

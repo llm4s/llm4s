@@ -1,9 +1,6 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.AgentState
-import org.llm4s.config.ConfigKeys._
-import org.llm4s.config.ConfigReader
-import org.llm4s.config.DefaultConfig._
 import org.llm4s.llmconnect.model.{ AssistantMessage, Message, TraceHelper }
 import org.slf4j.LoggerFactory
 
@@ -21,16 +18,6 @@ class LangfuseTracing(
   batchSender: LangfuseBatchSender = new DefaultLangfuseBatchSender()
 ) extends Tracing {
 
-  // Factory to build from any ConfigReader without internal fallbacks
-  def this(reader: ConfigReader) =
-    this(
-      langfuseUrl = reader.getOrElse(LANGFUSE_URL, DEFAULT_LANGFUSE_URL),
-      publicKey = reader.getOrElse(LANGFUSE_PUBLIC_KEY, ""),
-      secretKey = reader.getOrElse(LANGFUSE_SECRET_KEY, ""),
-      environment = reader.getOrElse(LANGFUSE_ENV, DEFAULT_LANGFUSE_ENV),
-      release = reader.getOrElse(LANGFUSE_RELEASE, DEFAULT_LANGFUSE_RELEASE),
-      version = reader.getOrElse(LANGFUSE_VERSION, DEFAULT_LANGFUSE_VERSION)
-    )
   private val logger         = LoggerFactory.getLogger(getClass)
   private def nowIso: String = DateTimeFormatter.ISO_INSTANT.format(Instant.now())
   private def uuid: String   = UUID.randomUUID().toString
@@ -250,4 +237,19 @@ class LangfuseTracing(
     )
     sendBatch(Seq(eventObj))
   }
+}
+
+object LangfuseTracing {
+  def from(cfg: org.llm4s.llmconnect.config.LangfuseConfig): LangfuseTracing =
+    new LangfuseTracing(
+      langfuseUrl = cfg.url,
+      publicKey = cfg.publicKey.getOrElse(""),
+      secretKey = cfg.secretKey.getOrElse(""),
+      environment = cfg.env,
+      release = cfg.release,
+      version = cfg.version
+    )
+
+  def fromEnv(): org.llm4s.types.Result[LangfuseTracing] =
+    org.llm4s.config.ConfigReader.TracingConf().map(ts => from(ts.langfuse))
 }

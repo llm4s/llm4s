@@ -1,6 +1,5 @@
 package org.llm4s.samples.basic
 
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 
@@ -21,8 +20,7 @@ object OllamaStreamingExample {
     val buffer = new StringBuilder
 
     val result = for {
-      reader <- LLMConfig()
-      client <- LLMConnect.getClient(reader)
+      client <- LLMConnect.fromEnv()
       completion <- client.streamComplete(
         conversation,
         CompletionOptions(),
