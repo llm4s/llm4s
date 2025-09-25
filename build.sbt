@@ -66,15 +66,15 @@ addCommandAlias("buildAll", ";clean;+compile;+test")
 addCommandAlias("publishAll", ";clean;+publish")
 addCommandAlias(
   "testAll",
-  ";project core; +test; project workspaceShared; +test; project workspaceRunner; +test; project samples; +test; project core; +publishLocal; project crossTestScala2; test; project crossTestScala3; test"
+  ";test;+publishLocal;++2.13.16 crossTestScala2/test;++3.7.1 crossTestScala3/test"
 )
 addCommandAlias(
   "cleanTestAll",
-  ";project core; clean; project workspaceShared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project core; testAll"
+  ";clean;testAll"
 )
 addCommandAlias(
   "cleanTestAllAndFormat",
-  ";scalafmtAll;project core; clean; project workspaceShared; clean; project workspaceRunner; clean; project samples; clean; project crossTestScala2; clean; project crossTestScala3; clean; project core; testAll"
+  ";scalafmtAll;cleanTestAll"
 )
 addCommandAlias("compileAll", ";+compile")
 addCommandAlias("testCross", ";++2.13.16 crossTestScala2/test;++3.7.1 crossTestScala3/test")
