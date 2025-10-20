@@ -1,6 +1,6 @@
 package org.llm4s.mcp
 
-import cats.data.{ Validated, ValidatedNel }
+import cats.data.ValidatedNel
 import cats.implicits._
 import org.llm4s.toolapi._
 import org.slf4j.LoggerFactory
@@ -182,17 +182,11 @@ class MCPToolRegistry(
   // Health check for MCP servers
   def healthCheck(): Map[String, Boolean] = {
     logger.info("Performing health check on all MCP servers")
-    val (_, servers) = mcpServers.foldMap { server =>
-      createAndInitializeClient(server) match {
-        case Validated.Valid(v)   => (List.empty[String], List(v))
-        case Validated.Invalid(e) => (e.toList, List.empty[MCPServerConfig])
-      }
-    }
+    val results = mcpServers.map(server => server.name -> createAndInitializeClient(server).isValid).toMap
 
-    val healthyCount = servers.size
+    val healthyCount = results.values.count(identity)
     logger.info(s"Health check completed: $healthyCount/${mcpServers.size} servers healthy")
-    val serverNames: Set[String] = servers.map(_.name).toSet
-    mcpServers.map(server => server.name -> serverNames(server.name)).toMap
+    results
   }
 
   // Initialize MCP tools after all methods are defined (with lazy initialization option)
