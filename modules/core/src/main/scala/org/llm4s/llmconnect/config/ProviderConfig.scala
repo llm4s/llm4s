@@ -5,6 +5,8 @@ import ConfigKeys._
 import org.llm4s.config.DefaultConfig._
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
+import org.llm4s.model.ModelRegistry
+import org.slf4j.LoggerFactory
 
 sealed trait ProviderConfig {
   def model: String
@@ -22,6 +24,7 @@ case class OpenAIConfig(
 ) extends ProviderConfig
 
 object OpenAIConfig {
+  private val logger = LoggerFactory.getLogger(getClass)
 
   def apply(modelName: String, config: ConfigReader): Result[OpenAIConfig] = {
     val (cw, rc) = getContextWindowForModel(modelName)
@@ -42,17 +45,28 @@ object OpenAIConfig {
   private def getContextWindowForModel(modelName: String): (Int, Int) = {
     val standardReserve = 4096 // 4K tokens reserved for completion
 
-    modelName match {
-      // GPT-4 family - 128K context window
-      case name if name.contains("gpt-4o")      => (128000, standardReserve)
-      case name if name.contains("gpt-4-turbo") => (128000, standardReserve)
-      case name if name.contains("gpt-4")       => (8192, standardReserve) // Original GPT-4 was 8K
-      // GPT-3.5 family - 16K context window
-      case name if name.contains("gpt-3.5-turbo") => (16384, standardReserve)
-      // o1 family - 128K context window
-      case name if name.contains("o1-") => (128000, standardReserve)
-      // Default fallback
-      case _ => (8192, standardReserve)
+    // Try to get from ModelRegistry first
+    ModelRegistry.lookup("openai", modelName).toOption.orElse(ModelRegistry.lookup(modelName).toOption) match {
+      case Some(metadata) =>
+        val contextWindow = metadata.maxInputTokens.getOrElse(8192)
+        val reserve       = metadata.maxOutputTokens.getOrElse(standardReserve)
+        logger.debug(s"Using ModelRegistry metadata for $modelName: context=$contextWindow, reserve=$reserve")
+        (contextWindow, reserve)
+      case None =>
+        // Fallback to hardcoded values if not in registry
+        logger.debug(s"Model $modelName not found in registry, using fallback values")
+        modelName match {
+          // GPT-4 family - 128K context window
+          case name if name.contains("gpt-4o")      => (128000, standardReserve)
+          case name if name.contains("gpt-4-turbo") => (128000, standardReserve)
+          case name if name.contains("gpt-4")       => (8192, standardReserve) // Original GPT-4 was 8K
+          // GPT-3.5 family - 16K context window
+          case name if name.contains("gpt-3.5-turbo") => (16384, standardReserve)
+          // o1 family - 128K context window
+          case name if name.contains("o1-") => (128000, standardReserve)
+          // Default fallback
+          case _ => (8192, standardReserve)
+        }
     }
   }
 
@@ -71,6 +85,7 @@ case class AzureConfig(
 ) extends ProviderConfig
 
 object AzureConfig {
+  private val logger = LoggerFactory.getLogger(getClass)
 
   def apply(modelName: String, config: ConfigReader): Result[AzureConfig] = {
     val (cw, rc) = getContextWindowForModel(modelName)
@@ -87,16 +102,35 @@ object AzureConfig {
       reserveCompletion = rc
     )
   }
-  // Azure mirrors OpenAI models; reuse similar heuristics
+
+  // Azure mirrors OpenAI models; try registry first, then fallback
   private def getContextWindowForModel(modelName: String): (Int, Int) = {
     val standardReserve = 4096
-    modelName match {
-      case name if name.contains("gpt-4o")        => (128000, standardReserve)
-      case name if name.contains("gpt-4-turbo")   => (128000, standardReserve)
-      case name if name.contains("gpt-4")         => (8192, standardReserve)
-      case name if name.contains("gpt-3.5-turbo") => (16384, standardReserve)
-      case name if name.contains("o1-")           => (128000, standardReserve)
-      case _                                      => (8192, standardReserve)
+
+    // Try to get from ModelRegistry first (look for azure or openai variants)
+    val registryResult = ModelRegistry
+      .lookup("azure", modelName)
+      .toOption
+      .orElse(ModelRegistry.lookup("openai", modelName).toOption)
+      .orElse(ModelRegistry.lookup(modelName).toOption)
+
+    registryResult match {
+      case Some(metadata) =>
+        val contextWindow = metadata.maxInputTokens.getOrElse(8192)
+        val reserve       = metadata.maxOutputTokens.getOrElse(standardReserve)
+        logger.debug(s"Using ModelRegistry metadata for Azure $modelName: context=$contextWindow, reserve=$reserve")
+        (contextWindow, reserve)
+      case None =>
+        // Fallback to hardcoded values if not in registry
+        logger.debug(s"Model $modelName not found in registry, using fallback values")
+        modelName match {
+          case name if name.contains("gpt-4o")        => (128000, standardReserve)
+          case name if name.contains("gpt-4-turbo")   => (128000, standardReserve)
+          case name if name.contains("gpt-4")         => (8192, standardReserve)
+          case name if name.contains("gpt-3.5-turbo") => (16384, standardReserve)
+          case name if name.contains("o1-")           => (128000, standardReserve)
+          case _                                      => (8192, standardReserve)
+        }
     }
   }
 
@@ -114,6 +148,7 @@ case class AnthropicConfig(
 ) extends ProviderConfig
 
 object AnthropicConfig {
+  private val logger = LoggerFactory.getLogger(getClass)
 
   def apply(modelName: String, config: ConfigReader): Result[AnthropicConfig] = {
     val (cw, rc) = getContextWindowForModel(modelName)
@@ -128,17 +163,29 @@ object AnthropicConfig {
       reserveCompletion = rc
     )
   }
+
   private def getContextWindowForModel(modelName: String): (Int, Int) = {
     val standardReserve = 4096 // 4K tokens reserved for completion
 
-    modelName match {
-      // Claude-3 family - 200K context window
-      case name if name.contains("claude-3")   => (200000, standardReserve)
-      case name if name.contains("claude-3.5") => (200000, standardReserve)
-      // Claude Instant - 100K context window
-      case name if name.contains("claude-instant") => (100000, standardReserve)
-      // Default fallback for Claude models
-      case _ => (200000, standardReserve)
+    // Try to get from ModelRegistry first
+    ModelRegistry.lookup("anthropic", modelName).toOption.orElse(ModelRegistry.lookup(modelName).toOption) match {
+      case Some(metadata) =>
+        val contextWindow = metadata.maxInputTokens.getOrElse(200000)
+        val reserve       = metadata.maxOutputTokens.getOrElse(standardReserve)
+        logger.debug(s"Using ModelRegistry metadata for $modelName: context=$contextWindow, reserve=$reserve")
+        (contextWindow, reserve)
+      case None =>
+        // Fallback to hardcoded values if not in registry
+        logger.debug(s"Model $modelName not found in registry, using fallback values")
+        modelName match {
+          // Claude-3 family - 200K context window
+          case name if name.contains("claude-3")   => (200000, standardReserve)
+          case name if name.contains("claude-3.5") => (200000, standardReserve)
+          // Claude Instant - 100K context window
+          case name if name.contains("claude-instant") => (100000, standardReserve)
+          // Default fallback for Claude models
+          case _ => (200000, standardReserve)
+        }
     }
   }
 
@@ -155,6 +202,7 @@ case class OllamaConfig(
 ) extends ProviderConfig
 
 object OllamaConfig {
+  private val logger = LoggerFactory.getLogger(getClass)
 
   def apply(modelName: String, config: ConfigReader): Result[OllamaConfig] = {
     val (cw, rc) = getContextWindowForModel(modelName)
@@ -162,17 +210,29 @@ object OllamaConfig {
       baseUrl <- config.require(OLLAMA_BASE_URL)
     } yield OllamaConfig(model = modelName, baseUrl = baseUrl, contextWindow = cw, reserveCompletion = rc)
   }
+
   private def getContextWindowForModel(modelName: String): (Int, Int) = {
     val standardReserve = 4096 // 4K tokens reserved for completion
 
-    // Ollama model context windows vary, use reasonable defaults
-    modelName match {
-      case name if name.contains("llama2")    => (4096, standardReserve)
-      case name if name.contains("llama3")    => (8192, standardReserve)
-      case name if name.contains("codellama") => (16384, standardReserve)
-      case name if name.contains("mistral")   => (32768, standardReserve)
-      // Default fallback for unknown Ollama models
-      case _ => (8192, standardReserve)
+    // Try to get from ModelRegistry first
+    ModelRegistry.lookup("ollama", modelName).toOption.orElse(ModelRegistry.lookup(modelName).toOption) match {
+      case Some(metadata) =>
+        val contextWindow = metadata.maxInputTokens.getOrElse(8192)
+        val reserve       = metadata.maxOutputTokens.getOrElse(standardReserve)
+        logger.debug(s"Using ModelRegistry metadata for $modelName: context=$contextWindow, reserve=$reserve")
+        (contextWindow, reserve)
+      case None =>
+        // Fallback to hardcoded values if not in registry
+        logger.debug(s"Model $modelName not found in registry, using fallback values")
+        // Ollama model context windows vary, use reasonable defaults
+        modelName match {
+          case name if name.contains("llama2")    => (4096, standardReserve)
+          case name if name.contains("llama3")    => (8192, standardReserve)
+          case name if name.contains("codellama") => (16384, standardReserve)
+          case name if name.contains("mistral")   => (32768, standardReserve)
+          // Default fallback for unknown Ollama models
+          case _ => (8192, standardReserve)
+        }
     }
   }
 
