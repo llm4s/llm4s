@@ -1,13 +1,104 @@
-
+# Site settings
 title: LLM4S
-email: your-email@example.com
-description: >- # this means to ignore newlines until "baseurl:"
-  LLM4S is a Scala LLM library.  Access the power of LLMs in the best language.
+description: >-
+  LLM4S - Large Language Models for Scala. A comprehensive, type-safe framework
+  for building LLM-powered applications with multi-provider support, agents,
+  tools, and observability.
 baseurl: ""
 url: "https://llm4s.org"
+logo: "/image_assets/llm4s_logo.png"
+
+# Author
+author:
+  name: LLM4S Team
+  email: hello@llm4s.org
 
 # Build settings
+markdown: kramdown
 theme: minima
 plugins:
   - jekyll-feed
   - jekyll-sitemap
+  - jekyll-seo-tag
+
+# Kramdown settings
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge
+  syntax_highlighter_opts:
+    block:
+      line_numbers: true
+
+# Collections for organized content
+collections:
+  guide:
+    output: true
+    permalink: /guide/:name
+  examples:
+    output: true
+    permalink: /examples/:name
+  advanced:
+    output: true
+    permalink: /advanced/:name
+  api:
+    output: true
+    permalink: /api/:name
+
+# Defaults
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: "default"
+  - scope:
+      path: ""
+      type: "guide"
+    values:
+      layout: "page"
+      parent: "User Guide"
+  - scope:
+      path: ""
+      type: "examples"
+    values:
+      layout: "page"
+      parent: "Examples"
+  - scope:
+      path: ""
+      type: "advanced"
+    values:
+      layout: "page"
+      parent: "Advanced Topics"
+  - scope:
+      path: ""
+      type: "api"
+    values:
+      layout: "page"
+      parent: "API Reference"
+
+# Exclude from processing
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor/
+  - .sass-cache/
+  - .jekyll-cache/
+  - gemfiles/
+
+# Social links
+github_username: llm4s
+discord_invite: https://discord.gg/4uvTPn6qww
+
+# Google Analytics (optional - add when ready)
+# google_analytics: UA-XXXXXXXXX-X
+
+# SEO settings
+twitter:
+  username: llm4s
+  card: summary_large_image
+
+social:
+  name: LLM4S
+  links:
+    - https://github.com/llm4s/llm4s
+    - https://discord.gg/4uvTPn6qww
