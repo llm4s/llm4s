@@ -64,6 +64,11 @@ Functional, immutable conversation management with automatic context window prun
 
 [View patterns →](/guide/multi-turn)
 
+### 🛡️ Guardrails & Validation
+Declarative input/output validation framework for production safety. Built-in guardrails for length checks, profanity filtering, JSON validation, and custom business logic.
+
+[Learn more →](/guide/guardrails)
+
 ### 🔍 RAG & Embeddings
 Built-in support for retrieval-augmented generation with vector embeddings and semantic search.
 
@@ -155,6 +160,11 @@ Explore **46 working examples** covering all features:
 - [Multi-Tool Agent](/examples/tools#multi-tool) - Multiple tools coordination
 - [MCP Integration](/examples/tools#mcp) - External tool servers
 
+**Guardrails Examples**
+- [Basic Validation](/examples/guardrails#basic) - Length checks and profanity filtering
+- [Custom Guardrails](/examples/guardrails#custom) - Build your own validators
+- [Composite Guardrails](/examples/guardrails#composite) - Combine multiple validations
+
 </div>
 
 [Browse all examples →](/examples/)
@@ -172,7 +182,7 @@ Explore **46 working examples** covering all features:
 
   <div class="grid-item">
     <h3>💻 Examples</h3>
-    <p>46 working code examples</p>
+    <p>50+ working code examples</p>
     <a href="/examples/">Browse examples →</a>
   </div>
 
@@ -222,14 +232,15 @@ Explore **46 working examples** covering all features:
 
 ## Project Status
 
-LLM4S is under active development. Current focus:
+LLM4S is under active development. Recent milestones:
 
 - ✅ **Phase 1.0**: Core framework and multi-provider support
 - ✅ **Phase 1.1**: Functional conversation management
-- 🚧 **Phase 1.2**: Guardrails and safety framework
-- 📋 **Phase 1.3**: Multi-agent handoff mechanism
+- ✅ **Phase 1.2**: Guardrails and validation framework
+- 🚧 **Phase 1.3**: Multi-agent handoff mechanism
+- 📋 **v1.0.0**: Production readiness (6-9 months)
 
-[View roadmap →](/reference/roadmap)
+[View detailed roadmap →](/reference/roadmap)
 
 ---
 

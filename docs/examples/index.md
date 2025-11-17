@@ -8,7 +8,7 @@ has_children: true
 # Example Gallery
 {: .no_toc }
 
-Explore **46 working examples** covering all LLM4S features.
+Explore **50+ working examples** covering all LLM4S features.
 {: .fs-6 .fw-300 }
 
 ## Table of contents
@@ -26,6 +26,7 @@ Explore **46 working examples** covering all LLM4S features.
 | [Basic Examples](#basic-examples) | 9 | Getting started, streaming, tracing |
 | [Agent Examples](#agent-examples) | 6 | Multi-turn agents, persistence |
 | [Tool Examples](#tool-examples) | 5 | Tool calling, MCP integration |
+| [Guardrails Examples](#guardrails-examples) | 5 | Input/output validation, safety |
 | [Context Management](#context-management) | 8 | Token windows, compression |
 | [Embeddings](#embeddings) | 5 | Vector search, RAG |
 | [MCP Examples](#mcp-examples) | 3 | Model Context Protocol |
@@ -468,6 +469,128 @@ sbt "samples/runMain org.llm4s.samples.toolapi.ImprovedErrorMessageDemo"
 - Detailed error context
 - Stack traces
 - Debugging information
+
+---
+
+## Guardrails Examples
+
+**Location:** `modules/samples/src/main/scala/org/llm4s/samples/guardrails/`
+
+### BasicInputValidationExample {#basic}
+
+**File:** `BasicInputValidationExample.scala`
+
+Basic input validation with built-in guardrails.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.guardrails.BasicInputValidationExample"
+```
+
+**What it demonstrates:**
+- LengthCheck guardrail for input size validation
+- ProfanityFilter for content filtering
+- Declarative validation before agent processing
+- Clear error messages for validation failures
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/guardrails/BasicInputValidationExample.scala)
+
+---
+
+### CustomGuardrailExample {#custom}
+
+**File:** `CustomGuardrailExample.scala`
+
+Build custom guardrails for application-specific validation.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.guardrails.CustomGuardrailExample"
+```
+
+**What it demonstrates:**
+- Implementing custom InputGuardrail trait
+- Keyword requirement validation
+- Reusable validation logic
+- Testing validation success and failure cases
+
+**Key code:**
+```scala
+class KeywordRequirementGuardrail(requiredKeywords: Set[String]) extends InputGuardrail {
+  def validate(value: String): Result[String] = {
+    // Custom validation logic
+  }
+}
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/guardrails/CustomGuardrailExample.scala)
+
+---
+
+### CompositeGuardrailExample {#composite}
+
+**File:** `CompositeGuardrailExample.scala`
+
+Combine multiple guardrails with different composition strategies.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.guardrails.CompositeGuardrailExample"
+```
+
+**What it demonstrates:**
+- Sequential composition (all must pass in order)
+- All composition (all must pass, run in parallel)
+- Any composition (at least one must pass)
+- Error accumulation and reporting
+
+**Key code:**
+```scala
+val allGuardrails = CompositeGuardrail.all(Seq(
+  LengthCheck(min = 10, max = 1000),
+  ProfanityFilter(),
+  customGuardrail
+))
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/guardrails/CompositeGuardrailExample.scala)
+
+---
+
+### JSONOutputValidationExample
+
+**File:** `JSONOutputValidationExample.scala`
+
+Validate LLM outputs are valid JSON.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.guardrails.JSONOutputValidationExample"
+```
+
+**What it demonstrates:**
+- Output guardrails (run after LLM response)
+- JSON format validation
+- Structured output enforcement
+- Integration with agent workflows
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/guardrails/JSONOutputValidationExample.scala)
+
+---
+
+### MultiTurnToneValidationExample
+
+**File:** `MultiTurnToneValidationExample.scala`
+
+Validate conversational tone across multiple turns.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.guardrails.MultiTurnToneValidationExample"
+```
+
+**What it demonstrates:**
+- ToneValidator for output validation
+- Maintaining consistent tone
+- Multi-turn conversation with guardrails
+- Professional/friendly tone enforcement
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/guardrails/MultiTurnToneValidationExample.scala)
 
 ---
 

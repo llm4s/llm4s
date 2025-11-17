@@ -35,7 +35,7 @@ Development roadmap and future plans for LLM4S.
 
 ### ✅ Phase 1.1: Functional Conversation Management
 
-**Status**: Complete
+**Status**: Complete (Nov 2024)
 
 **Key Features:**
 - Immutable conversation state
@@ -46,43 +46,46 @@ Development roadmap and future plans for LLM4S.
 
 **Details**: [Phase 1.1 Design Doc](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.1-functional-conversation-management.md)
 
+### ✅ Phase 1.2: Guardrails Framework
+
+**Status**: Complete (Nov 2024)
+
+**Implemented Features:**
+- ✅ Type-safe input/output validation
+- ✅ Declarative guardrail composition
+- ✅ Built-in guardrails (length, profanity, JSON, regex, tone)
+- ✅ Custom guardrail extensibility
+- ✅ Composite guardrails (sequential, all, any)
+- ✅ Integration with agent workflows
+- ✅ Comprehensive examples and documentation
+
+**Examples:**
+- [BasicInputValidationExample](/examples/guardrails#basic)
+- [CustomGuardrailExample](/examples/guardrails#custom)
+- [CompositeGuardrailExample](/examples/guardrails#composite)
+- [JSONOutputValidationExample](/examples/guardrails)
+- [MultiTurnToneValidationExample](/examples/guardrails)
+
+**Details**: [Phase 1.2 Design Doc](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.2-guardrails-framework.md)
+
 ---
 
 ## In Progress
 
-### 🚧 Phase 1.2: Guardrails Framework
+### 🚧 Phase 1.3: Multi-Agent Handoff
 
-**Status**: In development
-
-**Planned Features:**
-- Input/output validation
-- Content filtering
-- Rate limiting
-- Safety mechanisms
-- Policy enforcement
-
-**Details**: [Phase 1.2 Design Doc](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.2-guardrails-framework.md)
-
-**Target**: Q1 2025
-
----
-
-## Upcoming
-
-### 📋 Phase 1.3: Multi-Agent Handoff
-
-**Status**: Planned
+**Status**: Planning phase
 
 **Planned Features:**
 - Agent-to-agent communication
 - Handoff protocols
-- State transfer
+- State transfer mechanisms
 - Coordination patterns
 - Multi-agent orchestration
 
 **Details**: [Phase 1.3 Design Doc](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.3-handoff-mechanism.md)
 
-**Target**: Q2 2025
+**Target**: Q1 2025
 
 ---
 
