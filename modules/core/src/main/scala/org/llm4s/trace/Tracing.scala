@@ -69,10 +69,4 @@ object Tracing {
     val enhanced = EnhancedTracing.create(settings)
     new TracingBridge(enhanced)
   }
-
-  /**
-   * Convenience: build Tracing from environment/config files without passing ConfigReader.
-   */
-  def createFromEnv(): org.llm4s.types.Result[Tracing] =
-    EnhancedTracing.createFromEnv().map(createFromEnhanced)
 }

@@ -1,5 +1,8 @@
 package org.llm4s.config
 
+// scalafix:off DisableSyntax.NoConfigFactory
+import com.typesafe.config.ConfigFactory
+// scalafix:on DisableSyntax.NoConfigFactory
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -7,10 +10,11 @@ class ConfigReaderPrecedenceSpec extends AnyWordSpec with Matchers {
 
   "LLMConfig" should {
     "read llm4s.* values from test application.conf" in {
-      val cfg = ConfigReader.LLMConfig().fold(err => fail(err.toString), identity)
-      cfg.getPath("llm4s.llm.model") shouldBe Some("openai/gpt-4o")
-      cfg.get("OPENAI_API_KEY") shouldBe Some("test-key")
-      cfg.getPath("llm4s.openai.apiKey") shouldBe Some("test-key")
+      val cfg = Llm4sConfig
+        .provider()
+        .fold(err => fail(err.toString), identity)
+
+      cfg.model shouldBe "gpt-4o"
     }
 
     "allow -D system property to override application.conf" in {
@@ -18,9 +22,17 @@ class ConfigReaderPrecedenceSpec extends AnyWordSpec with Matchers {
       val original = System.getProperty(key)
       try {
         System.setProperty(key, "overridden-key")
-        val cfg = ConfigReader.LLMConfig().fold(err => fail(err.toString), identity)
-        cfg.getPath("llm4s.openai.apiKey") shouldBe Some("overridden-key")
-        cfg.get("OPENAI_API_KEY") shouldBe Some("overridden-key")
+        // Ensure updated system properties are visible to ConfigSource.default.
+        ConfigFactory.invalidateCaches()
+        val cfg = Llm4sConfig
+          .provider()
+          .fold(err => fail(err.toString), identity)
+        cfg match {
+          case openai: org.llm4s.llmconnect.config.OpenAIConfig =>
+            openai.apiKey shouldBe "overridden-key"
+          case other =>
+            fail(s"Expected OpenAIConfig, got $other")
+        }
       } finally
         if (original == null) System.clearProperty(key) else System.setProperty(key, original)
     }

@@ -249,7 +249,4 @@ object LangfuseTracing {
       release = cfg.release,
       version = cfg.version
     )
-
-  def fromEnv(): org.llm4s.types.Result[LangfuseTracing] =
-    org.llm4s.config.ConfigReader.TracingConf().map(ts => from(ts.langfuse))
 }

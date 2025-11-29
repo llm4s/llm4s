@@ -1,6 +1,7 @@
 package org.llm4s.samples.agent
 
 import org.llm4s.agent.{ Agent, AgentStatus }
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.tools.WeatherTool
@@ -12,7 +13,8 @@ object SingleStepAgentExample {
   def main(args: Array[String]): Unit = {
     // Get a client using environment variables (Result-first)
     val result = for {
-      client <- LLMConnect.fromEnv()
+      providerCfg <- Llm4sConfig.provider()
+      client      <- LLMConnect.getClient(providerCfg)
       toolRegistry = new ToolRegistry(Seq(WeatherTool.tool))
       agent        = new Agent(client)
       traceLogPath = ".log/single-step-trace.md"

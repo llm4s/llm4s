@@ -1,6 +1,7 @@
 package org.llm4s.codegen
 
 import org.llm4s.agent.AgentState
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.SimpleError
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole
@@ -25,12 +26,12 @@ object CodeGenExample {
         |You can assume you have sbt and java already installed.
         |Run the program and show the result.""".stripMargin
 
-    // TODO refactor and get it from a config or pass it as command arg parameter
     val result = for {
-      ws <- WorkspaceSettings.load()
+      ws <- WorkspaceConfigSupport.load()
       _ = logger.info(s"Using workspace directory: ${ws.workspaceDir}")
       _ = logger.info(s"Trace log will be written to: ${ws.traceLogPath}")
-      client <- LLMConnect.fromEnv()
+      providerCfg <- Llm4sConfig.provider()
+      client      <- LLMConnect.getClient(providerCfg)
       finalState <- Using.resource(new CodeWorker(ws.workspaceDir, ws.imageName, ws.hostPort, client)) { codeWorker =>
         for {
           _          <- Either.cond(codeWorker.initialize(), (), SimpleError("Failed to initialize CodeWorker"))

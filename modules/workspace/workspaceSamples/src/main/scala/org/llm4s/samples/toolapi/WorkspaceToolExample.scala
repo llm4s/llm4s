@@ -1,10 +1,8 @@
 package org.llm4s.samples.toolapi
 
-import org.llm4s.config.ConfigReader
-import org.llm4s.codegen.WorkspaceSettings
-import org.llm4s.llmconnect.config.{ AnthropicConfig, OpenAIConfig }
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.codegen.WorkspaceConfigSupport
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.provider.LLMProvider
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.toolapi._
 import org.llm4s.workspace.ContainerisedWorkspace
@@ -13,7 +11,6 @@ import upickle.default._
 
 import scala.annotation.tailrec
 import scala.util.{ Try, Using }
-import org.llm4s.types.TryOps
 
 /**
  * Example demonstrating how to use workspace tools with different LLM models
@@ -40,7 +37,8 @@ object WorkspaceToolExample {
     val sonnetModelName = "claude-3-7-sonnet-latest"
 
     // Typed workspace settings
-    val ws = WorkspaceSettings.load().getOrElse(throw new IllegalArgumentException("Failed to load workspace settings"))
+    val ws =
+      WorkspaceConfigSupport.load().getOrElse(throw new IllegalArgumentException("Failed to load workspace settings"))
     logger.info(s"Using workspace directory: ${ws.workspaceDir}")
 
     // Create a workspace
@@ -69,9 +67,9 @@ object WorkspaceToolExample {
             "and search for the word 'test' across all files. " +
             "Return a summary of what you found."
 
-          // Optional: run with the active provider from ConfigReader.Provider()
-          logger.info("Attempting active provider from configuration (LLM_MODEL)...")
-          val activeClientRes = ConfigReader.Provider().flatMap { provCfg =>
+          // Optional: run with the active provider from configuration (LLM_MODEL) via PureConfig
+          logger.info("Attempting active provider from configuration (llm4s.llm.model / LLM_MODEL)...")
+          val activeClientRes = Llm4sConfig.provider().flatMap { provCfg =>
             logger.info(s"Testing with active model: ${provCfg.model}")
             LLMConnect.getClient(provCfg).map(client => (client, provCfg.model))
           }
@@ -83,12 +81,19 @@ object WorkspaceToolExample {
               logger.warn(s"Active provider client setup skipped: ${err.formatted}")
           }
 
-          // Test with GPT-4o
+          // Test with GPT-4o by temporarily overriding llm4s.llm.model
           logger.info(s"Testing with OpenAI's $gpt4oModelName...")
-          val openaiClientRes = for {
-            cfg    <- OpenAIConfig.fromEnv(gpt4oModelName)
-            client <- LLMConnect.getClient(LLMProvider.OpenAI, cfg)
-          } yield client
+          val openaiClientRes = {
+            val key      = "llm4s.llm.model"
+            val original = Option(System.getProperty(key))
+            System.setProperty(key, s"openai/$gpt4oModelName")
+            val res = Llm4sConfig.provider().flatMap(LLMConnect.getClient)
+            original match {
+              case Some(v) => System.setProperty(key, v)
+              case None    => System.clearProperty(key)
+            }
+            res
+          }
           openaiClientRes match {
             case Right(openaiClient) =>
               testLLMWithTools(openaiClient, toolRegistry, prompt)
@@ -96,12 +101,19 @@ object WorkspaceToolExample {
               logger.error(s"OpenAI client setup failed: ${err.formatted}")
           }
 
-          // Test with Claude
+          // Test with Claude by temporarily overriding llm4s.llm.model
           logger.info(s"Testing with Anthropic's $sonnetModelName...")
-          val anthropicClientRes = for {
-            cfg    <- AnthropicConfig.fromEnv(sonnetModelName)
-            client <- LLMConnect.getClient(LLMProvider.Anthropic, cfg)
-          } yield client
+          val anthropicClientRes = {
+            val key      = "llm4s.llm.model"
+            val original = Option(System.getProperty(key))
+            System.setProperty(key, s"anthropic/$sonnetModelName")
+            val res = Llm4sConfig.provider().flatMap(LLMConnect.getClient)
+            original match {
+              case Some(v) => System.setProperty(key, v)
+              case None    => System.clearProperty(key)
+            }
+            res
+          }
           anthropicClientRes match {
             case Right(anthropicClient) =>
               testLLMWithTools(anthropicClient, toolRegistry, prompt)
@@ -121,8 +133,8 @@ object WorkspaceToolExample {
       }
     }
 
-    result.toResult.fold(
-      error => logger.error(s"Error during workspace demo: ${error.message}"),
+    result.fold(
+      error => logger.error("Error during workspace demo", error),
       _ => logger.info("Workspace tool demo completed successfully")
     )
   }

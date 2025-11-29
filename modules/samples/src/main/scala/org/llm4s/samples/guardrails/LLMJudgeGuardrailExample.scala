@@ -3,6 +3,7 @@ package org.llm4s.samples.guardrails
 import org.llm4s.agent.Agent
 import org.llm4s.agent.guardrails.LLMGuardrail
 import org.llm4s.agent.guardrails.builtin._
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
 
@@ -28,7 +29,8 @@ object LLMJudgeGuardrailExample extends App {
   println("=== LLM-as-Judge Guardrail Example ===\n")
 
   val result = for {
-    client <- LLMConnect.fromEnv()
+    providerCfg <- Llm4sConfig.provider()
+    client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
     // === Example 1: Professional Tone Validation ===

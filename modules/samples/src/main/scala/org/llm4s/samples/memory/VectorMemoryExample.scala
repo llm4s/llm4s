@@ -15,7 +15,7 @@ import java.nio.file.{ Files, Path }
  * - Monitor embedding coverage
  *
  * Note: This example uses MockEmbeddingService for demonstration.
- * In production, use LLMEmbeddingService.fromEnv() with a real provider.
+ * In production, wire LLMEmbeddingService using Llm4sConfig + EmbeddingClient.from(...)
  *
  * Run with: sbt "samples/runMain org.llm4s.samples.memory.VectorMemoryExample"
  */
@@ -30,7 +30,7 @@ object VectorMemoryExample extends App {
   println(s"\nDatabase location: $dbPath")
 
   // Use mock embedding service for this example
-  // In production, use: LLMEmbeddingService.fromEnv()
+  // In production, construct LLMEmbeddingService using Llm4sConfig and EmbeddingClient.from(...)
   val embeddingService = MockEmbeddingService(dimensions = 1536)
   println(s"Using embedding service with ${embeddingService.dimensions} dimensions")
 
@@ -297,14 +297,28 @@ object VectorMemoryExample extends App {
       |
       |To use real embeddings in production:
       |
-      |  // Set environment variables:
-      |  // export LLM_EMBEDDING_MODEL=openai/text-embedding-3-small
-      |  // export OPENAI_API_KEY=sk-...
-      |
-      |  val result = for {
-      |    embeddingService <- LLMEmbeddingService.fromEnv()
-      |    store <- VectorMemoryStore(dbPath, embeddingService, config)
-      |  } yield store
+      |  // 1. Configure embeddings provider and model in application.conf / reference.conf:
+      |  //    llm4s.embeddings.provider = \"openai\"        # or \"voyage\"
+      |  //    llm4s.embeddings.openai.baseUrl = \"https://api.openai.com/v1\"
+      |  //    llm4s.embeddings.openai.model   = \"text-embedding-3-small\"
+      |  //
+      |  // 2. Load typed config and wire the client + service explicitly:
+      |  //
+      |  //  import org.llm4s.config.Llm4sConfig
+      |  //  import org.llm4s.llmconnect.EmbeddingClient
+      |  //  import org.llm4s.llmconnect.config.EmbeddingModelConfig
+      |  //
+      |  //  val result = for {
+      |  //    (providerName, providerCfg) <- Llm4sConfig.embeddings()
+      |  //    client                      <- EmbeddingClient.from(providerName, providerCfg)
+      |  //    textModelSettings           <- Llm4sConfig.textEmbeddingModel()
+      |  //    modelConfig = EmbeddingModelConfig(
+      |  //                     name = textModelSettings.modelName,
+      |  //                     dimensions = textModelSettings.dimensions
+      |  //                   )
+      |  //    embeddingService = LLMEmbeddingService(client, modelConfig)
+      |  //    store            <- VectorMemoryStore(dbPath, embeddingService, config)
+      |  //  } yield store
       |
       |Supported embedding models include:
       |  - OpenAI: text-embedding-ada-002, text-embedding-3-small, text-embedding-3-large

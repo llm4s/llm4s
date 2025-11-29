@@ -208,15 +208,7 @@ ModelRegistry.register(customModel)
 
 You can override or extend the embedded metadata with a custom JSON file:
 
-**Option 1: Environment Variable**
-
-```bash
-export LLM4S_MODEL_METADATA_FILE=/path/to/custom_models.json
-```
-
-The registry will automatically load this file on initialization.
-
-**Option 2: Programmatic Loading**
+**Option 1: Programmatic Loading (recommended)**
 
 ```scala
 // Load from file
@@ -235,6 +227,8 @@ val customJson = """{
 
 ModelRegistry.loadCustomMetadataFromString(customJson)
 ```
+
+If you prefer to drive this from configuration or environment variables, read the value at the application edge (for example via `org.llm4s.config.Llm4sConfig` or `sys.env`) and then call `ModelRegistry.loadCustomMetadata(path)` explicitly during startup. The registry itself no longer reads `LLM4S_MODEL_METADATA_FILE` directly; this keeps configuration concerns separated from core metadata logic.
 
 **Custom Metadata Format**
 

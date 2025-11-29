@@ -2,6 +2,14 @@ package org.llm4s.llmconnect.config
 
 object ModelDimensionRegistry {
 
+  /**
+   * Central registry for known embedding model dimensions.
+   *
+   * This replaces the ad-hoc defaultDimensions map that used to live in
+   * LLMEmbeddingService.fromEnv on main. New models should be added here so
+   * that configuration code (e.g. Llm4sConfig.textEmbeddingModel) can remain
+   * config-agnostic and simply look up the correct dimensionality.
+   */
   private val dimensions: Map[String, Map[String, Int]] = Map(
     "openai" -> Map(
       "text-embedding-3-small" -> 1536,

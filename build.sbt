@@ -109,6 +109,7 @@ lazy val commonSettings = Seq(
     Deps.postgres,
     Deps.sqlite,
     Deps.config,
+    Deps.pureConfig,
     Deps.hikariCP
   )
 )

@@ -17,6 +17,7 @@ object Versions {
   val sqlite   = "3.45.3.0"
   val config   = "1.4.3"
   val hikariCP = "5.1.0"
+  val pureconfig = "0.17.6"
 
   val azureOpenAI = "1.0.0-beta.16"
   val anthropic   = "2.11.1"
@@ -50,6 +51,8 @@ object Deps {
   val sqlite    = "org.xerial"     % "sqlite-jdbc" % Versions.sqlite
   val config    = "com.typesafe"   % "config"    % Versions.config
   val hikariCP  = "com.zaxxer"     % "HikariCP"  % Versions.hikariCP
+  val pureConfig  = "com.github.pureconfig" %% "pureconfig-core" % Versions.pureconfig
+
 
   val azureOpenAI = "com.azure"     % "azure-ai-openai" % Versions.azureOpenAI
   val anthropic   = "com.anthropic" % "anthropic-java"  % Versions.anthropic

@@ -1,6 +1,7 @@
 package org.llm4s.samples.assistant
 
 import org.llm4s.assistant.AssistantAgent
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.mcp.{ MCPServerConfig, MCPToolRegistry }
 import org.llm4s.toolapi.tools.WeatherTool
@@ -57,9 +58,10 @@ object AssistantAgentExample {
   def main(args: Array[String]): Unit = {
     logger.info("Starting LLM4S Interactive Assistant Agent Example...")
 
-    // Get LLM client from environment variables (Result-first)
+    // Get LLM client from typed configuration (Result-first)
     val result = for {
-      client <- LLMConnect.fromEnv()
+      providerCfg <- Llm4sConfig.provider()
+      client      <- LLMConnect.getClient(providerCfg)
       playwrightServerConfig = MCPServerConfig.stdio(
         name = "playwright-mcp-server",
         command = Seq("npx", "@playwright/mcp@latest"),

@@ -618,12 +618,15 @@ object VectorMemoryStore {
       ProcessingError("vector-store", s"Failed to create in-memory vector store: ${e.getMessage}")
     )
 
-  /**
-   * Create a vector store from environment configuration.
-   * Uses the configured embedding provider.
-   */
-  def fromEnv(dbPath: String, config: MemoryStoreConfig = MemoryStoreConfig.default): Result[VectorMemoryStore] =
-    LLMEmbeddingService.fromEnv().flatMap(embeddingService => apply(dbPath, embeddingService, config))
+  // Note: A previous version exposed VectorMemoryStore.fromEnv, which constructed
+  // an EmbeddingService by reading environment/configuration directly. That helper
+  // has been removed so that VectorMemoryStore stays config-agnostic. Applications
+  // should now:
+  //   1) Load embeddings provider + model config via Llm4sConfig.embeddings()
+  //      and Llm4sConfig.textEmbeddingModel()
+  //   2) Build an EmbeddingClient via EmbeddingClient.from(provider, cfg)
+  //   3) Construct an LLMEmbeddingService from the client and model config
+  //   4) Pass that EmbeddingService into VectorMemoryStore(dbPath, embeddingService, config)
 
   // Serialization helpers
 

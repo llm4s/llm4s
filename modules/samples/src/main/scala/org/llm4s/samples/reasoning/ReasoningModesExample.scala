@@ -1,5 +1,6 @@
 package org.llm4s.samples.reasoning
 
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 import org.slf4j.LoggerFactory
@@ -44,9 +45,14 @@ object ReasoningModesExample {
     logger.info("\n--- Testing with LLM (if configured) ---")
 
     // Try to create a client and run a simple completion with reasoning
-    LLMConnect.fromEnv() match {
+    val clientResult = for {
+      providerCfg <- Llm4sConfig.provider()
+      client      <- LLMConnect.getClient(providerCfg)
+    } yield client
+
+    clientResult match {
       case Left(error) =>
-        logger.warn("LLM client not configured: {}", error)
+        logger.warn("LLM client not configured: {}", error.formatted)
         logger.info("Set LLM_MODEL and appropriate API key to test with a real model")
 
       case Right(client) =>

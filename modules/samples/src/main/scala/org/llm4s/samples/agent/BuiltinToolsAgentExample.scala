@@ -1,6 +1,7 @@
 package org.llm4s.samples.agent
 
 import org.llm4s.agent.Agent
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.builtin._
@@ -33,8 +34,11 @@ object BuiltinToolsAgentExample {
   def main(args: Array[String]): Unit = {
     logger.info("=== Built-in Tools Agent Example ===\n")
 
-    // Create LLM client from environment
-    val clientResult = LLMConnect.fromEnv()
+    // Create LLM client from typed configuration
+    val clientResult = for {
+      providerCfg <- Llm4sConfig.provider()
+      client      <- LLMConnect.getClient(providerCfg)
+    } yield client
 
     clientResult match {
       case Left(error) =>

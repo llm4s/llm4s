@@ -62,47 +62,16 @@ final class LLMEmbeddingService private (
 
 object LLMEmbeddingService {
 
-  // Default dimensions for common models
-  private val defaultDimensions: Map[String, Int] = Map(
-    "text-embedding-ada-002"  -> 1536,
-    "text-embedding-3-small"  -> 1536,
-    "text-embedding-3-large"  -> 3072,
-    "voyage-2"                -> 1024,
-    "voyage-large-2"          -> 1536,
-    "voyage-code-2"           -> 1536,
-    "voyage-large-2-instruct" -> 1024,
-    "voyage-finance-2"        -> 1024,
-    "voyage-multilingual-2"   -> 1024,
-    "voyage-law-2"            -> 1024
-  )
-
   /**
    * Create an embedding service from an existing client.
+   *
+   * This constructor is intentionally config-agnostic. Application or sample
+   * code should load provider and model settings via Llm4sConfig (or other
+   * typed configuration) and then pass the resulting EmbeddingClient and
+   * EmbeddingModelConfig in explicitly rather than using a fromEnv-style helper.
    */
   def apply(client: EmbeddingClient, modelConfig: EmbeddingModelConfig): LLMEmbeddingService =
     new LLMEmbeddingService(client, modelConfig)
-
-  /**
-   * Create an embedding service from environment configuration.
-   * Uses default dimensions based on the model name, or 1536 as fallback.
-   */
-  def fromEnv(): Result[LLMEmbeddingService] =
-    for {
-      client         <- EmbeddingClient.fromEnv()
-      providerConfig <- org.llm4s.config.ConfigReader.Embeddings().map(_._2)
-      dims        = defaultDimensions.getOrElse(providerConfig.model, 1536)
-      modelConfig = EmbeddingModelConfig(providerConfig.model, dims)
-    } yield new LLMEmbeddingService(client, modelConfig)
-
-  /**
-   * Create an embedding service with explicit dimensions.
-   */
-  def fromEnv(dimensions: Int): Result[LLMEmbeddingService] =
-    for {
-      client         <- EmbeddingClient.fromEnv()
-      providerConfig <- org.llm4s.config.ConfigReader.Embeddings().map(_._2)
-      modelConfig = EmbeddingModelConfig(providerConfig.model, dimensions)
-    } yield new LLMEmbeddingService(client, modelConfig)
 }
 
 /**

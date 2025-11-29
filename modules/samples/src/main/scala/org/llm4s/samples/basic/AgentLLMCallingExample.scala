@@ -3,7 +3,6 @@ package org.llm4s.samples.basic
 import org.llm4s.core.safety.Safety
 import org.llm4s.agent.{ Agent, AgentState, AgentStatus }
 import org.llm4s.llmconnect.config.TracingSettings
-import org.llm4s.config.ConfigReader
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.samples.util.{ BenchmarkUtil, TracingUtil }
@@ -39,7 +38,7 @@ object AgentLLMCallingExample {
     logger.info("🧮 Calculator Tool Agent Demo with Tracing")
     logger.info("=" * 50)
     val result = for {
-      settings <- ConfigReader.TracingConf()
+      settings <- org.llm4s.config.Llm4sConfig.tracing()
       tracing  <- createComprehensiveTracing(settings)
       _ = {
         logger.info("🔍 Tracing Configuration:")
@@ -97,7 +96,8 @@ object AgentLLMCallingExample {
     val benchmarkResult: BenchmarkUtil.BenchmarkResult[Either[LLMError, AgentExecutionResult]] =
       BenchmarkUtil.timeWithSteps { timer =>
         for {
-          llmClient <- LLMConnect.fromEnv()
+          providerCfg <- org.llm4s.config.Llm4sConfig.provider()
+          llmClient   <- LLMConnect.getClient(providerCfg)
           agent = new Agent(llmClient)
           agentExecutionResult = {
             val tools        = Seq(CalculatorTool.tool)

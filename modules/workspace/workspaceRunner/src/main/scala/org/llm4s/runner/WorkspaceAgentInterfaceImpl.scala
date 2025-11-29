@@ -17,8 +17,9 @@ import scala.util.{ Failure, Success, Try, Using }
  * Implementation of WorkspaceAgentInterface that operates on a local filesystem workspace.
  *
  * @param workspaceRoot The root directory of the workspace
+ * @param isWindows     True if the host OS is Windows (used for shell command selection)
  */
-class WorkspaceAgentInterfaceImpl(workspaceRoot: String) extends WorkspaceAgentInterface {
+class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) extends WorkspaceAgentInterface {
 
   private val rootPath = Paths.get(workspaceRoot).toAbsolutePath.normalize()
 
@@ -556,7 +557,7 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String) extends WorkspaceAgentI
     val timeoutMs = (timeoutSeconds.getOrElse(30 /* Default 30 seconds */ ) * 1000).toLong
     val env       = environment.getOrElse(Map.empty)
 
-    val cmd = if (System.getProperty("os.name").contains("Windows")) {
+    val cmd = if (isWindows) {
       Seq("cmd.exe", "/c", command)
     } else {
       Seq("sh", "-c", command)

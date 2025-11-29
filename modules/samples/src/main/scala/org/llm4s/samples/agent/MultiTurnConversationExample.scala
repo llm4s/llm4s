@@ -1,6 +1,7 @@
 package org.llm4s.samples.agent
 
 import org.llm4s.agent.Agent
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole
 import org.llm4s.toolapi.ToolRegistry
@@ -19,7 +20,8 @@ object MultiTurnConversationExample {
 
     // Functional style - no var, no mutation!
     val result = for {
-      client <- LLMConnect.fromEnv()
+      providerCfg <- Llm4sConfig.provider()
+      client      <- LLMConnect.getClient(providerCfg)
       tools = new ToolRegistry(Seq(WeatherTool.tool))
       agent = new Agent(client)
 
