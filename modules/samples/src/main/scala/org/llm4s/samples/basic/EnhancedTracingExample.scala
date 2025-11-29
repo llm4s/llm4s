@@ -1,6 +1,6 @@
 package org.llm4s.samples.basic
 
-import org.llm4s.config.ConfigReader
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.trace.{ EnhancedTracing, TraceEvent, TracingComposer, TracingMode }
@@ -13,7 +13,7 @@ object EnhancedTracingExample {
     logger.info("Enhanced Tracing Example")
     logger.info("=" * 50)
     val result = for {
-      settings <- ConfigReader.TracingConf()
+      settings <- Llm4sConfig.tracing()
       _ = {
         logger.info("1. Basic Enhanced Tracing")
         val basicTracer = EnhancedTracing.create(settings.copy(mode = TracingMode.Console))
@@ -142,8 +142,9 @@ object EnhancedTracingExample {
   private def example8(settings: TracingSettings): Unit = {
     // Example 8: Environment-based configuration
     logger.info("8. Environment-Based Configuration")
-    val envTracer = EnhancedTracing
-      .createFromEnv()
+    val envTracer = Llm4sConfig
+      .tracing()
+      .map(EnhancedTracing.create)
       .fold(_ => EnhancedTracing.create(settings.copy(mode = TracingMode.NoOp)), identity)
     logger.info(s"Created tracer from environment: ${envTracer.getClass.getSimpleName}")
 

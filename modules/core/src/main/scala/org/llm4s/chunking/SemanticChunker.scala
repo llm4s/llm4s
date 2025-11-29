@@ -21,7 +21,8 @@ import scala.util.matching.Regex
  *
  * Usage:
  * {{{
- * val embeddingClient = EmbeddingClient.fromEnv().getOrElse(???)
+ * val (provider, embeddingProviderCfg) = /* load embedding provider config */
+ * val embeddingClient = EmbeddingClient.from(provider, embeddingProviderCfg).getOrElse(???)
  * val modelConfig = EmbeddingModelConfig("text-embedding-3-small", 1536)
  * val chunker = SemanticChunker(embeddingClient, modelConfig, similarityThreshold = 0.5)
  * val chunks = chunker.chunk(documentText, ChunkingConfig(targetSize = 800))

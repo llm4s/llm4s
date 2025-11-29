@@ -1,10 +1,10 @@
 package org.llm4s.samples.basic
 
-import org.llm4s.trace.{ EnhancedTracing, Tracing }
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.model.{ AssistantMessage, Conversation, SystemMessage, ToolCall, ToolMessage, UserMessage }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.agent.{ AgentState, AgentStatus }
-import org.llm4s.trace.EnhancedConsoleTracing
+import org.llm4s.trace.{ EnhancedConsoleTracing, Tracing }
 
 object LangfuseSampleTraceRunner {
   def main(args: Array[String]): Unit =
@@ -28,9 +28,10 @@ object LangfuseSampleTraceRunner {
         "[tool] search (100ms): {\"result\":\"Here is what I found...\"}"
       )
     )
-    val tracer = EnhancedTracing
-      .createFromEnv()
-      .fold(_ => Tracing.createFromEnhanced(new EnhancedConsoleTracing()), Tracing.createFromEnhanced)
+    val tracer = Llm4sConfig
+      .tracing()
+      .map(Tracing.create)
+      .fold(_ => Tracing.createFromEnhanced(new EnhancedConsoleTracing()), identity)
     tracer.traceAgentState(fakeState)
   }
 }

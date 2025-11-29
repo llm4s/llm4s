@@ -2,6 +2,7 @@ package org.llm4s.samples.streaming
 
 import org.llm4s.agent.Agent
 import org.llm4s.agent.streaming.AgentEvent._
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
 
@@ -25,7 +26,8 @@ object EventCollectionExample extends App {
   println()
 
   val result = for {
-    client <- LLMConnect.fromEnv()
+    providerCfg <- Llm4sConfig.provider()
+    client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
     // Run and collect all events

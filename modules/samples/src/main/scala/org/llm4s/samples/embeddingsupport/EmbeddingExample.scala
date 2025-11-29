@@ -6,6 +6,7 @@ import org.llm4s.samples.embeddingsupport.{
   EmbeddingUiSettings,
   EmbeddingRuntimeSettings
 }
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.utils.SimilarityUtils
@@ -33,11 +34,32 @@ object EmbeddingExample {
     logger.info("Starting embedding example...")
 
     val result = for {
-      ui      <- EmbeddingUiSettings.loadFromEnv()
-      targets <- EmbeddingTargets.loadFromEnv().map(_.targets)
-      emb     <- org.llm4s.config.ConfigReader.Embeddings()
+      uiCfg <- Llm4sConfig.embeddingsUi()
+      ui = EmbeddingUiSettings(
+        maxRowsPerFile = uiCfg.maxRowsPerFile,
+        topDimsPerRow = uiCfg.topDimsPerRow,
+        globalTopK = uiCfg.globalTopK,
+        showGlobalTop = uiCfg.showGlobalTop,
+        colorEnabled = uiCfg.colorEnabled,
+        tableWidth = uiCfg.tableWidth
+      )
+      inputs  <- Llm4sConfig.embeddingsInputs()
+      targets <- EmbeddingTargets.fromInputs(inputs.inputPath, inputs.inputPaths).map(_.targets)
+      emb     <- Llm4sConfig.embeddings()
       client  <- EmbeddingClient.from(emb._1, emb._2)
-      runtime <- EmbeddingRuntimeSettings.loadFromEnv()
+      runtime <- EmbeddingRuntimeSettings()
+      textCfg <- Llm4sConfig.textEmbeddingModel()
+      textModel = org.llm4s.llmconnect.config.EmbeddingModelConfig(
+        name = textCfg.modelName,
+        dimensions = textCfg.dimensions
+      )
+      chunkingCfg = org.llm4s.llmconnect.encoding.UniversalEncoder.TextChunkingConfig(
+        enabled = runtime.chunkingEnabled,
+        size = runtime.chunkSize,
+        overlap = runtime.chunkOverlap
+      )
+      stubsEnabled = Llm4sConfig.experimentalStubsEnabled
+      localModels <- Llm4sConfig.localEmbeddingModels()
       _ = {
         val eq          = EmbeddingQuery.loadFromEnv().getOrElse(EmbeddingQuery(None))
         val queryVecOpt = eq.value.flatMap(q => embedQueryOnce(client, q, runtime.provider, emb._2.model, ui))
@@ -50,7 +72,7 @@ object EmbeddingExample {
 
         targets.foreach { p =>
           fileCount += 1
-          client.encodePath(p) match {
+          client.encodePath(p, textModel, chunkingCfg, stubsEnabled, localModels) match {
             case Left(err) =>
               val msg = s"${p.getFileName}: ${err.context.get("provider")} -> ${err.message}"
               errors += msg

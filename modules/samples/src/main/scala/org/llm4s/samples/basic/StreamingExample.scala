@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 
@@ -35,7 +36,8 @@ object StreamingExample {
     var chunkCount  = 0
     val startTime   = System.currentTimeMillis()
     val result = for {
-      client <- LLMConnect.fromEnv()
+      providerCfg <- Llm4sConfig.provider()
+      client      <- LLMConnect.getClient(providerCfg)
       _ = {
         println("=== Streaming Response ===")
         println("Receiving chunks as they arrive:")

@@ -2,6 +2,7 @@ package org.llm4s.samples.mcp
 
 import cats.implicits._
 import org.llm4s.agent.{ Agent, AgentState }
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model.MessageRole.Assistant
 import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
@@ -98,7 +99,7 @@ object PlaywrightExample {
     for {
       _      <- checkCommand("node", "Node.js")
       _      <- checkCommand("npx", "npx")
-      client <- LLMConnect.fromEnv().leftMap(_.formatted)
+      client <- Llm4sConfig.provider().flatMap(LLMConnect.getClient).leftMap(_.formatted)
     } yield {
       logger.info("✅ Prerequisites validated and LLM client initialized")
       client

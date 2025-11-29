@@ -1,6 +1,7 @@
 package org.llm4s.samples.agent
 
 import org.llm4s.agent.Agent
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole.Tool
 import org.llm4s.toolapi.ToolRegistry
@@ -13,7 +14,8 @@ object MultiStepAgentExample {
   def main(args: Array[String]): Unit = {
     // Get a client using environment variables (Result-first)
     val res = for {
-      client <- LLMConnect.fromEnv()
+      providerCfg <- Llm4sConfig.provider()
+      client      <- LLMConnect.getClient(providerCfg)
       toolRegistry        = new ToolRegistry(Seq(WeatherTool.tool))
       agent               = new Agent(client)
       query               = "What's the weather like in London, and is it different from New York?"

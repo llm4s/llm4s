@@ -1,6 +1,9 @@
 package org.llm4s.llmconnect.config
 
-import org.llm4s.config.ConfigReader
+// scalafix:off DisableSyntax.NoConfigFactory
+import com.typesafe.config.ConfigFactory
+// scalafix:on DisableSyntax.NoConfigFactory
+import org.llm4s.config.Llm4sConfig
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -10,6 +13,7 @@ class EmbeddingsConfigSpec extends AnyWordSpec with Matchers {
     val originals = props.keys.map(k => k -> Option(System.getProperty(k))).toMap
     try {
       props.foreach { case (k, v) => System.setProperty(k, v) }
+      ConfigFactory.invalidateCaches()
       f
     } finally
       originals.foreach {
@@ -18,7 +22,7 @@ class EmbeddingsConfigSpec extends AnyWordSpec with Matchers {
       }
   }
 
-  "ConfigReader.Embeddings" should {
+  "Llm4sConfig.embeddings" should {
     "load OpenAI embeddings config via llm4s.*" in {
       val props = Map(
         "llm4s.embeddings.provider"       -> "openai",
@@ -28,7 +32,8 @@ class EmbeddingsConfigSpec extends AnyWordSpec with Matchers {
         "llm4s.openai.apiKey" -> "sk-test"
       )
       withProps(props) {
-        val (provider, cfg) = ConfigReader.Embeddings().fold(err => fail(err.toString), identity)
+        val (provider, cfg) =
+          Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
         provider shouldBe "openai"
         cfg.baseUrl shouldBe "https://example.com/v1"
         cfg.model shouldBe "text-embedding-3-small"
@@ -44,7 +49,8 @@ class EmbeddingsConfigSpec extends AnyWordSpec with Matchers {
         "llm4s.embeddings.voyage.apiKey"  -> "vk-test"
       )
       withProps(props) {
-        val (provider, cfg) = ConfigReader.Embeddings().fold(err => fail(err.toString), identity)
+        val (provider, cfg) =
+          Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
         provider shouldBe "voyage"
         cfg.baseUrl shouldBe "https://api.voyage.ai"
         cfg.model shouldBe "voyage-3-large"
@@ -59,7 +65,7 @@ class EmbeddingsConfigSpec extends AnyWordSpec with Matchers {
         "llm4s.embeddings.ollama.model"   -> "nomic-embed-text"
       )
       withProps(props) {
-        val (provider, cfg) = ConfigReader.Embeddings().fold(err => fail(err.toString), identity)
+        val (provider, cfg) = Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
         provider shouldBe "ollama"
         cfg.baseUrl shouldBe "http://localhost:11434"
         cfg.model shouldBe "nomic-embed-text"
@@ -74,7 +80,7 @@ class EmbeddingsConfigSpec extends AnyWordSpec with Matchers {
         "llm4s.embeddings.ollama.model" -> "mxbai-embed-large"
       )
       withProps(props) {
-        val (provider, cfg) = ConfigReader.Embeddings().fold(err => fail(err.toString), identity)
+        val (provider, cfg) = Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
         provider shouldBe "ollama"
         // Default baseUrl when not specified
         cfg.baseUrl shouldBe "http://localhost:11434"

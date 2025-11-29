@@ -1,7 +1,7 @@
 package org.llm4s.agent.memory
 
 import org.llm4s.llmconnect.EmbeddingClient
-import org.llm4s.llmconnect.config.EmbeddingModelConfig
+import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ProviderConfig }
 import org.llm4s.llmconnect.model.EmbeddingRequest
 import org.llm4s.types.Result
 
@@ -62,29 +62,6 @@ final class LLMEmbeddingService private (
 
 object LLMEmbeddingService {
 
-  // Default dimensions for common models
-  private val defaultDimensions: Map[String, Int] = Map(
-    // OpenAI
-    "text-embedding-ada-002" -> 1536,
-    "text-embedding-3-small" -> 1536,
-    "text-embedding-3-large" -> 3072,
-    // VoyageAI
-    "voyage-2"                -> 1024,
-    "voyage-large-2"          -> 1536,
-    "voyage-code-2"           -> 1536,
-    "voyage-large-2-instruct" -> 1024,
-    "voyage-finance-2"        -> 1024,
-    "voyage-multilingual-2"   -> 1024,
-    "voyage-law-2"            -> 1024,
-    // Ollama (local models)
-    "nomic-embed-text"       -> 768,
-    "mxbai-embed-large"      -> 1024,
-    "all-minilm"             -> 384,
-    "snowflake-arctic-embed" -> 1024,
-    "bge-m3"                 -> 1024,
-    "bge-large"              -> 1024
-  )
-
   /**
    * Create an embedding service from an existing client.
    */
@@ -92,26 +69,19 @@ object LLMEmbeddingService {
     new LLMEmbeddingService(client, modelConfig)
 
   /**
-   * Create an embedding service from environment configuration.
-   * Uses default dimensions based on the model name, or 1536 as fallback.
+   * Create an embedding service with explicit dimensions using the embedding provider config.
    */
-  def fromEnv(): Result[LLMEmbeddingService] =
-    for {
-      client         <- EmbeddingClient.fromEnv()
-      providerConfig <- org.llm4s.config.ConfigReader.Embeddings().map(_._2)
-      dims        = defaultDimensions.getOrElse(providerConfig.model, 1536)
-      modelConfig = EmbeddingModelConfig(providerConfig.model, dims)
-    } yield new LLMEmbeddingService(client, modelConfig)
+  def apply(client: EmbeddingClient, providerConfig: ProviderConfig, dimensions: Int): Result[LLMEmbeddingService] =
+    Right(
+      LLMEmbeddingService(
+        client,
+        EmbeddingModelConfig(
+          providerConfig.model,
+          dimensions
+        )
+      )
+    )
 
-  /**
-   * Create an embedding service with explicit dimensions.
-   */
-  def fromEnv(dimensions: Int): Result[LLMEmbeddingService] =
-    for {
-      client         <- EmbeddingClient.fromEnv()
-      providerConfig <- org.llm4s.config.ConfigReader.Embeddings().map(_._2)
-      modelConfig = EmbeddingModelConfig(providerConfig.model, dimensions)
-    } yield new LLMEmbeddingService(client, modelConfig)
 }
 
 /**

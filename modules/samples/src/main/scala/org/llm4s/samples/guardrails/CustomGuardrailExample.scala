@@ -2,6 +2,7 @@ package org.llm4s.samples.guardrails
 
 import org.llm4s.agent.Agent
 import org.llm4s.agent.guardrails.InputGuardrail
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
@@ -46,7 +47,8 @@ object CustomGuardrailExample extends App {
   println("=== Custom Guardrail Example ===\n")
 
   val result = for {
-    client <- LLMConnect.fromEnv()
+    providerCfg <- Llm4sConfig.provider()
+    client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
     // Create custom guardrail
@@ -77,7 +79,8 @@ object CustomGuardrailExample extends App {
   println("\n=== Testing with missing keywords ===\n")
 
   val failureResult = for {
-    client <- LLMConnect.fromEnv()
+    providerCfg <- Llm4sConfig.provider()
+    client      <- LLMConnect.getClient(providerCfg)
     agent           = new Agent(client)
     customGuardrail = new KeywordRequirementGuardrail(Set("scala", "programming"))
 

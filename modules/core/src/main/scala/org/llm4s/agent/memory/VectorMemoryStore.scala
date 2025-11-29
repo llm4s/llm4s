@@ -2,6 +2,8 @@ package org.llm4s.agent.memory
 
 import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
+import org.llm4s.llmconnect.EmbeddingClient
+import org.llm4s.llmconnect.config.EmbeddingModelConfig
 
 import java.sql.{ Connection, DriverManager, PreparedStatement, ResultSet }
 import java.time.Instant
@@ -622,8 +624,13 @@ object VectorMemoryStore {
    * Create a vector store from environment configuration.
    * Uses the configured embedding provider.
    */
-  def fromEnv(dbPath: String, config: MemoryStoreConfig = MemoryStoreConfig.default): Result[VectorMemoryStore] =
-    LLMEmbeddingService.fromEnv().flatMap(embeddingService => apply(dbPath, embeddingService, config))
+  def fromEnv(
+    client: EmbeddingClient,
+    embeddingModel: EmbeddingModelConfig,
+    dbPath: String,
+    config: MemoryStoreConfig = MemoryStoreConfig.default
+  ): Result[VectorMemoryStore] =
+    apply(dbPath, LLMEmbeddingService(client, embeddingModel), config)
 
   // Serialization helpers
 

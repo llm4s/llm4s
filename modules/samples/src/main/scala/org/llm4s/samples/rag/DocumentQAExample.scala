@@ -1,8 +1,10 @@
 package org.llm4s.samples.rag
 
 import org.llm4s.agent.memory._
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ProcessingError
-import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
+import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient, LLMConnect }
+import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ModelDimensionRegistry }
 import org.llm4s.llmconnect.extractors.UniversalExtractor
 import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
 import org.llm4s.llmconnect.utils.ChunkingUtils
@@ -80,7 +82,13 @@ object DocumentQAExample extends App {
 
     // Use real embeddings if LLM_EMBEDDING_MODEL is set, otherwise fall back to mock
     val embeddingServiceResult: Result[EmbeddingService] =
-      LLMEmbeddingService.fromEnv() match {
+      Llm4sConfig
+        .embeddings()
+        .flatMap { case (provider, cfg) =>
+          val dims     = scala.util.Try(ModelDimensionRegistry.getDimension(provider, cfg.model)).getOrElse(1536)
+          val modelCfg = EmbeddingModelConfig(cfg.model, dims)
+          EmbeddingClient.from(provider, cfg).map(client => LLMEmbeddingService(client, modelCfg))
+        } match {
         case Right(realService) =>
           println(s"\nUsing LLMEmbeddingService (real embeddings)")
           Right(realService)
@@ -110,7 +118,8 @@ object DocumentQAExample extends App {
       _ = println("\n" + "-" * 40)
       _ = println("Step 2: Connecting to LLM")
       _ = println("-" * 40)
-      client <- LLMConnect.fromEnv()
+      providerCfg <- Llm4sConfig.provider()
+      client      <- LLMConnect.getClient(providerCfg)
       _ = println("LLM client connected successfully")
 
       // Step 3: Run sample queries

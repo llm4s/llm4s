@@ -2,6 +2,7 @@ package org.llm4s.samples.memory
 
 import org.llm4s.agent.Agent
 import org.llm4s.agent.memory._
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
 
@@ -20,7 +21,8 @@ object MemoryWithAgentExample extends App {
   println("=== Memory with Agent Integration Example ===\n")
 
   val result = for {
-    client <- LLMConnect.fromEnv()
+    providerCfg <- Llm4sConfig.provider()
+    client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
     // === Part 1: Initialize Memory with Background Knowledge ===

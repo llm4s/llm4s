@@ -1,5 +1,6 @@
 package org.llm4s.samples.toolapi
 
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.{ LLMConnect, LLMClient }
 import org.llm4s.toolapi._
@@ -13,7 +14,8 @@ import scala.annotation.tailrec
 object LLMWeatherExample {
   def main(args: Array[String]): Unit = {
     val result = for {
-      client <- LLMConnect.fromEnv()
+      providerCfg <- Llm4sConfig.provider()
+      client      <- LLMConnect.getClient(providerCfg)
       _ = {
         val toolRegistry        = new ToolRegistry(Seq(WeatherTool.tool))
         val initialConversation = Conversation(Seq(UserMessage("What's the weather like in Paris, France?")))

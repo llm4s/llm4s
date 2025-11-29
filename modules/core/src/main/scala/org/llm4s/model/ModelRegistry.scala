@@ -1,6 +1,5 @@
 package org.llm4s.model
 
-import org.llm4s.config.ConfigReader
 import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -30,9 +29,6 @@ object ModelRegistry {
   // Embedded metadata file location
   private val EmbeddedMetadataPath = "/modeldata/litellm_model_metadata.json"
 
-  // Environment variable for custom metadata file
-  private val CustomMetadataEnvVar = "LLM4S_MODEL_METADATA_FILE"
-
   // Mutable cache of model metadata (lazy-loaded)
   @volatile private var metadataCache: Map[String, ModelMetadata] = Map.empty
 
@@ -46,22 +42,21 @@ object ModelRegistry {
    * Initialize the registry by loading embedded metadata.
    * This is called automatically on first access, but can be called explicitly.
    *
-   * Also loads custom metadata from environment-specified file if available.
-   *
+   * @param customMetadataPath Optional path to a custom metadata JSON file to load after the embedded metadata.
    * @return Result indicating success or failure
    */
-  def initialize(): Result[Unit] =
+  def initialize(customMetadataPath: Option[String] = None): Result[Unit] =
     synchronized {
       if (!initialized) {
         logger.info("Initializing ModelRegistry with embedded metadata")
         val result = for {
           metadata <- loadEmbeddedMetadata()
+          _        <- customMetadataPath.map(loadCustomMetadata).getOrElse(Right(()))
           _ = {
             metadataCache = metadata
             initialized = true
             logger.info(s"ModelRegistry initialized with ${metadata.size} models")
           }
-          _ <- loadCustomMetadataIfConfigured()
         } yield ()
 
         result match {
@@ -306,7 +301,7 @@ object ModelRegistry {
 
   private def ensureInitialized(): Result[Unit] =
     if (initialized) Right(())
-    else initialize()
+    else initialize(None)
 
   private def findModel(modelId: String): Result[ModelMetadata] = {
     val normalized = modelId.trim
@@ -343,18 +338,6 @@ object ModelRegistry {
         }
     }
   }
-
-  private def loadCustomMetadataIfConfigured(): Result[Unit] =
-    ConfigReader.LLMConfig().flatMap { cfg =>
-      cfg.get(CustomMetadataEnvVar) match {
-        case Some(path) if path.trim.nonEmpty =>
-          logger.info(s"Custom metadata file specified: $path")
-          loadCustomMetadata(path)
-        case _ =>
-          logger.debug(s"No custom metadata file configured (set $CustomMetadataEnvVar to specify)")
-          Right(())
-      }
-    }
 
   private def loadEmbeddedMetadata(): Result[Map[String, ModelMetadata]] =
     Try {

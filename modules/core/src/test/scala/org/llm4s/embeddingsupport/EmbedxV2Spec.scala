@@ -1,12 +1,10 @@
 package embeddingsupport
-
-import org.llm4s.config.ConfigReader
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.EmbeddingClient
-import org.llm4s.llmconnect.config.{ EmbeddingConfig, ModelDimensionRegistry }
+import org.llm4s.llmconnect.config.ModelDimensionRegistry
 import org.llm4s.llmconnect.encoding.UniversalEncoder
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.llmconnect.config.LocalEmbeddingModels
 import org.llm4s.llmconnect.utils.ModelSelector
 import org.llm4s.types.Result
 import org.scalatest.funsuite.AnyFunSuite
@@ -35,8 +33,8 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
       Left(EmbeddingError(Some("418"), "stub provider (not used in these tests)", "stub"))
   })
 
-  private def experimentalOn(config: ConfigReader): Boolean =
-    config.get("ENABLE_EXPERIMENTAL_STUBS").exists(_.trim.equalsIgnoreCase("true"))
+  private def experimentalOn: Boolean =
+    sys.env.get("ENABLE_EXPERIMENTAL_STUBS").exists(_.trim.equalsIgnoreCase("true"))
 
   private def withTempFile[T](prefix: String, suffix: String)(use: Path => T): T = {
     val p = Files.createTempFile(prefix, suffix)
@@ -93,22 +91,51 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
   // ----------------- Tests -----------------
 
   test("Non-text: image/audio/video → 501 by default (stubs disabled)") {
-    val config = LLMConfig().fold(err => fail(err.formatted), identity)
-    if (experimentalOn(config)) cancel("ENABLE_EXPERIMENTAL_STUBS=true in env; skipping default-501 test.")
+    if (experimentalOn) cancel("ENABLE_EXPERIMENTAL_STUBS=true in env; skipping default-501 test.")
+
+    val dummyModel    = org.llm4s.llmconnect.config.EmbeddingModelConfig("dummy-text", 128)
+    val dummyChunking = org.llm4s.llmconnect.encoding.UniversalEncoder.TextChunkingConfig(false, 0, 0)
+    val localModels =
+      LocalEmbeddingModels(
+        imageModel = "openclip-vit-b32",
+        audioModel = "wav2vec2-base",
+        videoModel = "timesformer-base"
+      )
 
     val imgRes: Result[Seq[EmbeddingVector]] = withTempFile("embedx_png_", ".png") { png =>
       writeDummyPng(png)
-      UniversalEncoder.encodeFromPath(png, stubClient)
+      UniversalEncoder.encodeFromPath(
+        png,
+        stubClient,
+        dummyModel,
+        dummyChunking,
+        experimentalStubsEnabled = false,
+        localModels
+      )
     }
 
     val audRes = withTempFile("embedx_wav_", ".wav") { wav =>
       writeDummyWav(wav)
-      UniversalEncoder.encodeFromPath(wav, stubClient)
+      UniversalEncoder.encodeFromPath(
+        wav,
+        stubClient,
+        dummyModel,
+        dummyChunking,
+        experimentalStubsEnabled = false,
+        localModels
+      )
     }
 
     val vidRes = withTempFile("embedx_mp4_", ".mp4") { mp4 =>
       writeDummyMp4(mp4)
-      UniversalEncoder.encodeFromPath(mp4, stubClient)
+      UniversalEncoder.encodeFromPath(
+        mp4,
+        stubClient,
+        dummyModel,
+        dummyChunking,
+        experimentalStubsEnabled = false,
+        localModels
+      )
     }
 
     imgRes.isLeft shouldBe true
@@ -126,22 +153,51 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
   }
 
   test("Experimental stubs: image/audio/video produce vectors and experimental=true") {
-    val config = LLMConfig().fold(err => fail(err.formatted), identity)
-    if (!experimentalOn(config)) cancel("ENABLE_EXPERIMENTAL_STUBS!=true; set it to run this test.")
+    if (!experimentalOn) cancel("ENABLE_EXPERIMENTAL_STUBS!=true; set it to run this test.")
+
+    val dummyModel    = org.llm4s.llmconnect.config.EmbeddingModelConfig("dummy-text", 128)
+    val dummyChunking = org.llm4s.llmconnect.encoding.UniversalEncoder.TextChunkingConfig(false, 0, 0)
+    val localModels =
+      LocalEmbeddingModels(
+        imageModel = "openclip-vit-b32",
+        audioModel = "wav2vec2-base",
+        videoModel = "timesformer-base"
+      )
 
     val imgRes = withTempFile("embedx_png_", ".png") { png =>
       writeDummyPng(png)
-      UniversalEncoder.encodeFromPath(png, stubClient)
+      UniversalEncoder.encodeFromPath(
+        png,
+        stubClient,
+        dummyModel,
+        dummyChunking,
+        experimentalStubsEnabled = true,
+        localModels
+      )
     }
 
     val audRes = withTempFile("embedx_wav_", ".wav") { wav =>
       writeDummyWav(wav)
-      UniversalEncoder.encodeFromPath(wav, stubClient)
+      UniversalEncoder.encodeFromPath(
+        wav,
+        stubClient,
+        dummyModel,
+        dummyChunking,
+        experimentalStubsEnabled = true,
+        localModels
+      )
     }
 
     val vidRes = withTempFile("embedx_mp4_", ".mp4") { mp4 =>
       writeDummyMp4(mp4)
-      UniversalEncoder.encodeFromPath(mp4, stubClient)
+      UniversalEncoder.encodeFromPath(
+        mp4,
+        stubClient,
+        dummyModel,
+        dummyChunking,
+        experimentalStubsEnabled = true,
+        localModels
+      )
     }
 
     val img = imgRes.toOption.get; img.nonEmpty shouldBe true
@@ -158,13 +214,18 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
   }
 
   test("Local model dimensions (Image/Audio/Video) match registry") {
-    val config   = LLMConfig().fold(err => fail(err.formatted), identity)
-    val imgModel = ModelSelector.selectModel(Image, config)
-    val audModel = ModelSelector.selectModel(Audio, config)
-    val vidModel = ModelSelector.selectModel(Video, config)
+    val localModels =
+      LocalEmbeddingModels(
+        imageModel = "openclip-vit-b32",
+        audioModel = "wav2vec2-base",
+        videoModel = "timesformer-base"
+      )
+    val imgModel = ModelSelector.selectModel(Image, localModels).fold(err => fail(err.formatted), identity)
+    val audModel = ModelSelector.selectModel(Audio, localModels).fold(err => fail(err.formatted), identity)
+    val vidModel = ModelSelector.selectModel(Video, localModels).fold(err => fail(err.formatted), identity)
 
-    imgModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", EmbeddingConfig.imageModel(config))
-    audModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", EmbeddingConfig.audioModel(config))
-    vidModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", EmbeddingConfig.videoModel(config))
+    imgModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", imgModel.name)
+    audModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", audModel.name)
+    vidModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", vidModel.name)
   }
 }

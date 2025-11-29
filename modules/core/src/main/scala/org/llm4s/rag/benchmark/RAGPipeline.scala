@@ -1,7 +1,6 @@
 package org.llm4s.rag.benchmark
 
 import org.llm4s.chunking.{ ChunkerFactory, DocumentChunk, DocumentChunker }
-import org.llm4s.config.{ ConfigKeys, ConfigReader }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model._
@@ -413,36 +412,18 @@ object RAGPipeline {
    * @param config Embedding configuration
    * @return Embedding client or error
    */
-  def createEmbeddingClient(config: EmbeddingConfig): Result[EmbeddingClient] =
-    ConfigReader.LLMConfig().flatMap { cfg =>
-      val apiKey = config match {
-        case _: EmbeddingConfig.OpenAI =>
-          cfg.getOrElse(ConfigKeys.OPENAI_API_KEY, "")
-        case _: EmbeddingConfig.Voyage =>
-          cfg.getOrElse(ConfigKeys.VOYAGE_API_KEY, "")
-        case _: EmbeddingConfig.Ollama =>
-          "" // Ollama doesn't need API key
-      }
-
+  def createEmbeddingClient(
+    config: EmbeddingConfig,
+    resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig]
+  ): Result[EmbeddingClient] =
+    resolveEmbeddingProvider(config.provider).flatMap { baseConfig =>
       val providerConfig = config match {
         case EmbeddingConfig.OpenAI(model, _) =>
-          EmbeddingProviderConfig(
-            baseUrl = "https://api.openai.com/v1",
-            model = model,
-            apiKey = apiKey
-          )
+          baseConfig.copy(model = model)
         case EmbeddingConfig.Voyage(model, _) =>
-          EmbeddingProviderConfig(
-            baseUrl = "https://api.voyageai.com/v1",
-            model = model,
-            apiKey = apiKey
-          )
+          baseConfig.copy(model = model)
         case EmbeddingConfig.Ollama(model, _, baseUrl) =>
-          EmbeddingProviderConfig(
-            baseUrl = baseUrl,
-            model = model,
-            apiKey = apiKey
-          )
+          baseConfig.copy(model = model, baseUrl = baseUrl)
       }
 
       EmbeddingClient.from(config.provider, providerConfig)

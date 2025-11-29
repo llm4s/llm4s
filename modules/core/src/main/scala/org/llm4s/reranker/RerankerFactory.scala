@@ -1,6 +1,5 @@
 package org.llm4s.reranker
 
-import org.llm4s.config.ConfigReader
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.types.Result
 
@@ -20,8 +19,8 @@ import org.llm4s.types.Result
  * // LLM-based reranker
  * val llmReranker = RerankerFactory.llm(llmClient)
  *
- * // From environment variables
- * val reranker = RerankerFactory.fromEnv(configReader)
+ * // From provided config
+ * val reranker = RerankerFactory.fromConfig(Some(config))
  * }}}
  */
 object RerankerFactory {
@@ -88,65 +87,16 @@ object RerankerFactory {
     LLMReranker(client, batchSize, systemPrompt)
 
   /**
-   * Create a reranker from environment variables.
+   * Create a reranker from an optional typed configuration.
    *
-   * Reads the following environment variables:
-   * - RERANK_PROVIDER: "cohere", "llm", or "none" (default: none)
-   * - COHERE_API_KEY: API key for Cohere
-   * - COHERE_RERANK_BASE_URL: API base URL (default: https://api.cohere.ai)
-   * - COHERE_RERANK_MODEL: Model name (default: rerank-english-v3.0)
-   *
-   * @param configReader Configuration reader
+   * @param config Optional provider configuration
    * @return Optional reranker (None if disabled)
    */
-  def fromEnv(configReader: ConfigReader): Result[Option[Reranker]] = {
-    val provider = configReader.get("RERANK_PROVIDER").getOrElse("none")
-
-    Backend.fromString(provider) match {
-      case Some(Backend.Cohere) =>
-        configReader.get("COHERE_API_KEY") match {
-          case Some(apiKey) if apiKey.nonEmpty =>
-            val baseUrl = configReader
-              .get("COHERE_RERANK_BASE_URL")
-              .getOrElse(CohereReranker.DEFAULT_BASE_URL)
-            val model = configReader
-              .get("COHERE_RERANK_MODEL")
-              .getOrElse(CohereReranker.DEFAULT_MODEL)
-            Right(Some(cohere(apiKey, model, baseUrl)))
-
-          case _ =>
-            Left(
-              RerankError(
-                code = Some("400"),
-                message = "COHERE_API_KEY is required when RERANK_PROVIDER=cohere",
-                provider = "cohere"
-              )
-            )
-        }
-
-      case Some(Backend.LLM) =>
-        // LLM-based reranking requires an LLMClient to be provided separately
-        Left(
-          RerankError(
-            code = Some("501"),
-            message = "LLM-based reranking requires explicit LLMClient. Use RerankerFactory.llm(client) instead.",
-            provider = "llm"
-          )
-        )
-
-      case Some(Backend.None) =>
-        Right(scala.None)
-
-      case scala.None =>
-        Left(
-          RerankError(
-            code = Some("400"),
-            message = s"Unknown RERANK_PROVIDER: $provider. Valid values: cohere, llm, none",
-            provider = "unknown"
-          )
-        )
+  def fromConfig(config: Option[RerankProviderConfig]): Result[Option[Reranker]] =
+    config match {
+      case None      => Right(None)
+      case Some(cfg) => Right(Some(cohere(cfg)))
     }
-  }
 
   /**
    * No-op reranker that passes through results unchanged.

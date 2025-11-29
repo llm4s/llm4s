@@ -2,6 +2,12 @@ package org.llm4s.llmconnect.config
 
 object ModelDimensionRegistry {
 
+  /**
+   * Central registry for known embedding model dimensions.
+   *
+   * Prefer this registry over ad-hoc per-callsite maps so that configuration
+   * code and encoding logic can look up dimensionality consistently.
+   */
   private val dimensions: Map[String, Map[String, Int]] = Map(
     "openai" -> Map(
       "text-embedding-3-small" -> 1536,

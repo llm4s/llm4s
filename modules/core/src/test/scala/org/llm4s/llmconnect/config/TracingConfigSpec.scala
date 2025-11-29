@@ -1,7 +1,9 @@
 package org.llm4s.llmconnect.config
 
-import org.llm4s.config.ConfigReader
-import org.llm4s.config.DefaultConfig
+// scalafix:off DisableSyntax.NoConfigFactory
+import com.typesafe.config.ConfigFactory
+// scalafix:on DisableSyntax.NoConfigFactory
+import org.llm4s.config.{ DefaultConfig, Llm4sConfig }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -11,6 +13,7 @@ class TracingConfigSpec extends AnyWordSpec with Matchers {
     val originals = props.keys.map(k => k -> Option(System.getProperty(k))).toMap
     try {
       props.foreach { case (k, v) => System.setProperty(k, v) }
+      ConfigFactory.invalidateCaches()
       f
     } finally
       originals.foreach {
@@ -23,14 +26,14 @@ class TracingConfigSpec extends AnyWordSpec with Matchers {
     Option(System.getenv("LANGFUSE_PUBLIC_KEY")).exists(_.nonEmpty) ||
       Option(System.getenv("LANGFUSE_SECRET_KEY")).exists(_.nonEmpty)
 
-  "ConfigReader.TracingConf (Langfuse settings)" should {
+  "Llm4sConfig.tracing (Langfuse settings)" should {
     "provide defaults when not configured" in {
       // Skip test if Langfuse is configured in environment
       if (isLangfuseConfigured) {
         cancel("Test skipped: Langfuse is configured in environment (LANGFUSE_PUBLIC_KEY or LANGFUSE_SECRET_KEY)")
       }
 
-      val ts  = ConfigReader.TracingConf().fold(err => fail(err.toString), identity)
+      val ts  = Llm4sConfig.tracing().fold(err => fail(err.toString), identity)
       val cfg = ts.langfuse
       cfg.url shouldBe DefaultConfig.DEFAULT_LANGFUSE_URL
       cfg.env shouldBe DefaultConfig.DEFAULT_LANGFUSE_ENV
@@ -50,7 +53,7 @@ class TracingConfigSpec extends AnyWordSpec with Matchers {
         "llm4s.tracing.langfuse.version"   -> "2.1.3"
       )
       withProps(props) {
-        val ts  = ConfigReader.TracingConf().fold(err => fail(err.toString), identity)
+        val ts  = Llm4sConfig.tracing().fold(err => fail(err.toString), identity)
         val cfg = ts.langfuse
         cfg.url shouldBe "https://example.com/api"
         cfg.publicKey shouldBe Some("pub")

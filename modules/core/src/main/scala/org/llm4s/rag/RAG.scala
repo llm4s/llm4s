@@ -1,14 +1,13 @@
 package org.llm4s.rag
 
 import org.llm4s.chunking.{ ChunkerFactory, DocumentChunk, DocumentChunker }
-import org.llm4s.config.ConfigReader
 import org.llm4s.error.{ ConfigurationError, ProcessingError }
-import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient, LLMConnect }
+import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.extractors.UniversalExtractor
 import org.llm4s.llmconnect.model._
 import org.llm4s.rag.loader._
-import org.llm4s.reranker.{ Reranker, RerankerFactory }
+import org.llm4s.reranker.{ RerankProviderConfig, Reranker, RerankerFactory }
 import org.llm4s.trace.EnhancedTracing
 import org.llm4s.types.Result
 import org.llm4s.vectorstore._
@@ -810,58 +809,43 @@ Answer:"""
 
 object RAG {
 
+  private val missingEmbeddingProviderConfig: String => Result[EmbeddingProviderConfig] = provider =>
+    Left(
+      ConfigurationError(
+        s"Missing embedding provider config for '$provider'. Inject a resolver that returns EmbeddingProviderConfig for the selected provider."
+      )
+    )
+
   /**
    * Create a RAG builder with default configuration.
    */
   def builder(): RAGConfig = RAGConfig.default
 
   /**
-   * Create a RAG pipeline from environment configuration.
-   *
-   * Reads embedding provider from EMBEDDING_PROVIDER and related env vars.
-   * Creates an in-memory pipeline by default.
-   */
-  def fromEnv(): Result[RAG] =
-    for {
-      embeddingResult <- ConfigReader.Embeddings()
-      (providerName, providerConfig) = embeddingResult
-      embeddingClient <- EmbeddingClient.from(providerName, providerConfig)
-      dims       = defaultDimensions.getOrElse(providerConfig.model, 1536)
-      provider   = EmbeddingProvider.fromString(providerName).getOrElse(EmbeddingProvider.OpenAI)
-      baseConfig = RAGConfig().withEmbeddings(provider).withEmbeddingDimensions(dims)
-      rag <- build(baseConfig, Some(embeddingClient))
-    } yield rag
-
-  /**
-   * Create a RAG pipeline from environment with LLM client.
-   */
-  def fromEnvWithLLM(): Result[RAG] =
-    for {
-      embeddingResult <- ConfigReader.Embeddings()
-      (providerName, providerConfig) = embeddingResult
-      embeddingClient <- EmbeddingClient.from(providerName, providerConfig)
-      llmClient       <- LLMConnect.fromEnv()
-      dims       = defaultDimensions.getOrElse(providerConfig.model, 1536)
-      provider   = EmbeddingProvider.fromString(providerName).getOrElse(EmbeddingProvider.OpenAI)
-      baseConfig = RAGConfig().withEmbeddings(provider).withEmbeddingDimensions(dims).withLLM(llmClient)
-      rag <- build(baseConfig, Some(embeddingClient))
-    } yield rag
-
-  /**
    * Build a RAG pipeline from configuration.
    */
-  def build(config: RAGConfig): Result[RAG] = build(config, None)
+  def build(
+    config: RAGConfig,
+    resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig] = missingEmbeddingProviderConfig,
+    resolveRerankerConfig: () => Result[Option[RerankProviderConfig]] = () => Right(None)
+  ): Result[RAG] =
+    build(config, None, resolveEmbeddingProvider, resolveRerankerConfig)
 
-  private def build(config: RAGConfig, existingClient: Option[EmbeddingClient]): Result[RAG] =
+  private def build(
+    config: RAGConfig,
+    existingClient: Option[EmbeddingClient],
+    resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig],
+    resolveRerankerConfig: () => Result[Option[RerankProviderConfig]]
+  ): Result[RAG] =
     for {
       embeddingClient <- existingClient match {
         case Some(c) => Right(c)
-        case None    => createEmbeddingClient(config)
+        case None    => createEmbeddingClient(config, resolveEmbeddingProvider)
       }
       embeddingModelConfig = createEmbeddingModelConfig(config)
       chunker              = createChunker(config, embeddingClient, embeddingModelConfig)
       hybridSearcher <- createHybridSearcher(config)
-      reranker       <- createReranker(config)
+      reranker       <- createReranker(config, resolveRerankerConfig)
       registry       <- createRegistry(config)
       rag = new RAG(
         config = config,
@@ -894,28 +878,32 @@ object RAG {
    * Extension method to build from config.
    */
   implicit class RAGConfigOps(private val config: RAGConfig) extends AnyVal {
-    def build(): Result[RAG] = RAG.build(config)
+    def build(): Result[RAG] =
+      RAG.build(config)
+
+    def build(
+      resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig],
+      resolveRerankerConfig: () => Result[Option[RerankProviderConfig]] = () => Right(None)
+    ): Result[RAG] =
+      RAG.build(config, resolveEmbeddingProvider, resolveRerankerConfig)
   }
 
   // ========== Private Builders ==========
 
-  private def createEmbeddingClient(config: RAGConfig): Result[EmbeddingClient] = {
-    val (baseUrl, providerName) = config.embeddingProvider match {
-      case EmbeddingProvider.OpenAI => ("https://api.openai.com/v1", "openai")
-      case EmbeddingProvider.Voyage => ("https://api.voyageai.com/v1", "voyage")
-      case EmbeddingProvider.Ollama => ("http://localhost:11434", "ollama")
+  private def createEmbeddingClient(
+    config: RAGConfig,
+    resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig]
+  ): Result[EmbeddingClient] = {
+    val expectedProvider = config.embeddingProvider match {
+      case EmbeddingProvider.OpenAI => "openai"
+      case EmbeddingProvider.Voyage => "voyage"
+      case EmbeddingProvider.Ollama => "ollama"
     }
 
     val model = config.embeddingModel.getOrElse(defaultModel(config.embeddingProvider))
 
-    // Read API key from environment
-    ConfigReader.Embeddings().flatMap { case (_, envConfig) =>
-      val providerConfig = EmbeddingProviderConfig(
-        baseUrl = baseUrl,
-        model = model,
-        apiKey = envConfig.apiKey
-      )
-      EmbeddingClient.from(providerName, providerConfig)
+    resolveEmbeddingProvider(expectedProvider).flatMap { providerConfig =>
+      EmbeddingClient.from(expectedProvider, providerConfig.copy(model = model))
     }
   }
 
@@ -947,16 +935,23 @@ object RAG {
         HybridSearcher.inMemory()
     }
 
-  private def createReranker(config: RAGConfig): Result[Option[Reranker]] =
+  private def createReranker(
+    config: RAGConfig,
+    resolveRerankerConfig: () => Result[Option[RerankProviderConfig]]
+  ): Result[Option[Reranker]] =
     config.rerankingStrategy match {
       case RerankingStrategy.None =>
         Right(None)
       case RerankingStrategy.Cohere(_) =>
-        ConfigReader.LLMConfig().flatMap { cfg =>
-          RerankerFactory.fromEnv(cfg).map {
-            case Some(r) => Some(r)
-            case None    => None
-          }
+        resolveRerankerConfig().flatMap {
+          case Some(cfg) =>
+            Right(Some(RerankerFactory.cohere(cfg)))
+          case None =>
+            Left(
+              ConfigurationError(
+                "Cohere reranking selected but no reranker provider config was supplied. Provide a RerankProviderConfig via resolveRerankerConfig."
+              )
+            )
         }
       case RerankingStrategy.LLM =>
         config.llmClient match {

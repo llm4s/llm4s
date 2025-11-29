@@ -1,8 +1,8 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
-import org.llm4s.samples.util.ConfigValidator
 
 /**
  * Basic example demonstrating simple LLM API calls using LLM4S.
@@ -79,12 +79,12 @@ object BasicLLMCallingExample {
       )
     )
 
-    // Execute the example with validation and error handling
+    // Execute the example with explicit configuration and error handling
     val result = for {
-      // Validate configuration before attempting to connect
-      _ <- ConfigValidator.validateEnvironment()
-      // Get LLM client from environment variables
-      client <- LLMConnect.fromEnv()
+      // Load provider configuration (model, base URL, API key, etc.)
+      providerCfg <- Llm4sConfig.provider()
+      // Build LLM client from typed provider config
+      client <- LLMConnect.getClient(providerCfg)
       // Make the completion request
       completion <- client.complete(conversation)
       _ = {

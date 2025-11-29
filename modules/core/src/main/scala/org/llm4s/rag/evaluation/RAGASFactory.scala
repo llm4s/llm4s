@@ -1,10 +1,10 @@
 package org.llm4s.rag.evaluation
 
-import org.llm4s.config.ConfigReader
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient, LLMConnect }
-import org.llm4s.llmconnect.config.EmbeddingModelConfig
+import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ModelDimensionRegistry, ProviderConfig }
 import org.llm4s.rag.evaluation.metrics._
 import org.llm4s.types.Result
+import scala.util.Try
 
 /**
  * Factory for creating RAGAS evaluators and individual metrics.
@@ -15,7 +15,7 @@ import org.llm4s.types.Result
  * @example
  * {{{{
  * // Create from environment
- * val evaluator = RAGASFactory.fromEnv()
+ * val evaluator = RAGASFactory.fromConfigs(providerCfg, embeddingCfg)
  *
  * // Create with specific metrics
  * val basicEvaluator = RAGASFactory.withMetrics(
@@ -30,36 +30,17 @@ import org.llm4s.types.Result
 object RAGASFactory {
 
   /**
-   * Default embedding dimensions for common models.
+   * Create evaluator with all default metrics from explicit configurations.
    */
-  private val defaultDimensions: Map[String, Int] = Map(
-    "text-embedding-3-small" -> 1536,
-    "text-embedding-3-large" -> 3072,
-    "text-embedding-ada-002" -> 1536,
-    "voyage-3"               -> 1024,
-    "voyage-3-lite"          -> 512,
-    "voyage-code-3"          -> 1024,
-    "nomic-embed-text"       -> 768,
-    "mxbai-embed-large"      -> 1024,
-    "all-minilm"             -> 384
-  )
-
-  /**
-   * Create evaluator with all default metrics from environment configuration.
-   *
-   * Reads LLM and embedding configuration from environment variables:
-   * - LLM_MODEL: The LLM provider/model for semantic evaluation
-   * - EMBEDDING_PROVIDER: The embedding provider (openai, voyage, ollama)
-   * - Standard provider-specific keys (OPENAI_API_KEY, etc.)
-   *
-   * @return A configured evaluator or an error
-   */
-  def fromEnv(): Result[RAGASEvaluator] =
+  def fromConfigs(
+    providerCfg: ProviderConfig,
+    embedding: (String, org.llm4s.llmconnect.config.EmbeddingProviderConfig)
+  ): Result[RAGASEvaluator] =
     for {
-      llmClient       <- LLMConnect.fromEnv()
-      embeddingClient <- EmbeddingClient.fromEnv()
-      embeddingConfig <- ConfigReader.Embeddings().map(_._2)
-      dims              = defaultDimensions.getOrElse(embeddingConfig.model, 1536)
+      llmClient <- LLMConnect.getClient(providerCfg)
+      (providerName, embeddingConfig) = embedding
+      embeddingClient <- EmbeddingClient.from(providerName, embeddingConfig)
+      dims              = Try(ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model)).getOrElse(1536)
       embeddingModelCfg = EmbeddingModelConfig(embeddingConfig.model, dims)
     } yield RAGASEvaluator(llmClient, embeddingClient, embeddingModelCfg)
 
@@ -119,16 +100,17 @@ object RAGASFactory {
   ): RAGASEvaluator = RAGASEvaluator.basic(llmClient, embeddingClient, embeddingModelConfig)
 
   /**
-   * Create a basic evaluator from environment configuration.
-   *
-   * @return A basic evaluator or an error
+   * Create a basic evaluator from explicit configurations.
    */
-  def basicFromEnv(): Result[RAGASEvaluator] =
+  def basicFromConfigs(
+    providerCfg: ProviderConfig,
+    embedding: (String, org.llm4s.llmconnect.config.EmbeddingProviderConfig)
+  ): Result[RAGASEvaluator] =
     for {
-      llmClient       <- LLMConnect.fromEnv()
-      embeddingClient <- EmbeddingClient.fromEnv()
-      embeddingConfig <- ConfigReader.Embeddings().map(_._2)
-      dims              = defaultDimensions.getOrElse(embeddingConfig.model, 1536)
+      llmClient <- LLMConnect.getClient(providerCfg)
+      (providerName, embeddingConfig) = embedding
+      embeddingClient <- EmbeddingClient.from(providerName, embeddingConfig)
+      dims              = Try(ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model)).getOrElse(1536)
       embeddingModelCfg = EmbeddingModelConfig(embeddingConfig.model, dims)
     } yield RAGASEvaluator.basic(llmClient, embeddingClient, embeddingModelCfg)
 

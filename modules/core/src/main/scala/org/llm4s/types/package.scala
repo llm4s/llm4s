@@ -1,10 +1,9 @@
 package org.llm4s
 
 import cats.data.ValidatedNec
-import org.llm4s.config.ConfigReader
 import org.llm4s.core.safety.{ DefaultErrorMapper, ErrorMapper, Safety }
 import org.llm4s.types.TryOps
-import org.llm4s.error.{ ConfigurationError, ValidationError }
+import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model.StreamedChunk
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.{ AsyncResult, Result }
@@ -756,13 +755,6 @@ package object types {
       if (value.trim.nonEmpty && value.length >= 8) Right(new ApiKey(value))
       else Left(error.ValidationError("apiKey", "Must be at least 8 characters"))
 
-    def fromEnvironment(envVar: String)(config: ConfigReader): Result[ApiKey] =
-      config
-        .get(envVar)
-        .toRight(ConfigurationError(s"Environment variable '$envVar' not found", List(envVar)))
-        .flatMap(apply)
-
-    def unsafe(value: String): ApiKey = new ApiKey(value)
   }
 
   object ToolName {

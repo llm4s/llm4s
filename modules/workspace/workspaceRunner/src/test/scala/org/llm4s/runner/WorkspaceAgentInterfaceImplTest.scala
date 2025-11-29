@@ -10,9 +10,10 @@ import java.nio.file.Files
 class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org.scalatest.BeforeAndAfterAll {
 
   // Create a temporary workspace for testing
-  val tempDir       = Files.createTempDirectory("workspace-test")
-  val workspacePath = tempDir.toString
-  val interface     = new WorkspaceAgentInterfaceImpl(workspacePath)
+  val tempDir               = Files.createTempDirectory("workspace-test")
+  val workspacePath         = tempDir.toString
+  private val isWindowsHost = System.getProperty("os.name").startsWith("Windows")
+  val interface             = new WorkspaceAgentInterfaceImpl(workspacePath, isWindowsHost)
 
   // Create some test files
   val testFile1 = tempDir.resolve("test1.txt")

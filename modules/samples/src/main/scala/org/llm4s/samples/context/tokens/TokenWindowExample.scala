@@ -1,6 +1,6 @@
 package org.llm4s.samples.context.tokens
 
-import org.llm4s.config.ConfigReader
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.context.{ ConversationTokenCounter, TokenWindow, ConversationWindow }
 import org.llm4s.context.tokens.TokenizerMapping
 import org.llm4s.types.{ TokenBudget, HeadroomPercent }
@@ -38,8 +38,9 @@ object TokenWindowExample {
     logger.info("Starting Multi-Provider Token Window Management Demo")
 
     val result = for {
-      modelName    <- ConfigReader.Provider().map(_.model)
-      client       <- LLMConnect.fromEnv()
+      providerCfg <- Llm4sConfig.provider()
+      modelName = providerCfg.model
+      client       <- LLMConnect.getClient(providerCfg)
       tokenCounter <- createTokenCounter(modelName)
       demoResults  <- runDemo(client, tokenCounter, modelName)
     } yield demoResults

@@ -1,10 +1,8 @@
 package org.llm4s.llmconnect.encoding
 
 import org.apache.tika.Tika
-import org.llm4s.config.ConfigReader
-import org.llm4s.config.ConfigReader.LLMConfig
 import org.llm4s.llmconnect.EmbeddingClient
-import org.llm4s.llmconnect.config._
+import org.llm4s.llmconnect.config.LocalEmbeddingModels
 import org.llm4s.llmconnect.extractors.UniversalExtractor
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.utils.{ ChunkingUtils, ModelSelector }
@@ -22,15 +20,15 @@ object UniversalEncoder {
   // Maximum dimension size for stub embeddings to prevent OOM in tests
   private val MAX_STUB_DIMENSION = 8192
 
-  /** Entry point: detect MIME → extract → encode → normalized vectors + metadata. */
-  def encodeFromPath(path: Path, client: EmbeddingClient): Result[Seq[EmbeddingVector]] =
-    LLMConfig().flatMap(cfg => encodeFromPath(path, client, cfg))
+  final case class TextChunkingConfig(enabled: Boolean, size: Int, overlap: Int)
 
-  /** Entry point with explicit config for better testability and error handling. */
   def encodeFromPath(
     path: Path,
     client: EmbeddingClient,
-    config: ConfigReader
+    textModel: org.llm4s.llmconnect.config.EmbeddingModelConfig,
+    chunking: TextChunkingConfig,
+    experimentalStubsEnabled: Boolean,
+    localModels: LocalEmbeddingModels
   ): Result[Seq[EmbeddingVector]] = {
     val f = path.toFile
     if (!f.exists() || !f.isFile) return Left(EmbeddingError(None, s"File not found: $path", "extractor"))
@@ -39,10 +37,10 @@ object UniversalEncoder {
     logger.debug(s"[UniversalEncoder] MIME detected: $mime")
 
     // Reuse canonical MIME logic from UniversalExtractor (no duplication).
-    if (UniversalExtractor.isTextLike(mime)) encodeTextFile(f, mime, client, config)
-    else if (mime.startsWith("image/")) encodeImageFile(f, mime, config)
-    else if (mime.startsWith("audio/")) encodeAudioFile(f, mime, config)
-    else if (mime.startsWith("video/")) encodeVideoFile(f, mime, config)
+    if (UniversalExtractor.isTextLike(mime)) encodeTextFile(f, mime, client, textModel, chunking)
+    else if (mime.startsWith("image/")) encodeImageFile(f, mime, experimentalStubsEnabled, localModels)
+    else if (mime.startsWith("audio/")) encodeAudioFile(f, mime, experimentalStubsEnabled, localModels)
+    else if (mime.startsWith("video/")) encodeVideoFile(f, mime, experimentalStubsEnabled, localModels)
     else Left(EmbeddingError(None, s"Unsupported MIME for encoding: $mime", "encoder"))
   }
 
@@ -51,44 +49,38 @@ object UniversalEncoder {
     file: File,
     mime: String,
     client: EmbeddingClient,
-    config: ConfigReader
+    textModel: org.llm4s.llmconnect.config.EmbeddingModelConfig,
+    chunking: TextChunkingConfig
   ): Result[Seq[EmbeddingVector]] =
     UniversalExtractor.extract(file.getAbsolutePath) match {
       case Left(e) => Left(EmbeddingError(None, e.message, "extractor"))
       case Right(text) =>
-        val inputs: Seq[String] =
-          if (EmbeddingConfig.chunkingEnabled(config)) {
-            val size = EmbeddingConfig.chunkSize(config)
-            val ovlp = EmbeddingConfig.chunkOverlap(config)
-            logger.debug(s"[UniversalEncoder] Chunking text: size=$size overlap=$ovlp")
-            ChunkingUtils.chunkText(text, size, ovlp)
+        val inputs =
+          if (chunking.enabled) {
+            logger.debug(s"[UniversalEncoder] Chunking text: size=${chunking.size} overlap=${chunking.overlap}")
+            ChunkingUtils.chunkText(text, chunking.size, chunking.overlap)
           } else Seq(text)
 
-        val model = ModelSelector.selectModel(Text, config)
-        val req   = EmbeddingRequest(input = inputs, model = model)
+        val req = EmbeddingRequest(input = inputs, model = textModel)
 
-        client.embed(req).map { r =>
-          val dim = model.dimensions
-          r.embeddings.zipWithIndex.map { case (vec, i) =>
+        client.embed(req).map { resp =>
+          val dim = textModel.dimensions
+          resp.embeddings.zipWithIndex.map { case (vec, i) =>
             EmbeddingVector(
               id = s"${file.getName}#chunk_$i",
               modality = Text,
-              model = model.name,
+              model = textModel.name,
               dim = dim,
               values = l2(vec.map(_.toFloat).toArray),
               meta = Map(
-                "provider" -> r.metadata.getOrElse("provider", EmbeddingConfig.activeProvider(config)),
+                "provider" -> resp.metadata.getOrElse("provider", "unknown"),
                 "mime"     -> mime,
-                "count"    -> r.metadata.getOrElse("count", inputs.size.toString)
+                "count"    -> resp.metadata.getOrElse("count", inputs.size.toString)
               )
             )
           }
         }
     }
-
-  // --------------- EXPERIMENTAL GATE ----------------
-  private def experimentalOn(config: ConfigReader): Boolean =
-    config.get("ENABLE_EXPERIMENTAL_STUBS").exists(_.trim.equalsIgnoreCase("true"))
 
   private def notImpl(mod: String) =
     Left(
@@ -103,16 +95,17 @@ object UniversalEncoder {
   private def encodeImageFile(
     file: File,
     mime: String,
-    config: ConfigReader
+    experimentalStubsEnabled: Boolean,
+    localModels: LocalEmbeddingModels
   ): Result[Seq[EmbeddingVector]] = {
-    if (!experimentalOn(config)) return notImpl("Image")
-    val model = ModelSelector.selectModel(Image, config)
-    val dim   = model.dimensions
-    // Limit dimension to prevent OOM in tests (max 8K dimensions)
-    val safeDim = math.min(dim, MAX_STUB_DIMENSION)
-    val seed    = stableSeed(file)
-    val raw     = fillDeterministic(safeDim, seed)
-    Right(
+    if (!experimentalStubsEnabled) return notImpl("Image")
+    val modelResult = ModelSelector.selectModel(Image, localModels)
+    modelResult.map { model =>
+      val dim = model.dimensions
+      // Limit dimension to prevent OOM in tests (max 8K dimensions)
+      val safeDim = math.min(dim, MAX_STUB_DIMENSION)
+      val seed    = stableSeed(file)
+      val raw     = fillDeterministic(safeDim, seed)
       Seq(
         EmbeddingVector(
           id = file.getName,
@@ -123,23 +116,24 @@ object UniversalEncoder {
           meta = Map("mime" -> mime, "experimental" -> "true", "provider" -> "local-experimental")
         )
       )
-    )
+    }
   }
 
   // ---------------- AUDIO (stub gated behind demo flag) ----------------
   private def encodeAudioFile(
     file: File,
     mime: String,
-    config: ConfigReader
+    experimentalStubsEnabled: Boolean,
+    localModels: LocalEmbeddingModels
   ): Result[Seq[EmbeddingVector]] = {
-    if (!experimentalOn(config)) return notImpl("Audio")
-    val model = ModelSelector.selectModel(Audio, config)
-    val dim   = model.dimensions
-    // Limit dimension to prevent OOM in tests (max 8K dimensions)
-    val safeDim = math.min(dim, MAX_STUB_DIMENSION)
-    val seed    = stableSeed(file) ^ 0x9e3779b97f4a7c15L
-    val raw     = fillDeterministic(safeDim, seed)
-    Right(
+    if (!experimentalStubsEnabled) return notImpl("Audio")
+    val modelResult = ModelSelector.selectModel(Audio, localModels)
+    modelResult.map { model =>
+      val dim = model.dimensions
+      // Limit dimension to prevent OOM in tests (max 8K dimensions)
+      val safeDim = math.min(dim, MAX_STUB_DIMENSION)
+      val seed    = stableSeed(file) ^ 0x9e3779b97f4a7c15L
+      val raw     = fillDeterministic(safeDim, seed)
       Seq(
         EmbeddingVector(
           id = file.getName,
@@ -150,23 +144,24 @@ object UniversalEncoder {
           meta = Map("mime" -> mime, "experimental" -> "true", "provider" -> "local-experimental")
         )
       )
-    )
+    }
   }
 
   // ---------------- VIDEO (stub gated behind demo flag) ----------------
   private def encodeVideoFile(
     file: File,
     mime: String,
-    config: ConfigReader
+    experimentalStubsEnabled: Boolean,
+    localModels: LocalEmbeddingModels
   ): Result[Seq[EmbeddingVector]] = {
-    if (!experimentalOn(config)) return notImpl("Video")
-    val model = ModelSelector.selectModel(Video, config)
-    val dim   = model.dimensions
-    // Limit dimension to prevent OOM in tests (max 8K dimensions)
-    val safeDim = math.min(dim, MAX_STUB_DIMENSION)
-    val seed    = stableSeed(file) ^ 0xc2b2ae3d27d4eb4fL
-    val raw     = fillDeterministic(safeDim, seed)
-    Right(
+    if (!experimentalStubsEnabled) return notImpl("Video")
+    val modelResult = ModelSelector.selectModel(Video, localModels)
+    modelResult.map { model =>
+      val dim = model.dimensions
+      // Limit dimension to prevent OOM in tests (max 8K dimensions)
+      val safeDim = math.min(dim, MAX_STUB_DIMENSION)
+      val seed    = stableSeed(file) ^ 0xc2b2ae3d27d4eb4fL
+      val raw     = fillDeterministic(safeDim, seed)
       Seq(
         EmbeddingVector(
           id = file.getName,
@@ -177,7 +172,7 @@ object UniversalEncoder {
           meta = Map("mime" -> mime, "experimental" -> "true", "provider" -> "local-experimental")
         )
       )
-    )
+    }
   }
 
   // ---------------- helpers ----------------

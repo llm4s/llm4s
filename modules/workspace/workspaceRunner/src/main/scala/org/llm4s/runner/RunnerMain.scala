@@ -30,8 +30,11 @@ object RunnerMain extends cask.MainRoutes {
   private val workspacePath = Option(System.getenv("WORKSPACE_PATH")).getOrElse("/workspace")
   // scalafix:on DisableSyntax.NoSystemGetenv
 
+  // Detect host OS once and pass into the workspace interface (edge of configuration)
+  private val isWindows: Boolean = System.getProperty("os.name").contains("Windows")
+
   // Initialize workspace interface
-  private val workspaceInterface = new WorkspaceAgentInterfaceImpl(workspacePath)
+  private val workspaceInterface = new WorkspaceAgentInterfaceImpl(workspacePath, isWindows)
 
   // Track active connections and their last heartbeat
   private val connections                                 = new ConcurrentHashMap[cask.WsChannelActor, AtomicLong]()

@@ -384,24 +384,32 @@ Use the comprehensive [documentation](docs/llm4s-g8-starter-kit.md) to get start
 
 ## Configuration: Unified Loaders
 
-llm4s exposes a single entry point for reading configuration with sensible precedence:
+llm4s exposes a single configuration flow with sensible precedence:
 
 - Precedence: `-D` system properties > `application.conf` (if your app provides it) > `reference.conf` defaults.
 - Environment variables are wired via `${?ENV}` in `reference.conf` (no `.env` reader required).
 
-Helpers under `ConfigReader` (and typed loaders):
+Preferred typed entry points (PureConfig-backed via `Llm4sConfig`):
 
-- `ConfigReader.LLMConfig()`: returns a reader that prefers `llm4s.*` keys and falls back to legacy env-style keys.
-- `ConfigReader.Provider()`: returns the typed provider config (OpenAI/Azure/Anthropic/Ollama) based on `LLM_MODEL`/`llm4s.llm.model`.
-- `ConfigReader.Embeddings()`: returns `(provider, EmbeddingProviderConfig)` with validation.
-- `ConfigReader.TracingConf()`: returns typed `TracingSettings` (mode + Langfuse settings) for `EnhancedTracing/Tracing` creation.
+- Provider / model:
+  - `Llm4sConfig.provider(): Result[ProviderConfig]` – returns the typed provider config (OpenAI/Azure/Anthropic/Ollama).
+  - `LLMConnect.getClient(config: ProviderConfig): Result[LLMClient]` – builds a client from a typed config.
+- Tracing:
+  - `Llm4sConfig.tracing(): Result[TracingSettings]` – returns typed tracing settings.
+  - `EnhancedTracing.create(settings: TracingSettings): EnhancedTracing` – builds an enhanced tracer from typed settings.
+  - `Tracing.create(settings: TracingSettings): Tracing` – builds a legacy `Tracing` from typed settings.
+- Embeddings:
+  - `Llm4sConfig.embeddings(): Result[(String, EmbeddingProviderConfig)]` – returns `(provider, config)` with validation.
+  - `EmbeddingClient.from(provider: String, cfg: EmbeddingProviderConfig): Result[EmbeddingClient]` – builds an embeddings client from typed config.
 
-Recommended typed usage patterns:
+Recommended usage patterns:
 
-- Model name for display: `ConfigReader.Provider().map(_.model)` or prefer `completion.model` from API responses.
-- Tracing: `ConfigReader.TracingConf().map(Tracing.create)` or `EnhancedTracing.createFromEnv()` (Result).
-- Workspace (samples): `WorkspaceSettings.load()` to get `workspaceDir`, `imageName`, `hostPort`, `traceLogPath`.
-- Embeddings sample (samples): `EmbeddingUiSettings.load`, `EmbeddingTargets.load`, `EmbeddingQuery.load`.
+- Model name for display: `Llm4sConfig.provider().map(_.model)` or prefer `completion.model` from API responses.
+- Tracing:
+  - For enhanced tracing: `Llm4sConfig.tracing().map(EnhancedTracing.create)`.
+  - For legacy `Tracing`: `Llm4sConfig.tracing().map(Tracing.create)`.
+- Workspace (samples): `WorkspaceConfigSupport.load()` to get `workspaceDir`, `imageName`, `hostPort`, `traceLogPath`.
+- Embeddings sample (samples): `EmbeddingUiSettings.loadFromEnv`, `EmbeddingTargets.loadFromEnv`, `EmbeddingQuery.loadFromEnv` (sample helpers backed by `Llm4sConfig`).
 
 ### Config Keys → Typed Settings
 
@@ -410,22 +418,22 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
 - LLM model selection
   - Keys: `llm4s.llm.model` or `LLM_MODEL`
   - Type: `ProviderConfig` (with provider-specific subtypes)
-  - Loader: `ConfigReader.Provider()`
+  - Loader: `Llm4sConfig.provider()` + `LLMConnect.getClient(...)`
 
 - Tracing configuration
   - Keys: `llm4s.tracing.mode` | `TRACING_MODE`, `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION`
   - Type: `TracingSettings`
-  - Loader: `ConfigReader.TracingConf()`
+  - Loader: `Llm4sConfig.tracing()` → then `EnhancedTracing.create` or `Tracing.create`
 
 - Workspace settings (samples)
   - Keys: `llm4s.workspace.dir` | `WORKSPACE_DIR`, `llm4s.workspace.image` | `WORKSPACE_IMAGE`, `llm4s.workspace.port` | `WORKSPACE_PORT`, `llm4s.workspace.traceLogPath` | `WORKSPACE_TRACE_LOG`
   - Type: `WorkspaceSettings`
-  - Loader: `WorkspaceSettings.load()`
+  - Loader: `WorkspaceConfigSupport.load()`
 
 - Embeddings: inputs and UI (samples)
-  - Input paths: `EMBEDDING_INPUT_PATHS` or `EMBEDDING_INPUT_PATH` → `EmbeddingTargets.load()` → `EmbeddingTargets`
-  - Query: `EMBEDDING_QUERY` → `EmbeddingQuery.load()` → `EmbeddingQuery`
-  - UI knobs: `MAX_ROWS_PER_FILE`, `TOP_DIMS_PER_ROW`, `GLOBAL_TOPK`, `SHOW_GLOBAL_TOP`, `COLOR`, `TABLE_WIDTH` → `EmbeddingUiSettings.load()` → `EmbeddingUiSettings`
+  - Input paths: `EMBEDDING_INPUT_PATHS` or `EMBEDDING_INPUT_PATH` → `EmbeddingTargets.loadFromEnv()` → `EmbeddingTargets`
+  - Query: `EMBEDDING_QUERY` → `EmbeddingQuery.loadFromEnv()` → `EmbeddingQuery`
+  - UI knobs: `MAX_ROWS_PER_FILE`, `TOP_DIMS_PER_ROW`, `GLOBAL_TOPK`, `SHOW_GLOBAL_TOP`, `COLOR`, `TABLE_WIDTH` → `EmbeddingUiSettings.loadFromEnv()` → `EmbeddingUiSettings`
 
 - Embeddings: provider configuration
   - Key: `EMBEDDING_PROVIDER` or `llm4s.embeddings.provider` (required)
@@ -440,15 +448,15 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
 - Provider API keys and endpoints
   - Keys: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `AZURE_API_BASE`, `AZURE_API_KEY`, `AZURE_API_VERSION`, `OLLAMA_BASE_URL`
   - Type: concrete `ProviderConfig` (e.g., `OpenAIConfig`, `AnthropicConfig`, `AzureConfig`, `OllamaConfig`)
-  - Loader: `ConfigReader.Provider()` → then provider-specific config constructors
+  - Loader: `Llm4sConfig.provider()` → then provider-specific config constructors
 
 Tracing
 
 - Configure mode via `llm4s.tracing.mode` (default: `console`). Supported: `langfuse`, `console`, `noop`.
 - Override with env: `TRACING_MODE=langfuse` (or system property `-Dllm4s.tracing.mode=langfuse`).
 - Build tracers:
-  - Typed convenience: `EnhancedTracing.createFromEnv()` → `Result[EnhancedTracing]`
-  - Wrap into legacy `Tracing` if needed: `Tracing.createFromEnhanced(enhanced)`
+  - Typed: `Llm4sConfig.tracing().map(EnhancedTracing.create)` → `Result[EnhancedTracing]`
+  - Legacy bridge: `Llm4sConfig.tracing().map(Tracing.create)`
   - Low-level: `LangfuseTracing.fromEnv()` → `Result[LangfuseTracing]`
 
 Example (no application.conf required):

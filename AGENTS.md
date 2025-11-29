@@ -10,6 +10,11 @@
 - Formatting/linting: `sbt scalafmtAll` is required; `sbt scalafixAll` is available for extra hygiene.
 - Dev hook: `./hooks/install.sh` installs a pre-commit that runs scalafmt, compile, and tests.
 
+## Configuration Boundary
+- Core main code must not read configuration directly. PureConfig/env/system property access lives only in `org.llm4s.config`; everywhere else consumes typed settings injected from the app edge.
+- `Llm4sConfig` is for edge use (samples, CLIs, tests). Any reference to it in core main code is a violation.
+- Scalafix enforces this: in `modules/core/src/main/scala`, imports/uses of `Llm4sConfig`, `ConfigSource.default`, `sys.env`, or `System.getenv` are blocked (except inside `org.llm4s.config`). Tests and runnable mains are exempt.
+
 ## Coding Style & Naming Conventions
 - `.scalafmt.conf` enforces two-space indents, aligned imports/params, and trailing commas; run scalafmt instead of hand-formatting.
 - Favor immutability, pure functions, and explicit types at module boundaries. Keep logging consistent with existing `org.slf4j` usage.

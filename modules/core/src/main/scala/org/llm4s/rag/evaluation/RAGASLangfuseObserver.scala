@@ -1,9 +1,7 @@
 package org.llm4s.rag.evaluation
 
+import org.llm4s.llmconnect.config.{ LangfuseConfig, TracingSettings }
 import org.llm4s.trace.{ LangfuseBatchSender, LangfuseHttpApiCaller }
-import org.llm4s.llmconnect.config.LangfuseConfig
-import org.llm4s.config.ConfigReader
-import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
 import java.time.Instant
@@ -27,7 +25,7 @@ import java.util.UUID
  *
  * @example
  * {{{{
- * val observer = RAGASLangfuseObserver.fromEnv()
+ * val observer = RAGASLangfuseObserver.fromTracingSettings(tracingSettings)
  *
  * val result = evaluator.evaluate(sample)
  * result.foreach { evalResult =>
@@ -282,17 +280,10 @@ object RAGASLangfuseObserver {
     )
 
   /**
-   * Create an observer from environment configuration.
-   *
-   * Reads Langfuse configuration from environment variables:
-   * - LANGFUSE_PUBLIC_KEY
-   * - LANGFUSE_SECRET_KEY
-   * - LANGFUSE_URL (optional, defaults to cloud)
-   *
-   * @return A configured observer or an error
+   * Create an observer from tracing settings.
    */
-  def fromEnv(): Result[RAGASLangfuseObserver] =
-    ConfigReader.TracingConf().map(ts => from(ts.langfuse))
+  def fromTracingSettings(tracing: TracingSettings): RAGASLangfuseObserver =
+    from(tracing.langfuse)
 
   /**
    * Create an observer with explicit credentials.

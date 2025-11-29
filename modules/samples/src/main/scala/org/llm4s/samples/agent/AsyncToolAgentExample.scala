@@ -1,6 +1,7 @@
 package org.llm4s.samples.agent
 
 import org.llm4s.agent.Agent
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi._
 import org.slf4j.LoggerFactory
@@ -33,8 +34,9 @@ object AsyncToolAgentExample {
     logger.info("")
 
     val result = for {
-      // Create LLM client
-      client <- LLMConnect.fromEnv()
+      // Load typed provider configuration and build LLM client
+      providerCfg <- Llm4sConfig.provider()
+      client      <- LLMConnect.getClient(providerCfg)
 
       // Create weather tool
       weatherTool = createWeatherTool()
@@ -86,7 +88,7 @@ object AsyncToolAgentExample {
         logger.info("Example completed successfully!")
 
       case Left(error) =>
-        logger.error("Example failed: {}", error.message)
+        logger.error("Example failed: {}", error.formatted)
         logger.error("")
         logger.error("Make sure you have set:")
         logger.error("  - LLM_MODEL (e.g., openai/gpt-4o)")

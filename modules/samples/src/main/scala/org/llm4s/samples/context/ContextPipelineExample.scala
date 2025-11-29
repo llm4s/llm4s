@@ -1,6 +1,6 @@
 package org.llm4s.samples.context
 
-import org.llm4s.config.ConfigReader
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.context.{ ContextManager, ContextConfig, ConversationTokenCounter }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
@@ -44,8 +44,9 @@ object ContextPipelineExample {
     logger.info("Starting Context Management Pipeline Example")
 
     val result = for {
-      modelName    <- ConfigReader.Provider().map(_.model)
-      client       <- LLMConnect.fromEnv()
+      providerCfg <- Llm4sConfig.provider()
+      modelName = providerCfg.model
+      client       <- LLMConnect.getClient(providerCfg)
       tokenCounter <- ConversationTokenCounter.forModel(modelName)
       contextMgr   <- createContextManager(tokenCounter, client)
       results      <- runPipelineDemo(contextMgr, tokenCounter)

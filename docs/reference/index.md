@@ -15,6 +15,7 @@ Technical reference materials for LLM4S development and maintenance.
 - **[Scalafix Rules](scalafix)** - Linting rules and code quality
 - **[Test Coverage](test-coverage)** - Testing guidelines and coverage
 - **[Release Process](release)** - How releases are created
+- **[Configuration Boundary](configuration-boundary)** - How configuration is isolated from core code
 
 ## Roadmap & Planning
 

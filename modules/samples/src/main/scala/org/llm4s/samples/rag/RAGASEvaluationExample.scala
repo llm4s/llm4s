@@ -1,9 +1,9 @@
 package org.llm4s.samples.rag
 
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
-import org.llm4s.llmconnect.config.EmbeddingModelConfig
+import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ModelDimensionRegistry }
 import org.llm4s.rag.evaluation._
-import org.llm4s.config.ConfigReader
 
 /**
  * Example demonstrating RAGAS evaluation of RAG pipeline quality.
@@ -59,10 +59,12 @@ object RAGASEvaluationExample extends App {
 
   // Create evaluator from environment
   val result = for {
-    llmClient       <- LLMConnect.fromEnv()
-    embeddingClient <- EmbeddingClient.fromEnv()
-    embeddingConfig <- ConfigReader.Embeddings().map(_._2)
-    dims        = getEmbeddingDimensions(embeddingConfig.model)
+    providerCfg     <- Llm4sConfig.provider()
+    llmClient       <- LLMConnect.getClient(providerCfg)
+    embeddingResult <- Llm4sConfig.embeddings()
+    (providerName, embeddingConfig) = embeddingResult
+    embeddingClient <- EmbeddingClient.from(providerName, embeddingConfig)
+    dims        = ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model)
     modelConfig = EmbeddingModelConfig(embeddingConfig.model, dims)
     evaluator   = RAGASEvaluator(llmClient, embeddingClient, modelConfig)
     _           = println(s"\n--- Running RAGAS Evaluation ---")
@@ -127,14 +129,4 @@ object RAGASEvaluationExample extends App {
       error.code.foreach(c => println(s"   Error code: $c"))
   }
 
-  private def getEmbeddingDimensions(model: String): Int = model match {
-    case "text-embedding-3-small" => 1536
-    case "text-embedding-3-large" => 3072
-    case "text-embedding-ada-002" => 1536
-    case "voyage-3"               => 1024
-    case "nomic-embed-text"       => 768
-    case "mxbai-embed-large"      => 1024
-    case "all-minilm"             => 384
-    case _                        => 1536 // default
-  }
 }

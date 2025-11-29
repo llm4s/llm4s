@@ -1,7 +1,9 @@
 package org.llm4s.samples.rag
 
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
 import org.llm4s.rag.benchmark._
+import org.llm4s.error.ConfigurationError
 
 /**
  * Example demonstrating the RAG benchmarking harness.
@@ -71,9 +73,15 @@ object BenchmarkExample {
 
     // Initialize benchmark runner
     val runnerResult = for {
-      llmClient       <- LLMConnect.fromEnv()
-      embeddingClient <- EmbeddingClient.fromEnv()
-    } yield BenchmarkRunner(llmClient, embeddingClient)
+      providerCfg     <- Llm4sConfig.provider()
+      llmClient       <- LLMConnect.getClient(providerCfg)
+      embeddingResult <- Llm4sConfig.embeddings()
+      (providerName, embCfg) = embeddingResult
+      embeddingClient <- EmbeddingClient.from(providerName, embCfg)
+      resolveEmbedding = (name: String) =>
+        if (name.equalsIgnoreCase(providerName)) Right(embCfg)
+        else Left(ConfigurationError(s"No embedding credentials for provider '$name'"))
+    } yield BenchmarkRunner(llmClient, embeddingClient, resolveEmbedding)
 
     runnerResult match {
       case Right(runner) =>

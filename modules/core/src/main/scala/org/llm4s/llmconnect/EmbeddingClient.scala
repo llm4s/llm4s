@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect
 
-import org.llm4s.config.ConfigReader
-import org.llm4s.llmconnect.config.{ EmbeddingConfig, EmbeddingProviderConfig }
+import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig, LocalEmbeddingModels }
+import org.llm4s.llmconnect.encoding.UniversalEncoder
 import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse, EmbeddingVector }
 import org.llm4s.llmconnect.provider.{
   EmbeddingProvider,
@@ -9,7 +9,6 @@ import org.llm4s.llmconnect.provider.{
   OpenAIEmbeddingProvider,
   VoyageAIEmbeddingProvider
 }
-import org.llm4s.llmconnect.encoding.UniversalEncoder
 import org.llm4s.model.ModelRegistry
 import org.llm4s.trace.EnhancedTracing
 import org.llm4s.types.Result
@@ -27,6 +26,7 @@ class EmbeddingClient(
   /** Text embeddings via the configured HTTP provider. */
   def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
     logger.debug(s"[EmbeddingClient] Embedding with model=${request.model.name}, inputs=${request.input.size}")
+
     val result = provider.embed(request)
 
     // Emit trace events if tracing is enabled and we got a response with usage
@@ -68,41 +68,18 @@ class EmbeddingClient(
   def withOperation(op: String): EmbeddingClient =
     new EmbeddingClient(provider, tracer, op)
 
-  /** Unified API to encode any supported file into vectors. */
-  def encodePath(path: Path): Result[Seq[EmbeddingVector]] =
-    UniversalEncoder.encodeFromPath(path, this)
+  /** Unified API to encode any supported file into vectors, given text model + chunking. */
+  def encodePath(
+    path: Path,
+    textModel: EmbeddingModelConfig,
+    chunking: UniversalEncoder.TextChunkingConfig,
+    experimentalStubsEnabled: Boolean,
+    localModels: LocalEmbeddingModels
+  ): Result[Seq[EmbeddingVector]] =
+    UniversalEncoder.encodeFromPath(path, this, textModel, chunking, experimentalStubsEnabled, localModels)
 }
 
 object EmbeddingClient {
-  private val logger = LoggerFactory.getLogger(getClass)
-
-  /**
-   * Safe factory: returns Either instead of throwing on misconfiguration.
-   * Useful for samples/CLIs where we want a clean error path.
-   */
-  def fromConfigEither(config: ConfigReader): Result[EmbeddingClient] = {
-    val providerName = EmbeddingConfig.activeProvider(config).toLowerCase
-    val providerOpt: Option[EmbeddingProvider] = providerName match {
-      case "openai" => Some(OpenAIEmbeddingProvider(config))
-      case "voyage" => Some(VoyageAIEmbeddingProvider(config))
-      case "ollama" => Some(OllamaEmbeddingProvider(config))
-      case _        => None
-    }
-
-    providerOpt match {
-      case Some(p) =>
-        logger.info(s"[EmbeddingClient] Initialized with provider: $providerName")
-        Right(new EmbeddingClient(p))
-      case None =>
-        Left(
-          EmbeddingError(
-            code = Some("400"),
-            message = s"Unsupported embedding provider: $providerName",
-            provider = "config"
-          )
-        )
-    }
-  }
 
   /**
    * Typed factory: build client from resolved provider name and typed provider config.
@@ -125,10 +102,4 @@ object EmbeddingClient {
     }
   }
 
-  /**
-   * Convenience factory: reads provider + config via ConfigReader and returns a client.
-   * Uses the unified loader ConfigReader.Embeddings().
-   */
-  def fromEnv(): Result[EmbeddingClient] =
-    org.llm4s.config.ConfigReader.Embeddings().flatMap { case (provider, cfg) => from(provider, cfg) }
 }

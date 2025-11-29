@@ -56,11 +56,11 @@ Generate embeddings for semantic similarity:
 
 ## Configuration
 
-LLM4S uses `ConfigReader` for all configuration. Never access environment variables directly:
+LLM4S uses `Llm4sConfig` for all configuration loading. Core logic should not access environment variables directly:
 
 ```scala
 // Good
-val config = ConfigReader.LLMConfig()
+val providerCfg = Llm4sConfig.provider()
 
 // Bad - don't do this
 val key = sys.env.get("API_KEY")

@@ -22,15 +22,8 @@ class OllamaRoutingTest extends AnyFunSuite with Matchers {
   }
 
   test("OllamaConfig.from(reader) uses provided base URL") {
-    val reader = org.llm4s.config.ConfigReader(
-      Map("OLLAMA_BASE_URL" -> "http://lan-host:11434")
-    )
-
-    org.llm4s.llmconnect.config.OllamaConfig("mistral:latest", reader) match {
-      case Right(cfg) =>
-        cfg.baseUrl shouldBe "http://lan-host:11434"
-        cfg.model shouldBe "mistral:latest"
-      case Left(err) => fail(s"Expected Right, got Left($err)")
-    }
+    val cfg = OllamaConfig.fromValues("mistral:latest", "http://lan-host:11434")
+    cfg.baseUrl shouldBe "http://lan-host:11434"
+    cfg.model shouldBe "mistral:latest"
   }
 }

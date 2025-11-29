@@ -210,7 +210,4 @@ object EnhancedTracing {
     case TracingMode.Console => new EnhancedConsoleTracing()
     case TracingMode.NoOp    => new EnhancedNoOpTracing()
   }
-
-  def createFromEnv(): org.llm4s.types.Result[EnhancedTracing] =
-    org.llm4s.config.ConfigReader.TracingConf().map(create)
 }

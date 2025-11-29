@@ -917,12 +917,13 @@ class Agent(client: LLMClient) {
    * @example
    * {{{
    * val result = for {
-   *   client <- LLMConnect.fromEnv()
-   *   tools = new ToolRegistry(Seq(WeatherTool.tool))
-   *   agent = new Agent(client)
-   *   state1 <- agent.run("What's the weather in Paris?", tools)
-   *   state2 <- agent.continueConversation(state1, "And in London?")
-   *   state3 <- agent.continueConversation(state2, "Which is warmer?")
+   *   providerCfg <- /* load provider config */
+   *   client      <- org.llm4s.llmconnect.LLMConnect.getClient(providerCfg)
+   *   tools       = new ToolRegistry(Seq(WeatherTool.tool))
+   *   agent       = new Agent(client)
+   *   state1     <- agent.run("What's the weather in Paris?", tools)
+   *   state2     <- agent.continueConversation(state1, "And in London?")
+   *   state3     <- agent.continueConversation(state2, "Which is warmer?")
    * } yield state3
    * }}}
    */

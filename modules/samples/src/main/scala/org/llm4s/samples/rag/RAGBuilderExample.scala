@@ -1,6 +1,7 @@
 package org.llm4s.samples.rag
 
 import org.llm4s.chunking.ChunkerFactory
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.rag.{ EmbeddingProvider, RAG, RAGConfig }
 import org.llm4s.rag.RAG.RAGConfigOps
@@ -126,13 +127,17 @@ object RAGBuilderExample extends App {
   println("\n--- Example 6: Building a Real RAG Pipeline ---")
 
   // Check if we have LLM configured for answer generation
-  val hasLLM = LLMConnect.fromEnv().isRight
+  val llmResult = for {
+    cfg    <- Llm4sConfig.provider()
+    client <- LLMConnect.getClient(cfg)
+  } yield client
+  val hasLLM = llmResult.isRight
 
   if (hasLLM) {
     println("LLM configured - building RAG with answer generation...")
 
     val result = for {
-      llmClient <- LLMConnect.fromEnv()
+      llmClient <- llmResult
       rag <- RAG
         .builder()
         .withEmbeddings(EmbeddingProvider.OpenAI)

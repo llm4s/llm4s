@@ -1,7 +1,7 @@
 package org.llm4s.rag.benchmark
 
-import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient, LLMConnect }
-import org.llm4s.llmconnect.config.EmbeddingModelConfig
+import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
+import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.rag.evaluation._
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -26,7 +26,7 @@ import org.slf4j.LoggerFactory
  *
  * @example
  * {{{
- * val runner = BenchmarkRunner.fromEnv()
+ * val runner = BenchmarkRunner(llmClient, embeddingClient, resolveEmbeddingProvider)
  * val suite = BenchmarkSuite.chunkingSuite("data/datasets/ragbench/test.jsonl")
  * val results = runner.runSuite(suite)
  * println(BenchmarkReport.console(results))
@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory
 class BenchmarkRunner(
   llmClient: LLMClient,
   embeddingClient: EmbeddingClient,
+  resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig],
   datasetManager: DatasetManager = DatasetManager(),
   val options: BenchmarkRunnerOptions = BenchmarkRunnerOptions()
 ) {
@@ -107,7 +108,7 @@ class BenchmarkRunner(
     val experimentEmbeddings = if (config.embeddingConfig == EmbeddingConfig.default) {
       Right(embeddingClient)
     } else {
-      RAGPipeline.createEmbeddingClient(config.embeddingConfig)
+      RAGPipeline.createEmbeddingClient(config.embeddingConfig, resolveEmbeddingProvider)
     }
 
     experimentEmbeddings.flatMap { embedClient =>
@@ -264,19 +265,6 @@ final case class BenchmarkRunnerOptions(
 object BenchmarkRunner {
 
   /**
-   * Create a benchmark runner from environment configuration.
-   *
-   * Requires LLM_MODEL and embedding provider environment variables.
-   *
-   * @return BenchmarkRunner or error
-   */
-  def fromEnv(): Result[BenchmarkRunner] =
-    for {
-      llmClient       <- LLMConnect.fromEnv()
-      embeddingClient <- EmbeddingClient.fromEnv()
-    } yield new BenchmarkRunner(llmClient, embeddingClient)
-
-  /**
    * Create a benchmark runner with specific clients.
    *
    * @param llmClient LLM client
@@ -287,59 +275,8 @@ object BenchmarkRunner {
   def apply(
     llmClient: LLMClient,
     embeddingClient: EmbeddingClient,
+    resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig],
     options: BenchmarkRunnerOptions = BenchmarkRunnerOptions()
-  ): BenchmarkRunner = new BenchmarkRunner(llmClient, embeddingClient, options = options)
-
-  /**
-   * Run a quick benchmark from command line.
-   *
-   * @param args Command line arguments
-   */
-  def main(args: Array[String]): Unit = {
-    val datasetPath = args.headOption.getOrElse {
-      println("Usage: BenchmarkRunner <dataset-path> [--quick]")
-      println("\nChecking for available datasets...")
-
-      val available = DatasetManager.checkDatasets()
-      available.foreach { case (name, exists) =>
-        val status = if (exists) "OK" else "MISSING"
-        println(s"  [$status] $name")
-      }
-
-      if (available.values.forall(!_)) {
-        println(DatasetManager.downloadInstructions)
-      }
-
-      sys.exit(1)
-    }
-
-    val isQuick = args.contains("--quick")
-
-    println(s"Loading benchmark runner...")
-
-    fromEnv() match {
-      case Right(runner) =>
-        val suite = if (isQuick) {
-          BenchmarkSuite.quickSuite(datasetPath)
-        } else {
-          BenchmarkSuite.chunkingSuite(datasetPath)
-        }
-
-        println(s"Running suite: ${suite.name}")
-        println(s"Experiments: ${suite.experiments.map(_.name).mkString(", ")}")
-
-        runner.runSuite(suite) match {
-          case Right(results) =>
-            println(BenchmarkReport.console(results))
-          case Left(error) =>
-            println(s"Benchmark failed: ${error.message}")
-            sys.exit(1)
-        }
-
-      case Left(error) =>
-        println(s"Failed to initialize: ${error.message}")
-        println("Ensure LLM_MODEL and embedding provider environment variables are set.")
-        sys.exit(1)
-    }
-  }
+  ): BenchmarkRunner =
+    new BenchmarkRunner(llmClient, embeddingClient, resolveEmbeddingProvider, options = options)
 }

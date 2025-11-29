@@ -1,6 +1,6 @@
 package org.llm4s.samples.streaming
 
-import org.llm4s.config.ConfigReader
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 
@@ -14,8 +14,9 @@ import org.llm4s.llmconnect.model._
  */
 object BasicStreamingExample {
   def main(args: Array[String]): Unit = {
-    val provider = ConfigReader.Provider().fold(err => throw new RuntimeException(err.formatted), identity)
-    val model    = provider.model
+    val model = Llm4sConfig
+      .provider()
+      .fold(err => throw new RuntimeException(err.formatted), _.model)
     println("=== LLM4S Basic Streaming Example ===")
     println(s"Using model: $model")
     println("=" * 50 + "\n")
@@ -29,9 +30,10 @@ object BasicStreamingExample {
     )
     var firstChunkTime: Option[Long] = None
     var chunkCount                   = 0
-    // Get a client using environment variables (Result-first)
+    // Get a client using typed configuration (Result-first)
     val result = for {
-      client <- LLMConnect.fromEnv()
+      providerCfg <- Llm4sConfig.provider()
+      client      <- LLMConnect.getClient(providerCfg)
       startTime = System.currentTimeMillis()
       completion <- client.streamComplete(
         conversation,

@@ -3,6 +3,7 @@ package org.llm4s.samples.guardrails
 import org.llm4s.agent.Agent
 import org.llm4s.agent.guardrails._
 import org.llm4s.agent.guardrails.builtin._
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
 
@@ -28,7 +29,8 @@ object CompositeGuardrailExample extends App {
   )
 
   val result1 = for {
-    client <- LLMConnect.fromEnv()
+    providerCfg <- Llm4sConfig.provider()
+    client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
     state <- agent.run(
@@ -60,7 +62,8 @@ object CompositeGuardrailExample extends App {
   )
 
   val result2 = for {
-    client <- LLMConnect.fromEnv()
+    providerCfg <- Llm4sConfig.provider()
+    client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
     state <- agent.run(
@@ -90,7 +93,8 @@ object CompositeGuardrailExample extends App {
   )
 
   val result3 = for {
-    client <- LLMConnect.fromEnv()
+    providerCfg <- Llm4sConfig.provider()
+    client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
     state <- agent.run(
@@ -138,7 +142,8 @@ object CompositeGuardrailExample extends App {
   }
 
   val result4 = for {
-    client <- LLMConnect.fromEnv()
+    providerCfg <- Llm4sConfig.provider()
+    client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
     state <- agent.run(

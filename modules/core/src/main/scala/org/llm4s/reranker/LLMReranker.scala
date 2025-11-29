@@ -16,8 +16,8 @@ import scala.util.Try
  *
  * Usage:
  * {{{
- * val llmClient = LLMConnect.fromEnv().getOrElse(???)
- * val reranker = LLMReranker(llmClient)
+ * val llmClient = /* build LLMClient with your ProviderConfig */
+ * val reranker  = LLMReranker(llmClient)
  *
  * val request = RerankRequest(
  *   query = "What is Scala?",

@@ -1,6 +1,6 @@
 package org.llm4s.samples.context
 
-import org.llm4s.config.ConfigReader
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.context.{ ConversationTokenCounter, LLMCompressor }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
@@ -41,8 +41,9 @@ object LlmDigestSqueezeExample {
     logger.info("Starting LLM Digest Squeeze Example")
 
     val result = for {
-      modelName    <- ConfigReader.Provider().map(_.model)
-      client       <- LLMConnect.fromEnv()
+      providerCfg <- Llm4sConfig.provider()
+      modelName = providerCfg.model
+      client       <- LLMConnect.getClient(providerCfg)
       tokenCounter <- ConversationTokenCounter.forModel(modelName)
       results      <- runSqueezeTests(client, tokenCounter)
     } yield results

@@ -17,3 +17,6 @@ target/
 
 # Benchmark data (downloaded datasets, generated test sets, results)
 data/
+
+# Developer local overlays
+**/application.local.conf

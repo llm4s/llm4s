@@ -1,6 +1,6 @@
 package org.llm4s.samples.context
 
-import org.llm4s.config.ConfigReader
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.context.{ ConversationTokenCounter, HistoryCompressor, SemanticBlocks }
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -40,7 +40,7 @@ object HistoryDigestExample {
     logger.info("Starting History Digest Compression Example")
 
     val result = for {
-      modelName    <- ConfigReader.Provider().map(_.model)
+      modelName    <- Llm4sConfig.provider().map(_.model)
       tokenCounter <- ConversationTokenCounter.forModel(modelName)
       demo         <- runHistoryDigestDemo(tokenCounter)
     } yield demo

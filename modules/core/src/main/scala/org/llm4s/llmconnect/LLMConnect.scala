@@ -1,20 +1,11 @@
 package org.llm4s.llmconnect
 
-import org.llm4s.config.ConfigKeys.LLM_MODEL
-import org.llm4s.config.ConfigReader
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config._
-import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider._
 import org.llm4s.types.Result
-object LLMConnect {
 
-  def getClient(config: ConfigReader): Result[LLMClient] =
-    for {
-      model    <- config.require(LLM_MODEL)
-      provider <- ProviderConfigLoader(model, config)
-      client   <- buildClient(provider)
-    } yield client
+object LLMConnect {
 
   private def buildClient(config: ProviderConfig): Result[LLMClient] =
     config match {
@@ -46,15 +37,4 @@ object LLMConnect {
         val msg     = s"Invalid config type $cfgType for provider $prov"
         Left(ConfigurationError(msg))
     }
-
-  def complete(
-    messages: Seq[Message],
-    options: CompletionOptions = CompletionOptions()
-  )(config: ConfigReader): Result[Completion] =
-    getClient(config).flatMap(_.complete(Conversation(messages), options))
-
-  // Convenience: build client from environment/config using typed ProviderConfig loader
-  def fromEnv(): Result[LLMClient] =
-    ConfigReader.Provider().flatMap(getClient)
-
 }
