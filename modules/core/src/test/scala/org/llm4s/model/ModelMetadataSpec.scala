@@ -7,14 +7,14 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
 
   "ModelMetadata" should "parse from JSON correctly" in {
     val json = ujson.Obj(
-      "litellm_provider"   -> "openai",
-      "mode"               -> "chat",
-      "max_input_tokens"   -> 128000,
-      "max_output_tokens"  -> 16384,
-      "input_cost_per_token" -> 2.5e-6,
-      "output_cost_per_token" -> 1e-5,
+      "litellm_provider"          -> "openai",
+      "mode"                      -> "chat",
+      "max_input_tokens"          -> 128000,
+      "max_output_tokens"         -> 16384,
+      "input_cost_per_token"      -> 2.5e-6,
+      "output_cost_per_token"     -> 1e-5,
       "supports_function_calling" -> true,
-      "supports_vision"    -> true
+      "supports_vision"           -> true
     )
 
     val result = ModelMetadata.fromJson("gpt-4o", json)
@@ -111,7 +111,7 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "detect deprecated models" in {
-    val pastDate = java.time.LocalDate.now().minusDays(1).toString
+    val pastDate   = java.time.LocalDate.now().minusDays(1).toString
     val futureDate = java.time.LocalDate.now().plusDays(1).toString
 
     val deprecatedModel = ModelMetadata(

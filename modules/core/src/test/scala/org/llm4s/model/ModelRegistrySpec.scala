@@ -6,9 +6,8 @@ import org.scalatest.matchers.should.Matchers
 
 class ModelRegistrySpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
-  override def beforeEach(): Unit = {
+  override def beforeEach(): Unit =
     ModelRegistry.reset()
-  }
 
   "ModelRegistry" should "initialize successfully" in {
     val result = ModelRegistry.initialize()
@@ -165,10 +164,10 @@ class ModelRegistrySpec extends AnyFlatSpec with Matchers with BeforeAndAfterEac
 
     val stats = ModelRegistry.statistics()
 
-    stats should contain key "totalModels"
-    stats should contain key "providers"
-    stats should contain key "chatModels"
-    stats should contain key "embeddingModels"
+    (stats should contain).key("totalModels")
+    (stats should contain).key("providers")
+    (stats should contain).key("chatModels")
+    (stats should contain).key("embeddingModels")
 
     stats("totalModels").asInstanceOf[Int] should be > 0
     stats("providers").asInstanceOf[Int] should be > 0

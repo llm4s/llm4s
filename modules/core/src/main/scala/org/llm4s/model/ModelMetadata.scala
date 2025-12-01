@@ -1,6 +1,6 @@
 package org.llm4s.model
 
-import org.llm4s.types.{ ModelName, ProviderName, Result }
+import org.llm4s.types.Result
 import org.llm4s.error.ValidationError
 import upickle.default._
 
@@ -50,34 +50,34 @@ case class ModelMetadata(
    * Check if this model supports a specific capability.
    */
   def supports(capability: String): Boolean = capability.toLowerCase match {
-    case "function_calling" | "tools"           => capabilities.supportsFunctionCalling.getOrElse(false)
-    case "parallel_function_calling"            => capabilities.supportsParallelFunctionCalling.getOrElse(false)
-    case "vision" | "images"                    => capabilities.supportsVision.getOrElse(false)
-    case "prompt_caching" | "caching"           => capabilities.supportsPromptCaching.getOrElse(false)
-    case "reasoning"                            => capabilities.supportsReasoning.getOrElse(false)
-    case "response_schema" | "structured"       => capabilities.supportsResponseSchema.getOrElse(false)
-    case "system_messages"                      => capabilities.supportsSystemMessages.getOrElse(false)
-    case "pdf_input" | "pdf"                    => capabilities.supportsPdfInput.getOrElse(false)
-    case "audio_input"                          => capabilities.supportsAudioInput.getOrElse(false)
-    case "audio_output"                         => capabilities.supportsAudioOutput.getOrElse(false)
-    case "web_search"                           => capabilities.supportsWebSearch.getOrElse(false)
-    case "computer_use"                         => capabilities.supportsComputerUse.getOrElse(false)
-    case "assistant_prefill" | "prefill"        => capabilities.supportsAssistantPrefill.getOrElse(false)
-    case "tool_choice"                          => capabilities.supportsToolChoice.getOrElse(false)
-    case _                                      => false
+    case "function_calling" | "tools"     => capabilities.supportsFunctionCalling.getOrElse(false)
+    case "parallel_function_calling"      => capabilities.supportsParallelFunctionCalling.getOrElse(false)
+    case "vision" | "images"              => capabilities.supportsVision.getOrElse(false)
+    case "prompt_caching" | "caching"     => capabilities.supportsPromptCaching.getOrElse(false)
+    case "reasoning"                      => capabilities.supportsReasoning.getOrElse(false)
+    case "response_schema" | "structured" => capabilities.supportsResponseSchema.getOrElse(false)
+    case "system_messages"                => capabilities.supportsSystemMessages.getOrElse(false)
+    case "pdf_input" | "pdf"              => capabilities.supportsPdfInput.getOrElse(false)
+    case "audio_input"                    => capabilities.supportsAudioInput.getOrElse(false)
+    case "audio_output"                   => capabilities.supportsAudioOutput.getOrElse(false)
+    case "web_search"                     => capabilities.supportsWebSearch.getOrElse(false)
+    case "computer_use"                   => capabilities.supportsComputerUse.getOrElse(false)
+    case "assistant_prefill" | "prefill"  => capabilities.supportsAssistantPrefill.getOrElse(false)
+    case "tool_choice"                    => capabilities.supportsToolChoice.getOrElse(false)
+    case _                                => false
   }
 
   /**
    * Check if the model is deprecated.
    */
   def isDeprecated: Boolean = deprecationDate.exists { date =>
-    try {
-      val deprecation = java.time.LocalDate.parse(date)
-      val now         = java.time.LocalDate.now()
-      !now.isBefore(deprecation)
-    } catch {
-      case _: Exception => false
-    }
+    scala.util
+      .Try {
+        val deprecation = java.time.LocalDate.parse(date)
+        val now         = java.time.LocalDate.now()
+        !now.isBefore(deprecation)
+      }
+      .getOrElse(false)
   }
 
   /**
@@ -91,10 +91,10 @@ case class ModelMetadata(
       if (capabilities.supportsReasoning.getOrElse(false)) Some("reasoning") else None
     ).flatten
 
-    val capsStr  = if (caps.nonEmpty) caps.mkString(", ") else "basic"
-    val ctxStr   = contextWindow.map(c => s"${c / 1000}K").getOrElse("unknown")
-    val deprStr  = if (isDeprecated) " [DEPRECATED]" else ""
-    s"$modelId ($provider, $mode, ${ctxStr} context, $capsStr)$deprStr"
+    val capsStr = if (caps.nonEmpty) caps.mkString(", ") else "basic"
+    val ctxStr  = contextWindow.map(c => s"${c / 1000}K").getOrElse("unknown")
+    val deprStr = if (isDeprecated) " [DEPRECATED]" else ""
+    s"$modelId ($provider, ${mode.name}, ${ctxStr} context, $capsStr)$deprStr"
   }
 }
 
@@ -104,26 +104,26 @@ object ModelMetadata {
   /**
    * Create ModelMetadata from raw JSON values.
    */
-  def fromJson(modelId: String, data: ujson.Value): Result[ModelMetadata] =
-    try {
-      val obj      = data.obj
-      val provider = obj.get("litellm_provider").map(_.str).getOrElse("unknown")
-      val mode     = obj.get("mode").map(v => ModelMode.fromString(v.str)).getOrElse(ModelMode.Chat)
+  def fromJson(modelId: String, data: ujson.Value): Result[ModelMetadata] = {
+    import org.llm4s.types.TryOps
+    scala.util
+      .Try {
+        val obj      = data.obj
+        val provider = obj.get("litellm_provider").map(_.str).getOrElse("unknown")
+        val mode     = obj.get("mode").map(v => ModelMode.fromString(v.str)).getOrElse(ModelMode.Chat)
 
-      val maxInputTokens  = obj.get("max_input_tokens").flatMap(v => if (v.isNull) None else Some(v.num.toInt))
-      val maxOutputTokens = obj.get("max_output_tokens").flatMap(v => if (v.isNull) None else Some(v.num.toInt))
+        val maxInputTokens  = obj.get("max_input_tokens").flatMap(v => if (v.isNull) None else Some(v.num.toInt))
+        val maxOutputTokens = obj.get("max_output_tokens").flatMap(v => if (v.isNull) None else Some(v.num.toInt))
 
-      val inputCost  = obj.get("input_cost_per_token").flatMap(v => if (v.isNull) None else Some(v.num))
-      val outputCost = obj.get("output_cost_per_token").flatMap(v => if (v.isNull) None else Some(v.num))
+        val inputCost  = obj.get("input_cost_per_token").flatMap(v => if (v.isNull) None else Some(v.num))
+        val outputCost = obj.get("output_cost_per_token").flatMap(v => if (v.isNull) None else Some(v.num))
 
-      val capabilities = ModelCapabilities.fromJson(data)
-      val pricing      = ModelPricing.fromJson(data)
+        val capabilities = ModelCapabilities.fromJson(data)
+        val pricing      = ModelPricing.fromJson(data)
 
-      val deprecationDate = obj.get("deprecation_date").flatMap { v =>
-        if (v.isNull || v.str.isEmpty) None else Some(v.str)
-      }
+        val deprecationDate =
+          obj.get("deprecation_date").flatMap(v => if (v.isNull || v.str.isEmpty) None else Some(v.str))
 
-      Right(
         ModelMetadata(
           modelId = modelId,
           provider = provider,
@@ -136,11 +136,11 @@ object ModelMetadata {
           pricing = pricing,
           deprecationDate = deprecationDate
         )
-      )
-    } catch {
-      case e: Exception =>
-        Left(ValidationError(s"Failed to parse model metadata for $modelId: ${e.getMessage}", "modelId"))
-    }
+      }
+      .toResult
+      .left
+      .map(e => ValidationError(s"Failed to parse model metadata for $modelId: ${e.message}", "modelId"))
+  }
 }
 
 /**
@@ -151,16 +151,16 @@ sealed trait ModelMode {
 }
 
 object ModelMode {
-  case object Chat               extends ModelMode { val name = "chat"               }
-  case object Embedding          extends ModelMode { val name = "embedding"          }
-  case object Completion         extends ModelMode { val name = "completion"         }
-  case object ImageGeneration    extends ModelMode { val name = "image_generation"   }
+  case object Chat               extends ModelMode { val name = "chat"                }
+  case object Embedding          extends ModelMode { val name = "embedding"           }
+  case object Completion         extends ModelMode { val name = "completion"          }
+  case object ImageGeneration    extends ModelMode { val name = "image_generation"    }
   case object AudioTranscription extends ModelMode { val name = "audio_transcription" }
-  case object AudioSpeech        extends ModelMode { val name = "audio_speech"       }
-  case object Moderation         extends ModelMode { val name = "moderation"         }
-  case object Rerank             extends ModelMode { val name = "rerank"             }
-  case object Search             extends ModelMode { val name = "search"             }
-  case object Unknown            extends ModelMode { val name = "unknown"            }
+  case object AudioSpeech        extends ModelMode { val name = "audio_speech"        }
+  case object Moderation         extends ModelMode { val name = "moderation"          }
+  case object Rerank             extends ModelMode { val name = "rerank"              }
+  case object Search             extends ModelMode { val name = "search"              }
+  case object Unknown            extends ModelMode { val name = "unknown"             }
 
   def fromString(s: String): ModelMode = s.toLowerCase match {
     case "chat"                => Chat
@@ -211,9 +211,7 @@ object ModelCapabilities {
     def getStringList(key: String): Option[List[String]] =
       obj.get(key).flatMap { v =>
         if (v.isNull) None
-        else
-          try Some(v.arr.map(_.str).toList)
-          catch { case _: Exception => None }
+        else scala.util.Try(v.arr.map(_.str).toList).toOption
       }
 
     ModelCapabilities(

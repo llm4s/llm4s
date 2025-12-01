@@ -1,9 +1,9 @@
 package org.llm4s.model
 
+import org.llm4s.config.ConfigReader
 import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
-import upickle.default._
 
 import scala.io.Source
 import scala.util.{ Try, Using }
@@ -206,9 +206,7 @@ object ModelRegistry {
     synchronized {
       logger.info(s"Loading custom model metadata from $filePath")
       Try {
-        Using.resource(Source.fromFile(filePath)) { source =>
-          source.mkString
-        }
+        Using.resource(Source.fromFile(filePath))(source => source.mkString)
       }.toEither.left
         .map(e => ConfigurationError(s"Failed to load custom metadata from $filePath: ${e.getMessage}"))
         .flatMap { content =>
@@ -317,16 +315,16 @@ object ModelRegistry {
     // Try exact match first
     cache.get(normalized) match {
       case Some(metadata) => Right(metadata)
-      case None =>
+      case None           =>
         // Try case-insensitive match
         cache.find(_._1.equalsIgnoreCase(normalized)) match {
           case Some((_, metadata)) => Right(metadata)
-          case None =>
+          case None                =>
             // Try stripping provider prefix if present
             val withoutProvider = if (normalized.contains("/")) normalized.split("/", 2).last else normalized
             cache.find(_._1.equalsIgnoreCase(withoutProvider)) match {
               case Some((_, metadata)) => Right(metadata)
-              case None =>
+              case None                =>
                 // Try fuzzy match (contains)
                 val fuzzyMatches = cache.filter { case (id, _) =>
                   id.toLowerCase.contains(normalized.toLowerCase)
@@ -346,17 +344,17 @@ object ModelRegistry {
     }
   }
 
-  private def loadCustomMetadataIfConfigured(): Result[Unit] = {
-    val customFilePath = sys.env.get(CustomMetadataEnvVar)
-    customFilePath match {
-      case Some(path) if path.trim.nonEmpty =>
-        logger.info(s"Custom metadata file specified: $path")
-        loadCustomMetadata(path)
-      case _ =>
-        logger.debug(s"No custom metadata file configured (set $CustomMetadataEnvVar to specify)")
-        Right(())
+  private def loadCustomMetadataIfConfigured(): Result[Unit] =
+    ConfigReader.LLMConfig().flatMap { cfg =>
+      cfg.get(CustomMetadataEnvVar) match {
+        case Some(path) if path.trim.nonEmpty =>
+          logger.info(s"Custom metadata file specified: $path")
+          loadCustomMetadata(path)
+        case _ =>
+          logger.debug(s"No custom metadata file configured (set $CustomMetadataEnvVar to specify)")
+          Right(())
+      }
     }
-  }
 
   private def loadEmbeddedMetadata(): Result[Map[String, ModelMetadata]] =
     Try {
@@ -364,9 +362,7 @@ object ModelRegistry {
       if (stream == null) {
         throw new IllegalStateException(s"Embedded metadata not found: $EmbeddedMetadataPath")
       }
-      Using.resource(Source.fromInputStream(stream)) { source =>
-        source.mkString
-      }
+      Using.resource(Source.fromInputStream(stream))(source => source.mkString)
     }.toEither.left
       .map(e => ConfigurationError(s"Failed to load embedded metadata: ${e.getMessage}"))
       .flatMap(parseMetadataJson)
@@ -376,7 +372,7 @@ object ModelRegistry {
       val json = ujson.read(content).obj
 
       // Filter out the sample_spec entry
-      val modelEntries = json.filterKeys(_ != "sample_spec")
+      val modelEntries = json.view.filterKeys(_ != "sample_spec").toMap
 
       // Parse each model entry
       val parsed = modelEntries.flatMap { case (modelId, data) =>
