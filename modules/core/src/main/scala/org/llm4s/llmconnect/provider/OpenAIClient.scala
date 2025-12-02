@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming._
+import org.llm4s.model.{ RequestTransformer, TransformationResult }
 import org.llm4s.toolapi.{ AzureToolHelper, ToolRegistry }
 import org.llm4s.types.Result
 
@@ -67,15 +68,17 @@ class OpenAIClient private (
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = {
-    val chatOptions = prepareChatOptions(conversation, options)
-
-    // Add organization header if specified
-    // Note: Azure SDK doesn't directly support adding custom headers to ChatCompletionsOptions
-    // This would need to be handled differently if organization header is required
-
-    val res = Try(client.getChatCompletions(model, chatOptions)).toEither
+    // Transform options and messages for model-specific constraints
     for {
-      completions <- res.left.map(e => e.toLLMError)
+      transformed <- TransformationResult.transform(
+        model,
+        options,
+        conversation.messages,
+        dropUnsupported = true
+      )
+      transformedConversation = conversation.copy(messages = transformed.messages)
+      chatOptions             = prepareChatOptions(transformedConversation, transformed.options)
+      completions <- Try(client.getChatCompletions(model, chatOptions)).toEither.left.map(e => e.toLLMError)
     } yield convertFromOpenAIFormat(completions)
   }
 
@@ -84,47 +87,71 @@ class OpenAIClient private (
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
-    val chatOptions = prepareChatOptions(conversation, options)
+    // Transform options and messages for model-specific constraints
+    TransformationResult.transform(model, options, conversation.messages, dropUnsupported = true).flatMap {
+      transformed =>
+        val transformedConversation = conversation.copy(messages = transformed.messages)
+        val chatOptions             = prepareChatOptions(transformedConversation, transformed.options)
 
-    // Create accumulator for building the final completion
-    val accumulator = StreamingAccumulator.create()
+        // Create accumulator for building the final completion
+        val accumulator = StreamingAccumulator.create()
 
-    // Safely obtain and process the stream, mapping all failures to LLMError
-    val attempt = Try {
-      val stream = client.getChatCompletionsStream(model, chatOptions)
-
-      stream.forEach { chatCompletions =>
-        if (chatCompletions.getChoices != null && !chatCompletions.getChoices.isEmpty) {
-          val choice = chatCompletions.getChoices.get(0)
-          val delta  = choice.getDelta
-
-          // Create StreamedChunk from delta
-          val chunk = StreamedChunk(
-            id = Option(chatCompletions.getId).getOrElse(""),
-            content = Option(delta.getContent),
-            toolCall = extractStreamingToolCall(delta),
-            finishReason = Option(choice.getFinishReason).map(_.toString)
-          )
-
-          // Add to accumulator
-          accumulator.addChunk(chunk)
-
-          // Call the callback
-          onChunk(chunk)
-
-          // Check if streaming is complete
-          if (choice.getFinishReason != null) {
-            // Extract usage if available
-            Option(chatCompletions.getUsage).foreach { usage =>
-              accumulator.updateTokens(usage.getPromptTokens, usage.getCompletionTokens)
-            }
+        // Check if this model requires fake streaming
+        if (transformed.requiresFakeStreaming) {
+          // For models that don't support native streaming (e.g., O-series),
+          // make a regular completion call and emit the result as a single chunk
+          val attempt = Try(client.getChatCompletions(model, chatOptions)).toEither.left.map(e => e.toLLMError)
+          attempt.flatMap { completions =>
+            val completion = convertFromOpenAIFormat(completions)
+            // Emit a single chunk with the full content
+            val chunk = StreamedChunk(
+              id = completion.id,
+              content = Some(completion.content),
+              toolCall = completion.toolCalls.headOption,
+              finishReason = Some("stop")
+            )
+            onChunk(chunk)
+            Right(completion)
           }
-        }
-      }
-    }.toEither.left.map(e => e.toLLMError)
+        } else {
+          // Normal streaming path
+          val attempt = Try {
+            val stream = client.getChatCompletionsStream(model, chatOptions)
 
-    // Convert accumulated chunks into a final Completion on success
-    attempt.flatMap(_ => accumulator.toCompletion.map(c => c.copy(model = model)))
+            stream.forEach { chatCompletions =>
+              if (chatCompletions.getChoices != null && !chatCompletions.getChoices.isEmpty) {
+                val choice = chatCompletions.getChoices.get(0)
+                val delta  = choice.getDelta
+
+                // Create StreamedChunk from delta
+                val chunk = StreamedChunk(
+                  id = Option(chatCompletions.getId).getOrElse(""),
+                  content = Option(delta.getContent),
+                  toolCall = extractStreamingToolCall(delta),
+                  finishReason = Option(choice.getFinishReason).map(_.toString)
+                )
+
+                // Add to accumulator
+                accumulator.addChunk(chunk)
+
+                // Call the callback
+                onChunk(chunk)
+
+                // Check if streaming is complete
+                if (choice.getFinishReason != null) {
+                  // Extract usage if available
+                  Option(chatCompletions.getUsage).foreach { usage =>
+                    accumulator.updateTokens(usage.getPromptTokens, usage.getCompletionTokens)
+                  }
+                }
+              }
+            }
+          }.toEither.left.map(e => e.toLLMError)
+
+          // Convert accumulated chunks into a final Completion on success
+          attempt.flatMap(_ => accumulator.toCompletion.map(c => c.copy(model = model)))
+        }
+    }
   }
 
   override def getContextWindow(): Int = config.contextWindow

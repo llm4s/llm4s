@@ -64,6 +64,7 @@ case class ModelMetadata(
     case "computer_use"                   => capabilities.supportsComputerUse.getOrElse(false)
     case "assistant_prefill" | "prefill"  => capabilities.supportsAssistantPrefill.getOrElse(false)
     case "tool_choice"                    => capabilities.supportsToolChoice.getOrElse(false)
+    case "native_streaming" | "streaming" => capabilities.supportsNativeStreaming.getOrElse(true)
     case _                                => false
   }
 
@@ -180,6 +181,25 @@ object ModelMode {
 
 /**
  * Model capabilities and features.
+ *
+ * @param supportsFunctionCalling Whether the model supports function/tool calling
+ * @param supportsParallelFunctionCalling Whether the model supports parallel tool calls
+ * @param supportsVision Whether the model supports vision/image inputs
+ * @param supportsPromptCaching Whether the model supports prompt caching
+ * @param supportsReasoning Whether the model supports reasoning (O-series, Claude thinking)
+ * @param supportsResponseSchema Whether the model supports structured response schemas
+ * @param supportsSystemMessages Whether the model supports system messages (false for some O-series)
+ * @param supportsPdfInput Whether the model supports PDF file inputs
+ * @param supportsAudioInput Whether the model supports audio inputs
+ * @param supportsAudioOutput Whether the model supports audio outputs
+ * @param supportsWebSearch Whether the model supports web search
+ * @param supportsComputerUse Whether the model supports computer use
+ * @param supportsAssistantPrefill Whether the model supports assistant message prefill
+ * @param supportsToolChoice Whether the model supports tool_choice parameter
+ * @param supportsNativeStreaming Whether the model supports native streaming (false = needs fake streaming)
+ * @param supportedRegions List of supported deployment regions
+ * @param disallowedParams Set of parameter names that are not supported by this model
+ * @param temperatureConstraint Temperature constraint: None = any, Some((min, max)) = restricted range
  */
 case class ModelCapabilities(
   supportsFunctionCalling: Option[Boolean] = None,
@@ -196,7 +216,10 @@ case class ModelCapabilities(
   supportsComputerUse: Option[Boolean] = None,
   supportsAssistantPrefill: Option[Boolean] = None,
   supportsToolChoice: Option[Boolean] = None,
-  supportedRegions: Option[List[String]] = None
+  supportsNativeStreaming: Option[Boolean] = None,
+  supportedRegions: Option[List[String]] = None,
+  disallowedParams: Option[Set[String]] = None,
+  temperatureConstraint: Option[(Double, Double)] = None
 )
 
 object ModelCapabilities {
@@ -214,6 +237,22 @@ object ModelCapabilities {
         else scala.util.Try(v.arr.map(_.str).toList).toOption
       }
 
+    def getStringSet(key: String): Option[Set[String]] =
+      obj.get(key).flatMap { v =>
+        if (v.isNull) None
+        else scala.util.Try(v.arr.map(_.str).toSet).toOption
+      }
+
+    def getDoubleRange(key: String): Option[(Double, Double)] =
+      obj.get(key).flatMap { v =>
+        if (v.isNull) None
+        else
+          scala.util.Try {
+            val arr = v.arr
+            (arr(0).num, arr(1).num)
+          }.toOption
+      }
+
     ModelCapabilities(
       supportsFunctionCalling = getBool("supports_function_calling"),
       supportsParallelFunctionCalling = getBool("supports_parallel_function_calling"),
@@ -229,7 +268,10 @@ object ModelCapabilities {
       supportsComputerUse = getBool("supports_computer_use"),
       supportsAssistantPrefill = getBool("supports_assistant_prefill"),
       supportsToolChoice = getBool("supports_tool_choice"),
-      supportedRegions = getStringList("supported_regions")
+      supportsNativeStreaming = getBool("supports_native_streaming"),
+      supportedRegions = getStringList("supported_regions"),
+      disallowedParams = getStringSet("disallowed_params"),
+      temperatureConstraint = getDoubleRange("temperature_constraint")
     )
   }
 }

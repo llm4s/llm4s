@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming._
+import org.llm4s.model.TransformationResult
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ValidationError }
@@ -30,38 +31,44 @@ class AnthropicClient(config: AnthropicConfig) extends LLMClient {
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = {
-    // Create message parameters builder
-    val paramsBuilder = MessageCreateParams
-      .builder()
-      .model(config.model)
-      .temperature(options.temperature.floatValue())
-      .topP(options.topP.floatValue())
+    // Transform options and messages for model-specific constraints
+    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
+      transformed =>
+        val transformedConversation = conversation.copy(messages = transformed.messages)
 
-    // Add max tokens if specified
-    // max tokens is required by the api
-    val maxTokens = options.maxTokens.getOrElse(2048)
-    paramsBuilder.maxTokens(maxTokens)
+        // Create message parameters builder
+        val paramsBuilder = MessageCreateParams
+          .builder()
+          .model(config.model)
+          .temperature(transformed.options.temperature.floatValue())
+          .topP(transformed.options.topP.floatValue())
 
-    // Add tools if specified
-    if (options.tools.nonEmpty) {
-      options.tools.foreach(tool => paramsBuilder.addTool(convertToolToAnthropicTool(tool)))
+        // Add max tokens if specified
+        // max tokens is required by the api
+        val maxTokens = transformed.options.maxTokens.getOrElse(2048)
+        paramsBuilder.maxTokens(maxTokens)
+
+        // Add tools if specified
+        if (transformed.options.tools.nonEmpty) {
+          transformed.options.tools.foreach(tool => paramsBuilder.addTool(convertToolToAnthropicTool(tool)))
+        }
+
+        // Add messages from conversation
+        addMessagesToParams(transformedConversation, paramsBuilder)
+
+        // Build the parameters
+        val messageParams = paramsBuilder.build()
+
+        val messageService = client.messages()
+        // Make API call
+        val attempt = Try(messageService.create(messageParams)).toEither.left.map {
+          case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
+          case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
+          case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
+          case e: Exception                                          => e.toLLMError
+        }
+        attempt.map(convertFromAnthropicResponse) // Convert response to our model
     }
-
-    // Add messages from conversation
-    addMessagesToParams(conversation, paramsBuilder)
-
-    // Build the parameters
-    val messageParams = paramsBuilder.build()
-
-    val messageService = client.messages()
-    // Make API call
-    val attempt = Try(messageService.create(messageParams)).toEither.left.map {
-      case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
-      case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
-      case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
-      case e: Exception                                          => e.toLLMError
-    }
-    attempt.map(convertFromAnthropicResponse) // Convert response to our model
   }
 
   /*
@@ -93,29 +100,35 @@ curl https://api.anthropic.com/v1/messages \
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
-    // Build parameters
-    val paramsBuilder = MessageCreateParams
-      .builder()
-      .model(config.model)
-      .temperature(options.temperature.floatValue())
-      .topP(options.topP.floatValue())
+    // Transform options and messages for model-specific constraints
+    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
+      transformed =>
+        val transformedConversation = conversation.copy(messages = transformed.messages)
 
-    // Add max tokens if specified (required by the API)
-    val maxTokens = options.maxTokens.getOrElse(2048)
-    paramsBuilder.maxTokens(maxTokens)
-    // Add tools if specified
-    if (options.tools.nonEmpty) options.tools.foreach(t => paramsBuilder.addTool(convertToolToAnthropicTool(t)))
-    // Add messages from conversation
-    addMessagesToParams(conversation, paramsBuilder)
-    // Build the parameters
-    val messageParams = paramsBuilder.build()
+        // Build parameters
+        val paramsBuilder = MessageCreateParams
+          .builder()
+          .model(config.model)
+          .temperature(transformed.options.temperature.floatValue())
+          .topP(transformed.options.topP.floatValue())
 
-    // Create accumulator for building the final completion
-    val accumulator                      = StreamingAccumulator.create()
-    var currentMessageId: Option[String] = None
+        // Add max tokens if specified (required by the API)
+        val maxTokens = transformed.options.maxTokens.getOrElse(2048)
+        paramsBuilder.maxTokens(maxTokens)
+        // Add tools if specified
+        if (transformed.options.tools.nonEmpty)
+          transformed.options.tools.foreach(t => paramsBuilder.addTool(convertToolToAnthropicTool(t)))
+        // Add messages from conversation
+        addMessagesToParams(transformedConversation, paramsBuilder)
+        // Build the parameters
+        val messageParams = paramsBuilder.build()
 
-    // Process the stream
-    val attempt = Try {
+        // Create accumulator for building the final completion
+        val accumulator                      = StreamingAccumulator.create()
+        var currentMessageId: Option[String] = None
+
+        // Process the stream
+        val attempt = Try {
       val messageService = client.messages()
       val streamResponse = messageService.createStreaming(messageParams)
 
@@ -198,18 +211,19 @@ curl https://api.anthropic.com/v1/messages \
           }
         }
       }
-      Try(streamResponse.close());
-      loopTry.get
-    }.toEither.left
-      .map {
-        case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
-        case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
-        case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
-        case e: Exception                                          => e.toLLMError
-      }
+          Try(streamResponse.close());
+          loopTry.get
+        }.toEither.left
+          .map {
+            case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
+            case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
+            case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
+            case e: Exception                                          => e.toLLMError
+          }
 
-    // Return the accumulated completion
-    attempt.flatMap(_ => accumulator.toCompletion.map(c => c.copy(model = config.model)))
+        // Return the accumulated completion
+        attempt.flatMap(_ => accumulator.toCompletion.map(c => c.copy(model = config.model)))
+    }
   }
 
   override def getContextWindow(): Int = providerConfig.contextWindow
