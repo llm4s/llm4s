@@ -99,17 +99,17 @@ object ModelRegistry {
    * @param modelName The model name (e.g., "gpt-4o")
    * @return Model metadata if found
    */
-  def lookup(provider: String, modelName: String): Result[ModelMetadata] = {
-    ensureInitialized()
-    val cache = getMergedCache()
-    lookup(s"$provider/$modelName")
-      .orElse(lookup(modelName))
-      .orElse(
-        cache.values
-          .find(m => m.provider.equalsIgnoreCase(provider) && m.modelId.equalsIgnoreCase(modelName))
-          .toRight(ValidationError(s"Model not found: $provider/$modelName", "modelId"))
-      )
-  }
+  def lookup(provider: String, modelName: String): Result[ModelMetadata] =
+    ensureInitialized().flatMap { _ =>
+      val cache = getMergedCache()
+      findModel(s"$provider/$modelName")
+        .orElse(findModel(modelName))
+        .orElse(
+          cache.values
+            .find(m => m.provider.equalsIgnoreCase(provider) && m.modelId.equalsIgnoreCase(modelName))
+            .toRight(ValidationError(s"Model not found: $provider/$modelName", "modelId"))
+        )
+    }
 
   /**
    * Get all models for a specific provider.
@@ -117,13 +117,13 @@ object ModelRegistry {
    * @param provider The provider name
    * @return List of models for that provider
    */
-  def listByProvider(provider: String): Result[List[ModelMetadata]] = {
-    ensureInitialized()
-    val cache  = getMergedCache()
-    val models = cache.values.filter(_.provider.equalsIgnoreCase(provider)).toList
-    if (models.nonEmpty) Right(models)
-    else Left(ValidationError(s"No models found for provider: $provider", "provider"))
-  }
+  def listByProvider(provider: String): Result[List[ModelMetadata]] =
+    ensureInitialized().flatMap { _ =>
+      val cache  = getMergedCache()
+      val models = cache.values.filter(_.provider.equalsIgnoreCase(provider)).toList
+      if (models.nonEmpty) Right(models)
+      else Left(ValidationError(s"No models found for provider: $provider", "provider"))
+    }
 
   /**
    * Get all models of a specific mode (chat, embedding, etc.).
@@ -131,13 +131,13 @@ object ModelRegistry {
    * @param mode The model mode
    * @return List of models for that mode
    */
-  def listByMode(mode: ModelMode): Result[List[ModelMetadata]] = {
-    ensureInitialized()
-    val cache  = getMergedCache()
-    val models = cache.values.filter(_.mode == mode).toList
-    if (models.nonEmpty) Right(models)
-    else Left(ValidationError(s"No models found for mode: ${mode.name}", "mode"))
-  }
+  def listByMode(mode: ModelMode): Result[List[ModelMetadata]] =
+    ensureInitialized().flatMap { _ =>
+      val cache  = getMergedCache()
+      val models = cache.values.filter(_.mode == mode).toList
+      if (models.nonEmpty) Right(models)
+      else Left(ValidationError(s"No models found for mode: ${mode.name}", "mode"))
+    }
 
   /**
    * Find models that support a specific capability.
@@ -145,24 +145,24 @@ object ModelRegistry {
    * @param capability The capability name (e.g., "vision", "function_calling")
    * @return List of models supporting that capability
    */
-  def findByCapability(capability: String): Result[List[ModelMetadata]] = {
-    ensureInitialized()
-    val cache  = getMergedCache()
-    val models = cache.values.filter(_.supports(capability)).toList
-    if (models.nonEmpty) Right(models)
-    else Left(ValidationError(s"No models found with capability: $capability", "capability"))
-  }
+  def findByCapability(capability: String): Result[List[ModelMetadata]] =
+    ensureInitialized().flatMap { _ =>
+      val cache  = getMergedCache()
+      val models = cache.values.filter(_.supports(capability)).toList
+      if (models.nonEmpty) Right(models)
+      else Left(ValidationError(s"No models found with capability: $capability", "capability"))
+    }
 
   /**
    * Get all available providers.
    *
    * @return List of unique provider names
    */
-  def listProviders(): Result[List[String]] = {
-    ensureInitialized()
-    val cache = getMergedCache()
-    Right(cache.values.map(_.provider).toSet.toList.sorted)
-  }
+  def listProviders(): Result[List[String]] =
+    ensureInitialized().map { _ =>
+      val cache = getMergedCache()
+      cache.values.map(_.provider).toSet.toList.sorted
+    }
 
   /**
    * Update the registry with fresh metadata from an external source.
