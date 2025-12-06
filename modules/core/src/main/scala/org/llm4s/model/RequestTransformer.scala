@@ -207,21 +207,39 @@ class DefaultRequestTransformer(
 
   /**
    * Get capabilities for a model, checking overrides first, then registry.
+   * O-series models get special constraints merged regardless of source.
    */
   private def getCapabilities(modelId: String): ModelCapabilities = {
-    // Check overrides first
-    overrides.get(modelId).orElse {
-      // Then check registry
-      ModelRegistry.lookup(modelId).toOption.map(_.capabilities)
-    }.getOrElse {
-      // Fall back to O-series detection for common reasoning models
-      if (isOSeriesModel(modelId)) {
-        oSeriesCapabilities
-      } else {
-        ModelCapabilities() // Default: everything allowed
+    // Check overrides first, then registry, then default
+    val baseCapabilities = overrides
+      .get(modelId)
+      .orElse {
+        // Then check registry
+        ModelRegistry.lookup(modelId).toOption.map(_.capabilities)
       }
+      .getOrElse(ModelCapabilities())
+
+    // For O-series reasoning models, merge special constraints
+    // O-series models have strict requirements not always in metadata
+    if (isOSeriesModel(modelId)) {
+      mergeWithOSeriesConstraints(baseCapabilities)
+    } else {
+      baseCapabilities
     }
   }
+
+  /**
+   * Merge base capabilities with O-series specific constraints.
+   * O-series constraints take precedence where specified.
+   */
+  private def mergeWithOSeriesConstraints(base: ModelCapabilities): ModelCapabilities =
+    base.copy(
+      supportsReasoning = base.supportsReasoning.orElse(oSeriesCapabilities.supportsReasoning),
+      supportsNativeStreaming = oSeriesCapabilities.supportsNativeStreaming, // Always override
+      supportsSystemMessages = oSeriesCapabilities.supportsSystemMessages,   // Always override
+      temperatureConstraint = oSeriesCapabilities.temperatureConstraint,     // Always override
+      disallowedParams = oSeriesCapabilities.disallowedParams                // Always override
+    )
 
   /**
    * Check if a model is an O-series reasoning model based on naming patterns.
@@ -268,7 +286,7 @@ object TransformationResult {
     messages: Seq[Message],
     dropUnsupported: Boolean = true,
     transformer: RequestTransformer = RequestTransformer.default
-  ): Result[TransformationResult] = {
+  ): Result[TransformationResult] =
     transformer.transformOptions(modelId, options, dropUnsupported).map { transformedOptions =>
       TransformationResult(
         options = transformedOptions,
@@ -276,5 +294,4 @@ object TransformationResult {
         requiresFakeStreaming = transformer.requiresFakeStreaming(modelId)
       )
     }
-  }
 }

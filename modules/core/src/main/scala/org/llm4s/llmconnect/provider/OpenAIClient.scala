@@ -8,7 +8,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming._
-import org.llm4s.model.{ RequestTransformer, TransformationResult }
+import org.llm4s.model.TransformationResult
 import org.llm4s.toolapi.{ AzureToolHelper, ToolRegistry }
 import org.llm4s.types.Result
 
@@ -67,7 +67,7 @@ class OpenAIClient private (
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = {
+  ): Result[Completion] =
     // Transform options and messages for model-specific constraints
     for {
       transformed <- TransformationResult.transform(
@@ -80,13 +80,12 @@ class OpenAIClient private (
       chatOptions             = prepareChatOptions(transformedConversation, transformed.options)
       completions <- Try(client.getChatCompletions(model, chatOptions)).toEither.left.map(e => e.toLLMError)
     } yield convertFromOpenAIFormat(completions)
-  }
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = {
+  ): Result[Completion] =
     // Transform options and messages for model-specific constraints
     TransformationResult.transform(model, options, conversation.messages, dropUnsupported = true).flatMap {
       transformed =>
@@ -152,7 +151,6 @@ class OpenAIClient private (
           attempt.flatMap(_ => accumulator.toCompletion.map(c => c.copy(model = model)))
         }
     }
-  }
 
   override def getContextWindow(): Int = config.contextWindow
 

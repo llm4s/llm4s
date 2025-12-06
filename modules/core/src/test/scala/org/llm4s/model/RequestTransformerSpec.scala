@@ -1,10 +1,11 @@
 package org.llm4s.model
 
 import org.llm4s.llmconnect.model.{ CompletionOptions, SystemMessage, UserMessage }
+import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-class RequestTransformerSpec extends AnyFunSuite with Matchers {
+class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues {
 
   val transformer: RequestTransformer = RequestTransformer.default
 
@@ -18,8 +19,8 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers {
     val result = transformer.transformOptions("o1", options, dropUnsupported = false)
 
     result.isLeft shouldBe true
-    result.left.get.message should include("Temperature")
-    result.left.get.message should include("1.0")
+    result.left.value.message should include("Temperature")
+    result.left.value.message should include("1.0")
   }
 
   test("O-series models should adjust temperature to 1.0 when dropUnsupported=true") {
@@ -50,7 +51,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers {
     val result = transformer.transformOptions("o1", options, dropUnsupported = false)
 
     result.isLeft shouldBe true
-    result.left.get.message should include("top_p")
+    result.left.value.message should include("top_p")
   }
 
   test("O-series models should drop top_p when dropUnsupported=true") {
@@ -68,7 +69,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers {
     val result = transformer.transformOptions("o1", options, dropUnsupported = false)
 
     result.isLeft shouldBe true
-    result.left.get.message should include("presence_penalty")
+    result.left.value.message should include("presence_penalty")
   }
 
   test("O-series models should drop presence_penalty when dropUnsupported=true") {
@@ -86,7 +87,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers {
     val result = transformer.transformOptions("o1", options, dropUnsupported = false)
 
     result.isLeft shouldBe true
-    result.left.get.message should include("frequency_penalty")
+    result.left.value.message should include("frequency_penalty")
   }
 
   test("O-series models should drop frequency_penalty when dropUnsupported=true") {
@@ -113,7 +114,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers {
     val result = transformer.transformOptions("o1", options, dropUnsupported = false)
 
     result.isLeft shouldBe true
-    val message = result.left.get.message
+    val message = result.left.value.message
     message should include("Temperature")
     message should include("top_p")
     message should include("presence_penalty")
@@ -232,8 +233,8 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers {
     val result = customTransformer.transformOptions("my-custom-model", options, dropUnsupported = false)
 
     result.isLeft shouldBe true
-    result.left.get.message should include("Temperature")
-    result.left.get.message should include("0.5")
+    result.left.value.message should include("Temperature")
+    result.left.value.message should include("0.5")
   }
 
   // ============================================
@@ -260,7 +261,7 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers {
   }
 
   test("TransformationResult.transform should fail if dropUnsupported=false and violations exist") {
-    val options = CompletionOptions(temperature = 0.7)
+    val options  = CompletionOptions(temperature = 0.7)
     val messages = Seq(UserMessage("Hello"))
 
     val result = TransformationResult.transform("o1", options, messages, dropUnsupported = false)
