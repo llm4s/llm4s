@@ -19,7 +19,54 @@ Development roadmap and future plans for LLM4S.
 
 ---
 
-## Completed Phases
+## Core Framework Features
+
+Beyond the agent framework phases, LLM4S provides comprehensive core functionality:
+
+### LLM Connectivity
+
+| Feature | Status | Documentation |
+|---------|--------|---------------|
+| Multi-Provider Support | ✅ Complete | [Basic Usage](/guide/basic-usage) |
+| OpenAI Integration | ✅ Complete | [Providers](/guide/providers) |
+| Anthropic Integration | ✅ Complete | [Providers](/guide/providers) |
+| Azure OpenAI Integration | ✅ Complete | [Providers](/guide/providers) |
+| Ollama (Local Models) | ✅ Complete | [Providers](/guide/providers) |
+| Streaming Responses | ✅ Complete | [Streaming](/guide/streaming) |
+| Model Metadata API | ✅ Complete | [API Reference](/api/llm-client) |
+
+### Content Generation
+
+| Feature | Status | Documentation |
+|---------|--------|---------------|
+| Image Generation | ✅ Complete | [Image Generation](/guide/image-generation) |
+| Speech-to-Text (STT) | ✅ Complete | [Speech](/guide/speech) |
+| Text-to-Speech (TTS) | ✅ Complete | [Speech](/guide/speech) |
+| Embeddings API | ✅ Complete | [Embeddings](/guide/embeddings) |
+
+### Tools & Integration
+
+| Feature | Status | Documentation |
+|---------|--------|---------------|
+| Tool Calling API | ✅ Complete | [Tools](/guide/tools) |
+| MCP Server Support | ✅ Complete | [MCP](/guide/mcp) |
+| Built-in Tools Module | ✅ Complete | [Built-in Tools](/examples/#tool-examples) |
+| Workspace Isolation (Docker) | ✅ Complete | [Workspace](/advanced/workspace) |
+
+### Infrastructure
+
+| Feature | Status | Documentation |
+|---------|--------|---------------|
+| Type-Safe Configuration | ✅ Complete | [Configuration](/guide/configuration) |
+| Result-Based Error Handling | ✅ Complete | [Error Handling](/guide/error-handling) |
+| Langfuse Observability | ✅ Complete | [Observability](/guide/observability) |
+| Cross-Version Support (2.13/3.x) | ✅ Complete | [Installation](/getting-started/installation) |
+
+---
+
+## Agent Framework Phases
+
+The agent framework extends core LLM4S with advanced agent capabilities:
 
 ### ✅ Phase 1.0: Core Framework
 

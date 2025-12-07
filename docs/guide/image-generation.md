@@ -1,6 +1,15 @@
-# Image Generation with llm4s
+---
+layout: page
+title: Image Generation
+parent: User Guide
+nav_order: 8
+---
 
-The `llm4s` library provides a powerful and flexible API for generating images using different providers like Stable Diffusion (via a local WebUI) and the Hugging Face Inference API. This guide will walk you through setting up and using the image generation capabilities.
+# Image Generation with LLM4S
+
+The LLM4S library provides a powerful and flexible API for generating images using different providers like Stable Diffusion (via a local WebUI) and the Hugging Face Inference API.
+
+---
 
 ## Core Concepts
 
@@ -11,16 +20,18 @@ Key models include:
 - `ImageGenerationOptions`: A class to control generation parameters like image size, seed, and negative prompts.
 - `GeneratedImage`: A case class representing the generated image, including its data and metadata.
 
+---
+
 ## Using the Stable Diffusion Client
 
 This client connects to an instance of the [AUTOMATIC1111/stable-diffusion-webui](https://github.com/AUTOMATIC1111/stable-diffusion-webui). You must have this running locally or on a remote server.
 
 ### Setup
 
-First, ensure your `build.sbt` includes the `llm4s` dependency.
+First, ensure your `build.sbt` includes the LLM4S dependency.
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s" % "LATEST_VERSION" // Replace with the actual version
+libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.1.0-SNAPSHOT"
 ```
 
 ### Example Usage
@@ -58,6 +69,8 @@ sdClient.generateImage(prompt, options) match {
 }
 ```
 
+---
+
 ## Using the Hugging Face Client
 
 This client uses the Hugging Face Inference API, which requires an API token.
@@ -88,7 +101,7 @@ if (hfApiKey == "your_hf_api_token_here") {
 
   // 3. Define a prompt
   val prompt = "A cute robot reading a book, sci-fi concept art"
-  
+
   // 4. Generate the image
   println("Generating image with Hugging Face...")
   hfClient.generateImage(prompt) match {
@@ -104,13 +117,24 @@ if (hfApiKey == "your_hf_api_token_here") {
 }
 ```
 
+---
+
 ## Customizing Generation
 
 The `ImageGenerationOptions` class allows you to fine-tune the generation process:
 
-- `size`: The dimensions of the output image (e.g., `ImageSize.Square512`).
-- `format`: The image format (`ImageFormat.PNG` or `ImageFormat.JPEG`).
-- `seed`: A specific seed for reproducible results (`Option[Long]`).
-- `guidanceScale`: How strictly the model should follow the prompt (`Double`).
-- `inferenceSteps`: The number of steps in the diffusion process (`Int`).
-- `negativePrompt`: A prompt describing what you *don't* want to see (`Option[String]`). 
+| Option | Type | Description |
+|--------|------|-------------|
+| `size` | `ImageSize` | The dimensions of the output image (e.g., `ImageSize.Square512`) |
+| `format` | `ImageFormat` | The image format (`ImageFormat.PNG` or `ImageFormat.JPEG`) |
+| `seed` | `Option[Long]` | A specific seed for reproducible results |
+| `guidanceScale` | `Double` | How strictly the model should follow the prompt |
+| `inferenceSteps` | `Int` | The number of steps in the diffusion process |
+| `negativePrompt` | `Option[String]` | A prompt describing what you *don't* want to see |
+
+---
+
+## See Also
+
+- [Examples](/examples/) - Working code examples
+- [API Reference](/api/llm-client) - Complete API documentation

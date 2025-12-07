@@ -262,18 +262,23 @@ Explore **70+ working examples** covering all features:
 
 ## Project Status
 
-LLM4S is under active development with a comprehensive agent framework. Recent milestones:
+LLM4S is under active development with comprehensive LLM capabilities.
 
-- ✅ **Phase 1.0**: Core framework and multi-provider support
-- ✅ **Phase 1.1**: Functional conversation management
-- ✅ **Phase 1.2**: Guardrails and validation framework
-- ✅ **Phase 1.3**: Agent handoffs and delegation
-- ✅ **Phase 1.4**: Memory system (in-memory, SQLite, vector)
-- ✅ **Phase 2.1**: Event-based streaming
-- ✅ **Phase 2.2**: Async tool execution
+### Core Framework (Complete)
+
+| Category | Features |
+|----------|----------|
+| **LLM Providers** | OpenAI, Anthropic, Azure, Ollama |
+| **Content Generation** | Text, Images, Speech (STT/TTS), Embeddings |
+| **Tools & Integration** | Tool Calling, MCP Servers, Built-in Tools, Workspace Isolation |
+| **Infrastructure** | Type-Safe Config, Result Error Handling, Langfuse Tracing |
+
+### Agent Framework Phases
+
+- ✅ **Phase 1.0-1.4**: Core agents, conversations, guardrails, handoffs, memory
+- ✅ **Phase 2.1-2.2**: Event streaming, async tool execution
 - ✅ **Phase 3.2**: Built-in tools module
-- ✅ **Phase 4.1**: Reasoning modes
-- ✅ **Phase 4.3**: Session serialization
+- ✅ **Phase 4.1, 4.3**: Reasoning modes, session serialization
 - 🚧 **Next**: Enhanced observability, provider expansion
 - 📋 **v1.0.0**: Production readiness
 

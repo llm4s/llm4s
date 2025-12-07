@@ -236,15 +236,15 @@ sbt fullCrossTest
 
 Our goal is to implement Scala equivalents of popular Python LLM frameworks, with **multi-provider, multimodal, and observability-first design** as core principles.
 
-### 📋 Production Roadmap
+### 📋 Detailed Roadmap
 
-**For detailed production readiness planning, see the [Production Readiness Roadmap](docs/roadmap/PRODUCTION_ROADMAP.md)**
+**For the full roadmap including core framework features and agent phases, see the [LLM4S Roadmap](https://llm4s.org/reference/roadmap)**
 
-The comprehensive roadmap covers:
-- **Seven Production Pillars**: Testing, API Stability, Performance, Security, Documentation, Observability, Community
-- **6-9 Month Timeline**: Structured path to 1.0.0 production release
-- **Feature Completion Tracking**: RAG, Agents, MCP, and more
-- **Success Metrics**: Clear targets for quality, coverage, and adoption
+The roadmap covers:
+- **Core Framework Features**: Multi-provider LLM, image generation, speech, embeddings, tools, MCP
+- **Agent Framework Phases**: Conversations, guardrails, handoffs, memory, streaming, built-in tools
+- **Production Pillars**: Testing, API Stability, Performance, Security, Documentation, Observability
+- **Path to v1.0.0**: Structured path to production release
 
 ### High-Level Goals
 

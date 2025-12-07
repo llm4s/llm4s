@@ -15,7 +15,7 @@ author:
 
 # Build settings
 markdown: kramdown
-theme: minima
+theme: just-the-docs
 plugins:
   - jekyll-feed
   - jekyll-sitemap

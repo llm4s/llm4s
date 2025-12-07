@@ -47,19 +47,21 @@
 
 ### Gap Score
 
-| Category | llm4s Score | OpenAI SDK Score | Gap |
-|----------|-------------|------------------|-----|
-| **Core Agent Execution** | 9/10 | 10/10 | Small |
-| **Multi-Agent Orchestration** | 8/10 | 9/10 | Small |
-| **Tool Management** | 8/10 | 10/10 | Moderate |
-| **State & Session Management** | 6/10 | 10/10 | **Large** |
-| **Error Handling & Validation** | 7/10 | 10/10 | Moderate |
-| **Streaming** | 4/10 | 10/10 | **Large** |
-| **Observability** | 6/10 | 10/10 | Moderate |
-| **Production Features** | 5/10 | 10/10 | **Large** |
-| **Built-in Tools** | 2/10 | 10/10 | **Large** |
+| Category | llm4s Score | OpenAI SDK Score | Gap | Status |
+|----------|-------------|------------------|-----|--------|
+| **Core Agent Execution** | 9/10 | 10/10 | Small | - |
+| **Multi-Agent Orchestration** | 9/10 | 9/10 | None | ✅ Phase 1.3 |
+| **Tool Management** | 9/10 | 10/10 | Small | ✅ Phase 2.2, 3.2 |
+| **State & Session Management** | 8/10 | 10/10 | Small | ✅ Phase 1.1, 4.3 |
+| **Error Handling & Validation** | 9/10 | 10/10 | Small | ✅ Phase 1.2 |
+| **Streaming** | 9/10 | 10/10 | Small | ✅ Phase 2.1 |
+| **Observability** | 6/10 | 10/10 | Moderate | In Progress |
+| **Production Features** | 5/10 | 10/10 | **Large** | Phase 3.1 Parked |
+| **Built-in Tools** | 9/10 | 10/10 | Small | ✅ Phase 3.2 |
+| **Memory System** | 9/10 | 8/10 | None | ✅ Phase 1.4 (llm4s advantage) |
+| **Reasoning Modes** | 10/10 | 10/10 | None | ✅ Phase 4.1 |
 
-**Overall Assessment:** llm4s has a strong foundation but lacks several production-critical features that OpenAI Agents SDK provides out-of-the-box.
+**Overall Assessment:** llm4s has achieved near-parity with OpenAI Agents SDK across most categories, with unique advantages in type safety, functional purity, and memory systems. Remaining gaps are in observability integrations and workflow engine support.
 
 ---
 
@@ -502,11 +504,11 @@ state2.conversation.messageCount  // 2 ✓ As expected
 
 | Feature | llm4s | OpenAI Agents SDK | Notes |
 |---------|-------|-------------------|-------|
-| **Input Validation** | ⚠️ Manual via `Result` | ✅ Input guardrails | **GAP: No framework** |
-| **Output Validation** | ⚠️ Manual via `Result` | ✅ Output guardrails | **GAP: No framework** |
-| **Parallel Validation** | ❌ Not supported | ✅ Runs in parallel | **GAP: Need framework** |
-| **Debounced Validation** | ❌ Not supported | ✅ For realtime agents | **GAP: For streaming** |
-| **Safety Checks** | ⚠️ Manual implementation | ✅ Configurable framework | **GAP: Need declarative API** |
+| **Input Validation** | ✅ InputGuardrail framework | ✅ Input guardrails | **PARITY** (Phase 1.2) |
+| **Output Validation** | ✅ OutputGuardrail framework | ✅ Output guardrails | **PARITY** (Phase 1.2) |
+| **Parallel Validation** | ✅ CompositeGuardrail | ✅ Runs in parallel | **PARITY** (Phase 1.2) |
+| **Debounced Validation** | ❌ Not supported | ✅ For realtime agents | GAP: For streaming |
+| **Safety Checks** | ✅ LLM-as-Judge guardrails | ✅ Configurable framework | **PARITY** (Phase 1.2) |
 
 ### 5. Tool Ecosystem
 
@@ -514,22 +516,24 @@ state2.conversation.messageCount  // 2 ✓ As expected
 |---------|-------|-------------------|-------|
 | **Custom Tools** | ✅ `ToolFunction` with schema gen | ✅ Function tools with Pydantic | Similar |
 | **Tool Registry** | ✅ `ToolRegistry` | ✅ Agent.tools list | Similar |
-| **Tool Execution** | ✅ Synchronous | ✅ Sync and async | OpenAI more flexible |
-| **Web Search** | ❌ Not built-in | ✅ `WebSearchTool` | **GAP: No built-in** |
-| **File Search** | ❌ Not built-in | ✅ `FileSearchTool` with vector stores | **GAP: No built-in** |
-| **Computer Use** | ❌ Not built-in | ✅ `ComputerTool` (preview) | **GAP: No built-in** |
+| **Tool Execution** | ✅ Sync + Async (Phase 2.2) | ✅ Sync and async | **PARITY** (Phase 2.2) |
+| **Web Search** | ✅ DuckDuckGo (Phase 3.2) | ✅ `WebSearchTool` | **PARITY** (Phase 3.2) |
+| **File Operations** | ✅ Read/Write/List (Phase 3.2) | ✅ `FileSearchTool` with vector stores | **PARITY** (Phase 3.2) |
+| **Computer Use** | ❌ Not built-in | ✅ `ComputerTool` (preview) | GAP (preview feature) |
 | **MCP Support** | ✅ Via integration | ⚠️ Not documented | llm4s advantage |
 | **Tool Error Handling** | ✅ `Result`-based | ✅ Exception-based | Different approaches |
+| **Core Tools** | ✅ DateTime, Calculator, UUID, JSON | ⚠️ Not built-in | **llm4s advantage** (Phase 3.2) |
+| **HTTP Tools** | ✅ HTTPTool (Phase 3.2) | ⚠️ Via custom tools | **llm4s advantage** (Phase 3.2) |
 
 ### 6. Streaming
 
 | Feature | llm4s | OpenAI Agents SDK | Notes |
 |---------|-------|-------------------|-------|
-| **Streaming Support** | ⚠️ Basic via `StreamResult` | ✅ `run_streamed()` | **GAP: Limited** |
-| **Token-level Events** | ❌ Not supported | ✅ `RawResponsesStreamEvent` | **GAP: Need fine-grained** |
-| **Item-level Events** | ❌ Not supported | ✅ `RunItemStreamEvents` | **GAP: Need coarse-grained** |
-| **Progress Updates** | ⚠️ Via logs only | ✅ Via stream events | **GAP: Need event system** |
-| **Partial Responses** | ❌ Not supported | ✅ Via deltas | **GAP: Need delta support** |
+| **Streaming Support** | ✅ `runWithEvents()` | ✅ `run_streamed()` | **PARITY** (Phase 2.1) |
+| **Token-level Events** | ✅ `TextDelta` events | ✅ `RawResponsesStreamEvent` | **PARITY** (Phase 2.1) |
+| **Item-level Events** | ✅ `ToolCall*`, `Agent*` events | ✅ `RunItemStreamEvents` | **PARITY** (Phase 2.1) |
+| **Progress Updates** | ✅ `StepCompleted` events | ✅ Via stream events | **PARITY** (Phase 2.1) |
+| **Partial Responses** | ✅ `TextDelta` deltas | ✅ Via deltas | **PARITY** (Phase 2.1) |
 
 ### 7. Observability & Tracing
 
@@ -561,7 +565,8 @@ state2.conversation.messageCount  // 2 ✓ As expected
 | **Configuration System** | ✅ `ConfigReader` (type-safe) | ⚠️ Standard env vars | llm4s advantage |
 | **Model Selection** | ✅ Per-request override | ✅ Per-agent config | Similar |
 | **Temperature Control** | ✅ `CompletionOptions` | ✅ `ModelSettings` | Similar |
-| **Reasoning Modes** | ❌ Not supported | ✅ none/low/medium/high | **GAP: No reasoning config** |
+| **Reasoning Modes** | ✅ ReasoningEffort (Phase 4.1) | ✅ none/low/medium/high | **PARITY** (Phase 4.1) |
+| **Extended Thinking** | ✅ budgetTokens (Anthropic) | ⚠️ OpenAI models only | **llm4s advantage** |
 | **Cross-version Support** | ✅ Scala 2.13 & 3.x | N/A (Python-only) | llm4s advantage |
 
 ---
