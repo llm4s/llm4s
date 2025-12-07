@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Modules
-- Core framework lives in `modules/core` (agents, LLM connectors, guardrails, tracing). Workspace support sits in `modules/workspace` (runner/client/shared). Cross-version checks for Scala 2.13/3.3 live in `modules/crossTest`, and runnable demos are in `modules/samples`. `docs/` stores assets and slides; `hooks/` provides the pre-commit installer; `szork/` is an experimental game/tooling module. Sources use `src/main/scala` plus `src/main/scala-2.13` for version-specific code.
+- Core framework lives in `modules/core` (agents, LLM connectors, guardrails, tracing). Workspace support sits in `modules/workspace` (runner/client/shared). Cross-version checks for Scala 2.13/3.3 live in `modules/crossTest`, and runnable demos are in `modules/samples`. `docs/` stores documentation; `hooks/` provides the pre-commit installer. Sources use `src/main/scala` plus `src/main/scala-2.13` for version-specific code. See also [szork](https://github.com/llm4s/szork) - a demo game showcasing LLM4S agents.
 
 ## Build, Test, and Development Commands
 - Compile: `sbt compile` or `sbt +compile` (cross-build). Run examples via `sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"`.
