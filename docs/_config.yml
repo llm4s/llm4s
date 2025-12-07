@@ -21,6 +21,9 @@ plugins:
   - jekyll-sitemap
   - jekyll-seo-tag
 
+# Code block settings
+enable_copy_code_button: true
+
 # Kramdown settings
 kramdown:
   input: GFM
