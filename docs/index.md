@@ -44,75 +44,79 @@ result match {
 
 ## Key Features
 
-### 🔌 Multi-Provider Support
-Connect seamlessly to **OpenAI**, **Anthropic**, **Azure OpenAI**, and **Ollama** with a unified API. Switch providers with a single environment variable.
+### Core LLM Platform
 
+<div class="feature-grid" markdown="1">
+
+#### 🔌 Multi-Provider Support
+Connect seamlessly to **OpenAI**, **Anthropic**, **Azure OpenAI**, and **Ollama** with a unified API. Switch providers with a single environment variable.
 [Learn more →](/guide/basic-usage)
 
-### 🤖 Agent Framework
-Build sophisticated single and multi-agent workflows with built-in tool calling, conversation management, and state persistence.
+#### 📡 Streaming Responses
+Real-time token streaming with backpressure handling and error recovery.
+[View examples →](/examples/#streaming)
 
-[Explore agents →](/guide/agents)
-
-### 🛠️ Type-Safe Tool Calling
-Define tools with automatic schema generation and type-safe execution. Supports both local tools and Model Context Protocol (MCP) servers.
-
-[See examples →](/examples/tools)
-
-### 💬 Multi-Turn Conversations
-Functional, immutable conversation management with automatic context window pruning and conversation persistence.
-
-[View patterns →](/guide/multi-turn)
-
-### 🛡️ Guardrails & Validation
-Declarative input/output validation framework for production safety. Built-in guardrails for length checks, profanity filtering, JSON validation, tone validation, and LLM-as-Judge for semantic validation.
-
-[Learn more →](/guide/guardrails)
-
-### 🔄 Agent Handoffs
-LLM-driven agent-to-agent delegation for specialist routing. Simple API for handing off queries to domain experts with automatic context preservation.
-
-[See examples →](/examples/#handoff-examples)
-
-### 🧠 Memory System
-Short-term and long-term memory with entity tracking. In-memory, SQLite, and vector store backends for semantic search across conversations.
-
-[Explore memory →](/examples/#memory-examples)
-
-### 📡 Streaming Events
-Fine-grained agent execution events for real-time visibility. Text deltas, tool call progress, guardrail validation, and handoff notifications.
-
-[View examples →](/examples/#streaming-examples)
-
-### ⚡ Built-in Tools
-Pre-built tools for common tasks: DateTime, Calculator, UUID, JSON parsing, HTTP requests, web search, and file operations with security controls.
-
-[Browse tools →](/examples/#tool-examples)
-
-### 💭 Reasoning Modes
-Extended thinking support for OpenAI o1/o3 and Anthropic Claude. Configure reasoning effort levels and access thinking content.
-
-[Learn more →](/examples/#reasoning-examples)
-
-### 🔍 RAG & Embeddings
+#### 🔍 RAG & Embeddings
 Built-in support for retrieval-augmented generation with vector embeddings and semantic search.
-
 [Get started →](/guide/embeddings)
 
-### 📊 Observability
-Comprehensive tracing with Langfuse integration for debugging, monitoring, and production analytics.
-
-[Learn more →](/guide/observability)
-
-### 🖼️ Multimodal Support
+#### 🖼️ Multimodal Support
 Generate and analyze images, convert speech-to-text and text-to-speech, and work with multiple content modalities.
-
 [Image generation →](/guide/image-generation) | [Speech →](/guide/speech)
 
-### 🐳 Secure Execution
-Containerized workspace for safe tool execution with Docker isolation.
+#### 📊 Observability
+Comprehensive tracing with Langfuse integration for debugging, monitoring, and production analytics.
+[Learn more →](/guide/observability)
 
+#### 🛠️ Type-Safe Tool Calling
+Define tools with automatic schema generation and type-safe execution. Supports both local tools and Model Context Protocol (MCP) servers.
+[See examples →](/examples/tools)
+
+</div>
+
+### Agent Framework
+
+<div class="feature-grid" markdown="1">
+
+#### 🤖 Agent Framework
+Build sophisticated single and multi-agent workflows with built-in tool calling, conversation management, and state persistence.
+[Explore agents →](/guide/agents)
+
+#### 💬 Multi-Turn Conversations
+Functional, immutable conversation management with automatic context window pruning and conversation persistence.
+[View patterns →](/guide/multi-turn)
+
+#### 🛡️ Guardrails & Validation
+Declarative input/output validation framework for production safety. Built-in guardrails for length checks, profanity filtering, JSON validation, tone validation, and LLM-as-Judge.
+[Learn more →](/guide/guardrails)
+
+#### 🔄 Agent Handoffs
+LLM-driven agent-to-agent delegation for specialist routing. Simple API for handing off queries to domain experts with automatic context preservation.
+[See examples →](/examples/#handoff-examples)
+
+#### 🧠 Memory System
+Short-term and long-term memory with entity tracking. In-memory, SQLite, and vector store backends for semantic search across conversations.
+[Explore memory →](/examples/#memory-examples)
+
+#### 💭 Reasoning Modes
+Extended thinking support for OpenAI o1/o3 and Anthropic Claude. Configure reasoning effort levels and access thinking content.
+[Learn more →](/examples/#reasoning-examples)
+
+</div>
+
+### Infrastructure
+
+<div class="feature-grid" markdown="1">
+
+#### ⚡ Built-in Tools
+Pre-built tools for common tasks: DateTime, Calculator, UUID, JSON parsing, HTTP requests, web search, and file operations with security controls.
+[Browse tools →](/examples/#tool-examples)
+
+#### 🐳 Secure Execution
+Containerized workspace for safe tool execution with Docker isolation.
 [Advanced topics →](/advanced/workspace)
+
+</div>
 
 ---
 
