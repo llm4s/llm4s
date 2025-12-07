@@ -12,6 +12,11 @@ permalink: /
 A comprehensive, type-safe framework for building LLM-powered applications in Scala.
 {: .fs-6 .fw-300 }
 
+[![Maven Central](https://img.shields.io/maven-central/v/org.llm4s/llm4s-core_3.svg?label=Maven%20Central)](https://search.maven.org/search?q=g:org.llm4s%20AND%20a:llm4s-core_3)
+[![CI](https://github.com/llm4s/llm4s/actions/workflows/ci.yml/badge.svg)](https://github.com/llm4s/llm4s/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Discord](https://img.shields.io/discord/1234567890?color=7289da&label=Discord&logo=discord&logoColor=white)](https://discord.gg/4uvTPn6qww)
+
 [Get Started](/getting-started/installation){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [View on GitHub](https://github.com/llm4s/llm4s){: .btn .fs-5 .mb-4 .mb-md-0 }
 
@@ -127,8 +132,12 @@ Containerized workspace for safe tool execution with Docker isolation.
 Add LLM4S to your `build.sbt`:
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.1.0-SNAPSHOT"
+libraryDependencies += "org.llm4s" %% "llm4s-core" % "{{ site.data.project.version }}"
 ```
+
+{: .note }
+> **Current Version:** `{{ site.data.project.version }}`
+> Check [Maven Central](https://search.maven.org/search?q=g:org.llm4s%20AND%20a:llm4s-core_3) for the latest release.
 
 ### Configuration
 
@@ -258,6 +267,28 @@ Explore **70+ working examples** covering all features:
 ✅ **Enterprise Ready** - Seamless integration with JVM systems
 
 </div>
+
+---
+
+## Compatibility
+
+### Scala & JDK Support
+
+| Scala Version | JDK Version | Status |
+|---------------|-------------|--------|
+| 3.7.x | 21, 17 | ✅ Fully Supported |
+| 2.13.x | 21, 17 | ✅ Fully Supported |
+
+### LLM Provider Support
+
+| Provider | Status | Models |
+|----------|--------|--------|
+| **OpenAI** | ✅ Complete | GPT-4o, GPT-4, GPT-3.5, o1, o3 |
+| **Anthropic** | ✅ Complete | Claude 3.5, Claude 3 |
+| **Azure OpenAI** | ✅ Complete | All Azure-hosted models |
+| **Ollama** | ✅ Complete | Llama, Mistral, local models |
+| **Google Gemini** | 🚧 Planned | Coming soon |
+| **Cohere** | 🚧 Planned | Coming soon |
 
 ---
 

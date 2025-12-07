@@ -1,0 +1,46 @@
+# Project version information
+# This file is updated during CI builds or manually for releases
+
+# Current version - used in documentation
+# For SNAPSHOT, this shows the development version
+# CI will update this with the actual version from sbt-dynver
+version: "0.1.0-SNAPSHOT"
+
+# Latest stable release (updated by CI on release)
+latest_release: "0.1.0-SNAPSHOT"
+
+# Supported versions
+scala_versions:
+  - "2.13.16"
+  - "3.7.1"
+
+java_versions:
+  - "21"
+  - "17"
+
+# Provider support
+providers:
+  - name: "OpenAI"
+    status: "complete"
+    models: "GPT-4o, GPT-4, GPT-3.5, o1, o3"
+  - name: "Anthropic"
+    status: "complete"
+    models: "Claude 3.5, Claude 3, Claude 2"
+  - name: "Azure OpenAI"
+    status: "complete"
+    models: "All Azure-hosted OpenAI models"
+  - name: "Ollama"
+    status: "complete"
+    models: "Llama, Mistral, and all local models"
+  - name: "Google Gemini"
+    status: "planned"
+    models: "Coming soon"
+  - name: "Cohere"
+    status: "planned"
+    models: "Coming soon"
+
+# Repository info
+repo_url: "https://github.com/llm4s/llm4s"
+discord_url: "https://discord.gg/4uvTPn6qww"
+maven_group: "org.llm4s"
+maven_artifact: "llm4s-core"

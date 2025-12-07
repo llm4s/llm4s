@@ -105,3 +105,49 @@ social:
   links:
     - https://github.com/llm4s/llm4s
     - https://discord.gg/4uvTPn6qww
+
+# ----- just-the-docs theme settings -----
+
+# Aux links (appear in header)
+aux_links:
+  "GitHub":
+    - "https://github.com/llm4s/llm4s"
+  "Discord":
+    - "https://discord.gg/4uvTPn6qww"
+
+aux_links_new_tab: true
+
+# Enable "Edit this page on GitHub" link
+gh_edit_link: true
+gh_edit_link_text: "Edit this page on GitHub"
+gh_edit_repository: "https://github.com/llm4s/llm4s"
+gh_edit_branch: "main"
+gh_edit_source: "docs"
+gh_edit_view_mode: "edit"
+
+# Footer content
+footer_content: >-
+  LLM4S is released under the <a href="https://github.com/llm4s/llm4s/blob/main/LICENSE">Apache 2.0 License</a>.
+  Version: <code>{{ site.data.project.version }}</code>
+
+# Enable last modified date on pages
+last_edit_timestamp: true
+last_edit_time_format: "%b %e %Y at %I:%M %p"
+
+# Search settings
+search_enabled: true
+search:
+  heading_level: 2
+  previews: 3
+  preview_words_before: 5
+  preview_words_after: 10
+  tokenizer_separator: /[\s/]+/
+  rel_url: true
+  button: false
+
+# Color scheme (light/dark)
+color_scheme: light
+
+# Back to top link
+back_to_top: true
+back_to_top_text: "Back to top"
