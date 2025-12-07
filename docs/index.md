@@ -231,6 +231,12 @@ Explore **70+ working examples** covering all features:
     <p>Complete API documentation</p>
     <a href="/api/llm-client">View API docs →</a>
   </div>
+
+  <div class="grid-item">
+    <h3>📖 Scaladoc</h3>
+    <p>Generated API documentation</p>
+    <a href="/scaladoc/">Browse Scaladoc →</a>
+  </div>
 </div>
 
 ---

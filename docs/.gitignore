@@ -6,3 +6,6 @@
 vendor/
 
 _site/
+
+# Generated during CI build
+scaladoc/
