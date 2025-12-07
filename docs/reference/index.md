@@ -18,7 +18,7 @@ Technical reference materials for LLM4S development and maintenance.
 
 ## Roadmap & Planning
 
-- **[Project Roadmap](roadmap)** - Development roadmap and future plans
+- **[Project Roadmap](roadmap)** - Development roadmap, production readiness, and future plans (single source of truth)
 - **[Design Documents](https://github.com/llm4s/llm4s/tree/main/docs/design)** - Detailed architecture docs
 
 ## Contributing
@@ -26,52 +26,39 @@ Technical reference materials for LLM4S development and maintenance.
 - **[Contributing Guide](contributing)** - How to contribute to LLM4S
 - **[Code of Conduct](https://github.com/llm4s/llm4s/blob/main/CODE_OF_CONDUCT.md)** - Community guidelines
 
-## Additional Resources
-
-### External Documentation
+## External Resources
 
 - **GitHub Repository**: [llm4s/llm4s](https://github.com/llm4s/llm4s)
 - **Issue Tracker**: [GitHub Issues](https://github.com/llm4s/llm4s/issues)
 - **Pull Requests**: [GitHub PRs](https://github.com/llm4s/llm4s/pulls)
 
-### Project Documentation Files
+## Design Documents
 
-All existing project documentation is available in the [docs directory](https://github.com/llm4s/llm4s/tree/main/docs) on GitHub:
+Detailed design documents for agent framework phases:
 
-#### Feature Documentation
-- [Agent Framework](https://github.com/llm4s/llm4s/blob/main/docs/AGENTS.md)
-- [Image Generation](https://github.com/llm4s/llm4s/blob/main/docs/ImageGeneration.md)
-- [Speech Processing](https://github.com/llm4s/llm4s/blob/main/docs/README_SPEECH.md)
+| Document | Description |
+|----------|-------------|
+| [Agent Framework Roadmap](https://github.com/llm4s/llm4s/blob/main/docs/design/agent-framework-roadmap.md) | Comprehensive feature comparison and roadmap |
+| [Phase 1.1: Conversations](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.1-functional-conversation-management.md) | Functional conversation management |
+| [Phase 1.2: Guardrails](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.2-guardrails-framework.md) | Input/output validation framework |
+| [Phase 1.3: Handoffs](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.3-handoff-mechanism.md) | Agent-to-agent delegation |
+| [Phase 1.4: Memory](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.4-memory-system.md) | Short/long-term memory |
+| [Phase 2.1: Streaming](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-2.1-streaming-events.md) | Agent lifecycle events |
+| [Phase 2.2: Async Tools](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-2.2-async-tools.md) | Parallel tool execution |
+| [Phase 3.2: Built-in Tools](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-3.2-builtin-tools.md) | Standard tool library |
+| [Phase 4.1: Reasoning](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-4.1-reasoning-modes.md) | Extended thinking support |
+| [Phase 4.3: Serialization](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-4.3-session-serialization.md) | State persistence |
+
+## API Specifications
+
 - [Tool Calling API Design](https://github.com/llm4s/llm4s/blob/main/docs/tool-calling-api-design.md)
 - [Workspace Protocol](https://github.com/llm4s/llm4s/blob/main/docs/workspace-agent-protocol.md)
-
-#### API Specifications
-- [LLM4S API Spec](https://github.com/llm4s/llm4s/blob/main/docs/llm4s-api-spec.md)
-- [Anthropic Scala Integration](https://github.com/llm4s/llm4s/blob/main/docs/anthropic-scala-integration.md)
 - [Langfuse Workflow Patterns](https://github.com/llm4s/llm4s/blob/main/docs/langfuse-workflow-patterns.md)
-
-#### Implementation Plans
-- [Streaming Implementation](https://github.com/llm4s/llm4s/blob/main/docs/streaming-implementation-plan.md)
-- [Configuration Design](https://github.com/llm4s/llm4s/blob/main/docs/config-design.md)
-
-### Design Documents
-
-Detailed design documents for current and future phases:
-
-- **[Agent Framework Roadmap](https://github.com/llm4s/llm4s/blob/main/docs/design/agent-framework-roadmap.md)** (57 KB)
-- **[Phase 1.1: Functional Conversation Management](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.1-functional-conversation-management.md)** (33 KB)
-- **[Phase 1.2: Guardrails Framework](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.2-guardrails-framework.md)** (44 KB)
-- **[Phase 1.3: Handoff Mechanism](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.3-handoff-mechanism.md)** (47 KB)
-
-### Roadmap
-
-- **[Production Roadmap](https://github.com/llm4s/llm4s/blob/main/docs/roadmap/PRODUCTION_ROADMAP.md)** - Path to v1.0.0
 
 ## Community Resources
 
 - **Discord**: [Join the community](https://discord.gg/4uvTPn6qww)
 - **Starter Kit**: [llm4s.g8](https://github.com/llm4s/llm4s.g8) - Project template
-- **Talks & Presentations**: [Conference materials](https://github.com/llm4s/llm4s/tree/main/docs/image_assets)
 
 ## License
 
@@ -79,9 +66,4 @@ LLM4S is released under the [Apache 2.0 License](https://github.com/llm4s/llm4s/
 
 ---
 
-## Quick Links
-
-- [User Guide](/guide/basic-usage) - Learn to use LLM4S
-- [Examples](/examples/) - Working code samples
-- [API Reference](/api/llm-client) - API documentation
-- [Getting Started](/getting-started/installation) - Installation guide
+**Questions?** [Ask in Discord](https://discord.gg/4uvTPn6qww) or [open an issue](https://github.com/llm4s/llm4s/issues).
