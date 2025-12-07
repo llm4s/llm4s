@@ -255,7 +255,11 @@ The comprehensive roadmap covers:
   - [x] Logging, tracking, and monitoring ✅ *Complete*
 - [ ] Agentic framework (like PydanticAI, CrewAI)
   - [x] Single-agent workflows ✅ *Complete*
-  - [ ] Multi-agent orchestration 🚧 *In Progress (60%)*
+  - [x] Multi-agent handoffs ✅ *Complete*
+  - [x] Memory system (in-memory, SQLite, vector) ✅ *Complete*
+  - [x] Streaming events ✅ *Complete*
+  - [x] Built-in tools module ✅ *Complete*
+  - [ ] DAG-based orchestration 🚧 *In Progress*
 - [ ] Tokenization utilities (Scala port of tiktoken) ✅ *Complete*
 - [ ] Examples for all supported modalities and workflows ✅ *Complete*
 - [ ] Stable platform with extensive test coverage 🚧 *In Progress*

@@ -147,7 +147,10 @@ agent.run(
 )
 ```
 
-Built-in: `LengthCheck`, `ProfanityFilter`, `JSONValidator`, `RegexValidator`, `ToneValidator`
+Built-in guardrails:
+- **Simple validators**: `LengthCheck`, `ProfanityFilter`, `JSONValidator`, `RegexValidator`, `ToneValidator`
+- **LLM-as-Judge**: `LLMSafetyGuardrail`, `LLMFactualityGuardrail`, `LLMQualityGuardrail`, `LLMToneGuardrail`
+- **Composition**: `CompositeGuardrail.all()`, `CompositeGuardrail.any()`, `CompositeGuardrail.sequence()`
 
 ### Handoffs
 
@@ -184,6 +187,25 @@ val options = CompletionOptions()
 
 client.complete(conversation, options)
 ```
+
+### Streaming Events
+
+```scala
+import org.llm4s.agent.streaming._
+
+// Get real-time agent execution events
+agent.runWithEvents("Query here", tools) { event =>
+  event match {
+    case TextDelta(text) => print(text)
+    case ToolCallStarted(name, _) => println(s"Calling $name...")
+    case ToolCallCompleted(name, result, _) => println(s"$name returned: $result")
+    case AgentCompleted(state) => println("Done!")
+    case _ => ()
+  }
+}
+```
+
+Event types: `TextDelta`, `TextComplete`, `ToolCallStarted`, `ToolCallCompleted`, `ToolCallFailed`, `AgentStarted`, `StepStarted`, `StepCompleted`, `AgentCompleted`, `AgentFailed`, `InputGuardrailStarted`, `InputGuardrailCompleted`, `OutputGuardrailStarted`, `OutputGuardrailCompleted`, `HandoffStarted`, `HandoffCompleted`
 
 ## Testing
 

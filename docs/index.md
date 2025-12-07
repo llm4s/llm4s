@@ -65,9 +65,34 @@ Functional, immutable conversation management with automatic context window prun
 [View patterns →](/guide/multi-turn)
 
 ### 🛡️ Guardrails & Validation
-Declarative input/output validation framework for production safety. Built-in guardrails for length checks, profanity filtering, JSON validation, and custom business logic.
+Declarative input/output validation framework for production safety. Built-in guardrails for length checks, profanity filtering, JSON validation, tone validation, and LLM-as-Judge for semantic validation.
 
 [Learn more →](/guide/guardrails)
+
+### 🔄 Agent Handoffs
+LLM-driven agent-to-agent delegation for specialist routing. Simple API for handing off queries to domain experts with automatic context preservation.
+
+[See examples →](/examples/#handoff-examples)
+
+### 🧠 Memory System
+Short-term and long-term memory with entity tracking. In-memory, SQLite, and vector store backends for semantic search across conversations.
+
+[Explore memory →](/examples/#memory-examples)
+
+### 📡 Streaming Events
+Fine-grained agent execution events for real-time visibility. Text deltas, tool call progress, guardrail validation, and handoff notifications.
+
+[View examples →](/examples/#streaming-examples)
+
+### ⚡ Built-in Tools
+Pre-built tools for common tasks: DateTime, Calculator, UUID, JSON parsing, HTTP requests, web search, and file operations with security controls.
+
+[Browse tools →](/examples/#tool-examples)
+
+### 💭 Reasoning Modes
+Extended thinking support for OpenAI o1/o3 and Anthropic Claude. Configure reasoning effort levels and access thinking content.
+
+[Learn more →](/examples/#reasoning-examples)
 
 ### 🔍 RAG & Embeddings
 Built-in support for retrieval-augmented generation with vector embeddings and semantic search.
@@ -141,29 +166,34 @@ object HelloLLM extends App {
 
 ## Example Gallery
 
-Explore **46 working examples** covering all features:
+Explore **70+ working examples** covering all features:
 
 <div class="code-example" markdown="1">
 
 **Basic Examples**
-- [Basic LLM Calling](/examples/basic#basic-llm-calling) - Simple conversations
-- [Streaming Responses](/examples/basic#streaming) - Real-time token streaming
-- [Multi-Provider](/examples/basic#multi-provider) - OpenAI, Anthropic, Ollama
+- [Basic LLM Calling](/examples/#basic-llm-calling) - Simple conversations
+- [Streaming Responses](/examples/#streaming) - Real-time token streaming
+- [Multi-Provider](/examples/#ollama) - OpenAI, Anthropic, Ollama
 
 **Agent Examples**
-- [Single-Step Agent](/examples/agents#single-step) - Manual control
-- [Multi-Turn Conversations](/examples/agents#multi-turn) - Functional conversation API
-- [Conversation Persistence](/examples/agents#persistence) - Save and resume
+- [Multi-Turn Conversations](/examples/#multi-turn) - Functional conversation API
+- [Async Tool Execution](/examples/#agent-examples) - Parallel tool strategies
+- [Conversation Persistence](/examples/#persistence) - Save and resume
 
-**Tool Examples**
-- [Weather Tool](/examples/tools#weather) - Simple tool definition
-- [Multi-Tool Agent](/examples/tools#multi-tool) - Multiple tools coordination
-- [MCP Integration](/examples/tools#mcp) - External tool servers
+**Guardrails & Safety**
+- [Input/Output Validation](/examples/#guardrails-examples) - Length, profanity, JSON
+- [LLM-as-Judge](/examples/#guardrails-examples) - Semantic validation
+- [Custom Guardrails](/examples/#custom) - Build your own validators
 
-**Guardrails Examples**
-- [Basic Validation](/examples/guardrails#basic) - Length checks and profanity filtering
-- [Custom Guardrails](/examples/guardrails#custom) - Build your own validators
-- [Composite Guardrails](/examples/guardrails#composite) - Combine multiple validations
+**Handoffs & Memory**
+- [Agent Handoffs](/examples/#handoff-examples) - Specialist delegation
+- [Memory System](/examples/#memory-examples) - Entity and context memory
+- [Vector Search](/examples/#memory-examples) - Semantic retrieval
+
+**Tools & Streaming**
+- [Built-in Tools](/examples/#tool-examples) - DateTime, HTTP, file access
+- [Streaming Events](/examples/#streaming-examples) - Real-time agent events
+- [Reasoning Modes](/examples/#reasoning-examples) - Extended thinking
 
 </div>
 
@@ -182,7 +212,7 @@ Explore **46 working examples** covering all features:
 
   <div class="grid-item">
     <h3>💻 Examples</h3>
-    <p>50+ working code examples</p>
+    <p>70+ working code examples</p>
     <a href="/examples/">Browse examples →</a>
   </div>
 
@@ -232,13 +262,20 @@ Explore **46 working examples** covering all features:
 
 ## Project Status
 
-LLM4S is under active development. Recent milestones:
+LLM4S is under active development with a comprehensive agent framework. Recent milestones:
 
 - ✅ **Phase 1.0**: Core framework and multi-provider support
 - ✅ **Phase 1.1**: Functional conversation management
 - ✅ **Phase 1.2**: Guardrails and validation framework
-- 🚧 **Phase 1.3**: Multi-agent handoff mechanism
-- 📋 **v1.0.0**: Production readiness (6-9 months)
+- ✅ **Phase 1.3**: Agent handoffs and delegation
+- ✅ **Phase 1.4**: Memory system (in-memory, SQLite, vector)
+- ✅ **Phase 2.1**: Event-based streaming
+- ✅ **Phase 2.2**: Async tool execution
+- ✅ **Phase 3.2**: Built-in tools module
+- ✅ **Phase 4.1**: Reasoning modes
+- ✅ **Phase 4.3**: Session serialization
+- 🚧 **Next**: Enhanced observability, provider expansion
+- 📋 **v1.0.0**: Production readiness
 
 [View detailed roadmap →](/reference/roadmap)
 

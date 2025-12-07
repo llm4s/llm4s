@@ -68,24 +68,150 @@ Development roadmap and future plans for LLM4S.
 
 **Details**: [Phase 1.2 Design Doc](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.2-guardrails-framework.md)
 
+### ✅ Phase 1.3: Agent Handoffs
+
+**Status**: Complete
+
+**Key Features:**
+- LLM-driven agent-to-agent delegation
+- Context preservation across handoffs
+- Simple triage routing patterns
+- Integration with existing agent workflows
+
+**Examples:**
+- [SimpleTriageHandoffExample](/examples/handoffs)
+- [MathSpecialistHandoffExample](/examples/handoffs)
+- [ContextPreservationExample](/examples/handoffs)
+
+**Details**: [Phase 1.3 Design Doc](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.3-handoff-mechanism.md)
+
+### ✅ Phase 1.4: Memory System
+
+**Status**: Complete
+
+**Key Features:**
+- Short-term and long-term memory types
+- Entity tracking across conversations
+- In-memory, SQLite, and vector store backends
+- Semantic search with embeddings
+- Memory filtering and consolidation
+
+**Examples:**
+- [BasicMemoryExample](/examples/memory)
+- [SQLiteMemoryExample](/examples/memory)
+- [VectorMemoryExample](/examples/memory)
+
+**Details**: [Phase 1.4 Design Doc](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.4-memory-system.md)
+
+### ✅ Phase 2.1: Event-based Streaming
+
+**Status**: Complete
+
+**Key Features:**
+- Fine-grained agent execution events
+- Text delta and tool call events
+- Agent lifecycle events (started, completed, failed)
+- Guardrail and handoff events
+- `runWithEvents()` and `continueConversationWithEvents()` APIs
+
+**Examples:**
+- [StreamingAgentExample](/examples/streaming)
+- [EventCollectionExample](/examples/streaming)
+
+**Details**: [Phase 2.1 Design Doc](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-2.1-streaming-events.md)
+
+### ✅ Phase 2.2: Async Tool Execution
+
+**Status**: Complete
+
+**Key Features:**
+- Parallel tool execution strategies
+- Sequential, Parallel, and ParallelWithLimit modes
+- `ToolRegistry.executeAsync()` and `executeAll()` methods
+- `Agent.runWithStrategy()` for parallel tool execution
+
+**Examples:**
+- [ParallelToolExecutionExample](/examples/tools)
+- [AsyncToolAgentExample](/examples/agents)
+
+**Details**: [Phase 2.2 Design Doc](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-2.2-async-tools.md)
+
+### ✅ Phase 3.2: Built-in Tools
+
+**Status**: Complete
+
+**Key Features:**
+- Core tools: DateTime, Calculator, UUID, JSON
+- File operations: read, write, list, info
+- HTTP requests with configurable methods
+- Shell command execution with security restrictions
+- Web search (DuckDuckGo integration)
+- Tool bundles: `BuiltinTools.core()`, `safe()`, `withFiles()`, `development()`
+
+**Examples:**
+- [BuiltinToolsExample](/examples/tools)
+- [BuiltinToolsAgentExample](/examples/agents)
+
+**Details**: [Phase 3.2 Design Doc](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-3.2-builtin-tools.md)
+
+### ✅ Phase 4.1: Reasoning Modes
+
+**Status**: Complete
+
+**Key Features:**
+- ReasoningEffort levels (None, Low, Medium, High)
+- OpenAI o1/o3 reasoning_effort support
+- Anthropic extended thinking with budget tokens
+- `Completion.thinking` for thinking content access
+- `TokenUsage.thinkingTokens` for token tracking
+
+**Examples:**
+- [ReasoningModesExample](/examples/reasoning)
+
+**Details**: [Phase 4.1 Design Doc](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-4.1-reasoning-modes.md)
+
+### ✅ Phase 4.3: Session Serialization
+
+**Status**: Complete
+
+**Key Features:**
+- Full AgentState serialization to/from JSON
+- ReasoningEffort and CompletionOptions serialization
+- Backward-compatible deserialization
+- Save/load to file support
+
+**Details**: [Phase 4.3 Design Doc](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-4.3-session-serialization.md)
+
 ---
 
 ## In Progress
 
-### 🚧 Phase 1.3: Multi-Agent Handoff
+### 🚧 Phase 3.1: Workflow Engine Integration
 
-**Status**: Planning phase
+**Status**: Parked for design
 
 **Planned Features:**
-- Agent-to-agent communication
-- Handoff protocols
-- State transfer mechanisms
-- Coordination patterns
-- Multi-agent orchestration
+- Integration with workflow engines (Camunda, Temporal)
+- Durable agent execution
+- Human-in-the-loop support
+- Crash recovery
 
-**Details**: [Phase 1.3 Design Doc](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.3-handoff-mechanism.md)
+### 🚧 Phase 3.3: Enhanced Observability
 
-**Target**: Q1 2025
+**Status**: Planning
+
+**Planned Features:**
+- Plugin architecture for tracing backends
+- Additional integrations (Logfire, AgentOps, Braintrust)
+- Custom spans and multi-backend tracing
+
+### 🚧 Phase 4.2: Provider Expansion
+
+**Status**: Planning
+
+**Planned Features:**
+- Additional LLM providers (Cohere, Mistral, Gemini)
+- LiteLLM integration for 100+ providers
 
 ---
 
@@ -213,10 +339,16 @@ Want to influence the roadmap?
 
 All design documents are available in the [docs/design](https://github.com/llm4s/llm4s/tree/main/docs/design) directory:
 
-- [Agent Framework Roadmap](https://github.com/llm4s/llm4s/blob/main/docs/design/agent-framework-roadmap.md) (57 KB)
-- [Phase 1.1: Functional Conversation](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.1-functional-conversation-management.md) (33 KB)
-- [Phase 1.2: Guardrails](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.2-guardrails-framework.md) (44 KB)
-- [Phase 1.3: Handoff](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.3-handoff-mechanism.md) (47 KB)
+- [Agent Framework Roadmap](https://github.com/llm4s/llm4s/blob/main/docs/design/agent-framework-roadmap.md)
+- [Phase 1.1: Functional Conversation](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.1-functional-conversation-management.md)
+- [Phase 1.2: Guardrails](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.2-guardrails-framework.md)
+- [Phase 1.3: Handoff](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.3-handoff-mechanism.md)
+- [Phase 1.4: Memory System](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.4-memory-system.md)
+- [Phase 2.1: Streaming Events](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-2.1-streaming-events.md)
+- [Phase 2.2: Async Tools](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-2.2-async-tools.md)
+- [Phase 3.2: Built-in Tools](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-3.2-builtin-tools.md)
+- [Phase 4.1: Reasoning Modes](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-4.1-reasoning-modes.md)
+- [Phase 4.3: Session Serialization](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-4.3-session-serialization.md)
 
 ---
 

@@ -24,13 +24,17 @@ Explore **50+ working examples** covering all LLM4S features.
 | Category | Count | Description |
 |----------|-------|-------------|
 | [Basic Examples](#basic-examples) | 9 | Getting started, streaming, tracing |
-| [Agent Examples](#agent-examples) | 6 | Multi-turn agents, persistence |
-| [Tool Examples](#tool-examples) | 5 | Tool calling, MCP integration |
-| [Guardrails Examples](#guardrails-examples) | 5 | Input/output validation, safety |
+| [Agent Examples](#agent-examples) | 8 | Multi-turn agents, persistence, async tools |
+| [Tool Examples](#tool-examples) | 7 | Tool calling, built-in tools, parallel execution |
+| [Guardrails Examples](#guardrails-examples) | 7 | Input/output validation, LLM-as-Judge |
+| [Handoff Examples](#handoff-examples) | 3 | Agent-to-agent delegation |
+| [Memory Examples](#memory-examples) | 5 | Short/long-term memory, vector search |
+| [Streaming Examples](#streaming-examples) | 4 | Real-time responses, agent events |
+| [Reasoning Examples](#reasoning-examples) | 1 | Extended thinking modes |
 | [Context Management](#context-management) | 8 | Token windows, compression |
 | [Embeddings](#embeddings) | 5 | Vector search, RAG |
 | [MCP Examples](#mcp-examples) | 3 | Model Context Protocol |
-| [Streaming](#streaming) | 2 | Real-time responses |
+| [Model Examples](#model-examples) | 1 | Model metadata and capabilities |
 | [Other Examples](#other-examples) | 8 | Speech, actions, utilities |
 
 ---
@@ -362,6 +366,34 @@ sbt "samples/runMain org.llm4s.samples.agent.MCPAgentExample"
 
 ---
 
+### AsyncToolAgentExample
+
+**File:** `AsyncToolAgentExample.scala`
+
+Agent with parallel tool execution using different strategies.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.agent.AsyncToolAgentExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/AsyncToolAgentExample.scala)
+
+---
+
+### BuiltinToolsAgentExample
+
+**File:** `BuiltinToolsAgentExample.scala`
+
+Agent using built-in tools (DateTime, Calculator, web search, etc.).
+
+```bash
+sbt "samples/runMain org.llm4s.samples.agent.BuiltinToolsAgentExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/agent/BuiltinToolsAgentExample.scala)
+
+---
+
 ## Tool Examples
 
 **Location:** `modules/samples/src/main/scala/org/llm4s/samples/toolapi/`
@@ -469,6 +501,34 @@ sbt "samples/runMain org.llm4s.samples.toolapi.ImprovedErrorMessageDemo"
 - Detailed error context
 - Stack traces
 - Debugging information
+
+---
+
+### BuiltinToolsExample
+
+**File:** `BuiltinToolsExample.scala`
+
+Using the built-in tools library (DateTime, Calculator, UUID, JSON, HTTP, etc.).
+
+```bash
+sbt "samples/runMain org.llm4s.samples.toolapi.BuiltinToolsExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/toolapi/BuiltinToolsExample.scala)
+
+---
+
+### ParallelToolExecutionExample
+
+**File:** `ParallelToolExecutionExample.scala`
+
+Executing multiple tool calls in parallel with different strategies.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.toolapi.ParallelToolExecutionExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/toolapi/ParallelToolExecutionExample.scala)
 
 ---
 
@@ -594,6 +654,154 @@ sbt "samples/runMain org.llm4s.samples.guardrails.MultiTurnToneValidationExample
 
 ---
 
+### FactualityGuardrailExample
+
+**File:** `FactualityGuardrailExample.scala`
+
+LLM-as-Judge guardrail for validating factual accuracy of responses.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.guardrails.FactualityGuardrailExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/guardrails/FactualityGuardrailExample.scala)
+
+---
+
+### LLMJudgeGuardrailExample
+
+**File:** `LLMJudgeGuardrailExample.scala`
+
+Using LLM-as-Judge for content safety, quality, and tone validation.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.guardrails.LLMJudgeGuardrailExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/guardrails/LLMJudgeGuardrailExample.scala)
+
+---
+
+## Handoff Examples
+
+**Location:** `modules/samples/src/main/scala/org/llm4s/samples/handoff/`
+
+### SimpleTriageHandoffExample
+
+**File:** `SimpleTriageHandoffExample.scala`
+
+Basic agent-to-agent handoff for routing queries to specialists.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.handoff.SimpleTriageHandoffExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/handoff/SimpleTriageHandoffExample.scala)
+
+---
+
+### MathSpecialistHandoffExample
+
+**File:** `MathSpecialistHandoffExample.scala`
+
+Handoff to a math specialist agent for complex calculations.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.handoff.MathSpecialistHandoffExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/handoff/MathSpecialistHandoffExample.scala)
+
+---
+
+### ContextPreservationExample
+
+**File:** `ContextPreservationExample.scala`
+
+Preserving conversation context when handing off between agents.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.handoff.ContextPreservationExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/handoff/ContextPreservationExample.scala)
+
+---
+
+## Memory Examples
+
+**Location:** `modules/samples/src/main/scala/org/llm4s/samples/memory/`
+
+### BasicMemoryExample
+
+**File:** `BasicMemoryExample.scala`
+
+Getting started with the memory system for recording facts and retrieving context.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.memory.BasicMemoryExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/memory/BasicMemoryExample.scala)
+
+---
+
+### ConversationMemoryExample
+
+**File:** `ConversationMemoryExample.scala`
+
+Using memory to maintain context across conversation turns.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.memory.ConversationMemoryExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/memory/ConversationMemoryExample.scala)
+
+---
+
+### MemoryWithAgentExample
+
+**File:** `MemoryWithAgentExample.scala`
+
+Integrating memory with agent workflows for personalized responses.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.memory.MemoryWithAgentExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/memory/MemoryWithAgentExample.scala)
+
+---
+
+### SQLiteMemoryExample
+
+**File:** `SQLiteMemoryExample.scala`
+
+Persistent memory storage using SQLite backend.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.memory.SQLiteMemoryExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/memory/SQLiteMemoryExample.scala)
+
+---
+
+### VectorMemoryExample
+
+**File:** `VectorMemoryExample.scala`
+
+Semantic memory search using embeddings and vector store.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.memory.VectorMemoryExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/memory/VectorMemoryExample.scala)
+
+---
+
 ## Context Management
 
 **Location:** `modules/samples/src/main/scala/org/llm4s/samples/context/`
@@ -657,7 +865,7 @@ sbt "samples/runMain org.llm4s.samples.mcp.MCPToolExample"
 
 ---
 
-## Streaming
+## Streaming Examples
 
 **Location:** `modules/samples/src/main/scala/org/llm4s/samples/streaming/`
 
@@ -676,6 +884,66 @@ Streaming with real-time progress feedback.
 ```bash
 sbt "samples/runMain org.llm4s.samples.streaming.StreamingWithProgressExample"
 ```
+
+### StreamingAgentExample
+
+**File:** `StreamingAgentExample.scala`
+
+Agent with real-time event streaming using `runWithEvents()`.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.streaming.StreamingAgentExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/streaming/StreamingAgentExample.scala)
+
+### EventCollectionExample
+
+**File:** `EventCollectionExample.scala`
+
+Collecting and processing agent execution events.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.streaming.EventCollectionExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/streaming/EventCollectionExample.scala)
+
+---
+
+## Reasoning Examples
+
+**Location:** `modules/samples/src/main/scala/org/llm4s/samples/reasoning/`
+
+### ReasoningModesExample
+
+**File:** `ReasoningModesExample.scala`
+
+Using extended thinking/reasoning modes with OpenAI o1/o3 and Anthropic Claude.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.reasoning.ReasoningModesExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/reasoning/ReasoningModesExample.scala)
+
+---
+
+## Model Examples
+
+**Location:** `modules/samples/src/main/scala/org/llm4s/samples/model/`
+
+### ModelMetadataExample
+
+**File:** `ModelMetadataExample.scala`
+
+Querying model capabilities, pricing, and context limits.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.model.ModelMetadataExample"
+```
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/model/ModelMetadataExample.scala)
 
 ---
 
