@@ -8,7 +8,7 @@ has_children: true
 # Example Gallery
 {: .no_toc }
 
-Explore **50+ working examples** covering all LLM4S features.
+Explore **69 working examples** covering all LLM4S features.
 {: .fs-6 .fw-300 }
 
 ## Table of contents

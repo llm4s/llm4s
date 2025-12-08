@@ -300,7 +300,7 @@ val options = CompletionOptions()
   .copy(maxTokens = Some(4096))
 
 for {
-  client <- LLMConnect.fromEnv()  // LLM_MODEL=anthropic/claude-3-5-sonnet-latest
+  client <- LLMConnect.fromEnv()  // LLM_MODEL=anthropic/claude-sonnet-4-5-latest
   response <- client.complete(conversation, options)
 } yield response.thinking
 ```
@@ -407,7 +407,7 @@ Two sample applications demonstrate reasoning modes:
 
 2. **ExtendedThinkingExample**: Anthropic extended thinking
    ```bash
-   export LLM_MODEL=anthropic/claude-3-5-sonnet-latest
+   export LLM_MODEL=anthropic/claude-sonnet-4-5-latest
    export ANTHROPIC_API_KEY=sk-ant-...
    sbt "samples/runMain org.llm4s.samples.reasoning.ExtendedThinkingExample"
    ```

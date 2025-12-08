@@ -97,9 +97,9 @@ LLM4S participated in Google Summer of Code 2025:
 ### Documentation
 
 - **[Getting Started](/getting-started/installation)** - Installation and first steps
-- **[User Guide](/guide/basic-usage)** - Comprehensive feature guides
-- **[Examples](/examples/)** - 46 working code samples
-- **[API Reference](/api/llm-client)** - Detailed API docs
+- **[User Guide](/guide/)** - Comprehensive feature guides
+- **[Examples](/examples/)** - 69 working code samples
+- **[API Reference](/api/)** - Detailed API docs
 
 ### Video Tutorials
 

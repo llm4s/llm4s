@@ -409,17 +409,17 @@ for {
 Great job! You've written your first LLM4S programs. Now explore:
 
 1. **[Configuration →](configuration)** - Learn about advanced configuration
-2. **[Agent Framework →](/guide/agents)** - Build sophisticated agents
-3. **[Tool Calling →](/guide/tool-calling)** - Create custom tools
-4. **[Examples →](/examples/)** - Browse 46 working examples
+2. **[Agent Framework →](/examples/#agent-examples)** - Build sophisticated agents
+3. **[Tool Calling →](/examples/#tool-examples)** - Create custom tools
+4. **[Examples →](/examples/)** - Browse 69 working examples
 
 ---
 
 ## Learning Resources
 
 - **[Basic Examples](/examples/basic)** - More beginner-friendly examples
-- **[User Guide](/guide/basic-usage)** - Comprehensive feature guide
-- **[API Reference](/api/llm-client)** - Detailed API documentation
+- **[User Guide](/guide/)** - Comprehensive feature guide
+- **[API Reference](/api/)** - Detailed API documentation
 - **[Discord Community](https://discord.gg/4uvTPn6qww)** - Get help and share ideas
 
 ---

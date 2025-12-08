@@ -246,7 +246,7 @@ case class AzureConfig(
 
 case class AnthropicConfig(
   apiKey: String,
-  model: String = "claude-3-opus-20240229",
+  model: String = "claude-opus-4-5-latest",
   baseUrl: String = "https://api.anthropic.com"
 ) extends ProviderConfig
 ```

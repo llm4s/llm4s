@@ -99,7 +99,7 @@ ModelRegistry.lookup("gpt-4o") match {
 
 ```scala
 // Check if a model supports specific features
-ModelRegistry.lookup("claude-3-7-sonnet-latest") match {
+ModelRegistry.lookup("claude-sonnet-4-5-latest") match {
   case Right(metadata) =>
     if (metadata.supports("function_calling")) {
       println("Model supports function calling!")

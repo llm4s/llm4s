@@ -53,7 +53,7 @@ sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 
 ```bash
 # Required
-LLM_MODEL=openai/gpt-4o              # or anthropic/claude-3-7-sonnet-latest
+LLM_MODEL=openai/gpt-4o              # or anthropic/claude-sonnet-4-5-latest
 OPENAI_API_KEY=sk-...                # or ANTHROPIC_API_KEY
 
 # Optional

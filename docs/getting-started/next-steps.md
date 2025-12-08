@@ -259,7 +259,7 @@ val mcpTools = MCPClient.loadTools("mcp-server-name")
 
 ## Example Gallery
 
-Browse **46 working examples** organized by category:
+Browse **69 working examples** organized by category:
 
 ### Basic Examples (9)
 - [Basic LLM Calling](/examples/basic#basic-llm-calling)

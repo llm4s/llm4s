@@ -4,119 +4,90 @@ This directory contains the complete documentation for LLM4S, published at [llm4
 
 ## Documentation Structure
 
-The documentation is organized into the following sections:
+### 📘 [Getting Started](https://llm4s.org/getting-started/) ✅ Complete
 
-### 📘 [Getting Started](https://llm4s.org/getting-started/)
+Beginner-friendly guides:
 
-Beginner-friendly guides to get you up and running:
-
-- **[Installation](getting-started/installation.md)** - Set up LLM4S in your project
-- **[First Example](getting-started/first-example.md)** - Your first LLM-powered program
-- **[Configuration](getting-started/configuration.md)** - Configure providers and API keys
-- **[Next Steps](getting-started/next-steps.md)** - Choose your learning path
+- **[Installation](getting-started/installation.md)** - Set up LLM4S
+- **[First Example](getting-started/first-example.md)** - Your first program
+- **[Configuration](getting-started/configuration.md)** - Provider setup
+- **[Next Steps](getting-started/next-steps.md)** - Learning paths
 
 ### 📖 [User Guide](https://llm4s.org/guide/)
 
-Comprehensive guides for all features:
+Available guides:
+- **[Image Generation](guide/image-generation.md)** - DALL-E and image providers
+- **[Speech](guide/speech.md)** - STT and TTS
 
-**Core Concepts:**
-- `guide/basic-usage.md` - Fundamental concepts and patterns
-- `guide/multi-turn.md` - Multi-turn conversation management
-- `guide/context-management.md` - Token windows and pruning
+Other features are documented via examples and design documents.
 
-**Building with Agents:**
-- `guide/agents.md` - Agent framework guide
-- `guide/tool-calling.md` - Tool integration
+### 💻 [Examples](https://llm4s.org/examples/) ✅ Complete
 
-**Advanced Features:**
-- `guide/streaming.md` - Real-time streaming
-- `guide/embeddings.md` - Vector search and RAG
-- `guide/mcp.md` - Model Context Protocol
-- `guide/observability.md` - Tracing and monitoring
+69 working code examples covering all features:
 
-**Multimodal:**
-- `guide/image-generation.md` - Image generation
-- `guide/speech.md` - Speech-to-text and text-to-speech
-
-### 💻 [Examples](https://llm4s.org/examples/)
-
-46 working code examples organized by category:
-
-- `examples/index.md` - Complete example gallery
-- Examples grouped by: Basic, Agents, Tools, Context, Embeddings, MCP, Streaming
+| Category | Count |
+|----------|-------|
+| Basic LLM Calling | 9 |
+| Agent Framework | 8 |
+| Tool Calling | 7 |
+| Guardrails | 7 |
+| Handoffs | 3 |
+| Memory System | 5 |
+| Streaming Events | 4 |
+| Context Management | 8 |
+| Embeddings | 5 |
+| MCP Integration | 3 |
+| Other | 10+ |
 
 ### 🚀 [Advanced Topics](https://llm4s.org/advanced/)
 
-Production-ready features and optimization:
-
-- `advanced/production.md` - Production readiness guide
-- `advanced/error-handling.md` - Robust error handling
-- `advanced/performance.md` - Optimization techniques
-- `advanced/multi-agent.md` - Multi-agent orchestration
-- `advanced/workspace.md` - Containerized execution
-- `advanced/security.md` - Safety and guardrails
+Links to design documents for production features. See [design/](design/) for detailed technical docs.
 
 ### 📚 [API Reference](https://llm4s.org/api/)
 
-Complete API documentation:
+- **[Scaladoc](/scaladoc/)** - Auto-generated API documentation
+- API design principles and patterns
 
-- `api/llm-client.md` - LLMClient API
-- `api/core-types.md` - Result, ModelName, etc.
-- `api/agent.md` - Agent framework API
-- `api/tools.md` - Tool API
-- `api/config.md` - Configuration API
-- `api/tracing.md` - Tracing API
+### 📋 [Reference](https://llm4s.org/reference/) ✅ Complete
 
-### 📋 [Reference](https://llm4s.org/reference/)
-
-Technical reference materials:
-
-- `reference/migration.md` - Migration guide
-- `reference/scalafix.md` - Scalafix rules
-- `reference/test-coverage.md` - Testing guidelines
-- `reference/release.md` - Release process
-- `reference/roadmap.md` - Development roadmap
+- **[Migration Guide](reference/migration.md)** - Upgrade between versions
+- **[Scalafix Rules](reference/scalafix.md)** - Code quality
+- **[Test Coverage](reference/test-coverage.md)** - Testing guidelines
+- **[Release Process](reference/release.md)** - How releases work
+- **[Roadmap](reference/roadmap.md)** - Single source of truth for project status
 
 ### 🌐 [Community](https://llm4s.org/community/)
 
-Community resources and links:
-
-- Discord, GitHub, starter kit
+- Discord, GitHub, starter kit links
 - Talks and presentations
-- How to contribute
 
----
+### 📐 [Design Documents](design/)
 
-## Legacy Documentation
+Detailed technical specifications:
 
-The following files remain in the root for backward compatibility but are now organized under the new structure:
-
-- `AGENTS.md` → `guide/agents.md`
-- `ImageGeneration.md` → `guide/image-generation.md`
-- `README_SPEECH.md` → `guide/speech.md`
-- `MIGRATION_GUIDE.md` → `reference/migration.md`
-- `SCALAFIX.md` → `reference/scalafix.md`
-- `TEST_COVERAGE.md` → `reference/test-coverage.md`
-- `RELEASE.md` → `reference/release.md`
-
-Technical design documents remain in:
-- `design/` - Detailed design documents
-- `roadmap/` - Project roadmap
+| Phase | Topic |
+|-------|-------|
+| 1.1 | Functional Conversation Management |
+| 1.2 | Guardrails Framework |
+| 1.3 | Handoff Mechanism |
+| 1.4 | Memory System |
+| 2.1 | Streaming Events |
+| 2.2 | Async Tools |
+| 3.2 | Built-in Tools |
+| 4.1 | Reasoning Modes |
+| 4.3 | Session Serialization |
 
 ---
 
 ## Building the Documentation Site
 
-The documentation is built using **Jekyll** and hosted on **GitHub Pages**.
+The documentation uses **Jekyll** with **just-the-docs** theme on **GitHub Pages**.
 
 ### Local Development
 
 ```bash
-# Install Jekyll
-gem install jekyll bundler
-
-# Serve locally
 cd docs
+bundle install
 bundle exec jekyll serve
 
 # View at http://localhost:4000
@@ -125,41 +96,25 @@ bundle exec jekyll serve
 ### Configuration
 
 - `_config.yml` - Jekyll configuration
+- `_data/project.yml` - Version and project data
 - `index.md` - Homepage
 - `CNAME` - Custom domain (llm4s.org)
-
-### Theme
-
-The site uses the **Minima** theme with custom collections for organized content.
 
 ---
 
 ## Contributing to Documentation
 
-We welcome documentation improvements! To contribute:
-
 1. **Small fixes**: Edit directly and submit a PR
-2. **New guides**: Discuss in Discord or open an issue first
-3. **Examples**: Add to `examples/` with clear descriptions
+2. **New guides**: Discuss in Discord first
+3. **Examples**: Add to `modules/samples/` with documentation
 4. **API docs**: Update alongside code changes
 
-### Documentation Standards
+### Standards
 
-- **Clear and concise**: Write for developers
-- **Code examples**: Always include working code
-- **Links**: Cross-reference related topics
-- **Format**: Use Markdown with front matter
-- **Navigation**: Update nav_order if adding pages
-
----
-
-## Documentation Principles
-
-1. **User-First**: Written for library users, not contributors
-2. **Example-Driven**: Every feature shown with code
-3. **Progressive Disclosure**: Start simple, link to advanced
-4. **Consistent**: Same structure across all guides
-5. **Discoverable**: Clear navigation and cross-linking
+- Clear, concise writing
+- Working code examples
+- Cross-reference related topics
+- Include front matter with nav_order
 
 ---
 
@@ -169,20 +124,6 @@ We welcome documentation improvements! To contribute:
 - **GitHub**: [llm4s/llm4s](https://github.com/llm4s/llm4s)
 - **Discord**: [Join us](https://discord.gg/4uvTPn6qww)
 - **Starter Kit**: [llm4s.g8](https://github.com/llm4s/llm4s.g8)
-
----
-
-## Documentation TODO
-
-Future improvements:
-
-- [ ] Complete all User Guide pages (currently have index pages)
-- [ ] Add search functionality
-- [ ] Create video tutorials
-- [ ] Add FAQ section
-- [ ] Improve code highlighting
-- [ ] Add interactive examples
-- [ ] Create PDF version
 
 ---
 

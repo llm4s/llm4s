@@ -55,7 +55,7 @@ result match {
 
 #### 🔌 Multi-Provider Support
 Connect seamlessly to **OpenAI**, **Anthropic**, **Azure OpenAI**, and **Ollama** with a unified API. Switch providers with a single environment variable.
-[Learn more →](/guide/basic-usage)
+[Learn more →](/examples/#basic-examples)
 
 #### 📡 Streaming Responses
 Real-time token streaming with backpressure handling and error recovery.
@@ -63,7 +63,7 @@ Real-time token streaming with backpressure handling and error recovery.
 
 #### 🔍 RAG & Embeddings
 Built-in support for retrieval-augmented generation with vector embeddings and semantic search.
-[Get started →](/guide/embeddings)
+[Get started →](/examples/#embeddings-examples)
 
 #### 🖼️ Multimodal Support
 Generate and analyze images, convert speech-to-text and text-to-speech, and work with multiple content modalities.
@@ -71,11 +71,11 @@ Generate and analyze images, convert speech-to-text and text-to-speech, and work
 
 #### 📊 Observability
 Comprehensive tracing with Langfuse integration for debugging, monitoring, and production analytics.
-[Learn more →](/guide/observability)
+[Learn more →](/examples/#other-examples)
 
 #### 🛠️ Type-Safe Tool Calling
 Define tools with automatic schema generation and type-safe execution. Supports both local tools and Model Context Protocol (MCP) servers.
-[See examples →](/examples/tools)
+[See examples →](/examples/#tool-examples)
 
 </div>
 
@@ -85,15 +85,15 @@ Define tools with automatic schema generation and type-safe execution. Supports 
 
 #### 🤖 Agent Framework
 Build sophisticated single and multi-agent workflows with built-in tool calling, conversation management, and state persistence.
-[Explore agents →](/guide/agents)
+[Explore agents →](/examples/#agent-examples)
 
 #### 💬 Multi-Turn Conversations
 Functional, immutable conversation management with automatic context window pruning and conversation persistence.
-[View patterns →](/guide/multi-turn)
+[View patterns →](/examples/#context-management-examples)
 
 #### 🛡️ Guardrails & Validation
 Declarative input/output validation framework for production safety. Built-in guardrails for length checks, profanity filtering, JSON validation, tone validation, and LLM-as-Judge.
-[Learn more →](/guide/guardrails)
+[Learn more →](/examples/#guardrails-examples)
 
 #### 🔄 Agent Handoffs
 LLM-driven agent-to-agent delegation for specialist routing. Simple API for handing off queries to domain experts with automatic context preservation.
@@ -119,7 +119,7 @@ Pre-built tools for common tasks: DateTime, Calculator, UUID, JSON parsing, HTTP
 
 #### 🐳 Secure Execution
 Containerized workspace for safe tool execution with Docker isolation.
-[Advanced topics →](/advanced/workspace)
+[Advanced topics →](/advanced/)
 
 </div>
 
@@ -179,7 +179,7 @@ object HelloLLM extends App {
 
 ## Example Gallery
 
-Explore **70+ working examples** covering all features:
+Explore **69 working examples** covering all features:
 
 <div class="code-example" markdown="1">
 
@@ -219,26 +219,26 @@ Explore **70+ working examples** covering all features:
 <div class="grid">
   <div class="grid-item">
     <h3>📖 User Guide</h3>
-    <p>Comprehensive guides for all features</p>
-    <a href="/guide/basic-usage">Start learning →</a>
+    <p>Guides and tutorials</p>
+    <a href="/guide/">Start learning →</a>
   </div>
 
   <div class="grid-item">
     <h3>💻 Examples</h3>
-    <p>70+ working code examples</p>
+    <p>69 working code examples</p>
     <a href="/examples/">Browse examples →</a>
   </div>
 
   <div class="grid-item">
     <h3>🚀 Advanced Topics</h3>
     <p>Production readiness & optimization</p>
-    <a href="/advanced/production">Learn more →</a>
+    <a href="/advanced/">Learn more →</a>
   </div>
 
   <div class="grid-item">
     <h3>📚 API Reference</h3>
     <p>Complete API documentation</p>
-    <a href="/api/llm-client">View API docs →</a>
+    <a href="/api/">View API docs →</a>
   </div>
 
   <div class="grid-item">
@@ -329,8 +329,8 @@ LLM4S is under active development with comprehensive LLM capabilities.
 
 ## Getting Help
 
-- **Documentation**: Browse the [user guide](/guide/basic-usage)
-- **Examples**: Check out [working examples](/examples/)
+- **Documentation**: Browse the [user guide](/guide/)
+- **Examples**: Check out [69 working examples](/examples/)
 - **Discord**: Ask questions in our [community](https://discord.gg/4uvTPn6qww)
 - **Issues**: Report bugs on [GitHub](https://github.com/llm4s/llm4s/issues)
 

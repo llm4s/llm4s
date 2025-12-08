@@ -304,7 +304,7 @@ Response: LLM4S is working!
 
 **Solution**: Use the correct format:
 - OpenAI: `openai/gpt-4o`
-- Anthropic: `anthropic/claude-3-7-sonnet-latest`
+- Anthropic: `anthropic/claude-sonnet-4-5-latest`
 - Azure: `azure/gpt-4o`
 - Ollama: `ollama/llama2`
 
@@ -336,7 +336,7 @@ Now that LLM4S is installed:
 
 1. **[Write your first program →](first-example)** - Create a simple LLM application
 2. **[Configure providers →](configuration)** - Set up multiple LLM providers
-3. **[Explore examples →](/examples/)** - Browse 46 working examples
+3. **[Explore examples →](/examples/)** - Browse 69 working examples
 
 ---
 
@@ -345,7 +345,7 @@ Now that LLM4S is installed:
 - **GitHub Repository**: [llm4s/llm4s](https://github.com/llm4s/llm4s)
 - **Starter Kit**: [llm4s.g8](https://github.com/llm4s/llm4s.g8)
 - **Discord Community**: [Join us](https://discord.gg/4uvTPn6qww)
-- **API Reference**: [Core API](/api/llm-client)
+- **API Reference**: [Core API](/api/)
 
 ---
 

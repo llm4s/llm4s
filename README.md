@@ -161,7 +161,7 @@ OPENAI_API_KEY=<your_openai_api_key>
 or Anthropic:
 
 ```
-LLM_MODEL=anthropic/claude-3-7-sonnet-latest
+LLM_MODEL=anthropic/claude-sonnet-4-5-latest
 ANTHROPIC_API_KEY=<your_anthropic_api_key>
 ```
 

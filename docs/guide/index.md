@@ -7,35 +7,44 @@ has_children: true
 
 # User Guide
 
-Comprehensive guides for all LLM4S features.
+Comprehensive guides for LLM4S features.
 
-This guide covers everything you need to know to build LLM-powered applications with LLM4S:
+## Available Guides
 
-## Core Concepts
+### Multimodal Capabilities
 
-- **[Basic Usage](basic-usage)** - Fundamental concepts and patterns
-- **[Multi-Turn Conversations](multi-turn)** - Conversation management
-- **[Context Management](context-management)** - Token windows and pruning
+- **[Image Generation](image-generation)** - Generate images with DALL-E and other providers
+- **[Speech](speech)** - Speech-to-text (STT) and text-to-speech (TTS)
 
-## Building with Agents
+## Feature Coverage via Examples
 
-- **[Agent Framework](agents)** - Single and multi-agent workflows
-- **[Tool Calling](tool-calling)** - Integrate external functions and APIs
+For features not yet documented as dedicated guides, see our **[Examples Gallery](/examples/)** which includes 69 working examples:
 
-## Advanced Features
+| Feature | Examples Section |
+|---------|------------------|
+| Basic LLM Calling | [Basic Examples](/examples/#basic-examples) |
+| Multi-Turn Conversations | [Context Management Examples](/examples/#context-management-examples) |
+| Agent Framework | [Agent Examples](/examples/#agent-examples) |
+| Tool Calling | [Tool Examples](/examples/#tool-examples) |
+| Guardrails & Safety | [Guardrails Examples](/examples/#guardrails-examples) |
+| Agent Handoffs | [Handoff Examples](/examples/#handoff-examples) |
+| Memory System | [Memory Examples](/examples/#memory-examples) |
+| Streaming | [Streaming Examples](/examples/#streaming-examples) |
+| Embeddings & RAG | [Embeddings Examples](/examples/#embeddings-examples) |
+| MCP Integration | [MCP Examples](/examples/#mcp-examples) |
+| Observability | [Observability in Examples](/examples/#other-examples) |
 
-- **[Streaming](streaming)** - Real-time token streaming
-- **[Embeddings & RAG](embeddings)** - Vector search and retrieval
-- **[Model Context Protocol](mcp)** - MCP server integration
-- **[Observability](observability)** - Tracing and monitoring
+## Design Documents
 
-## Multimodal Capabilities
+For in-depth technical documentation, see our [design documents](/reference/#design-documents):
 
-- **[Image Generation](image-generation)** - Generate images with DALL-E, Stable Diffusion
-- **[Speech](speech)** - Speech-to-text and text-to-speech
+- [Agent Framework Roadmap](https://github.com/llm4s/llm4s/blob/main/docs/design/agent-framework-roadmap.md)
+- [Phase 1.1: Conversations](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.1-functional-conversation-management.md)
+- [Phase 1.2: Guardrails](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.2-guardrails-framework.md)
+- [Phase 1.3: Handoffs](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.3-handoff-mechanism.md)
 
 ## Getting Help
 
 - Browse [examples](/examples/) for working code samples
-- Check the [API reference](/api/llm-client) for detailed documentation
+- Check the [Scaladoc](/scaladoc/) for API documentation
 - Join our [Discord community](https://discord.gg/4uvTPn6qww) for support

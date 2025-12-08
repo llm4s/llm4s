@@ -9,17 +9,18 @@ has_children: true
 
 Complete API documentation for LLM4S.
 
-## Core APIs
+## Primary API Documentation
 
-- **[LLMClient API](llm-client)** - Main client interface for LLM interactions
-- **[Core Types](core-types)** - Result, ModelName, ApiKey, and other foundational types
-- **[Configuration API](config)** - ConfigReader and configuration management
+### Scaladoc
 
-## Feature APIs
+The **[Scaladoc](/scaladoc/)** provides comprehensive, auto-generated API documentation for all LLM4S classes and methods.
 
-- **[Agent API](agent)** - Agent framework and conversation management
-- **[Tool API](tools)** - ToolFunction, ToolBuilder, and tool calling
-- **[Tracing API](tracing)** - Observability and tracing providers
+### API Specifications
+
+| Document | Description |
+|----------|-------------|
+| [LLM4S API Spec](/reference/llm4s-api-spec) | Complete API specification |
+| [Tool Calling API Design](/design/tool-calling-api-design) | Tool calling interface design |
 
 ## API Design Principles
 
@@ -110,9 +111,7 @@ val content: Result[String] = response.map(_.content)
 val upper: Result[String] = content.map(_.toUpperCase)
 ```
 
-## API Reference Structure
-
-### Core Module
+## Core Module Structure
 
 The main `llm4s-core` module contains:
 
@@ -128,7 +127,7 @@ org.llm4s/
 └── error/              # Error types
 ```
 
-### Error Hierarchy
+## Error Hierarchy
 
 ```scala
 sealed trait LLMError
@@ -165,14 +164,13 @@ When APIs change, consult:
 
 ## Getting Help
 
-- **[User Guide](/guide/basic-usage)** - Learn how to use the APIs
-- **[Examples](/examples/)** - See APIs in action
+- **[User Guide](/guide/)** - Learn how to use the APIs
+- **[Examples](/examples/)** - See APIs in action (69 working examples)
 - **[Discord](https://discord.gg/4uvTPn6qww)** - Ask questions
 - **[GitHub Issues](https://github.com/llm4s/llm4s/issues)** - Report bugs
 
 ---
 
 **Explore the APIs:**
-- [LLMClient](llm-client) - Start here
-- [Agent API](agent) - Build agents
-- [Tool API](tools) - Add tools
+- [Scaladoc](/scaladoc/) - Complete API reference
+- [Examples](/examples/) - See APIs in action

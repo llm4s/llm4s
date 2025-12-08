@@ -833,8 +833,8 @@ private def detectHandoff(
  */
 private def findHandoffById(handoffId: String, state: AgentState): Option[Handoff] = {
   // Handoffs are stored in tools as metadata
-  // This is a simplified version - actual implementation would track handoffs
-  None // TODO: Implement handoff tracking
+  // This is a simplified version - actual implementation tracks handoffs in AgentState
+  None // Placeholder - see full implementation in agent/Handoff.scala
 }
 ```
 

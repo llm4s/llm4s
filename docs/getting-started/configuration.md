@@ -247,9 +247,8 @@ OPENAI_ORGANIZATION=org-...
 
 ```bash
 # Model selection
-LLM_MODEL=anthropic/claude-3-7-sonnet-latest
-LLM_MODEL=anthropic/claude-3-5-sonnet-latest
-LLM_MODEL=anthropic/claude-3-opus-latest
+LLM_MODEL=anthropic/claude-sonnet-4-5-latest
+LLM_MODEL=anthropic/claude-opus-4-5-latest
 
 # Required
 ANTHROPIC_API_KEY=sk-ant-...
@@ -260,9 +259,8 @@ ANTHROPIC_VERSION=2023-06-01
 ```
 
 **Available Models:**
-- `claude-3-7-sonnet-latest` - Latest Claude 3.7 Sonnet
-- `claude-3-5-sonnet-latest` - Claude 3.5 Sonnet
-- `claude-3-opus-latest` - Most capable
+- `claude-sonnet-4-5-latest` - Latest Claude 4.5 Sonnet
+- `claude-opus-4-5-latest` - Most capable Claude 4.5 Opus
 - `claude-3-haiku-latest` - Fastest
 
 ### Azure OpenAI
@@ -363,7 +361,7 @@ LLM_MODEL=openai/gpt-3.5-turbo
 OPENAI_API_KEY=sk-...
 
 # Production: Use Claude Sonnet (best quality)
-LLM_MODEL=anthropic/claude-3-7-sonnet-latest
+LLM_MODEL=anthropic/claude-sonnet-4-5-latest
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
@@ -425,7 +423,7 @@ LANGFUSE_SECRET_KEY=${STAGING_LANGFUSE_SECRET}
 Create `.env.prod`:
 
 ```bash
-LLM_MODEL=anthropic/claude-3-7-sonnet-latest
+LLM_MODEL=anthropic/claude-sonnet-4-5-latest
 ANTHROPIC_API_KEY=${PROD_ANTHROPIC_KEY}
 TRACING_MODE=langfuse
 LANGFUSE_PUBLIC_KEY=${PROD_LANGFUSE_PUBLIC}
