@@ -2,7 +2,7 @@ package org.llm4s.agent.guardrails.builtin
 
 import org.llm4s.agent.guardrails.OutputGuardrail
 import org.llm4s.error.ValidationError
-import org.llm4s.types.{Result, TryOps}
+import org.llm4s.types.{ Result, TryOps }
 
 import scala.util.{ Failure, Success, Try }
 
@@ -16,7 +16,7 @@ import scala.util.{ Failure, Success, Try }
  */
 class JSONValidator(schema: Option[ujson.Value] = None) extends OutputGuardrail {
 
-  override def validate(value: String): Result[String] = {
+  override def validate(value: String): Result[String] =
     // 1) Parse JSON
     Try(ujson.read(value)) match {
       case Failure(ex) =>
@@ -45,7 +45,6 @@ class JSONValidator(schema: Option[ujson.Value] = None) extends OutputGuardrail 
             }
         }
     }
-  }
 
   /**
    * Validates that all required fields exist according to:
@@ -54,7 +53,7 @@ class JSONValidator(schema: Option[ujson.Value] = None) extends OutputGuardrail 
    * Returns: list of missing field names.
    */
   private def validateRequiredFields(json: ujson.Value, schema: ujson.Value): List[String] = {
-    
+
     // Extract “required” keys without try/catch
     val requiredKeys: List[String] =
       Try {
@@ -64,9 +63,8 @@ class JSONValidator(schema: Option[ujson.Value] = None) extends OutputGuardrail 
           case _ =>
             List.empty
         }
-      }
-      .toResult
-      .fold(_ => List.empty, identity)
+      }.toResult
+        .fold(_ => List.empty, identity)
 
     if (requiredKeys.isEmpty) {
       List.empty

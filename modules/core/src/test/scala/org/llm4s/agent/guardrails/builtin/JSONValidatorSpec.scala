@@ -17,13 +17,13 @@ class JSONValidatorSpec extends AnyFunSuite with Matchers {
   }
 
   test("valid JSON satisfies required fields") {
-    val schema = Obj("required" -> ujson.Arr("name", "age"))
+    val schema    = Obj("required" -> ujson.Arr("name", "age"))
     val validator = JSONValidator.withSchema(schema)
     validator.validate("""{"name":"bob","age":20}""").isRight shouldBe true
   }
 
   test("missing fields fails validation") {
-    val schema = Obj("required" -> ujson.Arr("name", "age"))
+    val schema    = Obj("required" -> ujson.Arr("name", "age"))
     val validator = JSONValidator.withSchema(schema)
 
     val result = validator.validate("""{"name":"bob"}""")
@@ -31,15 +31,15 @@ class JSONValidatorSpec extends AnyFunSuite with Matchers {
     result.isLeft shouldBe true
 
     val message = result match {
-        case Left(err) => err.formatted
-        case Right(_)  => ""
+      case Left(err) => err.formatted
+      case Right(_)  => ""
     }
 
-    message should include ("Missing required JSON fields")
+    message should include("Missing required JSON fields")
   }
 
   test("required field check fails if root is not an object") {
-    val schema = Obj("required" -> ujson.Arr("name"))
+    val schema    = Obj("required" -> ujson.Arr("name"))
     val validator = JSONValidator.withSchema(schema)
 
     val result = validator.validate("""["not", "an", "object"]""")
