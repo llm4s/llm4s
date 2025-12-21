@@ -233,33 +233,39 @@ class OpenAIClient private (
    * @param conversation llm4s conversation to convert
    * @return ArrayList of ChatRequestMessage suitable for OpenAI API
    */
-  // TODO: Refactor to use idiomatic Scala collections with folding instead of mutable java.util.ArrayList
-  private def convertToOpenAIMessages(conversation: Conversation): java.util.ArrayList[ChatRequestMessage] = {
-    val messages = new java.util.ArrayList[ChatRequestMessage]()
+// Refactored to use idiomatic Scala collections instead of mutable java.util.ArrayList
+  private def convertToOpenAIMessages(
+    conversation: Conversation
+  ): java.util.ArrayList[ChatRequestMessage] = {
 
-    conversation.messages.foreach {
-      case UserMessage(content) =>
-        messages.add(new ChatRequestUserMessage(content))
-      case SystemMessage(content) =>
-        messages.add(new ChatRequestSystemMessage(content))
-      case AssistantMessage(content, toolCalls) =>
-        val msg = new ChatRequestAssistantMessage(content.getOrElse(""))
-        // Add tool calls if needed
-        if (toolCalls.nonEmpty) {
-          val openAIToolCools = new java.util.ArrayList[ChatCompletionsToolCall]()
-          toolCalls.foreach { tc =>
-            val function = new FunctionCall(tc.name, tc.arguments.render())
-            val toolCall = new ChatCompletionsFunctionToolCall(tc.id, function)
-            openAIToolCools.add(toolCall)
+    val scalaMessages =
+      conversation.messages.map {
+        case UserMessage(content) =>
+          new ChatRequestUserMessage(content)
+
+        case SystemMessage(content) =>
+          new ChatRequestSystemMessage(content)
+
+        case AssistantMessage(content, toolCalls) =>
+          val msg = new ChatRequestAssistantMessage(content.getOrElse(""))
+
+          if (toolCalls.nonEmpty) {
+            val openAIToolCalls: java.util.List[ChatCompletionsToolCall] =
+              toolCalls.map { tc =>
+                val function = new FunctionCall(tc.name, tc.arguments.render())
+                new ChatCompletionsFunctionToolCall(tc.id, function): ChatCompletionsToolCall
+              }.asJava
+
+            msg.setToolCalls(openAIToolCalls)
           }
-          msg.setToolCalls(openAIToolCools)
-        }
-        messages.add(msg)
-      case ToolMessage(content, toolCallId) =>
-        messages.add(new ChatRequestToolMessage(content, toolCallId))
-    }
 
-    messages
+          msg
+
+        case ToolMessage(content, toolCallId) =>
+          new ChatRequestToolMessage(content, toolCallId)
+      }
+
+    new java.util.ArrayList(scalaMessages.asJava)
   }
 
   /**
