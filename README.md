@@ -7,6 +7,9 @@
     <a href="https://discord.gg/4uvTPn6qww">
         <img src="https://img.shields.io/static/v1?label=Chat%20on&message=Discord&color=blue&logo=Discord&style=flat-square" alt="Discord">
     </a>
+    <a href="https://codecov.io/gh/llm4s/llm4s">
+        <img src="https://codecov.io/gh/llm4s/llm4s/branch/main/graph/badge.svg" alt="codecov">
+    </a>
 </h4>
 <h4 align="center">
     <img src="docs/image_assets/llm4s_logo.png" width="100pt" alt="LLM4S Logo">
