@@ -16,8 +16,6 @@ object CodeGenExample {
   private val logger = LoggerFactory.getLogger(getClass)
 
   def main(args: Array[String]): Unit = {
-    // TODO need to get workspace and traceLogPath dir from config/env vars
-
     // Trace log path comes from settings below
 
     val task =
@@ -27,12 +25,18 @@ object CodeGenExample {
         |Run the program and show the result.""".stripMargin
 
     val result = for {
+      // Uses the standard loader
       ws <- WorkspaceConfigSupport.load()
+
       _ = logger.info(s"Using workspace directory: ${ws.workspaceDir}")
       _ = logger.info(s"Trace log will be written to: ${ws.traceLogPath}")
+
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
-      finalState <- Using.resource(new CodeWorker(ws.workspaceDir, ws.imageName, ws.hostPort, client)) { codeWorker =>
+
+      finalState <- Using.resource(
+        new CodeWorker(ws.workspaceDir, ws.imageName, ws.hostPort, client)
+      ) { codeWorker =>
         for {
           _          <- Either.cond(codeWorker.initialize(), (), SimpleError("Failed to initialize CodeWorker"))
           finalState <- codeWorker.executeTask(task, Some(20), Some(ws.traceLogPath))
