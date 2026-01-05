@@ -1,6 +1,7 @@
 package org.llm4s.samples.memory
 
 import org.llm4s.agent.memory._
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating basic memory system usage.
@@ -13,169 +14,176 @@ import org.llm4s.agent.memory._
  *
  * No external dependencies required - runs entirely in-memory.
  */
-object BasicMemoryExample extends App {
-  println("=== Basic Memory System Example ===\n")
+object BasicMemoryExample {
 
-  // === Part 1: Creating a Memory Manager ===
-  println("1. Creating a Memory Manager")
-  println("-" * 40)
+  private val logger = LoggerFactory.getLogger(getClass)
 
-  // Start with an empty manager using default in-memory storage
-  val manager = SimpleMemoryManager.empty
-  println("Created empty SimpleMemoryManager")
-  println(s"Initial memory count: ${manager.stats.map(_.totalMemories).getOrElse(0)}")
+  def main(args: Array[String]): Unit = {
+    logger.info("=== Basic Memory System Example ===")
 
-  // === Part 2: Storing Different Memory Types ===
-  println("\n2. Storing Different Memory Types")
-  println("-" * 40)
+    // === Part 1: Creating a Memory Manager ===
+    logger.info("1. Creating a Memory Manager")
+    logger.info("-" * 40)
 
-  // Store user preferences
-  val withUserFacts = for {
-    m1 <- manager.recordUserFact("Prefers Scala over Java", Some("user-123"), Some(0.9))
-    m2 <- m1.recordUserFact("Works in fintech industry", Some("user-123"), Some(0.8))
-    m3 <- m2.recordUserFact("Based in San Francisco", Some("user-123"), Some(0.7))
-  } yield m3
+    // Start with an empty manager using default in-memory storage
+    val manager = SimpleMemoryManager.empty
+    logger.info("Created empty SimpleMemoryManager")
+    logger.info(s"Initial memory count: ${manager.stats.map(_.totalMemories).getOrElse(0)}")
 
-  withUserFacts match {
-    case Right(m) =>
-      println("Stored 3 user facts")
-      m.stats.foreach(s => println(s"  Total memories: ${s.totalMemories}"))
-    case Left(e) =>
-      println(s"Error: ${e.message}")
-  }
+    // === Part 2: Storing Different Memory Types ===
+    logger.info("2. Storing Different Memory Types")
+    logger.info("-" * 40)
 
-  // Store entity information
-  val entityId = EntityId.fromName("Scala Programming")
-  val withEntities = withUserFacts.flatMap { m =>
-    for {
-      m1 <- m.recordEntityFact(entityId, "Scala", "Created by Martin Odersky in 2004", "technology", Some(0.9))
-      m2 <- m1.recordEntityFact(entityId, "Scala", "Runs on the JVM", "technology", Some(0.8))
-      m3 <- m2.recordEntityFact(entityId, "Scala", "Supports both OOP and FP paradigms", "technology", Some(0.9))
+    // Store user preferences
+    val withUserFacts = for {
+      m1 <- manager.recordUserFact("Prefers Scala over Java", Some("user-123"), Some(0.9))
+      m2 <- m1.recordUserFact("Works in fintech industry", Some("user-123"), Some(0.8))
+      m3 <- m2.recordUserFact("Based in San Francisco", Some("user-123"), Some(0.7))
     } yield m3
-  }
 
-  withEntities match {
-    case Right(m) =>
-      println("\nStored 3 entity facts about Scala")
-      m.stats.foreach(s => println(s"  Total memories: ${s.totalMemories}"))
-    case Left(e) =>
-      println(s"Error: ${e.message}")
-  }
-
-  // Store knowledge from documents
-  val withKnowledge = withEntities.flatMap { m =>
-    for {
-      m1 <- m.recordKnowledge(
-        "Functional programming emphasizes immutability and pure functions",
-        "docs/fp-intro.md",
-        Map("chapter" -> "1", "topic" -> "basics")
-      )
-      m2 <- m1.recordKnowledge(
-        "Scala 3 introduced union types and intersection types",
-        "docs/scala3-features.md",
-        Map("chapter" -> "2", "topic" -> "types")
-      )
-    } yield m2
-  }
-
-  withKnowledge match {
-    case Right(m) =>
-      println("\nStored 2 knowledge entries")
-      m.stats.foreach(s => println(s"  Total memories: ${s.totalMemories}"))
-    case Left(e) =>
-      println(s"Error: ${e.message}")
-  }
-
-  // === Part 3: Recalling Memories with Filters ===
-  println("\n3. Recalling Memories with Filters")
-  println("-" * 40)
-
-  val filterExamples = withKnowledge.flatMap { m =>
-    for {
-      // Get all user facts
-      userFacts <- m.store.recall(MemoryFilter.userFacts)
-      _ = println(s"\nUser facts (${userFacts.size}):")
-      _ = userFacts.foreach(f => println(s"  - ${f.content}"))
-
-      // Get all entity facts
-      entityFacts <- m.store.recall(MemoryFilter.entities)
-      _ = println(s"\nEntity facts (${entityFacts.size}):")
-      _ = entityFacts.foreach(f => println(s"  - ${f.content}"))
-
-      // Get high-importance memories
-      important <- m.store.important(threshold = 0.85)
-      _ = println(s"\nHigh importance memories (score >= 0.85): ${important.size}")
-      _ = important.foreach(f => println(s"  - ${f.content} (importance: ${f.importance.getOrElse(0.0)})"))
-
-      // Combine filters: user facts OR knowledge
-      combined <- m.store.recall(MemoryFilter.userFacts || MemoryFilter.knowledge)
-      _ = println(s"\nUser facts OR knowledge: ${combined.size} memories")
-    } yield m
-  }
-
-  // === Part 4: Searching Memories ===
-  println("\n4. Searching Memories by Keyword")
-  println("-" * 40)
-
-  val searchExamples = filterExamples.flatMap { m =>
-    for {
-      // Search for Scala-related content
-      scalaResults <- m.store.search("Scala JVM", topK = 5)
-      _ = println(s"\nSearch results for 'Scala JVM':")
-      _ = scalaResults.foreach(sr => println(f"  Score: ${sr.score}%.2f - ${sr.memory.content.take(50)}..."))
-
-      // Search for FP content
-      fpResults <- m.store.search("functional programming", topK = 5)
-      _ = println(s"\nSearch results for 'functional programming':")
-      _ = fpResults.foreach(sr => println(f"  Score: ${sr.score}%.2f - ${sr.memory.content.take(50)}..."))
-    } yield m
-  }
-
-  // === Part 5: Getting Context ===
-  println("\n5. Getting Formatted Context")
-  println("-" * 40)
-
-  val contextExamples = searchExamples.flatMap { m =>
-    for {
-      // Get entity context
-      entityContext <- m.getEntityContext(entityId)
-      _ = println("\nEntity context for 'Scala':")
-      _ = if (entityContext.nonEmpty) println(entityContext) else println("  (none)")
-
-      // Get user context
-      userContext <- m.getUserContext(Some("user-123"))
-      _ = println("\nUser context:")
-      _ = if (userContext.nonEmpty) println(userContext) else println("  (none)")
-
-      // Get relevant context for a query
-      relevantContext <- m.getRelevantContext("Tell me about Scala and FP", maxTokens = 500)
-      _ = println("\nRelevant context for 'Tell me about Scala and FP':")
-      _ = if (relevantContext.nonEmpty) println(relevantContext) else println("  (none)")
-    } yield ()
-  }
-
-  // === Part 6: Statistics ===
-  println("\n6. Memory Statistics")
-  println("-" * 40)
-
-  filterExamples.foreach { m =>
-    m.stats.foreach { stats =>
-      println(s"""
-        |Memory Statistics:
-        |  Total memories: ${stats.totalMemories}
-        |  By type:
-        |${stats.byType.map { case (t, c) => s"    - ${t.name}: $c" }.mkString("\n")}
-        |  Distinct entities: ${stats.entityCount}
-        |  Embedded: ${stats.embeddedCount}
-        |""".stripMargin)
+    withUserFacts match {
+      case Right(m) =>
+        logger.info("Stored 3 user facts")
+        m.stats.foreach(s => logger.info(s"  Total memories: ${s.totalMemories}"))
+      case Left(e) =>
+        logger.error(s"Error while storing user facts: ${e.message}")
     }
-  }
 
-  contextExamples match {
-    case Right(_) =>
-      println("\n" + "=" * 50)
-      println("Basic memory example completed successfully!")
-    case Left(error) =>
-      println(s"\nExample failed with error: ${error.message}")
+    // Store entity information
+    val entityId = EntityId.fromName("Scala Programming")
+    val withEntities = withUserFacts.flatMap { m =>
+      for {
+        m1 <- m.recordEntityFact(entityId, "Scala", "Created by Martin Odersky in 2004", "technology", Some(0.9))
+        m2 <- m1.recordEntityFact(entityId, "Scala", "Runs on the JVM", "technology", Some(0.8))
+        m3 <- m2.recordEntityFact(entityId, "Scala", "Supports both OOP and FP paradigms", "technology", Some(0.9))
+      } yield m3
+    }
+
+    withEntities match {
+      case Right(m) =>
+        logger.info("Stored 3 entity facts about Scala")
+        m.stats.foreach(s => logger.info(s"  Total memories: ${s.totalMemories}"))
+      case Left(e) =>
+        logger.error(s"Error while storing entity facts: ${e.message}")
+    }
+
+    // Store knowledge from documents
+    val withKnowledge = withEntities.flatMap { m =>
+      for {
+        m1 <- m.recordKnowledge(
+          "Functional programming emphasizes immutability and pure functions",
+          "docs/fp-intro.md",
+          Map("chapter" -> "1", "topic" -> "basics")
+        )
+        m2 <- m1.recordKnowledge(
+          "Scala 3 introduced union types and intersection types",
+          "docs/scala3-features.md",
+          Map("chapter" -> "2", "topic" -> "types")
+        )
+      } yield m2
+    }
+
+    withKnowledge match {
+      case Right(m) =>
+        logger.info("Stored 2 knowledge entries")
+        m.stats.foreach(s => logger.info(s"  Total memories: ${s.totalMemories}"))
+      case Left(e) =>
+        logger.error(s"Error while storing knowledge entries: ${e.message}")
+    }
+
+    // === Part 3: Recalling Memories with Filters ===
+    logger.info("3. Recalling Memories with Filters")
+    logger.info("-" * 40)
+
+    val filterExamples = withKnowledge.flatMap { m =>
+      for {
+        // Get all user facts
+        userFacts <- m.store.recall(MemoryFilter.userFacts)
+        _ = logger.info(s"User facts (${userFacts.size}):")
+        _ = userFacts.foreach(f => logger.info(s"  - ${f.content}"))
+
+        // Get all entity facts
+        entityFacts <- m.store.recall(MemoryFilter.entities)
+        _ = logger.info(s"Entity facts (${entityFacts.size}):")
+        _ = entityFacts.foreach(f => logger.info(s"  - ${f.content}"))
+
+        // Get high-importance memories
+        important <- m.store.important(threshold = 0.85)
+        _ = logger.info(s"High importance memories (score >= 0.85): ${important.size}")
+        _ = important.foreach(f => logger.info(s"  - ${f.content} (importance: ${f.importance.getOrElse(0.0)})"))
+
+        // Combine filters: user facts OR knowledge
+        combined <- m.store.recall(MemoryFilter.userFacts || MemoryFilter.knowledge)
+        _ = logger.info(s"User facts OR knowledge: ${combined.size} memories")
+      } yield m
+    }
+
+    // === Part 4: Searching Memories ===
+    logger.info("4. Searching Memories by Keyword")
+    logger.info("-" * 40)
+
+    val searchExamples = filterExamples.flatMap { m =>
+      for {
+        // Search for Scala-related content
+        scalaResults <- m.store.search("Scala JVM", topK = 5)
+        _ = logger.info("Search results for 'Scala JVM':")
+        _ = scalaResults.foreach(sr => logger.info(f"  Score: ${sr.score}%.2f - ${sr.memory.content.take(50)}..."))
+
+        // Search for FP content
+        fpResults <- m.store.search("functional programming", topK = 5)
+        _ = logger.info("Search results for 'functional programming':")
+        _ = fpResults.foreach(sr => logger.info(f"  Score: ${sr.score}%.2f - ${sr.memory.content.take(50)}..."))
+      } yield m
+    }
+
+    // === Part 5: Getting Context ===
+    logger.info("5. Getting Formatted Context")
+    logger.info("-" * 40)
+
+    val contextExamples = searchExamples.flatMap { m =>
+      for {
+        // Get entity context
+        entityContext <- m.getEntityContext(entityId)
+        _ = logger.info("Entity context for 'Scala':")
+        _ = logger.info(if (entityContext.nonEmpty) entityContext else "  (none)")
+
+        // Get user context
+        userContext <- m.getUserContext(Some("user-123"))
+        _ = logger.info("User context:")
+        _ = logger.info(if (userContext.nonEmpty) userContext else "  (none)")
+
+        // Get relevant context for a query
+        relevantContext <- m.getRelevantContext("Tell me about Scala and FP", maxTokens = 500)
+        _ = logger.info("Relevant context for 'Tell me about Scala and FP':")
+        _ = logger.info(if (relevantContext.nonEmpty) relevantContext else "  (none)")
+      } yield ()
+    }
+
+    // === Part 6: Statistics ===
+    logger.info("6. Memory Statistics")
+    logger.info("-" * 40)
+
+    filterExamples.foreach { m =>
+      m.stats.foreach { stats =>
+        logger.info(
+          s"""
+             |Memory Statistics:
+             |  Total memories: ${stats.totalMemories}
+             |  By type:
+             |${stats.byType.map { case (t, c) => s"    - ${t.name}: $c" }.mkString("\n")}
+             |  Distinct entities: ${stats.entityCount}
+             |  Embedded: ${stats.embeddedCount}
+             |""".stripMargin
+        )
+      }
+    }
+
+    contextExamples match {
+      case Right(_) =>
+        logger.info("=" * 50)
+        logger.info("Basic memory example completed successfully!")
+      case Left(error) =>
+        logger.error(s"Example failed with error: ${error.message}")
+    }
   }
 }
