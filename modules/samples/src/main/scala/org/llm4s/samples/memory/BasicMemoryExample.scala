@@ -132,18 +132,14 @@ object BasicMemoryExample {
         // Search for Scala-related content
         scalaResults <- m.store.search("Scala JVM", topK = 5).tap { results =>
           logger.info("Search results for 'Scala JVM':")
-          
-          results.foreach(sr => 
-            logger.info("  Score: {} - {}...", sr.score, sr.memory.content.take(50))
-          )
+
+          results.foreach(sr => logger.info("  Score: {} - {}...", sr.score, sr.memory.content.take(50)))
         }
 
         // Search for FP content
         fpResults <- m.store.search("functional programming", topK = 5).tap { results =>
           logger.info("Search results for 'functional programming':")
-          results.foreach(sr => 
-            logger.info("  Score: {} - {}...", sr.score, sr.memory.content.take(50))
-          )
+          results.foreach(sr => logger.info("  Score: {} - {}...", sr.score, sr.memory.content.take(50)))
         }
       } yield m
     }

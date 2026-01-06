@@ -105,9 +105,7 @@ object VectorMemoryExample {
         )
       )
 
-      count <- store.count().tap { c =>
-        c.foreach(cnt => logger.info("Total memories stored: {}", cnt))
-      }
+      count <- store.count().tap(c => c.foreach(cnt => logger.info("Total memories stored: {}", cnt)))
 
     } yield store
 
@@ -135,11 +133,7 @@ object VectorMemoryExample {
           store.search(query, topK = 3) match {
             case Right(results) =>
               results.zipWithIndex.foreach { case (scored, idx) =>
-                logger.info("  {}. [{}] {}...", 
-                  idx + 1, 
-                  scored.score, 
-                  scored.memory.content.take(70)
-                )
+                logger.info("  {}. [{}] {}...", idx + 1, scored.score, scored.memory.content.take(70))
               }
             case Left(error) =>
               logger.error("  Search error: {}", error)
@@ -188,9 +182,7 @@ object VectorMemoryExample {
             logger.info("Searching only Knowledge memories for 'beginner friendly':")
             store.search("beginner friendly", topK = 3, filter = MemoryFilter.ByType(MemoryType.Knowledge)) match {
               case Right(res) =>
-                res.foreach(scored => 
-                  logger.info("  [{}] {}...", scored.score, scored.memory.content.take(60))
-                )
+                res.foreach(scored => logger.info("  [{}] {}...", scored.score, scored.memory.content.take(60)))
               case Left(err) =>
                 logger.error("  Error: {}", err)
             }
@@ -204,9 +196,7 @@ object VectorMemoryExample {
             ) match {
               case Right(res) =>
                 if (res.isEmpty) logger.info("  (no matches)")
-                else res.foreach(scored => 
-                  logger.info("  [{}] {}...", scored.score, scored.memory.content.take(60))
-                )
+                else res.foreach(scored => logger.info("  [{}] {}...", scored.score, scored.memory.content.take(60)))
               case Left(err) =>
                 logger.error("  Error: {}", err)
             }

@@ -59,13 +59,15 @@ object MemoryWithAgentExample {
         "project-docs",
         Map("component" -> "core")
       )
-      m5 <- m4.recordKnowledge(
-        "The API uses http4s server with JSON serialization via Circe",
-        "project-docs",
-        Map("component" -> "api")
-      ).tap { res =>
-        res.foreach(m => logger.info("Initialized memory with {} items", m.stats.map(_.totalMemories).getOrElse(0)))
-      }
+      m5 <- m4
+        .recordKnowledge(
+          "The API uses http4s server with JSON serialization via Circe",
+          "project-docs",
+          Map("component" -> "api")
+        )
+        .tap { res =>
+          res.foreach(m => logger.info("Initialized memory with {} items", m.stats.map(_.totalMemories).getOrElse(0)))
+        }
 
       // === Part 2: Build Context-Aware Prompt ===
       _ = logger.info("2. Building context-aware prompt")

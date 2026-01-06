@@ -110,19 +110,21 @@ object ConversationMemoryExample {
     withConv2.flatMap { m =>
       for {
         // Get only user messages
-        userMessages <- m.store.recall(
-          MemoryFilter.conversations && MemoryFilter.ByMetadata("role", "user")
-        ).tap { msgs =>
-          logger.info("User messages across all conversations: {}", msgs.size)
-          msgs.foreach(msg => logger.info("- {}...", msg.content.take(50)))
-        }
+        userMessages <- m.store
+          .recall(
+            MemoryFilter.conversations && MemoryFilter.ByMetadata("role", "user")
+          )
+          .tap { msgs =>
+            logger.info("User messages across all conversations: {}", msgs.size)
+            msgs.foreach(msg => logger.info("- {}...", msg.content.take(50)))
+          }
 
         // Get only assistant messages
-        assistantMessages <- m.store.recall(
-          MemoryFilter.conversations && MemoryFilter.ByMetadata("role", "assistant")
-        ).tap { msgs =>
-          logger.info("Assistant messages: {}", msgs.size)
-        }
+        assistantMessages <- m.store
+          .recall(
+            MemoryFilter.conversations && MemoryFilter.ByMetadata("role", "assistant")
+          )
+          .tap(msgs => logger.info("Assistant messages: {}", msgs.size))
 
         // Get messages from a specific conversation
         conv1Messages <- m.store.recall(MemoryFilter.forConversation("conv-scala-basics")).tap { msgs =>

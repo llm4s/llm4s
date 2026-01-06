@@ -61,7 +61,7 @@ object SQLiteMemoryExample {
         )
       )
 
-      _ = logger.info("Storing entity memories...")
+      _       = logger.info("Storing entity memories...")
       scalaId = EntityId.fromName("Scala Language")
       _ <- store.store(Memory.forEntity(scalaId, "Scala Language", "Created by Martin Odersky", "programming_language"))
       _ <- store.store(Memory.forEntity(scalaId, "Scala Language", "First released in 2004", "programming_language"))
@@ -90,9 +90,7 @@ object SQLiteMemoryExample {
         logger.info("Searching for 'functional programming'...")
         store.search("functional programming", topK = 3) match {
           case Right(results) =>
-            results.foreach(scored =>
-              logger.info("  Score: {} - {}...", scored.score, scored.memory.content.take(60))
-            )
+            results.foreach(scored => logger.info("  Score: {} - {}...", scored.score, scored.memory.content.take(60)))
           case Left(error) =>
             logger.error("  Search error: {}", error)
         }
