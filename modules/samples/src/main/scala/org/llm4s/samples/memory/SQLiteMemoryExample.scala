@@ -2,6 +2,7 @@ package org.llm4s.samples.memory
 
 import org.llm4s.agent.memory._
 import org.slf4j.LoggerFactory
+import scala.util.chaining._
 
 import java.nio.file.{ Files, Path }
 
@@ -26,7 +27,7 @@ object SQLiteMemoryExample {
 
     // Create a temporary database file
     val dbPath: Path = Files.createTempFile("llm4s-memory-", ".db")
-    logger.info(s"Database location: $dbPath")
+    logger.info("Database location: {}", dbPath)
 
     // ============================================================
     // Part 1: Create store and populate with memories
@@ -40,7 +41,7 @@ object SQLiteMemoryExample {
       _ = logger.info("Storing knowledge memories...")
       _ <- store.store(
         Memory.fromKnowledge(
-          "Scala is a multi-paradigm programming language that combines object-oriented and functional programming.",
+          "Scala is a multi-paradigm programming language ...",
           source = "scala-docs",
           chunkIndex = Some(1)
         )
@@ -60,7 +61,7 @@ object SQLiteMemoryExample {
         )
       )
 
-      _       = logger.info("Storing entity memories...")
+      _ = logger.info("Storing entity memories...")
       scalaId = EntityId.fromName("Scala Language")
       _ <- store.store(Memory.forEntity(scalaId, "Scala Language", "Created by Martin Odersky", "programming_language"))
       _ <- store.store(Memory.forEntity(scalaId, "Scala Language", "First released in 2004", "programming_language"))
@@ -70,13 +71,13 @@ object SQLiteMemoryExample {
       _ <- store.store(Memory.fromConversation("Scala is a programming language...", "assistant", Some("conv-1")))
 
       count <- store.count()
-      _ = logger.info(s"Total memories stored: $count")
+      _ = count.foreach(cnt => logger.info("Total memories stored: {}", cnt))
 
     } yield store
 
     createResult match {
       case Left(error) =>
-        logger.error(s"Error creating store: $error")
+        logger.error("Error creating store: {}", error)
         System.exit(1)
 
       case Right(store) =>
@@ -90,28 +91,28 @@ object SQLiteMemoryExample {
         store.search("functional programming", topK = 3) match {
           case Right(results) =>
             results.foreach(scored =>
-              logger.info(f"  Score: ${scored.score}%.3f - ${scored.memory.content.take(60)}...")
+              logger.info("  Score: {} - {}...", scored.score, scored.memory.content.take(60))
             )
           case Left(error) =>
-            logger.error(s"  Search error: $error")
+            logger.error("  Search error: {}", error)
         }
 
         // Filter by type
         logger.info("Knowledge memories:")
         store.recall(MemoryFilter.ByType(MemoryType.Knowledge)) match {
           case Right(memories) =>
-            memories.foreach(m => logger.info(s"  - ${m.content.take(60)}..."))
+            memories.foreach(m => logger.info("  - {}...", m.content.take(60)))
           case Left(error) =>
-            logger.error(s"  Error: $error")
+            logger.error("  Error: {}", error)
         }
 
         // Filter by entity
         logger.info("Scala entity facts:")
         store.recall(MemoryFilter.ByEntity(EntityId.fromName("Scala Language"))) match {
           case Right(memories) =>
-            memories.foreach(m => logger.info(s"  - ${m.content}"))
+            memories.foreach(m => logger.info("  - {}", m.content))
           case Left(error) =>
-            logger.error(s"  Error: $error")
+            logger.error("  Error: {}", error)
         }
 
         // ============================================================
@@ -126,25 +127,25 @@ object SQLiteMemoryExample {
           case Right(reopenedStore) =>
             reopenedStore.count() match {
               case Right(count) =>
-                logger.info(s"Memories recovered from disk: $count")
+                logger.info("Memories recovered from disk: {}", count)
               case Left(error) =>
-                logger.error(s"Count error: $error")
+                logger.error("Count error: {}", error)
             }
 
             logger.info("Searching recovered memories for 'JVM'...")
             reopenedStore.search("JVM", topK = 2) match {
               case Right(results) =>
                 results.foreach { scored =>
-                  logger.info(f"  Score: ${scored.score}%.3f - ${scored.memory.content.take(60)}...")
+                  logger.info("  Score: {} - {}...", scored.score, scored.memory.content.take(60))
                 }
               case Left(error) =>
-                logger.error(s"  Search error: $error")
+                logger.error("  Search error: {}", error)
             }
 
             reopenedStore.close()
 
           case Left(error) =>
-            logger.error(s"Error reopening store: $error")
+            logger.error("Error reopening store: {}", error)
         }
 
         // ============================================================
@@ -178,22 +179,22 @@ object SQLiteMemoryExample {
             managerResult match {
               case Right(context) =>
                 logger.info("Relevant context for 'Tell me about llm4s':")
-                logger.info(s"  $context")
+                logger.info("  {}", context)
               case Left(error) =>
-                logger.error(s"Manager error: $error")
+                logger.error("Manager error: {}", error)
             }
 
             sqliteStore.close()
 
           case Left(error) =>
-            logger.error(s"Error: $error")
+            logger.error("Error: {}", error)
         }
     }
 
     // Cleanup
     logger.info("--- Cleanup ---")
     Files.deleteIfExists(dbPath)
-    logger.info(s"Deleted temporary database: $dbPath")
+    logger.info("Deleted temporary database: {}", dbPath)
 
     logger.info("=" * 60)
     logger.info("SQLite Memory Example Complete!")

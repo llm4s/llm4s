@@ -2,6 +2,7 @@ package org.llm4s.samples.memory
 
 import org.llm4s.agent.memory._
 import org.slf4j.LoggerFactory
+import scala.util.chaining._
 
 /**
  * Example demonstrating basic memory system usage.
@@ -28,7 +29,7 @@ object BasicMemoryExample {
     // Start with an empty manager using default in-memory storage
     val manager = SimpleMemoryManager.empty
     logger.info("Created empty SimpleMemoryManager")
-    logger.info(s"Initial memory count: ${manager.stats.map(_.totalMemories).getOrElse(0)}")
+    logger.info("Initial memory count: {}", manager.stats.map(_.totalMemories).getOrElse(0))
 
     // === Part 2: Storing Different Memory Types ===
     logger.info("2. Storing Different Memory Types")
@@ -44,9 +45,9 @@ object BasicMemoryExample {
     withUserFacts match {
       case Right(m) =>
         logger.info("Stored 3 user facts")
-        m.stats.foreach(s => logger.info(s"  Total memories: ${s.totalMemories}"))
+        m.stats.foreach(s => logger.info("  Total memories: {}", s.totalMemories))
       case Left(e) =>
-        logger.error(s"Error while storing user facts: ${e.message}")
+        logger.error("Error while storing user facts: {}", e.message)
     }
 
     // Store entity information
@@ -62,9 +63,9 @@ object BasicMemoryExample {
     withEntities match {
       case Right(m) =>
         logger.info("Stored 3 entity facts about Scala")
-        m.stats.foreach(s => logger.info(s"  Total memories: ${s.totalMemories}"))
+        m.stats.foreach(s => logger.info("  Total memories: {}", s.totalMemories))
       case Left(e) =>
-        logger.error(s"Error while storing entity facts: ${e.message}")
+        logger.error("Error while storing entity facts: {}", e.message)
     }
 
     // Store knowledge from documents
@@ -86,9 +87,9 @@ object BasicMemoryExample {
     withKnowledge match {
       case Right(m) =>
         logger.info("Stored 2 knowledge entries")
-        m.stats.foreach(s => logger.info(s"  Total memories: ${s.totalMemories}"))
+        m.stats.foreach(s => logger.info("  Total memories: {}", s.totalMemories))
       case Left(e) =>
-        logger.error(s"Error while storing knowledge entries: ${e.message}")
+        logger.error("Error while storing knowledge entries: {}", e.message)
     }
 
     // === Part 3: Recalling Memories with Filters ===
@@ -98,23 +99,27 @@ object BasicMemoryExample {
     val filterExamples = withKnowledge.flatMap { m =>
       for {
         // Get all user facts
-        userFacts <- m.store.recall(MemoryFilter.userFacts)
-        _ = logger.info(s"User facts (${userFacts.size}):")
-        _ = userFacts.foreach(f => logger.info(s"  - ${f.content}"))
+        userFacts <- m.store.recall(MemoryFilter.userFacts).tap { facts =>
+          logger.info("User facts ({}):", facts.size)
+          facts.foreach(f => logger.info("  - {}", f.content))
+        }
 
         // Get all entity facts
-        entityFacts <- m.store.recall(MemoryFilter.entities)
-        _ = logger.info(s"Entity facts (${entityFacts.size}):")
-        _ = entityFacts.foreach(f => logger.info(s"  - ${f.content}"))
+        entityFacts <- m.store.recall(MemoryFilter.entities).tap { facts =>
+          logger.info("Entity facts ({}):", facts.size)
+          facts.foreach(f => logger.info("  - {}", f.content))
+        }
 
         // Get high-importance memories
-        important <- m.store.important(threshold = 0.85)
-        _ = logger.info(s"High importance memories (score >= 0.85): ${important.size}")
-        _ = important.foreach(f => logger.info(s"  - ${f.content} (importance: ${f.importance.getOrElse(0.0)})"))
+        important <- m.store.important(threshold = 0.85).tap { imps =>
+          logger.info("High importance memories (score >= 0.85): {}", imps.size)
+          imps.foreach(f => logger.info("  - {} (importance: {})", f.content, f.importance.getOrElse(0.0)))
+        }
 
         // Combine filters: user facts OR knowledge
-        combined <- m.store.recall(MemoryFilter.userFacts || MemoryFilter.knowledge)
-        _ = logger.info(s"User facts OR knowledge: ${combined.size} memories")
+        combined <- m.store.recall(MemoryFilter.userFacts || MemoryFilter.knowledge).tap { res =>
+          logger.info("User facts OR knowledge: {} memories", res.size)
+        }
       } yield m
     }
 
@@ -125,14 +130,21 @@ object BasicMemoryExample {
     val searchExamples = filterExamples.flatMap { m =>
       for {
         // Search for Scala-related content
-        scalaResults <- m.store.search("Scala JVM", topK = 5)
-        _ = logger.info("Search results for 'Scala JVM':")
-        _ = scalaResults.foreach(sr => logger.info(f"  Score: ${sr.score}%.2f - ${sr.memory.content.take(50)}..."))
+        scalaResults <- m.store.search("Scala JVM", topK = 5).tap { results =>
+          logger.info("Search results for 'Scala JVM':")
+          
+          results.foreach(sr => 
+            logger.info("  Score: {} - {}...", sr.score, sr.memory.content.take(50))
+          )
+        }
 
         // Search for FP content
-        fpResults <- m.store.search("functional programming", topK = 5)
-        _ = logger.info("Search results for 'functional programming':")
-        _ = fpResults.foreach(sr => logger.info(f"  Score: ${sr.score}%.2f - ${sr.memory.content.take(50)}..."))
+        fpResults <- m.store.search("functional programming", topK = 5).tap { results =>
+          logger.info("Search results for 'functional programming':")
+          results.foreach(sr => 
+            logger.info("  Score: {} - {}...", sr.score, sr.memory.content.take(50))
+          )
+        }
       } yield m
     }
 
@@ -143,19 +155,22 @@ object BasicMemoryExample {
     val contextExamples = searchExamples.flatMap { m =>
       for {
         // Get entity context
-        entityContext <- m.getEntityContext(entityId)
-        _ = logger.info("Entity context for 'Scala':")
-        _ = logger.info(if (entityContext.nonEmpty) entityContext else "  (none)")
+        entityContext <- m.getEntityContext(entityId).tap { ctx =>
+          logger.info("Entity context for 'Scala':")
+          logger.info("{}", if (ctx.nonEmpty) ctx else "  (none)")
+        }
 
         // Get user context
-        userContext <- m.getUserContext(Some("user-123"))
-        _ = logger.info("User context:")
-        _ = logger.info(if (userContext.nonEmpty) userContext else "  (none)")
+        userContext <- m.getUserContext(Some("user-123")).tap { ctx =>
+          logger.info("User context:")
+          logger.info("{}", if (ctx.nonEmpty) ctx else "  (none)")
+        }
 
         // Get relevant context for a query
-        relevantContext <- m.getRelevantContext("Tell me about Scala and FP", maxTokens = 500)
-        _ = logger.info("Relevant context for 'Tell me about Scala and FP':")
-        _ = logger.info(if (relevantContext.nonEmpty) relevantContext else "  (none)")
+        relevantContext <- m.getRelevantContext("Tell me about Scala and FP", maxTokens = 500).tap { ctx =>
+          logger.info("Relevant context for 'Tell me about Scala and FP':")
+          logger.info("{}", if (ctx.nonEmpty) ctx else "  (none)")
+        }
       } yield ()
     }
 
@@ -166,14 +181,18 @@ object BasicMemoryExample {
     filterExamples.foreach { m =>
       m.stats.foreach { stats =>
         logger.info(
-          s"""
-             |Memory Statistics:
-             |  Total memories: ${stats.totalMemories}
-             |  By type:
-             |${stats.byType.map { case (t, c) => s"    - ${t.name}: $c" }.mkString("\n")}
-             |  Distinct entities: ${stats.entityCount}
-             |  Embedded: ${stats.embeddedCount}
-             |""".stripMargin
+          """
+          |Memory Statistics:
+          |  Total memories: {}
+          |  By type:
+          |{}
+          |  Distinct entities: {}
+          |  Embedded: {}
+          """.stripMargin,
+          stats.totalMemories,
+          stats.byType.map { case (t, c) => s"    - ${t.name}: $c" }.mkString("\n"),
+          stats.entityCount,
+          stats.embeddedCount
         )
       }
     }
@@ -183,7 +202,7 @@ object BasicMemoryExample {
         logger.info("=" * 50)
         logger.info("Basic memory example completed successfully!")
       case Left(error) =>
-        logger.error(s"Example failed with error: ${error.message}")
+        logger.error("Example failed with error: {}", error.message)
     }
   }
 }

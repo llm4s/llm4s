@@ -6,6 +6,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
 import org.slf4j.LoggerFactory
+import scala.util.chaining._
 
 /**
  * Example demonstrating memory integration with the Agent API.
@@ -62,19 +63,21 @@ object MemoryWithAgentExample {
         "The API uses http4s server with JSON serialization via Circe",
         "project-docs",
         Map("component" -> "api")
-      )
-
-      _ = logger.info(s"Initialized memory with ${m5.stats.map(_.totalMemories).getOrElse(0)} items")
+      ).tap { res =>
+        res.foreach(m => logger.info("Initialized memory with {} items", m.stats.map(_.totalMemories).getOrElse(0)))
+      }
 
       // === Part 2: Build Context-Aware Prompt ===
       _ = logger.info("2. Building context-aware prompt")
       _ = logger.info("-" * 40)
 
-      userContext <- m5.getUserContext(Some("current-user"))
-      _ = logger.info(s"User context:\n$userContext")
+      userContext <- m5.getUserContext(Some("current-user")).tap { res =>
+        res.foreach(ctx => logger.info("User context:\n{}", ctx))
+      }
 
-      relevantContext <- m5.getRelevantContext("help me with error handling", maxTokens = 500)
-      _ = logger.info(s"Relevant knowledge:\n$relevantContext")
+      relevantContext <- m5.getRelevantContext("help me with error handling", maxTokens = 500).tap { res =>
+        res.foreach(ctx => logger.info("Relevant knowledge:\n{}", ctx))
+      }
 
       // Build the system prompt with memory context
       systemPrompt = s"""You are a helpful programming assistant. Here's what you know about the user:
@@ -96,9 +99,10 @@ Provide responses tailored to the user's experience level and preferences."""
         systemPromptAddition = Some(systemPrompt)
       )
 
-      response1 = state1.conversation.messages.last.content
-      _         = logger.info("Agent response (context-aware):")
-      _         = logger.info(response1.take(500) + (if (response1.length > 500) "..." else ""))
+      response1 = state1.conversation.messages.last.content.tap { r =>
+        logger.info("Agent response (context-aware):")
+        logger.info("{}", r.take(500) + (if (r.length > 500) "..." else ""))
+      }
 
       // === Part 4: Record the Conversation ===
       _ = logger.info("4. Recording the conversation in memory")
@@ -106,19 +110,23 @@ Provide responses tailored to the user's experience level and preferences."""
 
       m6 <- m5.recordConversation(state1.conversation.messages.toSeq, "session-1")
 
-      stats <- m6.stats
-      _ = logger.info("Memory now contains:")
-      _ = logger.info(s"  Total memories: ${stats.totalMemories}")
-      _ = logger.info(s"  Conversation messages: ${stats.byType.getOrElse(MemoryType.Conversation, 0L)}")
-      _ = logger.info(s"  Distinct conversations: ${stats.conversationCount}")
+      stats <- m6.stats.tap { res =>
+        res.foreach { s =>
+          logger.info("Memory now contains:")
+          logger.info("  Total memories: {}", s.totalMemories)
+          logger.info("  Conversation messages: {}", s.byType.getOrElse(MemoryType.Conversation, 0L))
+          logger.info("  Distinct conversations: {}", s.conversationCount)
+        }
+      }
 
       // === Part 5: Continue with Memory ===
       _ = logger.info("5. Continuing conversation with full history")
       _ = logger.info("-" * 40)
 
       // Get previous conversation context
-      _ <- m6.getConversationContext("session-1", maxMessages = 10)
-      _ = logger.info("Previous conversation retrieved from memory")
+      _ <- m6.getConversationContext("session-1", maxMessages = 10).tap { res =>
+        res.foreach(_ => logger.info("Previous conversation retrieved from memory"))
+      }
 
       // Continue the conversation
       state2 <- agent.continueConversation(
@@ -126,9 +134,10 @@ Provide responses tailored to the user's experience level and preferences."""
         "What about validation errors specifically?"
       )
 
-      response2 = state2.conversation.messages.last.content
-      _         = logger.info("Follow-up response:")
-      _         = logger.info(response2.take(500) + (if (response2.length > 500) "..." else ""))
+      response2 = state2.conversation.messages.last.content.tap { r =>
+        logger.info("Follow-up response:")
+        logger.info("{}", r.take(500) + (if (r.length > 500) "..." else ""))
+      }
 
       // Record follow-up
       m7 <- m6.recordMessage(
@@ -159,11 +168,14 @@ Provide responses tailored to the user's experience level and preferences."""
       )
 
       // Show final state
-      finalStats <- m9.stats
-      _ = logger.info("Final memory state:")
-      _ = logger.info(s"  Total memories: ${finalStats.totalMemories}")
-      _ = finalStats.byType.foreach { case (t, c) =>
-        logger.info(s"  ${t.name}: $c")
+      finalStats <- m9.stats.tap { res =>
+        res.foreach { s =>
+          logger.info("Final memory state:")
+          logger.info("  Total memories: {}", s.totalMemories)
+          s.byType.foreach { case (t, c) =>
+            logger.info("  {}: {}", t.name, c)
+          }
+        }
       }
 
     } yield ()
@@ -180,7 +192,7 @@ Provide responses tailored to the user's experience level and preferences."""
 
       case Left(error) =>
         logger.error("Example failed with error:")
-        logger.error(s"  ${error.formatted}")
+        logger.error("  {}", error.formatted)
         logger.error("Make sure LLM_MODEL and API key are configured.")
     }
   }

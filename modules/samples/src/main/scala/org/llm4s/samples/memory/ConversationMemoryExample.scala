@@ -3,6 +3,7 @@ package org.llm4s.samples.memory
 import org.llm4s.agent.memory._
 import org.llm4s.llmconnect.model._
 import org.slf4j.LoggerFactory
+import scala.util.chaining._
 
 /**
  * Example demonstrating conversation memory management.
@@ -45,10 +46,10 @@ object ConversationMemoryExample {
 
     withConv1 match {
       case Right(m) =>
-        logger.info(s"Recorded conversation with ${conversation1.size} messages")
-        m.stats.foreach(s => logger.info(s"Total memories: ${s.totalMemories}"))
+        logger.info("Recorded conversation with {} messages", conversation1.size)
+        m.stats.foreach(s => logger.info("Total memories: {}", s.totalMemories))
       case Left(e) =>
-        logger.error(s"Error recording first conversation: ${e.message}")
+        logger.error("Error recording first conversation: {}", e.message)
     }
 
     // === Part 2: Recording Another Conversation ===
@@ -78,10 +79,10 @@ object ConversationMemoryExample {
 
     withConv2 match {
       case Right(m) =>
-        logger.info(s"Recorded second conversation with ${conversation2.size} messages")
-        m.stats.foreach(s => logger.info(s"Total memories: ${s.totalMemories}"))
+        logger.info("Recorded second conversation with {} messages", conversation2.size)
+        m.stats.foreach(s => logger.info("Total memories: {}", s.totalMemories))
       case Left(e) =>
-        logger.error(s"Error recording second conversation: ${e.message}")
+        logger.error("Error recording second conversation: {}", e.message)
     }
 
     // === Part 3: Retrieving Conversation History ===
@@ -90,36 +91,43 @@ object ConversationMemoryExample {
 
     val retrieveConv1 = withConv2.flatMap(m => m.getConversationContext("conv-scala-basics", maxMessages = 10))
 
-    retrieveConv1 match {
-      case Right(context) =>
-        logger.info("Conversation 'conv-scala-basics':")
-        logger.info(context)
-      case Left(e) =>
-        logger.error(s"Error retrieving conversation history: ${e.message}")
+    retrieveConv1.tap { result =>
+      result.fold(
+        // Handle Left (Error)
+        e => logger.error("Error retrieving conversation history: {}", e.message),
+        // Handle Right (Context)
+        context => {
+          logger.info("Conversation 'conv-scala-basics':")
+          logger.info("{}", context)
+        }
+      )
     }
 
     // === Part 4: Filtering Conversation Messages ===
     logger.info("4. Filtering Conversation Messages")
     logger.info("-" * 40)
 
-    val _ = withConv2.flatMap { m =>
+    withConv2.flatMap { m =>
       for {
         // Get only user messages
         userMessages <- m.store.recall(
           MemoryFilter.conversations && MemoryFilter.ByMetadata("role", "user")
-        )
-        _ = logger.info(s"User messages across all conversations: ${userMessages.size}")
-        _ = userMessages.foreach(msg => logger.info(s"- ${msg.content.take(50)}..."))
+        ).tap { msgs =>
+          logger.info("User messages across all conversations: {}", msgs.size)
+          msgs.foreach(msg => logger.info("- {}...", msg.content.take(50)))
+        }
 
         // Get only assistant messages
         assistantMessages <- m.store.recall(
           MemoryFilter.conversations && MemoryFilter.ByMetadata("role", "assistant")
-        )
-        _ = logger.info(s"Assistant messages: ${assistantMessages.size}")
+        ).tap { msgs =>
+          logger.info("Assistant messages: {}", msgs.size)
+        }
 
         // Get messages from a specific conversation
-        conv1Messages <- m.store.recall(MemoryFilter.forConversation("conv-scala-basics"))
-        _ = logger.info(s"Messages in 'conv-scala-basics': ${conv1Messages.size}")
+        conv1Messages <- m.store.recall(MemoryFilter.forConversation("conv-scala-basics")).tap { msgs =>
+          logger.info("Messages in 'conv-scala-basics': {}", msgs.size)
+        }
       } yield ()
     }
 
@@ -147,9 +155,9 @@ object ConversationMemoryExample {
     incrementalConv match {
       case Right(m) =>
         logger.info("Recorded incremental conversation about traits")
-        m.getConversationContext("conv-traits").foreach(ctx => logger.info(ctx))
+        m.getConversationContext("conv-traits").foreach(ctx => logger.info("{}", ctx))
       case Left(e) =>
-        logger.error(s"Error recording incremental conversation: ${e.message}")
+        logger.error("Error recording incremental conversation: {}", e.message)
     }
 
     // === Part 6: Cross-Conversation Search ===
@@ -159,19 +167,22 @@ object ConversationMemoryExample {
     val searchResults = incrementalConv.flatMap { m =>
       for {
         // Search for pattern matching content across all conversations
-        patternMatching <- m.store.search("pattern matching", topK = 3)
-        _ = logger.info("Search results for 'pattern matching':")
-        _ = patternMatching.foreach { sr =>
-          val convId = sr.memory.getMetadata("conversation_id").getOrElse("unknown")
-          logger.info(f"[${sr.score}%.2f] ($convId) ${sr.memory.content.take(40)}...")
+        patternMatching <- m.store.search("pattern matching", topK = 3).tap { results =>
+          logger.info("Search results for 'pattern matching':")
+          results.foreach { sr =>
+            val convId = sr.memory.getMetadata("conversation_id").getOrElse("unknown")
+            // Replaced f-string with SLF4J placeholders
+            logger.info("[{}] ({}) {}...", sr.score, convId, sr.memory.content.take(40))
+          }
         }
 
         // Search for Scala types
-        scalaTypes <- m.store.search("case class trait", topK = 3)
-        _ = logger.info("Search results for 'case class trait':")
-        _ = scalaTypes.foreach { sr =>
-          val convId = sr.memory.getMetadata("conversation_id").getOrElse("unknown")
-          logger.info(f"[${sr.score}%.2f] ($convId) ${sr.memory.content.take(40)}...")
+        scalaTypes <- m.store.search("case class trait", topK = 3).tap { results =>
+          logger.info("Search results for 'case class trait':")
+          results.foreach { sr =>
+            val convId = sr.memory.getMetadata("conversation_id").getOrElse("unknown")
+            logger.info("[{}] ({}) {}...", sr.score, convId, sr.memory.content.take(40))
+          }
         }
       } yield ()
     }
@@ -182,15 +193,15 @@ object ConversationMemoryExample {
 
     incrementalConv.foreach { m =>
       m.stats.foreach { stats =>
-        logger.info(s"Total conversation messages: ${stats.byType.getOrElse(MemoryType.Conversation, 0L)}")
-        logger.info(s"Distinct conversations: ${stats.conversationCount}")
+        logger.info("Total conversation messages: {}", stats.byType.getOrElse(MemoryType.Conversation, 0L))
+        logger.info("Distinct conversations: {}", stats.conversationCount)
       }
 
       // Count messages per conversation
       logger.info("Messages per conversation:")
       Seq("conv-scala-basics", "conv-case-classes", "conv-traits").foreach { convId =>
         m.store.recall(MemoryFilter.forConversation(convId)).foreach { messages =>
-          logger.info(s"$convId: ${messages.size} messages")
+          logger.info("{}: {} messages", convId, messages.size)
         }
       }
     }
@@ -200,7 +211,7 @@ object ConversationMemoryExample {
         logger.info("=" * 50)
         logger.info("Conversation memory example completed successfully!")
       case Left(error) =>
-        logger.error(s"Conversation example failed with error: ${error.message}")
+        logger.error("Conversation example failed with error: {}", error.message)
     }
   }
 }

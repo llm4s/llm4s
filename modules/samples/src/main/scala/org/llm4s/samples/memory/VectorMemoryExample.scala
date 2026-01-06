@@ -2,6 +2,7 @@ package org.llm4s.samples.memory
 
 import org.llm4s.agent.memory._
 import org.slf4j.LoggerFactory
+import scala.util.chaining._
 
 import java.nio.file.{ Files, Path }
 
@@ -30,12 +31,12 @@ object VectorMemoryExample {
 
     // Create a temporary database file
     val dbPath: Path = Files.createTempFile("llm4s-vector-memory-", ".db")
-    logger.info(s"Database location: $dbPath")
+    logger.info("Database location: {}", dbPath)
 
     // Use mock embedding service for this example
     // In production, construct LLMEmbeddingService using Llm4sConfig and EmbeddingClient.from(...)
     val embeddingService = MockEmbeddingService(dimensions = 1536)
-    logger.info(s"Using embedding service with ${embeddingService.dimensions} dimensions")
+    logger.info("Using embedding service with {} dimensions", embeddingService.dimensions)
 
     // ============================================================
     // Part 1: Create store and populate with memories
@@ -104,14 +105,15 @@ object VectorMemoryExample {
         )
       )
 
-      count <- store.count()
-      _ = logger.info(s"Total memories stored: $count")
+      count <- store.count().tap { c =>
+        c.foreach(cnt => logger.info("Total memories stored: {}", cnt))
+      }
 
     } yield store
 
     createResult match {
       case Left(error) =>
-        logger.error(s"Error creating store: $error")
+        logger.error("Error creating store: {}", error)
         System.exit(1)
 
       case Right(store) =>
@@ -129,14 +131,18 @@ object VectorMemoryExample {
         )
 
         queries.foreach { query =>
-          logger.info(s"Query: \"$query\"")
+          logger.info("Query: \"{}\"", query)
           store.search(query, topK = 3) match {
             case Right(results) =>
               results.zipWithIndex.foreach { case (scored, idx) =>
-                logger.info(f"  ${idx + 1}. [${scored.score}%.3f] ${scored.memory.content.take(70)}...")
+                logger.info("  {}. [{}] {}...", 
+                  idx + 1, 
+                  scored.score, 
+                  scored.memory.content.take(70)
+                )
               }
             case Left(error) =>
-              logger.error(s"  Search error: $error")
+              logger.error("  Search error: {}", error)
           }
         }
 
@@ -147,12 +153,12 @@ object VectorMemoryExample {
 
         store.vectorStats match {
           case Right(stats) =>
-            logger.info(s"Total memories: ${stats.totalMemories}")
-            logger.info(s"Embedded memories: ${stats.embeddedMemories}")
-            logger.info(s"Coverage: ${(stats.embeddedMemories * 100.0 / stats.totalMemories).toInt}%")
-            logger.info(s"Embedding dimensions: ${stats.embeddingDimensions.mkString(", ")}")
+            logger.info("Total memories: {}", stats.totalMemories)
+            logger.info("Embedded memories: {}", stats.embeddedMemories)
+            logger.info("Coverage: {}%", (stats.embeddedMemories * 100.0 / stats.totalMemories).toInt)
+            logger.info("Embedding dimensions: {}", stats.embeddingDimensions.mkString(", "))
           case Left(error) =>
-            logger.error(s"Stats error: $error")
+            logger.error("Stats error: {}", error)
         }
 
         // ============================================================
@@ -175,16 +181,18 @@ object VectorMemoryExample {
 
         conversationResult match {
           case Left(error) =>
-            logger.error(s"Error storing conversations: $error")
+            logger.error("Error storing conversations: {}", error)
 
           case Right(_) =>
             // Search only in knowledge base
             logger.info("Searching only Knowledge memories for 'beginner friendly':")
             store.search("beginner friendly", topK = 3, filter = MemoryFilter.ByType(MemoryType.Knowledge)) match {
               case Right(res) =>
-                res.foreach(scored => logger.info(f"  [${scored.score}%.3f] ${scored.memory.content.take(60)}..."))
+                res.foreach(scored => 
+                  logger.info("  [{}] {}...", scored.score, scored.memory.content.take(60))
+                )
               case Left(err) =>
-                logger.error(s"  Error: $err")
+                logger.error("  Error: {}", err)
             }
 
             // Search only in conversations
@@ -196,9 +204,11 @@ object VectorMemoryExample {
             ) match {
               case Right(res) =>
                 if (res.isEmpty) logger.info("  (no matches)")
-                else res.foreach(scored => logger.info(f"  [${scored.score}%.3f] ${scored.memory.content.take(60)}..."))
+                else res.foreach(scored => 
+                  logger.info("  [{}] {}...", scored.score, scored.memory.content.take(60))
+                )
               case Left(err) =>
-                logger.error(s"  Error: $err")
+                logger.error("  Error: {}", err)
             }
         }
 
@@ -218,19 +228,22 @@ object VectorMemoryExample {
           _ <- store.store(Memory.fromKnowledge("Memory 2: Functional concepts", "batch"))
           _ <- store.store(Memory.fromKnowledge("Memory 3: Type systems", "batch"))
 
-          statsAfter <- store.vectorStats
-          _ = logger.info(s"After storing: ${statsAfter.embeddedMemories}/${statsAfter.totalMemories} embedded")
+          statsAfter <- store.vectorStats.tap { res =>
+            res.foreach(s => logger.info("After storing: {}/{} embedded", s.embeddedMemories, s.totalMemories))
+          }
 
           // Batch embed any unembedded memories
-          embeddedCount <- store.embedAll(batchSize = 10)
-          _ = logger.info(s"Batch embedded: $embeddedCount memories")
+          embeddedCount <- store.embedAll(batchSize = 10).tap { res =>
+            res.foreach(c => logger.info("Batch embedded: {} memories", c))
+          }
 
-          finalStats <- store.vectorStats
-          _ = logger.info(s"Final stats: ${finalStats.embeddedMemories}/${finalStats.totalMemories} embedded")
+          finalStats <- store.vectorStats.tap { res =>
+            res.foreach(s => logger.info("Final stats: {}/{} embedded", s.embeddedMemories, s.totalMemories))
+          }
 
         } yield ()
 
-        batchResult.left.foreach(error => logger.error(s"Batch error: $error"))
+        batchResult.left.foreach(error => logger.error("Batch error: {}", error))
 
         // ============================================================
         // Part 6: Using with SimpleMemoryManager
@@ -267,15 +280,15 @@ object VectorMemoryExample {
             managerResult match {
               case Right(context) =>
                 logger.info("Relevant context for 'How does the memory system work?':")
-                logger.info(s"  $context")
+                logger.info("  {}", context)
               case Left(error) =>
-                logger.error(s"Manager error: $error")
+                logger.error("Manager error: {}", error)
             }
 
             vectorStore.close()
 
           case Left(error) =>
-            logger.error(s"Error: $error")
+            logger.error("Error: {}", error)
         }
 
         // Clean up original store
@@ -285,7 +298,7 @@ object VectorMemoryExample {
     // Cleanup
     logger.info("--- Cleanup ---")
     Files.deleteIfExists(dbPath)
-    logger.info(s"Deleted temporary database: $dbPath")
+    logger.info("Deleted temporary database: {}", dbPath)
 
     logger.info("=" * 60)
     logger.info("Vector Memory Example Complete!")
