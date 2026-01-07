@@ -99,26 +99,36 @@ object BasicMemoryExample {
     val filterExamples = withKnowledge.flatMap { m =>
       for {
         // Get all user facts
-        userFacts <- m.store.recall(MemoryFilter.userFacts).tap { facts =>
-          logger.info("User facts ({}):", facts.size)
-          facts.foreach(f => logger.info("  - {}", f.content))
+        _ <- m.store.recall(MemoryFilter.userFacts).tap {
+          case Right(facts) =>
+            logger.info("User facts ({}):", facts.size)
+            facts.foreach(f => logger.info("  - {}", f.content))
+          case Left(e) =>
+            logger.error("Failed to recall user facts: {}", e.message)
         }
 
         // Get all entity facts
-        entityFacts <- m.store.recall(MemoryFilter.entities).tap { facts =>
-          logger.info("Entity facts ({}):", facts.size)
-          facts.foreach(f => logger.info("  - {}", f.content))
+        _ <- m.store.recall(MemoryFilter.entities).tap {
+          case Right(facts) =>
+            logger.info("Entity facts ({}):", facts.size)
+            facts.foreach(f => logger.info("  - {}", f.content))
+          case Left(e) =>
+            logger.error("Failed to recall entity facts: {}", e.message)
         }
 
         // Get high-importance memories
-        important <- m.store.important(threshold = 0.85).tap { imps =>
-          logger.info("High importance memories (score >= 0.85): {}", imps.size)
-          imps.foreach(f => logger.info("  - {} (importance: {})", f.content, f.importance.getOrElse(0.0)))
+        _ <- m.store.important(threshold = 0.85).tap {
+          case Right(imps) =>
+            logger.info("High importance memories (score >= 0.85): {}", imps.size)
+            imps.foreach(f => logger.info("  - {} (importance: {})", f.content, f.importance.getOrElse(0.0)))
+          case Left(e) =>
+            logger.error("Failed to recall important memories: {}", e.message)
         }
 
         // Combine filters: user facts OR knowledge
-        combined <- m.store.recall(MemoryFilter.userFacts || MemoryFilter.knowledge).tap { res =>
-          logger.info("User facts OR knowledge: {} memories", res.size)
+        _ <- m.store.recall(MemoryFilter.userFacts || MemoryFilter.knowledge).tap {
+          case Right(res) => logger.info("User facts OR knowledge: {} memories", res.size)
+          case Left(e)    => logger.error("Failed to recall combined memories: {}", e.message)
         }
       } yield m
     }
@@ -130,16 +140,19 @@ object BasicMemoryExample {
     val searchExamples = filterExamples.flatMap { m =>
       for {
         // Search for Scala-related content
-        scalaResults <- m.store.search("Scala JVM", topK = 5).tap { results =>
-          logger.info("Search results for 'Scala JVM':")
-
-          results.foreach(sr => logger.info("  Score: {} - {}...", sr.score, sr.memory.content.take(50)))
+        _ <- m.store.search("Scala JVM", 5).tap {
+          case Right(results) =>
+            logger.info("Search results for 'Scala JVM':")
+            results.foreach(sr => logger.info("  Score: {} - {}...", sr.score, sr.memory.content.take(50)))
+          case Left(e) => logger.error("Search failed: {}", e.message)
         }
 
         // Search for FP content
-        fpResults <- m.store.search("functional programming", topK = 5).tap { results =>
-          logger.info("Search results for 'functional programming':")
-          results.foreach(sr => logger.info("  Score: {} - {}...", sr.score, sr.memory.content.take(50)))
+        _ <- m.store.search("functional programming", 5).tap {
+          case Right(results) =>
+            logger.info("Search results for 'functional programming':")
+            results.foreach(sr => logger.info("  Score: {} - {}...", sr.score, sr.memory.content.take(50)))
+          case Left(e) => logger.error("Search failed: {}", e.message)
         }
       } yield m
     }
@@ -151,21 +164,27 @@ object BasicMemoryExample {
     val contextExamples = searchExamples.flatMap { m =>
       for {
         // Get entity context
-        entityContext <- m.getEntityContext(entityId).tap { ctx =>
-          logger.info("Entity context for 'Scala':")
-          logger.info("{}", if (ctx.nonEmpty) ctx else "  (none)")
+        _ <- m.getEntityContext(entityId).tap {
+          case Right(ctx) =>
+            logger.info("Entity context for 'Scala':")
+            logger.info("{}", if (ctx.nonEmpty) ctx else "  (none)")
+          case Left(e) => logger.error("Failed to get entity context: {}", e.message)
         }
 
         // Get user context
-        userContext <- m.getUserContext(Some("user-123")).tap { ctx =>
-          logger.info("User context:")
-          logger.info("{}", if (ctx.nonEmpty) ctx else "  (none)")
+        _ <- m.getUserContext(Some("user-123")).tap {
+          case Right(ctx) =>
+            logger.info("User context:")
+            logger.info("{}", if (ctx.nonEmpty) ctx else "  (none)")
+          case Left(e) => logger.error("Failed to get user context: {}", e.message)
         }
 
         // Get relevant context for a query
-        relevantContext <- m.getRelevantContext("Tell me about Scala and FP", maxTokens = 500).tap { ctx =>
-          logger.info("Relevant context for 'Tell me about Scala and FP':")
-          logger.info("{}", if (ctx.nonEmpty) ctx else "  (none)")
+        _ <- m.getRelevantContext("Tell me about Scala and FP", 500).tap {
+          case Right(ctx) =>
+            logger.info("Relevant context for 'Tell me about Scala and FP':")
+            logger.info("{}", if (ctx.nonEmpty) ctx else "  (none)")
+          case Left(e) => logger.error("Failed to get relevant context: {}", e.message)
         }
       } yield ()
     }

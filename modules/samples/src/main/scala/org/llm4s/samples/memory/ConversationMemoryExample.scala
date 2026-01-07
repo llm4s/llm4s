@@ -110,25 +110,31 @@ object ConversationMemoryExample {
     withConv2.flatMap { m =>
       for {
         // Get only user messages
-        userMessages <- m.store
+        _ <- m.store
           .recall(
             MemoryFilter.conversations && MemoryFilter.ByMetadata("role", "user")
           )
-          .tap { msgs =>
-            logger.info("User messages across all conversations: {}", msgs.size)
-            msgs.foreach(msg => logger.info("- {}...", msg.content.take(50)))
+          .tap {
+            case Right(msgs) =>
+              logger.info("User messages across all conversations: {}", msgs.size)
+              msgs.foreach(msg => logger.info("- {}...", msg.content.take(50)))
+            case Left(e) => logger.error("Failed to recall user messages: {}", e.message)
           }
 
         // Get only assistant messages
-        assistantMessages <- m.store
+        _ <- m.store
           .recall(
             MemoryFilter.conversations && MemoryFilter.ByMetadata("role", "assistant")
           )
-          .tap(msgs => logger.info("Assistant messages: {}", msgs.size))
+          .tap {
+            case Right(msgs) => logger.info("Assistant messages: {}", msgs.size)
+            case Left(e)     => logger.error("Failed to recall assistant messages: {}", e.message)
+          }
 
         // Get messages from a specific conversation
-        conv1Messages <- m.store.recall(MemoryFilter.forConversation("conv-scala-basics")).tap { msgs =>
-          logger.info("Messages in 'conv-scala-basics': {}", msgs.size)
+        _ <- m.store.recall(MemoryFilter.forConversation("conv-scala-basics")).tap {
+          case Right(msgs) => logger.info("Messages in 'conv-scala-basics': {}", msgs.size)
+          case Left(e)     => logger.error("Failed to recall conversation messages: {}", e.message)
         }
       } yield ()
     }
@@ -157,7 +163,10 @@ object ConversationMemoryExample {
     incrementalConv match {
       case Right(m) =>
         logger.info("Recorded incremental conversation about traits")
-        m.getConversationContext("conv-traits").foreach(ctx => logger.info("{}", ctx))
+        m.getConversationContext("conv-traits").tap {
+          case Right(ctx) => logger.info("{}", ctx)
+          case Left(e)    => logger.error("Failed to get conversation context: {}", e.message)
+        }
       case Left(e) =>
         logger.error("Error recording incremental conversation: {}", e.message)
     }
@@ -169,22 +178,25 @@ object ConversationMemoryExample {
     val searchResults = incrementalConv.flatMap { m =>
       for {
         // Search for pattern matching content across all conversations
-        patternMatching <- m.store.search("pattern matching", topK = 3).tap { results =>
-          logger.info("Search results for 'pattern matching':")
-          results.foreach { sr =>
-            val convId = sr.memory.getMetadata("conversation_id").getOrElse("unknown")
-            // Replaced f-string with SLF4J placeholders
-            logger.info("[{}] ({}) {}...", sr.score, convId, sr.memory.content.take(40))
-          }
+        _ <- m.store.search("pattern matching", 3).tap {
+          case Right(results) =>
+            logger.info("Search results for 'pattern matching':")
+            results.foreach { sr =>
+              val convId = sr.memory.getMetadata("conversation_id").getOrElse("unknown")
+              logger.info("[{}] ({}) {}...", sr.score, convId, sr.memory.content.take(40))
+            }
+          case Left(e) => logger.error("Search failed: {}", e.message)
         }
 
         // Search for Scala types
-        scalaTypes <- m.store.search("case class trait", topK = 3).tap { results =>
-          logger.info("Search results for 'case class trait':")
-          results.foreach { sr =>
-            val convId = sr.memory.getMetadata("conversation_id").getOrElse("unknown")
-            logger.info("[{}] ({}) {}...", sr.score, convId, sr.memory.content.take(40))
-          }
+        _ <- m.store.search("case class trait", 3).tap {
+          case Right(results) =>
+            logger.info("Search results for 'case class trait':")
+            results.foreach { sr =>
+              val convId = sr.memory.getMetadata("conversation_id").getOrElse("unknown")
+              logger.info("[{}] ({}) {}...", sr.score, convId, sr.memory.content.take(40))
+            }
+          case Left(e) => logger.error("Search failed: {}", e.message)
         }
       } yield ()
     }

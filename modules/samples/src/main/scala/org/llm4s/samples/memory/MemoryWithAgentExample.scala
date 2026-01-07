@@ -65,20 +65,23 @@ object MemoryWithAgentExample {
           "project-docs",
           Map("component" -> "api")
         )
-        .tap { res =>
-          res.foreach(m => logger.info("Initialized memory with {} items", m.stats.map(_.totalMemories).getOrElse(0)))
+        .tap {
+          case Right(m) => logger.info("Initialized memory with {} items", m.stats.map(_.totalMemories).getOrElse(0))
+          case Left(e)  => logger.error("Failed to init memory: {}", e.message)
         }
 
       // === Part 2: Build Context-Aware Prompt ===
       _ = logger.info("2. Building context-aware prompt")
       _ = logger.info("-" * 40)
 
-      userContext <- m5.getUserContext(Some("current-user")).tap { res =>
-        res.foreach(ctx => logger.info("User context:\n{}", ctx))
+      userContext <- m5.getUserContext(Some("current-user")).tap {
+        case Right(ctx) => logger.info("User context:\n{}", ctx)
+        case Left(e)    => logger.error("Failed to get user context: {}", e.message)
       }
 
-      relevantContext <- m5.getRelevantContext("help me with error handling", maxTokens = 500).tap { res =>
-        res.foreach(ctx => logger.info("Relevant knowledge:\n{}", ctx))
+      relevantContext <- m5.getRelevantContext("help me with error handling", 500).tap {
+        case Right(ctx) => logger.info("Relevant knowledge:\n{}", ctx)
+        case Left(e)    => logger.error("Failed to get relevant context: {}", e.message)
       }
 
       // Build the system prompt with memory context
@@ -101,7 +104,8 @@ Provide responses tailored to the user's experience level and preferences."""
         systemPromptAddition = Some(systemPrompt)
       )
 
-      response1 = state1.conversation.messages.last.content.tap { r =>
+      _ = {
+        val r = state1.conversation.messages.last.content
         logger.info("Agent response (context-aware):")
         logger.info("{}", r.take(500) + (if (r.length > 500) "..." else ""))
       }
@@ -112,13 +116,14 @@ Provide responses tailored to the user's experience level and preferences."""
 
       m6 <- m5.recordConversation(state1.conversation.messages.toSeq, "session-1")
 
-      stats <- m6.stats.tap { res =>
-        res.foreach { s =>
+      _ <- m6.stats.tap {
+        case Right(s) =>
           logger.info("Memory now contains:")
           logger.info("  Total memories: {}", s.totalMemories)
           logger.info("  Conversation messages: {}", s.byType.getOrElse(MemoryType.Conversation, 0L))
           logger.info("  Distinct conversations: {}", s.conversationCount)
-        }
+        case Left(e) =>
+          logger.warn("Stats not available: {}", e.message)
       }
 
       // === Part 5: Continue with Memory ===
@@ -126,8 +131,9 @@ Provide responses tailored to the user's experience level and preferences."""
       _ = logger.info("-" * 40)
 
       // Get previous conversation context
-      _ <- m6.getConversationContext("session-1", maxMessages = 10).tap { res =>
-        res.foreach(_ => logger.info("Previous conversation retrieved from memory"))
+      _ <- m6.getConversationContext("session-1", maxMessages = 10).tap {
+        case Right(_) => logger.info("Previous conversation retrieved from memory")
+        case Left(e)  => logger.error("Failed to get conversation: {}", e.message)
       }
 
       // Continue the conversation
@@ -136,7 +142,8 @@ Provide responses tailored to the user's experience level and preferences."""
         "What about validation errors specifically?"
       )
 
-      response2 = state2.conversation.messages.last.content.tap { r =>
+      _ = {
+        val r = state2.conversation.messages.last.content
         logger.info("Follow-up response:")
         logger.info("{}", r.take(500) + (if (r.length > 500) "..." else ""))
       }
@@ -170,14 +177,13 @@ Provide responses tailored to the user's experience level and preferences."""
       )
 
       // Show final state
-      finalStats <- m9.stats.tap { res =>
-        res.foreach { s =>
+      _ <- m9.stats.tap {
+        case Right(s) =>
           logger.info("Final memory state:")
           logger.info("  Total memories: {}", s.totalMemories)
-          s.byType.foreach { case (t, c) =>
-            logger.info("  {}: {}", t.name, c)
-          }
-        }
+          s.byType.foreach { case (t, c) => logger.info("  {}: {}", t.name, c) }
+        case Left(e) =>
+          logger.warn("Final stats not available: {}", e.message)
       }
 
     } yield ()

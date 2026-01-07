@@ -2,7 +2,6 @@ package org.llm4s.samples.memory
 
 import org.llm4s.agent.memory._
 import org.slf4j.LoggerFactory
-import scala.util.chaining._
 
 import java.nio.file.{ Files, Path }
 
@@ -71,7 +70,7 @@ object SQLiteMemoryExample {
       _ <- store.store(Memory.fromConversation("Scala is a programming language...", "assistant", Some("conv-1")))
 
       count <- store.count()
-      _ = count.foreach(cnt => logger.info("Total memories stored: {}", cnt))
+      _ = logger.info("Total memories stored: {}", count)
 
     } yield store
 
@@ -88,7 +87,7 @@ object SQLiteMemoryExample {
 
         // Full-text search
         logger.info("Searching for 'functional programming'...")
-        store.search("functional programming", topK = 3) match {
+        store.search("functional programming", 3) match {
           case Right(results) =>
             results.foreach(scored => logger.info("  Score: {} - {}...", scored.score, scored.memory.content.take(60)))
           case Left(error) =>
@@ -131,7 +130,7 @@ object SQLiteMemoryExample {
             }
 
             logger.info("Searching recovered memories for 'JVM'...")
-            reopenedStore.search("JVM", topK = 2) match {
+            reopenedStore.search("JVM", 2) match {
               case Right(results) =>
                 results.foreach { scored =>
                   logger.info("  Score: {} - {}...", scored.score, scored.memory.content.take(60))

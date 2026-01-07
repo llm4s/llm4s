@@ -105,7 +105,8 @@ object VectorMemoryExample {
         )
       )
 
-      count <- store.count().tap(c => c.foreach(cnt => logger.info("Total memories stored: {}", cnt)))
+      count <- store.count()
+      _ = logger.info("Total memories stored: {}", count)
 
     } yield store
 
@@ -130,7 +131,7 @@ object VectorMemoryExample {
 
         queries.foreach { query =>
           logger.info("Query: \"{}\"", query)
-          store.search(query, topK = 3) match {
+          store.search(query, 3) match {
             case Right(results) =>
               results.zipWithIndex.foreach { case (scored, idx) =>
                 logger.info("  {}. [{}] {}...", idx + 1, scored.score, scored.memory.content.take(70))
@@ -180,7 +181,7 @@ object VectorMemoryExample {
           case Right(_) =>
             // Search only in knowledge base
             logger.info("Searching only Knowledge memories for 'beginner friendly':")
-            store.search("beginner friendly", topK = 3, filter = MemoryFilter.ByType(MemoryType.Knowledge)) match {
+            store.search("beginner friendly", 3, filter = MemoryFilter.ByType(MemoryType.Knowledge)) match {
               case Right(res) =>
                 res.foreach(scored => logger.info("  [{}] {}...", scored.score, scored.memory.content.take(60)))
               case Left(err) =>
@@ -191,7 +192,7 @@ object VectorMemoryExample {
             logger.info("Searching only Conversation memories:")
             store.search(
               "language recommendation",
-              topK = 3,
+              3,
               filter = MemoryFilter.ByType(MemoryType.Conversation)
             ) match {
               case Right(res) =>
@@ -218,17 +219,20 @@ object VectorMemoryExample {
           _ <- store.store(Memory.fromKnowledge("Memory 2: Functional concepts", "batch"))
           _ <- store.store(Memory.fromKnowledge("Memory 3: Type systems", "batch"))
 
-          statsAfter <- store.vectorStats.tap { res =>
-            res.foreach(s => logger.info("After storing: {}/{} embedded", s.embeddedMemories, s.totalMemories))
+          _ <- store.vectorStats.tap {
+            case Right(s) => logger.info("After storing: {}/{} embedded", s.embeddedMemories, s.totalMemories)
+            case Left(e)  => logger.error("Stats failed: {}", e.message)
           }
 
           // Batch embed any unembedded memories
-          embeddedCount <- store.embedAll(batchSize = 10).tap { res =>
-            res.foreach(c => logger.info("Batch embedded: {} memories", c))
+          _ <- store.embedAll(10).tap {
+            case Right(c) => logger.info("Batch embedded: {} memories", c)
+            case Left(e)  => logger.error("Embed all failed: {}", e.message)
           }
 
-          finalStats <- store.vectorStats.tap { res =>
-            res.foreach(s => logger.info("Final stats: {}/{} embedded", s.embeddedMemories, s.totalMemories))
+          _ <- store.vectorStats.tap {
+            case Right(s) => logger.info("Final stats: {}/{} embedded", s.embeddedMemories, s.totalMemories)
+            case Left(e)  => logger.error("Stats failed: {}", e.message)
           }
 
         } yield ()
