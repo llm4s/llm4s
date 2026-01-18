@@ -27,6 +27,7 @@
 ![GitHub forks](https://img.shields.io/github/forks/llm4s/llm4s?style=for-the-badge&label=Forks&color=green)
 ![GitHub contributors](https://img.shields.io/github/contributors/llm4s/llm4s?style=for-the-badge&label=Contributors&color=blue)
 ![GitHub issues](https://img.shields.io/github/issues/llm4s/llm4s?style=for-the-badge&label=Open%20Issues&color=purple)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/llm4s/llm4s)
 
 ## Overview
 
