@@ -111,8 +111,8 @@ ollama pull mistral
 | **phi** | 1.6GB | 4GB | Lightweight, fast | `ollama pull phi` |
 | **neural-chat** | 4.1GB | 8GB | Conversational | `ollama pull neural-chat` |
 | **codellama** | 3.8GB | 8GB | Code generation | `ollama pull codellama` |
-| **llama3** | 4.7GB | 8GB | Latest Llama | `ollama pull llama3` |
-| **gemma** | 2.0GB | 8GB | Google's model | `ollama pull gemma` |
+| **llama3.2** | 2.0GB | 8GB | Latest Llama | `ollama pull llama3.2` |
+| **gemma2** | 5.4GB | 8GB | Google's model | `ollama pull gemma2` |
 
 {: .tip }
 > **Recommendation**: Start with `mistral` for the best balance of speed and quality.
@@ -273,20 +273,33 @@ Ollama supports tool calling (function calling) with compatible models:
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.tool._
+import org.llm4s.toolapi._
+import upickle.default._
 
 object OllamaTools extends App {
-  // Define a simple weather tool
-  val getWeather = ToolFunction(
+  // Define result type
+  case class WeatherResult(forecast: String)
+  implicit val weatherResultRW: ReadWriter[WeatherResult] = macroRW
+
+  // Define a weather tool with proper schema
+  val weatherSchema = Schema
+    .`object`[Map[String, Any]]("Weather parameters")
+    .withProperty(
+      Schema.property("location", Schema.string("City or location name"))
+    )
+
+  val getWeather = ToolBuilder[Map[String, Any], WeatherResult](
     name = "get_weather",
     description = "Get the current weather in a location",
-    implementation = (location: String) => {
+    schema = weatherSchema
+  ).withHandler { extractor =>
+    extractor.getString("location").map { location =>
       // Mock implementation
-      Right(s"Weather in $location: Sunny, 72°F")
+      WeatherResult(s"Weather in $location: Sunny, 72°F")
     }
-  )
+  }.build()
 
-  val tools = ToolRegistry(Seq(getWeather))
+  val tools = new ToolRegistry(Seq(getWeather))
 
   val result = for {
     providerConfig <- Llm4sConfig.provider()
@@ -348,8 +361,9 @@ Ollama models have different context windows:
 
 - **mistral**: 8k tokens
 - **llama2**: 4k tokens
-- **llama3**: 8k tokens
+- **llama3.2**: 128k tokens
 - **codellama**: 16k tokens
+- **gemma2**: 8k tokens
 
 ---
 
@@ -427,10 +441,7 @@ services:
       - "11434:11434"
     volumes:
       - ollama-data:/root/.ollama
-    deploy:
-      resources:
-        limits:
-          memory: 8G
+    mem_limit: 8g
 
   llm4s-app:
     build: .
@@ -511,3 +522,5 @@ docker-compose exec ollama ollama pull llama2
 > ```
 >
 > Your code stays exactly the same! 🎉
+
+---
