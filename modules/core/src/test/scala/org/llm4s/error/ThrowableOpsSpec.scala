@@ -57,6 +57,14 @@ class ThrowableOpsSpec extends AnyFlatSpec with Matchers {
     rateLimitError.provider shouldBe "unknown"
   }
 
+  it should "prioritize authentication error when both 401 and 429 are present in message" in {
+    val throwable = new RuntimeException("HTTP 401 Unauthorized, then HTTP 429 Too Many Requests")
+
+    val error = throwable.toLLMError
+
+    error shouldBe a[AuthenticationError]
+  }
+
   it should "convert unknown exception to UnknownError" in {
     val throwable = new IllegalStateException("Something unexpected happened")
 
