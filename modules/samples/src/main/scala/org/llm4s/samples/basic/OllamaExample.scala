@@ -3,8 +3,11 @@ package org.llm4s.samples.basic
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
+import org.slf4j.LoggerFactory
 
 object OllamaExample {
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def main(args: Array[String]): Unit = {
     // Configuration is loaded via Typesafe Config (reference.conf + application.conf + optional overlays).
     val conversation = Conversation(
@@ -18,9 +21,12 @@ object OllamaExample {
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
       completion  <- client.complete(conversation, CompletionOptions())
-      _ = Console.println("Assistant:\n" + completion.message.content)
+      _ = {
+        logger.info("Assistant:")
+        logger.info("{}", completion.message.content)
+      }
     } yield ()
 
-    result.fold(err => Console.err.println(s"Error: ${err.formatted}"), identity)
+    result.fold(err => logger.error("Error: {}", err.formatted), identity)
   }
 }

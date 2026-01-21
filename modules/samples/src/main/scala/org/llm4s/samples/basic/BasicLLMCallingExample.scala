@@ -3,6 +3,7 @@ package org.llm4s.samples.basic
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
+import org.slf4j.LoggerFactory
 
 /**
  * Basic example demonstrating simple LLM API calls using LLM4S.
@@ -49,6 +50,7 @@ import org.llm4s.llmconnect.model._
  * For more information, see: https://github.com/llm4s/llm4s#getting-started
  */
 object BasicLLMCallingExample {
+  private val logger = LoggerFactory.getLogger(getClass)
 
   def main(args: Array[String]): Unit = {
     // Create a multi-turn conversation demonstrating different message types
@@ -89,18 +91,21 @@ object BasicLLMCallingExample {
       completion <- client.complete(conversation)
       _ = {
         // Display the response
-        println(s"\n✅ Success! Response from ${completion.model}")
-        println(s"Model ID: ${completion.id}")
-        println(s"Created at: ${completion.created}")
-        println(s"Chat Role: ${completion.message.role}")
-        println("\n--- Response ---")
-        println(completion.message.content)
-        println("--- End Response ---\n")
+        logger.info("Success! Response from {}", completion.model)
+        logger.info("Model ID: {}", completion.id)
+        logger.info("Created at: {}", completion.created)
+        logger.info("Chat Role: {}", completion.message.role)
+        logger.info("--- Response ---")
+        logger.info("{}", completion.message.content)
+        logger.info("--- End Response ---")
 
         // Print usage information if available
         completion.usage.foreach { usage =>
-          println(
-            s"📊 Tokens used: ${usage.totalTokens} (${usage.promptTokens} prompt + ${usage.completionTokens} completion)"
+          logger.info(
+            "Tokens used: {} ({} prompt + {} completion)",
+            usage.totalTokens,
+            usage.promptTokens,
+            usage.completionTokens
           )
         }
       }
@@ -109,9 +114,9 @@ object BasicLLMCallingExample {
     // Handle errors with helpful guidance
     result.fold(
       err => {
-        println(err.formatted)
-        println("\n💡 Tip: Make sure your environment variables or application.conf values are set correctly.")
-        println("For more help, see: https://github.com/llm4s/llm4s#getting-started")
+        logger.error("{}", err.formatted)
+        logger.info("Tip: Make sure your environment variables or application.conf values are set correctly.")
+        logger.info("For more help, see: https://github.com/llm4s/llm4s#getting-started")
         sys.exit(1)
       },
       identity

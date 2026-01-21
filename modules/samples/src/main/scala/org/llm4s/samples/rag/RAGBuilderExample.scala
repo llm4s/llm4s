@@ -5,6 +5,8 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.rag.{ EmbeddingProvider, RAG, RAGConfig }
 import org.llm4s.rag.RAG.RAGConfigOps
+import org.slf4j.LoggerFactory
+import scala.util.chaining._
 
 /**
  * RAG Builder API Example
@@ -28,14 +30,15 @@ import org.llm4s.rag.RAG.RAGConfigOps
  *   sbt "samples/runMain org.llm4s.samples.rag.RAGBuilderExample"
  */
 object RAGBuilderExample extends App {
+  private val logger = LoggerFactory.getLogger(getClass)
 
-  println("=" * 60)
-  println("RAG Builder API Example")
-  println("=" * 60)
+  logger.info("=" * 60)
+  logger.info("RAG Builder API Example")
+  logger.info("=" * 60)
 
   // ========== Example 1: Minimal Configuration ==========
-  println("\n--- Example 1: Minimal Configuration ---")
-  println("""
+  logger.info("--- Example 1: Minimal Configuration ---")
+  logger.info("""
     |val rag = RAG.builder()
     |  .withEmbeddings(EmbeddingProvider.OpenAI)
     |  .build()
@@ -44,15 +47,14 @@ object RAGBuilderExample extends App {
   val minimalConfig = RAG
     .builder()
     .withEmbeddings(EmbeddingProvider.OpenAI)
-
-  println(s"Embedding provider: ${minimalConfig.embeddingProvider.name}")
-  println(s"Chunking strategy: ${minimalConfig.chunkingStrategy}")
-  println(s"Fusion strategy: ${minimalConfig.fusionStrategy}")
-  println(s"Top K: ${minimalConfig.topK}")
+    .tap(c => logger.info("Embedding provider: {}", c.embeddingProvider.name))
+    .tap(c => logger.info("Chunking strategy: {}", c.chunkingStrategy))
+    .tap(c => logger.info("Fusion strategy: {}", c.fusionStrategy))
+    .tap(c => logger.info("Top K: {}", c.topK))
 
   // ========== Example 2: Full Customization ==========
-  println("\n--- Example 2: Full Customization ---")
-  println("""
+  logger.info("--- Example 2: Full Customization ---")
+  logger.info("""
     |val rag = RAG.builder()
     |  .withEmbeddings(EmbeddingProvider.OpenAI, "text-embedding-3-large")
     |  .withChunking(ChunkerFactory.Strategy.Sentence, 800, 150)
@@ -71,60 +73,66 @@ object RAGBuilderExample extends App {
     .withCohereReranking()
     .withSQLite("./rag.db")
     .withTopK(10)
-
-  println(s"Embedding model: ${fullConfig.embeddingModel.getOrElse("default")}")
-  println(s"Chunk size: ${fullConfig.chunkingConfig.targetSize}")
-  println(s"Chunk overlap: ${fullConfig.chunkingConfig.overlap}")
-  println(s"Storage path: ${fullConfig.vectorStorePath.getOrElse("in-memory")}")
-  println(s"Reranking: ${fullConfig.rerankingStrategy}")
+    .tap(c => logger.info("Embedding model: {}", c.embeddingModel.getOrElse("default")))
+    .tap(c => logger.info("Chunk size: {}", c.chunkingConfig.targetSize))
+    .tap(c => logger.info("Chunk overlap: {}", c.chunkingConfig.overlap))
+    .tap(c => logger.info("Storage path: {}", c.vectorStorePath.getOrElse("in-memory")))
+    .tap(c => logger.info("Reranking: {}", c.rerankingStrategy))
 
   // ========== Example 3: Preset Configurations ==========
-  println("\n--- Example 3: Preset Configurations ---")
+  logger.info("--- Example 3: Preset Configurations ---")
 
-  println("\nRAGConfig.development:")
+  logger.info("RAGConfig.development:")
   val devConfig = RAGConfig.development
-  println(s"  Storage: ${devConfig.vectorStorePath.getOrElse("in-memory")}")
-  println(s"  Top K: ${devConfig.topK}")
+    .tap(c => logger.info("  Storage: {}", c.vectorStorePath.getOrElse("in-memory")))
+    .tap(c => logger.info("  Top K: {}", c.topK))
 
-  println("\nRAGConfig.production(\"/var/data/rag.db\"):")
-  val prodConfig = RAGConfig.production("/var/data/rag.db")
-  println(s"  Storage: ${prodConfig.vectorStorePath.getOrElse("in-memory")}")
-  println(s"  Chunk size: ${prodConfig.chunkingConfig.targetSize}")
+  logger.info("RAGConfig.production(\"/var/data/rag.db\"):")
+  val prodConfig = RAGConfig
+    .production("/var/data/rag.db")
+    .tap(c => logger.info("  Storage: {}", c.vectorStorePath.getOrElse("in-memory")))
+    .tap(c => logger.info("  Chunk size: {}", c.chunkingConfig.targetSize))
 
   // ========== Example 4: Different Embedding Providers ==========
-  println("\n--- Example 4: Different Embedding Providers ---")
+  logger.info("--- Example 4: Different Embedding Providers ---")
 
-  println("\nOllama (local, no API key):")
+  logger.info("Ollama (local, no API key):")
   val ollamaConfig = RAG
     .builder()
     .withEmbeddings(EmbeddingProvider.Ollama, "nomic-embed-text")
-  println(s"  Provider: ${ollamaConfig.embeddingProvider.name}")
-  println(s"  Model: ${ollamaConfig.embeddingModel.getOrElse("default")}")
+    .tap(c => logger.info("  Provider: {}", c.embeddingProvider.name))
+    .tap(c => logger.info("  Model: {}", c.embeddingModel.getOrElse("default")))
 
-  println("\nVoyage AI:")
+  logger.info("Voyage AI:")
   val voyageConfig = RAG
     .builder()
     .withEmbeddings(EmbeddingProvider.Voyage, "voyage-3")
-  println(s"  Provider: ${voyageConfig.embeddingProvider.name}")
-  println(s"  Model: ${voyageConfig.embeddingModel.getOrElse("default")}")
+    .tap(c => logger.info("  Provider: {}", c.embeddingProvider.name))
+    .tap(c => logger.info("  Model: {}", c.embeddingModel.getOrElse("default")))
 
   // ========== Example 5: Different Fusion Strategies ==========
-  println("\n--- Example 5: Fusion Strategies ---")
+  logger.info("--- Example 5: Fusion Strategies ---")
 
-  println("\nVector-only search:")
-  val vectorOnly = RAG.builder().vectorOnly
-  println(s"  Strategy: ${vectorOnly.fusionStrategy}")
+  logger.info("Vector-only search:")
+  val vectorOnly = RAG
+    .builder()
+    .vectorOnly
+    .tap(c => logger.info("  Strategy: {}", c.fusionStrategy))
 
-  println("\nKeyword-only search:")
-  val keywordOnly = RAG.builder().keywordOnly
-  println(s"  Strategy: ${keywordOnly.fusionStrategy}")
+  logger.info("Keyword-only search:")
+  val keywordOnly = RAG
+    .builder()
+    .keywordOnly
+    .tap(c => logger.info("  Strategy: {}", c.fusionStrategy))
 
-  println("\nWeighted score (70% vector, 30% keyword):")
-  val weighted = RAG.builder().withWeightedScore(0.7, 0.3)
-  println(s"  Strategy: ${weighted.fusionStrategy}")
+  logger.info("Weighted score (70% vector, 30% keyword):")
+  val weighted = RAG
+    .builder()
+    .withWeightedScore(0.7, 0.3)
+    .tap(c => logger.info("  Strategy: {}", c.fusionStrategy))
 
   // ========== Example 6: Building and Using (Demo) ==========
-  println("\n--- Example 6: Building a Real RAG Pipeline ---")
+  logger.info("--- Example 6: Building a Real RAG Pipeline ---")
 
   // Check if we have LLM configured for answer generation
   val llmResult = for {
@@ -134,7 +142,7 @@ object RAGBuilderExample extends App {
   val hasLLM = llmResult.isRight
 
   if (hasLLM) {
-    println("LLM configured - building RAG with answer generation...")
+    logger.info("LLM configured - building RAG with answer generation...")
 
     val result = for {
       llmClient <- llmResult
@@ -145,9 +153,9 @@ object RAGBuilderExample extends App {
         .withLLM(llmClient)
         .build()
     } yield {
-      println(s"RAG pipeline created successfully!")
-      println(s"Document count: ${rag.documentCount}")
-      println(s"Chunk count: ${rag.chunkCount}")
+      logger.info("RAG pipeline created successfully!")
+      logger.info("Document count: {}", rag.documentCount)
+      logger.info("Chunk count: {}", rag.chunkCount)
 
       // Ingest sample text
       val ingestResult = rag.ingestText(
@@ -157,25 +165,25 @@ object RAGBuilderExample extends App {
           |The API uses immutable configuration with sensible defaults.""".stripMargin,
         "sample-doc-1"
       )
-      ingestResult.foreach(count => println(s"Ingested document with $count chunks"))
+      ingestResult.foreach(count => logger.info("Ingested document with {} chunks", count))
 
       // Query
       val searchResult = rag.query("What embedding providers are supported?")
       searchResult.foreach { results =>
-        println(s"\nSearch found ${results.size} results:")
-        results.foreach(r => println(s"  - Score: ${r.score}: ${r.content.take(80)}..."))
+        logger.info("Search found {} results:", results.size)
+        results.foreach(r => logger.info("  - Score: {}: {}...", r.score, r.content.take(80)))
       }
 
       rag.close()
     }
 
-    result.left.foreach(error => println(s"Error: $error"))
+    result.left.foreach(error => logger.error("Error: {}", error))
   } else {
-    println("LLM not configured - skipping live demo")
-    println("Set LLM_MODEL and OPENAI_API_KEY (or equivalent) to run the full demo")
+    logger.info("LLM not configured - skipping live demo")
+    logger.info("Set LLM_MODEL and OPENAI_API_KEY (or equivalent) to run the full demo")
   }
 
-  println("\n" + "=" * 60)
-  println("RAG Builder API Example Complete")
-  println("=" * 60)
+  logger.info("=" * 60)
+  logger.info("RAG Builder API Example Complete")
+  logger.info("=" * 60)
 }

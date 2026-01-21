@@ -6,8 +6,11 @@ import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.trace.Tracing
+import org.slf4j.LoggerFactory
 
 object BasicLLMCallingWithTrace {
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def main(args: Array[String]): Unit = {
     val result = for {
       tracingSettings <- Llm4sConfig.tracing()
@@ -31,10 +34,10 @@ object BasicLLMCallingWithTrace {
         // Complete the conversation
         client.complete(conversation) match {
           case Right(completion) =>
-            println(s"Model ID=${completion.id} is created at ${completion.created}")
-            println(s"Chat Role: ${completion.message.role}")
-            println("Message:")
-            println(completion.message.content)
+            logger.info("Model ID={} is created at {}", completion.id, completion.created)
+            logger.info("Chat Role: {}", completion.message.role)
+            logger.info("Message:")
+            logger.info("{}", completion.message.content)
 
             // Trace the completion with token usage
             tracer.traceCompletion(completion, completion.model)
@@ -56,11 +59,11 @@ object BasicLLMCallingWithTrace {
 
           case Left(error) =>
             tracer.traceError(new RuntimeException(error.formatted))
-            println(s"Error: ${error.formatted}")
+            logger.error("Error: {}", error.formatted)
         }
         tracer.traceEvent("LLM conversation finished")
       }
     } yield ()
-    result.fold(err => println(s"Error: ${err.formatted}"), identity)
+    result.fold(err => logger.error("Error: {}", err.formatted), identity)
   }
 }

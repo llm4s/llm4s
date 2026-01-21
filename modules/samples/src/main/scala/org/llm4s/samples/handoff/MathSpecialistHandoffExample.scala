@@ -4,6 +4,7 @@ import org.llm4s.agent.{ Agent, Handoff }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
+import org.slf4j.LoggerFactory
 
 /**
  * Math Specialist Handoff Example
@@ -12,9 +13,11 @@ import org.llm4s.toolapi.ToolRegistry
  * to a specialist agent with expertise in mathematics.
  */
 object MathSpecialistHandoffExample extends App {
-  println("=" * 80)
-  println("Math Specialist Handoff Example")
-  println("=" * 80)
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  logger.info("=" * 80)
+  logger.info("Math Specialist Handoff Example")
+  logger.info("=" * 80)
 
   val result = for {
     providerCfg <- Llm4sConfig.provider()
@@ -27,8 +30,8 @@ object MathSpecialistHandoffExample extends App {
     mathAgent = new Agent(client)
 
     // Run general agent with math handoff
-    _ = println("\nQuery: 'What is the integral of 2x + 5 from 0 to 10?'")
-    _ = println("\nGeneral agent analyzing query...")
+    _ = logger.info("Query: 'What is the integral of 2x + 5 from 0 to 10?'")
+    _ = logger.info("General agent analyzing query...")
 
     finalState <- generalAgent.run(
       query = "What is the integral of 2x + 5 from 0 to 10?",
@@ -51,23 +54,23 @@ object MathSpecialistHandoffExample extends App {
 
   result match {
     case Right(finalState) =>
-      println("\n" + "=" * 80)
-      println("✅ Math question answered")
-      println("=" * 80)
-      println(s"Status: ${finalState.status}")
-      println(s"\nAnswer:")
-      println(finalState.conversation.messages.last.content)
+      logger.info("=" * 80)
+      logger.info("Math question answered")
+      logger.info("=" * 80)
+      logger.info("Status: {}", finalState.status)
+      logger.info("Answer:")
+      logger.info("{}", finalState.conversation.messages.last.content)
 
       // Check if handoff occurred
       if (finalState.logs.exists(_.contains("handoff"))) {
-        println(s"\n🔄 Handoff occurred:")
-        finalState.logs.filter(_.contains("handoff")).foreach(log => println(s"  $log"))
+        logger.info("Handoff occurred:")
+        finalState.logs.filter(_.contains("handoff")).foreach(log => logger.info("  {}", log))
       }
 
     case Left(error) =>
-      println("\n" + "=" * 80)
-      println("❌ Error occurred")
-      println("=" * 80)
-      println(s"Error: ${error.formatted}")
+      logger.error("=" * 80)
+      logger.error("Error occurred")
+      logger.error("=" * 80)
+      logger.error("Error: {}", error.formatted)
   }
 }

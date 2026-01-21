@@ -4,6 +4,7 @@ import org.llm4s.agent.{ Agent, Handoff }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
+import org.slf4j.LoggerFactory
 
 /**
  * Simple Triage Handoff Example
@@ -12,9 +13,11 @@ import org.llm4s.toolapi.ToolRegistry
  * A triage agent analyzes the query and hands off to the appropriate specialist.
  */
 object SimpleTriageHandoffExample extends App {
-  println("=" * 80)
-  println("Simple Triage Handoff Example")
-  println("=" * 80)
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  logger.info("=" * 80)
+  logger.info("Simple Triage Handoff Example")
+  logger.info("=" * 80)
 
   val result = for {
     providerCfg <- Llm4sConfig.provider()
@@ -29,8 +32,8 @@ object SimpleTriageHandoffExample extends App {
     triageAgent = new Agent(client)
 
     // Run triage agent with handoff options
-    _ = println("\nQuery: 'I want a refund for my order #12345'")
-    _ = println("\nTriaging query to appropriate specialist...")
+    _ = logger.info("Query: 'I want a refund for my order #12345'")
+    _ = logger.info("Triaging query to appropriate specialist...")
 
     finalState <- triageAgent.run(
       query = "I want a refund for my order #12345",
@@ -56,22 +59,22 @@ object SimpleTriageHandoffExample extends App {
 
   result match {
     case Right(finalState) =>
-      println("\n" + "=" * 80)
-      println("✅ Query handled successfully")
-      println("=" * 80)
-      println(s"Status: ${finalState.status}")
-      println(s"\nFinal Response:")
-      println(finalState.conversation.messages.last.content)
+      logger.info("=" * 80)
+      logger.info("Query handled successfully")
+      logger.info("=" * 80)
+      logger.info("Status: {}", finalState.status)
+      logger.info("Final Response:")
+      logger.info("{}", finalState.conversation.messages.last.content)
 
       if (finalState.logs.exists(_.contains("handoff"))) {
-        println(s"\n🔄 Handoff Log:")
-        finalState.logs.filter(_.contains("handoff")).foreach(log => println(s"  - $log"))
+        logger.info("Handoff Log:")
+        finalState.logs.filter(_.contains("handoff")).foreach(log => logger.info("  - {}", log))
       }
 
     case Left(error) =>
-      println("\n" + "=" * 80)
-      println("❌ Error occurred")
-      println("=" * 80)
-      println(s"Error: ${error.formatted}")
+      logger.error("=" * 80)
+      logger.error("Error occurred")
+      logger.error("=" * 80)
+      logger.error("Error: {}", error.formatted)
   }
 }

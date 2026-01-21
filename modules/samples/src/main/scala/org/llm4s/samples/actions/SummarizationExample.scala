@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.llmconnect.model._
 import org.llm4s.context.tokens.Tokenizer
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating how to use LLM4S for text summarization.
@@ -16,6 +17,8 @@ import org.llm4s.types.Result
  * 3. Process the summarized result
  */
 object SummarizationExample {
+
+  private val logger = LoggerFactory.getLogger(getClass)
 
   // Sample text to summarize - you can replace with any text
   val textToSummarize1 =
@@ -60,12 +63,11 @@ object SummarizationExample {
       )
     )
 
-    println("Original text:")
-    println("--------------")
-    println(textToSummarize1.trim)
-    println()
+    logger.info("Original text:")
+    logger.info("--------------")
+    logger.info("{}", textToSummarize1.trim)
 
-    println("Generating summary...")
+    logger.info("Generating summary...")
 
     // Get a client using typed configuration (Result-first)
     val result = for {
@@ -74,23 +76,26 @@ object SummarizationExample {
       completion  <- client.complete(conversation)
       _ = CompletionSummaryInfo(completion)
       summaryResult <- summarizeText(textToSummarize2, Some("50 words"))(client)
-      _ = println(summaryResult)
+      _ = logger.info("{}", summaryResult)
 
     } yield ()
 
-    result.fold(err => println(s"Error: ${err.formatted}"), identity)
+    result.fold(err => logger.error("Error: {}", err.formatted), identity)
 
   }
 
   private def CompletionSummaryInfo(completion: Completion): Unit = {
-    println("Summary:")
-    println("--------")
-    println(completion.message.content.trim)
+    logger.info("Summary:")
+    logger.info("--------")
+    logger.info("{}", completion.message.content.trim)
 
     // Print usage information if available
     completion.usage.foreach { usage =>
-      println(
-        s"Token usage: ${usage.totalTokens} total (${usage.promptTokens} prompt, ${usage.completionTokens} completion)"
+      logger.info(
+        "Token usage: {} total ({} prompt, {} completion)",
+        usage.totalTokens,
+        usage.promptTokens,
+        usage.completionTokens
       )
 
       val tokenizerId = O200K_BASE
@@ -105,12 +110,12 @@ object SummarizationExample {
         val outputTokens     = usage.completionTokens
         val compressionRatio = outputTokens.toDouble / originalTokens.toDouble
         // add compression in words and in characters as well
-        println(f"Compression ratio: ${compressionRatio * 100}%.1f%% (lower is better)")
-        println(
+        logger.info(f"Compression ratio: ${compressionRatio * 100}%.1f%% (lower is better)")
+        logger.info(
           f"${textToSummarize1.split("\\s+").length} words were successfully summarized into ${completion.message.content.trim.split("\\s+").length} words!"
         )
       } else {
-        println("Tokenizer not found!")
+        logger.warn("Tokenizer not found!")
       }
     }
   }

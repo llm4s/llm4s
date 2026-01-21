@@ -3,6 +3,7 @@ package org.llm4s.samples.basic
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
+import org.slf4j.LoggerFactory
 
 import scala.collection.mutable
 
@@ -42,6 +43,8 @@ import scala.collection.mutable
  * when the response is longer (3+ paragraphs).
  */
 object AdvancedStreamingExample {
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def main(args: Array[String]): Unit = {
 
     // Create a multi-turn conversation
@@ -65,8 +68,6 @@ object AdvancedStreamingExample {
     val spinner      = Array('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
     var spinnerIndex = 0
 
-    println("\n📖 Story streaming in progress...\n")
-
     // Buffer for current line to handle word wrapping
     var currentLine   = ""
     val maxLineLength = 80
@@ -75,13 +76,14 @@ object AdvancedStreamingExample {
       providerCfg <- Llm4sConfig.provider()
       _ = {
         val model = providerCfg.model
-        println(s"🎨 Advanced Streaming Example - Story Generation")
-        println(s"📍 Using model: $model")
-        println("=" * 60)
+        logger.info("Advanced Streaming Example - Story Generation")
+        logger.info("Using model: {}", model)
+        logger.info("=" * 60)
+        logger.info("Story streaming in progress...")
       }
       client <- LLMConnect.getClient(providerCfg)
       completion <- {
-        println("🎨 Advanced Streaming Example - Story Generation")
+        // Separator for the story output
         println("=" * 60)
         client.streamComplete(
           conversation,
@@ -91,7 +93,8 @@ object AdvancedStreamingExample {
             // Record first chunk timing
             if (firstChunkTime.isEmpty) {
               firstChunkTime = Some(chunkTime - startTime)
-              println(s"⚡ First chunk received in ${firstChunkTime.get}ms\n")
+              // Print this info to stdout as part of the "story UI" experience
+              println(s"First chunk received in ${firstChunkTime.get}ms\n")
               println("-" * maxLineLength)
             }
             chunk.content.foreach { content =>
@@ -144,55 +147,55 @@ object AdvancedStreamingExample {
 
         val totalTime = System.currentTimeMillis() - startTime
 
+        // End of story UI
         println("\n" + "-" * maxLineLength)
-        println("\n📊 Streaming Analytics")
-        println("=" * 60)
+        logger.info("Streaming Analytics")
+        logger.info("=" * 60)
 
         // Calculate statistics
         val avgChunkSize  = if (chunkSizes.nonEmpty) chunkSizes.sum / chunkSizes.length else 0
         val avgChunkDelay = if (chunkTimes.nonEmpty) chunkTimes.sum / chunkTimes.length else 0
         val throughput    = if (totalTime > 0) completion.message.content.length * 1000.0 / totalTime else 0
 
-        println(f"⏱️  Total streaming time: ${totalTime}ms")
-        println(f"⚡ Time to first chunk: ${firstChunkTime.getOrElse(0L)}ms")
-        println(f"📦 Total chunks received: ${chunkSizes.length}")
-        println(f"📏 Average chunk size: $avgChunkSize characters")
-        println(f"⏳ Average delay between chunks: ${avgChunkDelay}ms")
-        println(f"🚀 Throughput: ${throughput}%.1f characters/second")
-        println()
-        println(f"📝 Content Statistics:")
-        println(f"   - Total characters: ${completion.message.content.length}")
-        println(f"   - Words: ~$wordCount")
-        println(f"   - Sentences: ~$sentenceCount")
-        println(f"   - Paragraphs: ~${paragraphCount + 1}")
+        logger.info("Total streaming time: {}ms", totalTime)
+        logger.info("Time to first chunk: {}ms", firstChunkTime.getOrElse(0L))
+        logger.info("Total chunks received: {}", chunkSizes.length)
+        logger.info("Average chunk size: {} characters", avgChunkSize)
+        logger.info("Average delay between chunks: {}ms", avgChunkDelay)
+        logger.info("Throughput: {} characters/second", f"$throughput%.1f")
+        logger.info("")
+        logger.info("Content Statistics:")
+        logger.info("  - Total characters: {}", completion.message.content.length)
+        logger.info("  - Words: ~{}", wordCount)
+        logger.info("  - Sentences: ~{}", sentenceCount)
+        logger.info("  - Paragraphs: ~{}", paragraphCount + 1)
 
         // Token usage
         completion.usage.foreach { usage =>
-          println()
-          println(f"🎯 Token Usage:")
-          println(f"   - Prompt tokens: ${usage.promptTokens}")
-          println(f"   - Completion tokens: ${usage.completionTokens}")
-          println(f"   - Total tokens: ${usage.totalTokens}")
+          logger.info("Token Usage:")
+          logger.info("  - Prompt tokens: {}", usage.promptTokens)
+          logger.info("  - Completion tokens: {}", usage.completionTokens)
+          logger.info("  - Total tokens: {}", usage.totalTokens)
           val tokensPerSecond = if (totalTime > 0) usage.completionTokens * 1000.0 / totalTime else 0
-          println(f"   - Generation speed: ${tokensPerSecond}%.1f tokens/second")
+          logger.info("  - Generation speed: {} tokens/second", f"$tokensPerSecond%.1f")
         }
 
         // Create a histogram of chunk delays
         if (chunkTimes.nonEmpty) {
-          println("\n📈 Chunk Delay Distribution (ms):")
+          logger.info("Chunk Delay Distribution (ms):")
           val buckets = Seq(0, 10, 25, 50, 100, 200, 500, 1000)
           buckets.sliding(2).foreach { case Seq(min, max) =>
             val count = chunkTimes.count(t => t >= min && t < max)
             if (count > 0) {
               val bar = "█" * (count * 40 / chunkTimes.length).max(1)
-              println(f"   $min%3d-$max%3d ms: $bar $count")
+              logger.info(f"  $min%3d-$max%3d ms: $bar $count")
             }
           }
         }
 
-        println("\n✅ Streaming completed successfully!")
+        logger.info("Streaming completed successfully!")
       }
     } yield ()
-    result.fold(error => println(s"Error: ${error.message}"), _ => ())
+    result.fold(error => logger.error("Error: {}", error.message), _ => ())
   }
 }

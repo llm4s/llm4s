@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.tools.WeatherTool
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating long multi-turn conversations with automatic context pruning.
@@ -15,8 +16,10 @@ import org.llm4s.toolapi.tools.WeatherTool
  */
 object LongConversationExample {
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def main(args: Array[String]): Unit = {
-    println("=== Long Conversation with Context Pruning Example ===\n")
+    logger.info("=== Long Conversation with Context Pruning Example ===")
 
     // Configure context window management
     val contextConfig = ContextWindowConfig(
@@ -49,23 +52,23 @@ object LongConversationExample {
         contextWindowConfig = Some(contextConfig) // Enable automatic pruning
       )
 
-      _ = println("\n=== Conversation Statistics ===")
-      _ = println(s"Total messages: ${finalState.conversation.messageCount}")
-      _ = println(s"User messages: ${finalState.conversation.filterByRole(MessageRole.User).length}")
-      _ = println(s"Assistant messages: ${finalState.conversation.filterByRole(MessageRole.Assistant).length}")
-      _ = println(s"Tool messages: ${finalState.conversation.filterByRole(MessageRole.Tool).length}")
+      _ = logger.info("=== Conversation Statistics ===")
+      _ = logger.info("Total messages: {}", finalState.conversation.messageCount)
+      _ = logger.info("User messages: {}", finalState.conversation.filterByRole(MessageRole.User).length)
+      _ = logger.info("Assistant messages: {}", finalState.conversation.filterByRole(MessageRole.Assistant).length)
+      _ = logger.info("Tool messages: {}", finalState.conversation.filterByRole(MessageRole.Tool).length)
 
-      _ = println("\n=== Final Assistant Response ===")
+      _ = logger.info("=== Final Assistant Response ===")
       _ = finalState.conversation.messages
         .filter(_.role == MessageRole.Assistant)
         .lastOption
-        .foreach(msg => println(msg.content))
+        .foreach(msg => logger.info("{}", msg.content))
 
     } yield finalState
 
     result.fold(
-      error => println(s"\nError: ${error.formatted}"),
-      state => println(s"\nSuccess! Conversation completed with status: ${state.status}")
+      error => logger.error("Error: {}", error.formatted),
+      state => logger.info("Success! Conversation completed with status: {}", state.status)
     )
   }
 }

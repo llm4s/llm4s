@@ -4,6 +4,8 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
 import org.llm4s.rag.benchmark.{ BenchmarkReport, BenchmarkRunner, BenchmarkSuite, DatasetManager }
 import org.llm4s.error.ConfigurationError
+import org.slf4j.LoggerFactory
+import scala.util.chaining._
 
 /**
  * CLI entrypoint for running RAG benchmarks from the samples module.
@@ -17,19 +19,21 @@ import org.llm4s.error.ConfigurationError
  */
 object BenchmarkRunnerCli {
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def main(args: Array[String]): Unit = {
     val datasetPath = args.headOption.getOrElse {
-      println("Usage: BenchmarkRunnerCli <dataset-path> [--quick]")
-      println("\nChecking for available datasets...")
+      logger.info("Usage: BenchmarkRunnerCli <dataset-path> [--quick]")
+      logger.info("Checking for available datasets...")
 
       val available = DatasetManager.checkDatasets()
       available.foreach { case (name, exists) =>
         val status = if (exists) "OK" else "MISSING"
-        println(s"  [$status] $name")
+        logger.info("  [{}] {}", status, name)
       }
 
       if (available.values.forall(!_)) {
-        println(DatasetManager.downloadInstructions)
+        logger.info("{}", DatasetManager.downloadInstructions)
       }
 
       sys.exit(1)
@@ -37,7 +41,7 @@ object BenchmarkRunnerCli {
 
     val isQuick = args.contains("--quick")
 
-    println("Loading benchmark runner...")
+    logger.info("Loading benchmark runner...")
 
     val runnerResult = for {
       providerCfg     <- Llm4sConfig.provider()
@@ -52,26 +56,25 @@ object BenchmarkRunnerCli {
 
     runnerResult match {
       case Right(runner) =>
-        val suite = if (isQuick) {
-          BenchmarkSuite.quickSuite(datasetPath)
-        } else {
-          BenchmarkSuite.chunkingSuite(datasetPath)
-        }
-
-        println(s"Running suite: ${suite.name}")
-        println(s"Experiments: ${suite.experiments.map(_.name).mkString(", ")}")
+        val suite = (if (isQuick) {
+                       BenchmarkSuite.quickSuite(datasetPath)
+                     } else {
+                       BenchmarkSuite.chunkingSuite(datasetPath)
+                     })
+          .tap(s => logger.info("Running suite: {}", s.name))
+          .tap(s => logger.info("Experiments: {}", s.experiments.map(_.name).mkString(", ")))
 
         runner.runSuite(suite) match {
           case Right(results) =>
-            println(BenchmarkReport.console(results))
+            logger.debug("Benchmark report:\n{}", BenchmarkReport.console(results))
           case Left(error) =>
-            println(s"Benchmark failed: ${error.message}")
+            logger.error("Benchmark failed: {}", error.message)
             sys.exit(1)
         }
 
       case Left(error) =>
-        println(s"Failed to initialize: ${error.message}")
-        println("Ensure LLM_MODEL and embedding provider environment variables are set.")
+        logger.error("Failed to initialize: {}", error.message)
+        logger.error("Ensure LLM_MODEL and embedding provider environment variables are set.")
         sys.exit(1)
     }
   }

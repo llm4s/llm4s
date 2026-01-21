@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating how to use LLM4S for multi-tonal text translation.
@@ -17,6 +18,8 @@ import org.llm4s.types.Result
  * // Run: sbt "samples/runMain org.llm4s.samples.actions.TranslationExample"
  */
 object TranslationExample {
+  private val logger = LoggerFactory.getLogger(getClass)
+
   val textToTranslate = "Hello, how are you?"
   val language        = "French"
   private val systemPrompt =
@@ -34,11 +37,11 @@ object TranslationExample {
     case object Formal   extends Tone
   }
   def main(args: Array[String]): Unit = {
-    println("Translation Example")
-    println("-------------------------")
-    println(s"Text to translate: $textToTranslate")
-    println(s"Target Language: $language")
-    println("-------------------------")
+    logger.info("Translation Example")
+    logger.info("-------------------------")
+    logger.info("Text to translate: {}", textToTranslate)
+    logger.info("Target Language: {}", language)
+    logger.info("-------------------------")
 
     val result = for {
       providerCfg <- Llm4sConfig.provider()
@@ -50,11 +53,11 @@ object TranslationExample {
     } yield (informal, formal)
 
     result.fold(
-      err => println(s"Error: ${err.formatted}"),
+      err => logger.error("Error: {}", err.formatted),
       { case (informal, formal) =>
-        println(s"Informal ($language): $informal")
-        println(s"Formal   ($language): $formal")
-        println("-------------------------")
+        logger.info("Informal ({}): {}", language, informal)
+        logger.info("Formal   ({}): {}", language, formal)
+        logger.info("-------------------------")
       }
     )
   }

@@ -2,6 +2,7 @@ package org.llm4s.samples.types
 
 import org.llm4s.AsyncResult
 import org.llm4s.types._
+import org.slf4j.LoggerFactory
 
 import scala.concurrent.Future
 
@@ -14,14 +15,16 @@ import scala.concurrent.Future
 
 object TypeUsage {
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   // Example: Using type-safe IDs
   def exampleTypeSafeIds(): Unit = {
     val modelName = ModelName.GPT_4
     val provider  = ProviderName.OPENAI
     val apiKey    = ApiKey("sk-test123").getOrElse(throw new RuntimeException("Invalid API key"))
 
-    println(s"Using model $modelName from provider $provider")
-    println(s"API key: $apiKey") // Safely prints masked version
+    logger.info("Using model {} from provider {}", modelName, provider)
+    logger.info("API key: {}", apiKey) // Safely prints masked version
   }
 
   // Example: Using Result types
@@ -48,7 +51,7 @@ object TypeUsage {
     val agentId     = AgentId("agent-123")
     val workflowId  = WorkflowId("workflow-456")
 
-    println(s"Future features: image generation with prompt '$imagePrompt'")
-    println(s"Agent system with agent $agentId in workflow $workflowId")
+    logger.info("Future features: image generation with prompt '{}'", imagePrompt)
+    logger.info("Agent system with agent {} in workflow {}", agentId, workflowId)
   }
 }

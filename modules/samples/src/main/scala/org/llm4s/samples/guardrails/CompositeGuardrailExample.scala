@@ -6,6 +6,7 @@ import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating composite guardrails with different validation modes.
@@ -16,10 +17,12 @@ import org.llm4s.toolapi.ToolRegistry
  * Requires: LLM_MODEL and appropriate API key in environment
  */
 object CompositeGuardrailExample extends App {
-  println("=== Composite Guardrail Example ===\n")
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  logger.info("=== Composite Guardrail Example ===")
 
   // Example 1: All guardrails must pass (AND logic)
-  println("Example 1: All guardrails must pass\n")
+  logger.info("Example 1: All guardrails must pass")
 
   val safetyChecks = CompositeGuardrail.all(
     Seq(
@@ -42,16 +45,16 @@ object CompositeGuardrailExample extends App {
 
   result1 match {
     case Right(_) =>
-      println("✓ All safety checks passed!")
-      println(s"  Length check: PASS")
-      println(s"  Profanity filter: PASS\n")
+      logger.info("✓ All safety checks passed!")
+      logger.info("  Length check: PASS")
+      logger.info("  Profanity filter: PASS")
 
     case Left(error) =>
-      println(s"✗ Validation failed: ${error.formatted}\n")
+      logger.error("✗ Validation failed: {}", error.formatted)
   }
 
   // Example 2: At least one guardrail must pass (OR logic)
-  println("Example 2: At least one guardrail must pass (language detection)\n")
+  logger.info("Example 2: At least one guardrail must pass (language detection)")
 
   val languageDetection = CompositeGuardrail.any(
     Seq(
@@ -75,15 +78,15 @@ object CompositeGuardrailExample extends App {
 
   result2 match {
     case Right(_) =>
-      println("✓ Query matched at least one language pattern!")
-      println(s"  (Contains: scala, functional, java, python, etc.)\n")
+      logger.info("✓ Query matched at least one language pattern!")
+      logger.info("  (Contains: scala, functional, java, python, etc.)")
 
     case Left(error) =>
-      println(s"✗ No language patterns matched: ${error.formatted}\n")
+      logger.error("✗ No language patterns matched: {}", error.formatted)
   }
 
   // Example 3: Sequential validation (short-circuit on failure)
-  println("Example 3: Sequential validation with early termination\n")
+  logger.info("Example 3: Sequential validation with early termination")
 
   val sequentialChecks = CompositeGuardrail.sequential(
     Seq(
@@ -106,16 +109,16 @@ object CompositeGuardrailExample extends App {
 
   result3 match {
     case Right(_) =>
-      println("✓ All sequential checks passed!")
-      println(s"  Step 1 (Length): PASS")
-      println(s"  Step 2 (Profanity): PASS\n")
+      logger.info("✓ All sequential checks passed!")
+      logger.info("  Step 1 (Length): PASS")
+      logger.info("  Step 2 (Profanity): PASS")
 
     case Left(error) =>
-      println(s"✗ Validation failed at some step: ${error.formatted}\n")
+      logger.error("✗ Validation failed at some step: {}", error.formatted)
   }
 
   // Example 4: Combining safety and business logic
-  println("Example 4: Combining safety and business logic\n")
+  logger.info("Example 4: Combining safety and business logic")
 
   val combinedValidation: InputGuardrail = new InputGuardrail {
     val safetyLayer = CompositeGuardrail.all(
@@ -155,15 +158,15 @@ object CompositeGuardrailExample extends App {
 
   result4 match {
     case Right(state) =>
-      println("✓ Combined validation passed!")
-      println(s"  Safety layer: PASS")
-      println(s"  Business layer: PASS")
-      println("\nResponse preview:")
-      state.conversation.messages.last.content.split("\n").take(3).foreach(line => println(s"  $line"))
+      logger.info("✓ Combined validation passed!")
+      logger.info("  Safety layer: PASS")
+      logger.info("  Business layer: PASS")
+      logger.info("Response preview:")
+      state.conversation.messages.last.content.split("\n").take(3).foreach(line => logger.info("  {}", line))
 
     case Left(error) =>
-      println(s"✗ Combined validation failed: ${error.formatted}")
+      logger.error("✗ Combined validation failed: {}", error.formatted)
   }
 
-  println("\n" + "=" * 50)
+  logger.info("=" * 50)
 }

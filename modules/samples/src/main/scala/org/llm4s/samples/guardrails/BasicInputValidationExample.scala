@@ -5,6 +5,7 @@ import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating basic input validation with guardrails.
@@ -15,7 +16,9 @@ import org.llm4s.toolapi.ToolRegistry
  * Requires: LLM_MODEL and appropriate API key in environment
  */
 object BasicInputValidationExample extends App {
-  println("=== Basic Input Validation Example ===\n")
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  logger.info("=== Basic Input Validation Example ===")
 
   val result = for {
     providerCfg <- Llm4sConfig.provider()
@@ -38,14 +41,14 @@ object BasicInputValidationExample extends App {
 
   result match {
     case Right(state) =>
-      println("✓ Input validation passed!")
-      println(s"\nAgent response:")
-      state.conversation.messages.last.content.split("\n").foreach(line => println(s"  $line"))
+      logger.info("✓ Input validation passed!")
+      logger.info("Agent response:")
+      state.conversation.messages.last.content.split("\n").foreach(line => logger.info("  {}", line))
 
     case Left(error) =>
-      println(s"✗ Validation or execution failed:")
-      println(s"  Error: ${error.formatted}")
+      logger.error("✗ Validation or execution failed:")
+      logger.error("  Error: {}", error.formatted)
   }
 
-  println("\n" + "=" * 50)
+  logger.info("=" * 50)
 }

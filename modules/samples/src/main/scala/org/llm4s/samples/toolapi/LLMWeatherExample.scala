@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.{ LLMConnect, LLMClient }
 import org.llm4s.toolapi._
 import org.llm4s.toolapi.tools.WeatherTool
+import org.slf4j.LoggerFactory
 
 import scala.annotation.tailrec
 
@@ -12,6 +13,8 @@ import scala.annotation.tailrec
  * Example demonstrating how to use the weather tool with an LLM
  */
 object LLMWeatherExample {
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def main(args: Array[String]): Unit = {
     val result = for {
       providerCfg <- Llm4sConfig.provider()
@@ -20,13 +23,12 @@ object LLMWeatherExample {
         val toolRegistry        = new ToolRegistry(Seq(WeatherTool.tool))
         val initialConversation = Conversation(Seq(UserMessage("What's the weather like in Paris, France?")))
         val options             = CompletionOptions(tools = Seq(WeatherTool.tool))
-        println("Sending request to LLM with weather tool...")
+        logger.info("Sending request to LLM with weather tool...")
         processLLMRequest(client, initialConversation, options, toolRegistry)
       }
     } yield ()
 
-    result.fold(err => println(s"Error: ${err.formatted}"), identity)
-
+    result.fold(err => logger.error("Error: {}", err.formatted), identity)
   }
 
   /**
@@ -43,12 +45,12 @@ object LLMWeatherExample {
       case Right(completion) =>
         val assistantMessage = completion.message
 
-        println("\nLLM Response:")
-        println(assistantMessage.content)
+        logger.info("LLM Response:")
+        logger.info("{}", assistantMessage.content)
 
         // Check if there are tool calls
         if (assistantMessage.toolCalls.nonEmpty) {
-          println("\nTool calls detected, processing...")
+          logger.info("Tool calls detected, processing...")
 
           // Process each tool call and create tool messages
           val toolMessages: Seq[ToolMessage] = processToolCalls(assistantMessage.toolCalls, toolRegistry)
@@ -58,24 +60,27 @@ object LLMWeatherExample {
             .addMessage(assistantMessage)
             .addMessages(toolMessages)
 
-          println("\nSending follow-up request with tool results...")
+          logger.info("Sending follow-up request with tool results...")
 
           // Make the follow-up API request (without tools this time)
           processLLMRequest(client, updatedConversation, CompletionOptions(), toolRegistry)
         } else {
           // If no tool calls, we're done
-          println("\nFinal response (no tool calls needed).")
+          logger.info("Final response (no tool calls needed).")
 
           // Print token usage if available
           completion.usage.foreach { usage =>
-            println(
-              s"\nTokens used: ${usage.totalTokens} (${usage.promptTokens} prompt, ${usage.completionTokens} completion)"
+            logger.info(
+              "Tokens used: {} ({} prompt, {} completion)",
+              usage.totalTokens,
+              usage.promptTokens,
+              usage.completionTokens
             )
           }
         }
 
       case Left(error) =>
-        println(s"Error: ${error.formatted}")
+        logger.error("Error: {}", error.formatted)
     }
 
   /**
@@ -83,8 +88,8 @@ object LLMWeatherExample {
    */
   private def processToolCalls(toolCalls: Seq[ToolCall], toolRegistry: ToolRegistry): Seq[ToolMessage] =
     toolCalls.map { toolCall =>
-      println(s"\nExecuting tool: ${toolCall.name}")
-      println(s"Arguments: ${toolCall.arguments}")
+      logger.info("Executing tool: {}", toolCall.name)
+      logger.info("Arguments: {}", toolCall.arguments)
 
       val request    = ToolCallRequest(toolCall.name, toolCall.arguments)
       val toolResult = toolRegistry.execute(request)
@@ -94,7 +99,7 @@ object LLMWeatherExample {
         case Left(error) => s"""{ "isError": true, "message": "$error" }"""
       }
 
-      println(s"Tool execution result: $resultContent")
+      logger.info("Tool execution result: {}", resultContent)
 
       // Create a tool message with the result
       ToolMessage(toolCall.id, resultContent)

@@ -4,6 +4,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
+import org.slf4j.LoggerFactory
 
 /**
  * Example showing streaming with progress indicators and accumulation.
@@ -16,14 +17,9 @@ import org.llm4s.llmconnect.streaming.StreamingAccumulator
  * To run: sbt "samples/runMain org.llm4s.samples.streaming.StreamingWithProgressExample"
  */
 object StreamingWithProgressExample {
-  def main(args: Array[String]): Unit = {
-    val model = Llm4sConfig
-      .provider()
-      .fold(err => throw new RuntimeException(err.formatted), _.model)
-    println("=== LLM4S Streaming with Progress Example ===")
-    println(s"Using model: $model")
-    println("=" * 50 + "\n")
+  private val logger = LoggerFactory.getLogger(getClass)
 
+  def main(args: Array[String]): Unit = {
     // Create a conversation that will generate a longer response
     val conversation = Conversation(
       Seq(
@@ -44,13 +40,18 @@ object StreamingWithProgressExample {
     // Get a client (Result-first)
     val result = for {
       providerCfg <- Llm4sConfig.provider()
-      client      <- LLMConnect.getClient(providerCfg)
+      _ = {
+        logger.info("=== LLM4S Streaming with Progress Example ===")
+        logger.info("Using model: {}", providerCfg.model)
+        logger.info("=" * 50)
+      }
+      client <- LLMConnect.getClient(providerCfg)
       accumulator = StreamingAccumulator.create()
       startTime   = System.currentTimeMillis()
       spinner     = Array('⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏')
       _ = {
-        println("🚀 Starting stream...")
-        println("=" * 60)
+        logger.info("Starting stream...")
+        logger.info("=" * 60)
       }
       completion <- client.streamComplete(
         conversation,
@@ -72,6 +73,8 @@ object StreamingWithProgressExample {
           // Update progress in terminal title (if supported)
           if (chunkCount % 5 == 0) {
             val elapsed = (System.currentTimeMillis() - startTime) / 1000.0
+            // Spinner is printed directly to stdout for streaming UX,
+            // then cleared to avoid interfering with structured logs
             print(s"\r${spinner(spinnerIndex)} Streaming... [${chunkCount} chunks, ${charCount} chars, ${elapsed}s]")
             spinnerIndex = (spinnerIndex + 1) % spinner.length
 
@@ -81,44 +84,46 @@ object StreamingWithProgressExample {
         }
       )
       _ = {
-        println("\n✅ Stream completed successfully!\n")
+        // Ensure we end the streaming line cleanly before logging stats
+        logger.info("")
+        logger.info("Stream completed successfully!")
         val totalTime    = System.currentTimeMillis() - startTime
         val avgChunkTime = if (chunkCount > 0) totalTime.toDouble / chunkCount else 0
         // Show detailed statistics
-        println("📊 Streaming Performance:")
-        println(s"  Total time:        ${totalTime}ms (${totalTime / 1000.0}s)")
-        println(s"  Chunks received:   $chunkCount")
-        println(s"  Characters:        $charCount")
-        println(s"  Avg chunk time:    ${avgChunkTime.toString.format("%.2f")}ms")
-        println(s"  Throughput:        ${(charCount * 1000.0 / totalTime).toString.format("%.1f")} chars/sec")
+        logger.info("Streaming Performance:")
+        logger.info("  Total time:        {}ms ({}s)", totalTime, totalTime / 1000.0)
+        logger.info("  Chunks received:   {}", chunkCount)
+        logger.info("  Characters:        {}", charCount)
+        logger.info("  Avg chunk time:    {}ms", avgChunkTime.toString.format("%.2f"))
+        logger.info("  Throughput:        {} chars/sec", (charCount * 1000.0 / totalTime).toString.format("%.1f"))
 
         // Show accumulated content stats
         val fullContent = accumulator.getCurrentContent
         val wordCount   = fullContent.split("\\s+").length
         val lineCount   = fullContent.split("\n").length
 
-        println(s"\n📝 Content Statistics:")
-        println(s"  Words:             $wordCount")
-        println(s"  Lines:             $lineCount")
-        println(s"  Avg words/line:    ${(wordCount.toDouble / lineCount).toString.format("%.1f")}")
+        logger.info("Content Statistics:")
+        logger.info("  Words:             {}", wordCount)
+        logger.info("  Lines:             {}", lineCount)
+        logger.info("  Avg words/line:    {}", (wordCount.toDouble / lineCount).toString.format("%.1f"))
 
         // Show token usage if available
         completion.usage.foreach { usage =>
-          println(s"\n💰 Token Usage:")
-          println(s"  Prompt tokens:     ${usage.promptTokens}")
-          println(s"  Completion tokens: ${usage.completionTokens}")
-          println(s"  Total tokens:      ${usage.totalTokens}")
+          logger.info("Token Usage:")
+          logger.info("  Prompt tokens:     {}", usage.promptTokens)
+          logger.info("  Completion tokens: {}", usage.completionTokens)
+          logger.info("  Total tokens:      {}", usage.totalTokens)
 
           val tokensPerSecond = usage.completionTokens * 1000.0 / totalTime
-          println(s"  Generation speed:  ${tokensPerSecond.toString.format("%.1f")} tokens/sec")
+          logger.info("  Generation speed:  {} tokens/sec", tokensPerSecond.toString.format("%.1f"))
         }
 
         // Demonstrate that we have the full content accumulated
-        println("\n📋 Full response available in accumulator")
-        println(s"   First 100 chars: ${fullContent.take(100)}...")
+        logger.info("Full response available in accumulator")
+        logger.info("  First 100 chars: {}...", fullContent.take(100))
       }
     } yield ()
-    result.fold(err => println(s"Error: ${err.formatted}"), identity)
-    println("\n=== Example Complete ===")
+    result.fold(err => logger.error("Error: {}", err.formatted), identity)
+    logger.info("=== Example Complete ===")
   }
 }

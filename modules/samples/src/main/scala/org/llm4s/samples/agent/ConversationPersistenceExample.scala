@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.tools.WeatherTool
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating conversation persistence.
@@ -15,8 +16,10 @@ import org.llm4s.toolapi.tools.WeatherTool
  */
 object ConversationPersistenceExample {
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def main(args: Array[String]): Unit = {
-    println("=== Conversation Persistence Example ===\n")
+    logger.info("=== Conversation Persistence Example ===")
 
     val savePath = ".log/conversation-state.json"
 
@@ -27,18 +30,18 @@ object ConversationPersistenceExample {
       tools = new ToolRegistry(Seq(WeatherTool.tool))
       agent = new Agent(client)
 
-      _ = println("Part 1: Starting conversation and saving state\n")
-      _ = println("Query: What's the weather in Paris?")
+      _ = logger.info("Part 1: Starting conversation and saving state")
+      _ = logger.info("Query: What's the weather in Paris?")
 
       state1 <- agent.run("What's the weather in Paris?", tools)
       _ = state1.conversation.messages
         .filter(_.role == MessageRole.Assistant)
         .lastOption
-        .foreach(msg => println(s"Assistant: ${msg.content}"))
+        .foreach(msg => logger.info("Assistant: {}", msg.content))
 
-      _ = println(s"\nSaving state to: $savePath")
+      _ = logger.info("Saving state to: {}", savePath)
       _ <- AgentState.saveToFile(state1, savePath)
-      _ = println("State saved successfully!")
+      _ = logger.info("State saved successfully!")
 
     } yield state1
 
@@ -50,29 +53,29 @@ object ConversationPersistenceExample {
       tools = new ToolRegistry(Seq(WeatherTool.tool))
       agent = new Agent(client)
 
-      _ = println("\n--- Simulating New Session ---\n")
-      _ = println(s"Part 2: Loading state from: $savePath")
+      _ = logger.info("--- Simulating New Session ---")
+      _ = logger.info("Part 2: Loading state from: {}", savePath)
 
       loadedState <- AgentState.loadFromFile(savePath, tools)
-      _ = println(s"State loaded! Conversation has ${loadedState.conversation.messageCount} messages")
+      _ = logger.info("State loaded! Conversation has {} messages", loadedState.conversation.messageCount)
 
-      _ = println("\nContinuing conversation with: 'And what about London?'")
+      _ = logger.info("Continuing conversation with: 'And what about London?'")
       state2 <- agent.continueConversation(loadedState, "And what about London?")
       _ = state2.conversation.messages
         .filter(_.role == MessageRole.Assistant)
         .lastOption
-        .foreach(msg => println(s"Assistant: ${msg.content}"))
+        .foreach(msg => logger.info("Assistant: {}", msg.content))
 
-      _ = println(s"\n=== Final Statistics ===")
-      _ = println(s"Total messages: ${state2.conversation.messageCount}")
-      _ = println(s"Initial query: ${state2.initialQuery.getOrElse("N/A")}")
-      _ = println(s"Status: ${state2.status}")
+      _ = logger.info("=== Final Statistics ===")
+      _ = logger.info("Total messages: {}", state2.conversation.messageCount)
+      _ = logger.info("Initial query: {}", state2.initialQuery.getOrElse("N/A"))
+      _ = logger.info("Status: {}", state2.status)
 
     } yield state2
 
     continueResult.fold(
-      error => println(s"\nError: ${error.formatted}"),
-      _ => println("\nSuccess! Conversation persisted and resumed.")
+      error => logger.error("Error: {}", error.formatted),
+      _ => logger.info("Success! Conversation persisted and resumed.")
     )
   }
 }

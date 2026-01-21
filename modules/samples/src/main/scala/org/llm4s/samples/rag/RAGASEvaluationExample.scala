@@ -4,6 +4,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ModelDimensionRegistry }
 import org.llm4s.rag.evaluation._
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating RAGAS evaluation of RAG pipeline quality.
@@ -25,9 +26,11 @@ import org.llm4s.rag.evaluation._
  */
 object RAGASEvaluationExample extends App {
 
-  println("=" * 60)
-  println("RAGAS Evaluation Example")
-  println("=" * 60)
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  logger.info("=" * 60)
+  logger.info("RAGAS Evaluation Example")
+  logger.info("=" * 60)
 
   // Sample evaluation data - simulating a RAG pipeline output
   val sample = EvalSample(
@@ -51,11 +54,11 @@ object RAGASEvaluationExample extends App {
     )
   )
 
-  println("\n--- Evaluation Sample ---")
-  println(s"Question: ${sample.question}")
-  println(s"Answer: ${sample.answer.take(100)}...")
-  println(s"Contexts: ${sample.contexts.size} documents")
-  println(s"Ground Truth: ${sample.groundTruth.map(_.take(80) + "...").getOrElse("None")}")
+  logger.info("--- Evaluation Sample ---")
+  logger.info("Question: {}", sample.question)
+  logger.info("Answer: {}...", sample.answer.take(100))
+  logger.info("Contexts: {} documents", sample.contexts.size)
+  logger.info("Ground Truth: {}", sample.groundTruth.map(_.take(80) + "...").getOrElse("None"))
 
   // Create evaluator from environment
   val result = for {
@@ -67,23 +70,23 @@ object RAGASEvaluationExample extends App {
     dims        = ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model)
     modelConfig = EmbeddingModelConfig(embeddingConfig.model, dims)
     evaluator   = RAGASEvaluator(llmClient, embeddingClient, modelConfig)
-    _           = println(s"\n--- Running RAGAS Evaluation ---")
-    _           = println(s"LLM: ${llmClient.getClass.getSimpleName}")
-    _           = println(s"Embedding model: ${embeddingConfig.model} (dims: $dims)")
+    _           = logger.info("--- Running RAGAS Evaluation ---")
+    _           = logger.info("LLM: {}", llmClient.getClass.getSimpleName)
+    _           = logger.info("Embedding model: {} (dims: {})", embeddingConfig.model, dims)
     evalResult <- evaluator.evaluate(sample)
   } yield evalResult
 
   result match {
     case Right(evalResult) =>
-      println("\n" + "=" * 60)
-      println("EVALUATION RESULTS")
-      println("=" * 60)
+      logger.info("=" * 60)
+      logger.info("EVALUATION RESULTS")
+      logger.info("=" * 60)
 
       // Print individual metric scores
       evalResult.metrics.foreach { metric =>
         val bar     = "█" * (metric.score * 20).toInt + "░" * (20 - (metric.score * 20).toInt)
         val percent = f"${metric.score * 100}%.1f%%"
-        println(f"\n${metric.metricName}%-20s [$bar] $percent")
+        logger.info(f"${metric.metricName}%-20s [$bar] $percent")
 
         // Print some details
         metric.details.take(3).foreach { case (key, value) =>
@@ -91,24 +94,24 @@ object RAGASEvaluationExample extends App {
             case seq: Seq[_] => s"${seq.size} items"
             case other       => other.toString.take(50)
           }
-          println(f"  $key%-18s: $valueStr")
+          logger.info(f"  $key%-18s: $valueStr")
         }
       }
 
       // Print composite RAGAS score
-      println("\n" + "-" * 60)
+      logger.info("-" * 60)
       val ragasBar = "█" * (evalResult.ragasScore * 20).toInt + "░" * (20 - (evalResult.ragasScore * 20).toInt)
-      println(f"\nRAGAS SCORE          [$ragasBar] ${evalResult.ragasScore * 100}%.1f%%")
-      println("\n" + "=" * 60)
+      logger.info(f"RAGAS SCORE          [$ragasBar] ${evalResult.ragasScore * 100}%.1f%%")
+      logger.info("=" * 60)
 
       // Interpretation
-      println("\nInterpretation:")
+      logger.info("Interpretation:")
       if (evalResult.ragasScore >= 0.8) {
-        println("  ✓ Excellent RAG quality - answers are faithful, relevant, and well-supported")
+        logger.info("  ✓ Excellent RAG quality - answers are faithful, relevant, and well-supported")
       } else if (evalResult.ragasScore >= 0.6) {
-        println("  ~ Good RAG quality - some room for improvement")
+        logger.info("  ~ Good RAG quality - some room for improvement")
       } else {
-        println("  ✗ RAG quality needs improvement - check retrieval and generation")
+        logger.info("  ✗ RAG quality needs improvement - check retrieval and generation")
       }
 
       evalResult.metrics.foreach { m =>
@@ -120,13 +123,13 @@ object RAGASEvaluationExample extends App {
             case "context_recall"    => "Missing relevant information - improve retrieval"
             case _                   => "Low score"
           }
-          println(s"  ! ${m.metricName}: $suggestion")
+          logger.info("  ! {}: {}", m.metricName, suggestion)
         }
       }
 
     case Left(error) =>
-      println(s"\n❌ Evaluation failed: ${error.message}")
-      error.code.foreach(c => println(s"   Error code: $c"))
+      logger.error("Evaluation failed: {}", error.message)
+      error.code.foreach(c => logger.error("   Error code: {}", c))
   }
 
 }

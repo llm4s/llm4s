@@ -76,8 +76,10 @@ object EmbeddingExample {
             case Left(err) =>
               val msg = s"${p.getFileName}: ${err.context.get("provider")} -> ${err.message}"
               errors += msg
-              println(red(s"[ERR] $msg")(ui))
+              // Log error diagnostics to logger
+              logger.error("[ERR] {}", msg)
             case Right(Nil) =>
+              // UI warning on stdout
               println(yellow(s"[WARN] ${p.getFileName}: no embeddings.")(ui))
             case Right(vecs) =>
               val rows    = toRows(p.getFileName.toString, vecs, queryVecOpt, ui.topDimsPerRow)

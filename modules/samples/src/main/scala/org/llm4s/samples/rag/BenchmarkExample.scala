@@ -4,6 +4,8 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
 import org.llm4s.rag.benchmark._
 import org.llm4s.error.ConfigurationError
+import org.slf4j.LoggerFactory
+import scala.util.chaining._
 
 /**
  * Example demonstrating the RAG benchmarking harness.
@@ -30,12 +32,12 @@ import org.llm4s.error.ConfigurationError
  * }}}
  */
 object BenchmarkExample {
+  private val logger = LoggerFactory.getLogger(getClass)
 
   def main(args: Array[String]): Unit = {
-    println("=" * 70)
-    println("RAG Benchmarking Harness Example")
-    println("=" * 70)
-    println()
+    logger.info("=" * 70)
+    logger.info("RAG Benchmarking Harness Example")
+    logger.info("=" * 70)
 
     // Parse arguments
     val isQuick    = args.contains("--quick")
@@ -49,27 +51,25 @@ object BenchmarkExample {
     }
 
     // Check dataset availability
-    println("Checking dataset availability...")
+    logger.info("Checking dataset availability...")
     val datasets = DatasetManager.checkDatasets()
     datasets.foreach { case (name, available) =>
-      val status = if (available) "✓" else "✗"
-      println(s"  $status $name")
+      val status = if (available) "FOUND" else "MISSING"
+      logger.info("{} {}", status, name)
     }
-    println()
 
     // Determine dataset path
-    val datasetPath = customPath.getOrElse {
-      if (java.nio.file.Files.exists(java.nio.file.Paths.get(DatasetManager.Paths.ragbenchTest))) {
-        DatasetManager.Paths.ragbenchTest
-      } else {
-        println("No dataset found. Creating sample data...")
-        createSampleDataset()
-        "data/datasets/ragbench/test.jsonl"
+    val datasetPath = customPath
+      .getOrElse {
+        if (java.nio.file.Files.exists(java.nio.file.Paths.get(DatasetManager.Paths.ragbenchTest))) {
+          DatasetManager.Paths.ragbenchTest
+        } else {
+          logger.info("No dataset found. Creating sample data...")
+          createSampleDataset()
+          "data/datasets/ragbench/test.jsonl"
+        }
       }
-    }
-
-    println(s"Using dataset: $datasetPath")
-    println()
+      .tap(path => logger.info("Using dataset: {}", path))
 
     // Initialize benchmark runner
     val runnerResult = for {
@@ -88,13 +88,12 @@ object BenchmarkExample {
         runBenchmark(runner, datasetPath, isQuick, suiteArg)
 
       case Left(error) =>
-        println(s"❌ Failed to initialize: ${error.message}")
-        println()
-        println("Required environment variables:")
-        println("  LLM_MODEL=openai/gpt-4o (or anthropic/claude-sonnet-4-5-latest)")
-        println("  OPENAI_API_KEY=sk-...")
-        println("  EMBEDDING_PROVIDER=openai")
-        println("  OPENAI_EMBEDDING_MODEL=text-embedding-3-small")
+        logger.error("Failed to initialize: {}", error.message)
+        logger.error("Required environment variables:")
+        logger.error("  LLM_MODEL=openai/gpt-4o (or anthropic/claude-sonnet-4-5-latest)")
+        logger.error("  OPENAI_API_KEY=sk-...")
+        logger.error("  EMBEDDING_PROVIDER=openai")
+        logger.error("  OPENAI_EMBEDDING_MODEL=text-embedding-3-small")
         sys.exit(1)
     }
   }
@@ -108,35 +107,34 @@ object BenchmarkExample {
     // Choose suite based on mode and argument
     val suite = suiteArg match {
       case Some("chunking") =>
-        println("Running chunking comparison benchmark...")
+        logger.info("Running chunking comparison benchmark...")
         if (quick) BenchmarkSuite.chunkingSuite(datasetPath).quick(5)
         else BenchmarkSuite.chunkingSuite(datasetPath)
       case Some("fusion") =>
-        println("Running fusion strategy comparison benchmark...")
+        logger.info("Running fusion strategy comparison benchmark...")
         if (quick) BenchmarkSuite.fusionSuite(datasetPath).quick(5)
         else BenchmarkSuite.fusionSuite(datasetPath)
       case Some("embedding") =>
-        println("Running embedding provider comparison benchmark...")
+        logger.info("Running embedding provider comparison benchmark...")
         if (quick) BenchmarkSuite.embeddingSuite(datasetPath).quick(5)
         else BenchmarkSuite.embeddingSuite(datasetPath)
       case Some("all") =>
-        println("Running all benchmark suites...")
+        logger.info("Running all benchmark suites...")
         // Run chunking first, then create combined results
         if (quick) BenchmarkSuite.chunkingSuite(datasetPath).quick(5)
         else BenchmarkSuite.chunkingSuite(datasetPath)
       case _ =>
         if (quick) {
-          println("Running quick benchmark (5 samples)...")
+          logger.info("Running quick benchmark (5 samples)...")
           BenchmarkSuite.quickSuite(datasetPath, 5)
         } else {
-          println("Running chunking comparison benchmark...")
+          logger.info("Running chunking comparison benchmark...")
           BenchmarkSuite.chunkingSuite(datasetPath)
         }
     }
 
-    println(s"Suite: ${suite.name}")
-    println(s"Experiments: ${suite.experiments.map(_.name).mkString(", ")}")
-    println()
+    logger.info("Suite: {}", suite.name)
+    logger.info("Experiments: {}", suite.experiments.map(_.name).mkString(", "))
 
     // Run the benchmark
     val startTime = System.currentTimeMillis()
@@ -146,29 +144,27 @@ object BenchmarkExample {
         val elapsed = (System.currentTimeMillis() - startTime) / 1000.0
 
         // Print console report
-        println(BenchmarkReport.console(results))
+        logger.debug("Benchmark report:\n{}", BenchmarkReport.console(results))
 
         // Save JSON report
         val jsonPath = s"data/results/${suite.name}-${System.currentTimeMillis()}.json"
         BenchmarkReport.save(results, jsonPath, ReportFormat.Json) match {
-          case Right(_) => println(s"Report saved to: $jsonPath")
-          case Left(e)  => println(s"Failed to save report: ${e.message}")
+          case Right(_) => logger.info("Report saved to: {}", jsonPath)
+          case Left(e)  => logger.error("Failed to save report: {}", e.message)
         }
 
         // Print summary
-        println()
-        println(f"Total benchmark time: $elapsed%.1fs")
+        logger.info(f"Total benchmark time: $elapsed%.1fs")
 
         results.winner.foreach { winner =>
-          println()
-          println("=" * 70)
-          println(s"RECOMMENDATION: Use '${winner.config.name}' configuration")
-          println(s"               ${winner.config.fullDescription}")
-          println("=" * 70)
+          logger.info("=" * 70)
+          logger.info("RECOMMENDATION: Use '{}' configuration", winner.config.name)
+          logger.info("                {}", winner.config.fullDescription)
+          logger.info("=" * 70)
         }
 
       case Left(error) =>
-        println(s"❌ Benchmark failed: ${error.message}")
+        logger.error("Benchmark failed: {}", error.message)
         sys.exit(1)
     }
   }
@@ -187,11 +183,11 @@ object BenchmarkExample {
         |{"question": "What is the theory of relativity?", "response": "Einstein's theory of relativity describes how space, time, and gravity are interconnected.", "documents": ["Einstein's special theory of relativity introduced the concept that the speed of light is constant and that time and space are relative."], "answer": "Relativity describes the relationship between space, time, and gravity."}""".stripMargin
 
     Files.write(dir.resolve("test.jsonl"), sampleData.getBytes)
-    println("Sample dataset created at data/datasets/ragbench/test.jsonl")
+    logger.info("Sample dataset created at data/datasets/ragbench/test.jsonl")
   }
 
   def printUsage(): Unit =
-    println("""
+    logger.info("""
       |Usage: BenchmarkExample [options] [dataset-path]
       |
       |Options:

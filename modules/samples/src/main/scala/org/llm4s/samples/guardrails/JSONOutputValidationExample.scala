@@ -5,6 +5,7 @@ import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating JSON output validation with guardrails.
@@ -15,7 +16,9 @@ import org.llm4s.toolapi.ToolRegistry
  * Requires: LLM_MODEL and appropriate API key in environment
  */
 object JSONOutputValidationExample extends App {
-  println("=== JSON Output Validation Example ===\n")
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  logger.info("=== JSON Output Validation Example ===")
 
   val result = for {
     providerCfg <- Llm4sConfig.provider()
@@ -43,11 +46,11 @@ object JSONOutputValidationExample extends App {
 
   result match {
     case Right(state) =>
-      println("✓ Output validation passed - response is valid JSON!\n")
+      logger.info("✓ Output validation passed - response is valid JSON!")
 
       val response = state.conversation.messages.last.content
-      println(s"JSON Response:")
-      println(response)
+      logger.info("JSON Response:")
+      logger.info("{}", response)
 
       // Can safely parse the JSON now
       import scala.util.Try
@@ -55,21 +58,21 @@ object JSONOutputValidationExample extends App {
 
       Try {
         val json = ujson.read(response)
-        println("\nParsed JSON fields:")
-        println(s"  Name: ${json("name").str}")
-        println(s"  Paradigm: ${json("paradigm").str}")
-        println(s"  Year: ${json("year").num.toInt}")
+        logger.info("Parsed JSON fields:")
+        logger.info("  Name: {}", json("name").str)
+        logger.info("  Paradigm: {}", json("paradigm").str)
+        logger.info("  Year: {}", json("year").num.toInt)
       }.toResult match {
         case Right(_) => // Successfully parsed
         case Left(error) =>
-          println(s"  Note: Could not parse all fields: ${error.message}")
+          logger.warn("  Note: Could not parse all fields: {}", error.message)
       }
 
     case Left(error) =>
-      println(s"✗ Validation or execution failed:")
-      println(s"  Error: ${error.formatted}")
-      println("\nThis error likely means the LLM did not return valid JSON.")
+      logger.error("✗ Validation or execution failed:")
+      logger.error("  Error: {}", error.formatted)
+      logger.info("This error likely means the LLM did not return valid JSON.")
   }
 
-  println("\n" + "=" * 50)
+  logger.info("=" * 50)
 }

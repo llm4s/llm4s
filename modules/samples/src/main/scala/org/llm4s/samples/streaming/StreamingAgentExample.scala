@@ -6,6 +6,7 @@ import org.llm4s.agent.streaming.AgentEvent._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating streaming events during agent execution.
@@ -20,11 +21,11 @@ import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
  * Note: Requires LLM_MODEL and appropriate API key environment variables.
  */
 object StreamingAgentExample extends App {
+  private val logger = LoggerFactory.getLogger(getClass)
 
-  println("=" * 60)
-  println("Streaming Agent Example")
-  println("=" * 60)
-  println()
+  logger.info("=" * 60)
+  logger.info("Streaming Agent Example")
+  logger.info("=" * 60)
 
   // Create a simple weather tool for demonstration
   case class WeatherInput(city: String)
@@ -59,49 +60,44 @@ object StreamingAgentExample extends App {
   // Event handler that provides real-time feedback
   def handleEvent(event: AgentEvent): Unit = event match {
     case AgentStarted(query, toolCount, _) =>
-      println(s"[Agent] Starting with query: '$query'")
-      println(s"[Agent] Tools available: $toolCount")
-      println()
+      logger.info("[Agent] Starting with query: '{}'", query)
+      logger.info("[Agent] Tools available: {}", toolCount)
 
     case StepStarted(stepNumber, _) =>
-      println(s"[Step $stepNumber] Starting...")
+      logger.info("[Step {}] Starting...", stepNumber)
 
     case TextDelta(delta, _) =>
-      // Print text as it streams (no newline)
+      // Print text as it streams (no newline) - Keep print for UI effect
       print(delta)
 
     case TextComplete(_, _) =>
-      // Add newline after streaming completes
+      // Add newline after streaming completes - Keep println for UI line termination
       println()
 
     case ToolCallStarted(_, toolName, arguments, _) =>
-      println()
-      println(s"[Tool] Calling '$toolName' with: $arguments")
+      logger.info("[Tool] Calling '{}' with: {}", toolName, arguments)
 
     case ToolCallCompleted(_, toolName, result, success, durationMs, _) =>
       val status = if (success) "SUCCESS" else "FAILED"
-      println(s"[Tool] '$toolName' $status in ${durationMs}ms")
-      println(s"[Tool] Result: $result")
-      println()
+      logger.info("[Tool] '{}' {} in {}ms", toolName, status, durationMs)
+      logger.info("[Tool] Result: {}", result)
 
     case ToolCallFailed(_, toolName, error, _) =>
-      println(s"[Tool] '$toolName' FAILED: $error")
+      logger.error("[Tool] '{}' FAILED: {}", toolName, error)
 
     case StepCompleted(stepNumber, hasToolCalls, _) =>
       if (hasToolCalls) {
-        println(s"[Step $stepNumber] Completed (tool calls processed)")
+        logger.info("[Step {}] Completed (tool calls processed)", stepNumber)
       }
 
     case AgentCompleted(state, totalSteps, durationMs, _) =>
-      println()
-      println("=" * 60)
-      println(s"[Agent] Completed in $totalSteps steps, ${durationMs}ms")
-      println(s"[Agent] Final status: ${state.status}")
-      println("=" * 60)
+      logger.info("=" * 60)
+      logger.info("[Agent] Completed in {} steps, {}ms", totalSteps, durationMs)
+      logger.info("[Agent] Final status: {}", state.status)
+      logger.info("=" * 60)
 
     case AgentFailed(error, stepNumber, _) =>
-      println()
-      println(s"[Agent] FAILED at step ${stepNumber.getOrElse("unknown")}: ${error.message}")
+      logger.error("[Agent] FAILED at step {}: {}", stepNumber.getOrElse("unknown"), error.message)
 
     case _ =>
     // Ignore other events (guardrails, handoffs)
@@ -124,13 +120,12 @@ object StreamingAgentExample extends App {
 
   result match {
     case Right(state) =>
-      println()
-      println("Final Response:")
-      println("-" * 40)
-      state.conversation.messages.lastOption.foreach(msg => println(msg.content))
+      logger.info("Final Response:")
+      logger.info("-" * 40)
+      state.conversation.messages.lastOption.foreach(msg => logger.info("{}", msg.content))
 
     case Left(error) =>
-      println(s"Error: ${error.message}")
+      logger.error("Error: {}", error.message)
       System.exit(1)
   }
 }

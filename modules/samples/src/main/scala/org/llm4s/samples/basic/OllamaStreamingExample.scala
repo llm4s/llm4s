@@ -3,8 +3,11 @@ package org.llm4s.samples.basic
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
+import org.slf4j.LoggerFactory
 
 object OllamaStreamingExample {
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def main(args: Array[String]): Unit = {
     // Works with any configured provider; optimized for local Ollama
     // Env example:
@@ -34,13 +37,17 @@ object OllamaStreamingExample {
           }
       )
       _ = {
-        println("\n--- Final Message ---\n" + completion.message.content)
+        // Ensure line break after streaming
+        println()
+        logger.info("--- Final Message ---")
+        logger.info("{}", completion.message.content)
+
         completion.usage.foreach(u =>
-          println(s"Tokens: prompt=${u.promptTokens}, completion=${u.completionTokens}, total=${u.totalTokens}")
+          logger.info("Tokens: prompt={}, completion={}, total={}", u.promptTokens, u.completionTokens, u.totalTokens)
         )
       }
     } yield ()
 
-    result.fold(err => Console.err.println(s"Error: ${err.formatted}"), identity)
+    result.fold(err => logger.error("Error: {}", err.formatted), identity)
   }
 }

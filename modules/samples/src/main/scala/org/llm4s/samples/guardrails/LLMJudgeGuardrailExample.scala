@@ -6,6 +6,7 @@ import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating LLM-as-Judge guardrails.
@@ -26,7 +27,9 @@ import org.llm4s.toolapi.ToolRegistry
  * Requires: LLM_MODEL and appropriate API key in environment
  */
 object LLMJudgeGuardrailExample extends App {
-  println("=== LLM-as-Judge Guardrail Example ===\n")
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  logger.info("=== LLM-as-Judge Guardrail Example ===")
 
   val result = for {
     providerCfg <- Llm4sConfig.provider()
@@ -34,8 +37,8 @@ object LLMJudgeGuardrailExample extends App {
     agent = new Agent(client)
 
     // === Example 1: Professional Tone Validation ===
-    _ = println("1. Testing Professional Tone Guardrail")
-    _ = println("-" * 40)
+    _ = logger.info("1. Testing Professional Tone Guardrail")
+    _ = logger.info("-" * 40)
 
     // LLM evaluates if the response maintains a professional tone
     toneGuardrail = LLMToneGuardrail.professional(client, threshold = 0.7)
@@ -49,8 +52,8 @@ object LLMJudgeGuardrailExample extends App {
     _ = printResult(state1, "Professional Tone Check")
 
     // === Example 2: Safety Guardrail ===
-    _ = println("\n2. Testing Safety Guardrail")
-    _ = println("-" * 40)
+    _ = logger.info("2. Testing Safety Guardrail")
+    _ = logger.info("-" * 40)
 
     safetyGuardrail = LLMSafetyGuardrail(client, threshold = 0.8)
 
@@ -63,8 +66,8 @@ object LLMJudgeGuardrailExample extends App {
     _ = printResult(state2, "Safety Check")
 
     // === Example 3: Quality Assessment ===
-    _ = println("\n3. Testing Response Quality Guardrail")
-    _ = println("-" * 40)
+    _ = logger.info("3. Testing Response Quality Guardrail")
+    _ = logger.info("-" * 40)
 
     originalQuery    = "What are the benefits of functional programming?"
     qualityGuardrail = LLMQualityGuardrail(client, originalQuery, threshold = 0.7)
@@ -78,8 +81,8 @@ object LLMJudgeGuardrailExample extends App {
     _ = printResult(state3, "Quality Check")
 
     // === Example 4: Custom LLM Guardrail ===
-    _ = println("\n4. Testing Custom LLM Guardrail")
-    _ = println("-" * 40)
+    _ = logger.info("4. Testing Custom LLM Guardrail")
+    _ = logger.info("-" * 40)
 
     // Create a custom LLM guardrail for specific criteria
     customGuardrail = LLMGuardrail(
@@ -98,8 +101,8 @@ object LLMJudgeGuardrailExample extends App {
     _ = printResult(state4, "Custom Criteria Check")
 
     // === Example 5: Combined Function + LLM Guardrails ===
-    _ = println("\n5. Testing Combined Guardrails (Function + LLM)")
-    _ = println("-" * 40)
+    _ = logger.info("5. Testing Combined Guardrails (Function + LLM)")
+    _ = logger.info("-" * 40)
 
     // Use fast function-based guardrails first, then LLM for nuanced checks
     combinedGuardrails = Seq(
@@ -119,21 +122,21 @@ object LLMJudgeGuardrailExample extends App {
 
   result match {
     case Right(_) =>
-      println("\n" + "=" * 50)
-      println("✓ All LLM-as-Judge guardrail examples completed successfully!")
+      logger.info("=" * 50)
+      logger.info("✓ All LLM-as-Judge guardrail examples completed successfully!")
 
     case Left(error) =>
-      println(s"\n✗ Example failed with error:")
-      println(s"  ${error.formatted}")
+      logger.error("✗ Example failed with error:")
+      logger.error("  {}", error.formatted)
   }
 
   def printResult(state: org.llm4s.agent.AgentState, checkName: String): Unit = {
     val response = state.conversation.messages.last.content
     val preview  = if (response.length > 200) response.take(200) + "..." else response
 
-    println(s"✓ $checkName PASSED")
-    println(s"Response preview: $preview")
+    logger.info("✓ {} PASSED", checkName)
+    logger.info("Response preview: {}", preview)
   }
 
-  println("\n" + "=" * 50)
+  logger.info("=" * 50)
 }

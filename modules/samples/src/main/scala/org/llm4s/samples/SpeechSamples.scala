@@ -222,46 +222,46 @@ object SpeechSamples {
   }
 
   def demoWhisper(filePath: String): Unit = {
-    println(s"Testing Whisper STT on ${PlatformCommands.platformName}")
+    logger.info("Testing Whisper STT on {}", PlatformCommands.platformName)
     val stt = new WhisperSpeechToText(PlatformCommands.cat) // Cross-platform file content
     val res = stt.transcribe(AudioInput.FileAudio(Paths.get(filePath)), STTOptions(language = Some("en")))
-    println(res.fold(err => s"STT error: ${err.formatted}", t => s"Transcript: ${t.text}"))
+    logger.info("{}", res.fold(err => s"STT error: ${err.formatted}", t => s"Transcript: ${t.text}"))
   }
 
   def demoWhisperReal(filePath: String): Unit = {
-    println(s"Testing REAL Whisper STT on ${PlatformCommands.platformName}")
+    logger.info("Testing REAL Whisper STT on {}", PlatformCommands.platformName)
     // Use actual Whisper CLI if available
     val stt = new WhisperSpeechToText(Seq("whisper"), model = "base")
     val res = stt.transcribe(AudioInput.FileAudio(Paths.get(filePath)), STTOptions(language = Some("en")))
-    println(res.fold(err => s"STT error: ${err.formatted}", t => s"Transcript: ${t.text}"))
+    logger.info("{}", res.fold(err => s"STT error: ${err.formatted}", t => s"Transcript: ${t.text}"))
   }
 
   def demoVosk(filePath: String): Unit = {
-    println(s"Testing Vosk STT on ${PlatformCommands.platformName}")
+    logger.info("Testing Vosk STT on {}", PlatformCommands.platformName)
     val stt = new VoskSpeechToText()
     val res = stt.transcribe(AudioInput.FileAudio(Paths.get(filePath)), STTOptions(language = Some("en")))
-    println(res.fold(err => s"STT error: ${err.formatted}", t => s"Transcript: ${t.text}"))
+    logger.info("{}", res.fold(err => s"STT error: ${err.formatted}", t => s"Transcript: ${t.text}"))
   }
 
   def demoTacotron2(text: String): Unit = {
-    println(s"Testing Tacotron2 TTS on ${PlatformCommands.platformName}")
+    logger.info("Testing Tacotron2 TTS on {}", PlatformCommands.platformName)
     val tts = new Tacotron2TextToSpeech(PlatformCommands.echo) // Cross-platform echo
     val res = tts.synthesize(text, TTSOptions(voice = Some("default")))
-    println(res.fold(err => s"TTS error: ${err.formatted}", _ => s"TTS synthesis completed."))
+    logger.info("{}", res.fold(err => s"TTS error: ${err.formatted}", _ => s"TTS synthesis completed."))
   }
 
   def main(args: Array[String]): Unit = {
-    println("=== LLM4S Speech Demo ===")
-    println(s"Platform: ${PlatformCommands.platformName}")
+    logger.info("=== LLM4S Speech Demo ===")
+    logger.info("Platform: {}", PlatformCommands.platformName)
 
-    println("\n--- Creating Test Audio Files ---")
+    logger.info("--- Creating Test Audio Files ---")
     // Create all test files
     val result: Try[Unit] = for {
       silenceWavFile    <- createTestWavFile()
       toneWavFile       <- createToneWavFile()
       speechLikeWavFile <- createSpeechLikeWavFile()
     } yield {
-      println(
+      logger.info(
         s"""
            |Created test audio files:
            |  Silence WAV: ${silenceWavFile} (${Files.size(silenceWavFile)} bytes)
@@ -270,31 +270,31 @@ object SpeechSamples {
            |""".stripMargin
       )
 
-      println("\n--- Testing STT (Mock) ---")
+      logger.info("--- Testing STT (Mock) ---")
       demoWhisper(silenceWavFile.toString)
       demoVosk(silenceWavFile.toString)
 
-      println("\n--- Testing STT (Real Whisper - Silence) ---")
-      println("Note: This requires 'whisper' CLI to be installed (pip install openai-whisper)")
+      logger.info("--- Testing STT (Real Whisper - Silence) ---")
+      logger.info("Note: This requires 'whisper' CLI to be installed (pip install openai-whisper)")
       demoWhisperReal(silenceWavFile.toString)
 
-      println("\n--- Testing STT (Real Whisper - Tone) ---")
-      println("Testing with a 440Hz tone (A note) - should be more interesting for Whisper")
+      logger.info("--- Testing STT (Real Whisper - Tone) ---")
+      logger.info("Testing with a 440Hz tone (A note) - should be more interesting for Whisper")
       demoWhisperReal(toneWavFile.toString)
 
-      println("\n--- Testing STT (Real Whisper - Speech-like) ---")
-      println(
+      logger.info("--- Testing STT (Real Whisper - Speech-like) ---")
+      logger.info(
         "Testing with a speech-like modulated tone (200Hz base + 50Hz mod) - should be more interesting for Whisper"
       )
       demoWhisperReal(speechLikeWavFile.toString)
 
-      println("\n--- Testing TTS ---")
+      logger.info("--- Testing TTS ---")
       demoTacotron2("Hello from LLM4S")
       // Cleanup
       Files.deleteIfExists(silenceWavFile)
       Files.deleteIfExists(toneWavFile)
       Files.deleteIfExists(speechLikeWavFile)
-      println("\n=== Demo Complete ===")
+      logger.info("=== Demo Complete ===")
     }
     result.tap(x => x.fold(ex => logger.error("Error '{}'", ex.getMessage), _ => logger.trace("Ran successfully")))
   }

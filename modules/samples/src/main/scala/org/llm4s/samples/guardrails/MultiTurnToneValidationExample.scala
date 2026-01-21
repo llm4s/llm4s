@@ -5,6 +5,7 @@ import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating multi-turn conversations with tone validation.
@@ -16,7 +17,9 @@ import org.llm4s.toolapi.ToolRegistry
  * Requires: LLM_MODEL and appropriate API key in environment
  */
 object MultiTurnToneValidationExample extends App {
-  println("=== Multi-Turn Conversation with Tone Validation ===\n")
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  logger.info("=== Multi-Turn Conversation with Tone Validation ===")
 
   // Define guardrails to use across all turns
   val inputGuardrails = Seq(
@@ -34,56 +37,56 @@ object MultiTurnToneValidationExample extends App {
     agent = new Agent(client)
 
     // Turn 1: Ask about Scala
-    _ = println("Turn 1: Asking about Scala...")
+    _ = logger.info("Turn 1: Asking about Scala...")
     state1 <- agent.run(
       "What is Scala?",
       new ToolRegistry(Seq.empty),
       inputGuardrails = inputGuardrails,
       outputGuardrails = outputGuardrails
     )
-    _ = println(s"  ✓ Response passed tone validation\n")
+    _ = logger.info("  ✓ Response passed tone validation")
 
     // Turn 2: Ask for details
-    _ = println("Turn 2: Asking for main features...")
+    _ = logger.info("Turn 2: Asking for main features...")
     state2 <- agent.continueConversation(
       state1,
       "What are its main features?",
       inputGuardrails = inputGuardrails,
       outputGuardrails = outputGuardrails
     )
-    _ = println(s"  ✓ Response passed tone validation\n")
+    _ = logger.info("  ✓ Response passed tone validation")
 
     // Turn 3: Ask for examples
-    _ = println("Turn 3: Asking for code example...")
+    _ = logger.info("Turn 3: Asking for code example...")
     state3 <- agent.continueConversation(
       state2,
       "Can you give me a code example?",
       inputGuardrails = inputGuardrails,
       outputGuardrails = outputGuardrails
     )
-    _ = println(s"  ✓ Response passed tone validation\n")
+    _ = logger.info("  ✓ Response passed tone validation")
 
   } yield state3
 
   result match {
     case Right(finalState) =>
-      println("✓ All turns completed successfully!")
-      println(s"\nFinal conversation stats:")
-      println(s"  Status: ${finalState.status}")
-      println(s"  Total messages: ${finalState.conversation.messages.length}")
-      println(s"  Turns completed: 3")
+      logger.info("✓ All turns completed successfully!")
+      logger.info("Final conversation stats:")
+      logger.info("  Status: {}", finalState.status)
+      logger.info("  Total messages: {}", finalState.conversation.messages.length)
+      logger.info("  Turns completed: 3")
 
-      println("\nFinal response:")
-      finalState.conversation.messages.last.content.split("\n").take(5).foreach(line => println(s"  $line"))
+      logger.info("Final response:")
+      finalState.conversation.messages.last.content.split("\n").take(5).foreach(line => logger.info("  {}", line))
 
     case Left(error) =>
-      println(s"✗ Validation or execution failed:")
-      println(s"  Error: ${error.formatted}")
-      println("\nThis could mean:")
-      println("  - Input validation failed (profanity or length)")
-      println("  - Output tone was not professional or friendly")
-      println("  - Agent execution error")
+      logger.error("✗ Validation or execution failed:")
+      logger.error("  Error: {}", error.formatted)
+      logger.info("This could mean:")
+      logger.info("  - Input validation failed (profanity or length)")
+      logger.info("  - Output tone was not professional or friendly")
+      logger.info("  - Agent execution error")
   }
 
-  println("\n" + "=" * 50)
+  logger.info("=" * 50)
 }

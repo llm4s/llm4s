@@ -6,26 +6,34 @@ import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole.Tool
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.tools.WeatherTool
+import org.slf4j.LoggerFactory
+import scala.util.chaining._
 
 /**
  * Example demonstrating complete agent execution with multiple steps
  */
 object MultiStepAgentExample {
+
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def main(args: Array[String]): Unit = {
     // Get a client using environment variables (Result-first)
     val res = for {
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
-      toolRegistry        = new ToolRegistry(Seq(WeatherTool.tool))
-      agent               = new Agent(client)
-      query               = "What's the weather like in London, and is it different from New York?"
-      _                   = println(s"User Query: $query\n")
-      traceLogPath        = ".log/agent-trace.md"
-      _                   = println(s"Trace log will be written to: $traceLogPath\n")
-      _                   = println("=== Running Multi-Step Agent to Completion ===\n")
-      _                   = println("Example 1: Running without a step limit, with trace logging")
-      _                   = println("\n\n=== Running Multi-Step Agent with Step Limit ===\n")
-      _                   = println("Example 2: Running with a step limit of 1, with trace logging")
+      toolRegistry = new ToolRegistry(Seq(WeatherTool.tool))
+      agent        = new Agent(client)
+      query = "What's the weather like in London, and is it different from New York?"
+        .tap(q => logger.info("User Query: {}", q))
+
+      _ = ".log/agent-trace.md"
+        .tap(p => logger.info("Trace log will be written to: {}", p))
+
+      _ = logger.info("=== Running Multi-Step Agent to Completion ===")
+      _ = logger.info("Example 1: Running without a step limit, with trace logging")
+      _ = logger.info("=== Running Multi-Step Agent with Step Limit ===")
+      _ = logger.info("Example 2: Running with a step limit of 1, with trace logging")
+
       limitedTraceLogPath = "/Users/rory.graves/workspace/home/llm4s/log/agent-trace-limited.md"
       _ = agent.run(
         query = query,
@@ -40,14 +48,14 @@ object MultiStepAgentExample {
         debug = false
       ) match {
         case Right(finalState) =>
-          println(s"Final status: ${finalState.status}")
+          logger.info("Final status: {}", finalState.status)
 
           // Print execution info
-          println(s"\nTotal steps executed: ${finalState.logs.size}")
+          logger.info("Total steps executed: {}", finalState.logs.size)
 
           // Print logs with formatted output
           if (finalState.logs.nonEmpty) {
-            println("\nExecution logs:")
+            logger.info("Execution logs:")
             finalState.logs.foreach { log =>
               // Color-coded logs based on type
               val colorCode = log match {
@@ -58,40 +66,44 @@ object MultiStepAgentExample {
                 case _                                => Console.WHITE
               }
 
-              println(s"${colorCode}${log}${Console.RESET}")
+              logger.info("{}{}{}", colorCode, log, Console.RESET)
             }
           }
 
-          println(s"\nTrace log has been written to: $limitedTraceLogPath")
+          logger.info("Trace log has been written to: {}", limitedTraceLogPath)
 
         case Left(error) =>
-          println(s"Error running agent: $error")
+          logger.error("Error running agent: {}", error)
       }
       // Example 3: Manual step execution to show the two-phase flow
-      _                  = println("\n\n=== Manual Step Execution to Demonstrate Two-Phase Flow ===\n")
-      _                  = println("Example 3: Running with manual step execution")
+      _                  = logger.info("=== Manual Step Execution to Demonstrate Two-Phase Flow ===")
+      _                  = logger.info("Example 3: Running with manual step execution")
       manualTraceLogPath = ".log/agent-trace-manual.md"
-      initialState       = agent.initialize(query, toolRegistry)
-      _                  = println(s"Initial state: ${initialState.status}")
-      _                  = agent.writeTraceLog(initialState, manualTraceLogPath)
-      _                  = println(s"Initial state written to trace log: $manualTraceLogPath")
-      _                  = println("\nStep 1: Running LLM completion (usually generates tool calls)")
+      initialState = agent
+        .initialize(query, toolRegistry)
+        .tap(s => logger.info("Initial state: {}", s.status))
+
+      _ = agent
+        .writeTraceLog(initialState, manualTraceLogPath)
+        .tap(_ => logger.info("Initial state written to trace log: {}", manualTraceLogPath))
+
+      _ = logger.info("Step 1: Running LLM completion (usually generates tool calls)")
       afterLLMStep <- agent.runStep(initialState)
       _ = agent.writeTraceLog(afterLLMStep, manualTraceLogPath)
-      _ = println("\nConversation after LLM step:")
-      _ = afterLLMStep.conversation.messages.foreach(msg => println(s"[${msg.role}] ${msg.content}"))
-      _ = println("\nStep 2: Processing tool calls")
+      _ = logger.info("Conversation after LLM step:")
+      _ = afterLLMStep.conversation.messages.foreach(msg => logger.info("[{}] {}", msg.role, msg.content))
+      _ = logger.info("Step 2: Processing tool calls")
       afterToolStep <- agent.runStep(afterLLMStep)
       _ = agent.writeTraceLog(afterToolStep, manualTraceLogPath)
-      _ = println("\nConversation after tool execution:")
+      _ = logger.info("Conversation after tool execution:")
       _ = afterToolStep.conversation.messages.takeRight(2).foreach { msg =>
-        println(s"[${msg.role}] ${if (msg.role == Tool) msg.content.take(50) + "..." else msg.content}")
+        logger.info("[{}] {}", msg.role, if (msg.role == Tool) msg.content.take(50) + "..." else msg.content)
       }
-      _ = println("\nThe two-phase flow allows for more control and separation of concerns in the agent execution.")
-      _ = println(s"\nManual trace log has been written to: $manualTraceLogPath")
+      _ = logger.info("The two-phase flow allows for more control and separation of concerns in the agent execution.")
+      _ = logger.info("Manual trace log has been written to: {}", manualTraceLogPath)
     } yield ()
     res.fold(
-      err => println(s"Error: ${err.formatted}"),
+      err => logger.error("Error: {}", err.formatted),
       identity
     )
   }

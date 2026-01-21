@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.tools.WeatherTool
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating multi-turn conversations using the functional API.
@@ -15,8 +16,10 @@ import org.llm4s.toolapi.tools.WeatherTool
  */
 object MultiTurnConversationExample {
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def main(args: Array[String]): Unit = {
-    println("=== Multi-Turn Conversation Example ===\n")
+    logger.info("=== Multi-Turn Conversation Example ===")
 
     // Functional style - no var, no mutation!
     val result = for {
@@ -25,28 +28,28 @@ object MultiTurnConversationExample {
       tools = new ToolRegistry(Seq(WeatherTool.tool))
       agent = new Agent(client)
 
-      _ = println("Turn 1: Asking about Paris weather")
+      _ = logger.info("Turn 1: Asking about Paris weather")
       state1 <- agent.run("What's the weather in Paris?", tools)
       _ = printLastAssistantMessage(state1)
 
-      _ = println("\nTurn 2: Asking about London weather")
+      _ = logger.info("Turn 2: Asking about London weather")
       state2 <- agent.continueConversation(state1, "And what about London?")
       _ = printLastAssistantMessage(state2)
 
-      _ = println("\nTurn 3: Comparing the two")
+      _ = logger.info("Turn 3: Comparing the two")
       state3 <- agent.continueConversation(state2, "Which city is warmer?")
       _ = printLastAssistantMessage(state3)
 
-      _ = println(s"\n=== Conversation Complete ===")
-      _ = println(s"Total messages: ${state3.conversation.messageCount}")
-      _ = println(s"User messages: ${state3.conversation.filterByRole(MessageRole.User).length}")
-      _ = println(s"Assistant messages: ${state3.conversation.filterByRole(MessageRole.Assistant).length}")
+      _ = logger.info("=== Conversation Complete ===")
+      _ = logger.info("Total messages: {}", state3.conversation.messageCount)
+      _ = logger.info("User messages: {}", state3.conversation.filterByRole(MessageRole.User).length)
+      _ = logger.info("Assistant messages: {}", state3.conversation.filterByRole(MessageRole.Assistant).length)
 
     } yield state3
 
     result.fold(
-      error => println(s"\nError: ${error.formatted}"),
-      _ => println("\nSuccess!")
+      error => logger.error("Error: {}", error.formatted),
+      _ => logger.info("Success!")
     )
   }
 
@@ -54,5 +57,5 @@ object MultiTurnConversationExample {
     state.conversation.messages
       .filter(_.role == MessageRole.Assistant)
       .lastOption
-      .foreach(msg => println(s"Assistant: ${msg.content}"))
+      .foreach(msg => logger.info("Assistant: {}", msg.content))
 }

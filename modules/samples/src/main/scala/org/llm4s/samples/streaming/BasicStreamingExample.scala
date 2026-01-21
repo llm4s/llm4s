@@ -3,6 +3,7 @@ package org.llm4s.samples.streaming
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
+import org.slf4j.LoggerFactory
 
 /**
  * Basic example of using the streaming API to get real-time responses from LLMs.
@@ -13,14 +14,9 @@ import org.llm4s.llmconnect.model._
  * 3. Run: sbt "samples/runMain org.llm4s.samples.streaming.BasicStreamingExample"
  */
 object BasicStreamingExample {
-  def main(args: Array[String]): Unit = {
-    val model = Llm4sConfig
-      .provider()
-      .fold(err => throw new RuntimeException(err.formatted), _.model)
-    println("=== LLM4S Basic Streaming Example ===")
-    println(s"Using model: $model")
-    println("=" * 50 + "\n")
+  private val logger = LoggerFactory.getLogger(getClass)
 
+  def main(args: Array[String]): Unit = {
     // Create a conversation
     val conversation = Conversation(
       Seq(
@@ -30,10 +26,16 @@ object BasicStreamingExample {
     )
     var firstChunkTime: Option[Long] = None
     var chunkCount                   = 0
+
     // Get a client using typed configuration (Result-first)
     val result = for {
       providerCfg <- Llm4sConfig.provider()
-      client      <- LLMConnect.getClient(providerCfg)
+      _ = {
+        logger.info("=== LLM4S Basic Streaming Example ===")
+        logger.info("Using model: {}", providerCfg.model)
+        logger.info("=" * 50)
+      }
+      client <- LLMConnect.getClient(providerCfg)
       startTime = System.currentTimeMillis()
       completion <- client.streamComplete(
         conversation,
@@ -51,35 +53,37 @@ object BasicStreamingExample {
           chunkCount += 1
 
           // Show when we receive tool calls (if any)
-          chunk.toolCall.foreach(toolCall => println(s"\n[Tool Call: ${toolCall.name}]"))
+          chunk.toolCall.foreach(toolCall => logger.info("[Tool Call: {}]", toolCall.name))
 
           // Show finish reason
-          chunk.finishReason.foreach(reason => println(s"\n[Stream finished: $reason]"))
+          chunk.finishReason.foreach(reason => logger.info("[Stream finished: {}]", reason))
         }
       )
       _ = {
         val totalTime = System.currentTimeMillis() - startTime
-        println("\n" + "-" * 50)
-        println("\n✅ Streaming completed successfully!")
-        println(s"Message ID: ${completion.id}")
+        // Terminate the streaming line
+        println()
+        logger.info("-" * 50)
+        logger.info("Streaming completed successfully!")
+        logger.info("Message ID: {}", completion.id)
 
         // Print timing statistics
-        println(s"\n📊 Streaming Statistics:")
-        println(s"  - Time to first chunk: ${firstChunkTime.getOrElse(0L)}ms")
-        println(s"  - Total streaming time: ${totalTime}ms")
-        println(s"  - Number of chunks: $chunkCount")
+        logger.info("Streaming Statistics:")
+        logger.info("  - Time to first chunk: {}ms", firstChunkTime.getOrElse(0L))
+        logger.info("  - Total streaming time: {}ms", totalTime)
+        logger.info("  - Number of chunks: {}", chunkCount)
 
         // Print usage information if available
         completion.usage.foreach { usage =>
-          println(s"\n💰 Token Usage:")
-          println(s"  - Prompt tokens: ${usage.promptTokens}")
-          println(s"  - Completion tokens: ${usage.completionTokens}")
-          println(s"  - Total tokens: ${usage.totalTokens}")
+          logger.info("Token Usage:")
+          logger.info("  - Prompt tokens: {}", usage.promptTokens)
+          logger.info("  - Completion tokens: {}", usage.completionTokens)
+          logger.info("  - Total tokens: {}", usage.totalTokens)
         }
       }
     } yield ()
 
-    result.fold(err => println(s"Error: ${err.formatted}"), identity)
-    println("\n=== Example Complete ===")
+    result.fold(err => logger.error("Error: {}", err.formatted), identity)
+    logger.info("=== Example Complete ===")
   }
 }

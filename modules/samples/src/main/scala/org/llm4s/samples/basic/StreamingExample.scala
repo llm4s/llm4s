@@ -3,6 +3,7 @@ package org.llm4s.samples.basic
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
+import org.slf4j.LoggerFactory
 
 /**
  * Demonstrates streaming responses from LLMs using the streamComplete method.
@@ -23,6 +24,8 @@ import org.llm4s.llmconnect.model._
  * ```
  */
 object StreamingExample {
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def main(args: Array[String]): Unit = {
     // Create a conversation
     val conversation = Conversation(
@@ -39,9 +42,9 @@ object StreamingExample {
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
       _ = {
-        println("=== Streaming Response ===")
-        println("Receiving chunks as they arrive:")
-        println("-" * 40)
+        logger.info("=== Streaming Response ===")
+        logger.info("Receiving chunks as they arrive:")
+        logger.info("-" * 40)
       }
       completion <-
         client.streamComplete(
@@ -52,42 +55,49 @@ object StreamingExample {
 
             // Process content chunks
             chunk.content.foreach { content =>
-              print(content) // Print each chunk as it arrives
+              print(content) // Print each chunk as it arrives (Keep print for Streaming UI)
               fullContent += content
             }
 
             // Handle tool calls if present
-            chunk.toolCall.foreach(toolCall => println(s"\n[Tool Call: ${toolCall.name}]"))
+            chunk.toolCall.foreach(toolCall => logger.info("[Tool Call: {}]", toolCall.name))
 
             // Check if streaming is finished
-            chunk.finishReason.foreach(reason => println(s"\n\n[Stream finished: $reason]"))
+            chunk.finishReason.foreach { reason =>
+              // Ensure we break the line after streaming finishes
+              println()
+              logger.info("[Stream finished: {}]", reason)
+            }
           }
         )
       _ = {
         val endTime  = System.currentTimeMillis()
         val duration = endTime - startTime
 
-        println("\n" + "-" * 40)
-        println(s"\n=== Streaming Complete ===")
-        println(s"Total chunks received: $chunkCount")
-        println(s"Total time: ${duration}ms")
-        println(s"Completion ID: ${completion.id}")
+        logger.info("-" * 40)
+        logger.info("=== Streaming Complete ===")
+        logger.info("Total chunks received: {}", chunkCount)
+        logger.info("Total time: {}ms", duration)
+        logger.info("Completion ID: {}", completion.id)
 
         // Print token usage if available
         completion.usage.foreach { usage =>
-          println(
-            s"Tokens used: ${usage.totalTokens} (${usage.promptTokens} prompt, ${usage.completionTokens} completion)"
+          logger.info(
+            "Tokens used: {} ({} prompt, {} completion)",
+            usage.totalTokens,
+            usage.promptTokens,
+            usage.completionTokens
           )
         }
 
         // Verify the full content matches the completion message
         if (completion.message.content == fullContent) {
-          println("✓ Streamed content matches final completion")
+          logger.info("Streamed content matches final completion")
         } else {
-          println("⚠ Warning: Streamed content differs from final completion")
+          logger.warn("Warning: Streamed content differs from final completion")
         }
-        println("\n=== Comparison with Non-Streaming ===")
-        println("Now calling the same request without streaming...")
+        logger.info("=== Comparison with Non-Streaming ===")
+        logger.info("Now calling the same request without streaming...")
       }
       nonStreamStartTime = System.currentTimeMillis()
       noStreamCompletion <- client.complete(conversation)
@@ -95,16 +105,16 @@ object StreamingExample {
         val nonStreamEndTime  = System.currentTimeMillis()
         val nonStreamDuration = nonStreamEndTime - nonStreamStartTime
 
-        println(s"Non-streaming time: ${nonStreamDuration}ms")
-        println(s"Response length: ${noStreamCompletion.message.content.length} characters")
+        logger.info("Non-streaming time: {}ms", nonStreamDuration)
+        logger.info("Response length: {} characters", noStreamCompletion.message.content.length)
 
         // The non-streaming response should be similar
-        println("\nNon-streaming response (first 200 chars):")
-        println(noStreamCompletion.message.content.take(200) + "...")
+        logger.info("Non-streaming response (first 200 chars):")
+        logger.info("{}...", noStreamCompletion.message.content.take(200))
       }
     } yield ()
 
-    result.fold(err => println(s"Error: ${err.formatted}"), identity)
+    result.fold(err => logger.error("Error: {}", err.formatted), identity)
 
   }
 }

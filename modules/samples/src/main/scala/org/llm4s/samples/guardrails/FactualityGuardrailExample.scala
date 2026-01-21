@@ -5,6 +5,7 @@ import org.llm4s.agent.guardrails.builtin._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating factuality guardrails for RAG applications.
@@ -23,7 +24,9 @@ import org.llm4s.toolapi.ToolRegistry
  * Requires: LLM_MODEL and appropriate API key in environment
  */
 object FactualityGuardrailExample extends App {
-  println("=== Factuality Guardrail Example (RAG Use Case) ===\n")
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  logger.info("=== Factuality Guardrail Example (RAG Use Case) ===")
 
   // Simulated retrieved document content (in real RAG, this comes from vector search)
   val retrievedContext =
@@ -44,9 +47,9 @@ object FactualityGuardrailExample extends App {
     agent = new Agent(client)
 
     // === Example 1: Standard Factuality Check ===
-    _ = println("1. Standard Factuality Check")
-    _ = println("-" * 40)
-    _ = println(s"Reference Context:\n$retrievedContext\n")
+    _ = logger.info("1. Standard Factuality Check")
+    _ = logger.info("-" * 40)
+    _ = logger.info("Reference Context:\n{}\n", retrievedContext)
 
     factualityGuardrail = LLMFactualityGuardrail(
       client,
@@ -66,8 +69,8 @@ object FactualityGuardrailExample extends App {
     _ = printResult(state1, "Standard Factuality")
 
     // === Example 2: Strict Factuality Check ===
-    _ = println("\n2. Strict Factuality Check (Higher Threshold)")
-    _ = println("-" * 40)
+    _ = logger.info("2. Strict Factuality Check (Higher Threshold)")
+    _ = logger.info("-" * 40)
 
     strictGuardrail = LLMFactualityGuardrail.strict(client, retrievedContext)
 
@@ -82,8 +85,8 @@ object FactualityGuardrailExample extends App {
     _ = printResult(state2, "Strict Factuality")
 
     // === Example 3: Combined with Safety ===
-    _ = println("\n3. Factuality + Safety Combined")
-    _ = println("-" * 40)
+    _ = logger.info("3. Factuality + Safety Combined")
+    _ = logger.info("-" * 40)
 
     safetyGuardrail = LLMSafetyGuardrail(client)
     combinedGuardrails = Seq(
@@ -105,25 +108,25 @@ object FactualityGuardrailExample extends App {
 
   result match {
     case Right(_) =>
-      println("\n" + "=" * 50)
-      println("✓ All factuality guardrail examples completed successfully!")
-      println("\nNote: In production RAG systems, the context would come from")
-      println("vector search over your document embeddings.")
+      logger.info("=" * 50)
+      logger.info("✓ All factuality guardrail examples completed successfully!")
+      logger.info("Note: In production RAG systems, the context would come from")
+      logger.info("vector search over your document embeddings.")
 
     case Left(error) =>
-      println(s"\n✗ Example failed with error:")
-      println(s"  ${error.formatted}")
-      println("\nThis might indicate the response contained claims not supported")
-      println("by the reference context (potential hallucination).")
+      logger.error("✗ Example failed with error:")
+      logger.error("  {}", error.formatted)
+      logger.info("This might indicate the response contained claims not supported")
+      logger.info("by the reference context (potential hallucination).")
   }
 
   def printResult(state: org.llm4s.agent.AgentState, checkName: String): Unit = {
     val response = state.conversation.messages.last.content
     val preview  = if (response.length > 300) response.take(300) + "..." else response
 
-    println(s"✓ $checkName Check PASSED (response grounded in context)")
-    println(s"Response:\n$preview")
+    logger.info("✓ {} Check PASSED (response grounded in context)", checkName)
+    logger.info("Response:\n{}", preview)
   }
 
-  println("\n" + "=" * 50)
+  logger.info("=" * 50)
 }

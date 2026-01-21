@@ -5,6 +5,8 @@ import org.llm4s.rag.RAG.RAGConfigOps
 import org.llm4s.rag.permissions._
 import org.llm4s.rag.permissions.pg.PgSearchIndex
 import org.llm4s.config.Llm4sConfig
+import org.slf4j.LoggerFactory
+import scala.util.chaining._
 
 /**
  * Permission-Based RAG Example
@@ -39,40 +41,38 @@ import org.llm4s.config.Llm4sConfig
  *   sbt "samples/runMain org.llm4s.samples.rag.PermissionBasedRAGExample"
  */
 object PermissionBasedRAGExample extends App {
+  private val logger = LoggerFactory.getLogger(getClass)
 
-  println("=" * 60)
-  println("Permission-Based RAG Example")
-  println("=" * 60)
+  logger.info("=" * 60)
+  logger.info("Permission-Based RAG Example")
+  logger.info("=" * 60)
 
   // ========== Part 1: Core Types Overview ==========
-  println("\n--- Part 1: Core Types Overview ---")
+  logger.info("--- Part 1: Core Types Overview ---")
 
   // Principal IDs: Positive = User, Negative = Group
-  val userId  = PrincipalId.user(42)
-  val groupId = PrincipalId.group(5) // Stored as -5
-
-  println(s"User ID: $userId (raw: ${userId.value})")
-  println(s"Group ID: $groupId (raw: ${groupId.value})")
+  val userId  = PrincipalId.user(42).tap(u => logger.info("User ID: {} (raw: {})", u, u.value))
+  val groupId = PrincipalId.group(5).tap(g => logger.info("Group ID: {} (raw: {})", g, g.value)) // Stored as -5
 
   // Collection paths with hierarchy
   val rootPath       = CollectionPath.create("confluence")
   val childPath      = CollectionPath.create("confluence/EN")
   val grandchildPath = CollectionPath.create("confluence/EN/archive")
 
-  println(s"\nCollection paths:")
-  rootPath.foreach(p => println(s"  Root: $p (depth: ${p.depth})"))
-  childPath.foreach(p => println(s"  Child: $p (depth: ${p.depth})"))
+  logger.info("Collection paths:")
+  rootPath.foreach(p => logger.info("  Root: {} (depth: {})", p, p.depth))
+  childPath.foreach(p => logger.info("  Child: {} (depth: {})", p, p.depth))
   grandchildPath.foreach { p =>
-    println(s"  Grandchild: $p (depth: ${p.depth})")
-    println(s"    Parent: ${p.parent.map(_.value).getOrElse("none")}")
+    logger.info("  Grandchild: {} (depth: {})", p, p.depth)
+    logger.info("    Parent: {}", p.parent.map(_.value).getOrElse("none"))
   }
 
   // Collection patterns for querying
-  println("\nCollection patterns:")
-  println("  * -> matches all collections")
-  println("  confluence -> exact match only")
-  println("  confluence/★ -> immediate children (EN, DE)")
-  println("  confluence/★★ -> all descendants (EN, EN/archive, DE)")
+  logger.info("Collection patterns:")
+  logger.info("  * -> matches all collections")
+  logger.info("  confluence -> exact match only")
+  logger.info("  confluence/★ -> immediate children (EN, DE)")
+  logger.info("  confluence/★★ -> all descendants (EN, EN/archive, DE)")
 
   val patterns = Seq(
     "*"             -> CollectionPath.unsafe("any/path"),
@@ -84,26 +84,27 @@ object PermissionBasedRAGExample extends App {
   patterns.foreach { case (patternStr, testPath) =>
     CollectionPattern.parse(patternStr).foreach { pattern =>
       val matches = pattern.matches(testPath)
-      println(s"  Pattern '$patternStr' matches '$testPath': $matches")
+      logger.info("  Pattern '{}' matches '{}': {}", patternStr, testPath, matches)
     }
   }
 
   // User authorization context
-  println("\nUser authorization:")
-  val auth = UserAuthorization.forUser(
-    userId = PrincipalId.user(1),
-    groups = Set(PrincipalId.group(10), PrincipalId.group(20))
-  )
-  println(s"  Principal IDs: ${auth.principalIds.map(_.value).toSeq.sorted}")
-  println(s"  Is admin: ${auth.isAdmin}")
+  logger.info("User authorization:")
+  val auth = UserAuthorization
+    .forUser(
+      userId = PrincipalId.user(1),
+      groups = Set(PrincipalId.group(10), PrincipalId.group(20))
+    )
+    .tap(a => logger.info("  Principal IDs: {}", a.principalIds.map(_.value).toSeq.sorted))
+    .tap(a => logger.info("  Is admin: {}", a.isAdmin))
 
-  println(s"\nAdmin authorization:")
-  println(s"  Bypasses all permission checks: ${UserAuthorization.Admin.isAdmin}")
+  logger.info("Admin authorization:")
+  logger.info("  Bypasses all permission checks: {}", UserAuthorization.Admin.isAdmin)
 
   // ========== Part 2: API Overview (Without Database) ==========
-  println("\n--- Part 2: Permission-Aware RAG API ---")
+  logger.info("--- Part 2: Permission-Aware RAG API ---")
 
-  println("""
+  logger.info("""
     |// Configure RAG with a SearchIndex for permissions
     |val config = RAG.builder()
     |  .withEmbeddings(EmbeddingProvider.OpenAI)
@@ -134,51 +135,51 @@ object PermissionBasedRAGExample extends App {
   """.stripMargin)
 
   // ========== Part 3: Live Demo with PostgreSQL ==========
-  println("\n--- Part 3: Live Demo with PostgreSQL ---")
+  logger.info("--- Part 3: Live Demo with PostgreSQL ---")
 
   val pgConfigResult = Llm4sConfig.pgSearchIndex()
 
   pgConfigResult match {
     case Left(error) =>
-      println(s"\nCould not load PostgreSQL config: ${error.message}")
-      println("To run the live demo, set env vars like:")
-      println("  export PGVECTOR_HOST=localhost")
-      println("  export PGVECTOR_PORT=5432")
-      println("  export PGVECTOR_DATABASE=postgres")
-      println("  export PGVECTOR_USER=postgres")
-      println("  export PGVECTOR_PASSWORD=postgres")
-      println("\nSkipping live demo...")
+      logger.info("Could not load PostgreSQL config: {}", error.message)
+      logger.info("To run the live demo, set env vars like:")
+      logger.info("  export PGVECTOR_HOST=localhost")
+      logger.info("  export PGVECTOR_PORT=5432")
+      logger.info("  export PGVECTOR_DATABASE=postgres")
+      logger.info("  export PGVECTOR_USER=postgres")
+      logger.info("  export PGVECTOR_PASSWORD=postgres")
+      logger.info("Skipping live demo...")
 
     case Right(pgConfig) =>
       val config = pgConfig.copy(vectorTableName = "permission_demo_vectors")
-      println(s"PostgreSQL URL: ${config.jdbcUrl}")
+      logger.info("PostgreSQL URL: {}", config.jdbcUrl)
 
       // Try to create a SearchIndex
       PgSearchIndex(config) match {
         case Left(error) =>
-          println(s"\nCould not connect to PostgreSQL: ${error.message}")
-          println("To run the live demo, start PostgreSQL with pgvector:")
-          println("  docker run -d --name pgvector -p 5432:5432 \\")
-          println("    -e POSTGRES_PASSWORD=postgres \\")
-          println("    pgvector/pgvector:pg16")
-          println("\nSkipping live demo...")
+          logger.info("Could not connect to PostgreSQL: {}", error.message)
+          logger.info("To run the live demo, start PostgreSQL with pgvector:")
+          logger.info("  docker run -d --name pgvector -p 5432:5432 \\")
+          logger.info("    -e POSTGRES_PASSWORD=postgres \\")
+          logger.info("    pgvector/pgvector:pg16")
+          logger.info("Skipping live demo...")
 
         case Right(searchIndex) =>
-          println("Connected to PostgreSQL!")
+          logger.info("Connected to PostgreSQL!")
 
           // Initialize schema
           searchIndex.initializeSchema() match {
             case Left(error) =>
-              println(s"Schema initialization failed: ${error.message}")
+              logger.info("Schema initialization failed: {}", error.message)
 
             case Right(_) =>
-              println("Schema initialized.")
+              logger.info("Schema initialized.")
 
               // Create collections
               val collections = searchIndex.collections
               val principals  = searchIndex.principals
 
-              println("\nCreating users and groups...")
+              logger.info("Creating users and groups...")
 
               // Create principals
               val johnResult        = principals.getOrCreate(ExternalPrincipal.User("john@example.com"))
@@ -192,12 +193,12 @@ object PermissionBasedRAGExample extends App {
                 engineering <- engineeringResult
                 hr          <- hrResult
               } yield {
-                println(s"  john@example.com -> ${john.value}")
-                println(s"  jane@example.com -> ${jane.value}")
-                println(s"  engineering group -> ${engineering.value}")
-                println(s"  hr group -> ${hr.value}")
+                logger.info("  john@example.com -> {}", john.value)
+                logger.info("  jane@example.com -> {}", jane.value)
+                logger.info("  engineering group -> {}", engineering.value)
+                logger.info("  hr group -> {}", hr.value)
 
-                println("\nCreating collections...")
+                logger.info("Creating collections...")
 
                 // Create collection hierarchy
                 val publicConfig = CollectionConfig(
@@ -216,42 +217,42 @@ object PermissionBasedRAGExample extends App {
                   isLeaf = true
                 )
 
-                collections.create(publicConfig).foreach(_ => println("  Created 'public' (accessible to all)"))
+                collections.create(publicConfig).foreach(_ => logger.info("  Created 'public' (accessible to all)"))
                 collections
                   .create(engineeringConfig)
-                  .foreach(_ => println("  Created 'engineering' (engineering group only)"))
-                collections.create(hrConfig).foreach(_ => println("  Created 'hr' (HR group only)"))
+                  .foreach(_ => logger.info("  Created 'engineering' (engineering group only)"))
+                collections.create(hrConfig).foreach(_ => logger.info("  Created 'hr' (HR group only)"))
 
                 // Demo permission filtering
-                println("\nPermission filtering demo:")
+                logger.info("Permission filtering demo:")
 
                 val johnAuth = UserAuthorization.forUser(john, Set(engineering))
                 val janeAuth = UserAuthorization.forUser(jane, Set(hr))
 
-                println(s"\n  John (engineering): principals = ${johnAuth.asSeq.sorted}")
+                logger.info("  John (engineering): principals = {}", johnAuth.asSeq.sorted)
                 collections.findAccessible(johnAuth, CollectionPattern.All).foreach { accessible =>
-                  println(s"    Can access: ${accessible.map(_.path.value).mkString(", ")}")
+                  logger.info("    Can access: {}", accessible.map(_.path.value).mkString(", "))
                 }
 
-                println(s"\n  Jane (HR): principals = ${janeAuth.asSeq.sorted}")
+                logger.info("  Jane (HR): principals = {}", janeAuth.asSeq.sorted)
                 collections.findAccessible(janeAuth, CollectionPattern.All).foreach { accessible =>
-                  println(s"    Can access: ${accessible.map(_.path.value).mkString(", ")}")
+                  logger.info("    Can access: {}", accessible.map(_.path.value).mkString(", "))
                 }
 
-                println(s"\n  Admin: bypasses all checks")
+                logger.info("  Admin: bypasses all checks")
                 collections.findAccessible(UserAuthorization.Admin, CollectionPattern.All).foreach { accessible =>
-                  println(s"    Can access: ${accessible.map(_.path.value).mkString(", ")}")
+                  logger.info("    Can access: {}", accessible.map(_.path.value).mkString(", "))
                 }
 
               }) match {
                 case Left(error) =>
-                  println(s"Error during demo: ${error.message}")
+                  logger.info("Error during demo: {}", error.message)
                 case Right(_) =>
-                  println("\nDemo completed successfully!")
+                  logger.info("Demo completed successfully!")
               }
 
               // Build RAG with SearchIndex
-              println("\n--- Building RAG with Permission Support ---")
+              logger.info("--- Building RAG with Permission Support ---")
 
               val ragResult = for {
                 rag <- RAG
@@ -264,12 +265,12 @@ object PermissionBasedRAGExample extends App {
 
               ragResult match {
                 case Left(error) =>
-                  println(s"Could not build RAG: ${error.message}")
-                  println("Make sure OPENAI_API_KEY is set for embeddings.")
+                  logger.info("Could not build RAG: {}", error.message)
+                  logger.info("Make sure OPENAI_API_KEY is set for embeddings.")
 
                 case Right(rag) =>
-                  println(s"RAG built with permission support!")
-                  println(s"  Has permissions: ${rag.hasPermissions}")
+                  logger.info("RAG built with permission support!")
+                  logger.info("  Has permissions: {}", rag.hasPermissions)
                   rag.close()
               }
           }
@@ -279,8 +280,8 @@ object PermissionBasedRAGExample extends App {
   }
 
   // ========== Part 4: Two-Level Permission Model ==========
-  println("\n--- Part 4: Two-Level Permission Model ---")
-  println("""
+  logger.info("--- Part 4: Two-Level Permission Model ---")
+  logger.info("""
     |Permission filtering happens at two levels:
     |
     |1. COLLECTION-LEVEL (queryable_by):
@@ -306,7 +307,7 @@ object PermissionBasedRAGExample extends App {
     |  4. Return permission-filtered results
   """.stripMargin)
 
-  println("\n" + "=" * 60)
-  println("Permission-Based RAG Example Complete")
-  println("=" * 60)
+  logger.info("=" * 60)
+  logger.info("Permission-Based RAG Example Complete")
+  logger.info("=" * 60)
 }

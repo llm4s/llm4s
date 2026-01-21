@@ -5,6 +5,7 @@ import org.llm4s.agent.streaming.AgentEvent._
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating how to collect and analyze streaming events.
@@ -19,11 +20,11 @@ import org.llm4s.toolapi.ToolRegistry
  * Note: Requires LLM_MODEL and appropriate API key environment variables.
  */
 object EventCollectionExample extends App {
+  private val logger = LoggerFactory.getLogger(getClass)
 
-  println("=" * 60)
-  println("Event Collection Example")
-  println("=" * 60)
-  println()
+  logger.info("=" * 60)
+  logger.info("Event Collection Example")
+  logger.info("=" * 60)
 
   val result = for {
     providerCfg <- Llm4sConfig.provider()
@@ -41,10 +42,9 @@ object EventCollectionExample extends App {
   result match {
     case Right((state, events)) =>
       // Analyze the collected events
-      println("Collected Events Summary")
-      println("-" * 40)
-      println(s"Total events: ${events.size}")
-      println()
+      logger.info("Collected Events Summary")
+      logger.info("-" * 40)
+      logger.info("Total events: {}", events.size)
 
       // Count by type
       val textDeltas   = events.collect { case e: TextDelta => e }
@@ -53,28 +53,26 @@ object EventCollectionExample extends App {
       val toolCalls    = events.collect { case e: ToolCallStarted => e }
       val completions  = events.collect { case e: AgentCompleted => e }
 
-      println("Event breakdown:")
-      println(s"  - TextDelta events: ${textDeltas.size}")
-      println(s"  - TextComplete events: ${textComplete.size}")
-      println(s"  - StepStarted events: ${steps.size}")
-      println(s"  - ToolCallStarted events: ${toolCalls.size}")
-      println(s"  - AgentCompleted events: ${completions.size}")
-      println()
+      logger.info("Event breakdown:")
+      logger.info("  - TextDelta events: {}", textDeltas.size)
+      logger.info("  - TextComplete events: {}", textComplete.size)
+      logger.info("  - StepStarted events: {}", steps.size)
+      logger.info("  - ToolCallStarted events: {}", toolCalls.size)
+      logger.info("  - AgentCompleted events: {}", completions.size)
 
       // Calculate total streamed characters
       val totalChars = textDeltas.map(_.delta.length).sum
-      println(s"Total characters streamed: $totalChars")
+      logger.info("Total characters streamed: {}", totalChars)
 
       // Show timing if available
       completions.headOption.foreach { completion =>
-        println(s"Total duration: ${completion.durationMs}ms")
-        println(s"Total steps: ${completion.totalSteps}")
+        logger.info("Total duration: {}ms", completion.durationMs)
+        logger.info("Total steps: {}", completion.totalSteps)
       }
-      println()
 
       // Show event timeline
-      println("Event Timeline:")
-      println("-" * 40)
+      logger.info("Event Timeline:")
+      logger.info("-" * 40)
       events.zipWithIndex.foreach { case (event, idx) =>
         val eventType = event.getClass.getSimpleName
         val summary = event match {
@@ -88,17 +86,16 @@ object EventCollectionExample extends App {
           case ToolCallCompleted(_, name, _, _, ms, _) => s"$name completed in ${ms}ms"
           case _                                       => ""
         }
-        println(f"  $idx%3d. $eventType%-25s $summary")
+        logger.info(f"  $idx%3d. $eventType%-25s $summary")
       }
-      println()
 
       // Show final response
-      println("Final Response:")
-      println("-" * 40)
-      state.conversation.messages.lastOption.foreach(msg => println(msg.content))
+      logger.info("Final Response:")
+      logger.info("-" * 40)
+      state.conversation.messages.lastOption.foreach(msg => logger.info("{}", msg.content))
 
     case Left(error) =>
-      println(s"Error: ${error.message}")
+      logger.error("Error: {}", error.message)
       System.exit(1)
   }
 }

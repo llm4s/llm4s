@@ -2,11 +2,13 @@ package org.llm4s.samples.toolapi
 
 import org.llm4s.toolapi._
 import upickle.default._
+import org.slf4j.LoggerFactory
 
 /**
  * Demonstration of improved error messages for tool parameter validation
  */
 object ErrorMessageDemonstration extends App {
+  private val logger = LoggerFactory.getLogger(getClass)
 
   // Define a simple result type
   case class Result(message: String)
@@ -33,22 +35,24 @@ object ErrorMessageDemonstration extends App {
     }.build()
   }
 
-  println("=" * 60)
-  println("Tool Parameter Validation - Error Message Examples")
-  println("=" * 60)
+  logger.info("=" * 60)
+  logger.info("Tool Parameter Validation - Error Message Examples")
+  logger.info("=" * 60)
 
   // Example 1: Null arguments
-  println("\n1. Null arguments:")
+  logger.info("")
+  logger.info("1. Null arguments:")
   val nullResult = inventoryTool.execute(ujson.Null)
   nullResult match {
     case Left(error) =>
-      println(s"   Error: ${error.getMessage}")
+      logger.info("   Error: {}", error.getMessage)
     case Right(_) =>
-      println("   Unexpected success")
+      logger.info("   Unexpected success")
   }
 
   // Example 2: Missing required parameter
-  println("\n2. Missing 'quantity' parameter:")
+  logger.info("")
+  logger.info("2. Missing 'quantity' parameter:")
   val missingParamResult = inventoryTool.execute(
     ujson.Obj(
       "item"     -> "Apple",
@@ -58,13 +62,14 @@ object ErrorMessageDemonstration extends App {
   )
   missingParamResult match {
     case Left(error) =>
-      println(s"   Error: ${error.getMessage}")
+      logger.info("   Error: {}", error.getMessage)
     case Right(_) =>
-      println("   Unexpected success")
+      logger.info("   Unexpected success")
   }
 
   // Example 3: Type mismatch
-  println("\n3. Type mismatch (string instead of number for quantity):")
+  logger.info("")
+  logger.info("3. Type mismatch (string instead of number for quantity):")
   val typeMismatchResult = inventoryTool.execute(
     ujson.Obj(
       "item"     -> "Apple",
@@ -74,13 +79,14 @@ object ErrorMessageDemonstration extends App {
   )
   typeMismatchResult match {
     case Left(error) =>
-      println(s"   Error: ${error.getMessage}")
+      logger.info("   Error: {}", error.getMessage)
     case Right(_) =>
-      println("   Unexpected success")
+      logger.info("   Unexpected success")
   }
 
   // Example 4: Null value for required field
-  println("\n4. Null value for required 'location' field:")
+  logger.info("")
+  logger.info("4. Null value for required 'location' field:")
   val nullFieldResult = inventoryTool.execute(
     ujson.Obj(
       "item"     -> "Apple",
@@ -90,13 +96,14 @@ object ErrorMessageDemonstration extends App {
   )
   nullFieldResult match {
     case Left(error) =>
-      println(s"   Error: ${error.getMessage}")
+      logger.info("   Error: {}", error.getMessage)
     case Right(_) =>
-      println("   Unexpected success")
+      logger.info("   Unexpected success")
   }
 
   // Example 5: Successful execution
-  println("\n5. Successful execution with all parameters:")
+  logger.info("")
+  logger.info("5. Successful execution with all parameters:")
   val successResult = inventoryTool.execute(
     ujson.Obj(
       "item"     -> "Apple",
@@ -106,17 +113,18 @@ object ErrorMessageDemonstration extends App {
   )
   successResult match {
     case Left(error) =>
-      println(s"   Error: ${error.getMessage}")
+      logger.info("   Error: {}", error.getMessage)
     case Right(result) =>
-      println(s"   Success: ${result.render()}")
+      logger.info("   Success: {}", result.render())
   }
 
-  println("\n" + "=" * 60)
-  println("The improved error messages now clearly indicate:")
-  println("- Which tool failed")
-  println("- What parameter is problematic")
-  println("- What the actual issue is (null, missing, wrong type)")
-  println("- What was expected")
-  println("- Available alternatives when applicable")
-  println("=" * 60)
+  logger.info("")
+  logger.info("=" * 60)
+  logger.info("The improved error messages now clearly indicate:")
+  logger.info("- Which tool failed")
+  logger.info("- What parameter is problematic")
+  logger.info("- What the actual issue is (null, missing, wrong type)")
+  logger.info("- What was expected")
+  logger.info("- Available alternatives when applicable")
+  logger.info("=" * 60)
 }

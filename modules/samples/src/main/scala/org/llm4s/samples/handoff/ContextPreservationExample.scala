@@ -4,6 +4,7 @@ import org.llm4s.agent.{ Agent, Handoff }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
+import org.slf4j.LoggerFactory
 
 /**
  * Context Preservation Example
@@ -12,9 +13,11 @@ import org.llm4s.toolapi.ToolRegistry
  * The specialist agent receives the full conversation history.
  */
 object ContextPreservationExample extends App {
-  println("=" * 80)
-  println("Context Preservation Handoff Example")
-  println("=" * 80)
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  logger.info("=" * 80)
+  logger.info("Context Preservation Handoff Example")
+  logger.info("=" * 80)
 
   val result = for {
     providerCfg <- Llm4sConfig.provider()
@@ -24,7 +27,7 @@ object ContextPreservationExample extends App {
     specialistAgent = new Agent(client)
 
     // Multi-turn conversation with context
-    _ = println("\nTurn 1: 'I'm working on a quantum computing project'")
+    _ = logger.info("Turn 1: 'I'm working on a quantum computing project'")
 
     state1 <- generalAgent.run(
       query = "I'm working on a quantum computing project",
@@ -33,9 +36,9 @@ object ContextPreservationExample extends App {
       debug = false
     )
 
-    _ = println(s"Response: ${state1.conversation.messages.last.content}")
-    _ = println("\nTurn 2: 'Can you explain quantum entanglement in detail?'")
-    _ = println("(This should trigger a handoff to the specialist)")
+    _ = logger.info("Response: {}", state1.conversation.messages.last.content)
+    _ = logger.info("Turn 2: 'Can you explain quantum entanglement in detail?'")
+    _ = logger.info("(This should trigger a handoff to the specialist)")
 
     state2 <- generalAgent.continueConversation(
       previousState = state1,
@@ -45,7 +48,7 @@ object ContextPreservationExample extends App {
 
     // For this example, we'll manually demonstrate handoff with context
     // In a real scenario, the general agent would decide to hand off
-    _ = println("\nManually handing off to specialist with full context...")
+    _ = logger.info("Manually handing off to specialist with full context...")
 
     handoff = Handoff(
       targetAgent = specialistAgent,
@@ -68,24 +71,25 @@ object ContextPreservationExample extends App {
 
   result match {
     case Right((state2, finalState)) =>
-      println("\n" + "=" * 80)
-      println("✅ Context preservation demonstration complete")
-      println("=" * 80)
-      println(s"Original conversation messages: ${state2.conversation.messages.length}")
-      println(s"Specialist received messages: ${finalState.conversation.messages.length}")
-      println(s"\nSpecialist's response:")
-      println(finalState.conversation.messages.last.content)
+      logger.info("=" * 80)
+      logger.info("Context preservation demonstration complete")
+      logger.info("=" * 80)
+      logger.info("Original conversation messages: {}", state2.conversation.messages.length)
+      logger.info("Specialist received messages: {}", finalState.conversation.messages.length)
+      logger.info("Specialist's response:")
+      logger.info("{}", finalState.conversation.messages.last.content)
 
-      println(s"\n📝 Full conversation flow:")
+      logger.info("Full conversation flow:")
       state2.conversation.messages.zipWithIndex.foreach { case (msg, idx) =>
-        println(s"  ${idx + 1}. [${msg.role}] ${msg.content.take(80)}...")
+        val preview = msg.content.take(80) + "..."
+        logger.info("  {}. [{}] {}", idx + 1, msg.role, preview)
       }
 
     case Left(error) =>
-      println("\n" + "=" * 80)
-      println("❌ Error occurred")
-      println("=" * 80)
-      println(s"Error: ${error.formatted}")
+      logger.error("=" * 80)
+      logger.error("Error occurred")
+      logger.error("=" * 80)
+      logger.error("Error: {}", error.formatted)
   }
 
   // Helper method to demonstrate handoff state building

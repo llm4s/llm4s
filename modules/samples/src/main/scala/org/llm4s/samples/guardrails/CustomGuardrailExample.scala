@@ -7,6 +7,7 @@ import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
 /**
  * Custom guardrail that checks for specific keywords.
@@ -44,7 +45,9 @@ class KeywordRequirementGuardrail(requiredKeywords: Set[String]) extends InputGu
  * Requires: LLM_MODEL and appropriate API key in environment
  */
 object CustomGuardrailExample extends App {
-  println("=== Custom Guardrail Example ===\n")
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  logger.info("=== Custom Guardrail Example ===")
 
   val result = for {
     providerCfg <- Llm4sConfig.provider()
@@ -64,19 +67,19 @@ object CustomGuardrailExample extends App {
 
   result match {
     case Right(state) =>
-      println("✓ Query contained required keywords (scala, programming)")
-      println(s"\nAgent response:")
-      state.conversation.messages.last.content.split("\n").take(5).foreach(line => println(s"  $line"))
+      logger.info("✓ Query contained required keywords (scala, programming)")
+      logger.info("Agent response:")
+      state.conversation.messages.last.content.split("\n").take(5).foreach(line => logger.info("  {}", line))
 
     case Left(error) =>
-      println(s"✗ Validation failed:")
-      println(s"  Error: ${error.formatted}")
+      logger.error("✗ Validation failed:")
+      logger.error("  Error: {}", error.formatted)
   }
 
-  println("\n" + "=" * 50)
+  logger.info("=" * 50)
 
   // Demonstrate failure case
-  println("\n=== Testing with missing keywords ===\n")
+  logger.info("=== Testing with missing keywords ===")
 
   val failureResult = for {
     providerCfg <- Llm4sConfig.provider()
@@ -94,12 +97,12 @@ object CustomGuardrailExample extends App {
 
   failureResult match {
     case Right(_) =>
-      println("Unexpected success")
+      logger.warn("Unexpected success")
 
     case Left(error) =>
-      println(s"✓ Expected validation failure:")
-      println(s"  Error: ${error.formatted}")
+      logger.info("✓ Expected validation failure:")
+      logger.info("  Error: {}", error.formatted)
   }
 
-  println("\n" + "=" * 50)
+  logger.info("=" * 50)
 }

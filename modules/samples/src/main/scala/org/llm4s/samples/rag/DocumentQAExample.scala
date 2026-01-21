@@ -9,6 +9,8 @@ import org.llm4s.llmconnect.extractors.UniversalExtractor
 import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
 import org.llm4s.llmconnect.utils.ChunkingUtils
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
+import scala.util.chaining._
 
 import java.io.File
 import java.nio.file.{ Files, Path }
@@ -40,10 +42,11 @@ import java.nio.file.{ Files, Path }
  *   sbt "samples/runMain org.llm4s.samples.rag.DocumentQAExample ./my-docs"
  */
 object DocumentQAExample extends App {
+  private val logger = LoggerFactory.getLogger(getClass)
 
-  println("=" * 60)
-  println("Document Q&A - RAG Example")
-  println("=" * 60)
+  logger.info("=" * 60)
+  logger.info("Document Q&A - RAG Example")
+  logger.info("=" * 60)
 
   // Configuration
   val config = RAGConfig(
@@ -59,16 +62,16 @@ object DocumentQAExample extends App {
 
   result match {
     case Right(_) =>
-      println("\n" + "=" * 60)
-      println("RAG Demo Complete!")
-      println("=" * 60)
+      logger.info("=" * 60)
+      logger.info("RAG Demo Complete!")
+      logger.info("=" * 60)
 
     case Left(error) =>
-      println(s"\nError: ${error.formatted}")
-      println("\nTroubleshooting:")
-      println("  - For LLM answers: Set LLM_MODEL and appropriate API key")
-      println("  - Example: export LLM_MODEL=openai/gpt-4o")
-      println("  - Example: export OPENAI_API_KEY=sk-...")
+      logger.error("Error: {}", error.formatted)
+      logger.info("Troubleshooting:")
+      logger.info("  - For LLM answers: Set LLM_MODEL and appropriate API key")
+      logger.info("  - Example: export LLM_MODEL=openai/gpt-4o")
+      logger.info("  - Example: export OPENAI_API_KEY=sk-...")
       System.exit(1)
   }
 
@@ -90,11 +93,11 @@ object DocumentQAExample extends App {
           EmbeddingClient.from(provider, cfg).map(client => LLMEmbeddingService(client, modelCfg))
         } match {
         case Right(realService) =>
-          println(s"\nUsing LLMEmbeddingService (real embeddings)")
+          logger.info("Using LLMEmbeddingService (real embeddings)")
           Right(realService)
         case Left(_) =>
-          println(s"\nUsing MockEmbeddingService (1536 dimensions)")
-          println("Tip: Set LLM_EMBEDDING_MODEL for real embeddings")
+          logger.info("Using MockEmbeddingService (1536 dimensions)")
+          logger.info("Tip: Set LLM_EMBEDDING_MODEL for real embeddings")
           Right(MockEmbeddingService(dimensions = 1536))
       }
 
@@ -102,30 +105,30 @@ object DocumentQAExample extends App {
       embeddingService <- embeddingServiceResult
       // Create vector store
       store <- VectorMemoryStore(dbPath.toString, embeddingService, MemoryStoreConfig.default)
-      _ = println(s"Database: $dbPath")
+        .tap(_ => logger.info("Database: {}", dbPath))
 
       // Step 1: Ingest documents
-      _ = println("\n" + "-" * 40)
-      _ = println("Step 1: Ingesting Documents")
-      _ = println("-" * 40)
+      _ = logger.info("-" * 40)
+      _ = logger.info("Step 1: Ingesting Documents")
+      _ = logger.info("-" * 40)
       chunkCount <- ingestPath(store, config.documentPath, config)
-      _ = println(s"Ingested $chunkCount chunks from documents")
+      _ = logger.info("Ingested {} chunks from documents", chunkCount)
 
       stats <- store.vectorStats
-      _ = println(s"Store stats: ${stats.totalMemories} memories, ${stats.embeddedMemories} embedded")
+      _ = logger.info("Store stats: {} memories, {} embedded", stats.totalMemories, stats.embeddedMemories)
 
       // Step 2: Connect to LLM for answer generation
-      _ = println("\n" + "-" * 40)
-      _ = println("Step 2: Connecting to LLM")
-      _ = println("-" * 40)
+      _ = logger.info("-" * 40)
+      _ = logger.info("Step 2: Connecting to LLM")
+      _ = logger.info("-" * 40)
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
-      _ = println("LLM client connected successfully")
+      _ = logger.info("LLM client connected successfully")
 
       // Step 3: Run sample queries
-      _ = println("\n" + "-" * 40)
-      _ = println("Step 3: Running Sample Queries")
-      _ = println("-" * 40)
+      _ = logger.info("-" * 40)
+      _ = logger.info("Step 3: Running Sample Queries")
+      _ = logger.info("-" * 40)
       _ <- runSampleQueries(store, client, config)
 
       // Cleanup
@@ -158,11 +161,11 @@ object DocumentQAExample extends App {
       .filter(f => f.isFile && config.supportedExtensions.exists(ext => f.getName.toLowerCase.endsWith(ext)))
 
     if (files.isEmpty) {
-      println(s"  Warning: No supported files found in $dirPath")
-      println(s"  Supported extensions: ${config.supportedExtensions.mkString(", ")}")
+      logger.warn("  Warning: No supported files found in {}", dirPath)
+      logger.info("  Supported extensions: {}", config.supportedExtensions.mkString(", "))
       Right(0)
     } else {
-      println(s"  Found ${files.size} documents to ingest")
+      logger.info("  Found {} documents to ingest", files.size)
       files.foldLeft[Result[Int]](Right(0)) { (acc, file) =>
         for {
           count <- acc
@@ -174,16 +177,16 @@ object DocumentQAExample extends App {
 
   def ingestFile(store: VectorMemoryStore, filePath: String, config: RAGConfig): Result[Int] = {
     val fileName = new File(filePath).getName
-    println(s"  Processing: $fileName")
+    logger.info("  Processing: {}", fileName)
 
     UniversalExtractor.extract(filePath) match {
       case Left(e) =>
-        println(s"    Warning: Failed to extract $fileName: ${e.message}")
+        logger.warn("    Warning: Failed to extract {}: {}", fileName, e.message)
         Right(0) // Skip failed files, don't fail entire ingestion
 
       case Right(text) =>
         val chunks = ChunkingUtils.chunkText(text, config.chunkSize, config.chunkOverlap)
-        println(s"    Created ${chunks.size} chunks")
+        logger.info("    Created {} chunks", chunks.size)
 
         val storeResults = chunks.zipWithIndex.foldLeft[Result[MemoryStore]](Right(store)) {
           case (Right(s), (chunk, idx)) =>
@@ -212,17 +215,17 @@ object DocumentQAExample extends App {
     )
 
     queries.foreach { query =>
-      println(s"\n${"=" * 50}")
-      println(s"Q: $query")
-      println("=" * 50)
+      logger.info("=" * 50)
+      logger.info("Q: {}", query)
+      logger.info("=" * 50)
 
       queryWithContext(store, client, query, config) match {
         case Right(response) =>
-          println(s"\nAnswer:\n${response.answer}")
-          println(s"\n${formatCitations(response.sources)}")
+          logger.info("Answer:\n{}", response.answer)
+          logger.info("{}", formatCitations(response.sources))
 
         case Left(error) =>
-          println(s"\nError generating answer: ${error.formatted}")
+          logger.error("Error generating answer: {}", error.formatted)
       }
     }
 
@@ -237,8 +240,14 @@ object DocumentQAExample extends App {
   ): Result[RAGResponse] =
     for {
       // Retrieve relevant chunks
-      scoredMemories <- store.search(query, config.topK, MemoryFilter.ByType(MemoryType.Knowledge))
-      _ = println(s"  Retrieved ${scoredMemories.size} relevant chunks")
+      scoredMemories <- store
+        .search(query, config.topK, MemoryFilter.ByType(MemoryType.Knowledge))
+        .tap {
+          case Right(chunks) =>
+            logger.info("  Retrieved {} relevant chunks", chunks.size)
+          case Left(err) =>
+            logger.warn("  Failed to retrieve relevant chunks: {}", err.message)
+        }
 
       // Build context from retrieved chunks
       context = formatContext(scoredMemories)

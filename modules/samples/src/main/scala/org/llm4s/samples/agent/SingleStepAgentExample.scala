@@ -5,60 +5,83 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.tools.WeatherTool
+import org.slf4j.LoggerFactory
+import scala.util.chaining._
 
 /**
  * Example demonstrating step-by-step agent execution for debugging
  */
 object SingleStepAgentExample {
+
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def main(args: Array[String]): Unit = {
-    // Get a client using environment variables (Result-first)
     val result = for {
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
       toolRegistry = new ToolRegistry(Seq(WeatherTool.tool))
       agent        = new Agent(client)
+
       traceLogPath = ".log/single-step-trace.md"
-      query        = "I'm planning a trip to Paris. What's the weather like there now?"
-      _            = println(s"Trace log will be written to: $traceLogPath\n")
-      _            = println(s"User Query: $query\n")
-      _            = println("=== Running Step-by-Step ===\n")
-      state        = agent.initialize(query, toolRegistry)
-      _            = println(s"Initial state initialized with ${state.conversation.messages.length} messages")
-      _            = agent.writeTraceLog(state, traceLogPath)
-      _ = {
+        .tap(p => logger.info("Trace log will be written to: {}", p))
+
+      query = "I'm planning a trip to Paris. What's the weather like there now?"
+        .tap(q => logger.info("User Query: {}", q))
+
+      _ = logger.info("=== Running Step-by-Step ===")
+
+      initialState = agent
+        .initialize(query, toolRegistry)
+        .tap(s => logger.info("Initial state initialized with {} messages", s.conversation.messages.length))
+
+      _ = agent.writeTraceLog(initialState, traceLogPath)
+
+      // We use a block here to run the steps and return the FINAL state
+      finalState = {
         var stepCount = 0
-        var stat      = state
-        while ((stat.status == AgentStatus.InProgress || stat.status == AgentStatus.WaitingForTools) && stepCount < 5) {
-          println(s"\nRunning step ${stepCount + 1}...")
-          agent.runStep(stat) match {
+        var state     = initialState
+
+        while (
+          (state.status == AgentStatus.InProgress || state.status == AgentStatus.WaitingForTools) && stepCount < 5
+        ) {
+          logger.info("Running step {}...", stepCount + 1)
+
+          agent.runStep(state) match {
             case Right(newState) =>
-              stat = newState
-              println(s"Step completed with status: ${stat.status}")
-              // Print the most recent message
-              stat.conversation.messages.lastOption.foreach { msg =>
-                println(
-                  s"Last message (${msg.role}): ${msg.content.take(100)}${if (msg.content.length > 100) "..." else ""}"
-                )
+              state = newState
+              logger.info("Step completed with status: {}", state.status)
+
+              state.conversation.messages.lastOption.foreach { msg =>
+                val preview = msg.content.take(100) + (if (msg.content.length > 100) "..." else "")
+                logger.info("Last message ({}): {}", msg.role, preview)
               }
-              agent.writeTraceLog(stat, traceLogPath)
+
+              agent.writeTraceLog(state, traceLogPath)
+
             case Left(error) =>
-              println(s"Error running step: $error")
-              stat = stat.withStatus(AgentStatus.Failed(error.toString))
-              agent.writeTraceLog(stat, traceLogPath)
+              logger.error("Error running step: {}", error.formatted)
+              state = state.withStatus(AgentStatus.Failed(error.toString))
+              agent.writeTraceLog(state, traceLogPath)
           }
+
           stepCount += 1
         }
-        println("\n=== Step-by-Step Run Complete ===\n")
-        println(s"Final status: ${stat.status}")
-        println(s"Total messages: ${stat.conversation.messages.length}")
-        println(s"Trace log has been written to: $traceLogPath")
+
+        logger.info("=== Step-by-Step Run Complete ===")
+        logger.info("Final status: {}", state.status)
+        logger.info("Total messages: {}", state.conversation.messages.length)
+        logger.info("Trace log has been written to: {}", traceLogPath)
+
+        state // Return the updated state
       }
-      _ = println("\n=== Complete Agent State Dump ===\n")
-      _ = state.dump()
+
+      _ = logger.info("=== Complete Agent State Dump ===")
+      _ = finalState.dump()
+
     } yield ()
 
     result.fold(
-      err => println(s"Error: ${err.formatted}"),
+      err => logger.error("Error: {}", err.formatted),
       identity
     )
   }

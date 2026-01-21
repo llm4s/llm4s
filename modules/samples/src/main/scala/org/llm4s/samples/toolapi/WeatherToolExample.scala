@@ -2,11 +2,14 @@ package org.llm4s.samples.toolapi
 
 import org.llm4s.toolapi._
 import org.llm4s.toolapi.tools.WeatherTool
+import org.slf4j.LoggerFactory
 
 /**
  * Example demonstrating how to use the weather tool
  */
 object WeatherToolExample {
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def main(args: Array[String]): Unit = {
     // Create a tool registry with the weather tool
     val toolRegistry = new ToolRegistry(Seq(WeatherTool.tool))
@@ -20,16 +23,16 @@ object WeatherToolExample {
     // Execute the tool call
     val result = toolRegistry.execute(weatherRequest)
 
-    println("Tool execution result:")
+    logger.info("Tool execution result:")
     result match {
-      case Right(json) => println(json.render(indent = 2))
-      case Left(error) => println(s"Error: $error")
+      case Right(json) => logger.info("{}", json.render(indent = 2))
+      case Left(error) => logger.error("Error: {}", error)
     }
 
     // Generate tool definitions for OpenAI
     val openaiTools = toolRegistry.getToolDefinitions("openai")
 
-    println("\nOpenAI tool definition:")
-    println(openaiTools.render(indent = 2))
+    logger.info("OpenAI tool definition:")
+    logger.info("{}", openaiTools.render(indent = 2))
   }
 }
