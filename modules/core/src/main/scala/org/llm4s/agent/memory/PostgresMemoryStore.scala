@@ -15,7 +15,7 @@ import scala.util.{ Try, Using }
  * - This is an MVP implementation focused on persistence only.
  * - Full MemoryFilter support (And/Or/Not/TimeRange) and Semantic search via embeddings will be added later.
  */
-final class PostgresMemoryStore private (
+final class PostgresMemoryStore private[memory] (
   private val dataSource: HikariDataSource,
   val tableName: String
 ) extends MemoryStore
@@ -73,7 +73,7 @@ final class PostgresMemoryStore private (
           stmt.setString(1, memory.id.value)
           stmt.setString(2, memory.content)
           stmt.setString(3, memory.memoryType.name)
-          stmt.setString(4, metadataToJson(memory.metadata))
+          stmt.setString(4, PostgresMemoryStore.metadataToJson(memory.metadata))
           stmt.setTimestamp(5, Timestamp.from(memory.timestamp))
 
           memory.importance match {
@@ -82,7 +82,8 @@ final class PostgresMemoryStore private (
           }
 
           memory.embedding match {
-            case Some(vec) => stmt.setString(7, embeddingToString(vec))
+            // CALLING COMPANION OBJECT METHOD
+            case Some(vec) => stmt.setString(7, PostgresMemoryStore.embeddingToString(vec))
             case None      => stmt.setNull(7, java.sql.Types.OTHER, "vector")
           }
 
@@ -105,7 +106,7 @@ final class PostgresMemoryStore private (
   override def recall(filter: MemoryFilter, limit: Int): Result[Seq[Memory]] =
     Try {
       withConnection { conn =>
-        val (whereClause, params) = filterToSql(filter)
+        val (whereClause, params) = PostgresMemoryStore.filterToSql(filter)
         val sql =
           s"SELECT * FROM $tableName WHERE $whereClause ORDER BY created_at DESC LIMIT ?"
 
@@ -150,7 +151,7 @@ final class PostgresMemoryStore private (
   override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] =
     Try {
       withConnection { conn =>
-        val (whereClause, params) = filterToSql(filter)
+        val (whereClause, params) = PostgresMemoryStore.filterToSql(filter)
         val sql                   = s"DELETE FROM $tableName WHERE $whereClause"
 
         Using.resource(conn.prepareStatement(sql)) { stmt =>
@@ -176,7 +177,7 @@ final class PostgresMemoryStore private (
   override def count(filter: MemoryFilter): Result[Long] =
     Try {
       withConnection { conn =>
-        val (whereClause, params) = filterToSql(filter)
+        val (whereClause, params) = PostgresMemoryStore.filterToSql(filter)
         val sql                   = s"SELECT COUNT(*) FROM $tableName WHERE $whereClause"
 
         Using.resource(conn.prepareStatement(sql)) { stmt =>
@@ -224,32 +225,11 @@ final class PostgresMemoryStore private (
       id = MemoryId(rs.getString("id")),
       content = rs.getString("content"),
       memoryType = MemoryType.fromString(rs.getString("memory_type")),
-      metadata = jsonToMetadata(rs.getString("metadata")),
+      metadata = PostgresMemoryStore.jsonToMetadata(rs.getString("metadata")),
       timestamp = rs.getTimestamp("created_at").toInstant,
       importance = Option(rs.getDouble("importance")).filterNot(_ => rs.wasNull()),
-      embedding = Option(embeddingStr).map(stringToEmbedding)
+      embedding = Option(embeddingStr).map(PostgresMemoryStore.stringToEmbedding)
     )
-  }
-
-  private def filterToSql(filter: MemoryFilter): (String, Seq[Any]) = filter match {
-    case MemoryFilter.All =>
-      ("TRUE", Seq.empty)
-
-    case MemoryFilter.ByEntity(entityId) =>
-      ("metadata->>'entity_id' = ?", Seq(entityId.value))
-
-    case MemoryFilter.ByConversation(convId) =>
-      ("metadata->>'conversation_id' = ?", Seq(convId))
-
-    case MemoryFilter.ByType(memType) =>
-      ("memory_type = ?", Seq(memType.name))
-
-    case MemoryFilter.MinImportance(threshold) =>
-      ("importance >= ?", Seq(threshold))
-
-    case _ =>
-      // Safe fallback for now until full ADT support is added
-      ("FALSE", Seq.empty)
   }
 
   private def setParameter(stmt: PreparedStatement, index: Int, value: Any): Unit = value match {
@@ -260,28 +240,6 @@ final class PostgresMemoryStore private (
     case b: Boolean => stmt.setBoolean(index, b)
     case _          => stmt.setString(index, value.toString)
   }
-
-  private def metadataToJson(metadata: Map[String, String]): String =
-    if (metadata.isEmpty) "{}"
-    else metadata.map { case (k, v) => s""""$k":"${v.replace("\"", "\\\"")}"""" }.mkString("{", ",", "}")
-
-  private def jsonToMetadata(json: String): Map[String, String] =
-    if (json == null || json == "{}" || json.isEmpty) Map.empty
-    else {
-      val pattern = """"([^"]+)":\s*"([^"]*)"""".r
-      pattern.findAllMatchIn(json).map(m => m.group(1) -> m.group(2)).toMap
-    }
-
-  private def embeddingToString(embedding: Array[Float]): String =
-    embedding.mkString("[", ",", "]")
-
-  private def stringToEmbedding(s: String): Array[Float] =
-    if (s == null || s.isEmpty) Array.empty
-    else {
-      val cleaned = s.stripPrefix("[").stripSuffix("]")
-      if (cleaned.isEmpty) Array.empty
-      else cleaned.split(",").map(_.trim.toFloat)
-    }
 }
 
 object PostgresMemoryStore {
@@ -310,4 +268,47 @@ object PostgresMemoryStore {
       val dataSource = new HikariDataSource(hikariConfig)
       new PostgresMemoryStore(dataSource, config.tableName)
     }.toEither.left.map(e => ProcessingError("postgres-memory-store", s"Failed to initialize: ${e.getMessage}"))
+
+  private[memory] def filterToSql(filter: MemoryFilter): (String, Seq[Any]) = filter match {
+    case MemoryFilter.All =>
+      ("TRUE", Seq.empty)
+
+    case MemoryFilter.ByEntity(entityId) =>
+      ("metadata->>'entity_id' = ?", Seq(entityId.value))
+
+    case MemoryFilter.ByConversation(convId) =>
+      ("metadata->>'conversation_id' = ?", Seq(convId))
+
+    case MemoryFilter.ByType(memType) =>
+      ("memory_type = ?", Seq(memType.name))
+
+    case MemoryFilter.MinImportance(threshold) =>
+      ("importance >= ?", Seq(threshold))
+
+    case _ =>
+      // Safe fallback for now until full ADT support is added
+      ("FALSE", Seq.empty)
+  }
+
+  private[memory] def metadataToJson(metadata: Map[String, String]): String =
+    if (metadata.isEmpty) "{}"
+    else metadata.map { case (k, v) => s""""$k":"${v.replace("\"", "\\\"")}"""" }.mkString("{", ",", "}")
+
+  private[memory] def jsonToMetadata(json: String): Map[String, String] =
+    if (json == null || json == "{}" || json.isEmpty) Map.empty
+    else {
+      val pattern = """"([^"]+)":\s*"([^"]*)"""".r
+      pattern.findAllMatchIn(json).map(m => m.group(1) -> m.group(2)).toMap
+    }
+
+  private[memory] def embeddingToString(embedding: Array[Float]): String =
+    embedding.mkString("[", ",", "]")
+
+  private[memory] def stringToEmbedding(s: String): Array[Float] =
+    if (s == null || s.isEmpty) Array.emptyFloatArray
+    else {
+      val cleaned = s.stripPrefix("[").stripSuffix("]")
+      if (cleaned.isEmpty) Array.emptyFloatArray
+      else cleaned.split(",").map(_.trim.toFloat)
+    }
 }
