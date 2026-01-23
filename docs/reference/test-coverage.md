@@ -2,7 +2,8 @@ Test Coverage (scoverage)
 
 Overview
 - Uses `sbt-scoverage` to measure line and branch coverage for Scala 2.13 and Scala 3 builds.
-- Global defaults: minimum 80% coverage, build fails if below.
+- CI enforces a minimum coverage threshold (currently 54%); builds fail if coverage drops below this.
+- Production target is 80% coverage for core library code.
 
 How To Run Locally
 - Quick aliases:
@@ -23,8 +24,8 @@ CI Usage
 
 Configuration
 - Defined in `build.sbt`:
-  - `coverageMinimumStmtTotal := 80` — required minimum statement coverage; adjust to taste.
-  - `coverageFailOnMinimum := false` — fail build if under the minimum.
+  - `coverageMinimumStmtTotal := 54` — current minimum statement coverage (will be raised incrementally toward 80%).
+  - `coverageFailOnMinimum := true` — CI fails if coverage drops below the minimum.
   - `coverageHighlighting := true` — better highlighting for coverage in reports.
   - `coverageExcludedPackages` — excludes runner and samples packages by default.
 
@@ -33,7 +34,8 @@ On‑the‑fly Overrides
 - To disable fail on minimum for local runs: `sbt "set coverageFailOnMinimum := false" coverage test`
 
 Expectations
-- Target at least 80% coverage for core library code.
+- Current coverage is approximately 60%, with a CI-enforced minimum of 54%.
+- Production target is 80% coverage for core library code; the threshold will be raised incrementally as coverage improves.
 - Generated/entrypoint code (e.g., runner, samples) is excluded to keep focus on library logic.
 
 Per‑module vs aggregate
