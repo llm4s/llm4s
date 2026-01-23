@@ -164,30 +164,28 @@ Create `HelloOllama.scala`:
 ```scala
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model.{UserMessage, SystemMessage}
+import org.llm4s.llmconnect.model._
 
 object HelloOllama extends App {
-  // Load Ollama config
+  // Create a conversation with system and user messages
+  val conversation = Conversation(Seq(
+    SystemMessage("You are a helpful AI assistant."),
+    UserMessage("Explain what Scala is in one sentence.")
+  ))
+
+  // Load config and make the request
   val result = for {
     providerConfig <- Llm4sConfig.provider()
     client <- LLMConnect.getClient(providerConfig)
-    
-    // Make a completion request
-    response <- client.complete(
-      messages = List(
-        SystemMessage("You are a helpful AI assistant."),
-        UserMessage("Explain what Scala is in one sentence.")
-      ),
-      model = None  // Uses configured model (mistral)
-    )
-  } yield response
+    completion <- client.complete(conversation)
+  } yield completion
 
   result match {
     case Right(completion) =>
-      println(s"✓ Response from ${completion.model}:")
-      println(completion.content)
+      println(s"Response from ${completion.model}:")
+      println(completion.message.content)
     case Left(error) =>
-      println(s"✗ Error: $error")
+      println(s"Error: ${error.formatted}")
   }
 }
 ```
@@ -238,27 +236,27 @@ import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 
 object StreamingOllama extends App {
+  val conversation = Conversation(Seq(
+    SystemMessage("You are a concise assistant."),
+    UserMessage("Write a haiku about Scala programming.")
+  ))
+
   val result = for {
     providerConfig <- Llm4sConfig.provider()
     client <- LLMConnect.getClient(providerConfig)
-    
     completion <- client.streamComplete(
-      conversation = Conversation(Seq(
-        UserMessage("Write a haiku about Scala programming.")
-      )),
-      options = CompletionOptions(temperature = 0.8),
-      onChunk = chunk => {
-        // Print tokens as they arrive
-        chunk.content.foreach(print)
-      }
+      conversation,
+      CompletionOptions(),
+      chunk => chunk.content.foreach(print)  // Print tokens as they arrive
     )
   } yield completion
 
   result match {
-    case Right(completion) => 
-      println("\n\n✓ Streaming complete!")
-    case Left(error) => 
-      println(s"✗ Error: $error")
+    case Right(completion) =>
+      println("\n--- Streaming complete! ---")
+      println(s"Total content: ${completion.message.content}")
+    case Left(error) =>
+      println(s"Error: ${error.formatted}")
   }
 }
 ```
@@ -289,13 +287,13 @@ object OllamaTools extends App {
     )
 
   val getWeather = ToolBuilder[Map[String, Any], WeatherResult](
-    name = "get_weather",
-    description = "Get the current weather in a location",
-    schema = weatherSchema
+    "get_weather",
+    "Get the current weather in a location",
+    weatherSchema
   ).withHandler { extractor =>
     extractor.getString("location").map { location =>
       // Mock implementation
-      WeatherResult(s"Weather in $location: Sunny, 72°F")
+      WeatherResult(s"Weather in $location: Sunny, 72F")
     }
   }.build()
 
@@ -305,21 +303,15 @@ object OllamaTools extends App {
     providerConfig <- Llm4sConfig.provider()
     client <- LLMConnect.getClient(providerConfig)
     agent = new Agent(client)
-    
-    // Agent will call the tool automatically
-    state <- agent.run(
-      "What's the weather in San Francisco?",
-      tools,
-      maxSteps = Some(5)
-    )
+    state <- agent.run("What's the weather in San Francisco?", tools)
   } yield state
 
   result match {
     case Right(state) =>
-      println(s"✓ Final response:")
+      println("Final response:")
       println(state.conversation.messages.last.content)
     case Left(error) =>
-      println(s"✗ Error: $error")
+      println(s"Error: ${error.formatted}")
   }
 }
 ```
@@ -410,17 +402,20 @@ ollama rm llama2
 
 ## Running the Examples
 
-Try the built-in LLM4S samples with Ollama:
+Try the built-in LLM4S Ollama samples:
 
 ```bash
 # Set environment
 export LLM_MODEL=ollama/mistral
 export OLLAMA_BASE_URL=http://localhost:11434
 
-# Run streaming example
-sbt "samples/runMain org.llm4s.samples.streaming.BasicStreamingExample"
+# Run basic Ollama example
+sbt "samples/runMain org.llm4s.samples.basic.OllamaExample"
 
-# Run tool calling example
+# Run Ollama streaming example
+sbt "samples/runMain org.llm4s.samples.basic.OllamaStreamingExample"
+
+# Run tool calling example (works with any provider)
 sbt "samples/runMain org.llm4s.samples.toolapi.BuiltinToolsExample"
 ```
 
