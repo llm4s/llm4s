@@ -5,15 +5,16 @@ import org.scalatest.matchers.should.Matchers
 
 class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers {
 
-  behavior.of("PostgresMemoryStore utility methods")
+  behavior.of("PostgresMemoryStore helper methods")
 
   // JSON Tests
-  it should "convert metadata map to JSON string" in {
-    val metadata = Map("role" -> "user", "context" -> "test")
-    val json     = PostgresMemoryStore.metadataToJson(metadata)
+  it should "safely round-trip metadata map including special characters" in {
+    val original = Map("key" -> """value with "quotes" and \backslash""", "simple" -> "test")
 
-    json should include(""""role":"user"""")
-    json should include(""""context":"test"""")
+    val json     = PostgresMemoryStore.metadataToJson(original)
+    val restored = PostgresMemoryStore.jsonToMetadata(json)
+
+    restored shouldBe original
   }
 
   it should "handle empty metadata map" in {
@@ -33,6 +34,27 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers {
     PostgresMemoryStore.jsonToMetadata(null) shouldBe Map.empty
   }
 
+  // Config Validation Tests
+  it should "reject invalid table names in Config" in {
+    val badNames = Seq(
+      "foo; DROP TABLE--",
+      "123invalid",
+      "",
+      "a" * 100
+    )
+
+    badNames.foreach { name =>
+      an[IllegalArgumentException] should be thrownBy {
+        PostgresMemoryStore.Config(tableName = name)
+      }
+    }
+  }
+
+  it should "accept valid table names" in {
+    noException should be thrownBy PostgresMemoryStore.Config(tableName = "valid_table_1")
+    noException should be thrownBy PostgresMemoryStore.Config(tableName = "agent_memories")
+  }
+
   // SQL Filter Tests
   it should "generate SQL for ByType filter" in {
     val filter        = MemoryFilter.ByType(MemoryType.Task)
@@ -40,6 +62,27 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers {
 
     sql shouldBe "memory_type = ?"
     params shouldBe Seq("task")
+  }
+
+  it should "generate SQL for ByTypes filter with deterministic order" in {
+    val filter        = MemoryFilter.ByTypes(Set(MemoryType.Task, MemoryType.Conversation))
+    val (sql, params) = PostgresMemoryStore.filterToSql(filter)
+    sql shouldBe "memory_type IN (?,?)"
+    params shouldBe Seq("conversation", "task")
+  }
+
+  it should "generate safe interpolated SQL for ByMetadata filter" in {
+    val filter        = MemoryFilter.ByMetadata("session_id", "123")
+    val (sql, params) = PostgresMemoryStore.filterToSql(filter)
+    sql shouldBe "metadata->>'session_id' = ?"
+    params shouldBe Seq("123")
+  }
+
+  it should "reject invalid keys in ByMetadata filter" in {
+    val filter = MemoryFilter.ByMetadata("invalid-key; --", "value")
+    an[IllegalArgumentException] should be thrownBy {
+      PostgresMemoryStore.filterToSql(filter)
+    }
   }
 
   it should "generate SQL for MinImportance filter" in {
@@ -58,12 +101,12 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers {
 
   it should "parse vector string back to array" in {
     val vec = PostgresMemoryStore.stringToEmbedding("[0.5, 0.6, 0.7]")
-    vec.sameElements(Array(0.5f, 0.6f, 0.7f)) shouldBe true
+    vec shouldBe Array(0.5f, 0.6f, 0.7f)
   }
 
   it should "handle empty embedding string" in {
-    PostgresMemoryStore.stringToEmbedding("[]").isEmpty shouldBe true
-    PostgresMemoryStore.stringToEmbedding("").isEmpty shouldBe true
-    PostgresMemoryStore.stringToEmbedding(null).isEmpty shouldBe true
+    PostgresMemoryStore.stringToEmbedding("[]") shouldBe Array.empty[Float]
+    PostgresMemoryStore.stringToEmbedding("") shouldBe Array.empty[Float]
+    PostgresMemoryStore.stringToEmbedding(null) shouldBe Array.empty[Float]
   }
 }

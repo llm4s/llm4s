@@ -13,7 +13,7 @@ import scala.util.{ Try, Using }
  * Persists agent memories to a Postgres table using JDBC.
  * DESIGN NOTES:
  * - This is an MVP implementation focused on persistence only.
- * - Full MemoryFilter support (And/Or/Not/TimeRange) and Semantic search via embeddings will be added later.
+ * - Compound filters (And/Or/Not) and semantic search will be added later.
  */
 final class PostgresMemoryStore private[memory] (
   private val dataSource: HikariDataSource,
@@ -82,7 +82,6 @@ final class PostgresMemoryStore private[memory] (
           }
 
           memory.embedding match {
-            // CALLING COMPANION OBJECT METHOD
             case Some(vec) => stmt.setString(7, PostgresMemoryStore.embeddingToString(vec))
             case None      => stmt.setNull(7, java.sql.Types.OTHER, "vector")
           }
@@ -206,17 +205,8 @@ final class PostgresMemoryStore private[memory] (
   override def close(): Unit =
     if (!dataSource.isClosed) dataSource.close()
 
-  private def withConnection[A](f: Connection => A): A = {
-    val conn = dataSource.getConnection
-    Try(f(conn)) match {
-      case scala.util.Success(result) =>
-        conn.close()
-        result
-      case scala.util.Failure(e) =>
-        conn.close()
-        throw e
-    }
-  }
+  private def withConnection[A](f: Connection => A): A =
+    Using.resource(dataSource.getConnection)(f)
 
   private def rowToMemory(rs: ResultSet): Memory = {
     val embeddingStr = rs.getString("embedding")
@@ -233,16 +223,19 @@ final class PostgresMemoryStore private[memory] (
   }
 
   private def setParameter(stmt: PreparedStatement, index: Int, value: Any): Unit = value match {
-    case s: String  => stmt.setString(index, s)
-    case i: Int     => stmt.setInt(index, i)
-    case l: Long    => stmt.setLong(index, l)
-    case d: Double  => stmt.setDouble(index, d)
-    case b: Boolean => stmt.setBoolean(index, b)
-    case _          => stmt.setString(index, value.toString)
+    case s: String              => stmt.setString(index, s)
+    case i: Int                 => stmt.setInt(index, i)
+    case l: Long                => stmt.setLong(index, l)
+    case d: Double              => stmt.setDouble(index, d)
+    case b: Boolean             => stmt.setBoolean(index, b)
+    case ts: java.sql.Timestamp => stmt.setTimestamp(index, ts)
+    case _                      => stmt.setString(index, value.toString)
   }
 }
 
 object PostgresMemoryStore {
+
+  private val ValidIdentifierPattern = "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$".r
 
   final case class Config(
     host: String = "localhost",
@@ -253,6 +246,11 @@ object PostgresMemoryStore {
     tableName: String = "agent_memories",
     maxPoolSize: Int = 10
   ) {
+    require(
+      ValidIdentifierPattern.matches(tableName),
+      s"Invalid table name '$tableName': must match pattern [a-zA-Z_][a-zA-Z0-9_]{0,62}"
+    )
+
     def jdbcUrl: String = s"jdbc:postgresql://$host:$port/$database"
   }
 
@@ -282,33 +280,57 @@ object PostgresMemoryStore {
     case MemoryFilter.ByType(memType) =>
       ("memory_type = ?", Seq(memType.name))
 
+    case MemoryFilter.ByTypes(memoryTypes) =>
+      if (memoryTypes.isEmpty) ("FALSE", Seq.empty)
+      else {
+        val sortedTypes  = memoryTypes.toSeq.sortBy(_.name)
+        val placeholders = sortedTypes.map(_ => "?").mkString(",")
+        (s"memory_type IN ($placeholders)", sortedTypes.map(_.name))
+      }
+
     case MemoryFilter.MinImportance(threshold) =>
       ("importance >= ?", Seq(threshold))
 
-    case _ =>
-      // Safe fallback for now until full ADT support is added
-      ("FALSE", Seq.empty)
+    case MemoryFilter.ByTimeRange(after, before) =>
+      (after, before) match {
+        case (Some(a), Some(b)) =>
+          ("created_at >= ? AND created_at <= ?", Seq(Timestamp.from(a), Timestamp.from(b)))
+        case (Some(a), None) =>
+          ("created_at >= ?", Seq(Timestamp.from(a)))
+        case (None, Some(b)) =>
+          ("created_at <= ?", Seq(Timestamp.from(b)))
+        case (None, None) =>
+          ("TRUE", Seq.empty)
+      }
+
+    case MemoryFilter.ByMetadata(key, value) =>
+      if (!ValidIdentifierPattern.matches(key)) {
+        throw new IllegalArgumentException(s"Invalid metadata key: '$key'")
+      }
+      (s"metadata->>'$key' = ?", Seq(value))
+
+    case unsupported =>
+      throw new UnsupportedOperationException(
+        s"PostgresMemoryStore does not yet support filter: ${unsupported.getClass.getSimpleName}"
+      )
   }
 
   private[memory] def metadataToJson(metadata: Map[String, String]): String =
     if (metadata.isEmpty) "{}"
-    else metadata.map { case (k, v) => s""""$k":"${v.replace("\"", "\\\"")}"""" }.mkString("{", ",", "}")
+    else ujson.write(metadata)
 
   private[memory] def jsonToMetadata(json: String): Map[String, String] =
     if (json == null || json == "{}" || json.isEmpty) Map.empty
-    else {
-      val pattern = """"([^"]+)":\s*"([^"]*)"""".r
-      pattern.findAllMatchIn(json).map(m => m.group(1) -> m.group(2)).toMap
-    }
+    else ujson.read(json).obj.map { case (k, v) => k -> v.str }.toMap
 
   private[memory] def embeddingToString(embedding: Array[Float]): String =
     embedding.mkString("[", ",", "]")
 
   private[memory] def stringToEmbedding(s: String): Array[Float] =
-    if (s == null || s.isEmpty) Array.emptyFloatArray
+    if (s == null || s.isEmpty) Array.empty
     else {
       val cleaned = s.stripPrefix("[").stripSuffix("]")
-      if (cleaned.isEmpty) Array.emptyFloatArray
+      if (cleaned.isEmpty) Array.empty
       else cleaned.split(",").map(_.trim.toFloat)
     }
 }
