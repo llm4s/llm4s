@@ -2,6 +2,7 @@ package org.llm4s.agent.memory
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.agent.memory.PostgresMemoryStore.SqlParam._
 
 class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers {
 
@@ -34,6 +35,14 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers {
     PostgresMemoryStore.jsonToMetadata(null) shouldBe Map.empty
   }
 
+  it should "stringify non-string JSON values instead of throwing" in {
+    val json = """{"count": 3, "flag": true}"""
+    val res  = PostgresMemoryStore.jsonToMetadata(json)
+
+    res("count") shouldBe "3"
+    res("flag") shouldBe "true"
+  }
+
   // Config Validation Tests
   it should "reject invalid table names in Config" in {
     val badNames = Seq(
@@ -57,40 +66,54 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers {
 
   // SQL Filter Tests
   it should "generate SQL for ByType filter" in {
-    val filter        = MemoryFilter.ByType(MemoryType.Task)
-    val (sql, params) = PostgresMemoryStore.filterToSql(filter)
+    val result = PostgresMemoryStore.filterToSql(
+      MemoryFilter.ByType(MemoryType.Task)
+    )
+
+    result.isRight shouldBe true
+    val (sql, params) = result.toOption.get
 
     sql shouldBe "memory_type = ?"
-    params shouldBe Seq("task")
+    params shouldBe Seq(PString("task"))
   }
 
   it should "generate SQL for ByTypes filter with deterministic order" in {
-    val filter        = MemoryFilter.ByTypes(Set(MemoryType.Task, MemoryType.Conversation))
-    val (sql, params) = PostgresMemoryStore.filterToSql(filter)
+    val result = PostgresMemoryStore.filterToSql(
+      MemoryFilter.ByTypes(Set(MemoryType.Task, MemoryType.Conversation))
+    )
+    result.isRight shouldBe true
+    val (sql, params) = result.toOption.get
+
     sql shouldBe "memory_type IN (?,?)"
-    params shouldBe Seq("conversation", "task")
+    params shouldBe Seq(PString("conversation"), PString("task"))
   }
 
   it should "generate safe interpolated SQL for ByMetadata filter" in {
-    val filter        = MemoryFilter.ByMetadata("session_id", "123")
-    val (sql, params) = PostgresMemoryStore.filterToSql(filter)
+    val result = PostgresMemoryStore.filterToSql(
+      MemoryFilter.ByMetadata("session_id", "123")
+    )
+    result.isRight shouldBe true
+    val (sql, params) = result.toOption.get
     sql shouldBe "metadata->>'session_id' = ?"
-    params shouldBe Seq("123")
+    params shouldBe Seq(PString("123"))
   }
 
   it should "reject invalid keys in ByMetadata filter" in {
-    val filter = MemoryFilter.ByMetadata("invalid-key; --", "value")
-    an[IllegalArgumentException] should be thrownBy {
-      PostgresMemoryStore.filterToSql(filter)
-    }
+    val result = PostgresMemoryStore.filterToSql(
+      MemoryFilter.ByMetadata("invalid-key; --", "value")
+    )
+    result.isLeft shouldBe true
   }
 
   it should "generate SQL for MinImportance filter" in {
-    val filter        = MemoryFilter.MinImportance(0.8)
-    val (sql, params) = PostgresMemoryStore.filterToSql(filter)
+    val result = PostgresMemoryStore.filterToSql(
+      MemoryFilter.MinImportance(0.8)
+    )
+    result.isRight shouldBe true
+    val (sql, params) = result.toOption.get
 
     sql shouldBe "importance >= ?"
-    params shouldBe Seq(0.8)
+    params shouldBe Seq(PDouble(0.8))
   }
 
   // Embedding Tests

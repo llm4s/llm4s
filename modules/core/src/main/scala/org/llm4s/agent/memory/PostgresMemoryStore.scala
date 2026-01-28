@@ -3,9 +3,9 @@ package org.llm4s.agent.memory
 import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
+import ujson.{ read, write, Obj, Str }
 
 import java.sql.{ Connection, PreparedStatement, ResultSet, Timestamp }
-import scala.collection.mutable.ArrayBuffer
 import scala.util.{ Try, Using }
 
 /**
@@ -21,9 +21,9 @@ final class PostgresMemoryStore private[memory] (
 ) extends MemoryStore
     with AutoCloseable {
 
-  initializeSchema()
+  import PostgresMemoryStore.SqlParam
 
-  private def initializeSchema(): Unit =
+  private[memory] def initializeSchema(): Unit =
     withConnection { conn =>
       Using.resource(conn.createStatement()) { stmt =>
         // 1. Enable pgvector extension
@@ -90,7 +90,9 @@ final class PostgresMemoryStore private[memory] (
         }
       }
       this
-    }.toEither.left.map(e => ProcessingError("postgres-memory-store", s"Failed to store memory: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("postgres-memory-store", s"Failed to store memory: ${e.getMessage}", cause = Some(e))
+    )
 
   override def get(id: MemoryId): Result[Option[Memory]] =
     Try {
@@ -100,29 +102,35 @@ final class PostgresMemoryStore private[memory] (
           Using.resource(stmt.executeQuery())(rs => if (rs.next()) Some(rowToMemory(rs)) else None)
         }
       }
-    }.toEither.left.map(e => ProcessingError("postgres-memory-store", s"Failed to get memory: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("postgres-memory-store", s"Failed to get memory: ${e.getMessage}", cause = Some(e))
+    )
 
   override def recall(filter: MemoryFilter, limit: Int): Result[Seq[Memory]] =
-    Try {
-      withConnection { conn =>
-        val (whereClause, params) = PostgresMemoryStore.filterToSql(filter)
-        val sql =
-          s"SELECT * FROM $tableName WHERE $whereClause ORDER BY created_at DESC LIMIT ?"
+    PostgresMemoryStore.filterToSql(filter).flatMap { case (whereClause, params) =>
+      Try {
+        withConnection { conn =>
+          val sql = s"SELECT * FROM $tableName WHERE $whereClause ORDER BY created_at DESC LIMIT ?"
 
-        Using.resource(conn.prepareStatement(sql)) { stmt =>
-          params.zipWithIndex.foreach { case (param, idx) =>
-            setParameter(stmt, idx + 1, param)
-          }
-          stmt.setInt(params.size + 1, limit)
+          Using.resource(conn.prepareStatement(sql)) { stmt =>
+            params.zipWithIndex.foreach { case (param, idx) =>
+              setParameter(stmt, idx + 1, param)
+            }
+            setParameter(stmt, params.size + 1, SqlParam.PInt(limit))
 
-          Using.resource(stmt.executeQuery()) { rs =>
-            val memories = ArrayBuffer.empty[Memory]
-            while (rs.next()) memories += rowToMemory(rs)
-            memories.toSeq
+            Using.resource(stmt.executeQuery()) { rs =>
+              Iterator
+                .continually(rs)
+                .takeWhile(_.next())
+                .map(rowToMemory)
+                .toVector
+            }
           }
         }
-      }
-    }.toEither.left.map(e => ProcessingError("postgres-memory-store", s"Failed to recall memories: ${e.getMessage}"))
+      }.toEither.left.map(e =>
+        ProcessingError("postgres-memory-store", s"Failed to recall memories: ${e.getMessage}", cause = Some(e))
+      )
+    }
 
   override def search(
     query: String,
@@ -145,51 +153,59 @@ final class PostgresMemoryStore private[memory] (
         }
       }
       this
-    }.toEither.left.map(e => ProcessingError("postgres-memory-store", s"Failed to delete memory: ${e.getMessage}"))
-
-  override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] =
-    Try {
-      withConnection { conn =>
-        val (whereClause, params) = PostgresMemoryStore.filterToSql(filter)
-        val sql                   = s"DELETE FROM $tableName WHERE $whereClause"
-
-        Using.resource(conn.prepareStatement(sql)) { stmt =>
-          params.zipWithIndex.foreach { case (param, idx) =>
-            setParameter(stmt, idx + 1, param)
-          }
-          stmt.executeUpdate()
-        }
-      }
-      this
     }.toEither.left.map(e =>
-      ProcessingError("postgres-memory-store", s"Failed to delete matching memories: ${e.getMessage}")
+      ProcessingError("postgres-memory-store", s"Failed to delete memory: ${e.getMessage}", cause = Some(e))
     )
 
+  override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] =
+    PostgresMemoryStore.filterToSql(filter).flatMap { case (whereClause, params) =>
+      Try {
+        withConnection { conn =>
+          val sql = s"DELETE FROM $tableName WHERE $whereClause"
+
+          Using.resource(conn.prepareStatement(sql)) { stmt =>
+            params.zipWithIndex.foreach { case (param, idx) =>
+              setParameter(stmt, idx + 1, param)
+            }
+            stmt.executeUpdate()
+          }
+        }
+        this
+      }.toEither.left.map(e =>
+        ProcessingError(
+          "postgres-memory-store",
+          s"Failed to delete matching memories: ${e.getMessage}",
+          cause = Some(e)
+        )
+      )
+    }
+
   override def update(id: MemoryId, updateFn: Memory => Memory): Result[MemoryStore] =
-    // TODO: This update is not atomic under concurrency.
-    // Future improvement: SELECT FOR UPDATE or optimistic locking.
     get(id).flatMap {
       case Some(existing) => store(updateFn(existing))
       case None           => Right(this)
     }
 
   override def count(filter: MemoryFilter): Result[Long] =
-    Try {
-      withConnection { conn =>
-        val (whereClause, params) = PostgresMemoryStore.filterToSql(filter)
-        val sql                   = s"SELECT COUNT(*) FROM $tableName WHERE $whereClause"
+    PostgresMemoryStore.filterToSql(filter).flatMap { case (whereClause, params) =>
+      Try {
+        withConnection { conn =>
+          val sql = s"SELECT COUNT(*) FROM $tableName WHERE $whereClause"
 
-        Using.resource(conn.prepareStatement(sql)) { stmt =>
-          params.zipWithIndex.foreach { case (param, idx) =>
-            setParameter(stmt, idx + 1, param)
-          }
-          Using.resource(stmt.executeQuery()) { rs =>
-            rs.next()
-            rs.getLong(1)
+          Using.resource(conn.prepareStatement(sql)) { stmt =>
+            params.zipWithIndex.foreach { case (param, idx) =>
+              setParameter(stmt, idx + 1, param)
+            }
+            Using.resource(stmt.executeQuery()) { rs =>
+              rs.next()
+              rs.getLong(1)
+            }
           }
         }
-      }
-    }.toEither.left.map(e => ProcessingError("postgres-memory-store", s"Failed to count memories: ${e.getMessage}"))
+      }.toEither.left.map(e =>
+        ProcessingError("postgres-memory-store", s"Failed to count memories: ${e.getMessage}", cause = Some(e))
+      )
+    }
 
   override def clear(): Result[MemoryStore] =
     Try {
@@ -197,7 +213,9 @@ final class PostgresMemoryStore private[memory] (
         Using.resource(conn.createStatement())(stmt => stmt.execute(s"TRUNCATE TABLE $tableName"))
       }
       this
-    }.toEither.left.map(e => ProcessingError("postgres-memory-store", s"Failed to clear memories: ${e.getMessage}"))
+    }.toEither.left.map(e =>
+      ProcessingError("postgres-memory-store", s"Failed to clear memories: ${e.getMessage}", cause = Some(e))
+    )
 
   override def recent(limit: Int, filter: MemoryFilter): Result[Seq[Memory]] =
     recall(filter, limit)
@@ -222,20 +240,36 @@ final class PostgresMemoryStore private[memory] (
     )
   }
 
-  private def setParameter(stmt: PreparedStatement, index: Int, value: Any): Unit = value match {
-    case s: String              => stmt.setString(index, s)
-    case i: Int                 => stmt.setInt(index, i)
-    case l: Long                => stmt.setLong(index, l)
-    case d: Double              => stmt.setDouble(index, d)
-    case b: Boolean             => stmt.setBoolean(index, b)
-    case ts: java.sql.Timestamp => stmt.setTimestamp(index, ts)
-    case _                      => stmt.setString(index, value.toString)
+  private def setParameter(stmt: PreparedStatement, index: Int, value: SqlParam): Unit = value match {
+    case SqlParam.PString(s)    => stmt.setString(index, s)
+    case SqlParam.PInt(i)       => stmt.setInt(index, i)
+    case SqlParam.PLong(l)      => stmt.setLong(index, l)
+    case SqlParam.PDouble(d)    => stmt.setDouble(index, d)
+    case SqlParam.PBoolean(b)   => stmt.setBoolean(index, b)
+    case SqlParam.PTimestamp(t) => stmt.setTimestamp(index, t)
+    case SqlParam.PNullDouble   => stmt.setNull(index, java.sql.Types.DOUBLE)
+    case SqlParam.PNullVector   => stmt.setNull(index, java.sql.Types.OTHER, "vector")
   }
 }
 
 object PostgresMemoryStore {
 
-  private val ValidIdentifierPattern = "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$".r
+  sealed trait SqlParam
+  object SqlParam {
+    final case class PString(v: String)                extends SqlParam
+    final case class PInt(v: Int)                      extends SqlParam
+    final case class PLong(v: Long)                    extends SqlParam
+    final case class PDouble(v: Double)                extends SqlParam
+    final case class PBoolean(v: Boolean)              extends SqlParam
+    final case class PTimestamp(v: java.sql.Timestamp) extends SqlParam
+    case object PNullDouble                            extends SqlParam
+    case object PNullVector                            extends SqlParam
+  }
+
+  import SqlParam._
+
+  private val ValidIdentifierPattern  = "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$".r
+  private val ValidMetadataKeyPattern = "^[a-zA-Z_][a-zA-Z0-9_]*$".r
 
   final case class Config(
     host: String = "localhost",
@@ -250,7 +284,6 @@ object PostgresMemoryStore {
       ValidIdentifierPattern.matches(tableName),
       s"Invalid table name '$tableName': must match pattern [a-zA-Z_][a-zA-Z0-9_]{0,62}"
     )
-
     def jdbcUrl: String = s"jdbc:postgresql://$host:$port/$database"
   }
 
@@ -264,64 +297,77 @@ object PostgresMemoryStore {
       hikariConfig.setMinimumIdle(1)
 
       val dataSource = new HikariDataSource(hikariConfig)
-      new PostgresMemoryStore(dataSource, config.tableName)
-    }.toEither.left.map(e => ProcessingError("postgres-memory-store", s"Failed to initialize: ${e.getMessage}"))
+      val store      = new PostgresMemoryStore(dataSource, config.tableName)
+      store.initializeSchema()
+      store
+    }.toEither.left.map(e =>
+      ProcessingError("postgres-memory-store", s"Failed to initialize: ${e.getMessage}", cause = Some(e))
+    )
 
-  private[memory] def filterToSql(filter: MemoryFilter): (String, Seq[Any]) = filter match {
+  private[memory] def filterToSql(filter: MemoryFilter): Result[(String, Seq[SqlParam])] = filter match {
     case MemoryFilter.All =>
-      ("TRUE", Seq.empty)
+      Right("TRUE" -> Seq.empty)
 
     case MemoryFilter.ByEntity(entityId) =>
-      ("metadata->>'entity_id' = ?", Seq(entityId.value))
+      Right("metadata->>'entity_id' = ?" -> Seq(PString(entityId.value)))
 
     case MemoryFilter.ByConversation(convId) =>
-      ("metadata->>'conversation_id' = ?", Seq(convId))
+      Right("metadata->>'conversation_id' = ?" -> Seq(PString(convId)))
 
     case MemoryFilter.ByType(memType) =>
-      ("memory_type = ?", Seq(memType.name))
+      Right("memory_type = ?" -> Seq(PString(memType.name)))
 
     case MemoryFilter.ByTypes(memoryTypes) =>
-      if (memoryTypes.isEmpty) ("FALSE", Seq.empty)
+      if (memoryTypes.isEmpty) Right("FALSE" -> Seq.empty)
       else {
         val sortedTypes  = memoryTypes.toSeq.sortBy(_.name)
         val placeholders = sortedTypes.map(_ => "?").mkString(",")
-        (s"memory_type IN ($placeholders)", sortedTypes.map(_.name))
+        Right(s"memory_type IN ($placeholders)" -> sortedTypes.map(t => PString(t.name)))
       }
 
     case MemoryFilter.MinImportance(threshold) =>
-      ("importance >= ?", Seq(threshold))
+      Right("importance >= ?" -> Seq(PDouble(threshold)))
 
     case MemoryFilter.ByTimeRange(after, before) =>
-      (after, before) match {
+      val (clause, params) = (after, before) match {
         case (Some(a), Some(b)) =>
-          ("created_at >= ? AND created_at <= ?", Seq(Timestamp.from(a), Timestamp.from(b)))
+          ("created_at >= ? AND created_at <= ?", Seq(PTimestamp(Timestamp.from(a)), PTimestamp(Timestamp.from(b))))
         case (Some(a), None) =>
-          ("created_at >= ?", Seq(Timestamp.from(a)))
+          ("created_at >= ?", Seq(PTimestamp(Timestamp.from(a))))
         case (None, Some(b)) =>
-          ("created_at <= ?", Seq(Timestamp.from(b)))
+          ("created_at <= ?", Seq(PTimestamp(Timestamp.from(b))))
         case (None, None) =>
           ("TRUE", Seq.empty)
       }
+      Right(clause -> params)
 
     case MemoryFilter.ByMetadata(key, value) =>
-      if (!ValidIdentifierPattern.matches(key)) {
-        throw new IllegalArgumentException(s"Invalid metadata key: '$key'")
+      if (!ValidMetadataKeyPattern.matches(key)) {
+        Left(ProcessingError("postgres-memory-store", s"Invalid metadata key: '$key'"))
+      } else {
+        Right(s"metadata->>'$key' = ?" -> Seq(PString(value)))
       }
-      (s"metadata->>'$key' = ?", Seq(value))
 
     case unsupported =>
-      throw new UnsupportedOperationException(
-        s"PostgresMemoryStore does not yet support filter: ${unsupported.getClass.getSimpleName}"
-      )
+      Left(ProcessingError("postgres-memory-store", s"Unsupported filter: ${unsupported.getClass.getSimpleName}"))
   }
 
   private[memory] def metadataToJson(metadata: Map[String, String]): String =
     if (metadata.isEmpty) "{}"
-    else ujson.write(metadata)
+    else write(metadata)
 
   private[memory] def jsonToMetadata(json: String): Map[String, String] =
     if (json == null || json == "{}" || json.isEmpty) Map.empty
-    else ujson.read(json).obj.map { case (k, v) => k -> v.str }.toMap
+    else {
+      Try(read(json)).toOption match {
+        case Some(Obj(items)) =>
+          items.map {
+            case (k, Str(s)) => k -> s
+            case (k, v)      => k -> v.toString()
+          }.toMap
+        case _ => Map.empty
+      }
+    }
 
   private[memory] def embeddingToString(embedding: Array[Float]): String =
     embedding.mkString("[", ",", "]")
