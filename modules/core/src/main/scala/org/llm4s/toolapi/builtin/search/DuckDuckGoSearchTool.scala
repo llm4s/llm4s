@@ -5,6 +5,7 @@ import upickle.default._
 
 import java.net.URLEncoder
 import scala.util.Try
+import requests.Response
 
 /**
  * A related topic from web search.
@@ -109,75 +110,99 @@ object DuckDuckGoSearchTool {
    * Default DuckDuckGo search tool with standard configuration.
    */
   val tool: ToolFunction[Map[String, Any], DuckDuckGoSearchResult] = create()
-  val SAFE_SEARCH                                                  = "1"
-  val UNSAFE_SEARCH                                                = "-1"
+
+  private val SAFE_SEARCH   = "1"
+  private val UNSAFE_SEARCH = "-1"
   private def search(
     query: String,
     config: DuckDuckGoSearchConfig
   ): Either[String, DuckDuckGoSearchResult] = {
-    import sttp.client4._
 
-    Try {
-      val backend = DefaultSyncBackend()
+    val encodedQuery = URLEncoder.encode(query, "UTF-8")
+    val safeSearch   = if (config.safeSearch) SAFE_SEARCH else UNSAFE_SEARCH
+    val url =
+      s"$DuckDuckGoApiUrl?q=$encodedQuery&format=json&no_html=1&skip_disambig=0&t=llm4s&safesearch=$safeSearch"
 
-      val encodedQuery = URLEncoder.encode(query, "UTF-8")
-      val safeSearch   = if (config.safeSearch) SAFE_SEARCH else UNSAFE_SEARCH
-      val url =
-        s"$DuckDuckGoApiUrl?q=$encodedQuery&format=json&no_html=1&skip_disambig=0&t=llm4s&safesearch=$safeSearch"
+    val responseEither: Either[String, Response] =
+      Try {
+        requests.get(
+          url = url,
+          headers = Map(
+            "User-Agent" -> "llm4s-duckduckgo-search/1.0"
+          ),
+          readTimeout = config.timeoutMs
+        )
+      }.toEither.left.map(e => s"DuckDuckGo search request failed: ${e.getMessage}")
 
-      val response = basicRequest
-        .get(uri"$url")
-        .header("User-Agent", "llm4s-duckduckgo-search/1.0")
-        .readTimeout(scala.concurrent.duration.Duration(config.timeoutMs, "ms"))
-        .send(backend)
+    responseEither.flatMap(response =>
+      if (response.statusCode == 200) {
+        Try {
+          val json = ujson.read(response.text())
+          parseResults(query, json, config)
 
-      response.body match {
-        case Right(body) =>
-          // Parse the JSON response
-          val json = ujson.read(body)
+        }.toEither.left.map(e => s"DuckDuckGo search JSON parsing failed: ${e.getMessage}")
+      } else {
+        Left(s"DuckDuckGo search returned status ${response.statusCode}: ${response.text()}")
+      }
+    )
+  }
 
-          val relatedTopics = json.obj
-            .get("RelatedTopics")
-            .map { topics =>
-              topics.arr
-                .take(config.maxResults)
-                .flatMap { topic =>
-                  topic.obj.get("Text").map { text =>
-                    RelatedTopic(
-                      text = text.str,
-                      url = topic.obj.get("FirstURL").map(_.str)
-                    )
-                  }
-                }
-                .toSeq
-            }
-            .getOrElse(Seq.empty)
-
-          val infobox = json.obj.get("Infobox").flatMap { infobox =>
-            infobox.obj.get("content").map { content =>
-              content.arr
-                .map { item =>
-                  val label = item.obj.get("label").map(_.str).getOrElse("")
-                  val value = item.obj.get("value").map(_.str).getOrElse("")
-                  s"$label: $value"
-                }
-                .mkString("\n")
+  /**
+   * Parses the JSON response from DuckDuckGo API into a structured result.
+   *
+   * This function safely extracts data from the DuckDuckGo API response using
+   * `strOpt` and `arrOpt` to handle null values and type mismatches gracefully.
+   *
+   * @param query The original search query
+   * @param json The parsed JSON response from DuckDuckGo API
+   * @param config Configuration containing maxResults and other settings
+   * @return A structured DuckDuckGoSearchResult containing:
+   *         - Abstract: Summary from Wikipedia or other sources
+   *         - Answer: Direct answer if available
+   *         - RelatedTopics: List of related topics (limited by maxResults)
+   *         - Infobox: Structured data from Wikipedia infoboxes
+   */
+  private def parseResults(query: String, json: ujson.Value, config: DuckDuckGoSearchConfig): DuckDuckGoSearchResult = {
+    val relatedTopics = json.obj
+      .get("RelatedTopics")
+      .flatMap(_.arrOpt)
+      .map { topics =>
+        topics
+          .take(config.maxResults)
+          .flatMap { topic =>
+            topic.obj.get("Text").flatMap(_.strOpt).map { text =>
+              RelatedTopic(
+                text = text,
+                url = topic.obj.get("FirstURL").flatMap(_.strOpt)
+              )
             }
           }
-
-          DuckDuckGoSearchResult(
-            query = query,
-            abstract_ = json.obj.get("Abstract").map(_.str).getOrElse(""),
-            abstractSource = json.obj.get("AbstractSource").map(_.str).getOrElse(""),
-            abstractUrl = json.obj.get("AbstractURL").map(_.str).getOrElse(""),
-            answer = json.obj.get("Answer").map(_.str).getOrElse(""),
-            answerType = json.obj.get("AnswerType").map(_.str).getOrElse(""),
-            relatedTopics = relatedTopics,
-            infoboxContent = infobox
-          )
-        case Left(error) =>
-          throw new Exception(s"HTTP request failed: $error")
+          .toSeq
       }
-    }.toEither.left.map(e => s"DuckDuckGo search failed: ${e.getMessage}")
+      .getOrElse(Seq.empty)
+
+    val infobox = json.obj.get("Infobox").flatMap { infobox =>
+      infobox.obj.get("content").flatMap(_.arrOpt).map { content =>
+        content
+          .map { item =>
+            val label = item.obj.get("label").flatMap(_.strOpt).getOrElse("")
+            val value = item.obj.get("value").flatMap(_.strOpt).getOrElse("")
+            s"$label: $value"
+          }
+          .mkString("\n")
+      }
+    }
+
+    DuckDuckGoSearchResult(
+      query = query,
+      abstract_ = json.obj.get("Abstract").flatMap(_.strOpt).getOrElse(""),
+      abstractSource = json.obj.get("AbstractSource").flatMap(_.strOpt).getOrElse(""),
+      abstractUrl = json.obj.get("AbstractURL").flatMap(_.strOpt).getOrElse(""),
+      answer = json.obj.get("Answer").flatMap(_.strOpt).getOrElse(""),
+      answerType = json.obj.get("AnswerType").flatMap(_.strOpt).getOrElse(""),
+      relatedTopics = relatedTopics,
+      infoboxContent = infobox
+    )
   }
+
 }

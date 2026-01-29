@@ -144,6 +144,6 @@ object Llm4sConfig {
     fromConf
   }
 
-  def loadBraveSearchTool(): Result[BraveTool] =
+  def loadBraveSearchTool(): Result[BraveSearchToolConfig] =
     org.llm4s.config.ToolsConfigLoader.loadBraveSearchTool(ConfigSource.default)
 }

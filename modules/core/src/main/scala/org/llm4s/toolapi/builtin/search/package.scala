@@ -12,11 +12,6 @@ package org.llm4s.toolapi.builtin
  *   - No API key required
  *   - Returns abstracts, related topics, and infobox data
  *
- * - [[BraveSearchTool]]: Full web search using Brave Search API
- *   - Best for comprehensive web search results
- *   - Requires `BRAVE_SEARCH_API_KEY`
- *   - Returns snippets with title and URL
- *
  * @example
  * {{{
  * import org.llm4s.toolapi.builtin.search._
@@ -25,10 +20,6 @@ package org.llm4s.toolapi.builtin
  * // Default search tool
  * val searchTool = DuckDuckGoSearchTool.tool
  *
- * // Brave search tool
- * val braveSearch = BraveSearchTool.tool
- *
- * val tools = new ToolRegistry(Seq(searchTool, braveSearch))
  * }}}
  */
 package object search {
@@ -37,10 +28,6 @@ package object search {
    * All search tools with default configuration.
    */
   val allTools: Seq[org.llm4s.toolapi.ToolFunction[_, _]] = Seq(
-    DuckDuckGoSearchTool.tool,
-    BraveSearchTool.braveWebSearchTool,
-    BraveSearchTool.braveImageSearchTool,
-    BraveSearchTool.braveVideoSearchTool,
-    BraveSearchTool.braveNewsSearchTool
+    DuckDuckGoSearchTool.tool
   )
 }

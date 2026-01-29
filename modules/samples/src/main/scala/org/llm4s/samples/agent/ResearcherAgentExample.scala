@@ -25,7 +25,7 @@ import org.slf4j.LoggerFactory
  * export LLM_MODEL=openai/gpt-4o
  * export OPENAI_API_KEY=sk-...
  * export BRAVE_SEARCH_API_KEY=your-brave-api-key
- * sbt "samples/runMain org.llm4s.samples.agent.ResearcherAgentExample"
+ * ,
  * }}}
  */
 
@@ -40,23 +40,31 @@ object ResearcherAgentExample {
     logger.info("Research Topic: {}", RESEARCH_TOPIC)
     logger.info("=" * 70)
 
-    // Create LLM client from configuration
+    // Create LLM client and load Brave Search configuration
     val clientResult = for {
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
     } yield client
 
-    clientResult match {
-      case Left(error) =>
+    val braveConfigResult = Llm4sConfig.loadBraveSearchTool()
+
+    (clientResult, braveConfigResult) match {
+      case (Left(error), _) =>
         logger.error("Failed to create LLM client: {}", error)
         logger.error("Make sure LLM_MODEL and appropriate API key are set")
         logger.error("Example: export LLM_MODEL=openai/gpt-4o")
 
-      case Right(client) =>
-        logger.info("✓ LLM client created successfully\n")
+      case (_, Left(error)) =>
+        logger.error("Failed to load Brave Search configuration: {}", error)
+        logger.error("Make sure BRAVE_SEARCH_API_KEY is set")
+        logger.error("Example: export BRAVE_SEARCH_API_KEY=your-api-key")
+
+      case (Right(client), Right(braveConfig)) =>
+        logger.info("✓ LLM client created successfully")
+        logger.info("✓ Brave Search configuration loaded\n")
 
         // Create tool registry with all four Brave Search tools
-        val tools = createResearchTools()
+        val tools = createResearchTools(braveConfig)
         logger.info("✓ Research tools initialized: {}", tools.map(_.name).mkString(", "))
 
         val registry = new ToolRegistry(tools)
@@ -71,14 +79,25 @@ object ResearcherAgentExample {
   }
 
   /**
-   * Creates all four Brave Search tools using default configurations from reference.conf.
-   * This demonstrates clean API usage with configuration loading.
+   * Creates all four Brave Search tools using loaded configuration.
+   * This demonstrates clean API usage with configuration loading from reference.conf.
+   *
+   * @param braveConfig The loaded Brave Search configuration containing API key and defaults
+   * @return Sequence of configured Brave Search tools for Web, News, Image, and Video
    */
-  private def createResearchTools() = Seq(
-    BraveSearchTool.create(BraveSearchCategory.Web, BraveSearchConfig(count = 10)),
-    BraveSearchTool.create(BraveSearchCategory.News, BraveSearchConfig(count = 10)),
-    BraveSearchTool.create(BraveSearchCategory.Image, BraveSearchConfig(count = 2, safeSearch = SafeSearch.Strict)),
-    BraveSearchTool.create(BraveSearchCategory.Video, BraveSearchConfig(count = 2, safeSearch = SafeSearch.Strict))
+  private def createResearchTools(braveConfig: org.llm4s.config.BraveSearchToolConfig) = Seq(
+    BraveSearchTool.create(braveConfig, BraveSearchCategory.Web, Some(BraveSearchConfig(count = 10))),
+    BraveSearchTool.create(braveConfig, BraveSearchCategory.News, Some(BraveSearchConfig(count = 10))),
+    BraveSearchTool.create(
+      braveConfig,
+      BraveSearchCategory.Image,
+      Some(BraveSearchConfig(count = 2, safeSearch = SafeSearch.Strict))
+    ),
+    BraveSearchTool.create(
+      braveConfig,
+      BraveSearchCategory.Video,
+      Some(BraveSearchConfig(count = 2, safeSearch = SafeSearch.Strict))
+    )
   )
 
   /**
