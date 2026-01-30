@@ -30,7 +30,6 @@ case class DuckDuckGoSearchResult(
   answer: String,
   answerType: String,
   relatedTopics: Seq[RelatedTopic],
-  infoboxContent: Option[String]
 )
 
 object DuckDuckGoSearchResult {
@@ -96,12 +95,12 @@ object DuckDuckGoSearchTool {
     ToolBuilder[Map[String, Any], DuckDuckGoSearchResult](
       name = "duckduckgo_search",
       description = "Search the web for definitions, facts, and quick answers using DuckDuckGo. " +
-        "Best for factual queries and definitions. Does not provide full web search results. " +
-        s"Timeout: ${config.timeoutMs}ms.",
+        "Best for factual queries and definitions. Does not provide full web search results.",
       schema = createSchema
     ).withHandler { extractor =>
       for {
         searchQuery <- extractor.getString("search_query")
+        _           <- if (searchQuery.trim.isEmpty) Left("search_query cannot be empty") else Right(())
         result      <- search(searchQuery, config)
       } yield result
     }.build()
@@ -160,7 +159,6 @@ object DuckDuckGoSearchTool {
    *         - Abstract: Summary from Wikipedia or other sources
    *         - Answer: Direct answer if available
    *         - RelatedTopics: List of related topics (limited by maxResults)
-   *         - Infobox: Structured data from Wikipedia infoboxes
    */
   private def parseResults(query: String, json: ujson.Value, config: DuckDuckGoSearchConfig): DuckDuckGoSearchResult = {
     val relatedTopics = json.obj
@@ -181,18 +179,6 @@ object DuckDuckGoSearchTool {
       }
       .getOrElse(Seq.empty)
 
-    val infobox = json.obj.get("Infobox").flatMap { infobox =>
-      infobox.obj.get("content").flatMap(_.arrOpt).map { content =>
-        content
-          .map { item =>
-            val label = item.obj.get("label").flatMap(_.strOpt).getOrElse("")
-            val value = item.obj.get("value").flatMap(_.strOpt).getOrElse("")
-            s"$label: $value"
-          }
-          .mkString("\n")
-      }
-    }
-
     DuckDuckGoSearchResult(
       query = query,
       abstract_ = json.obj.get("Abstract").flatMap(_.strOpt).getOrElse(""),
@@ -201,7 +187,6 @@ object DuckDuckGoSearchTool {
       answer = json.obj.get("Answer").flatMap(_.strOpt).getOrElse(""),
       answerType = json.obj.get("AnswerType").flatMap(_.strOpt).getOrElse(""),
       relatedTopics = relatedTopics,
-      infoboxContent = infobox
     )
   }
 
