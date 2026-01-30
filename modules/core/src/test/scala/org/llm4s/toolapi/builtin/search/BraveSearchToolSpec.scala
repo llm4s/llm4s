@@ -113,4 +113,94 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
     verifyRoundTrip(newsResult)
     verifyRoundTrip(BraveNewsSearchResult("query", List(newsResult)))
   }
+
+  "BraveSearchCategory.parseResults" should "correctly parse Web results" in {
+    val json = ujson.Obj(
+      "web" -> ujson.Obj(
+        "results" -> ujson.Arr(
+          ujson.Obj(
+            "title"       -> "Web Title",
+            "url"         -> "https://example.com",
+            "description" -> "Web Description"
+          )
+        )
+      )
+    )
+    val result = BraveSearchCategory.Web.parseResults(json, "scala")
+    result.query shouldBe "scala"
+    result.results should have size 1
+    result.results.head shouldBe BraveWebResult("Web Title", "https://example.com", "Web Description")
+  }
+
+  it should "correctly parse Image results" in {
+    val json = ujson.Obj(
+      "results" -> ujson.Arr(
+        ujson.Obj(
+          "title" -> "Image Title",
+          "url"   -> "https://example.com/image.png",
+          "thumbnail" -> ujson.Obj(
+            "src" -> "https://example.com/thumb.png"
+          )
+        )
+      )
+    )
+    val result = BraveSearchCategory.Image.parseResults(json, "scala logo")
+    result.query shouldBe "scala logo"
+    result.results should have size 1
+    result.results.head shouldBe BraveImageResult(
+      "Image Title",
+      "https://example.com/image.png",
+      "https://example.com/thumb.png"
+    )
+  }
+
+  it should "correctly parse Video results" in {
+    val json = ujson.Obj(
+      "results" -> ujson.Arr(
+        ujson.Obj(
+          "title"       -> "Video Title",
+          "url"         -> "https://example.com/video",
+          "description" -> "Video Description"
+        )
+      )
+    )
+    val result = BraveSearchCategory.Video.parseResults(json, "scala tutorial")
+    result.query shouldBe "scala tutorial"
+    result.results should have size 1
+    result.results.head shouldBe BraveVideoResult(
+      "Video Title",
+      "https://example.com/video",
+      "Video Description"
+    )
+  }
+
+  it should "correctly parse News results" in {
+    val json = ujson.Obj(
+      "results" -> ujson.Arr(
+        ujson.Obj(
+          "title"       -> "News Title",
+          "url"         -> "https://example.com/news",
+          "description" -> "News Description"
+        )
+      )
+    )
+    val result = BraveSearchCategory.News.parseResults(json, "scala news")
+    result.query shouldBe "scala news"
+    result.results should have size 1
+    result.results.head shouldBe BraveNewsResult(
+      "News Title",
+      "https://example.com/news",
+      "News Description"
+    )
+  }
+
+  it should "handle missing or empty results gracefully" in {
+    val emptyJson = ujson.Obj("results" -> ujson.Arr())
+    val webJson   = ujson.Obj("web" -> ujson.Obj("results" -> ujson.Arr()))
+
+    BraveSearchCategory.Web.parseResults(webJson, "q").results shouldBe empty
+    BraveSearchCategory.Image.parseResults(emptyJson, "q").results shouldBe empty
+    BraveSearchCategory.Video.parseResults(emptyJson, "q").results shouldBe empty
+    BraveSearchCategory.News.parseResults(emptyJson, "q").results shouldBe empty
+  }
 }

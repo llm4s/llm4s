@@ -160,7 +160,11 @@ object DuckDuckGoSearchTool {
    *         - Answer: Direct answer if available
    *         - RelatedTopics: List of related topics (limited by maxResults)
    */
-  private def parseResults(query: String, json: ujson.Value, config: DuckDuckGoSearchConfig): DuckDuckGoSearchResult = {
+  private[search] def parseResults(
+    query: String,
+    json: ujson.Value,
+    config: DuckDuckGoSearchConfig
+  ): DuckDuckGoSearchResult = {
     val relatedTopics = json.obj
       .get("RelatedTopics")
       .flatMap(_.arrOpt)

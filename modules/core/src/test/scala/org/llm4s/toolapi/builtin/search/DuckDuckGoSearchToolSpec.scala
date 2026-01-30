@@ -83,4 +83,54 @@ class DuckDuckGoSearchToolSpec extends AnyFlatSpec with Matchers {
     deserialized shouldBe result
     deserialized.relatedTopics shouldBe empty
   }
+
+  "DuckDuckGoSearchTool.parseResults" should "correctly parse Instant Answer results" in {
+    val config = DuckDuckGoSearchConfig(maxResults = 2)
+    val json = ujson.Obj(
+      "Abstract"       -> "Scala Abstract",
+      "AbstractSource" -> "Wikipedia",
+      "AbstractURL"    -> "https://en.wikipedia.org/wiki/Scala",
+      "Answer"         -> "A functional programming language",
+      "AnswerType"     -> "definition",
+      "RelatedTopics" -> ujson.Arr(
+        ujson.Obj(
+          "Text"     -> "Topic 1",
+          "FirstURL" -> "https://example.com/1"
+        ),
+        ujson.Obj(
+          "Text"     -> "Topic 2",
+          "FirstURL" -> "https://example.com/2"
+        ),
+        ujson.Obj(
+          "Text"     -> "Topic 3",
+          "FirstURL" -> "https://example.com/3"
+        )
+      )
+    )
+
+    val result = DuckDuckGoSearchTool.parseResults("scala", json, config)
+
+    result.query shouldBe "scala"
+    result.abstract_ shouldBe "Scala Abstract"
+    result.abstractSource shouldBe "Wikipedia"
+    result.abstractUrl shouldBe "https://en.wikipedia.org/wiki/Scala"
+    result.answer shouldBe "A functional programming language"
+    result.answerType shouldBe "definition"
+
+    // Verify maxResults limit
+    result.relatedTopics should have size 2
+    result.relatedTopics.head shouldBe RelatedTopic("Topic 1", Some("https://example.com/1"))
+    result.relatedTopics(1) shouldBe RelatedTopic("Topic 2", Some("https://example.com/2"))
+  }
+
+  it should "handle missing fields by using defaults" in {
+    val result = DuckDuckGoSearchTool.parseResults("q", ujson.Obj(), DuckDuckGoSearchConfig())
+
+    result.abstract_ shouldBe ""
+    result.abstractSource shouldBe ""
+    result.abstractUrl shouldBe ""
+    result.answer shouldBe ""
+    result.answerType shouldBe ""
+    result.relatedTopics shouldBe empty
+  }
 }
