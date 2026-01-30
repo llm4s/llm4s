@@ -133,7 +133,8 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-reports-${{ matrix.os }}-scala-${{ matrix.scala }}
+          # Include job name to make CI failures easier to diagnose
+          name: test-reports-${{ github.job }}-${{ matrix.os }}-scala-${{ matrix.scala }}
           path: |
             **/target/test-reports/
             **/target/scala-${{ matrix.scala }}/test-reports/
