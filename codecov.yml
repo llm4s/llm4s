@@ -1,0 +1,20 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: 80%
+
+flags:
+  core:
+    paths:
+      - modules/core/src/main/scala
+  workspace:
+    paths:
+      - modules/workspace
+  samples:
+    paths:
+      - modules/samples
