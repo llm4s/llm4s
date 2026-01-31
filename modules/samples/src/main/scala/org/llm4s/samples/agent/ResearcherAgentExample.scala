@@ -33,8 +33,8 @@ object ResearcherAgentExample {
   private val logger = LoggerFactory.getLogger(getClass)
 
   def main(args: Array[String]): Unit = {
-  val config         = ConfigFactory.load()
-  val researchTopic = config.getString("llm4s.samples.agent.research-topic")
+    val config        = ConfigFactory.load()
+    val researchTopic = config.getString("llm4s.samples.agent.research-topic")
     logger.info("🔬 === Researcher Agent Example ===\n")
     logger.info("Research Topic: {}", researchTopic)
     logger.info("=" * 70)
