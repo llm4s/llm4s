@@ -317,7 +317,6 @@ object BraveSearchTool {
           category.parseResults(json, query)
         }.toEither.left.map(e => s"Brave ${category.toolName} JSON parsing failed: ${e.getMessage}")
       } else {
-        print("Some error occurred")
         Left(
           s"Brave ${category.toolName} returned status ${response.statusCode}: ${response.text()}"
         )

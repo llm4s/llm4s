@@ -32,12 +32,11 @@ import org.slf4j.LoggerFactory
 object ResearcherAgentExample {
   private val logger = LoggerFactory.getLogger(getClass)
 
-  private val config         = ConfigFactory.load()
-  private val RESEARCH_TOPIC = config.getString("llm4s.samples.agent.research-topic")
-
   def main(args: Array[String]): Unit = {
+  val config         = ConfigFactory.load()
+  val researchTopic = config.getString("llm4s.samples.agent.research-topic")
     logger.info("🔬 === Researcher Agent Example ===\n")
-    logger.info("Research Topic: {}", RESEARCH_TOPIC)
+    logger.info("Research Topic: {}", researchTopic)
     logger.info("=" * 70)
 
     // Create LLM client and load Brave Search configuration
@@ -71,7 +70,7 @@ object ResearcherAgentExample {
         val agent    = new Agent(client)
 
         // Execute research workflow
-        executeResearch(agent, registry)
+        executeResearch(agent, registry, researchTopic)
 
         logger.info("\n" + "=" * 70)
         logger.info("🔬 === Research Complete ===")
@@ -106,11 +105,11 @@ object ResearcherAgentExample {
 
   // research topic could be moved to config file
 
-  private def executeResearch(agent: Agent, registry: ToolRegistry): Unit = {
+  private def executeResearch(agent: Agent, registry: ToolRegistry, researchTopic: String): Unit = {
     val systemPrompt = createResearchSystemPrompt()
 
     val researchQuery =
-      s"""Conduct comprehensive research on: "$RESEARCH_TOPIC"
+      s"""Conduct comprehensive research on: "$researchTopic"
          |
          |Follow this research workflow:
          |1. Use brave_web_search to gather foundational information and key facts
