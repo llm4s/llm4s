@@ -1,10 +1,16 @@
 package org.llm4s.agent.memory
 
+import com.zaxxer.hikari.HikariDataSource
+import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.agent.memory.PostgresMemoryStore.SqlParam._
 
-class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers {
+import java.sql.{ Connection, PreparedStatement, ResultSet, SQLException, Timestamp }
+import java.time.Instant
+
+class MockableHikariDataSource extends HikariDataSource
+class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   behavior.of("PostgresMemoryStore helper methods")
 
@@ -131,5 +137,107 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers {
     PostgresMemoryStore.stringToEmbedding("[]") shouldBe Array.empty[Float]
     PostgresMemoryStore.stringToEmbedding("") shouldBe Array.empty[Float]
     PostgresMemoryStore.stringToEmbedding(null) shouldBe Array.empty[Float]
+  }
+
+  behavior.of("PostgresMemoryStore class execution")
+
+  val mockDataSource = mock[MockableHikariDataSource]
+  val mockConn       = mock[Connection]
+  val mockStmt       = mock[PreparedStatement]
+
+  // Helper to simulate a DB connection
+  def setupFailingExecution(): Unit = {
+    (mockDataSource.getConnection _).expects().returning(mockConn)
+    (mockConn.prepareStatement(_: String)).expects(*).returning(mockStmt)
+    // Allow any parameter setting
+    (mockStmt.setString(_: Int, _: String)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setTimestamp(_: Int, _: Timestamp)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setDouble(_: Int, _: Double)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setInt(_: Int, _: Int)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setBoolean(_: Int, _: Boolean)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setNull(_: Int, _: Int)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setNull(_: Int, _: Int, _: String)).expects(*, *, *).anyNumberOfTimes()
+
+    (mockStmt.close _).expects()
+    (mockConn.close _).expects()
+  }
+
+  it should "execute store() logic and handle DB failure" in {
+    setupFailingExecution()
+    (mockStmt.executeUpdate _).expects().throws(new SQLException("Mock DB Error"))
+
+    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+    val mem   = Memory(MemoryId("1"), "test", MemoryType.Task, Map.empty, Instant.now(), None, None)
+
+    // It runs all the lines inside store()
+    val result = store.store(mem)
+    result.isLeft shouldBe true
+    result.left.map(_.message should include("Mock DB Error"))
+  }
+
+  it should "execute get() logic and handle DB failure" in {
+    setupFailingExecution()
+    (mockStmt.executeQuery _).expects().throws(new SQLException("Mock DB Error"))
+
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val result = store.get(MemoryId("1"))
+
+    result.isLeft shouldBe true
+  }
+
+  it should "execute recall() logic and handle DB failure" in {
+    setupFailingExecution()
+    (mockStmt.executeQuery _).expects().throws(new SQLException("Mock DB Error"))
+
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val result = store.recall(MemoryFilter.ByType(MemoryType.Task), 10)
+
+    result.isLeft shouldBe true
+  }
+
+  it should "execute delete() logic and handle DB failure" in {
+    setupFailingExecution()
+    (mockStmt.executeUpdate _).expects().throws(new SQLException("Mock DB Error"))
+
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val result = store.delete(MemoryId("1"))
+
+    result.isLeft shouldBe true
+  }
+
+  it should "execute count() logic and handle DB failure" in {
+    setupFailingExecution()
+    (mockStmt.executeQuery _).expects().throws(new SQLException("Mock DB Error"))
+
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val result = store.count(MemoryFilter.All)
+
+    result.isLeft shouldBe true
+  }
+
+  it should "execute clear() logic and handle DB failure" in {
+    // clear uses createStatement, not prepareStatement
+    (mockDataSource.getConnection _).expects().returning(mockConn)
+    (mockConn.createStatement _).expects().returning(mockStmt)
+    (mockStmt.execute(_: String)).expects(*).throws(new SQLException("Mock DB Error"))
+    (mockStmt.close _).expects()
+    (mockConn.close _).expects()
+
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val result = store.clear()
+
+    result.isLeft shouldBe true
+  }
+
+  it should "handle schema initialization failure in factory" in {
+    (mockDataSource.getConnection _).expects().returning(mockConn)
+    (mockConn.createStatement _).expects().returning(mockStmt)
+    (mockStmt.execute(_: String)).expects(*).throws(new SQLException("Init Error"))
+    (mockStmt.close _).expects()
+    (mockConn.close _).expects()
+
+    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+
+    an[SQLException] should be thrownBy store.initializeSchema()
   }
 }
