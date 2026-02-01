@@ -1,8 +1,25 @@
 package org.llm4s.llmconnect.caching
 
 import scala.concurrent.duration.FiniteDuration
+import org.llm4s.types.Result
 
 case class CacheConfig(
   similarityThreshold: Double,
-  ttl: FiniteDuration
+  ttl: FiniteDuration,
+  maxSize: Int = 1000
 )
+
+object CacheConfig {
+  def validate(config: CacheConfig): Result[CacheConfig] = {
+    val errors = List(
+      if (config.similarityThreshold < 0.0 || config.similarityThreshold > 1.0)
+        Some("similarityThreshold must be between 0.0 and 1.0")
+      else None,
+      if (config.ttl.length <= 0) Some("ttl must be positive") else None,
+      if (config.maxSize <= 0) Some("maxSize must be positive") else None
+    ).flatten
+
+    if (errors.nonEmpty) Left(org.llm4s.error.ValidationError(errors.mkString("; "), "CacheConfig"))
+    else Right(config)
+  }
+}
