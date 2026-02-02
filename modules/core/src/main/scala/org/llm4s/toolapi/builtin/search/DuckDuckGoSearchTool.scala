@@ -7,6 +7,8 @@ import java.net.URLEncoder
 import scala.util.Try
 import requests.Response
 
+import org.llm4s.config.DuckDuckGoSearchToolConfig
+
 /**
  * A related topic from web search.
  */
@@ -63,19 +65,43 @@ case class DuckDuckGoSearchConfig(
  *
  * It does NOT provide full web search results (that would require a paid API).
  *
+ * Architecture:
+ * This tool follows the "config at the edge" pattern:
+ * 1. Configuration is loaded at the application boundary via Llm4sConfig.loadDuckDuckGoSearchTool()
+ * 2. The loaded DuckDuckGoSearchToolConfig is passed to create() method
+ * 3. The tool operates with the provided configuration
+ *
+ * This keeps the tool implementation pure and testable without direct config dependencies.
+ *
  * @example
  * {{{
+ * import org.llm4s.config.Llm4sConfig
  * import org.llm4s.toolapi.builtin.search._
  *
- * val searchTool = DuckDuckGoSearchTool.create()
+ * // Load configuration at the application edge
+ * val toolConfigResult = Llm4sConfig.loadDuckDuckGoSearchTool()
  *
- * val tools = new ToolRegistry(Seq(searchTool))
- * agent.run("What is Scala programming language?", tools)
+ * toolConfigResult match {
+ *   case Right(toolConfig) =>
+ *     // Create the tool with loaded configuration
+ *     val searchTool = DuckDuckGoSearchTool.create(toolConfig)
+ *     val tools = new ToolRegistry(Seq(searchTool))
+ *     agent.run("What is Scala programming language?", tools)
+ *
+ *   case Left(error) =>
+ *     println(s"Failed to load DuckDuckGo config: $error")
+ * }
+ * }}}
+ *
+ * For testing, you can create a config directly:
+ * {{{
+ * import org.llm4s.config.DuckDuckGoSearchToolConfig
+ *
+ * val testConfig = DuckDuckGoSearchToolConfig(apiUrl = "https://api.duckduckgo.com")
+ * val searchTool = DuckDuckGoSearchTool.create(testConfig)
  * }}}
  */
 object DuckDuckGoSearchTool {
-
-  private val DuckDuckGoApiUrl = "https://api.duckduckgo.com/"
 
   private def createSchema = Schema
     .`object`[Map[String, Any]]("DuckDuckGo search parameters")
@@ -88,8 +114,34 @@ object DuckDuckGoSearchTool {
 
   /**
    * Create a DuckDuckGo search tool with the given configuration.
+   *
+   * This method follows the "config at the edge" pattern where configuration is loaded
+   * at the application boundary and passed in as a parameter.
+   *
+   * @param toolConfig The tool configuration containing API URL (loaded via Llm4sConfig.loadDuckDuckGoSearchTool())
+   * @param config Optional runtime configuration for timeout, maxResults, and safeSearch settings
+   * @return A configured ToolFunction ready to be registered with the agent
+   *
+   * @example
+   * {{{
+   * // Load config at application edge
+   * val toolConfig = Llm4sConfig.loadDuckDuckGoSearchTool().getOrElse(
+   *   throw new RuntimeException("Failed to load DuckDuckGo config")
+   * )
+   *
+   * // Create tool with custom runtime settings
+   * val searchTool = DuckDuckGoSearchTool.create(
+   *   toolConfig = toolConfig,
+   *   config = DuckDuckGoSearchConfig(
+   *     timeoutMs = 5000,
+   *     maxResults = 5,
+   *     safeSearch = true
+   *   )
+   * )
+   * }}}
    */
   def create(
+    toolConfig: DuckDuckGoSearchToolConfig,
     config: DuckDuckGoSearchConfig = DuckDuckGoSearchConfig()
   ): ToolFunction[Map[String, Any], DuckDuckGoSearchResult] =
     ToolBuilder[Map[String, Any], DuckDuckGoSearchResult](
@@ -101,18 +153,14 @@ object DuckDuckGoSearchTool {
       for {
         searchQuery <- extractor.getString("search_query")
         _           <- if (searchQuery.trim.isEmpty) Left("search_query cannot be empty") else Right(())
-        result      <- search(searchQuery, config)
+        result      <- search(toolConfig.apiUrl, searchQuery, config)
       } yield result
     }.build()
-
-  /**
-   * Default DuckDuckGo search tool with standard configuration.
-   */
-  val tool: ToolFunction[Map[String, Any], DuckDuckGoSearchResult] = create()
 
   private val SAFE_SEARCH   = "1"
   private val UNSAFE_SEARCH = "-1"
   private def search(
+    apiUrl: String,
     query: String,
     config: DuckDuckGoSearchConfig
   ): Either[String, DuckDuckGoSearchResult] = {
@@ -120,7 +168,7 @@ object DuckDuckGoSearchTool {
     val encodedQuery = URLEncoder.encode(query, "UTF-8")
     val safeSearch   = if (config.safeSearch) SAFE_SEARCH else UNSAFE_SEARCH
     val url =
-      s"$DuckDuckGoApiUrl?q=$encodedQuery&format=json&no_html=1&skip_disambig=0&t=llm4s&safesearch=$safeSearch"
+      s"$apiUrl?q=$encodedQuery&format=json&no_html=1&skip_disambig=0&t=llm4s&safesearch=$safeSearch"
 
     val responseEither: Either[String, Response] =
       Try {

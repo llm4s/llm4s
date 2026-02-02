@@ -123,7 +123,6 @@ object BuiltinToolsExample {
     )
 
     val tools = BuiltinTools.custom(
-      includeSearch = false,
       fileConfig = Some(fileConfig),
       writeConfig = Some(writeConfig)
     )
@@ -189,7 +188,6 @@ object BuiltinToolsExample {
     // Read-only shell with safe commands
     val config = ShellConfig.readOnly()
     val tools = BuiltinTools.custom(
-      includeSearch = false,
       shellConfig = Some(config)
     )
     val registry = new ToolRegistry(tools)
@@ -254,7 +252,6 @@ object BuiltinToolsExample {
 
     // Custom configuration
     val customTools = BuiltinTools.custom(
-      includeSearch = true,
       httpConfig = Some(HttpConfig.readOnly()),
       fileConfig = Some(FileConfig()),
       writeConfig = None, // No write access

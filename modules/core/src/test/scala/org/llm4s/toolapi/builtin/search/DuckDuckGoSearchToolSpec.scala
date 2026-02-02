@@ -1,5 +1,6 @@
 package org.llm4s.toolapi.builtin.search
 
+import org.llm4s.config.DuckDuckGoSearchToolConfig
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -25,7 +26,8 @@ class DuckDuckGoSearchToolSpec extends AnyFlatSpec with Matchers {
   }
 
   "DuckDuckGoSearchTool" should "have the correct metadata" in {
-    val tool = DuckDuckGoSearchTool.create()
+    val toolConfig = DuckDuckGoSearchToolConfig(apiUrl = "https://api.duckduckgo.com")
+    val tool       = DuckDuckGoSearchTool.create(toolConfig)
     tool.name shouldBe "duckduckgo_search"
     tool.description shouldBe
       "Search the web for definitions, facts, and quick answers using DuckDuckGo. Best for factual queries and definitions. Does not provide full web search results."

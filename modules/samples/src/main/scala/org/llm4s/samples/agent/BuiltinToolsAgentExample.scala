@@ -57,7 +57,6 @@ object BuiltinToolsAgentExample {
         )
 
         val tools = BuiltinTools.custom(
-          includeSearch = true,
           fileConfig = Some(fileConfig),
           shellConfig = Some(ShellConfig.readOnly())
         )
