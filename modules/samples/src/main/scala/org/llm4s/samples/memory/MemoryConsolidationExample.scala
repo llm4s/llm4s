@@ -167,6 +167,8 @@ object MemoryConsolidationExample {
     manager.store.recall(MemoryFilter.All, 100).foreach { allMemories =>
       allMemories.foreach { memory =>
         logger.info("\n[{}] {}", memory.memoryType.name, memory.id.value.take(8))
+        // WARNING: Logging memory content is acceptable for this demo but should NOT be done
+        // in production as it may expose sensitive user data, PII, or confidential information
         logger.info("Content: {}", memory.content.take(100) + "...")
 
         memory.getMetadata("consolidated_from").foreach { count =>
