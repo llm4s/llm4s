@@ -95,8 +95,8 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
   // ============================================================
 
   "LLMMemoryManager" should "create with default configuration" in {
-    val client = new MockLLMClient()
-    val store  = InMemoryStore.empty
+    val client  = new MockLLMClient()
+    val store   = InMemoryStore.empty
     val manager = LLMMemoryManager.withDefaults(store, client)
 
     manager.config shouldBe MemoryManagerConfig.default
@@ -122,7 +122,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
 
     val memories = result.toOption.get.store.recall(MemoryFilter.All, 100)
-    memories.toOption.get should have length 1
+    (memories.toOption.get should have).length(1)
   }
 
   it should "record conversations" in {
@@ -140,7 +140,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
 
     val memories = result.toOption.get.store.recall(MemoryFilter.conversations, 100)
-    memories.toOption.get should have length 4
+    (memories.toOption.get should have).length(4)
   }
 
   it should "record entity facts" in {
@@ -158,7 +158,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
 
     val memories = result.toOption.get.store.recall(MemoryFilter.entities, 100)
-    memories.toOption.get should have length 1
+    (memories.toOption.get should have).length(1)
   }
 
   it should "record user facts" in {
@@ -173,7 +173,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
 
     val memories = result.toOption.get.store.recall(MemoryFilter.userFacts, 100)
-    memories.toOption.get should have length 1
+    (memories.toOption.get should have).length(1)
   }
 
   it should "record knowledge" in {
@@ -188,7 +188,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
 
     val memories = result.toOption.get.store.recall(MemoryFilter.knowledge, 100)
-    memories.toOption.get should have length 1
+    (memories.toOption.get should have).length(1)
   }
 
   it should "record tasks" in {
@@ -204,7 +204,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
 
     val memories = result.toOption.get.store.recall(MemoryFilter.tasks, 100)
-    memories.toOption.get should have length 1
+    (memories.toOption.get should have).length(1)
   }
 
   it should "not consolidate if below minimum count" in {
@@ -229,7 +229,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     val finalStore = consolidated.toOption.get.store
     val remaining  = finalStore.recall(MemoryFilter.All, 100)
 
-    remaining.toOption.get should have length 2
+    (remaining.toOption.get should have).length(2)
   }
 
   it should "consolidate conversation memories when conditions are met" in {
@@ -244,7 +244,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     )
 
     val result = for {
-      populated <- manager.recordConversation(messages, "conv-1")
+      populated   <- manager.recordConversation(messages, "conv-1")
       statsBefore <- populated.stats
       _ = statsBefore.totalMemories shouldBe 4
 
@@ -293,7 +293,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     val memories = result.toOption.get
 
     // Should have 1 consolidated memory
-    memories should have length 1
+    (memories should have).length(1)
 
     // Should preserve max importance (0.9)
     memories.head.importance.getOrElse(0.0) shouldBe 0.9
@@ -318,7 +318,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
     val memories = result.toOption.get
 
-    memories should have length 1
+    (memories should have).length(1)
 
     val memory = memories.head
     memory.getMetadata("consolidated_from") shouldBe Some("3")
@@ -347,7 +347,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
     val memories = result.toOption.get
 
-    memories should have length 1
+    (memories should have).length(1)
     memories.head.content should include("Consolidated")
   }
 
@@ -370,7 +370,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
     val memories = result.toOption.get
 
-    memories should have length 1
+    (memories should have).length(1)
     memories.head.content should include("Consolidated")
   }
 

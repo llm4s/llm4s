@@ -184,29 +184,29 @@ final case class LLMMemoryManager(
   override def consolidateMemories(
     olderThan: Instant,
     minCount: Int
-  ): Result[MemoryManager] = {
+  ): Result[MemoryManager] =
     // 1. Find old memories that need consolidation
-    store.recall(
-      filter = MemoryFilter.before(olderThan),
-      limit = Int.MaxValue
-    ).flatMap { oldMemories =>
-      // 2. Check if we have enough memories to consolidate
-      if (oldMemories.length < minCount) {
-        Right(this) // Not enough memories, return unchanged
-      } else {
-        // 3. Group memories by type and context
-        val grouped = groupMemoriesForConsolidation(oldMemories)
+    store
+      .recall(
+        filter = MemoryFilter.before(olderThan),
+        limit = Int.MaxValue
+      )
+      .flatMap { oldMemories =>
+        // 2. Check if we have enough memories to consolidate
+        if (oldMemories.length < minCount) {
+          Right(this) // Not enough memories, return unchanged
+        } else {
+          // 3. Group memories by type and context
+          val grouped = groupMemoriesForConsolidation(oldMemories)
 
-        // 4. Consolidate each group
-        grouped.foldLeft[Result[MemoryStore]](Right(store)) {
-          case (accStore, group) =>
-            accStore.flatMap { s =>
-              consolidateGroup(group, s)
+          // 4. Consolidate each group
+          grouped
+            .foldLeft[Result[MemoryStore]](Right(store)) { case (accStore, group) =>
+              accStore.flatMap(s => consolidateGroup(group, s))
             }
-        }.map(consolidatedStore => copy(store = consolidatedStore))
+            .map(consolidatedStore => copy(store = consolidatedStore))
+        }
       }
-    }
-  }
 
   /**
    * Group memories for consolidation.
@@ -297,9 +297,8 @@ final case class LLMMemoryManager(
       )
 
       // 4. Delete old memories and store consolidated one
-      val deleteResult = group.foldLeft[Result[MemoryStore]](Right(currentStore)) {
-        case (accStore, memory) =>
-          accStore.flatMap(_.delete(memory.id))
+      val deleteResult = group.foldLeft[Result[MemoryStore]](Right(currentStore)) { case (accStore, memory) =>
+        accStore.flatMap(_.delete(memory.id))
       }
 
       deleteResult.flatMap(_.store(consolidatedMemory))
@@ -309,7 +308,7 @@ final case class LLMMemoryManager(
   /**
    * Select the appropriate consolidation prompt for a memory group.
    */
-  private def selectPromptForGroup(group: Seq[Memory]): String = {
+  private def selectPromptForGroup(group: Seq[Memory]): String =
     group.head.memoryType match {
       case MemoryType.Conversation =>
         ConsolidationPrompts.conversationSummary(group)
@@ -331,7 +330,6 @@ final case class LLMMemoryManager(
       case MemoryType.Custom(_) =>
         ConsolidationPrompts.knowledgeConsolidation(group)
     }
-  }
 
   /**
    * Merge metadata from multiple memories.

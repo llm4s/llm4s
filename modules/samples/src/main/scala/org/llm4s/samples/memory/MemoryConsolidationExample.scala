@@ -61,7 +61,7 @@ object MemoryConsolidationExample {
 
   private def runExample(client: LLMClient, providerName: String): Boolean = {
     logger.info("--- Part 1: Setting up LLM Memory Manager ---")
-    val store = InMemoryStore.empty
+    val store                  = InMemoryStore.empty
     var manager: MemoryManager = LLMMemoryManager.withDefaults(store, client)
     logger.info("Created LLMMemoryManager with {} model", providerName)
 
@@ -98,9 +98,8 @@ object MemoryConsolidationExample {
       ("Based in San Francisco", 0.6)
     )
 
-    for ((fact, importance) <- userFacts) {
+    for ((fact, importance) <- userFacts)
       manager = manager.recordUserFact(fact, Some("user-1"), Some(importance)).getOrElse(manager)
-    }
     logger.info("Recorded {} user facts", userFacts.length)
 
     // Part 4: Populate with entity facts
@@ -113,9 +112,8 @@ object MemoryConsolidationExample {
       ("Version 3 introduced union types", 0.7)
     )
 
-    for ((fact, importance) <- entityFacts) {
+    for ((fact, importance) <- entityFacts)
       manager = manager.recordEntityFact(entityId, "Scala", fact, "technology", Some(importance)).getOrElse(manager)
-    }
     logger.info("Recorded {} entity facts about Scala", entityFacts.length)
 
     // Part 5: Populate with knowledge entries
@@ -126,9 +124,8 @@ object MemoryConsolidationExample {
       ("Higher-order functions take other functions as parameters", Map("chapter" -> "2"))
     )
 
-    for ((content, metadata) <- knowledge) {
+    for ((content, metadata) <- knowledge)
       manager = manager.recordKnowledge(content, "fp-guide.md", metadata).getOrElse(manager)
-    }
     logger.info("Recorded {} knowledge entries", knowledge.length)
 
     // Part 6: Show stats before consolidation
@@ -147,10 +144,12 @@ object MemoryConsolidationExample {
     logger.info("Consolidating memories older than now (all memories)...")
     logger.info("Minimum memories per group: 3")
 
-    manager = manager.consolidateMemories(
-      olderThan = Instant.now().plus(1, ChronoUnit.DAYS), // Include all memories
-      minCount = 3 // Only consolidate groups with 3+ memories
-    ).getOrElse(manager)
+    manager = manager
+      .consolidateMemories(
+        olderThan = Instant.now().plus(1, ChronoUnit.DAYS), // Include all memories
+        minCount = 3                                        // Only consolidate groups with 3+ memories
+      )
+      .getOrElse(manager)
 
     logger.info("✅ Consolidation completed")
 
@@ -173,24 +172,16 @@ object MemoryConsolidationExample {
         memory.getMetadata("consolidated_from").foreach { count =>
           logger.info("  ↳ Consolidated from {} memories", count)
         }
-        memory.getMetadata("consolidation_method").foreach { method =>
-          logger.info("  ↳ Method: {}", method)
-        }
-        memory.importance.foreach { imp =>
-          logger.info("  ↳ Importance: {}", imp)
-        }
+        memory.getMetadata("consolidation_method").foreach(method => logger.info("  ↳ Method: {}", method))
+        memory.importance.foreach(imp => logger.info("  ↳ Importance: {}", imp))
       }
     }
 
     // Part 10: Test retrieval after consolidation
     logger.info("\n--- Part 10: Testing Context Retrieval After Consolidation ---")
-    manager.getUserContext(Some("user-1")).foreach { userContext =>
-      logger.info("User context:\n{}", userContext)
-    }
+    manager.getUserContext(Some("user-1")).foreach(userContext => logger.info("User context:\n{}", userContext))
 
-    manager.getEntityContext(entityId).foreach { entityContext =>
-      logger.info("\nEntity context:\n{}", entityContext)
-    }
+    manager.getEntityContext(entityId).foreach(entityContext => logger.info("\nEntity context:\n{}", entityContext))
 
     true
   }

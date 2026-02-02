@@ -18,10 +18,12 @@ object ConsolidationPrompts {
    * @return Prompt string for LLM
    */
   def conversationSummary(memories: Seq[Memory]): String = {
-    val memoryTexts = memories.zipWithIndex.map { case (m, idx) =>
-      val role = m.getMetadata("role").getOrElse("unknown")
-      s"${idx + 1}. [$role]: ${m.content}"
-    }.mkString("\n")
+    val memoryTexts = memories.zipWithIndex
+      .map { case (m, idx) =>
+        val role = m.getMetadata("role").getOrElse("unknown")
+        s"${idx + 1}. [$role]: ${m.content}"
+      }
+      .mkString("\n")
 
     s"""Summarize the following conversation into a single concise paragraph.
        |Preserve key facts, decisions, and important details.
@@ -65,10 +67,12 @@ object ConsolidationPrompts {
    * @return Prompt string for LLM
    */
   def knowledgeConsolidation(memories: Seq[Memory]): String = {
-    val knowledgeTexts = memories.zipWithIndex.map { case (m, idx) =>
-      val source = m.source.getOrElse("unknown")
-      s"${idx + 1}. [from $source]: ${m.content}"
-    }.mkString("\n")
+    val knowledgeTexts = memories.zipWithIndex
+      .map { case (m, idx) =>
+        val source = m.source.getOrElse("unknown")
+        s"${idx + 1}. [from $source]: ${m.content}"
+      }
+      .mkString("\n")
 
     s"""Consolidate these related knowledge entries into a single comprehensive entry.
        |Preserve all important information and remove redundancy.
@@ -112,10 +116,12 @@ object ConsolidationPrompts {
    * @return Prompt string for LLM
    */
   def taskConsolidation(tasks: Seq[Memory]): String = {
-    val taskTexts = tasks.zipWithIndex.map { case (m, idx) =>
-      val success = m.getMetadata("success").getOrElse("unknown")
-      s"${idx + 1}. [success: $success] ${m.content}"
-    }.mkString("\n")
+    val taskTexts = tasks.zipWithIndex
+      .map { case (m, idx) =>
+        val success = m.getMetadata("success").getOrElse("unknown")
+        s"${idx + 1}. [success: $success] ${m.content}"
+      }
+      .mkString("\n")
 
     s"""Consolidate these task completion records into a single summary.
        |Focus on outcomes, patterns, and learnings.
