@@ -209,7 +209,9 @@ final case class LLMMemoryManager(
    * Groups by:
    * - Conversation ID (consolidate entire conversations)
    * - Entity ID (consolidate entity facts)
-   * - Memory type (consolidate similar types)
+   * - User ID (consolidate user facts)
+   * - Knowledge source (consolidate knowledge from same source)
+   * - Task success status (consolidate successful/failed tasks separately)
    *
    * Only groups with minCount+ memories are returned.
    * Caps each group at config.maxMemoriesPerGroup to prevent context overflow.
@@ -253,10 +255,11 @@ final case class LLMMemoryManager(
       .collect { case (Some(_), entries) if entries.length >= minCount => entries.take(config.maxMemoriesPerGroup) }
       .toSeq
 
-    // Group tasks
+    // Group tasks by success status
     val byTask = memories
       .filter(_.memoryType == MemoryType.Task)
-      .grouped(5)                              // Group every 5 tasks
+      .groupBy(_.getMetadata("success").getOrElse("unknown"))
+      .values
       .filter(_.length >= minCount)            // Apply minCount per group
       .map(_.take(config.maxMemoriesPerGroup)) // Cap group size
       .toSeq
