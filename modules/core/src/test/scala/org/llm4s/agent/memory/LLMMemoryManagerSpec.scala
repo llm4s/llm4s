@@ -221,6 +221,37 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     (remaining.toOption.get should have).length(2)
   }
 
+  it should "not consolidate when each group is below minCount" in {
+    val manager  = createManager()
+    val entityId = EntityId.fromName("Scala")
+
+    // Create multiple groups, each with 2 memories (below minCount of 3)
+    // Total = 6 memories, but no single group has 3+
+    val populated = for {
+      m1 <- manager.recordUserFact("User fact 1", Some("user-1"), None)
+      m2 <- m1.recordUserFact("User fact 2", Some("user-1"), None)
+      m3 <- m2.recordEntityFact(entityId, "Scala", "Entity fact 1", "tech", None)
+      m4 <- m3.recordEntityFact(entityId, "Scala", "Entity fact 2", "tech", None)
+      m5 <- m4.recordKnowledge("Knowledge 1", "doc.md", Map.empty)
+      m6 <- m5.recordKnowledge("Knowledge 2", "doc.md", Map.empty)
+    } yield m6
+
+    val consolidated = populated.flatMap(
+      _.consolidateMemories(
+        olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
+        minCount = 3
+      )
+    )
+
+    consolidated.isRight shouldBe true
+
+    // Verify no consolidation happened (all 6 memories remain)
+    val finalStore = consolidated.toOption.get.store
+    val remaining  = finalStore.recall(MemoryFilter.All, 100)
+
+    (remaining.toOption.get should have).length(6)
+  }
+
   it should "consolidate conversation memories when conditions are met" in {
     val manager = createManager()
 
