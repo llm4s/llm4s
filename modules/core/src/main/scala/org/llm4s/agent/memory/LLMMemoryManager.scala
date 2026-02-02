@@ -217,6 +217,7 @@ final case class LLMMemoryManager(
    * - Memory type (consolidate similar types)
    *
    * Only groups with 3+ memories are returned.
+   * Caps each group at config.maxMemoriesPerGroup to prevent context overflow.
    */
   private def groupMemoriesForConsolidation(
     memories: Seq[Memory]
@@ -226,14 +227,15 @@ final case class LLMMemoryManager(
       .filter(_.conversationId.isDefined)
       .groupBy(_.conversationId.get)
       .values
-      .filter(_.length >= 3) // At least 3 messages
+      .filter(_.length >= 3)                   // At least 3 messages
+      .map(_.take(config.maxMemoriesPerGroup)) // Cap group size
       .toSeq
 
     // Group by entity
     val byEntity = memories
       .filter(_.memoryType == MemoryType.Entity)
       .groupBy(_.getMetadata("entity_id"))
-      .collect { case (Some(_), facts) if facts.length >= 3 => facts }
+      .collect { case (Some(_), facts) if facts.length >= 3 => facts.take(config.maxMemoriesPerGroup) }
       .toSeq
 
     // Group user facts by user ID
@@ -242,13 +244,14 @@ final case class LLMMemoryManager(
       .groupBy(_.getMetadata("user_id"))
       .values
       .filter(_.length >= 3)
+      .map(_.take(config.maxMemoriesPerGroup)) // Cap group size
       .toSeq
 
     // Group knowledge by source
     val byKnowledge = memories
       .filter(_.memoryType == MemoryType.Knowledge)
       .groupBy(_.source)
-      .collect { case (Some(_), entries) if entries.length >= 3 => entries }
+      .collect { case (Some(_), entries) if entries.length >= 3 => entries.take(config.maxMemoriesPerGroup) }
       .toSeq
 
     // Group tasks
@@ -256,6 +259,7 @@ final case class LLMMemoryManager(
       .filter(_.memoryType == MemoryType.Task)
       .grouped(5) // Group every 5 tasks
       .filter(_.length >= 3)
+      .map(_.take(config.maxMemoriesPerGroup)) // Cap group size
       .toSeq
 
     byConversation ++ byEntity ++ byUser ++ byKnowledge ++ byTask

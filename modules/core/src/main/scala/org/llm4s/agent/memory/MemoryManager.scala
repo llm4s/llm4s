@@ -234,13 +234,15 @@ object MemoryStats {
  * @param defaultImportance Default importance score for unscored memories
  * @param contextTokenBudget Default token budget for context retrieval
  * @param consolidationEnabled Whether to enable automatic memory consolidation
+ * @param maxMemoriesPerGroup Maximum memories per consolidation group (prevents unbounded context)
  */
 final case class MemoryManagerConfig(
   autoRecordMessages: Boolean = true,
   autoExtractEntities: Boolean = false,
   defaultImportance: Double = 0.5,
   contextTokenBudget: Int = 2000,
-  consolidationEnabled: Boolean = false
+  consolidationEnabled: Boolean = false,
+  maxMemoriesPerGroup: Int = 50
 )
 
 object MemoryManagerConfig {
