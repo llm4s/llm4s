@@ -224,6 +224,22 @@ sbt "samples/runMain org.llm4s.samples.basic.AgentLLMCallingExample"
 - Agent state tracking
 
 ---
+ ### ProviderFallBackExample
+
+**File:** [`ProviderFallBackExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/basic/ProviderFallBackExample.scala)
+LLM calls with automatic provider fallback for reliability.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.basic.ProviderFallBackExample"
+```
+**What it demonstrates:**
+- Multiple provider configurations
+- Automatic fallback on failure
+- Enhanced reliability
+
+---
+
+
 
 ## Agent Examples
 
