@@ -1,0 +1,483 @@
+package org.llm4s.agent.memory
+
+import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.model._
+import org.llm4s.types.Result
+
+import java.time.Instant
+
+/**
+ * Memory manager with LLM-powered consolidation and entity extraction.
+ *
+ * Extends basic memory management with advanced features:
+ * - Automatic memory consolidation using LLM summarization
+ * - Entity extraction from conversation text (TODO: Phase 2)
+ * - Importance scoring based on content analysis (TODO: Phase 2)
+ *
+ * This implementation follows the same patterns as SimpleMemoryManager
+ * but adds LLM-powered intelligence for memory operations.
+ *
+ * @param config Configuration for memory management
+ * @param store Underlying memory store
+ * @param client LLM client for consolidation and extraction
+ */
+final case class LLMMemoryManager(
+  config: MemoryManagerConfig,
+  override val store: MemoryStore,
+  client: LLMClient
+) extends MemoryManager {
+
+  // ============================================================
+  // Recording methods (same as SimpleMemoryManager)
+  // ============================================================
+
+  override def recordMessage(
+    message: Message,
+    conversationId: String,
+    importance: Option[Double]
+  ): Result[MemoryManager] = {
+    val role = message match {
+      case _: UserMessage      => "user"
+      case _: AssistantMessage => "assistant"
+      case _: SystemMessage    => "system"
+      case _: ToolMessage      => "tool"
+    }
+
+    val memory = Memory
+      .fromConversation(message.content, role, Some(conversationId))
+      .copy(importance = importance.orElse(Some(config.defaultImportance)))
+
+    store.store(memory).map(newStore => copy(store = newStore))
+  }
+
+  override def recordConversation(
+    messages: Seq[Message],
+    conversationId: String
+  ): Result[MemoryManager] =
+    messages.foldLeft[Result[MemoryManager]](Right(this)) { (acc, message) =>
+      acc.flatMap(_.recordMessage(message, conversationId, None))
+    }
+
+  override def recordEntityFact(
+    entityId: EntityId,
+    entityName: String,
+    fact: String,
+    entityType: String,
+    importance: Option[Double]
+  ): Result[MemoryManager] = {
+    val memory = Memory
+      .forEntity(entityId, entityName, fact, entityType)
+      .copy(importance = importance.orElse(Some(config.defaultImportance)))
+
+    store.store(memory).map(newStore => copy(store = newStore))
+  }
+
+  override def recordUserFact(
+    fact: String,
+    userId: Option[String],
+    importance: Option[Double]
+  ): Result[MemoryManager] = {
+    val memory = Memory
+      .userFact(fact, userId)
+      .copy(importance = importance.orElse(Some(config.defaultImportance)))
+
+    store.store(memory).map(newStore => copy(store = newStore))
+  }
+
+  override def recordKnowledge(
+    content: String,
+    source: String,
+    metadata: Map[String, String]
+  ): Result[MemoryManager] = {
+    val memory = Memory
+      .fromKnowledge(content, source)
+      .withMetadata(metadata)
+
+    store.store(memory).map(newStore => copy(store = newStore))
+  }
+
+  override def recordTask(
+    description: String,
+    outcome: String,
+    success: Boolean,
+    importance: Option[Double]
+  ): Result[MemoryManager] = {
+    val memory = Memory
+      .fromTask(description, outcome, success)
+      .copy(importance = importance.orElse(Some(config.defaultImportance)))
+
+    store.store(memory).map(newStore => copy(store = newStore))
+  }
+
+  // ============================================================
+  // Context retrieval methods (same as SimpleMemoryManager)
+  // ============================================================
+
+  override def getRelevantContext(
+    query: String,
+    maxTokens: Int,
+    filter: MemoryFilter
+  ): Result[String] = {
+    // Estimate ~4 chars per token
+    val approxMaxChars = maxTokens * 4
+
+    for {
+      scored <- store.search(query, topK = 20, filter)
+    } yield formatMemoriesAsContext(scored.map(_.memory), approxMaxChars)
+  }
+
+  override def getConversationContext(
+    conversationId: String,
+    maxMessages: Int
+  ): Result[String] =
+    for {
+      memories <- store.getConversation(conversationId, maxMessages)
+    } yield
+      if (memories.isEmpty) {
+        ""
+      } else {
+        val lines = memories.map { memory =>
+          val role = memory.getMetadata("role").getOrElse("unknown")
+          s"[$role]: ${memory.content}"
+        }
+        s"Previous conversation:\n${lines.mkString("\n")}"
+      }
+
+  override def getEntityContext(entityId: EntityId): Result[String] =
+    for {
+      memories <- store.getEntityMemories(entityId)
+    } yield
+      if (memories.isEmpty) {
+        ""
+      } else {
+        val entityName = memories.headOption
+          .flatMap(_.getMetadata("entity_name"))
+          .getOrElse(entityId.value)
+
+        val facts = memories.map(m => s"- ${m.content}")
+        s"Known facts about $entityName:\n${facts.mkString("\n")}"
+      }
+
+  override def getUserContext(userId: Option[String]): Result[String] = {
+    val filter = userId match {
+      case Some(id) =>
+        MemoryFilter.ByType(MemoryType.UserFact) && MemoryFilter.ByMetadata("user_id", id)
+      case None =>
+        MemoryFilter.ByType(MemoryType.UserFact)
+    }
+
+    for {
+      memories <- store.recall(filter)
+    } yield
+      if (memories.isEmpty) {
+        ""
+      } else {
+        val facts = memories.map(m => s"- ${m.content}")
+        s"Known facts about the user:\n${facts.mkString("\n")}"
+      }
+  }
+
+  // ============================================================
+  // LLM-powered consolidation (NEW IMPLEMENTATION)
+  // ============================================================
+
+  override def consolidateMemories(
+    olderThan: Instant,
+    minCount: Int
+  ): Result[MemoryManager] = {
+    // 1. Find old memories that need consolidation
+    store.recall(
+      filter = MemoryFilter.before(olderThan),
+      limit = Int.MaxValue
+    ).flatMap { oldMemories =>
+      // 2. Check if we have enough memories to consolidate
+      if (oldMemories.length < minCount) {
+        Right(this) // Not enough memories, return unchanged
+      } else {
+        // 3. Group memories by type and context
+        val grouped = groupMemoriesForConsolidation(oldMemories)
+
+        // 4. Consolidate each group
+        grouped.foldLeft[Result[MemoryStore]](Right(store)) {
+          case (accStore, group) =>
+            accStore.flatMap { s =>
+              consolidateGroup(group, s)
+            }
+        }.map(consolidatedStore => copy(store = consolidatedStore))
+      }
+    }
+  }
+
+  /**
+   * Group memories for consolidation.
+   *
+   * Groups by:
+   * - Conversation ID (consolidate entire conversations)
+   * - Entity ID (consolidate entity facts)
+   * - Memory type (consolidate similar types)
+   *
+   * Only groups with 3+ memories are returned.
+   */
+  private def groupMemoriesForConsolidation(
+    memories: Seq[Memory]
+  ): Seq[Seq[Memory]] = {
+    // Group by conversation
+    val byConversation = memories
+      .filter(_.conversationId.isDefined)
+      .groupBy(_.conversationId.get)
+      .values
+      .filter(_.length >= 3) // At least 3 messages
+      .toSeq
+
+    // Group by entity
+    val byEntity = memories
+      .filter(_.memoryType == MemoryType.Entity)
+      .groupBy(_.getMetadata("entity_id"))
+      .collect { case (Some(_), facts) if facts.length >= 3 => facts }
+      .toSeq
+
+    // Group user facts by user ID
+    val byUser = memories
+      .filter(_.memoryType == MemoryType.UserFact)
+      .groupBy(_.getMetadata("user_id"))
+      .values
+      .filter(_.length >= 3)
+      .toSeq
+
+    // Group knowledge by source
+    val byKnowledge = memories
+      .filter(_.memoryType == MemoryType.Knowledge)
+      .groupBy(_.source)
+      .collect { case (Some(_), entries) if entries.length >= 3 => entries }
+      .toSeq
+
+    // Group tasks
+    val byTask = memories
+      .filter(_.memoryType == MemoryType.Task)
+      .grouped(5) // Group every 5 tasks
+      .filter(_.length >= 3)
+      .toSeq
+
+    byConversation ++ byEntity ++ byUser ++ byKnowledge ++ byTask
+  }
+
+  /**
+   * Consolidate a single group of memories.
+   *
+   * Uses LLM to generate a summary, then replaces the group
+   * with a single consolidated memory.
+   */
+  private def consolidateGroup(
+    group: Seq[Memory],
+    currentStore: MemoryStore
+  ): Result[MemoryStore] = {
+    if (group.isEmpty) return Right(currentStore)
+
+    // 1. Determine consolidation prompt based on memory type
+    val prompt = selectPromptForGroup(group)
+
+    // 2. Call LLM to consolidate
+    val completionResult = client.complete(
+      conversation = Conversation(Seq(UserMessage(prompt))),
+      options = CompletionOptions()
+    )
+
+    completionResult.flatMap { completion =>
+      val consolidatedText = completion.content.trim
+
+      // 3. Create consolidated memory
+      val consolidatedMemory = Memory(
+        id = MemoryId.generate(),
+        content = consolidatedText,
+        memoryType = group.head.memoryType,
+        metadata = mergeMetadata(group),
+        timestamp = Instant.now(),
+        importance = Some(group.flatMap(_.importance).maxOption.getOrElse(config.defaultImportance)),
+        embedding = None // Will be regenerated if needed
+      )
+
+      // 4. Delete old memories and store consolidated one
+      val deleteResult = group.foldLeft[Result[MemoryStore]](Right(currentStore)) {
+        case (accStore, memory) =>
+          accStore.flatMap(_.delete(memory.id))
+      }
+
+      deleteResult.flatMap(_.store(consolidatedMemory))
+    }
+  }
+
+  /**
+   * Select the appropriate consolidation prompt for a memory group.
+   */
+  private def selectPromptForGroup(group: Seq[Memory]): String = {
+    group.head.memoryType match {
+      case MemoryType.Conversation =>
+        ConsolidationPrompts.conversationSummary(group)
+
+      case MemoryType.Entity =>
+        val entityName = group.head.getMetadata("entity_name").getOrElse("Unknown")
+        ConsolidationPrompts.entityConsolidation(entityName, group)
+
+      case MemoryType.Knowledge =>
+        ConsolidationPrompts.knowledgeConsolidation(group)
+
+      case MemoryType.UserFact =>
+        val userId = group.head.getMetadata("user_id")
+        ConsolidationPrompts.userFactConsolidation(userId, group)
+
+      case MemoryType.Task =>
+        ConsolidationPrompts.taskConsolidation(group)
+
+      case MemoryType.Custom(_) =>
+        ConsolidationPrompts.knowledgeConsolidation(group)
+    }
+  }
+
+  /**
+   * Merge metadata from multiple memories.
+   *
+   * Keeps unique values and important fields, adds consolidation metadata.
+   */
+  private def mergeMetadata(memories: Seq[Memory]): Map[String, String] = {
+    val baseMetadata = memories.head.metadata
+
+    // Add consolidation metadata
+    baseMetadata ++ Map(
+      "consolidated_from"    -> memories.length.toString,
+      "consolidated_at"      -> Instant.now().toString,
+      "original_ids"         -> memories.map(_.id.value).take(10).mkString(","),
+      "consolidation_method" -> "llm_summary"
+    )
+  }
+
+  // ============================================================
+  // Entity extraction (TODO: Future implementation)
+  // ============================================================
+
+  override def extractEntities(
+    text: String,
+    conversationId: Option[String]
+  ): Result[MemoryManager] =
+    // TODO: Implement LLM-based entity extraction
+    // For now, return unchanged
+    Right(this)
+
+  // ============================================================
+  // Statistics
+  // ============================================================
+
+  override def stats: Result[MemoryStats] =
+    for {
+      total             <- store.count()
+      conversationCount <- store.count(MemoryFilter.conversations)
+      entityCount       <- store.count(MemoryFilter.entities)
+      knowledgeCount    <- store.count(MemoryFilter.knowledge)
+      userFactCount     <- store.count(MemoryFilter.userFacts)
+      taskCount         <- store.count(MemoryFilter.tasks)
+      allMemories       <- store.recall(MemoryFilter.All, Int.MaxValue)
+    } yield {
+      val byType = Map[MemoryType, Long](
+        MemoryType.Conversation -> conversationCount,
+        MemoryType.Entity       -> entityCount,
+        MemoryType.Knowledge    -> knowledgeCount,
+        MemoryType.UserFact     -> userFactCount,
+        MemoryType.Task         -> taskCount
+      ).filter(_._2 > 0)
+
+      val timestamps = allMemories.map(_.timestamp)
+      val embedded   = allMemories.count(_.isEmbedded)
+
+      val distinctEntities = allMemories
+        .flatMap(_.getMetadata("entity_id"))
+        .distinct
+        .size
+
+      val distinctConversations = allMemories
+        .flatMap(_.getMetadata("conversation_id"))
+        .distinct
+        .size
+
+      MemoryStats(
+        totalMemories = total,
+        byType = byType,
+        entityCount = distinctEntities.toLong,
+        conversationCount = distinctConversations.toLong,
+        embeddedCount = embedded.toLong,
+        oldestMemory = if (timestamps.isEmpty) None else Some(timestamps.min),
+        newestMemory = if (timestamps.isEmpty) None else Some(timestamps.max)
+      )
+    }
+
+  /**
+   * Format memories as context string.
+   */
+  private def formatMemoriesAsContext(memories: Seq[Memory], maxChars: Int): String = {
+    if (memories.isEmpty) return ""
+
+    val sections      = memories.groupBy(_.memoryType)
+    val formatted     = new StringBuilder()
+    var currentLength = 0
+
+    def addSection(title: String, mems: Seq[Memory]): Unit =
+      if (mems.nonEmpty && currentLength < maxChars) {
+        val header = s"\n## $title\n"
+        formatted.append(header)
+        currentLength += header.length
+
+        mems.takeWhile { memory =>
+          val line = s"- ${memory.content}\n"
+          if (currentLength + line.length <= maxChars) {
+            formatted.append(line)
+            currentLength += line.length
+            true
+          } else false
+        }
+      }
+
+    // Order sections by relevance
+    sections.get(MemoryType.Knowledge).foreach(addSection("Relevant Knowledge", _))
+    sections.get(MemoryType.Entity).foreach(addSection("Entity Information", _))
+    sections.get(MemoryType.UserFact).foreach(addSection("User Preferences", _))
+    sections.get(MemoryType.Conversation).foreach(addSection("Previous Context", _))
+    sections.get(MemoryType.Task).foreach(addSection("Past Tasks", _))
+
+    // Handle custom types
+    sections.foreach {
+      case (MemoryType.Custom(name), mems) => addSection(s"$name", mems)
+      case _                               => // already handled
+    }
+
+    if (formatted.nonEmpty) {
+      s"# Retrieved Context\n${formatted.toString.trim}"
+    } else ""
+  }
+}
+
+object LLMMemoryManager {
+
+  /**
+   * Create a new LLM-powered memory manager.
+   */
+  def apply(
+    config: MemoryManagerConfig,
+    store: MemoryStore,
+    client: LLMClient
+  ): LLMMemoryManager =
+    new LLMMemoryManager(config, store, client)
+
+  /**
+   * Create with default configuration.
+   */
+  def withDefaults(store: MemoryStore, client: LLMClient): LLMMemoryManager =
+    new LLMMemoryManager(MemoryManagerConfig.default, store, client)
+
+  /**
+   * Create with in-memory store for testing.
+   */
+  def forTesting(client: LLMClient): LLMMemoryManager =
+    new LLMMemoryManager(
+      MemoryManagerConfig.testing,
+      InMemoryStore.forTesting(),
+      client
+    )
+}
