@@ -1,4 +1,4 @@
-package samples.cache
+package org.llm4s.samples.cache
 
 import org.llm4s.llmconnect.caching.{ CacheConfig, CachingLLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
@@ -21,7 +21,7 @@ import scala.concurrent.duration._
  * Prerequisites:
  * - Set OPENAI_API_KEY environment variable
  *
- * Run with: sbt "samples/runMain samples.cache.SemanticCachingSample"
+ * Run with: sbt "samples/runMain org.llm4s.samples.cache.SemanticCachingSample"
  */
 object SemanticCachingSample extends App {
 

@@ -108,8 +108,11 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     client.complete(conversation)
     mockLLM.callCount shouldBe 1
     tracing.events should have size 1
-    val missEvent = tracing.events.head.asInstanceOf[TraceEvent.CacheMiss]
-    missEvent.reason shouldBe TraceEvent.CacheMissReason.LowSimilarity
+    tracing.events.head match {
+      case missEvent: TraceEvent.CacheMiss =>
+        missEvent.reason shouldBe TraceEvent.CacheMissReason.LowSimilarity
+      case other => fail(s"Expected CacheMiss but got $other")
+    }
 
     // Hit
     client.complete(conversation)
@@ -135,8 +138,11 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     mockLLM.callCount shouldBe 2
 
     // Verify reason
-    val missEvent = tracing.events.last.asInstanceOf[TraceEvent.CacheMiss]
-    missEvent.reason shouldBe TraceEvent.CacheMissReason.OptionsMismatch
+    tracing.events.last match {
+      case missEvent: TraceEvent.CacheMiss =>
+        missEvent.reason shouldBe TraceEvent.CacheMissReason.OptionsMismatch
+      case other => fail(s"Expected CacheMiss but got $other")
+    }
   }
 
   test("TTL expiration logs TtlExpired") {
@@ -160,8 +166,11 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     mockLLM.callCount shouldBe 2
 
     // Verify reason
-    val missEvent = tracing.events.last.asInstanceOf[TraceEvent.CacheMiss]
-    missEvent.reason shouldBe TraceEvent.CacheMissReason.TtlExpired
+    tracing.events.last match {
+      case missEvent: TraceEvent.CacheMiss =>
+        missEvent.reason shouldBe TraceEvent.CacheMissReason.TtlExpired
+      case other => fail(s"Expected CacheMiss but got $other")
+    }
   }
 
   test("Config validation returns Result") {
