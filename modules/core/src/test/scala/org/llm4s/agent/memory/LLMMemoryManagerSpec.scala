@@ -70,12 +70,39 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     def getReserveCompletion(): Int = 1024
   }
 
+  /**
+   * Mock LLM client that fails for testing error paths.
+   */
+  class FailingMockLLMClient extends LLMClient {
+    override def complete(
+      conversation: Conversation,
+      options: CompletionOptions
+    ): Result[Completion] =
+      Left(org.llm4s.error.APIError("test-provider", "Mock LLM failure for testing"))
+
+    def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] =
+      complete(conversation, options)
+
+    def getContextWindow(): Int = 4096
+
+    def getReserveCompletion(): Int = 1024
+  }
+
   // ============================================================
   // Helper methods
   // ============================================================
 
   def createManager(): LLMMemoryManager = {
     val client = new MockLLMClient()
+    LLMMemoryManager.forTesting(client)
+  }
+
+  def createFailingManager(): LLMMemoryManager = {
+    val client = new FailingMockLLMClient()
     LLMMemoryManager.forTesting(client)
   }
 
@@ -467,5 +494,194 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     )
 
     result.isRight shouldBe true
+  }
+
+  // ============================================================
+  // Error path tests
+  // ============================================================
+
+  it should "handle LLM failures during consolidation" in {
+    val manager = createFailingManager()
+
+    val result = for {
+      m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
+      m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
+      m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
+
+      consolidated <- m3.consolidateMemories(
+        olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
+        minCount = 3
+      )
+    } yield consolidated
+
+    result.isLeft shouldBe true
+  }
+
+  it should "preserve original memories when LLM consolidation fails" in {
+    val manager = createFailingManager()
+
+    val result = for {
+      m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
+      m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
+      m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
+
+      // Try to consolidate (should fail)
+      consolidated <- m3.consolidateMemories(
+        olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
+        minCount = 3
+      )
+
+      memories <- consolidated.store.recall(MemoryFilter.All, 100)
+    } yield memories
+
+    // Should fail and not delete original memories
+    result.isLeft shouldBe true
+  }
+
+  // ============================================================
+  // formatMemoriesAsContext edge cases
+  // ============================================================
+
+  it should "handle empty context retrieval" in {
+    val manager = createManager()
+
+    val result = manager.getRelevantContext("nonexistent query", maxTokens = 100)
+
+    result.isRight shouldBe true
+    result.toOption.get shouldBe ""
+  }
+
+  it should "truncate context when exceeding maxTokens" in {
+    val manager = createManager()
+
+    // Create many memories with long content
+    val result = for {
+      m1 <- manager.recordKnowledge("A" * 1000, "source1.md", Map.empty)
+      m2 <- m1.recordKnowledge("B" * 1000, "source2.md", Map.empty)
+      m3 <- m2.recordKnowledge("C" * 1000, "source3.md", Map.empty)
+
+      // Request context with very low token limit
+      context <- m3.getRelevantContext("test query", maxTokens = 10)
+    } yield context
+
+    result.isRight shouldBe true
+    val context = result.toOption.get
+
+    // Should truncate based on maxTokens (10 tokens ≈ 40 chars)
+    context.length should be <= 200 // Allow some overhead for headers
+  }
+
+  it should "format different memory types in context" in {
+    val manager  = createManager()
+    val entityId = EntityId.fromName("TestEntity")
+
+    val result = for {
+      m1 <- manager.recordKnowledge("Knowledge fact", "doc.md", Map.empty)
+      m2 <- m1.recordEntityFact(entityId, "TestEntity", "Entity fact", "type", None)
+      m3 <- m2.recordUserFact("User fact", Some("user-1"), None)
+      m4 <- m3.recordTask("Task desc", "Outcome", success = true, None)
+
+      // Recall all to check they exist
+      allMemories <- m4.store.recall(MemoryFilter.All, 100)
+    } yield allMemories
+
+    result.isRight shouldBe true
+    val memories = result.toOption.get
+
+    // Verify all 4 memories were created
+    (memories should have length 4)
+    
+    // Verify each type is present
+    val types = memories.map(_.memoryType).toSet
+    types should contain(MemoryType.Knowledge)
+    types should contain(MemoryType.Entity)
+    types should contain(MemoryType.UserFact)
+    types should contain(MemoryType.Task)
+  }
+
+  // ============================================================
+  // Custom memory type tests
+  // ============================================================
+
+  it should "handle custom memory types" in {
+    val manager = createManager()
+
+    // Create custom memory using basic constructor
+    val customMemory = Memory(
+      id = MemoryId.generate(),
+      content = "Custom memory content",
+      memoryType = MemoryType.Custom("CustomType"),
+      metadata = Map.empty,
+      timestamp = Instant.now(),
+      importance = Some(0.8),
+      embedding = None
+    )
+
+    val result = for {
+      newStore    <- manager.store.store(customMemory)
+      newManager  = manager.copy(store = newStore)
+      stats       <- newManager.stats
+      allMemories <- newStore.recall(MemoryFilter.All, 100)
+    } yield (stats, allMemories)
+
+    result.isRight shouldBe true
+    val (stats, allMemories) = result.toOption.get
+
+    stats.totalMemories shouldBe 1
+    allMemories should have length 1
+    allMemories.head.memoryType shouldBe MemoryType.Custom("CustomType")
+  }
+
+  it should "consolidate custom memory types" in {
+    val manager = createManager()
+
+    // Create multiple custom memories with knowledge type (which is supported for consolidation)
+    val result = for {
+      m1 <- manager.recordKnowledge("Custom knowledge 1", "custom-source.md", Map("type" -> "custom"))
+      m2 <- m1.recordKnowledge("Custom knowledge 2", "custom-source.md", Map("type" -> "custom"))
+      m3 <- m2.recordKnowledge("Custom knowledge 3", "custom-source.md", Map("type" -> "custom"))
+
+      // Consolidate
+      consolidated <- m3.consolidateMemories(
+        olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
+        minCount = 3
+      )
+
+      memories <- consolidated.store.recall(MemoryFilter.knowledge, 100)
+    } yield memories
+
+    result.isRight shouldBe true
+    val memories = result.toOption.get
+
+    // Should consolidate knowledge entries from same source
+    (memories should have length 1)
+    memories.head.content should include("Consolidated")
+  }
+
+  it should "format custom memory types in context" in {
+    val manager = createManager()
+
+    val customMemory = Memory(
+      id = MemoryId.generate(),
+      content = "Custom content for retrieval",
+      memoryType = MemoryType.Custom("SpecialType"),
+      metadata = Map.empty,
+      timestamp = Instant.now(),
+      importance = Some(0.9),
+      embedding = None
+    )
+
+    val result = for {
+      newStore   <- manager.store.store(customMemory)
+      newManager = manager.copy(store = newStore)
+      context    <- newManager.getRelevantContext("custom", maxTokens = 1000)
+    } yield context
+
+    result.isRight shouldBe true
+    val context = result.toOption.get
+
+    // Should include custom type section
+    context should include("SpecialType")
+    context should include("Custom content")
   }
 }
