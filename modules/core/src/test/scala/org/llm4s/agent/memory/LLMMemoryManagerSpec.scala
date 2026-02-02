@@ -79,17 +79,6 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     LLMMemoryManager.forTesting(client)
   }
 
-  def createOldMemories(manager: LLMMemoryManager, conversationId: String): Result[LLMMemoryManager] = {
-    val messages = Seq(
-      UserMessage("What is Scala?"),
-      AssistantMessage("Scala is a programming language..."),
-      UserMessage("Tell me more"),
-      AssistantMessage("Scala runs on the JVM...")
-    )
-
-    manager.recordConversation(messages, conversationId).map(_.asInstanceOf[LLMMemoryManager])
-  }
-
   // ============================================================
   // Tests
   // ============================================================
