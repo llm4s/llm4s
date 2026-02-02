@@ -9,7 +9,6 @@ import org.llm4s.trace.{ TraceEvent, Tracing }
 import scala.jdk.CollectionConverters._
 import org.slf4j.LoggerFactory
 
-
 /**
  * Semantic caching wrapper for LLMClient.
  *
@@ -80,7 +79,7 @@ class CachingLLMClient(
     // to prevent leaking sensitive information found in tool arguments or outputs.
     val promptText = conversation.messages
       .collect {
-        case m: UserMessage => s"${m.role}: ${m.content}"
+        case m: UserMessage   => s"${m.role}: ${m.content}"
         case m: SystemMessage => s"${m.role}: ${m.content}"
       }
       .mkString("\n")
@@ -98,11 +97,16 @@ class CachingLLMClient(
 
         // Scan cache for semantic candidates and analyze them
         val (hit, missReason) = cache.synchronized {
-          val candidates = cache.entrySet().asScala.map { entry =>
-            val similarity =
-              org.llm4s.llmconnect.utils.SimilarityUtils.cosineSimilarity(currentEmbedding, entry.getValue.embedding)
-            (entry.getKey, entry.getValue, similarity)
-          }.filter(_._3 >= config.similarityThreshold).toList
+          val candidates = cache
+            .entrySet()
+            .asScala
+            .map { entry =>
+              val similarity =
+                org.llm4s.llmconnect.utils.SimilarityUtils.cosineSimilarity(currentEmbedding, entry.getValue.embedding)
+              (entry.getKey, entry.getValue, similarity)
+            }
+            .filter(_._3 >= config.similarityThreshold)
+            .toList
 
           // Find the best valid match (Sim >= Threshold AND Options Match AND TTL Valid)
           val validMatch = candidates
@@ -113,7 +117,7 @@ class CachingLLMClient(
 
           validMatch match {
             case Some(matchTuple) => (Some(matchTuple), None)
-            case None =>
+            case None             =>
               // Analyze why we missed
               val reason = if (candidates.isEmpty) {
                 TraceEvent.CacheMissReason.LowSimilarity
@@ -157,14 +161,13 @@ class CachingLLMClient(
     }
   }
 
-  private def isWithinTtl(timestamp: Instant, ttlNanos: Long, now: Instant): Boolean = {
-    try {
+  private def isWithinTtl(timestamp: Instant, ttlNanos: Long, now: Instant): Boolean =
+    try
       // Safe check for overflow issues with large TTLs
       timestamp.plusNanos(ttlNanos).isAfter(now)
-    } catch {
+    catch {
       case _: ArithmeticException => true // Treated as infinite TTL if overflow matches logic
     }
-  }
 
   private def executeAndCache(
     conversation: Conversation,
@@ -172,7 +175,7 @@ class CachingLLMClient(
     embedding: Seq[Double]
   ): Result[Completion] =
     baseClient.complete(conversation, options).map { completion =>
-      // Key is not used for lookup (we use embedding similarity scan), but required for the Map. 
+      // Key is not used for lookup (we use embedding similarity scan), but required for the Map.
       // Random UUID is sufficient and ensures uniqueness in the LRU cache.
       cache.put(java.util.UUID.randomUUID().toString, CacheEntry(embedding, completion, Instant.now(clock), options))
       completion

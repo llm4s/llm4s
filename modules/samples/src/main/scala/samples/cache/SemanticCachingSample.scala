@@ -52,14 +52,16 @@ object SemanticCachingSample extends App {
     apiKey = apiKey
   )
   val embeddingClient = EmbeddingClient.from("openai", embeddingConfig).fold(err => sys.error(err.message), identity)
-  val embeddingModel = EmbeddingModelConfig("text-embedding-3-small", 1536)
+  val embeddingModel  = EmbeddingModelConfig("text-embedding-3-small", 1536)
 
   // Configure cache: 95% similarity threshold, 5 minute TTL, max 100 entries
-  val cacheConfig = CacheConfig.create(
-    similarityThreshold = 0.95,
-    ttl = 5.minutes,
-    maxSize = 100
-  ).fold(err => sys.error(err.message), identity)
+  val cacheConfig = CacheConfig
+    .create(
+      similarityThreshold = 0.95,
+      ttl = 5.minutes,
+      maxSize = 100
+    )
+    .fold(err => sys.error(err.message), identity)
 
   // Wrap base client with caching
   val cachingClient = new CachingLLMClient(
@@ -78,7 +80,7 @@ object SemanticCachingSample extends App {
   // Demo 1: Cache miss then hit
   println("--- Demo 1: Identical queries (should hit cache) ---")
   val query1 = "What is the capital of France?"
-  val conv1 = Conversation.userOnly(query1).getOrElse(sys.error("Failed to create conversation"))
+  val conv1  = Conversation.userOnly(query1).getOrElse(sys.error("Failed to create conversation"))
 
   println(s"Query 1: $query1")
   cachingClient.complete(conv1) match {
@@ -95,7 +97,7 @@ object SemanticCachingSample extends App {
   // Demo 2: Similar query (should hit cache if similarity > threshold)
   println("--- Demo 2: Similar query ---")
   val query2 = "Tell me the capital city of France"
-  val conv2 = Conversation.userOnly(query2).getOrElse(sys.error("Failed to create conversation"))
+  val conv2  = Conversation.userOnly(query2).getOrElse(sys.error("Failed to create conversation"))
 
   println(s"Query 3 (similar): $query2")
   cachingClient.complete(conv2) match {
@@ -106,7 +108,7 @@ object SemanticCachingSample extends App {
   // Demo 3: Different query (should miss cache)
   println("--- Demo 3: Different query (should miss cache) ---")
   val query3 = "What is the capital of Germany?"
-  val conv3 = Conversation.userOnly(query3).getOrElse(sys.error("Failed to create conversation"))
+  val conv3  = Conversation.userOnly(query3).getOrElse(sys.error("Failed to create conversation"))
 
   println(s"Query 4 (different): $query3")
   cachingClient.complete(conv3) match {

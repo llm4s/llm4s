@@ -63,7 +63,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
       conversation: Conversation,
       options: CompletionOptions,
       onChunk: StreamedChunk => Unit
-    ): Result[Completion] = 
+    ): Result[Completion] =
       Left(org.llm4s.error.ProcessingError("mock", "streamComplete not implemented in mock"))
     override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 100
@@ -133,7 +133,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     // Request 2: temp 0.0 (Should be miss despite similar embedding)
     client.complete(conv, CompletionOptions(temperature = 0.0))
     mockLLM.callCount shouldBe 2
-    
+
     // Verify reason
     val missEvent = tracing.events.last.asInstanceOf[TraceEvent.CacheMiss]
     missEvent.reason shouldBe TraceEvent.CacheMissReason.OptionsMismatch
@@ -178,13 +178,13 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
     val client    = new CachingLLMClient(mockLLM, mockEmbed, embeddingModel, config, new MockTracing(), new MockClock())
 
     val conversation = Conversation(
-        messages = List(
-            UserMessage("What is the weather?"),
-            AssistantMessage("Checking...", toolCalls = List(ToolCall("1", "weather", "{\"loc\":\"Paris\"}"))),
-            ToolMessage("Paris: 20C", "1"),
-            AssistantMessage("It is 20C"),
-            UserMessage("And in London?")
-        )
+      messages = List(
+        UserMessage("What is the weather?"),
+        AssistantMessage("Checking...", toolCalls = List(ToolCall("1", "weather", "{\"loc\":\"Paris\"}"))),
+        ToolMessage("Paris: 20C", "1"),
+        AssistantMessage("It is 20C"),
+        UserMessage("And in London?")
+      )
     )
 
     client.complete(conversation)

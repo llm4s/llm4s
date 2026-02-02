@@ -9,14 +9,15 @@ import java.time.Instant
 class LangfuseTracingCacheEventsSpec extends AnyFunSuite with Matchers {
 
   // Spy class to capture events without making HTTP calls
-  class LangfuseTracingSpy extends LangfuseTracing(
-    "http://mock-url",
-    "mock-public-key",
-    "mock-secret-key",
-    "test-env",
-    "v1.0.0",
-    "1.0.0"
-  ) {
+  class LangfuseTracingSpy
+      extends LangfuseTracing(
+        "http://mock-url",
+        "mock-public-key",
+        "mock-secret-key",
+        "test-env",
+        "v1.0.0",
+        "1.0.0"
+      ) {
     var lastEventJson: Option[ujson.Obj] = None
 
     override protected def sendBatch(events: Seq[ujson.Obj]): Result[Unit] = {
@@ -41,7 +42,7 @@ class LangfuseTracingCacheEventsSpec extends AnyFunSuite with Matchers {
     spy.lastEventJson shouldBe defined
     val json = spy.lastEventJson.get
     json("type").str shouldBe "span-create"
-    
+
     val body = json("body").obj
     body("name").str shouldBe "Cache Hit"
     body("input").obj("similarity").num shouldBe 0.95
@@ -62,7 +63,7 @@ class LangfuseTracingCacheEventsSpec extends AnyFunSuite with Matchers {
     spy.lastEventJson shouldBe defined
     val json = spy.lastEventJson.get
     json("type").str shouldBe "span-create"
-    
+
     val body = json("body").obj
     body("name").str shouldBe "Cache Miss"
     body("input").obj("reason").str shouldBe "low_similarity"
