@@ -59,11 +59,11 @@ object MemoryConsolidationExample {
     }
   }
 
-  private def runExample(client: LLMClient, providerName: String): Boolean = {
+  private def runExample(client: LLMClient, modelName: String): Boolean = {
     logger.info("--- Part 1: Setting up LLM Memory Manager ---")
     val store                  = InMemoryStore.empty
     var manager: MemoryManager = LLMMemoryManager.withDefaults(store, client)
-    logger.info("Created LLMMemoryManager with {} model", providerName)
+    logger.info("Created LLMMemoryManager with {} model", modelName)
 
     // Part 2: Populate with conversation memories
     logger.info("\n--- Part 2: Populating with Conversation Memories ---")
