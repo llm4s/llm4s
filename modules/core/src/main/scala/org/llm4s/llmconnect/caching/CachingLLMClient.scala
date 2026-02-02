@@ -134,7 +134,9 @@ class CachingLLMClient(
         hit match {
           case Some((key, entry, score)) =>
             logger.debug(s"Cache hit! Similarity: $score > ${config.similarityThreshold}")
-            val _ = tracing.traceEvent(TraceEvent.CacheHit(score, config.similarityThreshold, now))
+            tracing.traceEvent(TraceEvent.CacheHit(score, config.similarityThreshold, now)).left.foreach { err =>
+              logger.warn(s"Failed to emit cache hit trace event: ${err.message}")
+            }
             cache.get(key) // Update LRU
             Right(entry.response)
 
@@ -142,7 +144,9 @@ class CachingLLMClient(
             val reasonStr = missReason.map(_.value).getOrElse("unknown")
             logger.debug(s"Cache miss. Reason: $reasonStr. Calling base client.")
             missReason.foreach { reason =>
-               val _ = tracing.traceEvent(TraceEvent.CacheMiss(reason, now))
+              tracing.traceEvent(TraceEvent.CacheMiss(reason, now)).left.foreach { err =>
+                logger.warn(s"Failed to emit cache miss trace event: ${err.message}")
+              }
             }
             executeAndCache(conversation, options, currentEmbedding)
         }

@@ -259,4 +259,54 @@ object TraceEvent {
       )
     )
 
+  /**
+   * Cache hit event for semantic caching
+   */
+  case class CacheHit(
+    similarity: Double,
+    threshold: Double,
+    timestamp: Instant = Instant.now()
+  ) extends TraceEvent {
+    def eventType: String = "cache_hit"
+    def toJson: ujson.Value = ujson.Obj(
+      "event_type" -> eventType,
+      "timestamp"  -> timestamp.toString,
+      "similarity" -> similarity,
+      "threshold"  -> threshold
+    )
+  }
+
+  /**
+   * Cache miss reason ADT
+   */
+  sealed trait CacheMissReason {
+    def value: String
+  }
+  object CacheMissReason {
+    case object LowSimilarity extends CacheMissReason {
+      def value: String = "low_similarity"
+    }
+    case object TtlExpired extends CacheMissReason {
+      def value: String = "ttl_expired"
+    }
+    case object OptionsMismatch extends CacheMissReason {
+      def value: String = "options_mismatch"
+    }
+  }
+
+  /**
+   * Cache miss event for semantic caching
+   */
+  case class CacheMiss(
+    reason: CacheMissReason,
+    timestamp: Instant = Instant.now()
+  ) extends TraceEvent {
+    def eventType: String = "cache_miss"
+    def toJson: ujson.Value = ujson.Obj(
+      "event_type" -> eventType,
+      "timestamp"  -> timestamp.toString,
+      "reason"     -> reason.value
+    )
+  }
+
 }

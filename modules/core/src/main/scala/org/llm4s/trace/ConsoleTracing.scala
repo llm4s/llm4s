@@ -148,6 +148,21 @@ class ConsoleTracing extends Tracing {
           println(s"${YELLOW}Cost (USD): $$${f"${e.costUsd}%.6f"}$RESET")
           println()
 
+        case e: TraceEvent.CacheHit =>
+          println()
+          printSubHeader("CACHE HIT", GREEN)
+          println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
+          println(s"${GREEN}Similarity: ${f"${e.similarity}%.4f"}$RESET")
+          println(s"${GREEN}Threshold: ${f"${e.threshold}%.4f"}$RESET")
+          println()
+
+        case e: TraceEvent.CacheMiss =>
+          println()
+          printSubHeader("CACHE MISS", YELLOW)
+          println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
+          println(s"${YELLOW}Reason: ${e.reason.value}$RESET")
+          println()
+
         case e: TraceEvent.RAGOperationCompleted =>
           println()
           printSubHeader("RAG OPERATION COMPLETED", CYAN)

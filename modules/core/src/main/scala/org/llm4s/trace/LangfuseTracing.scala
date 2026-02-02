@@ -368,6 +368,52 @@ class LangfuseTracing(
           )
         )
 
+      case e: TraceEvent.CacheHit =>
+        ujson.Obj(
+          "id"        -> uuid,
+          "timestamp" -> now,
+          "type"      -> "span-create",
+          "body" -> ujson.Obj(
+            "id"        -> uuid,
+            "timestamp" -> now,
+            "name"      -> "Cache Hit",
+            "level"     -> "DEFAULT",
+            "input" -> ujson.Obj(
+              "similarity" -> e.similarity,
+              "threshold"  -> e.threshold
+            ),
+            "output" -> ujson.Obj(
+              "result" -> "hit"
+            ),
+            "metadata" -> ujson.Obj(
+              "similarity" -> e.similarity,
+              "threshold"  -> e.threshold
+            )
+          )
+        )
+
+      case e: TraceEvent.CacheMiss =>
+        ujson.Obj(
+          "id"        -> uuid,
+          "timestamp" -> now,
+          "type"      -> "span-create",
+          "body" -> ujson.Obj(
+            "id"        -> uuid,
+            "timestamp" -> now,
+            "name"      -> "Cache Miss",
+            "level"     -> "DEFAULT",
+            "input" -> ujson.Obj(
+              "reason" -> e.reason.value
+            ),
+            "output" -> ujson.Obj(
+              "result" -> "miss"
+            ),
+            "metadata" -> ujson.Obj(
+              "reason" -> e.reason.value
+            )
+          )
+        )
+
       case e: TraceEvent.RAGOperationCompleted =>
         val outputObj = ujson.Obj(
           "operation"   -> e.operation,
