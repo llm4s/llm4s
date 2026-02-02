@@ -296,12 +296,13 @@ final case class LLMMemoryManager(
         embedding = None // Will be regenerated if needed
       )
 
-      // 4. Delete old memories and store consolidated one
-      val deleteResult = group.foldLeft[Result[MemoryStore]](Right(currentStore)) { case (accStore, memory) =>
-        accStore.flatMap(_.delete(memory.id))
+      // 4. Store consolidated memory first, then delete originals
+      // This prevents data loss if delete succeeds but store fails
+      currentStore.store(consolidatedMemory).flatMap { updatedStore =>
+        group.foldLeft[Result[MemoryStore]](Right(updatedStore)) { case (accStore, memory) =>
+          accStore.flatMap(_.delete(memory.id))
+        }
       }
-
-      deleteResult.flatMap(_.store(consolidatedMemory))
     }
   }
 
