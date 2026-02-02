@@ -192,20 +192,15 @@ final case class LLMMemoryManager(
         limit = Int.MaxValue
       )
       .flatMap { oldMemories =>
-        // 2. Check if we have enough memories to consolidate
-        if (oldMemories.length < minCount) {
-          Right(this) // Not enough memories, return unchanged
-        } else {
-          // 3. Group memories by type and context
-          val grouped = groupMemoriesForConsolidation(oldMemories)
+        // 2. Group memories by type and context, applying minCount per group
+        val grouped = groupMemoriesForConsolidation(oldMemories, minCount)
 
-          // 4. Consolidate each group
-          grouped
-            .foldLeft[Result[MemoryStore]](Right(store)) { case (accStore, group) =>
-              accStore.flatMap(s => consolidateGroup(group, s))
-            }
-            .map(consolidatedStore => copy(store = consolidatedStore))
-        }
+        // 3. Consolidate each group
+        grouped
+          .foldLeft[Result[MemoryStore]](Right(store)) { case (accStore, group) =>
+            accStore.flatMap(s => consolidateGroup(group, s))
+          }
+          .map(consolidatedStore => copy(store = consolidatedStore))
       }
 
   /**
@@ -216,18 +211,22 @@ final case class LLMMemoryManager(
    * - Entity ID (consolidate entity facts)
    * - Memory type (consolidate similar types)
    *
-   * Only groups with 3+ memories are returned.
+   * Only groups with minCount+ memories are returned.
    * Caps each group at config.maxMemoriesPerGroup to prevent context overflow.
+   *
+   * @param memories Memories to group
+   * @param minCount Minimum memories required per group for consolidation
    */
   private def groupMemoriesForConsolidation(
-    memories: Seq[Memory]
+    memories: Seq[Memory],
+    minCount: Int
   ): Seq[Seq[Memory]] = {
     // Group by conversation
     val byConversation = memories
       .filter(_.conversationId.isDefined)
       .groupBy(_.conversationId.get)
       .values
-      .filter(_.length >= 3)                   // At least 3 messages
+      .filter(_.length >= minCount)            // Apply minCount per group
       .map(_.take(config.maxMemoriesPerGroup)) // Cap group size
       .toSeq
 
@@ -235,7 +234,7 @@ final case class LLMMemoryManager(
     val byEntity = memories
       .filter(_.memoryType == MemoryType.Entity)
       .groupBy(_.getMetadata("entity_id"))
-      .collect { case (Some(_), facts) if facts.length >= 3 => facts.take(config.maxMemoriesPerGroup) }
+      .collect { case (Some(_), facts) if facts.length >= minCount => facts.take(config.maxMemoriesPerGroup) }
       .toSeq
 
     // Group user facts by user ID
@@ -243,7 +242,7 @@ final case class LLMMemoryManager(
       .filter(_.memoryType == MemoryType.UserFact)
       .groupBy(_.getMetadata("user_id"))
       .values
-      .filter(_.length >= 3)
+      .filter(_.length >= minCount)            // Apply minCount per group
       .map(_.take(config.maxMemoriesPerGroup)) // Cap group size
       .toSeq
 
@@ -251,14 +250,14 @@ final case class LLMMemoryManager(
     val byKnowledge = memories
       .filter(_.memoryType == MemoryType.Knowledge)
       .groupBy(_.source)
-      .collect { case (Some(_), entries) if entries.length >= 3 => entries.take(config.maxMemoriesPerGroup) }
+      .collect { case (Some(_), entries) if entries.length >= minCount => entries.take(config.maxMemoriesPerGroup) }
       .toSeq
 
     // Group tasks
     val byTask = memories
       .filter(_.memoryType == MemoryType.Task)
-      .grouped(5) // Group every 5 tasks
-      .filter(_.length >= 3)
+      .grouped(5)                              // Group every 5 tasks
+      .filter(_.length >= minCount)            // Apply minCount per group
       .map(_.take(config.maxMemoriesPerGroup)) // Cap group size
       .toSeq
 
