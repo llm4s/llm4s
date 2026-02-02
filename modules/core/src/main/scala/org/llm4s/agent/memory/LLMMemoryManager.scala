@@ -295,7 +295,7 @@ final case class LLMMemoryManager(
         memoryType = group.head.memoryType,
         metadata = mergeMetadata(group),
         timestamp = Instant.now(),
-        importance = Some(group.flatMap(_.importance).maxOption.getOrElse(config.defaultImportance)),
+        importance = group.flatMap(_.importance).maxOption,
         embedding = None // Will be regenerated if needed
       )
 
