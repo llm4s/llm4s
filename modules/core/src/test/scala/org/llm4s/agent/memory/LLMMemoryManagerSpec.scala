@@ -514,7 +514,10 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       )
     } yield consolidated
 
-    result.isLeft shouldBe true
+    // Should succeed (non-fatal error recovery) but preserve original memories
+    result.isRight shouldBe true
+    val memories = result.toOption.get.store.recall(MemoryFilter.All, 100)
+    (memories.toOption.get should have).length(3) // Original memories preserved
   }
 
   it should "preserve original memories when LLM consolidation fails" in {
@@ -525,7 +528,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
       m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
 
-      // Try to consolidate (should fail)
+      // Try to consolidate (should continue despite LLM failure)
       consolidated <- m3.consolidateMemories(
         olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
         minCount = 3
@@ -534,8 +537,9 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       memories <- consolidated.store.recall(MemoryFilter.All, 100)
     } yield memories
 
-    // Should fail and not delete original memories
-    result.isLeft shouldBe true
+    // Should succeed and preserve original memories (non-fatal error recovery)
+    result.isRight shouldBe true
+    (result.toOption.get should have).length(3) // All original memories preserved
   }
 
   // ============================================================

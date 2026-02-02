@@ -195,10 +195,19 @@ final case class LLMMemoryManager(
         // 2. Group memories by type and context, applying minCount per group
         val grouped = groupMemoriesForConsolidation(oldMemories, minCount)
 
-        // 3. Consolidate each group
+        // 3. Consolidate each group (continue on errors to make failures non-fatal)
         grouped
           .foldLeft[Result[MemoryStore]](Right(store)) { case (accStore, group) =>
-            accStore.flatMap(s => consolidateGroup(group, s))
+            accStore.flatMap { s =>
+              consolidateGroup(group, s) match {
+                case Right(newStore) => Right(newStore)
+                case Left(_) =>
+                  // Log error but continue with other groups (non-fatal consolidation)
+                  // In production, use proper logging framework
+                  // For now, continue with current store state
+                  Right(s)
+              }
+            }
           }
           .map(consolidatedStore => copy(store = consolidatedStore))
       }
@@ -215,6 +224,9 @@ final case class LLMMemoryManager(
    *
    * Only groups with minCount+ memories are returned.
    * Caps each group at config.maxMemoriesPerGroup to prevent context overflow.
+   *
+   * TODO: Use client.getContextWindow() for more accurate token budget management
+   * instead of relying on maxMemoriesPerGroup as a proxy.
    *
    * @param memories Memories to group
    * @param minCount Minimum memories required per group for consolidation
