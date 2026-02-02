@@ -593,8 +593,8 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     val memories = result.toOption.get
 
     // Verify all 4 memories were created
-    (memories should have length 4)
-    
+    (memories should have).length(4)
+
     // Verify each type is present
     val types = memories.map(_.memoryType).toSet
     types should contain(MemoryType.Knowledge)
@@ -622,8 +622,8 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     )
 
     val result = for {
-      newStore    <- manager.store.store(customMemory)
-      newManager  = manager.copy(store = newStore)
+      newStore <- manager.store.store(customMemory)
+      newManager = manager.copy(store = newStore)
       stats       <- newManager.stats
       allMemories <- newStore.recall(MemoryFilter.All, 100)
     } yield (stats, allMemories)
@@ -632,7 +632,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     val (stats, allMemories) = result.toOption.get
 
     stats.totalMemories shouldBe 1
-    allMemories should have length 1
+    (allMemories should have).length(1)
     allMemories.head.memoryType shouldBe MemoryType.Custom("CustomType")
   }
 
@@ -658,7 +658,7 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     val memories = result.toOption.get
 
     // Should consolidate knowledge entries from same source
-    (memories should have length 1)
+    (memories should have).length(1)
     memories.head.content should include("Consolidated")
   }
 
@@ -676,9 +676,9 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     )
 
     val result = for {
-      newStore   <- manager.store.store(customMemory)
+      newStore <- manager.store.store(customMemory)
       newManager = manager.copy(store = newStore)
-      context    <- newManager.getRelevantContext("custom", maxTokens = 1000)
+      context <- newManager.getRelevantContext("custom", maxTokens = 1000)
     } yield context
 
     result.isRight shouldBe true

@@ -201,7 +201,7 @@ final case class LLMMemoryManager(
             accStore.flatMap { s =>
               consolidateGroup(group, s) match {
                 case Right(newStore) => Right(newStore)
-                case Left(_) =>
+                case Left(_)         =>
                   // Log error but continue with other groups (non-fatal consolidation)
                   // In production, use proper logging framework
                   // For now, continue with current store state
