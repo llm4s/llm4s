@@ -335,13 +335,20 @@ final case class LLMMemoryManager(
   /**
    * Merge metadata from multiple memories.
    *
-   * Keeps unique values and important fields, adds consolidation metadata.
+   * Collects all unique key-value pairs across memories. For keys that appear
+   * in multiple memories with different values, keeps the first occurrence.
+   * Adds consolidation tracking metadata.
    */
   private def mergeMetadata(memories: Seq[Memory]): Map[String, String] = {
-    val baseMetadata = memories.head.metadata
+    // Merge all metadata, keeping first value for conflicting keys
+    val mergedMetadata = memories.foldLeft(Map.empty[String, String]) { (acc, memory) =>
+      memory.metadata.foldLeft(acc) { case (m, (key, value)) =>
+        if (m.contains(key)) m else m + (key -> value)
+      }
+    }
 
     // Add consolidation metadata
-    baseMetadata ++ Map(
+    mergedMetadata ++ Map(
       "consolidated_from"    -> memories.length.toString,
       "consolidated_at"      -> Instant.now().toString,
       "original_ids"         -> memories.map(_.id.value).take(10).mkString(","),
