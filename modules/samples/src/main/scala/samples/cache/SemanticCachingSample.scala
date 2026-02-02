@@ -3,7 +3,8 @@ package samples.cache
 import org.llm4s.llmconnect.caching.{ CacheConfig, CachingLLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.provider.openai.OpenAIProvider
+import org.llm4s.llmconnect.provider.OpenAIClient
+import org.llm4s.llmconnect.config.{ OpenAIConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.trace.{ ConsoleTracing, Tracing }
 
@@ -36,20 +37,29 @@ object SemanticCachingSample extends App {
   val tracing: Tracing = new ConsoleTracing()
 
   // Create base LLM client
-  val llmProvider = new OpenAIProvider(apiKey)
-  val baseLLMClient: LLMClient = llmProvider.chatClient("gpt-4o-mini")
+  val openAIConfig = OpenAIConfig.fromValues(
+    modelName = "gpt-4o-mini",
+    apiKey = apiKey,
+    organization = None,
+    baseUrl = "https://api.openai.com"
+  )
+  val baseLLMClient: LLMClient = OpenAIClient(openAIConfig).fold(err => sys.error(err.message), identity)
 
   // Create embedding client for semantic similarity
-  val embeddingProvider = new OpenAIProvider(apiKey)
-  val embeddingClient: EmbeddingClient = embeddingProvider.embeddingClient()
+  val embeddingConfig = EmbeddingProviderConfig(
+    baseUrl = "https://api.openai.com",
+    model = "text-embedding-3-small",
+    apiKey = apiKey
+  )
+  val embeddingClient = EmbeddingClient.from("openai", embeddingConfig).fold(err => sys.error(err.message), identity)
   val embeddingModel = EmbeddingModelConfig("text-embedding-3-small", 1536)
 
   // Configure cache: 95% similarity threshold, 5 minute TTL, max 100 entries
-  val cacheConfig = CacheConfig(
+  val cacheConfig = CacheConfig.create(
     similarityThreshold = 0.95,
     ttl = 5.minutes,
     maxSize = 100
-  )
+  ).fold(err => sys.error(err.message), identity)
 
   // Wrap base client with caching
   val cachingClient = new CachingLLMClient(

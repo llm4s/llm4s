@@ -9,12 +9,6 @@ import org.llm4s.trace.{ TraceEvent, Tracing }
 import scala.jdk.CollectionConverters._
 import org.slf4j.LoggerFactory
 
-case class CacheEntry(
-  embedding: Seq[Double],
-  response: Completion,
-  timestamp: Instant,
-  options: CompletionOptions
-)
 
 /**
  * Semantic caching wrapper for LLMClient.
@@ -49,6 +43,8 @@ case class CacheEntry(
  * == Limitations ==
  * - `streamComplete` requests bypass the cache entirely.
  * - Cache is in-memory and lost on restart.
+ * - Cache lookup involves a linear scan (O(n)) of all entries to calculate cosine similarity.
+ *   Performance may degrade with very large `maxSize`.
  *
  * @param baseClient The underlying LLM client to delegate to on cache miss.
  * @param embeddingClient Client to generate embeddings for prompts.

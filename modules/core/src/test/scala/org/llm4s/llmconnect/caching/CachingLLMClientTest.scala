@@ -92,7 +92,7 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
   }
 
   val embeddingModel = EmbeddingModelConfig("test-embedding", 3)
-  val config         = CacheConfig(similarityThreshold = 0.9, ttl = 1.hour)
+  val config         = CacheConfig.create(similarityThreshold = 0.9, ttl = 1.hour).getOrElse(fail("Invalid config"))
 
   test("Cache miss calls base client, caches result, and logs TraceEvent with correct reason") {
     val mockLLM   = new MockLLMClient()
@@ -165,11 +165,11 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
   }
 
   test("Config validation returns Result") {
-    CacheConfig.validate(CacheConfig(1.1, 1.hour)).isLeft shouldBe true
-    CacheConfig.validate(CacheConfig(-0.1, 1.hour)).isLeft shouldBe true
-    CacheConfig.validate(CacheConfig(0.5, 0.seconds)).isLeft shouldBe true
-    CacheConfig.validate(CacheConfig(0.5, 1.hour, 0)).isLeft shouldBe true
-    CacheConfig.validate(CacheConfig(0.5, 1.hour, 100)).isRight shouldBe true
+    CacheConfig.create(1.1, 1.hour).isLeft shouldBe true
+    CacheConfig.create(-0.1, 1.hour).isLeft shouldBe true
+    CacheConfig.create(0.5, 0.seconds).isLeft shouldBe true
+    CacheConfig.create(0.5, 1.hour, 0).isLeft shouldBe true
+    CacheConfig.create(0.5, 1.hour, 100).isRight shouldBe true
   }
 
   test("Security: Prompt text excludes sensitive tool outputs") {
