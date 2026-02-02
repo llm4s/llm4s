@@ -83,7 +83,7 @@ class LangfuseTracing(
   private def nowIso: String = DateTimeFormatter.ISO_INSTANT.format(Instant.now())
   private def uuid: String   = UUID.randomUUID().toString
 
-  private def sendBatch(events: Seq[ujson.Obj]): Result[Unit] = {
+  protected def sendBatch(events: Seq[ujson.Obj]): Result[Unit] = {
     if (publicKey.isEmpty || secretKey.isEmpty) {
       logger.warn("[Langfuse] Public or secret key not set in environment. Skipping export.")
       logger.warn(s"[Langfuse] Expected environment variables: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY")
