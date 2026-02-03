@@ -24,6 +24,8 @@ object LLMConnect {
         ZaiClient(cfg, metrics)
       case cfg: GeminiConfig =>
         GeminiClient(cfg, metrics)
+      case cfg: DeepSeekConfig =>
+        DeepSeekClient(cfg)
     }
 
   // Typed-config entry: build client directly from ProviderConfig
@@ -51,6 +53,7 @@ object LLMConnect {
       case (LLMProvider.Ollama, cfg: OllamaConfig)       => OllamaClient(cfg, metrics)
       case (LLMProvider.Zai, cfg: ZaiConfig)             => ZaiClient(cfg, metrics)
       case (LLMProvider.Gemini, cfg: GeminiConfig)       => GeminiClient(cfg, metrics)
+      case (LLMProvider.DeepSeek, cfg: DeepSeekConfig)   => DeepSeekClient(cfg)
       case (prov, wrongCfg) =>
         val cfgType = wrongCfg.getClass.getSimpleName
         val msg     = s"Invalid config type $cfgType for provider $prov"

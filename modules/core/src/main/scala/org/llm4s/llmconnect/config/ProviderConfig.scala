@@ -370,3 +370,63 @@ object GeminiConfig {
     )
   }
 }
+
+case class DeepSeekConfig(
+  apiKey: String,
+  model: String,
+  baseUrl: String,
+  contextWindow: Int,
+  reserveCompletion: Int
+) extends ProviderConfig {
+  override def toString: String =
+    s"DeepSeekConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
+      s"reserveCompletion=$reserveCompletion)"
+}
+
+object DeepSeekConfig {
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  val DEFAULT_BASE_URL: String = "https://api.deepseek.com"
+
+  private def getContextWindowForModel(modelName: String): (Int, Int) = {
+    val standardReserve = 8192 // 8K tokens reserved for completion (DeepSeek supports large outputs)
+
+    val registryResult =
+      ModelRegistry
+        .lookup("deepseek", modelName)
+        .toOption
+        .orElse(ModelRegistry.lookup(modelName).toOption)
+
+    registryResult match {
+      case Some(metadata) =>
+        val contextWindow = metadata.maxInputTokens.getOrElse(64000)
+        val reserve       = metadata.maxOutputTokens.getOrElse(standardReserve)
+        logger.debug(s"Using ModelRegistry metadata for $modelName: context=$contextWindow, reserve=$reserve")
+        (contextWindow, reserve)
+      case None =>
+        logger.debug(s"Model $modelName not found in registry, using fallback values")
+        modelName match {
+          case name if name.contains("reasoner") || name.contains("r1") => (128000, standardReserve)
+          case name if name.contains("chat") || name.contains("v3")    => (64000, standardReserve)
+          case _                                                        => (64000, standardReserve)
+        }
+    }
+  }
+
+  def fromValues(
+    modelName: String,
+    apiKey: String,
+    baseUrl: String
+  ): DeepSeekConfig = {
+    require(apiKey.trim.nonEmpty, "DeepSeek apiKey must be non-empty")
+    require(baseUrl.trim.nonEmpty, "DeepSeek baseUrl must be non-empty")
+    val (cw, rc) = getContextWindowForModel(modelName)
+    DeepSeekConfig(
+      apiKey = apiKey,
+      model = modelName,
+      baseUrl = baseUrl,
+      contextWindow = cw,
+      reserveCompletion = rc
+    )
+  }
+}

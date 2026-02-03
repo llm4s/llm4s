@@ -20,6 +20,7 @@ sealed trait LLMProvider {
     case LLMProvider.Ollama     => "ollama"
     case LLMProvider.Zai        => "zai"
     case LLMProvider.Gemini     => "gemini"
+    case LLMProvider.DeepSeek   => "deepseek"
   }
 }
 
@@ -85,8 +86,17 @@ object LLMProvider {
    */
   case object Gemini extends LLMProvider
 
+  /**
+   * DeepSeek provider for DeepSeek models.
+   *
+   * Supports DeepSeek-Chat (V3), DeepSeek-Reasoner (R1) and other DeepSeek models.
+   * Features reasoning capability for complex tasks.
+   * Requires a DeepSeek API key.
+   */
+  case object DeepSeek extends LLMProvider
+
   /** All available providers */
-  val all: Seq[LLMProvider] = Seq(OpenAI, Azure, Anthropic, OpenRouter, Ollama, Zai, Gemini)
+  val all: Seq[LLMProvider] = Seq(OpenAI, Azure, Anthropic, OpenRouter, Ollama, Zai, Gemini, DeepSeek)
 
   /**
    * Parses a provider name string to LLMProvider.
@@ -102,6 +112,7 @@ object LLMProvider {
     case "ollama"            => Some(Ollama)
     case "zai"               => Some(Zai)
     case "gemini" | "google" => Some(Gemini)
+    case "deepseek"          => Some(DeepSeek)
     case _                   => None
   }
 }
