@@ -59,6 +59,27 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
     attributes.get(AttributeKey.longKey("arg_usage_total_tokens")) shouldBe 30L
   }
 
+  it should "map CacheHit parameters to OpenTelemetry attributes" in {
+    val event = TraceEvent.CacheHit(similarity = 0.95, threshold = 0.9)
+    val (name, attributes) = tracing.mapEventToAttributes(event)
+
+    name shouldBe "Cache Hit"
+    attributes.get(TraceAttributes.EventType) shouldBe "cache_hit"
+    attributes.get(AttributeKey.booleanKey("gen_ai.cache.hit")) shouldBe true
+    attributes.get(AttributeKey.doubleKey("gen_ai.cache.similarity")) shouldBe 0.95
+    attributes.get(AttributeKey.doubleKey("gen_ai.cache.threshold")) shouldBe 0.9
+  }
+
+  it should "map CacheMiss parameters to OpenTelemetry attributes" in {
+    val event = TraceEvent.CacheMiss(TraceEvent.CacheMissReason.LowSimilarity)
+    val (name, attributes) = tracing.mapEventToAttributes(event)
+
+    name shouldBe "Cache Miss"
+    attributes.get(TraceAttributes.EventType) shouldBe "cache_miss"
+    attributes.get(AttributeKey.booleanKey("gen_ai.cache.hit")) shouldBe false
+    attributes.get(AttributeKey.stringKey("gen_ai.cache.miss_reason")) shouldBe "low_similarity"
+  }
+
   it should "truncate excessive content in attributes" in {
     val longContent = "a" * 2000
     val event       = TraceEvent.CompletionReceived("id", "model", 0, longContent)

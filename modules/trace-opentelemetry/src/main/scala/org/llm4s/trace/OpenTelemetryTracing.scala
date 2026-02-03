@@ -243,6 +243,29 @@ class OpenTelemetryTracing(
             .put("total_cost_usd", e.totalCostUsd.getOrElse(0.0))
             .build()
         )
+
+      case e: TraceEvent.CacheHit =>
+        (
+          "Cache Hit",
+          Attributes
+            .builder()
+            .put(TraceAttributes.EventType, "cache_hit")
+            .put("gen_ai.cache.hit", true)
+            .put("gen_ai.cache.similarity", e.similarity)
+            .put("gen_ai.cache.threshold", e.threshold)
+            .build()
+        )
+
+      case e: TraceEvent.CacheMiss =>
+        (
+          "Cache Miss",
+          Attributes
+            .builder()
+            .put(TraceAttributes.EventType, "cache_miss")
+            .put("gen_ai.cache.hit", false)
+            .put("gen_ai.cache.miss_reason", e.reason.value)
+            .build()
+        )
     }
   }
 
