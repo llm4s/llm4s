@@ -64,8 +64,7 @@ class OpenTelemetryTracing(
   initializationResult match {
     case Left(error) =>
       org.slf4j.LoggerFactory.getLogger(getClass).error("Failed to initialize OpenTelemetry tracing", error)
-    case Right(_) =>
-
+    case Right(_) => // Successfully initialized
   }
 
   private val tracer: Option[Tracer] = initializationResult.map(_._2).toOption
@@ -141,7 +140,7 @@ class OpenTelemetryTracing(
 
       case e: TraceEvent.ToolExecuted =>
         (
-          s"Tool Execution: ${e.name}",
+          "Tool Execution: " + e.name,
           Attributes
             .builder()
             .put(TraceAttributes.EventType, "span-create")
@@ -167,7 +166,7 @@ class OpenTelemetryTracing(
 
       case e: TraceEvent.TokenUsageRecorded =>
         (
-          s"Token Usage - ${e.operation}",
+          "Token Usage - " + e.operation,
           Attributes
             .builder()
             .put(TraceAttributes.EventType, "event-create")
@@ -175,7 +174,7 @@ class OpenTelemetryTracing(
             .put("operation", e.operation)
             .put("gen_ai.usage.input_tokens", e.usage.promptTokens.toLong)
             .put("gen_ai.usage.output_tokens", e.usage.completionTokens.toLong)
-            .put("arg_usage_total_tokens", e.usage.totalTokens.toLong)
+            .put("gen_ai.usage.total_tokens", e.usage.totalTokens.toLong)
             .build()
         )
 
@@ -203,7 +202,7 @@ class OpenTelemetryTracing(
 
       case e: TraceEvent.EmbeddingUsageRecorded =>
         (
-          s"Embedding Usage - ${e.operation}",
+          "Embedding Usage - " + e.operation,
           Attributes
             .builder()
             .put(TraceAttributes.EventType, "embedding-usage")
@@ -211,13 +210,13 @@ class OpenTelemetryTracing(
             .put("operation", e.operation)
             .put("input_count", e.inputCount.toLong)
             .put("gen_ai.usage.input_tokens", e.usage.promptTokens.toLong)
-            .put("arg_usage_total_tokens", e.usage.totalTokens.toLong)
+            .put("gen_ai.usage.total_tokens", e.usage.totalTokens.toLong)
             .build()
         )
 
       case e: TraceEvent.CostRecorded =>
         (
-          s"Cost - ${e.operation}",
+          "Cost - " + e.operation,
           Attributes
             .builder()
             .put(TraceAttributes.EventType, "cost")
@@ -231,7 +230,7 @@ class OpenTelemetryTracing(
 
       case e: TraceEvent.RAGOperationCompleted =>
         (
-          s"RAG ${e.operation}",
+          "RAG " + e.operation,
           Attributes
             .builder()
             .put(TraceAttributes.EventType, "rag-operation")
@@ -249,10 +248,10 @@ class OpenTelemetryTracing(
           "Cache Hit",
           Attributes
             .builder()
-            .put(TraceAttributes.EventType, "cache_hit")
-            .put("gen_ai.cache.hit", true)
-            .put("gen_ai.cache.similarity", e.similarity)
-            .put("gen_ai.cache.threshold", e.threshold)
+            .put(TraceAttributes.EventType, "cache-hit")
+            .put("similarity", e.similarity)
+            .put("threshold", e.threshold)
+            .put("timestamp", e.timestamp.toString)
             .build()
         )
 
@@ -261,9 +260,9 @@ class OpenTelemetryTracing(
           "Cache Miss",
           Attributes
             .builder()
-            .put(TraceAttributes.EventType, "cache_miss")
-            .put("gen_ai.cache.hit", false)
-            .put("gen_ai.cache.miss_reason", e.reason.value)
+            .put(TraceAttributes.EventType, "cache-miss")
+            .put("reason", e.reason.value)
+            .put("timestamp", e.timestamp.toString)
             .build()
         )
     }

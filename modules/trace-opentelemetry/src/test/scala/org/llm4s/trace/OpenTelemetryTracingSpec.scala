@@ -56,7 +56,7 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
     attributes.get(AttributeKey.stringKey("gen_ai.request.model")) shouldBe "gpt-4"
     attributes.get(AttributeKey.longKey("gen_ai.usage.input_tokens")) shouldBe 10L
     attributes.get(AttributeKey.longKey("gen_ai.usage.output_tokens")) shouldBe 20L
-    attributes.get(AttributeKey.longKey("arg_usage_total_tokens")) shouldBe 30L
+    attributes.get(AttributeKey.longKey("gen_ai.usage.total_tokens")) shouldBe 30L
   }
 
   it should "map CacheHit parameters to OpenTelemetry attributes" in {
@@ -64,10 +64,10 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
     val (name, attributes) = tracing.mapEventToAttributes(event)
 
     name shouldBe "Cache Hit"
-    attributes.get(TraceAttributes.EventType) shouldBe "cache_hit"
-    attributes.get(AttributeKey.booleanKey("gen_ai.cache.hit")) shouldBe true
-    attributes.get(AttributeKey.doubleKey("gen_ai.cache.similarity")) shouldBe 0.95
-    attributes.get(AttributeKey.doubleKey("gen_ai.cache.threshold")) shouldBe 0.9
+    attributes.get(TraceAttributes.EventType) shouldBe "cache-hit"
+    attributes.get(AttributeKey.doubleKey("similarity")) shouldBe 0.95
+    attributes.get(AttributeKey.doubleKey("threshold")) shouldBe 0.9
+    attributes.get(AttributeKey.stringKey("timestamp")) should not be empty
   }
 
   it should "map CacheMiss parameters to OpenTelemetry attributes" in {
@@ -75,9 +75,9 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
     val (name, attributes) = tracing.mapEventToAttributes(event)
 
     name shouldBe "Cache Miss"
-    attributes.get(TraceAttributes.EventType) shouldBe "cache_miss"
-    attributes.get(AttributeKey.booleanKey("gen_ai.cache.hit")) shouldBe false
-    attributes.get(AttributeKey.stringKey("gen_ai.cache.miss_reason")) shouldBe "low_similarity"
+    attributes.get(TraceAttributes.EventType) shouldBe "cache-miss"
+    attributes.get(AttributeKey.stringKey("reason")) shouldBe "low_similarity"
+    attributes.get(AttributeKey.stringKey("timestamp")) should not be empty
   }
 
   it should "truncate excessive content in attributes" in {
