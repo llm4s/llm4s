@@ -60,7 +60,7 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "map CacheHit parameters to OpenTelemetry attributes" in {
-    val event = TraceEvent.CacheHit(similarity = 0.95, threshold = 0.9)
+    val event              = TraceEvent.CacheHit(similarity = 0.95, threshold = 0.9)
     val (name, attributes) = tracing.mapEventToAttributes(event)
 
     name shouldBe "Cache Hit"
@@ -71,7 +71,7 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "map CacheMiss parameters to OpenTelemetry attributes" in {
-    val event = TraceEvent.CacheMiss(TraceEvent.CacheMissReason.LowSimilarity)
+    val event              = TraceEvent.CacheMiss(TraceEvent.CacheMissReason.LowSimilarity)
     val (name, attributes) = tracing.mapEventToAttributes(event)
 
     name shouldBe "Cache Miss"
