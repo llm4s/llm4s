@@ -5,6 +5,7 @@ import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.agent.memory.PostgresMemoryStore.SqlParam._
+import org.llm4s.error.NotFoundError
 
 import java.sql.{ Connection, PreparedStatement, ResultSet, SQLException, Timestamp }
 import java.time.Instant
@@ -137,6 +138,20 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     PostgresMemoryStore.stringToEmbedding("[]") shouldBe Array.empty[Float]
     PostgresMemoryStore.stringToEmbedding("") shouldBe Array.empty[Float]
     PostgresMemoryStore.stringToEmbedding(null) shouldBe Array.empty[Float]
+  }
+
+  it should "handle malformed embedding string gracefully" in {
+    PostgresMemoryStore.stringToEmbedding("[not,valid,floats]") shouldBe Array.empty[Float]
+    PostgresMemoryStore.stringToEmbedding("[1.0,abc,3.0]") shouldBe Array.empty[Float]
+    PostgresMemoryStore.stringToEmbedding("garbage") shouldBe Array.empty[Float]
+  }
+
+  it should "generate SQL for None filter" in {
+    val result = PostgresMemoryStore.filterToSql(MemoryFilter.None)
+    result.isRight shouldBe true
+    val (sql, params) = result.toOption.get
+    sql shouldBe "FALSE"
+    params shouldBe Seq.empty
   }
 
   behavior.of("PostgresMemoryStore class execution")
@@ -276,5 +291,19 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     val store = new PostgresMemoryStore(mockDataSource, "test_table")
 
     an[SQLException] should be thrownBy store.initializeSchema()
+  }
+
+  it should "return NotFoundError when updating non-existent memory" in {
+    setupMockExecution()
+    (() => mockStmt.executeQuery()).expects().returning(mockRs)
+    (() => mockRs.next()).expects().returning(false)
+    (() => mockRs.close()).expects()
+
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val result = store.update(MemoryId("non-existent"), identity)
+
+    result.isLeft shouldBe true
+    result.left.toOption.get shouldBe a[NotFoundError]
+    result.left.toOption.get.message should include("Memory not found")
   }
 }

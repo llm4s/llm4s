@@ -1,7 +1,7 @@
 package org.llm4s.agent.memory
 
 import org.llm4s.types.Result
-import org.llm4s.error.ProcessingError
+import org.llm4s.error.{ NotFoundError, ProcessingError }
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import ujson.{ read, write, Obj, Str }
 
@@ -183,7 +183,7 @@ final class PostgresMemoryStore private[memory] (
   override def update(id: MemoryId, updateFn: Memory => Memory): Result[MemoryStore] =
     get(id).flatMap {
       case Some(existing) => store(updateFn(existing))
-      case None           => Right(this)
+      case None           => Left(NotFoundError(s"Memory not found: ${id.value}", id.value))
     }
 
   override def count(filter: MemoryFilter): Result[Long] =
@@ -308,6 +308,9 @@ object PostgresMemoryStore {
     case MemoryFilter.All =>
       Right("TRUE" -> Seq.empty)
 
+    case MemoryFilter.None =>
+      Right("FALSE" -> Seq.empty)
+
     case MemoryFilter.ByEntity(entityId) =>
       Right("metadata->>'entity_id' = ?" -> Seq(PString(entityId.value)))
 
@@ -377,6 +380,6 @@ object PostgresMemoryStore {
     else {
       val cleaned = s.stripPrefix("[").stripSuffix("]")
       if (cleaned.isEmpty) Array.empty
-      else cleaned.split(",").map(_.trim.toFloat)
+      else Try(cleaned.split(",").map(_.trim.toFloat)).getOrElse(Array.empty)
     }
 }
