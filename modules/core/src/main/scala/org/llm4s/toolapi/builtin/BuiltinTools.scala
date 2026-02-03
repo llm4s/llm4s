@@ -4,7 +4,6 @@ import org.llm4s.toolapi.ToolFunction
 import org.llm4s.toolapi.builtin.core._
 import org.llm4s.toolapi.builtin.filesystem._
 import org.llm4s.toolapi.builtin.http._
-import org.llm4s.toolapi.builtin.search._
 import org.llm4s.toolapi.builtin.shell._
 
 /**
@@ -53,16 +52,15 @@ object BuiltinTools {
    *
    * Includes:
    * - All core utilities
-   * - Web search (DuckDuckGo, no API key required)
    * - Read-only HTTP with localhost blocked
    *
    * Does NOT include:
    * - File system access
    * - Shell access
+   * - Web search (configure separately at application edge)
    */
   def safe(httpConfig: HttpConfig = HttpConfig.readOnly()): Seq[ToolFunction[_, _]] =
     core ++ Seq(
-      WebSearchTool.tool,
       HTTPTool.create(httpConfig)
     )
 
@@ -117,7 +115,6 @@ object BuiltinTools {
     val shellConfig = ShellConfig.development(workingDirectory)
 
     core ++ Seq(
-      WebSearchTool.tool,
       HTTPTool.tool,
       ReadFileTool.create(fileConfig),
       ListDirectoryTool.create(fileConfig),
@@ -134,20 +131,14 @@ object BuiltinTools {
    * @param writeConfig Optional write configuration (if None, write tool is not included)
    * @param httpConfig HTTP configuration
    * @param shellConfig Optional shell configuration (if None, shell tool is not included)
-   * @param includeSearch Whether to include web search
    */
   def custom(
     fileConfig: Option[FileConfig] = None,
     writeConfig: Option[WriteConfig] = None,
     httpConfig: Option[HttpConfig] = None,
-    shellConfig: Option[ShellConfig] = None,
-    includeSearch: Boolean = true
+    shellConfig: Option[ShellConfig] = None
   ): Seq[ToolFunction[_, _]] = {
     var tools: Seq[ToolFunction[_, _]] = core
-
-    if (includeSearch) {
-      tools = tools :+ WebSearchTool.tool
-    }
 
     httpConfig.foreach(cfg => tools = tools :+ HTTPTool.create(cfg))
 

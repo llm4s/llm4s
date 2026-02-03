@@ -17,7 +17,14 @@ case class LangfuseConfig(
       s"env=$env, release=$release, version=$version)"
 }
 
+case class OpenTelemetryConfig(
+  serviceName: String = "llm4s-agent",
+  endpoint: String = "http://localhost:4317",
+  headers: Map[String, String] = Map.empty
+)
+
 case class TracingSettings(
   mode: TracingMode,
-  langfuse: LangfuseConfig
+  langfuse: LangfuseConfig,
+  openTelemetry: OpenTelemetryConfig = OpenTelemetryConfig()
 )

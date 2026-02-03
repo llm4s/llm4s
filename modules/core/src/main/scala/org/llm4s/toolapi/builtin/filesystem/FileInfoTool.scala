@@ -5,6 +5,7 @@ import upickle.default._
 
 import java.nio.file.{ Files, LinkOption, Paths }
 import java.nio.file.attribute.BasicFileAttributes
+import scala.annotation.tailrec
 import scala.util.Try
 
 /**
@@ -160,15 +161,21 @@ object FileInfoTool {
     }
   }
 
+  private val FileSizeUnits = Seq("KB", "MB", "GB", "TB", "PB")
+
   private def humanReadableSize(bytes: Long): String = {
-    if (bytes < 1024) return s"$bytes B"
-    val units     = Seq("KB", "MB", "GB", "TB", "PB")
-    var size      = bytes.toDouble
-    var unitIndex = -1
-    while (size >= 1024 && unitIndex < units.length - 1) {
-      size /= 1024
-      unitIndex += 1
+    @tailrec
+    def calculate(currentSize: Double, remainingUnits: Seq[String]): String =
+      if (currentSize < 1024 || remainingUnits.tail.isEmpty) {
+        f"$currentSize%.1f ${remainingUnits.head}"
+      } else {
+        calculate(currentSize / 1024, remainingUnits.tail)
+      }
+
+    if (bytes < 1024) {
+      s"$bytes B"
+    } else {
+      calculate(bytes.toDouble / 1024, FileSizeUnits)
     }
-    f"$size%.1f ${units(unitIndex)}"
   }
 }

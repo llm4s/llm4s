@@ -123,7 +123,7 @@ lazy val commonSettings = Seq(
 
 // ---- projects ----
 lazy val llm4s = (project in file("."))
-  .aggregate(core, samples, workspaceShared, workspaceRunner, workspaceClient, workspaceSamples)
+  .aggregate(core, samples, workspaceShared, workspaceRunner, workspaceClient, workspaceSamples, traceOpentelemetry)
   .settings(
     publish / skip := true
   )
@@ -158,7 +158,9 @@ lazy val core = (project in file("modules/core"))
       Deps.config,
       Deps.hikariCP,
       Deps.awsS3,
-      Deps.awsSts
+      Deps.awsSts,
+      Deps.prometheusCore,
+      Deps.prometheusHttp
     )
   )
 
@@ -236,6 +238,18 @@ lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples
     commonSettings,
     publish / skip := true,
     coverageEnabled := false
+  )
+
+lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-trace-opentelemetry",
+    commonSettings,
+    libraryDependencies ++= Seq(
+      Deps.opentelemetryApi,
+      Deps.opentelemetrySdk,
+      Deps.opentelemetryExporterOtlp
+    )
   )
 
 lazy val crossTestScala2 = (project in file("modules/crossTest/scala2"))

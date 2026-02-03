@@ -55,4 +55,7 @@ object ConfigKeys {
   val CHUNK_SIZE       = "CHUNK_SIZE"
   val CHUNK_OVERLAP    = "CHUNK_OVERLAP"
   val CHUNKING_ENABLED = "CHUNKING_ENABLED"
+
+  // Tool API Keys
+  val BRAVE_SEARCH_API_KEY = "BRAVE_SEARCH_API_KEY"
 }

@@ -17,13 +17,17 @@ import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import scala.util.Try
 
-class OpenRouterClient(config: OpenAIConfig) extends LLMClient {
+class OpenRouterClient(
+  config: OpenAIConfig,
+  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+) extends LLMClient
+    with MetricsRecording {
   private val httpClient = HttpClient.newHttpClient()
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = {
+  ): Result[Completion] = withMetrics("openrouter", config.model) {
     // Convert conversation to OpenRouter format
     val requestBody = createRequestBody(conversation, options)
 
@@ -55,13 +59,19 @@ class OpenRouterClient(config: OpenAIConfig) extends LLMClient {
         case status => Left(ServiceError(status, "openrouter", s"OpenRouter API error: ${response.body()}"))
       }
     }
-  }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
+      }
+  )
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = {
+  ): Result[Completion] = withMetrics("openrouter", config.model) {
     val requestBody = createRequestBody(conversation, options)
     requestBody("stream") = true
 
@@ -121,7 +131,13 @@ class OpenRouterClient(config: OpenAIConfig) extends LLMClient {
         .map(_.toLLMError)
 
     attempt.flatMap(_ => accumulator.toCompletion)
-  }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens.toInt, usage.completionTokens.toInt)
+      }
+  )
 
   private def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
     val choices = json("choices").arr
@@ -350,6 +366,9 @@ class OpenRouterClient(config: OpenAIConfig) extends LLMClient {
 object OpenRouterClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: OpenAIConfig): Result[OpenRouterClient] =
-    Try(new OpenRouterClient(config)).toResult
+  def apply(
+    config: OpenAIConfig,
+    metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+  ): Result[OpenRouterClient] =
+    Try(new OpenRouterClient(config, metrics)).toResult
 }

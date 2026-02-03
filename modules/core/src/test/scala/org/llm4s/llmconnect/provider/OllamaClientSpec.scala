@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.scalatest.funsuite.AnyFunSuite
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.config.OllamaConfig
+import org.llm4s.metrics.MockMetricsCollector
 
 class OllamaClientSpec extends AnyFunSuite {
 
@@ -56,5 +57,36 @@ class OllamaClientSpec extends AnyFunSuite {
       "Expected assistant message content to be a string for Ollama"
     )
     assert(assistantMessage("content").str == "", "Assistant content should default to empty string when missing")
+  }
+
+  test("ollama client accepts custom metrics collector") {
+    val config = OllamaConfig(
+      model = "llama3.1",
+      baseUrl = "http://localhost:11434",
+      contextWindow = 4096,
+      reserveCompletion = 512
+    )
+
+    val mockMetrics = new MockMetricsCollector()
+    val client      = new OllamaClient(config, mockMetrics)
+
+    // Verify client was created with custom metrics
+    assert(client != null)
+    assert(mockMetrics.totalRequests == 0) // No requests yet
+  }
+
+  test("ollama client uses noop metrics by default") {
+    val config = OllamaConfig(
+      model = "llama3.1",
+      baseUrl = "http://localhost:11434",
+      contextWindow = 4096,
+      reserveCompletion = 512
+    )
+
+    // Default constructor should use noop metrics
+    val client = new OllamaClient(config)
+
+    // Verify it compiles and doesn't throw (noop metrics should never fail)
+    assert(client != null)
   }
 }

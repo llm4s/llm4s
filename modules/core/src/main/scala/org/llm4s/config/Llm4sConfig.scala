@@ -1,6 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.llmconnect.config._
+import org.llm4s.metrics.{ MetricsCollector, PrometheusEndpoint }
 import org.llm4s.types.Result
 import pureconfig.ConfigSource
 
@@ -12,17 +13,19 @@ object Llm4sConfig {
   def pgSearchIndex(): Result[org.llm4s.rag.permissions.SearchIndex.PgConfig] =
     org.llm4s.config.PgSearchIndexConfigLoader.load(ConfigSource.default)
 
-  final private case class LangfuseSection(
-    url: Option[String],
-    publicKey: Option[String],
-    secretKey: Option[String],
-    env: Option[String],
-    release: Option[String],
-    version: Option[String]
-  )
-
   def tracing(): Result[TracingSettings] =
     org.llm4s.config.TracingConfigLoader.load(ConfigSource.default)
+
+  /**
+   * Load the metrics configuration.
+   *
+   * Returns a MetricsCollector and optional PrometheusEndpoint if metrics are enabled.
+   * Use MetricsCollector.noop if you want to disable metrics programmatically.
+   *
+   * @return Result containing (MetricsCollector, Option[PrometheusEndpoint])
+   */
+  def metrics(): Result[(MetricsCollector, Option[PrometheusEndpoint])] =
+    org.llm4s.config.MetricsConfigLoader.load(ConfigSource.default)
 
   final case class EmbeddingsChunkingSettings(
     enabled: Boolean,
@@ -143,4 +146,77 @@ object Llm4sConfig {
     val fromConf = source.at("file").load[String].toOption.map(_.trim).filter(_.nonEmpty)
     fromConf
   }
+
+  /**
+   * Load Brave Search tool configuration from application.conf.
+   *
+   * This method loads the BraveSearchToolConfig which should be passed to
+   * BraveSearchTool.create() when instantiating the tool.
+   *
+   * Configuration is expected at path: llm4s.tools.brave
+   *
+   * Example application.conf:
+   * {{{
+   * llm4s {
+   *   tools {
+   *     brave {
+   *       apiKey = "your-api-key"
+   *       apiUrl = "https://api.search.brave.com/res/v1"
+   *       count = 10
+   *       safeSearch = "moderate"
+   *     }
+   *   }
+   * }
+   * }}}
+   *
+   * Usage:
+   * {{{
+   * import org.llm4s.config.Llm4sConfig
+   * import org.llm4s.toolapi.builtin.search.BraveSearchTool
+   *
+   * val toolConfig = Llm4sConfig.loadBraveSearchTool().getOrElse(
+   *   throw new RuntimeException("Failed to load Brave Search config")
+   * )
+   * val searchTool = BraveSearchTool.create(toolConfig)
+   * }}}
+   *
+   * @return Right(BraveSearchToolConfig) if configuration is valid, Left(ConfigurationError) otherwise
+   */
+  def loadBraveSearchTool(): Result[BraveSearchToolConfig] =
+    org.llm4s.config.ToolsConfigLoader.loadBraveSearchTool(ConfigSource.default)
+
+  /**
+   * Load DuckDuckGo Search tool configuration from application.conf.
+   *
+   * This method loads the DuckDuckGoSearchToolConfig which should be passed to
+   * DuckDuckGoSearchTool.create() when instantiating the tool.
+   *
+   * Configuration is expected at path: llm4s.tools.duckduckgo
+   *
+   * Example application.conf:
+   * {{{
+   * llm4s {
+   *   tools {
+   *     duckduckgo {
+   *       apiUrl = "https://api.duckduckgo.com"
+   *     }
+   *   }
+   * }
+   * }}}
+   *
+   * Usage:
+   * {{{
+   * import org.llm4s.config.Llm4sConfig
+   * import org.llm4s.toolapi.builtin.search.DuckDuckGoSearchTool
+   *
+   * val toolConfig = Llm4sConfig.loadDuckDuckGoSearchTool().getOrElse(
+   *   throw new RuntimeException("Failed to load DuckDuckGo config")
+   * )
+   * val searchTool = DuckDuckGoSearchTool.create(toolConfig)
+   * }}}
+   *
+   * @return Right(DuckDuckGoSearchToolConfig) if configuration is valid, Left(ConfigurationError) otherwise
+   */
+  def loadDuckDuckGoSearchTool(): Result[DuckDuckGoSearchToolConfig] =
+    org.llm4s.config.ToolsConfigLoader.loadDuckDuckGoSearchTool(ConfigSource.default)
 }

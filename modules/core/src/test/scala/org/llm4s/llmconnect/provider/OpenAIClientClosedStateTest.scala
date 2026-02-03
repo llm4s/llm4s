@@ -27,7 +27,7 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers {
     Conversation(Seq(UserMessage("Hello")))
 
   "OpenAIClient" should "return ConfigurationError when complete() is called after close()" in {
-    val client = new OpenAIClient(createTestConfig)
+    val client = new OpenAIClient(createTestConfig, org.llm4s.metrics.MetricsCollector.noop)
 
     // Close the client
     client.close()
@@ -42,7 +42,7 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "return ConfigurationError when streamComplete() is called after close()" in {
-    val client         = new OpenAIClient(createTestConfig)
+    val client         = new OpenAIClient(createTestConfig, org.llm4s.metrics.MetricsCollector.noop)
     var chunksReceived = 0
 
     // Close the client
@@ -62,7 +62,7 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "allow close() to be called multiple times (idempotent)" in {
-    val client = new OpenAIClient(createTestConfig)
+    val client = new OpenAIClient(createTestConfig, org.llm4s.metrics.MetricsCollector.noop)
 
     // Close multiple times - should not throw
     noException should be thrownBy {
@@ -77,6 +77,24 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers {
     result.left.toOption.get shouldBe a[ConfigurationError]
   }
 
+  it should "succeed for operations before close() is called" in {
+    val client = new OpenAIClient(createTestConfig, org.llm4s.metrics.MetricsCollector.noop)
+
+    // Before closing, complete() should attempt the operation (and fail due to invalid API key,
+    // but NOT due to closed state). We verify the error is NOT a ConfigurationError about being closed.
+    val result = client.complete(createTestConversation, CompletionOptions())
+
+    // The request will fail (invalid API key), but not because the client is closed
+    result.isLeft shouldBe true
+    result.left.toOption.get match {
+      case ce: ConfigurationError =>
+        (ce.message should not).include("already closed")
+      case _ =>
+        // Other errors (like ServiceError from invalid API key) are expected
+        succeed
+    }
+  }
+
   it should "include model name in the closed error message" in {
     val modelName = "gpt-4-turbo-preview"
     val config = OpenAIConfig.fromValues(
@@ -86,7 +104,7 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers {
       // Must never be used by unit tests (no network). We keep a clearly fake endpoint.
       baseUrl = "https://example.invalid/v1"
     )
-    val client = new OpenAIClient(config)
+    val client = new OpenAIClient(config, org.llm4s.metrics.MetricsCollector.noop)
 
     client.close()
 

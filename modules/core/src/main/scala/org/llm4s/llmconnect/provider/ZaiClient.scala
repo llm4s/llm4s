@@ -16,14 +16,18 @@ import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import scala.util.Try
 
-class ZaiClient(config: ZaiConfig) extends LLMClient {
+class ZaiClient(
+  config: ZaiConfig,
+  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+) extends LLMClient
+    with MetricsRecording {
   private val httpClient = HttpClient.newHttpClient()
   private val logger     = org.slf4j.LoggerFactory.getLogger(getClass)
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = {
+  ): Result[Completion] = withMetrics("zai", config.model) {
     val requestBody = createRequestBody(conversation, options)
 
     logger.debug(s"Sending request to Z.ai API at ${config.baseUrl}/chat/completions")
@@ -59,13 +63,19 @@ class ZaiClient(config: ZaiConfig) extends LLMClient {
         case status => Left(ServiceError(status, "zai", s"Z.ai API error: ${response.body()}"))
       }
     }
-  }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
+      }
+  )
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = {
+  ): Result[Completion] = withMetrics("zai", config.model) {
     val requestBody = createRequestBody(conversation, options)
     requestBody("stream") = true
 
@@ -124,7 +134,13 @@ class ZaiClient(config: ZaiConfig) extends LLMClient {
         streamResult.flatMap(_ => accumulator.toCompletion)
       }
     }
-  }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens.toInt, usage.completionTokens.toInt)
+      }
+  )
 
   private def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
     val choices = json("choices").arr
@@ -310,6 +326,9 @@ class ZaiClient(config: ZaiConfig) extends LLMClient {
 object ZaiClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: ZaiConfig): Result[ZaiClient] =
-    Try(new ZaiClient(config)).toResult
+  def apply(
+    config: ZaiConfig,
+    metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+  ): Result[ZaiClient] =
+    Try(new ZaiClient(config, metrics)).toResult
 }

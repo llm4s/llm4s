@@ -17,9 +17,16 @@ private[config] object TracingConfigLoader {
     version: Option[String]
   )
 
+  final private case class OpenTelemetrySection(
+    serviceName: Option[String],
+    endpoint: Option[String],
+    headers: Option[Map[String, String]]
+  )
+
   final private case class TracingSection(
     mode: Option[String],
-    langfuse: Option[LangfuseSection]
+    langfuse: Option[LangfuseSection],
+    opentelemetry: Option[OpenTelemetrySection]
   )
 
   final private case class TracingRoot(tracing: Option[TracingSection])
@@ -27,8 +34,11 @@ private[config] object TracingConfigLoader {
   implicit private val langfuseSectionReader: PureConfigReader[LangfuseSection] =
     PureConfigReader.forProduct6("url", "publicKey", "secretKey", "env", "release", "version")(LangfuseSection.apply)
 
+  implicit private val opentelemetrySectionReader: PureConfigReader[OpenTelemetrySection] =
+    PureConfigReader.forProduct3("serviceName", "endpoint", "headers")(OpenTelemetrySection.apply)
+
   implicit private val tracingSectionReader: PureConfigReader[TracingSection] =
-    PureConfigReader.forProduct2("mode", "langfuse")(TracingSection.apply)
+    PureConfigReader.forProduct3("mode", "langfuse", "opentelemetry")(TracingSection.apply)
 
   implicit private val tracingRootReader: PureConfigReader[TracingRoot] =
     PureConfigReader.forProduct1("tracing")(TracingRoot.apply)
@@ -45,7 +55,7 @@ private[config] object TracingConfigLoader {
   }
 
   private def buildTracingSettings(root: TracingRoot): TracingSettings = {
-    val tracing = root.tracing.getOrElse(TracingSection(None, None))
+    val tracing = root.tracing.getOrElse(TracingSection(None, None, None))
 
     val modeStr =
       tracing.mode.map(_.trim).filter(_.nonEmpty).getOrElse("console")
@@ -65,6 +75,17 @@ private[config] object TracingConfigLoader {
       lfSection.version.map(_.trim).filter(_.nonEmpty).getOrElse(DefaultConfig.DEFAULT_LANGFUSE_VERSION)
 
     val lfCfg = LangfuseConfig(url, publicKey, secretKey, env, release, version)
-    TracingSettings(mode, lfCfg)
+
+    // OpenTelemetry
+    val otelSection = tracing.opentelemetry.getOrElse(OpenTelemetrySection(None, None, None))
+    import org.llm4s.llmconnect.config.OpenTelemetryConfig
+
+    val otelCfg = OpenTelemetryConfig(
+      serviceName = otelSection.serviceName.getOrElse("llm4s-agent"),
+      endpoint = otelSection.endpoint.getOrElse("http://localhost:4317"),
+      headers = otelSection.headers.getOrElse(Map.empty)
+    )
+
+    TracingSettings(mode, lfCfg, otelCfg)
   }
 }

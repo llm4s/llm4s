@@ -68,7 +68,7 @@ package org.llm4s.toolapi
  * import org.llm4s.toolapi.builtin.search._
  *
  * val searchTools = new ToolRegistry(Seq(
- *   WebSearchTool.tool
+ *   DuckDuckGoSearchTool.tool
  * ))
  * }}}
  *

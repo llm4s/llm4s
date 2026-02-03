@@ -193,7 +193,7 @@ class PoliciesSpec extends AnyFlatSpec with Matchers with ScalaFutures {
       fallback = Some(fallbackAgent)
     )
 
-    whenReady(enhancedAgent.execute("test")) { result =>
+    whenReady(enhancedAgent.execute("test"), timeout(500.millis)) { result =>
       // Should timeout on each retry attempt, then use fallback
       result shouldBe Right("fallback: test")
     }

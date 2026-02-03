@@ -83,7 +83,7 @@ class LangfuseTracing(
   private def nowIso: String = DateTimeFormatter.ISO_INSTANT.format(Instant.now())
   private def uuid: String   = UUID.randomUUID().toString
 
-  private def sendBatch(events: Seq[ujson.Obj]): Result[Unit] = {
+  protected def sendBatch(events: Seq[ujson.Obj]): Result[Unit] = {
     if (publicKey.isEmpty || secretKey.isEmpty) {
       logger.warn("[Langfuse] Public or secret key not set in environment. Skipping export.")
       logger.warn(s"[Langfuse] Expected environment variables: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY")
@@ -364,6 +364,52 @@ class LangfuseTracing(
               "token_count" -> e.tokenCount,
               "cost_type"   -> e.costType,
               "cost_usd"    -> e.costUsd
+            )
+          )
+        )
+
+      case e: TraceEvent.CacheHit =>
+        ujson.Obj(
+          "id"        -> uuid,
+          "timestamp" -> now,
+          "type"      -> "span-create",
+          "body" -> ujson.Obj(
+            "id"        -> uuid,
+            "timestamp" -> now,
+            "name"      -> "Cache Hit",
+            "level"     -> "DEFAULT",
+            "input" -> ujson.Obj(
+              "similarity" -> e.similarity,
+              "threshold"  -> e.threshold
+            ),
+            "output" -> ujson.Obj(
+              "result" -> "hit"
+            ),
+            "metadata" -> ujson.Obj(
+              "similarity" -> e.similarity,
+              "threshold"  -> e.threshold
+            )
+          )
+        )
+
+      case e: TraceEvent.CacheMiss =>
+        ujson.Obj(
+          "id"        -> uuid,
+          "timestamp" -> now,
+          "type"      -> "span-create",
+          "body" -> ujson.Obj(
+            "id"        -> uuid,
+            "timestamp" -> now,
+            "name"      -> "Cache Miss",
+            "level"     -> "DEFAULT",
+            "input" -> ujson.Obj(
+              "reason" -> e.reason.value
+            ),
+            "output" -> ujson.Obj(
+              "result" -> "miss"
+            ),
+            "metadata" -> ujson.Obj(
+              "reason" -> e.reason.value
             )
           )
         )

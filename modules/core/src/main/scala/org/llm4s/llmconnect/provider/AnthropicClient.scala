@@ -22,7 +22,11 @@ import java.util.Optional
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
-class AnthropicClient(config: AnthropicConfig) extends LLMClient {
+class AnthropicClient(
+  config: AnthropicConfig,
+  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+) extends LLMClient
+    with MetricsRecording {
   // Store config for budget calculations
   private val providerConfig: ProviderConfig = config
 
@@ -36,7 +40,7 @@ class AnthropicClient(config: AnthropicConfig) extends LLMClient {
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] =
+  ): Result[Completion] = withMetrics("anthropic", config.model) {
     // Transform options and messages for model-specific constraints
     TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
       transformed =>
@@ -84,6 +88,13 @@ class AnthropicClient(config: AnthropicConfig) extends LLMClient {
         }
         attempt.map(convertFromAnthropicResponse) // Convert response to our model
     }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
+      }
+  )
 
   /*
 curl https://api.anthropic.com/v1/messages \
@@ -113,7 +124,7 @@ curl https://api.anthropic.com/v1/messages \
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = {
+  ): Result[Completion] = withMetrics("anthropic", config.model) {
     // Transform options and messages for model-specific constraints
     TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
       transformed =>
@@ -270,7 +281,13 @@ curl https://api.anthropic.com/v1/messages \
         // Return the accumulated completion
         attempt.flatMap(_ => accumulator.toCompletion.map(c => c.copy(model = config.model)))
     }
-  }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
+      }
+  )
 
   override def getContextWindow(): Int = providerConfig.contextWindow
 
@@ -420,6 +437,9 @@ curl https://api.anthropic.com/v1/messages \
 object AnthropicClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: AnthropicConfig): Result[AnthropicClient] =
-    Try(new AnthropicClient(config)).toResult
+  def apply(
+    config: AnthropicConfig,
+    metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+  ): Result[AnthropicClient] =
+    Try(new AnthropicClient(config, metrics)).toResult
 }

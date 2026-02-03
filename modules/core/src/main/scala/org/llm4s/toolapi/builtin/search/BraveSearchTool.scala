@@ -1,0 +1,326 @@
+package org.llm4s.toolapi.builtin.search
+
+import org.llm4s.toolapi._
+import upickle.default._
+import org.llm4s.config.BraveSearchToolConfig
+
+import scala.util.Try
+import requests.Response
+
+sealed trait BraveSearchCategory[R] {
+  def endpoint: String
+  def toolName: String
+  def description: String
+  def parseResults(json: ujson.Value, query: String): R
+  def mapSafeSearch(safeSearch: SafeSearch): String
+}
+object BraveSearchCategory {
+  case object Web extends BraveSearchCategory[BraveWebSearchResult] {
+    val endpoint    = "web/search"
+    val toolName    = "brave_web_search"
+    val description = "Searches the web using Brave Search"
+
+    def mapSafeSearch(safeSearch: SafeSearch): String = safeSearch.value
+
+    def parseResults(json: ujson.Value, query: String): BraveWebSearchResult = {
+      val webResultsArr = for {
+        web     <- json.obj.get("web")
+        results <- web.obj.get("results")
+        arr     <- results.arrOpt
+      } yield arr.toList
+
+      val finalResults = webResultsArr.getOrElse(Nil).map { r =>
+        BraveWebResult(
+          title = r.obj.get("title").flatMap(_.strOpt).getOrElse(""),
+          url = r.obj.get("url").flatMap(_.strOpt).getOrElse(""),
+          description = r.obj.get("description").flatMap(_.strOpt).getOrElse("")
+        )
+      }
+      BraveWebSearchResult(query, finalResults)
+    }
+  }
+  case object Image extends BraveSearchCategory[BraveImageSearchResult] {
+    val endpoint    = "images/search"
+    val toolName    = "brave_image_search"
+    val description = "Searches for images using Brave Search"
+
+    def mapSafeSearch(safeSearch: SafeSearch): String = safeSearch match {
+      case SafeSearch.Moderate => "strict" // Images don't support moderate, map to strict
+      case other               => other.value
+    }
+
+    def parseResults(json: ujson.Value, query: String): BraveImageSearchResult = {
+      val imageResultsArr = for {
+        results <- json.obj.get("results")
+        arr     <- results.arrOpt
+      } yield arr.toList
+
+      val finalResults = imageResultsArr.getOrElse(Nil).map { r =>
+        BraveImageResult(
+          title = r.obj.get("title").flatMap(_.strOpt).getOrElse(""),
+          url = r.obj.get("url").flatMap(_.strOpt).getOrElse(""),
+          thumbnail = r.obj.get("thumbnail").flatMap(_.obj.get("src")).flatMap(_.strOpt).getOrElse("")
+        )
+      }
+      BraveImageSearchResult(query, finalResults)
+    }
+  }
+  case object Video extends BraveSearchCategory[BraveVideoSearchResult] {
+    val endpoint    = "videos/search"
+    val toolName    = "brave_video_search"
+    val description = "Searches for videos using Brave Search"
+
+    def mapSafeSearch(safeSearch: SafeSearch): String = safeSearch.value
+
+    def parseResults(json: ujson.Value, query: String): BraveVideoSearchResult = {
+      val videoResultsArr = for {
+        results <- json.obj.get("results")
+        arr     <- results.arrOpt
+      } yield arr.toList
+
+      val finalResults = videoResultsArr.getOrElse(Nil).map { r =>
+        BraveVideoResult(
+          title = r.obj.get("title").flatMap(_.strOpt).getOrElse(""),
+          url = r.obj.get("url").flatMap(_.strOpt).getOrElse(""),
+          description = r.obj.get("description").flatMap(_.strOpt).getOrElse("")
+        )
+      }
+      BraveVideoSearchResult(query, finalResults)
+    }
+  }
+  case object News extends BraveSearchCategory[BraveNewsSearchResult] {
+    val endpoint    = "news/search"
+    val toolName    = "brave_news_search"
+    val description = "Searches for news using Brave Search"
+
+    def mapSafeSearch(safeSearch: SafeSearch): String = safeSearch.value
+
+    def parseResults(json: ujson.Value, query: String): BraveNewsSearchResult = {
+      val newsResultsArr = for {
+        results <- json.obj.get("results")
+        arr     <- results.arrOpt
+      } yield arr.toList
+
+      val finalResults = newsResultsArr.getOrElse(Nil).map { r =>
+        BraveNewsResult(
+          title = r.obj.get("title").flatMap(_.strOpt).getOrElse(""),
+          url = r.obj.get("url").flatMap(_.strOpt).getOrElse(""),
+          description = r.obj.get("description").flatMap(_.strOpt).getOrElse("")
+        )
+      }
+      BraveNewsSearchResult(query, finalResults)
+    }
+  }
+}
+sealed trait SafeSearch {
+  def value: String
+}
+
+object SafeSearch {
+  case object Off      extends SafeSearch { val value = "off"      }
+  case object Moderate extends SafeSearch { val value = "moderate" }
+  case object Strict   extends SafeSearch { val value = "strict"   }
+
+  /**
+   * Parse a string value from configuration into a SafeSearch enum.
+   * @param value The string value (e.g., "off", "moderate", "strict")
+   * @return The corresponding SafeSearch enum, defaulting to Moderate for invalid values
+   */
+  def fromString(value: String): SafeSearch = value.toLowerCase match {
+    case "off"      => Off
+    case "moderate" => Moderate
+    case "strict"   => Strict
+    case _          => Moderate // Safe default
+  }
+}
+
+case class BraveSearchConfig(
+  timeoutMs: Int = 10000,
+  count: Int = 5,
+  safeSearch: SafeSearch = SafeSearch.Strict,
+  extraParams: Map[String, ujson.Value] = Map.empty
+)
+case class BraveNewsSearchResult(
+  query: String,
+  results: List[BraveNewsResult]
+)
+case class BraveNewsResult(
+  title: String,
+  url: String,
+  description: String
+)
+case class BraveVideoSearchResult(
+  query: String,
+  results: List[BraveVideoResult]
+)
+case class BraveVideoResult(
+  title: String,
+  url: String,
+  description: String
+)
+case class BraveImageSearchResult(
+  query: String,
+  results: List[BraveImageResult]
+)
+case class BraveImageResult(
+  title: String,
+  url: String,
+  thumbnail: String
+)
+case class BraveWebSearchResult(
+  query: String,
+  results: List[BraveWebResult]
+)
+case class BraveWebResult(
+  title: String,
+  url: String,
+  description: String
+)
+
+object BraveWebResult {
+  implicit val braveWebResultRW: ReadWriter[BraveWebResult] = macroRW[BraveWebResult]
+}
+
+object BraveWebSearchResult {
+  implicit val braveWebSearchResultRW: ReadWriter[BraveWebSearchResult] = macroRW[BraveWebSearchResult]
+}
+
+object BraveImageSearchResult {
+  implicit val braveImageSearchResultRW: ReadWriter[BraveImageSearchResult] = macroRW[BraveImageSearchResult]
+}
+
+object BraveImageResult {
+  implicit val braveImageResultRW: ReadWriter[BraveImageResult] = macroRW[BraveImageResult]
+}
+
+object BraveVideoResult {
+  implicit val braveVideoResultRW: ReadWriter[BraveVideoResult] = macroRW[BraveVideoResult]
+}
+
+object BraveVideoSearchResult {
+  implicit val braveVideoSearchResultRW: ReadWriter[BraveVideoSearchResult] = macroRW[BraveVideoSearchResult]
+}
+
+object BraveNewsResult {
+  implicit val braveNewsResultRW: ReadWriter[BraveNewsResult] = macroRW[BraveNewsResult]
+}
+
+object BraveNewsSearchResult {
+  implicit val braveNewsSearchResultRW: ReadWriter[BraveNewsSearchResult] = macroRW[BraveNewsSearchResult]
+}
+
+object BraveSearchTool {
+
+  private def createSchema = Schema
+    .`object`[Map[String, Any]]("Brave Search parameters")
+    .withProperty(
+      Schema.property(
+        "search_query",
+        Schema.string("The search query")
+      )
+    )
+
+  /**
+   * Create a Brave search tool with explicit configuration.
+   *
+   * @param toolConfig The Brave API configuration (apiKey, apiUrl, count, safeSearch)
+   * @param category The search category (Web, Image, Video, or News)
+   * @param config Optional configuration overrides (defaults use values from toolConfig)
+   * @return A configured ToolFunction
+   */
+  def create[R: ReadWriter](
+    toolConfig: BraveSearchToolConfig,
+    category: BraveSearchCategory[R] = BraveSearchCategory.Web,
+    config: Option[BraveSearchConfig] = None
+  ): ToolFunction[Map[String, Any], R] =
+    ToolBuilder[Map[String, Any], R](
+      name = category.toolName,
+      description = category.description,
+      schema = createSchema
+    ).withHandler { extractor =>
+      for {
+        query <- extractor.getString("search_query")
+        // Use provided config if set, otherwise parse from loaded config
+        finalConfig = config.getOrElse(
+          BraveSearchConfig(
+            count = toolConfig.count,
+            safeSearch = SafeSearch.fromString(toolConfig.safeSearch)
+          )
+        )
+        result <- search(query, finalConfig, toolConfig, category)
+      } yield result
+    }.build()
+
+  /**
+   * Create a Brave search tool with explicit API key and optional overrides.
+   *
+   * Uses hardcoded defaults for apiUrl, count, and safeSearch.
+   * For full control, use create() with a BraveSearchToolConfig instead.
+   *
+   * @param apiKey The Brave Search API key to use
+   * @param apiUrl The Brave API URL (defaults to production endpoint)
+   * @param category The search category (Web, Image, Video, or News)
+   * @param config Optional search config overrides (count, safeSearch)
+   * @return A configured ToolFunction ready to use
+   */
+  def withApiKey[R: ReadWriter](
+    apiKey: String,
+    apiUrl: String = "https://api.search.brave.com/res/v1",
+    category: BraveSearchCategory[R] = BraveSearchCategory.Web,
+    config: Option[BraveSearchConfig] = None
+  ): ToolFunction[Map[String, Any], R] = {
+    // Hardcoded defaults when using withApiKey
+    val braveTool = BraveSearchToolConfig(
+      apiKey = apiKey,
+      apiUrl = apiUrl,
+      count = 5,
+      safeSearch = "moderate"
+    )
+    create(braveTool, category, config)
+  }
+
+  private def search[R](
+    query: String,
+    config: BraveSearchConfig,
+    braveTool: BraveSearchToolConfig,
+    category: BraveSearchCategory[R]
+  ): Either[String, R] = {
+
+    // Build query parameters from config
+    val params = Map(
+      "q"          -> query,
+      "count"      -> config.count.toString,
+      "safesearch" -> category.mapSafeSearch(config.safeSearch)
+    ) ++ config.extraParams.map { case (k, v) => k -> v.toString }
+
+    val url = s"${braveTool.apiUrl}/${category.endpoint}"
+
+    val responseEither: Either[String, Response] =
+      Try {
+        requests.get(
+          url = url,
+          params = params,
+          headers = Map(
+            "Accept"               -> "application/json",
+            "Accept-Encoding"      -> "gzip",
+            "X-Subscription-Token" -> braveTool.apiKey,
+            "User-Agent"           -> "llm4s-brave-search/1.0"
+          ),
+          readTimeout = config.timeoutMs
+        )
+      }.toEither.left.map(e => s"Brave ${category.toolName} request failed: ${e.getMessage}")
+
+    responseEither.flatMap { response =>
+      if (response.statusCode == 200) {
+        Try {
+          val json = ujson.read(response.text())
+          category.parseResults(json, query)
+        }.toEither.left.map(e => s"Brave ${category.toolName} JSON parsing failed: ${e.getMessage}")
+      } else {
+        Left(
+          s"Brave ${category.toolName} returned status ${response.statusCode}: ${response.text()}"
+        )
+      }
+    }
+  }
+}

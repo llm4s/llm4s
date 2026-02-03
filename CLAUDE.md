@@ -57,9 +57,13 @@ LLM_MODEL=openai/gpt-4o              # or anthropic/claude-sonnet-4-5-latest, ge
 OPENAI_API_KEY=sk-...                # or ANTHROPIC_API_KEY, GOOGLE_API_KEY
 
 # Optional - Tracing
-TRACING_MODE=langfuse                # langfuse, console, or none
+TRACING_MODE=langfuse                # langfuse, opentelemetry, console, or none
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
+
+# OpenTelemetry
+OTEL_SERVICE_NAME=llm4s-agent
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
 # Embeddings - Unified format (recommended)
 EMBEDDING_MODEL=openai/text-embedding-3-small  # provider/model format, uses default base URL
