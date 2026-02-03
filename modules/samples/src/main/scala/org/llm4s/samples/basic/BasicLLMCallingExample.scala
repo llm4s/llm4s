@@ -81,14 +81,25 @@ object BasicLLMCallingExample {
       )
     )
 
+    // Optional max token override via environment variable
+    val maxTokensFromEnv: Option[Int] =
+      sys.env.get("LLM_MAX_TOKENS").flatMap(_.toIntOption)
+
     // Execute the example with explicit configuration and error handling
     val result = for {
       // Load provider configuration (model, base URL, API key, etc.)
       providerCfg <- Llm4sConfig.provider()
       // Build LLM client from typed provider config
       client <- LLMConnect.getClient(providerCfg)
+
       // Make the completion request
-      completion <- client.complete(conversation)
+      completion <- client.complete(
+        conversation,
+        CompletionOptions(
+          maxTokens = maxTokensFromEnv.orElse(Some(512))
+        )
+      )
+
       _ = {
         // Display the response
         logger.info("Success! Response from {}", completion.model)
