@@ -148,8 +148,6 @@ object ExaSearchTool {
             numResults = toolConfig.numResults,
             searchType = SearchType.fromString(toolConfig.searchType),
             maxCharacters = toolConfig.maxCharacters,
-            maxAgeHours = toolConfig.maxAgeHours,
-            category = toolConfig.category.flatMap(Category.fromString)
           )
         )
 
@@ -176,7 +174,6 @@ object ExaSearchTool {
       numResults = 10,
       searchType = "auto",
       maxCharacters = 3000,
-      maxAgeHours = 1,
     )
     create(toolConfig, config)
   }

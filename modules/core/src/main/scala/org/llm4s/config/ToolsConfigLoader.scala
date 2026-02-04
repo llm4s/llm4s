@@ -51,8 +51,6 @@ final case class ExaSearchToolConfig(
   numResults: Int,
   searchType: String,
   maxCharacters: Int,
-  maxAgeHours: Int,
-  category: Option[String] = None
 )
 
 /**
@@ -81,14 +79,12 @@ private[config] object ToolsConfigLoader {
     PureConfigReader.forProduct1("apiUrl")(DuckDuckGoSearchToolConfig.apply)
 
   implicit private val exaSearchSectionReader: PureConfigReader[ExaSearchToolConfig] =
-    PureConfigReader.forProduct7(
+    PureConfigReader.forProduct5(
       "apiKey",
       "apiUrl",
       "numResults",
       "searchType",
-      "maxCharacters",
-      "maxAgeHours",
-      "category"
+      "maxCharacters"
     )(ExaSearchToolConfig.apply)
 
   // ---- Public API used by Llm4sConfig ----
