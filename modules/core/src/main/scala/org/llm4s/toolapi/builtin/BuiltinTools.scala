@@ -90,7 +90,6 @@ object BuiltinTools {
    *
    * Includes:
    * - All core utilities
-   * - Web search
    * - Full HTTP access
    * - File system read/write
    * - Shell with common dev commands
