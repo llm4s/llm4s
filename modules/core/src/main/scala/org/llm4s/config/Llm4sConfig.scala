@@ -147,76 +147,12 @@ object Llm4sConfig {
     fromConf
   }
 
-  /**
-   * Load Brave Search tool configuration from application.conf.
-   *
-   * This method loads the BraveSearchToolConfig which should be passed to
-   * BraveSearchTool.create() when instantiating the tool.
-   *
-   * Configuration is expected at path: llm4s.tools.brave
-   *
-   * Example application.conf:
-   * {{{
-   * llm4s {
-   *   tools {
-   *     brave {
-   *       apiKey = "your-api-key"
-   *       apiUrl = "https://api.search.brave.com/res/v1"
-   *       count = 10
-   *       safeSearch = "moderate"
-   *     }
-   *   }
-   * }
-   * }}}
-   *
-   * Usage:
-   * {{{
-   * import org.llm4s.config.Llm4sConfig
-   * import org.llm4s.toolapi.builtin.search.BraveSearchTool
-   *
-   * val toolConfig = Llm4sConfig.loadBraveSearchTool().getOrElse(
-   *   throw new RuntimeException("Failed to load Brave Search config")
-   * )
-   * val searchTool = BraveSearchTool.create(toolConfig)
-   * }}}
-   *
-   * @return Right(BraveSearchToolConfig) if configuration is valid, Left(ConfigurationError) otherwise
-   */
+
   def loadBraveSearchTool(): Result[BraveSearchToolConfig] =
     org.llm4s.config.ToolsConfigLoader.loadBraveSearchTool(ConfigSource.default)
-
-  /**
-   * Load DuckDuckGo Search tool configuration from application.conf.
-   *
-   * This method loads the DuckDuckGoSearchToolConfig which should be passed to
-   * DuckDuckGoSearchTool.create() when instantiating the tool.
-   *
-   * Configuration is expected at path: llm4s.tools.duckduckgo
-   *
-   * Example application.conf:
-   * {{{
-   * llm4s {
-   *   tools {
-   *     duckduckgo {
-   *       apiUrl = "https://api.duckduckgo.com"
-   *     }
-   *   }
-   * }
-   * }}}
-   *
-   * Usage:
-   * {{{
-   * import org.llm4s.config.Llm4sConfig
-   * import org.llm4s.toolapi.builtin.search.DuckDuckGoSearchTool
-   *
-   * val toolConfig = Llm4sConfig.loadDuckDuckGoSearchTool().getOrElse(
-   *   throw new RuntimeException("Failed to load DuckDuckGo config")
-   * )
-   * val searchTool = DuckDuckGoSearchTool.create(toolConfig)
-   * }}}
-   *
-   * @return Right(DuckDuckGoSearchToolConfig) if configuration is valid, Left(ConfigurationError) otherwise
-   */
   def loadDuckDuckGoSearchTool(): Result[DuckDuckGoSearchToolConfig] =
     org.llm4s.config.ToolsConfigLoader.loadDuckDuckGoSearchTool(ConfigSource.default)
+
+  def loadExaSearchTool(): Result[ExaSearchToolConfig] =
+    org.llm4s.config.ToolsConfigLoader.loadExaSearchTool(ConfigSource.default)
 }
