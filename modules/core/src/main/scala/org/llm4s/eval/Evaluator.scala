@@ -11,6 +11,10 @@ class Evaluator(val llmClient: LLMClient) {
   def evaluate(metric: EvalMetric, context: EvalContext): Result[EvalResult] =
     metric.evaluate(context, llmClient)
 
+  /**
+   * Evaluate all metrics against a single context.
+   * Stops on first error (fail-fast).
+   */
   def evaluateAll(metrics: Seq[EvalMetric], context: EvalContext): Result[Seq[EvalResult]] =
     metrics.foldLeft[Result[Seq[EvalResult]]](Right(Seq.empty)) { (acc, metric) =>
       for {

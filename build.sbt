@@ -9,8 +9,8 @@ inThisBuild(
     organization       := "org.llm4s",
     organizationName   := "llm4s",
     versionScheme      := Some("early-semver"),
-    homepage := Some(url("https://github.com/llm4s/")),
-    licenses := List("MIT" -> url("https://mit-license.org/")),
+    homepage           := Some(url("https://github.com/llm4s/")),
+    licenses           := List("MIT" -> url("https://mit-license.org/")),
     developers := List(
       Developer(
         "rorygraves",
@@ -56,7 +56,7 @@ inThisBuild(
     ThisBuild / (coverageReport / aggregate) := false,
     // --- scalafix ---
     ThisBuild / scalafixDependencies += "ch.epfl.scala" %% "scalafix-rules" % "0.12.1",
-    ThisBuild / scalafixOnCompile := false  // Disabled for now
+    ThisBuild / scalafixOnCompile                       := false // Disabled for now
   )
 )
 
@@ -84,26 +84,24 @@ addCommandAlias(
   ";clean ;crossTestScala2/clean ;crossTestScala3/clean ;+publishLocal ;testCross"
 )
 
-
-
 // ---- shared settings ----
 lazy val commonSettings = Seq(
-  crossScalaVersions := Seq(scala213, scala3),
+  crossScalaVersions      := Seq(scala213, scala3),
   Compile / scalacOptions := scalacOptionsForVersion(scalaVersion.value),
   Test / scalacOptions    := scalacOptionsForVersion(scalaVersion.value),
   // Suppress ScalaDoc warnings from third-party libraries (e.g., ScalaTest)
   Compile / doc / scalacOptions ++= {
     CrossVersion.partialVersion(scalaVersion.value) match {
       case Some((3, _)) => Seq("-Wconf:cat=scaladoc:silent")
-      case _ => Seq.empty
+      case _            => Seq.empty
     }
   },
-  semanticdbEnabled       := CrossVersion.partialVersion(scalaVersion.value).exists(_._1 == 3),
-  Test / scalafix / unmanagedSources := Seq.empty,
+  semanticdbEnabled                      := CrossVersion.partialVersion(scalaVersion.value).exists(_._1 == 3),
+  Test / scalafix / unmanagedSources     := Seq.empty,
   Compile / packageDoc / publishArtifact := !isSnapshot.value,
   // Disable test Scaladoc generation during publish (not needed, saves memory in CI)
   Test / packageDoc / publishArtifact := false,
-  Test / doc / sources := Seq.empty,
+  Test / doc / sources                := Seq.empty,
   libraryDependencies ++= Seq(
     Deps.cats,
     Deps.upickle,
@@ -132,10 +130,10 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
-    Test / fork := true,
-    Compile / mainClass := None,
+    Test / fork                     := true,
+    Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
-    resolvers += "Vosk Repository" at "https://alphacephei.com/maven/",
+    resolvers += "Vosk Repository".at("https://alphacephei.com/maven/"),
     libraryDependencies ++= Seq(
       Deps.azureOpenAI,
       Deps.anthropic,
@@ -169,7 +167,7 @@ lazy val workspaceShared = (project in file("modules/workspace/workspaceShared")
     name := "workspaceShared",
     commonSettings,
     Compile / discoveredMainClasses := Seq.empty,
-    coverageEnabled := false
+    coverageEnabled                 := false
   )
 
 lazy val workspaceClient = (project in file("modules/workspace/workspaceClient"))
@@ -178,7 +176,7 @@ lazy val workspaceClient = (project in file("modules/workspace/workspaceClient")
     name := "workspaceClient",
     commonSettings,
     Compile / discoveredMainClasses := Seq.empty,
-    coverageEnabled := false,
+    coverageEnabled                 := false,
     libraryDependencies ++= Seq(
       Deps.azureOpenAI,
       Deps.anthropic,
@@ -217,7 +215,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
       Deps.config,
       Deps.hikariCP
     ),
-    publish / skip := true,
+    publish / skip  := true,
     coverageEnabled := false
   )
   .settings(WorkspaceRunnerDocker.settings)
@@ -227,7 +225,7 @@ lazy val samples = (project in file("modules//samples"))
   .settings(
     name := "samples",
     commonSettings,
-    publish / skip := true,
+    publish / skip  := true,
     coverageEnabled := false
   )
 
@@ -236,7 +234,7 @@ lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples
   .settings(
     name := "workspaceSamples",
     commonSettings,
-    publish / skip := true,
+    publish / skip  := true,
     coverageEnabled := false
   )
 
@@ -258,8 +256,8 @@ lazy val crossTestScala2 = (project in file("modules/crossTest/scala2"))
     name         := "crosstest-scala2",
     scalaVersion := scala213,
     Test / fork  := true,
-    resolvers   += Resolver.mavenLocal,
-    resolvers   += Resolver.defaultLocal,
+    resolvers += Resolver.mavenLocal,
+    resolvers += Resolver.defaultLocal,
     scalacOptions ++= scala2CompilerOptions,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test,
@@ -278,8 +276,8 @@ lazy val crossTestScala3 = (project in file("modules/crossTest/scala3"))
     name         := "crosstest-scala3",
     scalaVersion := scala3,
     Test / fork  := true,
-    resolvers   += Resolver.mavenLocal,
-    resolvers   += Resolver.defaultLocal,
+    resolvers += Resolver.mavenLocal,
+    resolvers += Resolver.defaultLocal,
     scalacOptions ++= scala3CompilerOptions,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test

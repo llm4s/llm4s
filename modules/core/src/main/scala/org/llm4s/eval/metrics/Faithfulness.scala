@@ -1,17 +1,18 @@
 package org.llm4s.eval.metrics
 
 import org.llm4s.error.ValidationError
-import org.llm4s.eval.{ EvalContext, EvalMetric, EvalResult }
+import org.llm4s.eval.{ EvalContext, EvalMetric, EvalResult, ResponseParser }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 
-import scala.util.Try
-
 /**
  * Faithfulness metric - measures if the answer is grounded in the context.
+ *
+ * @param threshold Score threshold for passing (default: 0.7). Must be in [0.0, 1.0].
  */
 class Faithfulness(override val threshold: Double = 0.7) extends EvalMetric {
+  require(threshold >= 0.0 && threshold <= 1.0, s"Threshold must be in [0.0, 1.0], got $threshold")
 
   val name: String = "Faithfulness"
 
@@ -47,17 +48,20 @@ class Faithfulness(override val threshold: Double = 0.7) extends EvalMetric {
   }
 
   private def parseResponse(response: String): Result[EvalResult] = {
-    val lines    = response.split("\n").map(_.trim).filter(_.nonEmpty)
-    val scoreOpt = lines.find(_.startsWith("SCORE:")).flatMap(l => Try(l.stripPrefix("SCORE:").trim.toDouble).toOption)
-    val explanation = lines.find(_.startsWith("EXPLANATION:")).map(_.stripPrefix("EXPLANATION:").trim).getOrElse("")
+    val scoreOpt    = ResponseParser.extractScore(response)
+    val explanation = ResponseParser.extractExplanation(response)
 
     scoreOpt match {
-      case Some(score) =>
-        Right(EvalResult(name, Math.max(0.0, Math.min(1.0, score)), passes(score), explanation))
+      case Some(rawScore) =>
+        val clampedScore = Math.max(0.0, Math.min(1.0, rawScore))
+        Right(EvalResult(name, clampedScore, passes(clampedScore), explanation))
+
       case None =>
-        Try(response.trim.replaceAll("[^0-9.]", "").toDouble).toOption match {
-          case Some(s) if s >= 0.0 && s <= 1.0 => Right(EvalResult(name, s, passes(s), ""))
-          case _ => Left(ValidationError.invalid("faithfulness_parse", s"Could not parse: ${response.take(100)}"))
+        ResponseParser.extractFirstNumber(response) match {
+          case Some(rawScore) if rawScore >= 0.0 && rawScore <= 1.0 =>
+            Right(EvalResult(name, rawScore, passes(rawScore), ""))
+          case _ =>
+            Left(ValidationError.invalid("faithfulness_parse", s"Could not parse: ${response.take(100)}"))
         }
     }
   }

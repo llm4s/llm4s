@@ -36,11 +36,11 @@ object WorkspaceRunnerDocker {
 
   // Core image settings used by workspaceRunner
   val settings: Seq[Setting[_]] = Seq(
-    Docker / maintainer := "llm4s",
-    Docker / packageName := "llm4s/workspace-runner",
-    dockerExposedPorts  := Seq(8080),
-    dockerBaseImage     := "eclipse-temurin:21-jdk",
-    Docker / version    := version.value.replace('+', '-'),
+    Docker / maintainer         := "llm4s",
+    Docker / packageName        := "llm4s/workspace-runner",
+    dockerExposedPorts          := Seq(8080),
+    dockerBaseImage             := "eclipse-temurin:21-jdk",
+    Docker / version            := version.value.replace('+', '-'),
     Docker / dockerBuildOptions := Seq("--platform=linux/amd64"),
     dockerCommands ++= devToolingCommands,
     dockerLabels ++= Map(

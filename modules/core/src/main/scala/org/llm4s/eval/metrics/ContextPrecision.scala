@@ -1,17 +1,17 @@
 package org.llm4s.eval.metrics
 
 import org.llm4s.error.ValidationError
-import org.llm4s.eval.{ EvalContext, EvalMetric, EvalResult }
+import org.llm4s.eval.{ EvalContext, EvalMetric, EvalResult, ResponseParser }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 
-import scala.util.Try
-
 /**
  * Context Precision metric - measures if retrieved context is useful.
+ * Uses 0.5 threshold (vs 0.7) as retrieval systems often return mixed results.
  */
 class ContextPrecision(override val threshold: Double = 0.5) extends EvalMetric {
+  require(threshold >= 0.0 && threshold <= 1.0, s"Threshold must be in [0.0, 1.0], got $threshold")
 
   val name: String = "ContextPrecision"
 
@@ -49,9 +49,9 @@ class ContextPrecision(override val threshold: Double = 0.5) extends EvalMetric 
   }
 
   private def parseResponse(response: String): Result[EvalResult] = {
-    val lines    = response.split("\n").map(_.trim).filter(_.nonEmpty)
-    val scoreOpt = lines.find(_.startsWith("SCORE:")).flatMap(l => Try(l.stripPrefix("SCORE:").trim.toDouble).toOption)
-    val explanation = lines.find(_.startsWith("EXPLANATION:")).map(_.stripPrefix("EXPLANATION:").trim).getOrElse("")
+    val lines       = response.split("\n").map(_.trim).filter(_.nonEmpty)
+    val scoreOpt    = ResponseParser.extractScore(response)
+    val explanation = ResponseParser.extractExplanation(response)
     val relevant =
       lines.find(_.startsWith("RELEVANT_CHUNKS:")).map(_.stripPrefix("RELEVANT_CHUNKS:").trim).getOrElse("")
 
@@ -59,12 +59,16 @@ class ContextPrecision(override val threshold: Double = 0.5) extends EvalMetric 
       if (relevant.nonEmpty && relevant != "NONE") s"$explanation (Relevant: $relevant)" else explanation
 
     scoreOpt match {
-      case Some(score) =>
-        Right(EvalResult(name, Math.max(0.0, Math.min(1.0, score)), passes(score), detailedExplanation))
+      case Some(rawScore) =>
+        val clampedScore = Math.max(0.0, Math.min(1.0, rawScore))
+        Right(EvalResult(name, clampedScore, passes(clampedScore), detailedExplanation))
+
       case None =>
-        Try(response.trim.replaceAll("[^0-9.]", "").toDouble).toOption match {
-          case Some(s) if s >= 0.0 && s <= 1.0 => Right(EvalResult(name, s, passes(s), ""))
-          case _ => Left(ValidationError.invalid("context_precision_parse", s"Could not parse: ${response.take(100)}"))
+        ResponseParser.extractFirstNumber(response) match {
+          case Some(rawScore) if rawScore >= 0.0 && rawScore <= 1.0 =>
+            Right(EvalResult(name, rawScore, passes(rawScore), ""))
+          case _ =>
+            Left(ValidationError.invalid("context_precision_parse", s"Could not parse: ${response.take(100)}"))
         }
     }
   }
