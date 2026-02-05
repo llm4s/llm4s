@@ -22,6 +22,13 @@ package org.llm4s.toolapi.builtin
  *   - Returns web pages, snippets, and metadata
  *   - Configuration: API key, URL, result count, safe search settings
  *
+ * - [[ExaSearchTool]]: Search using Exa (formerly Metaphor) API
+ *   - AI-powered semantic search engine
+ *   - Requires API key (paid service)
+ *   - Supports multiple search types: auto, neural, fast, deep
+ *   - Returns rich content with text, highlights, summaries, and metadata
+ *   - Configuration: API key, URL, result count, search type, max characters, max age
+ *
  * == Usage Pattern ==
  *
  * All search tools require configuration to be loaded at the application edge:
@@ -44,8 +51,14 @@ package org.llm4s.toolapi.builtin
  * )
  * val braveTool = BraveSearchTool.create(braveConfig)
  *
+ * // Load Exa Search configuration
+ * val exaConfig = Llm4sConfig.loadExaSearchTool().getOrElse(
+ *   throw new RuntimeException("Failed to load Exa Search config")
+ * )
+ * val exaTool = ExaSearchTool.create(exaConfig)
+ *
  * // Register tools with the agent
- * val tools = new ToolRegistry(Seq(duckDuckGoTool, braveTool))
+ * val tools = new ToolRegistry(Seq(duckDuckGoTool, braveTool, exaTool))
  * }}}
  *
  * == Configuration ==
@@ -63,6 +76,13 @@ package org.llm4s.toolapi.builtin
  *       apiUrl = "https://api.search.brave.com/res/v1"
  *       count = 10
  *       safeSearch = "moderate"
+ *     }
+ *     exa {
+ *       apiKey = "your-exa-api-key"
+ *       apiUrl = "https://api.exa.ai"
+ *       numResults = 10
+ *       searchType = "auto"        # Options: auto, neural, fast, deep
+ *       maxCharacters = 500
  *     }
  *   }
  * }
