@@ -54,7 +54,7 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
 
 ## Features
 
-- **Multi-Provider Support**: Connect seamlessly to multiple LLM providers (OpenAI, Anthropic, Google Gemini, Azure, Ollama).
+- **Multi-Provider Support**: Connect seamlessly to multiple LLM providers (OpenAI, Anthropic, Google Gemini, Azure, Ollama, DeepSeek).
 - **Execution Environments**: Run LLM-driven operations in secure, containerized or non-containerized setups.
 - **Error Handling**: Robust mechanisms to catch, log, and recover from failures gracefully.
 - **MCP Support**: Integration with Model Context Protocol for richer context management.
@@ -71,7 +71,7 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
         └──────────┬────────────────┘
                    │
           Multi-Provider Connector
-       (OpenAI | Anthropic | Future...)
+        (OpenAI | Anthropic | DeepSeek | ...)
                    │
          ┌─────────┴─────────┐
          │ Execution Manager │
@@ -186,6 +186,16 @@ LLM_MODEL=zai/GLM-4.7
 ZAI_API_KEY=<your_zai_api_key>
 ZAI_BASE_URL=https://api.z.ai/api/paas/v4
 ```
+
+or DeepSeek:
+
+```
+LLM_MODEL=deepseek/deepseek-chat
+DEEPSEEK_API_KEY=<your_deepseek_api_key>
+# Optional: DEEPSEEK_BASE_URL defaults to https://api.deepseek.com
+```
+
+> **Migration Note:** The `LLMProvider.DeepSeek` case has been added to the sealed `LLMProvider` ADT. If you have exhaustive pattern matches on `LLMProvider`, add a `case LLMProvider.DeepSeek => ...` handler, or use a wildcard `case _ => ...` to gracefully handle future providers.
 
 This will allow you to run the non-containerized examples.
 
@@ -460,8 +470,8 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
     - **Ollama** (local): `OLLAMA_EMBEDDING_BASE_URL` (default: `http://localhost:11434`), `OLLAMA_EMBEDDING_MODEL`
 
 - Provider API keys and endpoints
-  - Keys: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `AZURE_API_BASE`, `AZURE_API_KEY`, `AZURE_API_VERSION`, `OLLAMA_BASE_URL`
-  - Type: concrete `ProviderConfig` (e.g., `OpenAIConfig`, `AnthropicConfig`, `AzureConfig`, `OllamaConfig`)
+  - Keys: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `AZURE_API_BASE`, `AZURE_API_KEY`, `AZURE_API_VERSION`, `OLLAMA_BASE_URL`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`
+  - Type: concrete `ProviderConfig` (e.g., `OpenAIConfig`, `AnthropicConfig`, `AzureConfig`, `OllamaConfig`, `DeepSeekConfig`)
   - Loader: `Llm4sConfig.provider()` → then provider-specific config constructors
 
 Tracing
