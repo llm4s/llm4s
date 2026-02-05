@@ -3,6 +3,7 @@ package org.llm4s.agent.memory
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
 import java.time.Instant
 
@@ -26,6 +27,8 @@ final case class LLMMemoryManager(
   override val store: MemoryStore,
   client: LLMClient
 ) extends MemoryManager {
+
+  private val logger = LoggerFactory.getLogger(getClass)
 
   // ============================================================
   // Recording methods (same as SimpleMemoryManager)
@@ -195,17 +198,24 @@ final case class LLMMemoryManager(
         // 2. Group memories by type and context, applying minCount per group
         val grouped = groupMemoriesForConsolidation(oldMemories, minCount)
 
-        // 3. Consolidate each group (continue on errors to make failures non-fatal)
+        // 3. Consolidate each group (strict mode fails fast, best-effort logs and continues)
         grouped
           .foldLeft[Result[MemoryStore]](Right(store)) { case (accStore, group) =>
             accStore.flatMap { s =>
               consolidateGroup(group, s) match {
                 case Right(newStore) => Right(newStore)
-                case Left(_)         =>
-                  // Log error but continue with other groups (non-fatal consolidation)
-                  // In production, use proper logging framework
-                  // For now, continue with current store state
-                  Right(s)
+                case Left(error)     =>
+                  // Log error with safe summary (no sensitive content)
+                  val groupType = group.headOption.map(_.memoryType.name).getOrElse("unknown")
+                  val groupSize = group.length
+                  val groupIds  = group.map(_.id.value.take(8)).mkString(", ")
+                  logger.warn(
+                    s"Consolidation failed for $groupType group (size=$groupSize, ids=[$groupIds]): ${error.message}"
+                  )
+
+                  // Strict mode: fail fast. Best-effort mode: continue with current store
+                  if (config.consolidationConfig.strictMode) Left(error)
+                  else Right(s)
               }
             }
           }

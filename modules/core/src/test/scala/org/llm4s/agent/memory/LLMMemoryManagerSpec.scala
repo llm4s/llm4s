@@ -542,6 +542,30 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     (result.toOption.get should have).length(3) // All original memories preserved
   }
 
+  it should "fail fast in strict mode when consolidation fails" in {
+    val strictConfig = MemoryManagerConfig.testing.copy(
+      consolidationConfig = ConsolidationConfig.strict
+    )
+    val client  = new FailingMockLLMClient()
+    val store   = InMemoryStore.empty
+    val manager = LLMMemoryManager(strictConfig, store, client)
+
+    val result = for {
+      m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
+      m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
+      m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
+
+      // Try to consolidate in strict mode (should fail fast)
+      consolidated <- m3.consolidateMemories(
+        olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
+        minCount = 3
+      )
+    } yield consolidated
+
+    // Should fail fast in strict mode
+    result.isLeft shouldBe true
+  }
+
   // ============================================================
   // formatMemoriesAsContext edge cases
   // ============================================================

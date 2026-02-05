@@ -252,17 +252,24 @@ final case class MemoryManagerConfig(
  * when consolidationEnabled is true.
  *
  * @param maxMemoriesPerGroup Maximum memories per consolidation group (prevents unbounded context)
+ * @param strictMode If true, fail fast on any consolidation error. If false, log and continue (best-effort)
  */
 final case class ConsolidationConfig(
-  maxMemoriesPerGroup: Int = 50
+  maxMemoriesPerGroup: Int = 50,
+  strictMode: Boolean = false
 )
 
 object ConsolidationConfig {
 
   /**
-   * Default consolidation configuration.
+   * Default consolidation configuration (best-effort mode).
    */
   val default: ConsolidationConfig = ConsolidationConfig()
+
+  /**
+   * Strict consolidation configuration (fails fast on any error).
+   */
+  val strict: ConsolidationConfig = ConsolidationConfig(strictMode = true)
 }
 
 object MemoryManagerConfig {
