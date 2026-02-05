@@ -168,12 +168,11 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
 
       val result = TracingConfigLoader.load(ConfigSource.string(hocon))
 
-      // TracingMode.fromString should handle case-insensitively or use the raw value
       result.isRight shouldBe true
-      // The exact behavior depends on TracingMode.fromString implementation
+      result.value.mode shouldBe TracingMode.Langfuse
     }
 
-    "default to console for unknown mode values" in {
+    "default to NoOp for unknown mode values" in {
       val hocon =
         """
           |llm4s {
@@ -184,7 +183,7 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
       val result = TracingConfigLoader.load(ConfigSource.string(hocon))
 
       result.isRight shouldBe true
-      // Unknown modes should fall back to a reasonable default (Console or similar)
+      result.value.mode shouldBe TracingMode.NoOp
     }
 
     "handle empty mode string by using default" in {
