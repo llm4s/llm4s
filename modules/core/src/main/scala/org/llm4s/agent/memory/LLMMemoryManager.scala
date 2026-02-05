@@ -312,33 +312,60 @@ final case class LLMMemoryManager(
     if (group.isEmpty) return Right(currentStore)
 
     // 1. Determine consolidation prompt based on memory type
-    val prompt = selectPromptForGroup(group)
+    val userPrompt = selectPromptForGroup(group)
 
-    // 2. Call LLM to consolidate
+    // 2. Call LLM with system prompt for security + user prompt
     val completionResult = client.complete(
-      conversation = Conversation(Seq(UserMessage(prompt))),
-      options = CompletionOptions()
+      conversation = Conversation(
+        Seq(
+          SystemMessage(ConsolidationPrompts.systemPrompt),
+          UserMessage(userPrompt)
+        )
+      ),
+      options = CompletionOptions(
+        maxTokens = Some(500), // Cap output length for stable summaries
+        temperature = 0.3      // Low temperature for consistent, factual summaries
+      )
     )
 
     completionResult.flatMap { completion =>
       val consolidatedText = completion.content.trim
 
-      // 3. Create consolidated memory
-      val consolidatedMemory = Memory(
-        id = MemoryId.generate(),
-        content = consolidatedText,
-        memoryType = group.head.memoryType,
-        metadata = mergeMetadata(group),
-        timestamp = Instant.now(),
-        importance = group.flatMap(_.importance).maxOption,
-        embedding = None // Will be regenerated if needed
-      )
+      // 3. Validate output
+      if (consolidatedText.isEmpty) {
+        Left(
+          org.llm4s.error.APIError(
+            "test-provider",
+            "Consolidation produced empty output",
+            None
+          )
+        )
+      } else {
+        // Cap consolidated text length (sanity check)
+        val cappedText = if (consolidatedText.length > 2000) {
+          logger.warn(
+            s"Consolidation output too long (${consolidatedText.length} chars), truncating to 2000"
+          )
+          consolidatedText.take(2000) + "..."
+        } else consolidatedText
 
-      // 4. Store consolidated memory first, then delete originals
-      // This prevents data loss if delete succeeds but store fails
-      currentStore.store(consolidatedMemory).flatMap { updatedStore =>
-        group.foldLeft[Result[MemoryStore]](Right(updatedStore)) { case (accStore, memory) =>
-          accStore.flatMap(_.delete(memory.id))
+        // 4. Create consolidated memory
+        val consolidatedMemory = Memory(
+          id = MemoryId.generate(),
+          content = cappedText,
+          memoryType = group.head.memoryType,
+          metadata = mergeMetadata(group),
+          timestamp = Instant.now(),
+          importance = group.flatMap(_.importance).maxOption,
+          embedding = None // Will be regenerated if needed
+        )
+
+        // 5. Store consolidated memory first, then delete originals
+        // This prevents data loss if delete succeeds but store fails
+        currentStore.store(consolidatedMemory).flatMap { updatedStore =>
+          group.foldLeft[Result[MemoryStore]](Right(updatedStore)) { case (accStore, memory) =>
+            accStore.flatMap(_.delete(memory.id))
+          }
         }
       }
     }
