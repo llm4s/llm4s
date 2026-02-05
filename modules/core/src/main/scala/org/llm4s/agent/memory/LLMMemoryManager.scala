@@ -235,13 +235,18 @@ final case class LLMMemoryManager(
     memories: Seq[Memory],
     minCount: Int
   ): Seq[Seq[Memory]] = {
-    // Group by conversation
+    // Group by conversation (only Conversation type, sorted by timestamp for stable summaries)
     val byConversation = memories
+      .filter(_.memoryType == MemoryType.Conversation)
       .filter(_.conversationId.isDefined)
       .groupBy(_.conversationId.get)
       .values
-      .filter(_.length >= minCount)                                // Apply minCount per group
-      .map(_.take(config.consolidationConfig.maxMemoriesPerGroup)) // Cap group size
+      .filter(_.length >= minCount) // Apply minCount per group
+      .map(group =>
+        group
+          .sortBy(_.timestamp) // Sort by timestamp (oldest first)
+          .take(config.consolidationConfig.maxMemoriesPerGroup)
+      ) // Cap group size
       .toSeq
 
     // Group by entity
