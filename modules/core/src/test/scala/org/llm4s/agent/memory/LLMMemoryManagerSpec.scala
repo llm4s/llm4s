@@ -374,6 +374,38 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     memory.getMetadata("original_ids") should not be None
   }
 
+  it should "use latest timestamp for consolidated memory" in {
+    val manager = createManager()
+
+    val baseTime = Instant.now().minus(3, ChronoUnit.DAYS)
+    val t1       = baseTime
+    val t2       = baseTime.plus(1, ChronoUnit.DAYS)
+    val t3       = baseTime.plus(2, ChronoUnit.DAYS)
+    val convId   = Some("conv-1")
+
+    val m1 = Memory.fromConversation("Message 1", "user", convId).copy(timestamp = t1)
+    val m2 = Memory.fromConversation("Message 2", "assistant", convId).copy(timestamp = t2)
+    val m3 = Memory.fromConversation("Message 3", "user", convId).copy(timestamp = t3)
+
+    val result = for {
+      s1 <- manager.store.store(m1)
+      s2 <- s1.store(m2)
+      s3 <- s2.store(m3)
+      updatedManager = manager.copy(store = s3)
+      consolidated <- updatedManager.consolidateMemories(
+        olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
+        minCount = 3
+      )
+      memories <- consolidated.store.recall(MemoryFilter.conversations, 100)
+    } yield memories
+
+    result.isRight shouldBe true
+    val memories = result.toOption.get
+
+    (memories should have).length(1)
+    memories.head.timestamp shouldBe t3
+  }
+
   it should "consolidate entity facts" in {
     val manager  = createManager()
     val entityId = EntityId.fromName("Scala")

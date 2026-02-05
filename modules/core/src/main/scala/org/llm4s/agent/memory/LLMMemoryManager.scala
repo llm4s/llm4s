@@ -355,7 +355,7 @@ final case class LLMMemoryManager(
           content = cappedText,
           memoryType = group.head.memoryType,
           metadata = mergeMetadata(group),
-          timestamp = Instant.now(),
+          timestamp = group.map(_.timestamp).max,
           importance = group.flatMap(_.importance).maxOption,
           embedding = None // Will be regenerated if needed
         )
