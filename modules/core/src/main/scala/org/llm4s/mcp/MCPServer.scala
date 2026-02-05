@@ -8,7 +8,9 @@ import upickle.default.{ read => upickleRead, write => upickleWrite }
 
 import java.net.InetSocketAddress
 import java.util.UUID
-import scala.collection.mutable
+
+import scala.collection.concurrent.TrieMap
+import java.util.concurrent.{Executors, ExecutorService, TimeUnit}
 import scala.util.{ Failure, Success, Try, Using }
 
 /**
@@ -30,9 +32,10 @@ case class MCPServerOptions(
  * A generic, reusable Model Context Protocol (MCP) Server.
  *
  * This server hosts a list of llm4s `ToolFunction`s and exposes them
- * via the MCP protocol (Streamable HTTP 2025-06-18 and SSE 2024-11-05).
+ * via the MCP protocol (HTTP Transport 2024-11-05 / 2025-06-18).
  *
- * Usage:
+ * NOTE: This server is intended for LOCAL DEVELOPMENT use only.
+ * It does not implement authentication or strict security sandboxing.
  * ```scala
  * val tools = Seq(myTool1, myTool2)
  * val options = MCPServerOptions(8080, "/mcp", "MyServer", "1.0")
@@ -49,20 +52,30 @@ class MCPServer(
 ) {
   private val logger = LoggerFactory.getLogger(getClass)
   private var server: Option[HttpServer] = None
+  private var executorService: ExecutorService = _
   
   // Map for fast tool lookup
   private val toolMap: Map[String, ToolFunction[_, _]] = tools.map(t => t.name -> t).toMap
+
+  def boundPort: Int = server.map(_.getAddress.getPort).getOrElse(-1)
+  def getPort: Int = boundPort
 
   def start(): Unit = {
     if (server.isDefined) {
       logger.warn("MCPServer is already running")
       return
     }
+    
+    logger.warn("!!! SECURITY WARNING !!!")
+    logger.warn("This server is intended for local development only. Do not use in production.")
+    logger.warn("It does not implement authentication or strict security boundaries.")
 
     try {
       val httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", options.port), 0)
       httpServer.createContext(options.path, new MCPHandler)
-      httpServer.setExecutor(null) // Default executor
+      // Use a bounded thread pool to prevent resource exhaustion
+      executorService = Executors.newFixedThreadPool(16)
+      httpServer.setExecutor(executorService)
       httpServer.start()
       server = Some(httpServer)
       val actualPort = httpServer.getAddress.getPort
@@ -79,12 +92,21 @@ class MCPServer(
     server.foreach { s =>
       logger.info("Stopping MCPServer...")
       s.stop(delay)
+      if (executorService != null) {
+        executorService.shutdown()
+        try {
+          if (!executorService.awaitTermination(delay.toLong, TimeUnit.SECONDS)) {
+             executorService.shutdownNow()
+          }
+        } catch {
+          case _: InterruptedException => executorService.shutdownNow()
+        }
+        executorService = null
+      }
       server = None
     }
   }
   
-  def boundPort: Int = server.map(_.getAddress.getPort).getOrElse(options.port)
-
   // Session management logic (internal)
   private case class Session(
     id: String,
@@ -93,7 +115,7 @@ class MCPServer(
   )
 
   private object SessionStore {
-    private val sessions = mutable.Map[String, Session]()
+    private val sessions = TrieMap[String, Session]()
 
     def createSession(protocolVersion: String): Session = {
       val session = Session(UUID.randomUUID().toString, protocolVersion)
@@ -120,7 +142,10 @@ class MCPServer(
       Try {
         method match {
           case "POST"   => handlePOST(exchange)
-          case "GET"    => handleGET(exchange)
+          case "GET"    => 
+            // SSE support explicitly disabled/removed as per mentor feedback
+            // handleGET(exchange) 
+            sendErrorResponse(exchange, 501, "Server-Sent Events (SSE) transport is not currently supported.")
           case "DELETE" => handleDELETE(exchange)
           case _        => sendErrorResponse(exchange, 405, "Method not allowed")
         }
@@ -130,40 +155,92 @@ class MCPServer(
       }
     }
 
+    private val MaxPayloadSize = 10 * 1024 * 1024 // 10 MB
+
     private def handlePOST(exchange: HttpExchange): Unit = {
+      val contentLengthStr = Option(exchange.getRequestHeaders.getFirst("Content-Length"))
+      val exceedsLimit = contentLengthStr.flatMap(s => Try(s.toLong).toOption).exists(_ > MaxPayloadSize)
+
+      if (exceedsLimit) {
+        sendErrorResponse(exchange, 413, "Payload too large")
+        return
+      }
+
       val result = for {
-        body    <- Try(scala.io.Source.fromInputStream(exchange.getRequestBody).mkString)
-        request <- Try(upickleRead[JsonRpcRequest](body))
-      } yield request
+        bodyStr <- readBodyWithLimit(exchange, MaxPayloadSize)
+        json    <- Try(ujson.read(bodyStr))
+      } yield (bodyStr, json)
 
       result match {
-        case Success(request) =>
-          logger.debug(s"Request: ${request.method} (id: ${request.id})")
-
-          // Protocol Version Check
-          val protocolValid = if (request.method != "initialize") {
-             Option(exchange.getRequestHeaders.getFirst("MCP-Protocol-Version")).forall { version =>
-               version.startsWith("2024-") || version.startsWith("2025-")
+        case Success((bodyStr, json)) =>
+          if (json.obj.contains("id")) {
+             // It's a request
+             Try(upickleRead[JsonRpcRequest](bodyStr)) match {
+               case Success(request) =>
+                 logger.debug(s"Request: ${request.method} (id: ${request.id})")
+                 handleRequest(exchange, request)
+               case Failure(e) =>
+                 logger.error(s"Failed to parse request: ${e.getMessage}")
+                 sendJsonRpcError(exchange, "unknown", MCPErrorCodes.PARSE_ERROR, "Parse error")
              }
-          } else true
-
-          if (!protocolValid) {
-             val version = exchange.getRequestHeaders.getFirst("MCP-Protocol-Version")
-             sendJsonRpcError(exchange, request.id, MCPErrorCodes.INVALID_PROTOCOL_VERSION, s"Unsupported protocol version: $version")
           } else {
-             val sessionId = Option(exchange.getRequestHeaders.getFirst("mcp-session-id"))
-
-             request.method match {
-               case "initialize" => handleInitialize(exchange, request)
-               case "tools/list" => handleWithSession(exchange, request, sessionId, handleToolsList)
-               case "tools/call" => handleWithSession(exchange, request, sessionId, handleToolsCall)
-               case _            => sendJsonRpcError(exchange, request.id, MCPErrorCodes.METHOD_NOT_FOUND, "Method not found")
+             // It's a notification
+             Try(upickleRead[JsonRpcNotification](bodyStr)) match {
+               case Success(notification) =>
+                 logger.debug(s"Notification: ${notification.method}")
+                 handleNotification(notification)
+                 // Notifications do not receive a response, but we must acknowledge the HTTP request
+                 exchange.sendResponseHeaders(200, -1)
+                 exchange.close()
+               case Failure(e) =>
+                 logger.warn(s"Failed to parse notification: ${e.getMessage}")
+                 // Even if malformed, for notifications we typically just ignore or log
+                 exchange.sendResponseHeaders(200, -1)
+                 exchange.close()
              }
           }
 
+        case Failure(e) if e.getMessage == "Payload too large" =>
+           logger.warn("Payload size exceeded limit")
+           sendErrorResponse(exchange, 413, "Payload too large")
+
         case Failure(e) =>
-          logger.error(s"Failed to parse request: ${e.getMessage}")
+          logger.error(s"Failed to parse JSON: ${e.getMessage}")
           sendJsonRpcError(exchange, "unknown", MCPErrorCodes.PARSE_ERROR, "Parse error")
+      }
+    }
+
+    private val SupportedVersions = Set("2024-11-05", "2025-06-18")
+
+    private def handleRequest(exchange: HttpExchange, request: JsonRpcRequest): Unit = {
+       // Protocol Version Check
+       val protocolValid = if (request.method != "initialize") {
+          Option(exchange.getRequestHeaders.getFirst("MCP-Protocol-Version")).exists { version =>
+            SupportedVersions.contains(version)
+          }
+       } else true
+
+       if (!protocolValid) {
+          val version = exchange.getRequestHeaders.getFirst("MCP-Protocol-Version")
+          sendJsonRpcError(exchange, request.id, MCPErrorCodes.INVALID_PROTOCOL_VERSION, s"Unsupported protocol version: $version. Supported: ${SupportedVersions.mkString(", ")}")
+       } else {
+          val sessionId = Option(exchange.getRequestHeaders.getFirst("mcp-session-id"))
+
+          request.method match {
+            case "initialize" => handleInitialize(exchange, request)
+            case "tools/list" => handleWithSession(exchange, request, sessionId, handleToolsList)
+            case "tools/call" => handleWithSession(exchange, request, sessionId, handleToolsCall)
+            case _            => sendJsonRpcError(exchange, request.id, MCPErrorCodes.METHOD_NOT_FOUND, "Method not found")
+          }
+       }
+    }
+
+    private def handleNotification(notification: JsonRpcNotification): Unit = {
+      notification.method match {
+        case "notifications/initialized" =>
+          logger.info("Client initialized notification received")
+        case _ =>
+          logger.debug(s"Received unhandled notification: ${notification.method}")
       }
     }
 
@@ -174,16 +251,12 @@ class MCPServer(
 
       // Protocol negotiation
       val clientVersion = initRequest.protocolVersion
-      val protocolVersion = clientVersion match {
-        case v if v.startsWith("2025-06-18") => "2025-06-18"
-        case v if v.startsWith("2025-03-26") => "2025-03-26"
-        case _                               => "2024-11-05"
-      }
+      val protocolVersion = if (SupportedVersions.contains(clientVersion)) clientVersion else "2024-11-05"
 
       logger.info(s"Initializing with protocol: $protocolVersion")
 
       // Create session for modern protocols
-      val sessionOpt = if (protocolVersion == "2025-06-18" || protocolVersion == "2025-03-26") {
+      val sessionOpt = if (protocolVersion == "2025-06-18") {
         Some(SessionStore.createSession(protocolVersion))
       } else None
 
@@ -278,6 +351,7 @@ class MCPServer(
       }
     }
 
+    /* SSE support explicitly disabled/removed as per mentor feedback
     private def handleGET(exchange: HttpExchange): Unit = {
        val acceptHeader = Option(exchange.getRequestHeaders.getFirst("Accept")).getOrElse("")
        if (!acceptHeader.contains("text/event-stream")) {
@@ -294,6 +368,7 @@ class MCPServer(
            sendErrorResponse(exchange, 400, "Missing mcp-session-id header for SSE")
        }
     }
+    */
 
     private def handleDELETE(exchange: HttpExchange): Unit = {
       val sessionId = Option(exchange.getRequestHeaders.getFirst("mcp-session-id"))
@@ -337,6 +412,7 @@ class MCPServer(
     private def sendErrorResponse(exchange: HttpExchange, code: Int, message: String): Unit =
       sendResponse(exchange, code, "text/plain", message)
 
+    /* SSE support disabled
     private def sendSSEStream(exchange: HttpExchange, sessionId: String): Unit = {
        exchange.getResponseHeaders.set("Content-Type", "text/event-stream")
        exchange.getResponseHeaders.set("Cache-Control", "no-cache")
@@ -347,6 +423,22 @@ class MCPServer(
           "data: {\"jsonrpc\":\"2.0\",\"method\":\"notification/stream_started\",\"params\":{\"session\":\"" + sessionId + "\"}}\n\n"
        
        sendResponse(exchange, 200, "text/event-stream", sseData)
+    }
+    */
+    private def readBodyWithLimit(exchange: HttpExchange, limit: Int): Try[String] = {
+       Using(exchange.getRequestBody) { is =>
+         val buffer = new Array[Byte](4096)
+         val out = new java.io.ByteArrayOutputStream()
+         var total = 0
+         var bytesRead = is.read(buffer)
+         while (bytesRead != -1) {
+           total += bytesRead
+           if (total > limit) throw new RuntimeException("Payload too large")
+           out.write(buffer, 0, bytesRead)
+           bytesRead = is.read(buffer)
+         }
+         out.toString("UTF-8")
+       }
     }
   }
 }

@@ -100,6 +100,8 @@ class StreamableHTTPTransportImpl(url: String, override val name: String, timeou
       // Build headers according to 2025-06-18 spec
       val headers = buildHeaders(request)
 
+      logger.debug(s"StreamableHTTPTransport($name) using URL: '$url'")
+
       // POST to MCP endpoint (single endpoint, no /sse suffix)
       val response = requests.post(
         url,
