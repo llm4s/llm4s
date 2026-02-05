@@ -310,17 +310,17 @@ val clientLayer: ZLayer[Scope, LLMError, LLMClient] =
 
 ### Workspace Execution
 
-For workspace-based execution (containerized code execution), the `ContainerisedWorkspace` manages its own lifecycle:
+For workspace-based execution (containerized command execution), the `ContainerisedWorkspace` manages its own lifecycle:
 
 ```scala
 import org.llm4s.workspace.ContainerisedWorkspace
 
 val workspace = new ContainerisedWorkspace(config)
 try {
-  // Execute in isolated container
-  workspace.execute(code)
+  // Execute a shell command inside the isolated container
+  workspace.executeCommand("python main.py")
 } finally {
-  workspace.shutdown()  // Stops container and cleans up
+  workspace.stopContainer()  // Stops container and cleans up
 }
 ```
 
@@ -505,11 +505,18 @@ Key considerations:
 Use `LLMClient.getContextBudget()` to stay within limits:
 
 ```scala
-val budgetTokens = client.getContextBudget(HeadroomPercent.Standard)
-// Returns available tokens after reserving space for completion and safety margin
+import org.llm4s.agent.AgentState
+import org.llm4s.context.ContextWindowConfig
 
-// Prune conversation to fit budget
-val prunedConversation = conversation.pruneToFit(budgetTokens)
+val budgetTokens = client.getContextBudget(HeadroomPercent.Standard)
+
+// Prune conversation using the AgentState pruning API
+val state = AgentState(conversation)
+
+val prunedConversation =
+  state.pruneConversation(
+    ContextWindowConfig(maxTokens = budgetTokens)
+  )
 ```
 
 ### Conversation Pruning
@@ -518,11 +525,17 @@ For long-running conversations, use built-in pruning strategies:
 
 ```scala
 import org.llm4s.agent.AgentState
+import org.llm4s.context.ContextWindowConfig
+import org.llm4s.context.PruningStrategy.OldestFirst
 
-// Prune when context exceeds budget
-val pruned = state.conversation
-  .withMaxMessages(50)                    // Hard limit
-  .withPruningStrategy(OldestFirst)       // or MiddleOut, RecentTurns
+// Prune when context exceeds configured limits
+val prunedConversation =
+  state.pruneConversation(
+    ContextWindowConfig(
+      maxMessages = Some(50),
+      pruningStrategy = OldestFirst
+    )
+  )
 ```
 
 ### Caching Considerations
