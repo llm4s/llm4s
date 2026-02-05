@@ -89,7 +89,8 @@ object BasicLLMCallingExample {
 
     // Optional max token override via environment variable
     val maxTokensFromEnv: Option[Int] =
-      sys.env.get("LLM_MAX_TOKENS")
+      sys.env
+        .get("LLM_MAX_TOKENS")
         .map(_.trim)
         .flatMap(_.toIntOption)
         .filter(_ > 0)
@@ -101,14 +102,10 @@ object BasicLLMCallingExample {
                 v
               )
               None
-           case _ =>
-             None
-         }
-       }
-
-
-
-
+            case _ =>
+              None
+          }
+        }
 
     // Execute the example with explicit configuration and error handling
     val result = for {
