@@ -13,11 +13,11 @@
 
     <!-- Set Netty logging to INFO level -->
     <logger name="io.netty" level="INFO"/>
-    
+
     <!-- Set other noisy loggers to INFO -->
     <logger name="com.azure" level="INFO"/>
     <logger name="reactor" level="INFO"/>
-    
+
     <root level="INFO">
         <appender-ref ref="STDOUT"/>
     </root>

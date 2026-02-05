@@ -46,12 +46,15 @@ private[provider] trait OpenAIClientTransport {
  * @param model the model identifier (e.g., "gpt-4", "gpt-3.5-turbo")
  * @param client configured Azure OpenAI client instance
  * @param config provider configuration containing context window and reserve completion settings
+ * @param metrics metrics collector for observability (default: noop)
  */
 class OpenAIClient private (
   private val model: String,
   private val transport: OpenAIClientTransport,
-  private val config: ProviderConfig
-) extends LLMClient {
+  private val config: ProviderConfig,
+  protected val metrics: org.llm4s.metrics.MetricsCollector
+) extends LLMClient
+    with MetricsRecording {
 
   private lazy val logger: Logger   = LoggerFactory.getLogger(getClass)
   private val closed: AtomicBoolean = new AtomicBoolean(false)
@@ -60,8 +63,9 @@ class OpenAIClient private (
    * Creates an OpenAI client for direct OpenAI API access.
    *
    * @param config OpenAI configuration with API key and base URL
+   * @param metrics metrics collector (default: noop)
    */
-  def this(config: OpenAIConfig) = this(
+  def this(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector) = this(
     config.model,
     OpenAIClientTransport.azure(
       new OpenAIClientBuilder()
@@ -69,15 +73,17 @@ class OpenAIClient private (
         .endpoint(config.baseUrl)
         .buildClient()
     ),
-    config
+    config,
+    metrics
   )
 
   /**
    * Creates an OpenAI client for Azure OpenAI service.
    *
    * @param config Azure configuration with API key, endpoint, and API version
+   * @param metrics metrics collector (default: noop)
    */
-  def this(config: AzureConfig) = this(
+  def this(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector) = this(
     config.model,
     OpenAIClientTransport.azure(
       new OpenAIClientBuilder()
@@ -86,13 +92,14 @@ class OpenAIClient private (
         .serviceVersion(OpenAIServiceVersion.valueOf(config.apiVersion))
         .buildClient()
     ),
-    config
+    config,
+    metrics
   )
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] =
+  ): Result[Completion] = withMetrics("openai", model) {
     validateNotClosed.flatMap { _ =>
       // Transform options and messages for model-specific constraints
       for {
@@ -115,12 +122,19 @@ class OpenAIClient private (
           }
       } yield convertFromOpenAIFormat(completions)
     }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
+      }
+  )
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] =
+  ): Result[Completion] = withMetrics("openai", model) {
     validateNotClosed.flatMap { _ =>
       // Transform options and messages for model-specific constraints
       TransformationResult.transform(model, options, conversation.messages, dropUnsupported = true).flatMap {
@@ -136,6 +150,13 @@ class OpenAIClient private (
           }
       }
     }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
+      }
+  )
 
   override def close(): Unit =
     // Mark client as closed to prevent further operations.
@@ -543,27 +564,42 @@ object OpenAIClient {
   private[provider] def forTest(
     model: String,
     transport: OpenAIClientTransport,
-    config: ProviderConfig
+    config: ProviderConfig,
+    metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
   ): OpenAIClient =
-    new OpenAIClient(model, transport, config)
+    new OpenAIClient(model, transport, config, metrics)
 
   /**
    * Creates an OpenAI client for direct OpenAI API access.
    *
    * @param config OpenAI configuration with API key, model, and base URL
+   * @param metrics metrics collector for observability
    * @return Right(OpenAIClient) on success, Left(LLMError) if client creation fails
    */
+  def apply(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector): Result[OpenAIClient] =
+    Try(new OpenAIClient(config, metrics)).toResult
+
+  /**
+   * Convenience overload with noop metrics.
+   */
   def apply(config: OpenAIConfig): Result[OpenAIClient] =
-    Try(new OpenAIClient(config)).toResult
+    Try(new OpenAIClient(config, org.llm4s.metrics.MetricsCollector.noop)).toResult
 
   /**
    * Creates an OpenAI client for Azure OpenAI service.
    *
    * @param config Azure configuration with API key, model, endpoint, and API version
+   * @param metrics metrics collector for observability
    * @return Right(OpenAIClient) on success, Left(LLMError) if client creation fails
    */
+  def apply(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector): Result[OpenAIClient] =
+    Try(new OpenAIClient(config, metrics)).toResult
+
+  /**
+   * Convenience overload with noop metrics.
+   */
   def apply(config: AzureConfig): Result[OpenAIClient] =
-    Try(new OpenAIClient(config)).toResult
+    Try(new OpenAIClient(config, org.llm4s.metrics.MetricsCollector.noop)).toResult
 }
 
 private[provider] object OpenAIClientTransport {

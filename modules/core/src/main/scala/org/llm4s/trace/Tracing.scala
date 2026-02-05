@@ -125,6 +125,12 @@ trait Tracing {
     )
     this.traceEvent(event)
   }
+
+  /**
+   * Shutdown the tracing backend.
+   * Alias for close() to maintain terminology consistency.
+   */
+  def shutdown(): Unit = {}
 }
 
 /**
@@ -218,6 +224,8 @@ private class CompositeTracing(tracers: Vector[Tracing]) extends Tracing {
     val event = TraceEvent.TokenUsageRecorded(usage, model, operation)
     traceEvent(event)
   }
+
+  override def shutdown(): Unit = tracers.foreach(_.shutdown())
 }
 
 private class FilteredTracing(underlying: Tracing, predicate: TraceEvent => Boolean) extends Tracing {
@@ -232,6 +240,8 @@ private class FilteredTracing(underlying: Tracing, predicate: TraceEvent => Bool
     underlying.traceCompletion(completion, model)
   def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
     underlying.traceTokenUsage(usage, model, operation)
+
+  override def shutdown(): Unit = underlying.shutdown()
 }
 
 private class TransformedTracing(underlying: Tracing, transform: TraceEvent => TraceEvent) extends Tracing {
@@ -246,6 +256,8 @@ private class TransformedTracing(underlying: Tracing, transform: TraceEvent => T
     underlying.traceCompletion(completion, model)
   def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
     underlying.traceTokenUsage(usage, model, operation)
+
+  override def shutdown(): Unit = underlying.shutdown()
 }
 
 /**
@@ -254,15 +266,21 @@ private class TransformedTracing(underlying: Tracing, transform: TraceEvent => T
 sealed trait TracingMode extends Product with Serializable
 
 object TracingMode {
-  case object Langfuse extends TracingMode
-  case object Console  extends TracingMode
-  case object NoOp     extends TracingMode
+  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
+
+  case object Langfuse      extends TracingMode
+  case object Console       extends TracingMode
+  case object OpenTelemetry extends TracingMode
+  case object NoOp          extends TracingMode
 
   def fromString(mode: String): TracingMode = mode.toLowerCase match {
-    case "langfuse"          => Langfuse
-    case "console" | "print" => Console
-    case "noop" | "none"     => NoOp
-    case _                   => NoOp
+    case "langfuse"               => Langfuse
+    case "console" | "print"      => Console
+    case "opentelemetry" | "otel" => OpenTelemetry
+    case "noop" | "none"          => NoOp
+    case other =>
+      logger.warn(s"Unknown tracing mode '$other', falling back to NoOp")
+      NoOp
   }
 }
 
@@ -302,6 +320,29 @@ object Tracing {
         lf.version
       )
     case TracingMode.Console => new ConsoleTracing()
-    case TracingMode.NoOp    => new NoOpTracing()
+    case TracingMode.OpenTelemetry =>
+      val ot = settings.openTelemetry
+      try {
+        val clazz = Class.forName("org.llm4s.trace.OpenTelemetryTracing")
+        val ctor  = clazz.getConstructor(classOf[String], classOf[String], classOf[Map[String, String]])
+        ctor.newInstance(ot.serviceName, ot.endpoint, ot.headers).asInstanceOf[Tracing]
+      } catch {
+        case _: ClassNotFoundException | _: NoClassDefFoundError =>
+          val logger = org.slf4j.LoggerFactory.getLogger(getClass)
+          logger.error(
+            "OpenTelemetry tracing configured but 'trace-opentelemetry' module not found on classpath. " +
+              "Please add 'org.llm4s' %% 'llm4s-trace-opentelemetry' dependency. Falling back to NoOpTracing."
+          )
+          new NoOpTracing()
+        case e: java.lang.reflect.InvocationTargetException =>
+          val logger = org.slf4j.LoggerFactory.getLogger(getClass)
+          logger.error("OpenTelemetry tracing initialization failed", e.getCause)
+          new NoOpTracing()
+        case e: Throwable =>
+          val logger = org.slf4j.LoggerFactory.getLogger(getClass)
+          logger.error("Failed to initialize OpenTelemetry tracing. Falling back to NoOpTracing.", e)
+          new NoOpTracing()
+      }
+    case TracingMode.NoOp => new NoOpTracing()
   }
 }

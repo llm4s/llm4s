@@ -1,0 +1,27 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: 80%
+
+# Coverage flags for per-module tracking
+# Only track main source code (not tests or resources)
+flags:
+  core:
+    paths:
+      - modules/core/src/main/scala
+    carryforward: true
+  workspace:
+    paths:
+      - modules/workspace/*/src/main/scala
+    carryforward: true
+
+# PR comment configuration
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default
+  require_changes: true

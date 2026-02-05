@@ -80,7 +80,8 @@ jobs:
           PGVECTOR_PASSWORD: postgres
           PGVECTOR_TEST_USER: postgres
           PGVECTOR_TEST_PASSWORD: postgres
-        run: sbt coverage test coverageAggregate
+        # Run coverage only for core to keep signal focused and CI fast
+        run: sbt coverage core/test coverageAggregate
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -134,7 +135,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           # Include OS and Scala version to make CI failures easier to diagnose
-          name: test-reports-${{ github.job }}-${{ matrix.os }}-scala-${{ matrix.scala }}
+          name: test-reports-${{ matrix.os }}-scala-${{ matrix.scala }}
           path: |
             **/target/test-reports/
             **/target/scala-${{ matrix.scala }}/test-reports/

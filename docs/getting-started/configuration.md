@@ -674,45 +674,207 @@ object ValidateConfig extends App {
 
 ### Problem: "API key not found"
 
-**Check:**
-1. `.env` file exists and is in project root
-2. Environment variable is spelled correctly
-3. `.env` file is sourced: `source .env`
-4. No quotes around values in `.env` (unless needed)
+**Symptoms:**
+```
+Left(ConfigurationError("Missing API key for provider: openai"))
+```
+
+**Root causes:**
+1. Environment variable not set
+2. Typo in variable name (case-sensitive)
+3. `.env` file not loaded in your shell session
+4. Using wrong shell (check with `echo $SHELL`)
+
+**Debug steps:**
+```bash
+# Check if variable is set
+echo $OPENAI_API_KEY
+
+# List all LLM4S-related variables
+env | grep -E '(LLM_MODEL|OPENAI|ANTHROPIC|AZURE|OLLAMA)'
+
+# Source .env explicitly
+source .env
+echo $OPENAI_API_KEY  # Should show your key
+
+# Run SBT with explicit env loading
+sbt -Dconfig.override_with_env_vars=true run
+```
 
 ### Problem: "Invalid model format"
 
-**Fix:** Use correct format:
-```bash
-# ✅ Correct
-LLM_MODEL=openai/gpt-4o
-
-# ❌ Wrong
-LLM_MODEL=gpt-4o
+**Symptoms:**
+```
+Left(ConfigurationError("Invalid model format: gpt-4o"))
 ```
 
-### Problem: "Configuration not loading"
+**Fix:** Models must include the provider prefix:
+```bash
+# ✅ Correct format: provider/model-name
+LLM_MODEL=openai/gpt-4o
+LLM_MODEL=anthropic/claude-3-5-sonnet-20241022
+LLM_MODEL=ollama/llama3.2
+
+# ❌ Wrong - missing provider
+LLM_MODEL=gpt-4o
+LLM_MODEL=claude-3-5-sonnet
+```
+
+### Problem: "Configuration not loading from application.conf"
+
+**Symptoms:** Environment variables work but application.conf is ignored.
 
 **Debug:**
 ```scala
-import org.llm4s.config.Llm4sConfig
+import com.typesafe.config.ConfigFactory
 
-val config = Llm4sConfig.provider()
-println(config)
+val config = ConfigFactory.load()
+println(config.hasPath("llm4s.provider"))  // Should be true
+println(config.getString("llm4s.provider.model"))  // Should show your model
+```
+
+**Common causes:**
+- application.conf not in `src/main/resources/`
+- HOCON syntax error (missing quotes, wrong nesting)
+- Environment variable overriding config (env vars have higher precedence)
+
+**Fix:** Validate HOCON syntax:
+```bash
+# Test config loading
+sbt "runMain com.typesafe.config.impl.ConfigImpl"
 ```
 
 ### Problem: "Provider mismatch"
 
-Ensure your `LLM_MODEL` matches the API key provider:
+**Symptoms:**
+```
+import org.llm4s.error.AuthenticationError
+
+Left(AuthenticationError("Invalid API key"))
+```
+
+**Root cause:** Model provider doesn't match API key provider.
 
 ```bash
-# ✅ Correct
-LLM_MODEL=openai/gpt-4o
-OPENAI_API_KEY=sk-...
+# ✅ Check your configuration
+echo $LLM_MODEL        # Should be openai/...
+echo $OPENAI_API_KEY   # Should start with sk-proj-...
 
-# ❌ Wrong
+# ❌ Common mismatch:
 LLM_MODEL=openai/gpt-4o
-ANTHROPIC_API_KEY=sk-ant-...  # Wrong provider!
+ANTHROPIC_API_KEY=sk-ant-...  # ❌ Wrong! Need OPENAI_API_KEY
+OPENAI_API_KEY=              # ❌ Wrong - key is empty
+```
+
+### Problem: "Rate limiting / 429 errors"
+
+**Symptoms:**
+```
+import org.llm4s.error.RateLimitError
+
+Left(RateLimitError("Rate limit exceeded"))
+```
+
+**Solutions:**
+
+1. **Add retry logic:**
+```scala
+import scala.concurrent.duration._
+import org.llm4s.error.RateLimitError
+import org.llm4s.types.Result
+
+// Note: This example uses Thread.sleep for simplicity.
+// In production, prefer scala.concurrent or cats-effect for non-blocking delays.
+def retryWithBackoff[A](op: => Result[A], maxRetries: Int = 3): Result[A] = {
+  (1 to maxRetries).foldLeft(op) { (result, attempt) =>
+    result match {
+      case Left(_: RateLimitError) if attempt < maxRetries =>
+        Thread.sleep(Math.pow(2, attempt).toLong * 1000)  // Exponential backoff
+        op
+      case other => other
+    }
+  }
+}
+```
+
+2. **Use a cheaper model for testing:**
+```bash
+# Development
+LLM_MODEL=openai/gpt-4o-mini  # 60x cheaper
+
+# Production
+LLM_MODEL=openai/gpt-4o
+```
+
+3. **Switch to Ollama for development:**
+```bash
+LLM_MODEL=ollama/llama3.2  # Free, no rate limits
+```
+
+### Problem: "Slow responses or timeouts"
+
+**Symptoms:** Requests take 30+ seconds or timeout.
+
+**Solutions:**
+
+1. **Increase timeout in application.conf:**
+```hocon
+llm4s {
+  request-timeout = 60 seconds  # Default is 30s
+}
+```
+
+2. **Use streaming for long responses:**
+```scala
+// Non-streaming: waits for full response
+client.complete(Conversation(Seq(UserMessage("Your query"))))
+
+// Streaming: get tokens as they arrive
+client.streamComplete(
+  Conversation(Seq(UserMessage("Your query")))
+) { chunk =>
+  chunk.content.foreach(print)
+}
+```
+
+3. **Reduce response length:**
+```scala
+client.complete(
+  Conversation(Seq(UserMessage("Your query"))),
+  CompletionOptions(maxTokens = Some(500))  // Limit response length
+)
+```
+
+### Problem: "OutOfMemoryError with embeddings"
+
+**Symptoms:** JVM crashes when processing large document collections.
+
+**Solutions:**
+
+1. **Batch embeddings instead of loading all at once:**
+```scala
+val documents: List[String] = loadDocuments()
+val batchSize = 100
+
+val embeddings = documents.grouped(batchSize).flatMap { batch =>
+  embedder.embed(batch) match {
+    case Right(emb) => emb
+    case Left(err) => 
+      println(s"Batch failed: $err")
+      List.empty
+  }
+}.toList
+```
+
+2. **Increase JVM heap:**
+```bash
+export SBT_OPTS="-Xmx4G -Xss4M"
+sbt run
+```
+
+3. **Use a local embedding model (smaller memory footprint):**
+```bash
+LLM_EMBEDDING_MODEL=ollama/nomic-embed-text
 ```
 
 ---

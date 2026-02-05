@@ -20,13 +20,12 @@ class BuiltinToolsSpec extends AnyFlatSpec with Matchers {
   "BuiltinTools.safe" should "include core tools plus safe network tools" in {
     val tools = BuiltinTools.safe()
 
-    tools.size shouldBe 6 // 4 core + search + http
+    tools.size shouldBe 5 // 4 core + http
     (tools.map(_.name) should contain).allOf(
       "get_current_datetime",
       "calculator",
       "generate_uuid",
       "json_tool",
-      "web_search",
       "http_request"
     )
   }
@@ -70,7 +69,6 @@ class BuiltinToolsSpec extends AnyFlatSpec with Matchers {
     toolNames should contain("json_tool")
 
     // Network tools
-    toolNames should contain("web_search")
     toolNames should contain("http_request")
 
     // File tools
@@ -84,26 +82,17 @@ class BuiltinToolsSpec extends AnyFlatSpec with Matchers {
   }
 
   "BuiltinTools.custom" should "allow selective tool inclusion" in {
-    // Only core and search, nothing else
-    val tools = BuiltinTools.custom(includeSearch = true)
+    // Only core, nothing else
+    val tools = BuiltinTools.custom()
 
-    tools.size shouldBe 5 // 4 core + search
-    tools.map(_.name) should contain("web_search")
+    tools.size shouldBe 4 // Only core
     tools.map(_.name) should not contain "http_request"
     tools.map(_.name) should not contain "read_file"
   }
 
-  it should "allow excluding search" in {
-    val tools = BuiltinTools.custom(includeSearch = false)
-
-    tools.size shouldBe 4 // Only core
-    tools.map(_.name) should not contain "web_search"
-  }
-
   it should "include HTTP when configured" in {
     val tools = BuiltinTools.custom(
-      httpConfig = Some(http.HttpConfig()),
-      includeSearch = false
+      httpConfig = Some(http.HttpConfig())
     )
 
     tools.map(_.name) should contain("http_request")
@@ -111,8 +100,7 @@ class BuiltinToolsSpec extends AnyFlatSpec with Matchers {
 
   it should "include files when configured" in {
     val tools = BuiltinTools.custom(
-      fileConfig = Some(filesystem.FileConfig()),
-      includeSearch = false
+      fileConfig = Some(filesystem.FileConfig())
     )
 
     (tools.map(_.name) should contain).allOf("read_file", "list_directory", "file_info")
@@ -121,8 +109,7 @@ class BuiltinToolsSpec extends AnyFlatSpec with Matchers {
 
   it should "include write when configured" in {
     val tools = BuiltinTools.custom(
-      writeConfig = Some(filesystem.WriteConfig(allowedPaths = Seq("/tmp"))),
-      includeSearch = false
+      writeConfig = Some(filesystem.WriteConfig(allowedPaths = Seq("/tmp")))
     )
 
     tools.map(_.name) should contain("write_file")
@@ -130,8 +117,7 @@ class BuiltinToolsSpec extends AnyFlatSpec with Matchers {
 
   it should "include shell when configured" in {
     val tools = BuiltinTools.custom(
-      shellConfig = Some(shell.ShellConfig.readOnly()),
-      includeSearch = false
+      shellConfig = Some(shell.ShellConfig.readOnly())
     )
 
     tools.map(_.name) should contain("shell_command")

@@ -4,6 +4,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
+import org.llm4s.metrics.MockMetricsCollector
 
 /**
  * Unit tests for ZaiClient.
@@ -735,4 +736,29 @@ class ZaiClientTestHelper(config: ZaiConfig) extends ZaiClient(config) {
 
   def testParseStreamingArguments(raw: String): ujson.Value =
     if (raw.isEmpty) ujson.Null else scala.util.Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
+}
+
+// ============ Metrics Tests ============
+class ZaiClientMetricsSpec extends AnyFlatSpec with Matchers {
+  private val testConfig = ZaiConfig(
+    apiKey = "test-key",
+    model = "test-model",
+    baseUrl = "http://test.com",
+    contextWindow = 128000,
+    reserveCompletion = 4096
+  )
+
+  "ZaiClient" should "accept custom metrics collector" in {
+    val mockMetrics = new MockMetricsCollector()
+    val client      = new ZaiClient(testConfig, mockMetrics)
+
+    client should not be null
+    mockMetrics.totalRequests shouldBe 0 // No requests yet
+  }
+
+  it should "use noop metrics by default" in {
+    val client = new ZaiClient(testConfig)
+
+    client should not be null // Verify it compiles without metrics parameter
+  }
 }

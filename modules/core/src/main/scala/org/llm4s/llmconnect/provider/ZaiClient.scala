@@ -6,7 +6,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
+import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ServiceError }
 import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
@@ -14,117 +14,139 @@ import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.time.Duration
 import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
-class ZaiClient(config: ZaiConfig) extends LLMClient {
-  private val httpClient = HttpClient.newHttpClient()
-  private val logger     = org.slf4j.LoggerFactory.getLogger(getClass)
+class ZaiClient(
+  config: ZaiConfig,
+  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+) extends LLMClient
+    with MetricsRecording {
+  private val httpClient            = HttpClient.newHttpClient()
+  private val logger                = org.slf4j.LoggerFactory.getLogger(getClass)
+  private val closed: AtomicBoolean = new AtomicBoolean(false)
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = {
-    val requestBody = createRequestBody(conversation, options)
+  ): Result[Completion] = withMetrics("zai", config.model) {
+    validateNotClosed.flatMap { _ =>
+      val requestBody = createRequestBody(conversation, options)
 
-    logger.debug(s"Sending request to Z.ai API at ${config.baseUrl}/chat/completions")
-    logger.debug(s"Request body: ${requestBody.render()}")
+      logger.debug(s"Sending request to Z.ai API at ${config.baseUrl}/chat/completions")
+      logger.debug(s"Request body: ${requestBody.render()}")
 
-    val attempt =
-      Try {
+      val attempt =
+        Try {
+          val request = HttpRequest
+            .newBuilder()
+            .uri(URI.create(s"${config.baseUrl}/chat/completions"))
+            .header("Content-Type", "application/json")
+            .header("Authorization", s"Bearer ${config.apiKey}")
+            .header("User-Agent", "llm4s-coding-assistant/1.0")
+            .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
+            .build()
+
+          val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+
+          logger.debug(s"Response status: ${response.statusCode()}")
+          logger.debug(s"Response body: ${response.body()}")
+
+          response
+        }.toEither.left
+          .map(_.toLLMError)
+
+      attempt.flatMap { response =>
+        response.statusCode() match {
+          case 200 =>
+            val responseJson = ujson.read(response.body())
+            Right(parseCompletion(responseJson))
+          case 401    => Left(AuthenticationError("zai", "Invalid API key"))
+          case 429    => Left(RateLimitError("zai"))
+          case status => Left(ServiceError(status, "zai", s"Z.ai API error: ${response.body()}"))
+        }
+      }
+    }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
+      }
+  )
+
+  override def streamComplete(
+    conversation: Conversation,
+    options: CompletionOptions = CompletionOptions(),
+    onChunk: StreamedChunk => Unit
+  ): Result[Completion] = withMetrics("zai", config.model) {
+    validateNotClosed.flatMap { _ =>
+      val requestBody = createRequestBody(conversation, options)
+      requestBody("stream") = true
+
+      val accumulator = StreamingAccumulator.create()
+
+      val requestResult = Try {
         val request = HttpRequest
           .newBuilder()
           .uri(URI.create(s"${config.baseUrl}/chat/completions"))
           .header("Content-Type", "application/json")
           .header("Authorization", s"Bearer ${config.apiKey}")
           .header("User-Agent", "llm4s-coding-assistant/1.0")
+          .timeout(Duration.ofMinutes(5))
           .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
           .build()
 
-        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+        httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
+      }.toEither.left.map(_.toLLMError)
 
-        logger.debug(s"Response status: ${response.statusCode()}")
-        logger.debug(s"Response body: ${response.body()}")
-
-        response
-      }.toEither.left
-        .map(_.toLLMError)
-
-    attempt.flatMap { response =>
-      response.statusCode() match {
-        case 200 =>
-          val responseJson = ujson.read(response.body())
-          Right(parseCompletion(responseJson))
-        case 401    => Left(AuthenticationError("zai", "Invalid API key"))
-        case 429    => Left(RateLimitError("zai"))
-        case status => Left(ServiceError(status, "zai", s"Z.ai API error: ${response.body()}"))
-      }
-    }
-  }
-
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
-    onChunk: StreamedChunk => Unit
-  ): Result[Completion] = {
-    val requestBody = createRequestBody(conversation, options)
-    requestBody("stream") = true
-
-    val accumulator = StreamingAccumulator.create()
-
-    val requestResult = Try {
-      val request = HttpRequest
-        .newBuilder()
-        .uri(URI.create(s"${config.baseUrl}/chat/completions"))
-        .header("Content-Type", "application/json")
-        .header("Authorization", s"Bearer ${config.apiKey}")
-        .header("User-Agent", "llm4s-coding-assistant/1.0")
-        .timeout(Duration.ofMinutes(5))
-        .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
-        .build()
-
-      httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
-    }.toEither.left.map(_.toLLMError)
-
-    requestResult.flatMap { response =>
-      if (response.statusCode() != 200) {
-        val errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
-        response.statusCode() match {
-          case 401    => Left(AuthenticationError("zai", "Invalid API key"))
-          case 429    => Left(RateLimitError("zai"))
-          case status => Left(ServiceError(status, "zai", s"Z.ai API error: $errorBody"))
-        }
-      } else {
-        val streamResult = Try {
-          val sseParser = SSEParser.createStreamingParser()
-          val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
-          try {
-            var line: String = null
-            while ({ line = reader.readLine(); line != null }) {
-              sseParser.addChunk(line + "\n")
-              while (sseParser.hasEvents)
-                sseParser.nextEvent().foreach { event =>
-                  event.data.foreach { data =>
-                    if (data != "[DONE]") {
-                      val json   = ujson.read(data)
-                      val chunks = parseStreamingChunks(json)
-                      chunks.foreach { c =>
-                        accumulator.addChunk(c)
-                        onChunk(c)
+      requestResult.flatMap { response =>
+        if (response.statusCode() != 200) {
+          val errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
+          response.statusCode() match {
+            case 401    => Left(AuthenticationError("zai", "Invalid API key"))
+            case 429    => Left(RateLimitError("zai"))
+            case status => Left(ServiceError(status, "zai", s"Z.ai API error: $errorBody"))
+          }
+        } else {
+          val streamResult = Try {
+            val sseParser = SSEParser.createStreamingParser()
+            val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
+            try {
+              var line: String = null
+              while ({ line = reader.readLine(); line != null }) {
+                sseParser.addChunk(line + "\n")
+                while (sseParser.hasEvents)
+                  sseParser.nextEvent().foreach { event =>
+                    event.data.foreach { data =>
+                      if (data != "[DONE]") {
+                        val json   = ujson.read(data)
+                        val chunks = parseStreamingChunks(json)
+                        chunks.foreach { c =>
+                          accumulator.addChunk(c)
+                          onChunk(c)
+                        }
                       }
                     }
                   }
-                }
+              }
+            } finally {
+              Try(reader.close())
+              Try(response.body().close())
             }
-          } finally {
-            Try(reader.close())
-            Try(response.body().close())
-          }
-        }.toEither.left.map(_.toLLMError)
+          }.toEither.left.map(_.toLLMError)
 
-        streamResult.flatMap(_ => accumulator.toCompletion)
+          streamResult.flatMap(_ => accumulator.toCompletion)
+        }
       }
     }
-  }
+  }(
+    extractUsage = _.usage,
+    estimateCost = usage =>
+      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
+        meta.pricing.estimateCost(usage.promptTokens.toInt, usage.completionTokens.toInt)
+      }
+  )
 
   private def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
     val choices = json("choices").arr
@@ -305,11 +327,27 @@ class ZaiClient(config: ZaiConfig) extends LLMClient {
   override def getContextWindow(): Int = config.contextWindow
 
   override def getReserveCompletion(): Int = config.reserveCompletion
+
+  override def close(): Unit =
+    if (closed.compareAndSet(false, true)) {
+      // Java HttpClient does not have explicit close()
+      // We track logical closed state for thread-safety
+    }
+
+  private def validateNotClosed: Result[Unit] =
+    if (closed.get()) {
+      Left(ConfigurationError(s"Z.ai client for model ${config.model} is already closed"))
+    } else {
+      Right(())
+    }
 }
 
 object ZaiClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: ZaiConfig): Result[ZaiClient] =
-    Try(new ZaiClient(config)).toResult
+  def apply(
+    config: ZaiConfig,
+    metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+  ): Result[ZaiClient] =
+    Try(new ZaiClient(config, metrics)).toResult
 }
