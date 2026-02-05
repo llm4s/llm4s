@@ -1,6 +1,6 @@
 package org.llm4s.eval.metrics
 
-import org.llm4s.error.ValidationError
+import org.llm4s.error.ConfigurationError
 import org.llm4s.eval.{ EvalContext, EvalMetric, EvalResult, ResponseParser }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -8,11 +8,9 @@ import org.llm4s.types.Result
 
 /**
  * Faithfulness metric - measures if the answer is grounded in the context.
- *
- * @param threshold Score threshold for passing (default: 0.7). Must be in [0.0, 1.0].
+ * Uses 0.7 threshold by default.
  */
-class Faithfulness(override val threshold: Double = 0.7) extends EvalMetric {
-  require(threshold >= 0.0 && threshold <= 1.0, s"Threshold must be in [0.0, 1.0], got $threshold")
+class Faithfulness private (override val threshold: Double) extends EvalMetric {
 
   val name: String = "Faithfulness"
 
@@ -61,15 +59,21 @@ class Faithfulness(override val threshold: Double = 0.7) extends EvalMetric {
           case Some(rawScore) if rawScore >= 0.0 && rawScore <= 1.0 =>
             Right(EvalResult(name, rawScore, passes(rawScore), ""))
           case _ =>
-            Left(ValidationError.invalid("faithfulness_parse", s"Could not parse: ${response.take(100)}"))
+            Left(ConfigurationError(s"Could not parse faithfulness score: ${response.take(100)}"))
         }
     }
   }
 }
 
 object Faithfulness {
-  def apply(): Faithfulness                  = new Faithfulness()
-  def apply(threshold: Double): Faithfulness = new Faithfulness(threshold)
-  def strict: Faithfulness                   = new Faithfulness(0.9)
-  def lenient: Faithfulness                  = new Faithfulness(0.5)
+  def apply(threshold: Double = 0.7): Result[Faithfulness] =
+    if (threshold >= 0.0 && threshold <= 1.0) Right(new Faithfulness(threshold))
+    else Left(ConfigurationError(s"Threshold must be in [0.0, 1.0], got $threshold"))
+
+  def strict: Result[Faithfulness]  = apply(0.9)
+  def lenient: Result[Faithfulness] = apply(0.5)
+
+  /** Unsafe constructor for tests/convenience - throws on invalid threshold */
+  def unsafe(threshold: Double = 0.7): Faithfulness =
+    apply(threshold).fold(e => throw new IllegalArgumentException(e.message), identity)
 }

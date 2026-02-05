@@ -1,6 +1,6 @@
 package org.llm4s.eval.metrics
 
-import org.llm4s.error.ValidationError
+import org.llm4s.error.ConfigurationError
 import org.llm4s.eval.{ EvalContext, EvalMetric, EvalResult, ResponseParser }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -10,8 +10,7 @@ import org.llm4s.types.Result
  * Context Precision metric - measures if retrieved context is useful.
  * Uses 0.5 threshold (vs 0.7) as retrieval systems often return mixed results.
  */
-class ContextPrecision(override val threshold: Double = 0.5) extends EvalMetric {
-  require(threshold >= 0.0 && threshold <= 1.0, s"Threshold must be in [0.0, 1.0], got $threshold")
+class ContextPrecision private (override val threshold: Double) extends EvalMetric {
 
   val name: String = "ContextPrecision"
 
@@ -68,15 +67,20 @@ class ContextPrecision(override val threshold: Double = 0.5) extends EvalMetric 
           case Some(rawScore) if rawScore >= 0.0 && rawScore <= 1.0 =>
             Right(EvalResult(name, rawScore, passes(rawScore), ""))
           case _ =>
-            Left(ValidationError.invalid("context_precision_parse", s"Could not parse: ${response.take(100)}"))
+            Left(ConfigurationError(s"Could not parse context precision score: ${response.take(100)}"))
         }
     }
   }
 }
 
 object ContextPrecision {
-  def apply(): ContextPrecision                  = new ContextPrecision()
-  def apply(threshold: Double): ContextPrecision = new ContextPrecision(threshold)
-  def strict: ContextPrecision                   = new ContextPrecision(0.75)
-  def lenient: ContextPrecision                  = new ContextPrecision(0.25)
+  def apply(threshold: Double = 0.5): Result[ContextPrecision] =
+    if (threshold >= 0.0 && threshold <= 1.0) Right(new ContextPrecision(threshold))
+    else Left(ConfigurationError(s"Threshold must be in [0.0, 1.0], got $threshold"))
+
+  def strict: Result[ContextPrecision]  = apply(0.75)
+  def lenient: Result[ContextPrecision] = apply(0.25)
+
+  def unsafe(threshold: Double = 0.5): ContextPrecision =
+    apply(threshold).fold(e => throw new IllegalArgumentException(e.message), identity)
 }

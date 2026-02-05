@@ -1,6 +1,6 @@
 package org.llm4s.eval.metrics
 
-import org.llm4s.error.ValidationError
+import org.llm4s.error.ConfigurationError
 import org.llm4s.eval.{ EvalContext, EvalMetric, EvalResult, ResponseParser }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -10,8 +10,7 @@ import org.llm4s.types.Result
  * Answer Relevance metric - measures if the answer addresses the query.
  * Does not require context (evaluates answer-to-query relevance only).
  */
-class AnswerRelevance(override val threshold: Double = 0.7) extends EvalMetric {
-  require(threshold >= 0.0 && threshold <= 1.0, s"Threshold must be in [0.0, 1.0], got $threshold")
+class AnswerRelevance private (override val threshold: Double) extends EvalMetric {
 
   val name: String = "AnswerRelevance"
 
@@ -53,15 +52,20 @@ class AnswerRelevance(override val threshold: Double = 0.7) extends EvalMetric {
           case Some(rawScore) if rawScore >= 0.0 && rawScore <= 1.0 =>
             Right(EvalResult(name, rawScore, passes(rawScore), ""))
           case _ =>
-            Left(ValidationError.invalid("answer_relevance_parse", s"Could not parse: ${response.take(100)}"))
+            Left(ConfigurationError(s"Could not parse answer relevance score: ${response.take(100)}"))
         }
     }
   }
 }
 
 object AnswerRelevance {
-  def apply(): AnswerRelevance                  = new AnswerRelevance()
-  def apply(threshold: Double): AnswerRelevance = new AnswerRelevance(threshold)
-  def strict: AnswerRelevance                   = new AnswerRelevance(0.9)
-  def lenient: AnswerRelevance                  = new AnswerRelevance(0.5)
+  def apply(threshold: Double = 0.7): Result[AnswerRelevance] =
+    if (threshold >= 0.0 && threshold <= 1.0) Right(new AnswerRelevance(threshold))
+    else Left(ConfigurationError(s"Threshold must be in [0.0, 1.0], got $threshold"))
+
+  def strict: Result[AnswerRelevance]  = apply(0.9)
+  def lenient: Result[AnswerRelevance] = apply(0.5)
+
+  def unsafe(threshold: Double = 0.7): AnswerRelevance =
+    apply(threshold).fold(e => throw new IllegalArgumentException(e.message), identity)
 }

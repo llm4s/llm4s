@@ -16,12 +16,14 @@ class Evaluator(val llmClient: LLMClient) {
    * Stops on first error (fail-fast).
    */
   def evaluateAll(metrics: Seq[EvalMetric], context: EvalContext): Result[Seq[EvalResult]] =
-    metrics.foldLeft[Result[Seq[EvalResult]]](Right(Seq.empty)) { (acc, metric) =>
-      for {
-        results <- acc
-        result  <- evaluate(metric, context)
-      } yield results :+ result
-    }
+    metrics
+      .foldLeft[Result[List[EvalResult]]](Right(Nil)) { (acc, metric) =>
+        for {
+          results <- acc
+          result  <- evaluate(metric, context)
+        } yield result :: results
+      }
+      .map(_.reverse)
 }
 
 object Evaluator {

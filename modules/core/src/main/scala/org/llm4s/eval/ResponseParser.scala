@@ -15,7 +15,7 @@ private[eval] object ResponseParser {
     val lines = response.split("\n").map(_.trim).filter(_.nonEmpty)
     lines.find(_.startsWith(s"$fieldName:")).flatMap { line =>
       val value = line.stripPrefix(s"$fieldName:").trim
-      "([0-9]+\\.?[0-9]*)".r.findFirstIn(value).flatMap(s => Try(s.toDouble).toOption)
+      "(-?[0-9]+\\.?[0-9]*)".r.findFirstIn(value).flatMap(s => Try(s.toDouble).toOption)
     }
   }
 
@@ -32,7 +32,8 @@ private[eval] object ResponseParser {
 
   /**
    * Fallback: extract first valid decimal number from response.
+   * Handles negative numbers (e.g. "-0.2").
    */
   def extractFirstNumber(response: String): Option[Double] =
-    "([0-9]+\\.?[0-9]*)".r.findFirstIn(response.trim).flatMap(s => Try(s.toDouble).toOption)
+    "(-?[0-9]+\\.?[0-9]*)".r.findFirstIn(response.trim).flatMap(s => Try(s.toDouble).toOption)
 }
