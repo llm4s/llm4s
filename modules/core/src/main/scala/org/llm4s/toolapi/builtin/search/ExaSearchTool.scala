@@ -73,7 +73,7 @@ case class ExaSearchConfig(
   timeoutMs: Int = 10000,
   numResults: Int = 10,
   searchType: SearchType = SearchType.Auto,
-  maxCharacters: Int = 3000,
+  maxCharacters: Int = 500,
   maxAgeHours: Int = 1,
   category: Option[Category] = None,
   additionalQueries: Option[List[String]] = None,
@@ -100,7 +100,6 @@ case class ExaResult(
 object ExaResult {
   implicit val exaResultRW: ReadWriter[ExaResult] = macroRW[ExaResult]
 }
-
 
 case class ExaSearchResult(
   query: String,
@@ -173,7 +172,7 @@ object ExaSearchTool {
       apiUrl = apiUrl,
       numResults = 10,
       searchType = "auto",
-      maxCharacters = 3000,
+      maxCharacters = 500,
     )
     create(toolConfig, config)
   }
@@ -213,7 +212,7 @@ object ExaSearchTool {
     }
   }
 
-  private def buildRequestBody(
+  private[search] def buildRequestBody(
     query: String,
     config: ExaSearchConfig
   ): ujson.Obj = {
@@ -251,7 +250,7 @@ object ExaSearchTool {
     body
   }
 
-  private def parseResponse(json: ujson.Value, query: String): ExaSearchResult = {
+  private[search] def parseResponse(json: ujson.Value, query: String): ExaSearchResult = {
     val resultsArr = json.obj.get("results").flatMap(_.arrOpt).getOrElse(Nil)
     val requestId  = json.obj.get("requestId").flatMap(_.strOpt)
     val searchType = json.obj.get("searchType").flatMap(_.strOpt)
