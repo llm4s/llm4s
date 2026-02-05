@@ -234,7 +234,7 @@ object MemoryStats {
  * @param defaultImportance Default importance score for unscored memories
  * @param contextTokenBudget Default token budget for context retrieval
  * @param consolidationEnabled Whether to enable automatic memory consolidation
- * @param maxMemoriesPerGroup Maximum memories per consolidation group (prevents unbounded context)
+ * @param consolidationConfig Configuration for memory consolidation behavior
  */
 final case class MemoryManagerConfig(
   autoRecordMessages: Boolean = true,
@@ -242,8 +242,28 @@ final case class MemoryManagerConfig(
   defaultImportance: Double = 0.5,
   contextTokenBudget: Int = 2000,
   consolidationEnabled: Boolean = false,
+  consolidationConfig: ConsolidationConfig = ConsolidationConfig.default
+)
+
+/**
+ * Configuration for memory consolidation behavior.
+ *
+ * This nested config contains consolidation-specific settings and is only used
+ * when consolidationEnabled is true.
+ *
+ * @param maxMemoriesPerGroup Maximum memories per consolidation group (prevents unbounded context)
+ */
+final case class ConsolidationConfig(
   maxMemoriesPerGroup: Int = 50
 )
+
+object ConsolidationConfig {
+
+  /**
+   * Default consolidation configuration.
+   */
+  val default: ConsolidationConfig = ConsolidationConfig()
+}
 
 object MemoryManagerConfig {
 

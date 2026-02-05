@@ -240,15 +240,17 @@ final case class LLMMemoryManager(
       .filter(_.conversationId.isDefined)
       .groupBy(_.conversationId.get)
       .values
-      .filter(_.length >= minCount)            // Apply minCount per group
-      .map(_.take(config.maxMemoriesPerGroup)) // Cap group size
+      .filter(_.length >= minCount)                                // Apply minCount per group
+      .map(_.take(config.consolidationConfig.maxMemoriesPerGroup)) // Cap group size
       .toSeq
 
     // Group by entity
     val byEntity = memories
       .filter(_.memoryType == MemoryType.Entity)
       .groupBy(_.getMetadata("entity_id"))
-      .collect { case (Some(_), facts) if facts.length >= minCount => facts.take(config.maxMemoriesPerGroup) }
+      .collect {
+        case (Some(_), facts) if facts.length >= minCount => facts.take(config.consolidationConfig.maxMemoriesPerGroup)
+      }
       .toSeq
 
     // Group user facts by user ID
@@ -256,15 +258,18 @@ final case class LLMMemoryManager(
       .filter(_.memoryType == MemoryType.UserFact)
       .groupBy(_.getMetadata("user_id"))
       .values
-      .filter(_.length >= minCount)            // Apply minCount per group
-      .map(_.take(config.maxMemoriesPerGroup)) // Cap group size
+      .filter(_.length >= minCount)                                // Apply minCount per group
+      .map(_.take(config.consolidationConfig.maxMemoriesPerGroup)) // Cap group size
       .toSeq
 
     // Group knowledge by source
     val byKnowledge = memories
       .filter(_.memoryType == MemoryType.Knowledge)
       .groupBy(_.source)
-      .collect { case (Some(_), entries) if entries.length >= minCount => entries.take(config.maxMemoriesPerGroup) }
+      .collect {
+        case (Some(_), entries) if entries.length >= minCount =>
+          entries.take(config.consolidationConfig.maxMemoriesPerGroup)
+      }
       .toSeq
 
     // Group tasks by success status
@@ -272,8 +277,8 @@ final case class LLMMemoryManager(
       .filter(_.memoryType == MemoryType.Task)
       .groupBy(_.getMetadata("success").getOrElse("unknown"))
       .values
-      .filter(_.length >= minCount)            // Apply minCount per group
-      .map(_.take(config.maxMemoriesPerGroup)) // Cap group size
+      .filter(_.length >= minCount)                                // Apply minCount per group
+      .map(_.take(config.consolidationConfig.maxMemoriesPerGroup)) // Cap group size
       .toSeq
 
     byConversation ++ byEntity ++ byUser ++ byKnowledge ++ byTask
