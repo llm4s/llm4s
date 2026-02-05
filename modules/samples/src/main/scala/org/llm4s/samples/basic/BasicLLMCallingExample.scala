@@ -31,6 +31,12 @@ import org.slf4j.LoggerFactory
  *    sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
  *    }}}
  *
+ * Optional:
+ *  - LLM_MAX_TOKENS
+ *      Overrides the provider's default max token limit.
+ *      Must be a positive integer.
+ *      If unset or invalid, provider defaults are used.
+ *
  * == Expected Output ==
  * The LLM will respond with a function to filter even numbers from a list,
  * likely using the `isEven` function from the conversation history.
@@ -83,7 +89,26 @@ object BasicLLMCallingExample {
 
     // Optional max token override via environment variable
     val maxTokensFromEnv: Option[Int] =
-      sys.env.get("LLM_MAX_TOKENS").flatMap(_.toIntOption)
+      sys.env.get("LLM_MAX_TOKENS")
+        .map(_.trim)
+        .flatMap(_.toIntOption)
+        .filter(_ > 0)
+        .orElse {
+          sys.env.get("LLM_MAX_TOKENS") match {
+            case Some(v) if v.nonEmpty =>
+              logger.warn(
+                "Ignoring invalid LLM_MAX_TOKENS='{}'. Must be a positive integer.",
+                v
+              )
+              None
+           case _ =>
+             None
+         }
+       }
+
+
+
+
 
     // Execute the example with explicit configuration and error handling
     val result = for {
@@ -96,7 +121,7 @@ object BasicLLMCallingExample {
       completion <- client.complete(
         conversation,
         CompletionOptions(
-          maxTokens = maxTokensFromEnv.orElse(Some(512))
+          maxTokens = maxTokensFromEnv
         )
       )
 
