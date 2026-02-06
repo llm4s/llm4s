@@ -334,10 +334,9 @@ final case class LLMMemoryManager(
       // 3. Validate output
       if (consolidatedText.isEmpty) {
         Left(
-          org.llm4s.error.APIError(
-            "test-provider",
-            "Consolidation produced empty output",
-            None
+          org.llm4s.error.ValidationError(
+            "consolidation_output",
+            "Consolidation produced empty output"
           )
         )
       } else {
