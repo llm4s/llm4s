@@ -13,7 +13,7 @@ class PayloadLimitSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
   override def beforeAll(): Unit = {
     val options = MCPServerOptions(0, "/mcp", "TestServer", "1.0")
     server = new MCPServer(options, Seq.empty)
-    server.start()
+    server.start().fold(e => throw e, _ => ())
     // Thread.sleep(100) - Removed as per mentor feedback code is synchronous
     port = server.boundPort
   }

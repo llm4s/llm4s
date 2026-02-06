@@ -12,22 +12,27 @@ class SessionStoreConcurrencySpec extends AnyFunSpec with Matchers with BeforeAn
 
   var server: MCPServer = _
   var port: Int = _
-  implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(Executors.newFixedThreadPool(20))
+  var executorService: java.util.concurrent.ExecutorService = _
+  implicit var ec: ExecutionContext = _
 
   override def beforeAll(): Unit = {
+    executorService = Executors.newFixedThreadPool(20)
+    ec = ExecutionContext.fromExecutor(executorService)
+
     // Define a simple tool
     val pingTool = ToolBuilder[Map[String, Any], String]("ping", "Echo", Schema.`object`[Map[String, Any]]("p"))
       .withHandler(_ => Right("pong"))
       .build()
 
     server = new MCPServer(MCPServerOptions(0, "/mcp", "TestServer", "1.0"), Seq(pingTool))
-    server.start()
+    server.start().fold(e => throw e, _ => ())
     // Thread.sleep(100) - Removed as per mentor feedback code is synchronous
     port = server.boundPort
   }
 
   override def afterAll(): Unit = {
     if (server != null) server.stop()
+    if (executorService != null) executorService.shutdown()
   }
 
   describe("SessionStore Concurrency") {

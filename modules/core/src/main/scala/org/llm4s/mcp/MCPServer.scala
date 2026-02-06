@@ -32,7 +32,7 @@ case class MCPServerOptions(
  * A generic, reusable Model Context Protocol (MCP) Server.
  *
  * This server hosts a list of llm4s `ToolFunction`s and exposes them
- * via the MCP protocol (HTTP Transport 2024-11-05 / 2025-06-18).
+ * via the MCP protocol (HTTP Transport 2025-06-18 only).
  *
  * NOTE: This server is intended for LOCAL DEVELOPMENT use only.
  * It does not implement authentication or strict security sandboxing.
@@ -60,17 +60,17 @@ class MCPServer(
   def boundPort: Int = server.map(_.getAddress.getPort).getOrElse(-1)
   def getPort: Int = boundPort
 
-  def start(): Unit = {
+  def start(): Either[Exception, Unit] = synchronized {
     if (server.isDefined) {
       logger.warn("MCPServer is already running")
-      return
+      return Right(())
     }
     
     logger.warn("!!! SECURITY WARNING !!!")
     logger.warn("This server is intended for local development only. Do not use in production.")
     logger.warn("It does not implement authentication or strict security boundaries.")
 
-    try {
+    Try {
       val httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", options.port), 0)
       httpServer.createContext(options.path, new MCPHandler)
       // Use a bounded thread pool to prevent resource exhaustion
@@ -81,14 +81,14 @@ class MCPServer(
       val actualPort = httpServer.getAddress.getPort
       logger.info(s"MCPServer '${options.name}' started on http://127.0.0.1:$actualPort${options.path}")
       logger.info(s"Exposing ${tools.size} tools: ${tools.map(_.name).mkString(", ")}")
-    } catch {
+    }.toEither.left.map {
       case e: Exception =>
         logger.error(s"Failed to start MCPServer: ${e.getMessage}", e)
-        throw e
+        e
     }
   }
 
-  def stop(delay: Int = 0): Unit = {
+  def stop(delay: Int = 0): Unit = synchronized {
     server.foreach { s =>
       logger.info("Stopping MCPServer...")
       s.stop(delay)
@@ -142,10 +142,6 @@ class MCPServer(
       Try {
         method match {
           case "POST"   => handlePOST(exchange)
-          case "GET"    => 
-            // SSE support explicitly disabled/removed as per mentor feedback
-            // handleGET(exchange) 
-            sendErrorResponse(exchange, 501, "Server-Sent Events (SSE) transport is not currently supported.")
           case "DELETE" => handleDELETE(exchange)
           case _        => sendErrorResponse(exchange, 405, "Method not allowed")
         }
@@ -210,7 +206,7 @@ class MCPServer(
       }
     }
 
-    private val SupportedVersions = Set("2024-11-05", "2025-06-18")
+    private val SupportedVersions = Set("2025-06-18")
 
     private def handleRequest(exchange: HttpExchange, request: JsonRpcRequest): Unit = {
        // Protocol Version Check
@@ -247,11 +243,11 @@ class MCPServer(
     private def handleInitialize(exchange: HttpExchange, request: JsonRpcRequest): Unit = {
       val initRequest = request.params
         .flatMap(params => Try(upickleRead[InitializeRequest](params.toString)).toOption)
-        .getOrElse(InitializeRequest("2024-11-05", MCPCapabilities(), ClientInfo("unknown", "1.0")))
+        .getOrElse(InitializeRequest("2025-06-18", MCPCapabilities(), ClientInfo("unknown", "1.0")))
 
       // Protocol negotiation
       val clientVersion = initRequest.protocolVersion
-      val protocolVersion = if (SupportedVersions.contains(clientVersion)) clientVersion else "2024-11-05"
+      val protocolVersion = if (SupportedVersions.contains(clientVersion)) clientVersion else "2025-06-18"
 
       logger.info(s"Initializing with protocol: $protocolVersion")
 
@@ -281,13 +277,14 @@ class MCPServer(
       handler: JsonRpcRequest => JsonRpcResponse
     ): Unit = {
       // Basic session validation
-      sessionId.foreach { id =>
-        if (SessionStore.getSession(id).isEmpty) {
+      sessionId match {
+        case Some(id) if SessionStore.getSession(id).isEmpty =>
            logger.warn(s"Unknown session: $id")
-        }
+           sendJsonRpcError(exchange, request.id, MCPErrorCodes.INVALID_REQUEST, s"Invalid session: $id")
+        case _ =>
+           val response = handler(request)
+           sendJsonRpcResponse(exchange, response, sessionId)
       }
-      val response = handler(request)
-      sendJsonRpcResponse(exchange, response, sessionId)
     }
 
     private def handleToolsList(request: JsonRpcRequest): JsonRpcResponse = {

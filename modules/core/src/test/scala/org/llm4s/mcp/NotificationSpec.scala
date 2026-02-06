@@ -2,12 +2,11 @@ package org.llm4s.mcp
 
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterAll
 import java.net.http.{HttpClient, HttpRequest, HttpResponse}
 import java.net.URI
-import scala.concurrent.ExecutionContext
 
-class NotificationSpec extends AnyFunSpec with Matchers {
-  implicit val ec: ExecutionContext = ExecutionContext.global
+class NotificationSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
 
   val options = MCPServerOptions(
     port = 0, // Random port
@@ -16,16 +15,22 @@ class NotificationSpec extends AnyFunSpec with Matchers {
     version = "1.0"
   )
 
-  val server = new MCPServer(options, Seq.empty)
-  server.start()
-
-  val port = server.getPort
-  val baseUrl = s"http://127.0.0.1:$port/mcp"
+  var server: MCPServer = _
+  var port: Int = _
+  var baseUrl: String = _
   val client = HttpClient.newHttpClient()
 
-  // Make sure server is stopped after tests
-  sys.addShutdownHook {
-    server.stop()
+  override def beforeAll(): Unit = {
+    server = new MCPServer(options, Seq.empty)
+    server.start().fold(e => throw e, _ => ())
+    port = server.getPort
+    baseUrl = s"http://127.0.0.1:$port/mcp"
+  }
+
+  override def afterAll(): Unit = {
+    if (server != null) {
+      server.stop()
+    }
   }
 
   describe("MCPServer Notification Support") {
