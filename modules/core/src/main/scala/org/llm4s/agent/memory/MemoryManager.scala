@@ -275,6 +275,26 @@ object ConsolidationConfig {
 object MemoryManagerConfig {
 
   /**
+   * Binary-compatible constructor for existing compiled code (pre-consolidationConfig).
+   * Maintains backward compatibility by providing the old 5-parameter signature.
+   */
+  def apply(
+    autoRecordMessages: Boolean,
+    autoExtractEntities: Boolean,
+    defaultImportance: Double,
+    contextTokenBudget: Int,
+    consolidationEnabled: Boolean
+  ): MemoryManagerConfig =
+    MemoryManagerConfig(
+      autoRecordMessages,
+      autoExtractEntities,
+      defaultImportance,
+      contextTokenBudget,
+      consolidationEnabled,
+      ConsolidationConfig.default
+    )
+
+  /**
    * Default configuration.
    */
   val default: MemoryManagerConfig = MemoryManagerConfig()
