@@ -166,8 +166,9 @@ object BasicMemoryExample {
         // Get entity context
         _ <- m.getEntityContext(entityId).tap {
           case Right(ctx) =>
-            val preview = if (ctx.length > 200) ctx.take(200) + "... [truncated]" else ctx
-            logger.info("Entity context for 'Scala' (preview):")
+            val redacted = SensitiveDataRedactor.redact(ctx)
+            val preview  = if (redacted.length > 200) redacted.take(200) + "... [truncated]" else redacted
+            logger.info("Entity context for 'Scala' (preview, redacted):")
             logger.info("{}", if (preview.nonEmpty) preview else "  (none)")
           case Left(e) => logger.error("Failed to get entity context: {}", e.message)
         }
@@ -175,8 +176,9 @@ object BasicMemoryExample {
         // Get user context
         _ <- m.getUserContext(Some("user-123")).tap {
           case Right(ctx) =>
-            val preview = if (ctx.length > 200) ctx.take(200) + "... [truncated]" else ctx
-            logger.info("User context (preview, may contain sensitive data):")
+            val redacted = SensitiveDataRedactor.redact(ctx)
+            val preview  = if (redacted.length > 200) redacted.take(200) + "... [truncated]" else redacted
+            logger.info("User context (preview, redacted):")
             logger.info("{}", if (preview.nonEmpty) preview else "  (none)")
           case Left(e) => logger.error("Failed to get user context: {}", e.message)
         }
@@ -184,8 +186,9 @@ object BasicMemoryExample {
         // Get relevant context for a query
         _ <- m.getRelevantContext("Tell me about Scala and FP", 500).tap {
           case Right(ctx) =>
-            val preview = if (ctx.length > 300) ctx.take(300) + "... [truncated]" else ctx
-            logger.info("Relevant context for 'Tell me about Scala and FP' (preview):")
+            val redacted = SensitiveDataRedactor.redact(ctx)
+            val preview  = if (redacted.length > 300) redacted.take(300) + "... [truncated]" else redacted
+            logger.info("Relevant context for 'Tell me about Scala and FP' (preview, redacted):")
             logger.info("{}", if (preview.nonEmpty) preview else "  (none)")
           case Left(e) => logger.error("Failed to get relevant context: {}", e.message)
         }

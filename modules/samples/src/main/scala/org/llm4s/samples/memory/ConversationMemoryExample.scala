@@ -97,8 +97,9 @@ object ConversationMemoryExample {
         e => logger.error("Error retrieving conversation history: {}", e.message),
         // Handle Right (Context)
         context => {
-          val preview = if (context.length > 300) context.take(300) + "... [truncated]" else context
-          logger.info("Conversation 'conv-scala-basics' (preview):")
+          val redacted = SensitiveDataRedactor.redact(context)
+          val preview  = if (redacted.length > 300) redacted.take(300) + "... [truncated]" else redacted
+          logger.info("Conversation 'conv-scala-basics' (preview, redacted):")
           logger.info("{}", preview)
         }
       )
@@ -166,8 +167,9 @@ object ConversationMemoryExample {
         logger.info("Recorded incremental conversation about traits")
         m.getConversationContext("conv-traits").tap {
           case Right(ctx) =>
-            val preview = if (ctx.length > 300) ctx.take(300) + "... [truncated]" else ctx
-            logger.info("Conversation context (preview):\n{}", preview)
+            val redacted = SensitiveDataRedactor.redact(ctx)
+            val preview  = if (redacted.length > 300) redacted.take(300) + "... [truncated]" else redacted
+            logger.info("Conversation context (preview, redacted):\n{}", preview)
           case Left(e) => logger.error("Failed to get conversation context: {}", e.message)
         }
       case Left(e) =>

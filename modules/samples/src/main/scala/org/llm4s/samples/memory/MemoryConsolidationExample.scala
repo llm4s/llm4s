@@ -182,13 +182,15 @@ object MemoryConsolidationExample {
     // Part 10: Test retrieval after consolidation
     logger.info("\n--- Part 10: Testing Context Retrieval After Consolidation ---")
     manager.getUserContext(Some("user-1")).foreach { userContext =>
-      val preview = if (userContext.length > 200) userContext.take(200) + "... [truncated]" else userContext
-      logger.info("User context (preview, may contain sensitive data):\n{}", preview)
+      val redacted = SensitiveDataRedactor.redact(userContext)
+      val preview  = if (redacted.length > 200) redacted.take(200) + "... [truncated]" else redacted
+      logger.info("User context (preview, redacted):\n{}", preview)
     }
 
     manager.getEntityContext(entityId).foreach { entityContext =>
-      val preview = if (entityContext.length > 200) entityContext.take(200) + "... [truncated]" else entityContext
-      logger.info("\nEntity context (preview):\n{}", preview)
+      val redacted = SensitiveDataRedactor.redact(entityContext)
+      val preview  = if (redacted.length > 200) redacted.take(200) + "... [truncated]" else redacted
+      logger.info("\nEntity context (preview, redacted):\n{}", preview)
     }
 
     true
