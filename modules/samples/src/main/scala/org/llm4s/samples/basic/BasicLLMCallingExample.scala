@@ -88,7 +88,6 @@ object BasicLLMCallingExample {
     )
 
     // Optional max token override via environment variable
-    // Read env only once
     val rawMaxTokens = sys.env.get("LLM_MAX_TOKENS")
 
     val maxTokensFromEnv: Option[Int] =
