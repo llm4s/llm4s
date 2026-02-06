@@ -68,21 +68,21 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "parse string values correctly" in {
-    SearchType.fromString("auto") shouldBe SearchType.Auto
-    SearchType.fromString("neural") shouldBe SearchType.Neural
-    SearchType.fromString("fast") shouldBe SearchType.Fast
-    SearchType.fromString("deep") shouldBe SearchType.Deep
+    SearchType.fromString("auto") shouldBe Some(SearchType.Auto)
+    SearchType.fromString("neural") shouldBe Some(SearchType.Neural)
+    SearchType.fromString("fast") shouldBe Some(SearchType.Fast)
+    SearchType.fromString("deep") shouldBe Some(SearchType.Deep)
 
     // Case-insensitive
-    SearchType.fromString("AUTO") shouldBe SearchType.Auto
-    SearchType.fromString("NEURAL") shouldBe SearchType.Neural
+    SearchType.fromString("AUTO") shouldBe Some(SearchType.Auto)
+    SearchType.fromString("NEURAL") shouldBe Some(SearchType.Neural)
 
     // Whitespace handling
-    SearchType.fromString("  auto  ") shouldBe SearchType.Auto
+    SearchType.fromString("  auto  ") shouldBe Some(SearchType.Auto)
 
-    // Invalid defaults to Auto
-    SearchType.fromString("invalid") shouldBe SearchType.Auto
-    SearchType.fromString("") shouldBe SearchType.Auto
+    // Invalid returns None
+    SearchType.fromString("invalid") shouldBe None
+    SearchType.fromString("") shouldBe None
   }
 
   "Category" should "return correct values for all categories" in {

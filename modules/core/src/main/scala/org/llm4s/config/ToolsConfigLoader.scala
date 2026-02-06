@@ -42,8 +42,6 @@ final case class DuckDuckGoSearchToolConfig(
  * @param numResults Number of results to return
  * @param searchType Search type (auto, neural, fast, deep)
  * @param maxCharacters Maximum characters for text content
- * @param maxAgeHours Maximum age of content in hours (-1: cache only, 0: live, >0: cache if fresh)
- * @param category Optional data category (company, research paper, news, etc.)
  */
 final case class ExaSearchToolConfig(
   apiKey: String,
@@ -120,8 +118,27 @@ private[config] object ToolsConfigLoader {
    * @return ExaSearchToolConfig or error
    */
   def loadExaSearchTool(source: ConfigSource): Result[ExaSearchToolConfig] =
-    source.at("llm4s.tools.exa").load[ExaSearchToolConfig].left.map { failures =>
-      val msg = failures.toList.map(_.description).mkString("; ")
-      ConfigurationError(s"Failed to load Exa Search tool config: $msg")
-    }
+    source
+      .at("llm4s.tools.exa")
+      .load[ExaSearchToolConfig]
+      .left
+      .map { failures =>
+        val msg = failures.toList.map(_.description).mkString("; ")
+        ConfigurationError(s"Failed to load Exa Search tool config: $msg")
+      }
+      .flatMap { config =>
+        // Validate searchType is one of the allowed values
+        val validSearchTypes     = Set("auto", "neural", "fast", "deep")
+        val normalizedSearchType = config.searchType.trim.toLowerCase
+
+        if (validSearchTypes.contains(normalizedSearchType)) {
+          Right(config.copy(searchType = normalizedSearchType))
+        } else {
+          Left(
+            ConfigurationError(
+              s"Invalid searchType '${config.searchType}'. Must be one of: ${validSearchTypes.mkString(", ")}"
+            )
+          )
+        }
+      }
 }

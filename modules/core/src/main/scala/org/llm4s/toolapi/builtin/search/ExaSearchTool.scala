@@ -18,12 +18,12 @@ object SearchType {
   case object Fast   extends SearchType { val value = "fast"   }
   case object Deep   extends SearchType { val value = "deep"   }
 
-  def fromString(value: String): SearchType = value.trim.toLowerCase match {
-    case "auto"   => Auto
-    case "neural" => Neural
-    case "fast"   => Fast
-    case "deep"   => Deep
-    case _        => Auto
+  def fromString(value: String): Option[SearchType] = value.trim.toLowerCase match {
+    case "auto"   => Some(Auto)
+    case "neural" => Some(Neural)
+    case "fast"   => Some(Fast)
+    case "deep"   => Some(Deep)
+    case _        => None
   }
 }
 
@@ -198,10 +198,14 @@ object ExaSearchTool {
       for {
         query <- extractor.getString("query")
 
+        searchType <- SearchType
+          .fromString(toolConfig.searchType)
+          .toRight(s"Invalid searchType: ${toolConfig.searchType}")
+
         finalConfig = config.getOrElse(
           ExaSearchConfig(
             numResults = toolConfig.numResults,
-            searchType = SearchType.fromString(toolConfig.searchType),
+            searchType = searchType,
             maxCharacters = toolConfig.maxCharacters,
           )
         )
