@@ -174,10 +174,6 @@ akka.http.client {
   idle-timeout = 60s
 }
 
-# For streaming, allow longer timeouts
-llm4s.streaming {
-  read-timeout = 120s
-}
 ```
 
 ### Provider Fallbacks (Planned)
@@ -506,7 +502,7 @@ Use `LLMClient.getContextBudget()` to stay within limits:
 
 ```scala
 import org.llm4s.agent.AgentState
-import org.llm4s.context.ContextWindowConfig
+import org.llm4s.agent.ContextWindowConfig
 
 val budgetTokens = client.getContextBudget(HeadroomPercent.Standard)
 
@@ -514,8 +510,9 @@ val budgetTokens = client.getContextBudget(HeadroomPercent.Standard)
 val state = AgentState(conversation)
 
 val prunedConversation =
-  state.pruneConversation(
-    ContextWindowConfig(maxTokens = budgetTokens)
+  AgentState.pruneConversation(
+    state,
+    ContextWindowConfig(maxTokens = Some(budgetTokens))
   )
 ```
 
@@ -530,7 +527,8 @@ import org.llm4s.context.PruningStrategy.OldestFirst
 
 // Prune when context exceeds configured limits
 val prunedConversation =
-  state.pruneConversation(
+  AgentState.pruneConversation(
+    state,
     ContextWindowConfig(
       maxMessages = Some(50),
       pruningStrategy = OldestFirst
