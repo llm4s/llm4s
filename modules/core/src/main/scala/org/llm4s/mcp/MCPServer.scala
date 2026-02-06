@@ -51,8 +51,8 @@ class MCPServer(
   tools: Seq[ToolFunction[_, _]]
 ) {
   private val logger = LoggerFactory.getLogger(getClass)
-  private var server: Option[HttpServer] = None
-  private var executorService: ExecutorService = _
+  @volatile private var server: Option[HttpServer] = None
+  @volatile private var executorService: ExecutorService = _
   
   // Map for fast tool lookup
   private val toolMap: Map[String, ToolFunction[_, _]] = tools.map(t => t.name -> t).toMap
