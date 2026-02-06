@@ -167,9 +167,9 @@ object MemoryConsolidationExample {
     manager.store.recall(MemoryFilter.All, 100).foreach { allMemories =>
       allMemories.foreach { memory =>
         logger.info("\n[{}] {}", memory.memoryType.name, memory.id.value.take(8))
-        // WARNING: Logging memory content is acceptable for this demo but should NOT be done
-        // in production as it may expose sensitive user data, PII, or confidential information
-        logger.info("Content: {}", memory.content.take(100) + "...")
+        val redacted = SensitiveDataRedactor.redact(memory.content)
+        val preview  = if (redacted.length > 100) redacted.take(100) + "..." else redacted
+        logger.info("Content (preview, redacted): {}", preview)
 
         memory.getMetadata("consolidated_from").foreach { count =>
           logger.info("  ↳ Consolidated from {} memories", count)
