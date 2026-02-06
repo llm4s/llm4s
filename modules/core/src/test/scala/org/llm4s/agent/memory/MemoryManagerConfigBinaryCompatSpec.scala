@@ -106,7 +106,7 @@ class MemoryManagerConfigBinaryCompatSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "support 6-parameter signature with custom ConsolidationConfig" in {
-    val original = MemoryManagerConfig.default
+    val original     = MemoryManagerConfig.default
     val customConfig = ConsolidationConfig(maxMemoriesPerGroup = 100, strictMode = true)
 
     val modified = original.copy(
@@ -160,7 +160,7 @@ class MemoryManagerConfigBinaryCompatSpec extends AnyFlatSpec with Matchers {
 
   "MemoryManagerConfig.default" should "have sensible defaults including ConsolidationConfig" in {
     val config = MemoryManagerConfig.default
-    
+
     config.autoRecordMessages shouldBe true
     config.autoExtractEntities shouldBe false
     config.defaultImportance shouldBe 0.5
