@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.model
 
 import org.llm4s.toolapi.ToolFunction
+import upickle.default.{ macroRW, readwriter, ReadWriter => RW }
 
 /**
  * Represents options for a completion request.
@@ -75,4 +76,23 @@ case class CompletionOptions(
    */
   def effectiveBudgetTokens: Option[Int] =
     budgetTokens.orElse(reasoning.map(ReasoningEffort.defaultBudgetTokens)).filter(_ > 0)
+}
+
+object CompletionOptions {
+
+  // Dummy RW for ToolFunction to satisfy macroRW requirement.
+  // We explicitly clear tools before writing, so this writer is never actually called for values,
+  // but it must exist for compilation.
+  implicit def toolFunctionRW[A, B]: RW[ToolFunction[A, B]] =
+    readwriter[ujson.Value].bimap[ToolFunction[A, B]](
+      _ => ujson.Null,
+      _ => throw new UnsupportedOperationException("Cannot deserialize ToolFunction")
+    )
+
+  // Custom RW that excludes tools field since functions cannot be serialized
+  implicit val rw: RW[CompletionOptions] = macroRW[CompletionOptions]
+    .bimap[CompletionOptions](
+      opts => opts.copy(tools = Seq.empty), // Clear tools before writing
+      opts => opts                          // Read as is (tools will be empty)
+    )
 }

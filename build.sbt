@@ -123,9 +123,20 @@ lazy val commonSettings = Seq(
 
 // ---- projects ----
 lazy val llm4s = (project in file("."))
-  .aggregate(core, samples, workspaceShared, workspaceRunner, workspaceClient, workspaceSamples, traceOpentelemetry)
+  .aggregate(core, samples, workspaceShared, workspaceRunner, workspaceClient, workspaceSamples, traceOpentelemetry, testing)
   .settings(
     publish / skip := true
+  )
+
+lazy val testing = (project in file("modules/testing"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-testing",
+    commonSettings,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest
+    )
   )
 
 lazy val core = (project in file("modules/core"))

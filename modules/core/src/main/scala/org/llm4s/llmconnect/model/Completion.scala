@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.model
 
+import upickle.default.{ macroRW, ReadWriter => RW }
+
 /**
  * Represents a completion response from an LLM.
  * This includes the ID, creation timestamp, the assistant's message, and optional token usage statistics.
@@ -52,6 +54,10 @@ case class Completion(
   }
 }
 
+object Completion {
+  implicit val rw: RW[Completion] = macroRW
+}
+
 /**
  * Token usage statistics for a completion request.
  *
@@ -82,6 +88,10 @@ case class TokenUsage(
   def hasThinkingTokens: Boolean = thinkingTokens.exists(_ > 0)
 }
 
+object TokenUsage {
+  implicit val rw: RW[TokenUsage] = macroRW
+}
+
 /**
  * Token usage statistics for an embedding request.
  *
@@ -92,6 +102,10 @@ case class EmbeddingUsage(
   promptTokens: Int,
   totalTokens: Int
 )
+
+object EmbeddingUsage {
+  implicit val rw: RW[EmbeddingUsage] = macroRW
+}
 
 /**
  * Represents a streamed chunk of completion data.
@@ -120,6 +134,10 @@ case class StreamedChunk(
    * Check if this chunk contains main content.
    */
   def hasContent: Boolean = content.exists(_.nonEmpty)
+}
+
+object StreamedChunk {
+  implicit val rw: RW[StreamedChunk] = macroRW
 }
 
 /**
@@ -154,5 +172,10 @@ final case class ChunkDelta(
 )
 
 object ChunkDelta {
-  def empty: ChunkDelta = ChunkDelta()
+  def empty: ChunkDelta           = ChunkDelta()
+  implicit val rw: RW[ChunkDelta] = macroRW
+}
+
+object CompletionChunk {
+  implicit val rw: RW[CompletionChunk] = macroRW
 }
