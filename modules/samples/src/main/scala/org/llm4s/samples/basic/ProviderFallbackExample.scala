@@ -4,8 +4,6 @@ import org.llm4s.llmconnect._
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.config._
 import org.slf4j.LoggerFactory
-
-
 /**
  * Provider fallback example demonstrating multi-provider support in LLM4S.
  *
@@ -83,35 +81,27 @@ object ProviderFallbackExample extends App {
         reserveCompletion = 4096
       )
     )
-  )
+)
   val providers: Seq[(String, LLMClient)] =
     providerConfigs.flatMap { case (name, config) =>
       LLMConnect.getClient(config) match {
-
         case Right(client) =>
           Some(name -> client)
-
         case Left(error) =>
-          logger.error(
+          logger.info(
             s"Failed to initialize provider: $name - ${error.formatted}"
           )
           None
       }
     }
-
   def completeWithFallback(prompt: String): Either[String, String] = {
-
     val conversation = Conversation(Seq(UserMessage(prompt)))
     val options = CompletionOptions()
-
     providers.foldLeft[Either[String, String]](Left("All providers failed")) {
-
       case (success @ Right(_), _) =>
         success
-
       case (Left(_), (name, client)) =>
         client.complete(conversation, options) match {
-
           case Right(completion) =>
             Right(completion.message.content)
 
@@ -124,10 +114,8 @@ object ProviderFallbackExample extends App {
   val result =
     completeWithFallback("Hello, world! Which provider am I talking to?")
   result match {
-
     case Right(text) =>
       logger.info(s"[SUCCESS] Response:\n$text")
-
     case Left(error) =>
       logger.info(s"[FAILED] $error")
   }
