@@ -40,7 +40,7 @@ final case class DuckDuckGoSearchToolConfig(
  * @param apiKey The Exa API key
  * @param apiUrl Base URL (default: https://api.exa.ai)
  * @param numResults Number of results to return
- * @param searchType Search type (auto, keyword, neural, fast, deep)
+ * @param searchType Search type (auto, neural, fast, deep)
  * @param maxCharacters Maximum characters for text content
  * @param maxAgeHours Maximum age of content in hours (-1: cache only, 0: live, >0: cache if fresh)
  * @param category Optional data category (company, research paper, news, etc.)

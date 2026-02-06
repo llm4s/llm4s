@@ -191,7 +191,8 @@ object ExaSearchTool {
   ): ToolFunction[Map[String, Any], ExaSearchResult] =
     ToolBuilder[Map[String, Any], ExaSearchResult](
       name = "exa_search",
-      description = "Search the web using Exa. Supports auto, neural, and keyword search with rich content extraction.",
+      description =
+        "Search the web using Exa's AI-powered search engine. Use this for semantic and intent-based searches that understand natural language queries (e.g., 'companies working on AI safety', 'recent papers about transformers'). Returns high-quality structured results with titles, URLs, text snippets, authors, and publication dates. Best for research, technical documentation, finding specific companies or people, and discovering recent content.",
       schema = createSchema
     ).withHandler { extractor =>
       for {

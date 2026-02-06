@@ -18,7 +18,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     val tool = ExaSearchTool.create(toolConfig)
 
     tool.name shouldBe "exa_search"
-    tool.description shouldBe "Search the web using Exa. Supports auto, neural, and keyword search with rich content extraction."
+    tool.description shouldBe "Search the web using Exa's AI-powered search engine. Use this for semantic and intent-based searches that understand natural language queries (e.g., 'companies working on AI safety', 'recent papers about transformers'). Returns high-quality structured results with titles, URLs, text snippets, authors, and publication dates. Best for research, technical documentation, finding specific companies or people, and discovering recent content."
   }
 
   "ExaSearchConfig" should "initialize with valid default parameters" in {
@@ -536,7 +536,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     )
 
     tool.name shouldBe "exa_search"
-    tool.description shouldBe "Search the web using Exa. Supports auto, neural, and keyword search with rich content extraction."
+    tool.description shouldBe "Search the web using Exa's AI-powered search engine. Use this for semantic and intent-based searches that understand natural language queries (e.g., 'companies working on AI safety', 'recent papers about transformers'). Returns high-quality structured results with titles, URLs, text snippets, authors, and publication dates. Best for research, technical documentation, finding specific companies or people, and discovering recent content."
   }
 
   // Test helper: Mock HTTP client for testing
