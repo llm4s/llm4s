@@ -2,7 +2,7 @@ package org.llm4s.eval
 
 import org.llm4s.eval.metrics._
 import org.llm4s.llmconnect.model.UserMessage
-import org.llm4s.testutil.{ FailingMockLLMClient, MockLLMClient }
+import org.llm4s.testutil.{ FailingMockLLMClient, MockLLMClient, UnsafeMetrics }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -30,8 +30,8 @@ class EvalMetricSpec extends AnyFlatSpec with Matchers {
 
   "Faithfulness" should "pass when score is above threshold" in {
     val result =
-      Faithfulness
-        .unsafe()
+      UnsafeMetrics
+        .faithfulness()
         .evaluate(EvalContext("Q", Seq("C"), "A"), new MockLLMClient("SCORE: 0.85\nEXPLANATION: Good"))
     result.isRight shouldBe true
     result.toOption.get.passed shouldBe true
@@ -39,26 +39,28 @@ class EvalMetricSpec extends AnyFlatSpec with Matchers {
 
   it should "fail when score is below threshold" in {
     val result =
-      Faithfulness.unsafe().evaluate(EvalContext("Q", Seq("C"), "A"), new MockLLMClient("SCORE: 0.4\nEXPLANATION: Bad"))
+      UnsafeMetrics
+        .faithfulness()
+        .evaluate(EvalContext("Q", Seq("C"), "A"), new MockLLMClient("SCORE: 0.4\nEXPLANATION: Bad"))
     result.toOption.get.passed shouldBe false
   }
 
   it should "fail with empty context" in {
-    val result = Faithfulness.unsafe().evaluate(EvalContext("Q", Seq.empty, "A"), new MockLLMClient("0.9"))
+    val result = UnsafeMetrics.faithfulness().evaluate(EvalContext("Q", Seq.empty, "A"), new MockLLMClient("0.9"))
     result.toOption.get.passed shouldBe false
   }
 
   it should "include query and context in LLM request" in {
     val client = new MockLLMClient("SCORE: 0.9\nEXPLANATION: OK")
-    Faithfulness.unsafe().evaluate(EvalContext("What is X?", Seq("X is Y"), "Answer"), client)
+    UnsafeMetrics.faithfulness().evaluate(EvalContext("What is X?", Seq("X is Y"), "Answer"), client)
     val msg = client.lastConversation.get.messages.collectFirst { case m: UserMessage => m }.get
     msg.content should include("What is X?")
     msg.content should include("X is Y")
   }
 
   it should "parse score-only responses" in {
-    Faithfulness
-      .unsafe()
+    UnsafeMetrics
+      .faithfulness()
       .evaluate(EvalContext("Q", Seq("C"), "A"), new MockLLMClient("0.75"))
       .toOption
       .get
@@ -66,8 +68,8 @@ class EvalMetricSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail gracefully on unparseable response" in {
-    Faithfulness
-      .unsafe()
+    UnsafeMetrics
+      .faithfulness()
       .evaluate(EvalContext("Q", Seq("C"), "A"), new MockLLMClient("Cannot evaluate"))
       .isLeft shouldBe true
   }
@@ -87,8 +89,8 @@ class EvalMetricSpec extends AnyFlatSpec with Matchers {
   }
 
   "AnswerRelevance" should "pass when answer is relevant" in {
-    AnswerRelevance
-      .unsafe()
+    UnsafeMetrics
+      .answerRelevance()
       .evaluate(EvalContext("Q", Seq("C"), "A"), new MockLLMClient("SCORE: 0.9"))
       .toOption
       .get
@@ -96,8 +98,8 @@ class EvalMetricSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail when answer is irrelevant" in {
-    AnswerRelevance
-      .unsafe()
+    UnsafeMetrics
+      .answerRelevance()
       .evaluate(EvalContext("Q", Seq("C"), "A"), new MockLLMClient("SCORE: 0.2"))
       .toOption
       .get
@@ -106,7 +108,7 @@ class EvalMetricSpec extends AnyFlatSpec with Matchers {
 
   it should "include query and answer in LLM request" in {
     val client = new MockLLMClient("SCORE: 0.9")
-    AnswerRelevance.unsafe().evaluate(EvalContext("Test query", Seq("C"), "Test answer"), client)
+    UnsafeMetrics.answerRelevance().evaluate(EvalContext("Test query", Seq("C"), "Test answer"), client)
     val msg = client.lastConversation.get.messages.collectFirst { case m: UserMessage => m }.get
     msg.content should include("Test query")
     msg.content should include("Test answer")
@@ -118,8 +120,8 @@ class EvalMetricSpec extends AnyFlatSpec with Matchers {
   }
 
   "ContextPrecision" should "pass when chunks are relevant" in {
-    ContextPrecision
-      .unsafe()
+    UnsafeMetrics
+      .contextPrecision()
       .evaluate(EvalContext("Q", Seq("C1", "C2"), "A"), new MockLLMClient("SCORE: 0.8"))
       .toOption
       .get
@@ -127,8 +129,8 @@ class EvalMetricSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail when chunks are irrelevant" in {
-    ContextPrecision
-      .unsafe()
+    UnsafeMetrics
+      .contextPrecision()
       .evaluate(EvalContext("Q", Seq("C"), "A"), new MockLLMClient("SCORE: 0.2"))
       .toOption
       .get
@@ -136,8 +138,8 @@ class EvalMetricSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail with empty context" in {
-    ContextPrecision
-      .unsafe()
+    UnsafeMetrics
+      .contextPrecision()
       .evaluate(EvalContext("Q", Seq.empty, "A"), new MockLLMClient("0.9"))
       .toOption
       .get
@@ -145,8 +147,8 @@ class EvalMetricSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "include chunk info in explanation" in {
-    val result = ContextPrecision
-      .unsafe()
+    val result = UnsafeMetrics
+      .contextPrecision()
       .evaluate(
         EvalContext("Q", Seq("A", "B"), "X"),
         new MockLLMClient("SCORE: 0.67\nRELEVANT_CHUNKS: 1\nEXPLANATION: Test")
@@ -162,8 +164,8 @@ class EvalMetricSpec extends AnyFlatSpec with Matchers {
   "All metrics" should "propagate LLM client errors" in {
     val client  = new FailingMockLLMClient()
     val context = EvalContext("Q", Seq("C"), "A")
-    Faithfulness.unsafe().evaluate(context, client).isLeft shouldBe true
-    AnswerRelevance.unsafe().evaluate(context, client).isLeft shouldBe true
-    ContextPrecision.unsafe().evaluate(context, client).isLeft shouldBe true
+    UnsafeMetrics.faithfulness().evaluate(context, client).isLeft shouldBe true
+    UnsafeMetrics.answerRelevance().evaluate(context, client).isLeft shouldBe true
+    UnsafeMetrics.contextPrecision().evaluate(context, client).isLeft shouldBe true
   }
 }

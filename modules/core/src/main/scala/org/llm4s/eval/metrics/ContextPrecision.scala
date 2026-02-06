@@ -1,6 +1,6 @@
 package org.llm4s.eval.metrics
 
-import org.llm4s.error.ConfigurationError
+import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.eval.{ EvalContext, EvalMetric, EvalResult, ResponseParser }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -67,7 +67,7 @@ class ContextPrecision private (override val threshold: Double) extends EvalMetr
           case Some(rawScore) if rawScore >= 0.0 && rawScore <= 1.0 =>
             Right(EvalResult(name, rawScore, passes(rawScore), ""))
           case _ =>
-            Left(ConfigurationError(s"Could not parse context precision score: ${response.take(100)}"))
+            Left(ValidationError.invalid("context_precision_score", s"Could not parse: ${response.take(100)}"))
         }
     }
   }
@@ -80,7 +80,4 @@ object ContextPrecision {
 
   def strict: Result[ContextPrecision]  = apply(0.75)
   def lenient: Result[ContextPrecision] = apply(0.25)
-
-  def unsafe(threshold: Double = 0.5): ContextPrecision =
-    apply(threshold).fold(e => throw new IllegalArgumentException(e.message), identity)
 }

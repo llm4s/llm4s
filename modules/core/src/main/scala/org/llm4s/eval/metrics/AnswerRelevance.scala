@@ -1,6 +1,6 @@
 package org.llm4s.eval.metrics
 
-import org.llm4s.error.ConfigurationError
+import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.eval.{ EvalContext, EvalMetric, EvalResult, ResponseParser }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -52,7 +52,7 @@ class AnswerRelevance private (override val threshold: Double) extends EvalMetri
           case Some(rawScore) if rawScore >= 0.0 && rawScore <= 1.0 =>
             Right(EvalResult(name, rawScore, passes(rawScore), ""))
           case _ =>
-            Left(ConfigurationError(s"Could not parse answer relevance score: ${response.take(100)}"))
+            Left(ValidationError.invalid("answer_relevance_score", s"Could not parse: ${response.take(100)}"))
         }
     }
   }
@@ -65,7 +65,4 @@ object AnswerRelevance {
 
   def strict: Result[AnswerRelevance]  = apply(0.9)
   def lenient: Result[AnswerRelevance] = apply(0.5)
-
-  def unsafe(threshold: Double = 0.7): AnswerRelevance =
-    apply(threshold).fold(e => throw new IllegalArgumentException(e.message), identity)
 }
