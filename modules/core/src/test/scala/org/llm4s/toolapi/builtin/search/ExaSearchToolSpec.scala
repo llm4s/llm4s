@@ -538,4 +538,153 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     tool.name shouldBe "exa_search"
     tool.description shouldBe "Search the web using Exa. Supports auto, neural, and keyword search with rich content extraction."
   }
+
+  // Test helper: Mock HTTP client for testing
+  class MockHttpClient(response: HttpResponse) extends BaseHttpClient {
+    var lastUrl: Option[String] = None
+    var lastHeaders: Option[Map[String, String]] = None
+    var lastBody: Option[String] = None
+    var lastTimeout: Option[Int] = None
+
+    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse = {
+      lastUrl = Some(url)
+      lastHeaders = Some(headers)
+      lastBody = Some(body)
+      lastTimeout = Some(timeout)
+      response
+    }
+  }
+
+  class FailingHttpClient(exception: Throwable) extends BaseHttpClient {
+    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse = {
+      throw exception
+    }
+  }
+
+  "search method" should "handle successful 200 response and return ExaSearchResult" in {
+    val successResponse = HttpResponse(
+      statusCode = 200,
+      body = """{"requestId":"req-123","searchType":"neural","results":[{"title":"Test Result","url":"https://example.com","text":"Test content"}]}"""
+    )
+    val mockClient = new MockHttpClient(successResponse)
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    val result = ExaSearchTool.search("test query", ExaSearchConfig(), toolConfig, mockClient)
+
+    result.isRight shouldBe true
+    val searchResult = result.getOrElse(fail("Expected Right but got Left"))
+    searchResult.query shouldBe "test query"
+    searchResult.requestId shouldBe Some("req-123")
+    searchResult.searchType shouldBe Some("neural")
+    searchResult.results should have length 1
+    searchResult.results.head.title shouldBe "Test Result"
+    searchResult.results.head.url shouldBe "https://example.com"
+
+    mockClient.lastUrl shouldBe Some("https://api.exa.ai/search")
+    mockClient.lastHeaders.get("x-api-key") shouldBe "test-key"
+    mockClient.lastHeaders.get("Content-Type") shouldBe "application/json"
+  }
+
+  it should "handle 401 unauthorized error" in {
+    val errorResponse = HttpResponse(
+      statusCode = 401,
+      body = """{"error":"Invalid API key"}"""
+    )
+    val mockClient = new MockHttpClient(errorResponse)
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "invalid-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient)
+
+    result.isLeft shouldBe true
+    result.swap.getOrElse("") should include("401")
+  }
+
+  it should "handle 429 rate limit error" in {
+    val errorResponse = HttpResponse(
+      statusCode = 429,
+      body = """{"error":"Rate limit exceeded"}"""
+    )
+    val mockClient = new MockHttpClient(errorResponse)
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient)
+
+    result.isLeft shouldBe true
+    result.swap.getOrElse("") should include("429")
+  }
+
+  it should "handle 500 server error" in {
+    val errorResponse = HttpResponse(
+      statusCode = 500,
+      body = """{"error":"Internal server error"}"""
+    )
+    val mockClient = new MockHttpClient(errorResponse)
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient)
+
+    result.isLeft shouldBe true
+    result.swap.getOrElse("") should include("500")
+  }
+
+  it should "handle network timeout exception" in {
+    val failingClient = new FailingHttpClient(new java.net.SocketTimeoutException("Connection timeout"))
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, failingClient)
+
+    result.isLeft shouldBe true
+    result.swap.getOrElse("") should include("request failed")
+  }
+
+  it should "handle invalid JSON response" in {
+    val invalidJsonResponse = HttpResponse(
+      statusCode = 200,
+      body = """{"invalid json structure}"""
+    )
+    val mockClient = new MockHttpClient(invalidJsonResponse)
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient)
+
+    result.isLeft shouldBe true
+    result.swap.getOrElse("") should include("parsing failed")
+  }
+
 }

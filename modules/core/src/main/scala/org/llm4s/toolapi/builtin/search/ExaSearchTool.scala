@@ -4,7 +4,9 @@ import org.llm4s.toolapi._
 import upickle.default._
 import org.llm4s.config.ExaSearchToolConfig
 import scala.util.Try
-import requests.Response
+import java.net.http.{HttpClient => JHttpClient, HttpRequest, HttpResponse => JHttpResponse}
+import java.net.URI
+import java.time.Duration
 
 sealed trait SearchType {
   def value: String
@@ -112,6 +114,57 @@ object ExaSearchResult {
   implicit val exaSearchResultRW: ReadWriter[ExaSearchResult] = macroRW[ExaSearchResult]
 }
 
+/**
+ * Simple HTTP response wrapper.
+ */
+case class HttpResponse(
+  statusCode: Int,
+  body: String
+)
+
+/**
+ * Abstraction for HTTP client to enable dependency injection and testing.
+ */
+trait BaseHttpClient {
+  def post(
+    url: String,
+    headers: Map[String, String],
+    body: String,
+    timeout: Int
+  ): HttpResponse
+}
+
+/**
+ * Java HttpClient implementation using JDK 11+ built-in HTTP client.
+ */
+class JavaHttpClient extends BaseHttpClient {
+  private val client = JHttpClient.newHttpClient()
+
+  override def post(
+    url: String,
+    headers: Map[String, String],
+    body: String,
+    timeout: Int
+  ): HttpResponse = {
+    val requestBuilder = HttpRequest
+      .newBuilder()
+      .uri(URI.create(url))
+      .timeout(Duration.ofMillis(timeout.toLong))
+      .POST(HttpRequest.BodyPublishers.ofString(body))
+
+    headers.foreach { case (key, value) =>
+      requestBuilder.header(key, value)
+    }
+
+    val response = client.send(
+      requestBuilder.build(),
+      JHttpResponse.BodyHandlers.ofString()
+    )
+
+    HttpResponse(response.statusCode(), response.body())
+  }
+}
+
 object ExaSearchTool {
 
   private def createSchema = Schema
@@ -128,11 +181,13 @@ object ExaSearchTool {
    *
    * @param toolConfig The Exa API configuration
    * @param config Optional configuration overrides
+   * @param httpClient HTTP client for making requests (injectable for testing)
    * @return A configured ToolFunction
    */
   def create(
     toolConfig: ExaSearchToolConfig,
-    config: Option[ExaSearchConfig] = None
+    config: Option[ExaSearchConfig] = None,
+    httpClient: BaseHttpClient = new JavaHttpClient()
   ): ToolFunction[Map[String, Any], ExaSearchResult] =
     ToolBuilder[Map[String, Any], ExaSearchResult](
       name = "exa_search",
@@ -150,7 +205,7 @@ object ExaSearchTool {
           )
         )
 
-        result <- search(query, finalConfig, toolConfig)
+        result <- search(query, finalConfig, toolConfig, httpClient)
       } yield result
     }.build()
 
@@ -160,12 +215,14 @@ object ExaSearchTool {
    * @param apiKey The Exa API key
    * @param apiUrl The Exa API URL
    * @param config Optional request configuration
+   * @param httpClient HTTP client for making requests (injectable for testing)
    * @return A configured ToolFunction
    */
   def withApiKey(
     apiKey: String,
     apiUrl: String = "https://api.exa.ai",
-    config: Option[ExaSearchConfig] = None
+    config: Option[ExaSearchConfig] = None,
+    httpClient: BaseHttpClient = new JavaHttpClient()
   ): ToolFunction[Map[String, Any], ExaSearchResult] = {
     val toolConfig = ExaSearchToolConfig(
       apiKey = apiKey,
@@ -174,40 +231,41 @@ object ExaSearchTool {
       searchType = "auto",
       maxCharacters = 500,
     )
-    create(toolConfig, config)
+    create(toolConfig, config, httpClient)
   }
 
-  private def search(
+  private[search] def search(
     query: String,
     config: ExaSearchConfig,
-    toolConfig: ExaSearchToolConfig
+    toolConfig: ExaSearchToolConfig,
+    httpClient: BaseHttpClient
   ): Either[String, ExaSearchResult] = {
 
     val url  = s"${toolConfig.apiUrl}/search"
     val body = buildRequestBody(query, config)
 
-    val responseEither: Either[String, Response] =
+    val responseEither: Either[String, HttpResponse] =
       Try {
-        requests.post(
+        httpClient.post(
           url = url,
           headers = Map(
             "Content-Type" -> "application/json",
             "x-api-key"    -> toolConfig.apiKey,
             "User-Agent"   -> "llm4s-exa-search/1.0"
           ),
-          data = ujson.write(body),
-          readTimeout = config.timeoutMs
+          body = ujson.write(body),
+          timeout = config.timeoutMs
         )
       }.toEither.left.map(e => s"Exa search request failed: ${e.getMessage}")
 
     responseEither.flatMap { response =>
       if (response.statusCode == 200) {
         Try {
-          val json = ujson.read(response.text())
+          val json = ujson.read(response.body)
           parseResponse(json, query)
         }.toEither.left.map(e => s"Exa JSON parsing failed: ${e.getMessage}")
       } else {
-        Left(s"Exa returned status ${response.statusCode}: ${response.text()}")
+        Left(s"Exa returned status ${response.statusCode}: ${response.body}")
       }
     }
   }
