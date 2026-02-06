@@ -229,6 +229,9 @@ object MemoryStats {
 /**
  * Configuration for memory manager behavior.
  *
+ * Refactored from case class to regular class to maintain binary compatibility
+ * when adding new parameters.
+ *
  * @param autoRecordMessages Whether to automatically record conversation messages
  * @param autoExtractEntities Whether to automatically extract entities from messages
  * @param defaultImportance Default importance score for unscored memories
@@ -236,14 +239,104 @@ object MemoryStats {
  * @param consolidationEnabled Whether to enable automatic memory consolidation
  * @param consolidationConfig Configuration for memory consolidation behavior
  */
-final case class MemoryManagerConfig(
-  autoRecordMessages: Boolean = true,
-  autoExtractEntities: Boolean = false,
-  defaultImportance: Double = 0.5,
-  contextTokenBudget: Int = 2000,
-  consolidationEnabled: Boolean = false,
-  consolidationConfig: ConsolidationConfig = ConsolidationConfig.default
-)
+final class MemoryManagerConfig(
+  val autoRecordMessages: Boolean = true,
+  val autoExtractEntities: Boolean = false,
+  val defaultImportance: Double = 0.5,
+  val contextTokenBudget: Int = 2000,
+  val consolidationEnabled: Boolean = false,
+  val consolidationConfig: ConsolidationConfig = ConsolidationConfig.default
+) {
+
+  /**
+   * Binary-compatible 5-parameter constructor.
+   * Preserves the old constructor signature for code compiled against pre-0.1.4 versions.
+   */
+  def this(
+    autoRecordMessages: Boolean,
+    autoExtractEntities: Boolean,
+    defaultImportance: Double,
+    contextTokenBudget: Int,
+    consolidationEnabled: Boolean
+  ) = this(
+    autoRecordMessages,
+    autoExtractEntities,
+    defaultImportance,
+    contextTokenBudget,
+    consolidationEnabled,
+    ConsolidationConfig.default
+  )
+
+  /**
+   * Copy method with all 6 parameters.
+   */
+  def copy(
+    autoRecordMessages: Boolean = this.autoRecordMessages,
+    autoExtractEntities: Boolean = this.autoExtractEntities,
+    defaultImportance: Double = this.defaultImportance,
+    contextTokenBudget: Int = this.contextTokenBudget,
+    consolidationEnabled: Boolean = this.consolidationEnabled,
+    consolidationConfig: ConsolidationConfig = this.consolidationConfig
+  ): MemoryManagerConfig = new MemoryManagerConfig(
+    autoRecordMessages,
+    autoExtractEntities,
+    defaultImportance,
+    contextTokenBudget,
+    consolidationEnabled,
+    consolidationConfig
+  )
+
+  /**
+   * Binary-compatible 5-parameter copy method.
+   * Preserves the old copy signature for code compiled against pre-0.1.4 versions.
+   */
+  def copy(
+    autoRecordMessages: Boolean,
+    autoExtractEntities: Boolean,
+    defaultImportance: Double,
+    contextTokenBudget: Int,
+    consolidationEnabled: Boolean
+  ): MemoryManagerConfig = new MemoryManagerConfig(
+    autoRecordMessages,
+    autoExtractEntities,
+    defaultImportance,
+    contextTokenBudget,
+    consolidationEnabled,
+    ConsolidationConfig.default
+  )
+
+  override def equals(obj: Any): Boolean = obj match {
+    case that: MemoryManagerConfig =>
+      this.autoRecordMessages == that.autoRecordMessages &&
+      this.autoExtractEntities == that.autoExtractEntities &&
+      this.defaultImportance == that.defaultImportance &&
+      this.contextTokenBudget == that.contextTokenBudget &&
+      this.consolidationEnabled == that.consolidationEnabled &&
+      this.consolidationConfig == that.consolidationConfig
+    case _ => false
+  }
+
+  override def hashCode(): Int = {
+    val state = Seq(
+      autoRecordMessages,
+      autoExtractEntities,
+      defaultImportance,
+      contextTokenBudget,
+      consolidationEnabled,
+      consolidationConfig
+    )
+    state.map(_.hashCode()).foldLeft(0)((a, b) => 31 * a + b)
+  }
+
+  override def toString: String =
+    s"MemoryManagerConfig(" +
+      s"autoRecordMessages=$autoRecordMessages, " +
+      s"autoExtractEntities=$autoExtractEntities, " +
+      s"defaultImportance=$defaultImportance, " +
+      s"contextTokenBudget=$contextTokenBudget, " +
+      s"consolidationEnabled=$consolidationEnabled, " +
+      s"consolidationConfig=$consolidationConfig)"
+}
 
 /**
  * Configuration for memory consolidation behavior.
@@ -275,8 +368,27 @@ object ConsolidationConfig {
 object MemoryManagerConfig {
 
   /**
-   * Binary-compatible constructor for existing compiled code (pre-consolidationConfig).
-   * Maintains backward compatibility by providing the old 5-parameter signature.
+   * Factory method with all 6 parameters.
+   */
+  def apply(
+    autoRecordMessages: Boolean = true,
+    autoExtractEntities: Boolean = false,
+    defaultImportance: Double = 0.5,
+    contextTokenBudget: Int = 2000,
+    consolidationEnabled: Boolean = false,
+    consolidationConfig: ConsolidationConfig = ConsolidationConfig.default
+  ): MemoryManagerConfig = new MemoryManagerConfig(
+    autoRecordMessages,
+    autoExtractEntities,
+    defaultImportance,
+    contextTokenBudget,
+    consolidationEnabled,
+    consolidationConfig
+  )
+
+  /**
+   * Binary-compatible 5-parameter factory method.
+   * Maintains backward compatibility for code compiled against pre-0.1.4 versions.
    */
   def apply(
     autoRecordMessages: Boolean,
@@ -284,25 +396,24 @@ object MemoryManagerConfig {
     defaultImportance: Double,
     contextTokenBudget: Int,
     consolidationEnabled: Boolean
-  ): MemoryManagerConfig =
-    MemoryManagerConfig(
-      autoRecordMessages,
-      autoExtractEntities,
-      defaultImportance,
-      contextTokenBudget,
-      consolidationEnabled,
-      ConsolidationConfig.default
-    )
+  ): MemoryManagerConfig = new MemoryManagerConfig(
+    autoRecordMessages,
+    autoExtractEntities,
+    defaultImportance,
+    contextTokenBudget,
+    consolidationEnabled,
+    ConsolidationConfig.default
+  )
 
   /**
    * Default configuration.
    */
-  val default: MemoryManagerConfig = MemoryManagerConfig()
+  val default: MemoryManagerConfig = new MemoryManagerConfig()
 
   /**
    * Configuration for testing.
    */
-  val testing: MemoryManagerConfig = MemoryManagerConfig(
+  val testing: MemoryManagerConfig = new MemoryManagerConfig(
     autoRecordMessages = false,
     autoExtractEntities = false
   )
@@ -310,7 +421,7 @@ object MemoryManagerConfig {
   /**
    * Full-featured configuration.
    */
-  val fullFeatured: MemoryManagerConfig = MemoryManagerConfig(
+  val fullFeatured: MemoryManagerConfig = new MemoryManagerConfig(
     autoRecordMessages = true,
     autoExtractEntities = true,
     consolidationEnabled = true
