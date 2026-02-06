@@ -541,10 +541,10 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
 
   // Test helper: Mock HTTP client for testing
   class MockHttpClient(response: HttpResponse) extends BaseHttpClient {
-    var lastUrl: Option[String] = None
+    var lastUrl: Option[String]                  = None
     var lastHeaders: Option[Map[String, String]] = None
-    var lastBody: Option[String] = None
-    var lastTimeout: Option[Int] = None
+    var lastBody: Option[String]                 = None
+    var lastTimeout: Option[Int]                 = None
 
     override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse = {
       lastUrl = Some(url)
@@ -556,15 +556,15 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
   }
 
   class FailingHttpClient(exception: Throwable) extends BaseHttpClient {
-    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse = {
+    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
       throw exception
-    }
   }
 
   "search method" should "handle successful 200 response and return ExaSearchResult" in {
     val successResponse = HttpResponse(
       statusCode = 200,
-      body = """{"requestId":"req-123","searchType":"neural","results":[{"title":"Test Result","url":"https://example.com","text":"Test content"}]}"""
+      body =
+        """{"requestId":"req-123","searchType":"neural","results":[{"title":"Test Result","url":"https://example.com","text":"Test content"}]}"""
     )
     val mockClient = new MockHttpClient(successResponse)
     val toolConfig = ExaSearchToolConfig(
@@ -582,7 +582,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     searchResult.query shouldBe "test query"
     searchResult.requestId shouldBe Some("req-123")
     searchResult.searchType shouldBe Some("neural")
-    searchResult.results should have length 1
+    (searchResult.results should have).length(1)
     searchResult.results.head.title shouldBe "Test Result"
     searchResult.results.head.url shouldBe "https://example.com"
 

@@ -4,7 +4,7 @@ import org.llm4s.toolapi._
 import upickle.default._
 import org.llm4s.config.ExaSearchToolConfig
 import scala.util.Try
-import java.net.http.{HttpClient => JHttpClient, HttpRequest, HttpResponse => JHttpResponse}
+import java.net.http.{ HttpClient => JHttpClient, HttpRequest, HttpResponse => JHttpResponse }
 import java.net.URI
 import java.time.Duration
 
