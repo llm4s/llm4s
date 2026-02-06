@@ -97,8 +97,9 @@ object ConversationMemoryExample {
         e => logger.error("Error retrieving conversation history: {}", e.message),
         // Handle Right (Context)
         context => {
-          logger.info("Conversation 'conv-scala-basics':")
-          logger.info("{}", context)
+          val preview = if (context.length > 300) context.take(300) + "... [truncated]" else context
+          logger.info("Conversation 'conv-scala-basics' (preview):")
+          logger.info("{}", preview)
         }
       )
     }
@@ -164,8 +165,10 @@ object ConversationMemoryExample {
       case Right(m) =>
         logger.info("Recorded incremental conversation about traits")
         m.getConversationContext("conv-traits").tap {
-          case Right(ctx) => logger.info("{}", ctx)
-          case Left(e)    => logger.error("Failed to get conversation context: {}", e.message)
+          case Right(ctx) =>
+            val preview = if (ctx.length > 300) ctx.take(300) + "... [truncated]" else ctx
+            logger.info("Conversation context (preview):\n{}", preview)
+          case Left(e) => logger.error("Failed to get conversation context: {}", e.message)
         }
       case Left(e) =>
         logger.error("Error recording incremental conversation: {}", e.message)

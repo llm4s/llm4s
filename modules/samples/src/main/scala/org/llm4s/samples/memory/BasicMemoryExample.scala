@@ -166,24 +166,27 @@ object BasicMemoryExample {
         // Get entity context
         _ <- m.getEntityContext(entityId).tap {
           case Right(ctx) =>
-            logger.info("Entity context for 'Scala':")
-            logger.info("{}", if (ctx.nonEmpty) ctx else "  (none)")
+            val preview = if (ctx.length > 200) ctx.take(200) + "... [truncated]" else ctx
+            logger.info("Entity context for 'Scala' (preview):")
+            logger.info("{}", if (preview.nonEmpty) preview else "  (none)")
           case Left(e) => logger.error("Failed to get entity context: {}", e.message)
         }
 
         // Get user context
         _ <- m.getUserContext(Some("user-123")).tap {
           case Right(ctx) =>
-            logger.info("User context:")
-            logger.info("{}", if (ctx.nonEmpty) ctx else "  (none)")
+            val preview = if (ctx.length > 200) ctx.take(200) + "... [truncated]" else ctx
+            logger.info("User context (preview, may contain sensitive data):")
+            logger.info("{}", if (preview.nonEmpty) preview else "  (none)")
           case Left(e) => logger.error("Failed to get user context: {}", e.message)
         }
 
         // Get relevant context for a query
         _ <- m.getRelevantContext("Tell me about Scala and FP", 500).tap {
           case Right(ctx) =>
-            logger.info("Relevant context for 'Tell me about Scala and FP':")
-            logger.info("{}", if (ctx.nonEmpty) ctx else "  (none)")
+            val preview = if (ctx.length > 300) ctx.take(300) + "... [truncated]" else ctx
+            logger.info("Relevant context for 'Tell me about Scala and FP' (preview):")
+            logger.info("{}", if (preview.nonEmpty) preview else "  (none)")
           case Left(e) => logger.error("Failed to get relevant context: {}", e.message)
         }
       } yield ()
