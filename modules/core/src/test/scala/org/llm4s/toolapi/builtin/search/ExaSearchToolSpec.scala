@@ -527,4 +527,15 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     searchResult.results(1).title shouldBe "Result 2"
     searchResult.results(1).id shouldBe Some("r2")
   }
+
+  "withApiKey" should "create tool with correct configuration" in {
+    val tool = ExaSearchTool.withApiKey(
+      apiKey = "test-api-key",
+      apiUrl = "https://custom.exa.ai",
+      config = Some(ExaSearchConfig(numResults = 20, searchType = SearchType.Neural))
+    )
+
+    tool.name shouldBe "exa_search"
+    tool.description shouldBe "Search the web using Exa. Supports auto, neural, and keyword search with rich content extraction."
+  }
 }
