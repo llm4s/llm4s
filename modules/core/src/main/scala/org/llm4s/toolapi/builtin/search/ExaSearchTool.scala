@@ -3,6 +3,7 @@ package org.llm4s.toolapi.builtin.search
 import org.llm4s.toolapi._
 import upickle.default._
 import org.llm4s.config.ExaSearchToolConfig
+import org.llm4s.error.ValidationError
 import scala.util.Try
 import java.net.http.{ HttpClient => JHttpClient, HttpRequest, HttpResponse => JHttpResponse }
 import java.net.URI
@@ -177,9 +178,34 @@ object ExaSearchTool {
     )
 
   /**
+   * Sanitize error messages to prevent information leakage.
+   * Removes sensitive details while keeping useful debugging info.
+   */
+  private def sanitizeErrorMessage(statusCode: Int, responseBody: String): String =
+    statusCode match {
+      case 401 => "Authentication failed. Please verify your API key is valid."
+      case 403 => "Access forbidden. Your API key may not have permission for this operation."
+      case 429 => "Rate limit exceeded. Please reduce request frequency and try again later."
+      case code if code >= 500 && code < 600 =>
+        "External search service is temporarily unavailable. Please try again later."
+      case 400 =>
+        // For 400 errors, include a sanitized version of the error if it's safe
+        if (responseBody.length < 200 && !responseBody.contains("key") && !responseBody.contains("token")) {
+          s"Invalid request: ${responseBody.take(150)}"
+        } else {
+          "Invalid request. Please check your query parameters."
+        }
+      case _ =>
+        s"Search request failed with status $statusCode. Please try again or contact support."
+    }
+
+  /**
    * Create an Exa search tool with explicit configuration.
    *
-   * @param toolConfig The Exa API configuration
+   * Security: This tool makes external HTTPS calls to the Exa API.
+   * Ensure proper API key management and network access controls.
+   *
+   * @param toolConfig The Exa API configuration (must use HTTPS)
    * @param config Optional configuration overrides
    * @param httpClient HTTP client for making requests (injectable for testing)
    * @return A configured ToolFunction
@@ -188,7 +214,22 @@ object ExaSearchTool {
     toolConfig: ExaSearchToolConfig,
     config: Option[ExaSearchConfig] = None,
     httpClient: BaseHttpClient = new JavaHttpClient()
-  ): ToolFunction[Map[String, Any], ExaSearchResult] =
+  ): ToolFunction[Map[String, Any], ExaSearchResult] = {
+    // Validate security boundaries at tool creation time
+    val apiUrl = toolConfig.apiUrl.toLowerCase.trim
+    if (!apiUrl.startsWith("https://")) {
+      throw new IllegalArgumentException(
+        ValidationError
+          .invalid("apiUrl", "must use HTTPS protocol for secure communication")
+          .message
+      )
+    }
+    if (toolConfig.apiKey.trim.isEmpty) {
+      throw new IllegalArgumentException(
+        ValidationError.required("apiKey").message
+      )
+    }
+
     ToolBuilder[Map[String, Any], ExaSearchResult](
       name = "exa_search",
       description =
@@ -196,32 +237,42 @@ object ExaSearchTool {
       schema = createSchema
     ).withHandler { extractor =>
       for {
-        query <- extractor.getString("query")
+        rawQuery <- extractor.getString("query")
+        query = rawQuery.trim
 
         searchType <- SearchType
           .fromString(toolConfig.searchType)
-          .toRight(s"Invalid searchType: ${toolConfig.searchType}")
+          .toRight(
+            ValidationError
+              .invalid("searchType", s"'${toolConfig.searchType}' is not a valid search type")
+              .message
+          )
 
         finalConfig = config.getOrElse(
           ExaSearchConfig(
             numResults = toolConfig.numResults,
             searchType = searchType,
-            maxCharacters = toolConfig.maxCharacters,
+            maxCharacters = toolConfig.maxCharacters
           )
         )
 
         result <- search(query, finalConfig, toolConfig, httpClient)
       } yield result
     }.build()
+  }
 
   /**
    * Create an Exa search tool with explicit API key and defaults.
    *
-   * @param apiKey The Exa API key
-   * @param apiUrl The Exa API URL
+   * Security: This tool makes external HTTPS calls to the Exa API.
+   * The provided API URL must use HTTPS protocol.
+   *
+   * @param apiKey The Exa API key (must not be empty)
+   * @param apiUrl The Exa API URL (must use HTTPS, default: https://api.exa.ai)
    * @param config Optional request configuration
    * @param httpClient HTTP client for making requests (injectable for testing)
    * @return A configured ToolFunction
+   * @throws IllegalArgumentException if security boundaries are violated
    */
   def withApiKey(
     apiKey: String,
@@ -234,7 +285,7 @@ object ExaSearchTool {
       apiUrl = apiUrl,
       numResults = 10,
       searchType = "auto",
-      maxCharacters = 500,
+      maxCharacters = 500
     )
     create(toolConfig, config, httpClient)
   }
@@ -249,7 +300,7 @@ object ExaSearchTool {
     val url  = s"${toolConfig.apiUrl}/search"
     val body = buildRequestBody(query, config)
 
-    val responseEither: Either[String, HttpResponse] =
+        val responseEither: Either[String, HttpResponse] =
       Try {
         httpClient.post(
           url = url,
@@ -261,16 +312,39 @@ object ExaSearchTool {
           body = ujson.write(body),
           timeout = config.timeoutMs
         )
-      }.toEither.left.map(e => s"Exa search request failed: ${e.getMessage}")
+      }.toEither.left.map { e =>
+        // Sanitize exception messages to avoid leaking internal details
+        e match {
+          case _: java.net.http.HttpTimeoutException =>
+            s"Search request timed out after ${config.timeoutMs}ms. Please try again with a simpler query."
+          case _: java.net.UnknownHostException =>
+            "Unable to reach search service. Please check network connectivity."
+          case _: java.net.ConnectException =>
+            "Failed to connect to search service. The service may be temporarily unavailable."
+          case _ =>
+            // Generic error without exposing stack traces or internal details
+            "Search request failed due to a network error. Please try again."
+        }
+      }
 
     responseEither.flatMap { response =>
       if (response.statusCode == 200) {
+        // Parse successful response
         Try {
           val json = ujson.read(response.body)
           parseResponse(json, query)
-        }.toEither.left.map(e => s"Exa JSON parsing failed: ${e.getMessage}")
+        }.toEither.left.map { e =>
+          // Sanitize parsing errors
+          e match {
+            case _: ujson.ParseException =>
+              "Failed to parse search results. The response format may be invalid."
+            case _ =>
+              "Failed to process search results. Please try again."
+          }
+        }
       } else {
-        Left(s"Exa returned status ${response.statusCode}: ${response.body}")
+        // Use sanitized error messages for non-200 responses
+        Left(sanitizeErrorMessage(response.statusCode, response.body))
       }
     }
   }

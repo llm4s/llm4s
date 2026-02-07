@@ -18,7 +18,55 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     val tool = ExaSearchTool.create(toolConfig)
 
     tool.name shouldBe "exa_search"
-    tool.description shouldBe "Search the web using Exa's AI-powered search engine. Use this for semantic and intent-based searches that understand natural language queries (e.g., 'companies working on AI safety', 'recent papers about transformers'). Returns high-quality structured results with titles, URLs, text snippets, authors, and publication dates. Best for research, technical documentation, finding specific companies or people, and discovering recent content."
+    tool.description should include("EXTERNAL API")
+    tool.description should include("Exa's AI-powered search engine")
+  }
+
+  it should "reject non-HTTPS API URL" in {
+    val thrown = intercept[IllegalArgumentException] {
+      ExaSearchTool.create(
+        ExaSearchToolConfig(
+          apiKey = "test-key",
+          apiUrl = "http://api.exa.ai", // HTTP instead of HTTPS
+          numResults = 10,
+          searchType = "auto",
+          maxCharacters = 500
+        )
+      )
+    }
+    thrown.getMessage should include("HTTPS")
+  }
+
+  it should "reject empty API key" in {
+    val thrown = intercept[IllegalArgumentException] {
+      ExaSearchTool.create(
+        ExaSearchToolConfig(
+          apiKey = "",
+          apiUrl = "https://api.exa.ai",
+          numResults = 10,
+          searchType = "auto",
+          maxCharacters = 500
+        )
+      )
+    }
+    thrown.getMessage should include("apiKey")
+    thrown.getMessage should include("required")
+  }
+
+  it should "reject whitespace-only API key" in {
+    val thrown = intercept[IllegalArgumentException] {
+      ExaSearchTool.create(
+        ExaSearchToolConfig(
+          apiKey = "   ",
+          apiUrl = "https://api.exa.ai",
+          numResults = 10,
+          searchType = "auto",
+          maxCharacters = 500
+        )
+      )
+    }
+    thrown.getMessage should include("apiKey")
+    thrown.getMessage should include("required")
   }
 
   "ExaSearchConfig" should "initialize with valid default parameters" in {
@@ -536,7 +584,37 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     )
 
     tool.name shouldBe "exa_search"
-    tool.description shouldBe "Search the web using Exa's AI-powered search engine. Use this for semantic and intent-based searches that understand natural language queries (e.g., 'companies working on AI safety', 'recent papers about transformers'). Returns high-quality structured results with titles, URLs, text snippets, authors, and publication dates. Best for research, technical documentation, finding specific companies or people, and discovering recent content."
+    tool.description should include("EXTERNAL API")
+  }
+
+  it should "reject non-HTTPS URL in withApiKey" in {
+    val thrown = intercept[IllegalArgumentException] {
+      ExaSearchTool.withApiKey(
+        apiKey = "test-key",
+        apiUrl = "http://insecure.api.com"
+      )
+    }
+    thrown.getMessage should include("HTTPS")
+  }
+
+  "Input validation" should "trim whitespace from query through tool" in {
+    val successResponse = HttpResponse(
+      200,
+      """{"results":[{"title":"Test","url":"https://example.com"}]}"""
+    )
+    val mockClient = new MockHttpClient(successResponse)
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+    val tool = ExaSearchTool.create(toolConfig, None, mockClient)
+
+    val result = tool.execute(ujson.Obj("query" -> ujson.Str("  valid query  ")))
+
+    result.isRight shouldBe true
   }
 
   // Test helper: Mock HTTP client for testing
@@ -591,7 +669,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     mockClient.lastHeaders.get("Content-Type") shouldBe "application/json"
   }
 
-  it should "handle 401 unauthorized error" in {
+  it should "handle 401 unauthorized error with sanitized message" in {
     val errorResponse = HttpResponse(
       statusCode = 401,
       body = """{"error":"Invalid API key"}"""
@@ -608,10 +686,13 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient)
 
     result.isLeft shouldBe true
-    result.swap.getOrElse("") should include("401")
+    val error = result.swap.getOrElse("")
+    error should include("Authentication failed")
+    error should include("API key")
+    (error should not).include("Invalid API key") // Sensitive details should be hidden
   }
 
-  it should "handle 429 rate limit error" in {
+  it should "handle 429 rate limit error with sanitized message" in {
     val errorResponse = HttpResponse(
       statusCode = 429,
       body = """{"error":"Rate limit exceeded"}"""
@@ -628,10 +709,12 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient)
 
     result.isLeft shouldBe true
-    result.swap.getOrElse("") should include("429")
+    val error = result.swap.getOrElse("")
+    error should include("Rate limit")
+    error should include("reduce request frequency")
   }
 
-  it should "handle 500 server error" in {
+  it should "handle 500 server error with sanitized message" in {
     val errorResponse = HttpResponse(
       statusCode = 500,
       body = """{"error":"Internal server error"}"""
@@ -648,11 +731,31 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient)
 
     result.isLeft shouldBe true
-    result.swap.getOrElse("") should include("500")
+    val error = result.swap.getOrElse("")
+    error should include("temporarily unavailable")
+    (error should not).include("Internal server error") // Don't leak internal errors
   }
 
-  it should "handle network timeout exception" in {
-    val failingClient = new FailingHttpClient(new java.net.SocketTimeoutException("Connection timeout"))
+  it should "handle network timeout exception with sanitized message" in {
+    val failingClient = new FailingHttpClient(new java.net.http.HttpTimeoutException("Connection timeout"))
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    val result = ExaSearchTool.search("test", ExaSearchConfig(timeoutMs = 5000), toolConfig, failingClient)
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse("")
+    error should include("timed out")
+    error should include("5000ms")
+  }
+
+  it should "handle unknown host exception with sanitized message" in {
+    val failingClient = new FailingHttpClient(new java.net.UnknownHostException("Unknown host"))
     val toolConfig = ExaSearchToolConfig(
       apiKey = "test-key",
       apiUrl = "https://api.exa.ai",
@@ -664,10 +767,12 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, failingClient)
 
     result.isLeft shouldBe true
-    result.swap.getOrElse("") should include("request failed")
+    val error = result.swap.getOrElse("")
+    error should include("Unable to reach")
+    error should include("network connectivity")
   }
 
-  it should "handle invalid JSON response" in {
+  it should "handle invalid JSON response with sanitized message" in {
     val invalidJsonResponse = HttpResponse(
       statusCode = 200,
       body = """{"invalid json structure}"""
@@ -684,7 +789,9 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient)
 
     result.isLeft shouldBe true
-    result.swap.getOrElse("") should include("parsing failed")
+    val error = result.swap.getOrElse("")
+    error should (include("parse").or(include("process")))
+    error should (include("invalid").or(include("try again")))
   }
 
 }
