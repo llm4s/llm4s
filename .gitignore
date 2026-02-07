@@ -20,3 +20,4 @@ data/
 
 # Developer local overlays
 **/application.local.conf
+compile_213.log

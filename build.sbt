@@ -135,7 +135,7 @@ lazy val testing = (project in file("modules/testing"))
     commonSettings,
     libraryDependencies ++= Seq(
       Deps.ujson,
-      Deps.scalatest
+      Deps.scalatest % Test
     )
   )
 

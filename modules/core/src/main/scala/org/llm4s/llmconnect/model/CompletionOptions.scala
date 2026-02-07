@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.model
 
 import org.llm4s.toolapi.ToolFunction
-import upickle.default.{ macroRW, readwriter, ReadWriter => RW }
+import upickle.default.{ readwriter, ReadWriter => RW }
 
 /**
  * Represents options for a completion request.
@@ -80,19 +80,93 @@ case class CompletionOptions(
 
 object CompletionOptions {
 
-  // Dummy RW for ToolFunction to satisfy macroRW requirement.
-  // We explicitly clear tools before writing, so this writer is never actually called for values,
-  // but it must exist for compilation.
-  implicit def toolFunctionRW[A, B]: RW[ToolFunction[A, B]] =
-    readwriter[ujson.Value].bimap[ToolFunction[A, B]](
-      _ => ujson.Null,
-      _ => throw new UnsupportedOperationException("Cannot deserialize ToolFunction")
-    )
+  /**
+   * Stable tool descriptor for serialization.
+   * Stores tool name and description without the function handler.
+   */
+  case class ToolDescriptor(name: String, description: String)
 
-  // Custom RW that excludes tools field since functions cannot be serialized
-  implicit val rw: RW[CompletionOptions] = macroRW[CompletionOptions]
-    .bimap[CompletionOptions](
-      opts => opts.copy(tools = Seq.empty), // Clear tools before writing
-      opts => opts                          // Read as is (tools will be empty)
+  object ToolDescriptor {
+    implicit val rw: RW[ToolDescriptor] = readwriter[ujson.Value].bimap[ToolDescriptor](
+      td => ujson.Obj("name" -> td.name, "description" -> td.description),
+      json => ToolDescriptor(json("name").str, json("description").str)
     )
+  }
+
+  /**
+   * Manual ReadWriter for CompletionOptions that:
+   * - Stores tool descriptors (name, description) instead of full functions
+   * - Avoids implicit resolution issues with ToolFunction[_, _] in Scala 2.13
+   * - Preserves tool metadata for replay semantics
+   */
+  implicit val rw: RW[CompletionOptions] = readwriter[ujson.Value].bimap[CompletionOptions](
+    opts => {
+      val toolDescriptors = opts.tools.map(t => ToolDescriptor(t.name, t.description))
+      ujson.Obj(
+        "temperature"      -> opts.temperature,
+        "topP"             -> opts.topP,
+        "maxTokens"        -> opts.maxTokens.map(ujson.Num(_)).getOrElse(ujson.Null),
+        "presencePenalty"  -> opts.presencePenalty,
+        "frequencyPenalty" -> opts.frequencyPenalty,
+        "toolDescriptors"  -> upickle.default.writeJs(toolDescriptors),
+        "reasoning"        -> opts.reasoning.map(r => upickle.default.writeJs(r)).getOrElse(ujson.Null),
+        "budgetTokens"     -> opts.budgetTokens.map(ujson.Num(_)).getOrElse(ujson.Null)
+      )
+    },
+    json =>
+      CompletionOptions(
+        temperature = json("temperature").num,
+        topP = json("topP").num,
+        maxTokens = json("maxTokens") match {
+          case ujson.Null => None
+          case v          => Some(v.num.toInt)
+        },
+        presencePenalty = json("presencePenalty").num,
+        frequencyPenalty = json("frequencyPenalty").num,
+        tools = Seq.empty,
+        reasoning = json("reasoning") match {
+          case ujson.Null => None
+          case v          => Some(upickle.default.read[ReasoningEffort](v))
+        },
+        budgetTokens = json("budgetTokens") match {
+          case ujson.Null => None
+          case v          => Some(v.num.toInt)
+        }
+      )
+  )
+
+  /**
+   * Compares two CompletionOptions for equivalence, ignoring tools field.
+   * Used for matching in playback scenarios where tools cannot be serialized.
+   */
+  def equalsIgnoringTools(a: CompletionOptions, b: CompletionOptions): Boolean =
+    a.temperature == b.temperature &&
+      a.topP == b.topP &&
+      a.maxTokens == b.maxTokens &&
+      a.presencePenalty == b.presencePenalty &&
+      a.frequencyPenalty == b.frequencyPenalty &&
+      a.reasoning == b.reasoning &&
+      a.budgetTokens == b.budgetTokens
+
+  /**
+   * Compares options leniently - ignores default/empty values.
+   * Used by Lenient matching mode.
+   */
+  def equalsLenient(a: CompletionOptions, b: CompletionOptions): Boolean = {
+    val defaultOpts = CompletionOptions()
+
+    def fieldsMatch[T](getter: CompletionOptions => T): Boolean = {
+      val aVal = getter(a)
+      val bVal = getter(b)
+      aVal == bVal || getter(defaultOpts) == aVal || getter(defaultOpts) == bVal
+    }
+
+    fieldsMatch(_.temperature) &&
+    fieldsMatch(_.topP) &&
+    fieldsMatch(_.maxTokens) &&
+    fieldsMatch(_.presencePenalty) &&
+    fieldsMatch(_.frequencyPenalty) &&
+    fieldsMatch(_.reasoning) &&
+    fieldsMatch(_.budgetTokens)
+  }
 }

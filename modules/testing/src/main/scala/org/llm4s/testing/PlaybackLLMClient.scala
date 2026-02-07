@@ -81,7 +81,10 @@ class PlaybackLLMClient(
         recordings.find(i => i.conversation == conversation && i.options == options)
 
       case MatchingMode.Lenient =>
-        recordings.find(i => normalizeConversation(i.conversation) == normalizeConversation(conversation))
+        recordings.find { i =>
+          normalizeConversation(i.conversation) == normalizeConversation(conversation) &&
+          CompletionOptions.equalsLenient(i.options, options)
+        }
 
       case MatchingMode.ContentOnly =>
         val inputContent = conversation.messages.map(_.content.trim).mkString("\n")
