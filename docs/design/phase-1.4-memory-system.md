@@ -459,7 +459,7 @@ sbt "samples/runMain org.llm4s.samples.memory.VectorMemoryExample"
 
 ### Phase 1.4.3: Additional LLM-Powered Features
 - Automatic entity extraction using LLM
-- ~~Memory consolidation/summarization~~ ✅ Done (Phase 1.4.2)
+- ~~Memory consolidation/summarization~~ ✅ Done (Phase 1.4.3)
 - Importance scoring via LLM
 
 ### Phase 1.4.4: Agent Integration
