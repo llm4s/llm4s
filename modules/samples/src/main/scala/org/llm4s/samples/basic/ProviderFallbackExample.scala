@@ -4,6 +4,7 @@ import org.llm4s.llmconnect._
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.config._
 import org.slf4j.LoggerFactory
+
 /**
  * Provider fallback example demonstrating multi-provider support in LLM4S.
  *
@@ -12,13 +13,13 @@ import org.slf4j.LoggerFactory
  * - Attempting a request across providers using fallback logic
  * - Running the same prompt across providers without changing application code
  * - Using the first provider that successfully generates a response
- * 
+ *
  * == Quick Start ==
  *
  * 1. This example demonstrates provider fallback using providers
  *    configured directly in `providerConfigs`. Providers are tried
  *    in the order listed there (not via `LLM_MODEL`).
- 
+ *
  * 2. (Optional) Set API keys for cloud providers:
  *    {{{
  *    export OPENAI_API_KEY=sk-...
@@ -44,7 +45,6 @@ import org.slf4j.LoggerFactory
  * - '''Anthropic''': `LLM_MODEL=anthropic/<model>`, requires `ANTHROPIC_API_KEY`
  * - '''Ollama''': `LLM_MODEL=ollama/<model>`, no API key required (local)
  */
-
 
 object ProviderFallbackExample extends App {
 
@@ -81,7 +81,7 @@ object ProviderFallbackExample extends App {
         reserveCompletion = 4096
       )
     )
-)
+  )
   val providers: Seq[(String, LLMClient)] =
     providerConfigs.flatMap { case (name, config) =>
       LLMConnect.getClient(config) match {
@@ -96,7 +96,7 @@ object ProviderFallbackExample extends App {
     }
   def completeWithFallback(prompt: String): Either[String, String] = {
     val conversation = Conversation(Seq(UserMessage(prompt)))
-    val options = CompletionOptions()
+    val options      = CompletionOptions()
     providers.foldLeft[Either[String, String]](Left("All providers failed")) {
       case (success @ Right(_), _) =>
         success
