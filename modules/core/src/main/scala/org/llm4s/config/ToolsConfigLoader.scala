@@ -127,16 +127,15 @@ private[config] object ToolsConfigLoader {
         ConfigurationError(s"Failed to load Exa Search tool config: $msg")
       }
       .flatMap { config =>
-        // Validate searchType is one of the allowed values
-        val validSearchTypes     = Set("auto", "neural", "fast", "deep")
-        val normalizedSearchType = config.searchType.trim.toLowerCase
+        val validSearchTypes  = Set("auto", "neural", "fast", "deep")
+        val trimmedSearchType = config.searchType.trim
 
-        if (validSearchTypes.contains(normalizedSearchType)) {
-          Right(config.copy(searchType = normalizedSearchType))
+        if (validSearchTypes.contains(trimmedSearchType)) {
+          Right(config.copy(searchType = trimmedSearchType))
         } else {
           Left(
             ConfigurationError(
-              s"Invalid searchType '${config.searchType}'. Must be one of: ${validSearchTypes.mkString(", ")}"
+              s"Invalid searchType '${config.searchType}'. Must be one of (lowercase): ${validSearchTypes.mkString(", ")}"
             )
           )
         }
