@@ -111,6 +111,7 @@ class DeepSeekClient(
     requestResult.flatMap { response =>
       if (response.statusCode() != 200) {
         val errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
+        Try(response.body().close())  // Ensure stream is closed on error path
         response.statusCode() match {
           case 401    => Left(AuthenticationError("deepseek", "Invalid API key"))
           case 429    => Left(RateLimitError("deepseek"))
