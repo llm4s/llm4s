@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect
 
-import org.llm4s.error.{ AuthenticationError, RateLimitError, SimpleError, ValidationError }
+import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, SimpleError, TimeoutError, ValidationError }
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -108,6 +108,73 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
     result.left.toOption.get shouldBe a[AuthenticationError]
   }
 
+  it should "retry on ServiceError 5xx then succeed" in {
+    val client = stubClient(
+      completeResults = Seq(
+        Left(ServiceError(503, "p", "Service Unavailable")),
+        Right(stubCompletion)
+      ),
+      streamBehaviors = Seq.empty
+    )
+    val result = LLMClientRetry.completeWithRetry(
+      client,
+      conv,
+      maxAttempts = 3,
+      baseDelay = 1.milli
+    )
+    result shouldBe Right(stubCompletion)
+  }
+
+  it should "fail immediately on ServiceError 4xx (e.g. 400)" in {
+    val err = ServiceError(400, "p", "Bad request")
+    val client = stubClient(
+      completeResults = Seq(Left(err)),
+      streamBehaviors = Seq.empty
+    )
+    val result = LLMClientRetry.completeWithRetry(
+      client,
+      conv,
+      maxAttempts = 3,
+      baseDelay = 1.milli
+    )
+    result.isLeft shouldBe true
+    result.left.toOption.get shouldBe err
+  }
+
+  it should "retry on ServiceError 429 then succeed" in {
+    val client = stubClient(
+      completeResults = Seq(
+        Left(ServiceError(429, "p", "Rate limited")),
+        Right(stubCompletion)
+      ),
+      streamBehaviors = Seq.empty
+    )
+    val result = LLMClientRetry.completeWithRetry(
+      client,
+      conv,
+      maxAttempts = 3,
+      baseDelay = 1.milli
+    )
+    result shouldBe Right(stubCompletion)
+  }
+
+  it should "retry on TimeoutError (fallback to backoff) then succeed" in {
+    val client = stubClient(
+      completeResults = Seq(
+        Left(TimeoutError("timeout", 1.second, "api-call")),
+        Right(stubCompletion)
+      ),
+      streamBehaviors = Seq.empty
+    )
+    val result = LLMClientRetry.completeWithRetry(
+      client,
+      conv,
+      maxAttempts = 3,
+      baseDelay = 1.milli
+    )
+    result shouldBe Right(stubCompletion)
+  }
+
   it should "return last error when retries exhausted" in {
     val err = RateLimitError("p")
     val client = stubClient(
@@ -170,7 +237,10 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
     t.join(2000)
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe a[SimpleError]
-    result.left.toOption.get.message should include("interrupted")
+    val msg = result.left.toOption.get.asInstanceOf[SimpleError].message
+    msg should include("interrupted")
+    msg should include("attempt 1")
+    msg should include("RateLimitError")
   }
 
   // ---- streamCompleteWithRetry ----
@@ -216,5 +286,47 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe err
     chunkCount shouldBe 1
+  }
+
+  it should "return ValidationError when maxAttempts <= 0" in {
+    val client = stubClient(Seq.empty, Seq.empty)
+    val result = LLMClientRetry.streamCompleteWithRetry(
+      client,
+      conv,
+      maxAttempts = 0,
+      baseDelay = 1.second
+    )(_ => ())
+    result.isLeft shouldBe true
+    result.left.toOption.get shouldBe a[ValidationError]
+    result.left.toOption.get.asInstanceOf[ValidationError].field shouldBe "maxAttempts"
+  }
+
+  it should "return ValidationError when baseDelay is non-positive" in {
+    val client = stubClient(Seq.empty, Seq.empty)
+    val result = LLMClientRetry.streamCompleteWithRetry(
+      client,
+      conv,
+      maxAttempts = 3,
+      baseDelay = 0.millis
+    )(_ => ())
+    result.isLeft shouldBe true
+    result.left.toOption.get shouldBe a[ValidationError]
+    result.left.toOption.get.asInstanceOf[ValidationError].field shouldBe "baseDelay"
+  }
+
+  it should "fail immediately on non-recoverable ServiceError 400 in stream" in {
+    val err = ServiceError(400, "p", "Bad request")
+    val client = stubClient(
+      completeResults = Seq.empty,
+      streamBehaviors = Seq((_: StreamedChunk => Unit) => Left(err))
+    )
+    val result = LLMClientRetry.streamCompleteWithRetry(
+      client,
+      conv,
+      maxAttempts = 3,
+      baseDelay = 1.milli
+    )(_ => ())
+    result.isLeft shouldBe true
+    result.left.toOption.get shouldBe err
   }
 }

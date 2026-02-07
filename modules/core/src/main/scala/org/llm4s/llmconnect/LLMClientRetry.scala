@@ -30,7 +30,7 @@ object LLMClientRetry {
    * @param conversation conversation to complete
    * @param options      completion options (default: CompletionOptions())
    * @param maxAttempts  maximum attempts including the first (default: 3); must be positive
-   * @param baseDelay    base delay for backoff (default: 1 second); must be positive
+   * @param baseDelay    base delay for backoff when provider retry-delay hints are absent (default: 1 second); must be positive
    * @return Right(Completion) on success, Left(error) when retries exhausted, non-recoverable error, invalid input, or interrupted
    */
   def completeWithRetry(
@@ -50,7 +50,7 @@ object LLMClientRetry {
             case Left(e) =>
               if (attemptNumber >= maxAttempts)
                 Left(e)
-              else if (!LLMError.isRecoverable(e))
+              else if (!isRetryable(e))
                 Left(e)
               else
                 sleepForRetry(e, attemptNumber, baseDelay) match {
@@ -69,7 +69,7 @@ object LLMClientRetry {
    * @param conversation conversation to complete
    * @param options      completion options (default: CompletionOptions())
    * @param maxAttempts  maximum attempts including the first (default: 3); must be positive
-   * @param baseDelay    base delay for backoff (default: 1 second); must be positive
+   * @param baseDelay    base delay for backoff when provider retry-delay hints are absent (default: 1 second); must be positive
    * @param onChunk      callback for each streamed chunk
    * @return Right(Completion) on success, Left(error) when retries exhausted, non-recoverable error, invalid input, or interrupted
    */
@@ -98,7 +98,7 @@ object LLMClientRetry {
                 Left(e)
               else if (attemptNumber >= maxAttempts)
                 Left(e)
-              else if (!LLMError.isRecoverable(e))
+              else if (!isRetryable(e))
                 Left(e)
               else
                 sleepForRetry(e, attemptNumber, baseDelay) match {
@@ -108,6 +108,15 @@ object LLMClientRetry {
           }
         attempt(1)
     }
+
+  /** ServiceError is retried only for 5xx, 429, or 408; other status codes are non-recoverable. */
+  private def isRetryableServiceError(e: ServiceError): Boolean =
+    e.httpStatus >= 500 || e.httpStatus == 429 || e.httpStatus == 408
+
+  private def isRetryable(e: LLMError): Boolean = e match {
+    case s: ServiceError => isRetryableServiceError(s)
+    case other           => LLMError.isRecoverable(other)
+  }
 
   /** Validate maxAttempts and baseDelay; return ValidationError if invalid so Result contract is preserved. */
   private def validateRetryParams(maxAttempts: Int, baseDelay: FiniteDuration): Result[Unit] =
@@ -155,7 +164,11 @@ object LLMClientRetry {
     } catch {
       case _: InterruptedException =>
         Thread.currentThread().interrupt()
-        Left(SimpleError("Retry interrupted"))
+        Left(
+          SimpleError(
+            s"Retry interrupted during attempt $attemptNumber after ${e.getClass.getSimpleName}: ${e.message}"
+          )
+        )
     }
   }
 
