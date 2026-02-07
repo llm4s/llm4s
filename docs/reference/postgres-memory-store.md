@@ -1,3 +1,10 @@
+---
+layout: page
+title: Postgres Memory Store
+nav_order: 10
+parent: Reference
+---
+
 # Postgres Memory Store
 
 `PostgresMemoryStore` is a PostgreSQL backed implementation of the `MemoryStore` abstraction used by LLM4S agents. It provides durable persistence for agent memories, including metadata and optional vector embeddings.

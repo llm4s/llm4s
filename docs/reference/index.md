@@ -18,6 +18,7 @@ Technical reference materials for LLM4S development and maintenance.
 - **[Code Review Guidelines](review-guidelines)** - Best practices from PR feedback
 - **[Release Process](release)** - How releases are created
 - **[Configuration Boundary](configuration-boundary)** - How configuration is isolated from core code
+- **[Postgres Memory Store](postgres-memory-store)** - PostgreSQL-backed agent memory persistence
 
 ## Roadmap & Planning
 
