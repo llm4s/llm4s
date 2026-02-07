@@ -8,7 +8,7 @@ import org.llm4s.agent.Agent
 import org.slf4j.LoggerFactory
 import com.typesafe.config.ConfigFactory
 
-object HallunicationDetector {
+object HallucinationDetector {
   private val logger = LoggerFactory.getLogger(getClass)
 
   def main(args: Array[String]): Unit = {

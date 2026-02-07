@@ -64,7 +64,7 @@ object Category {
  * @param timeoutMs Request timeout in milliseconds
  * @param numResults Number of results (mandatory, default 10)
  * @param searchType Search type (mandatory, default Auto)
- * @param maxCharacters Max text characters (mandatory, default 3000)
+ * @param maxCharacters Max text characters (mandatory, default 500)
  * @param maxAgeHours Max content age in hours (optional, default None)
  * @param category Data category (optional, default None)
  * @param additionalQueries Additional queries for deep search (optional, default None)
@@ -118,7 +118,7 @@ object ExaSearchResult {
 /**
  * Simple HTTP response wrapper.
  */
-case class HttpResponse(
+private[search] case class HttpResponse(
   statusCode: Int,
   body: String
 )
@@ -126,7 +126,7 @@ case class HttpResponse(
 /**
  * Abstraction for HTTP client to enable dependency injection and testing.
  */
-trait BaseHttpClient {
+private[search] trait BaseHttpClient {
   def post(
     url: String,
     headers: Map[String, String],
@@ -138,7 +138,7 @@ trait BaseHttpClient {
 /**
  * Java HttpClient implementation using JDK 11+ built-in HTTP client.
  */
-class JavaHttpClient extends BaseHttpClient {
+private[search] class JavaHttpClient extends BaseHttpClient {
   private val client = JHttpClient.newHttpClient()
 
   override def post(
@@ -239,6 +239,7 @@ object ExaSearchTool {
       for {
         rawQuery <- extractor.getString("query")
         query = rawQuery.trim
+        _ <- if (query.nonEmpty) Right(()) else Left(ValidationError.required("query").message)
 
         searchType <- SearchType
           .fromString(toolConfig.searchType)
