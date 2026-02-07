@@ -12,8 +12,9 @@ Phase 1.4 adds a comprehensive memory system to the LLM4S agent framework. The s
 - Store and retrieve knowledge from external sources
 - Learn and retain user preferences
 - Search memories semantically
+- Consolidate and summarize memories using LLMs
 
-This brings LLM4S closer to feature parity with CrewAI's memory capabilities.
+This brings LLM4S to feature parity with CrewAI's memory capabilities.
 
 ## Motivation
 
@@ -455,6 +456,73 @@ VectorOps.topKBySimilarity(query, candidates, k)  // Top-K search
 sbt "samples/runMain org.llm4s.samples.memory.VectorMemoryExample"
 ```
 
+## LLM-Powered Memory Consolidation (Phase 1.4.2)
+
+The LLM Memory Consolidation feature automatically summarizes and consolidates multiple related memories into concise summaries, reducing storage and improving retrieval efficiency.
+
+### Features
+- **LLM-Powered Summarization**: Uses LLM to intelligently merge related memories
+- **Conversation Grouping**: Groups memories by conversation ID and timestamp
+- **Security Protection**: Built-in prompt injection prevention with system rules
+- **Output Validation**: Validates consolidated text length and content
+- **Strict Mode**: Optional fail-fast behavior for production reliability
+- **Binary Compatibility**: Backward-compatible API with companion apply method
+
+### Configuration
+
+```scala
+import org.llm4s.agent.memory._
+
+// Enable consolidation with custom config
+val config = MemoryManagerConfig(
+  consolidationEnabled = true,
+  consolidationConfig = ConsolidationConfig(
+    maxMemoriesPerGroup = 50,    // Max memories per consolidation group
+    strictMode = false             // Best-effort (false) or fail-fast (true)
+  )
+)
+
+// Use with LLMMemoryManager
+val manager = for {
+  (provider, cfg) <- Llm4sConfig.completions()
+  client <- CompletionClient.from(provider, cfg)
+  model <- Llm4sConfig.completionModel()
+  store <- VectorMemoryStore.inMemory()
+} yield LLMMemoryManager(config, store, client, model.modelName)
+```
+
+### How It Works
+
+1. **Grouping**: Groups conversation memories by `conversationId` and sorts by timestamp
+2. **LLM Summarization**: Sends grouped memories to LLM with security-focused system prompt
+3. **Validation**: Checks output is non-empty and under 2000 characters
+4. **Replacement**: Replaces old memories with consolidated summary
+5. **Metadata Preservation**: Retains conversation ID, uses max timestamp from group
+
+### Security
+
+Built-in protections against prompt injection:
+- System message with 5 explicit security rules
+- Output length capping (2000 chars)
+- Token limits (maxTokens=500, temperature=0.3)
+- Content validation (non-empty check)
+
+### Strict Mode
+
+```scala
+// Best-effort mode (default): Log errors, continue operation
+ConsolidationConfig.default
+
+// Strict mode: Fail fast on any consolidation error
+ConsolidationConfig.strict
+```
+
+### Sample
+
+```bash
+sbt "samples/runMain org.llm4s.samples.memory.MemoryConsolidationExample"
+```
+
 ## Future Enhancements
 
 ### Phase 1.4.3: Additional LLM-Powered Features
@@ -491,8 +559,9 @@ Phase 1.4 delivers a functional, composable memory system that:
 - ✅ Includes working in-memory implementation
 - ✅ Includes SQLite persistent storage with FTS5 search (Phase 1.4.1)
 - ✅ Includes vector store with semantic search (Phase 1.4.2)
+- ✅ Includes LLM-powered memory consolidation (Phase 1.4.2)
 - ✅ Offers high-level manager API for common patterns
 - ✅ Has comprehensive test coverage (130+ tests)
 - ✅ Includes usage samples
 
-Future phases will add LLM-powered entity extraction and deeper agent integration.
+Future phases will add automatic entity extraction and deeper agent integration.
