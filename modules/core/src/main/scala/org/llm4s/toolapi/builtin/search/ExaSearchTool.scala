@@ -300,7 +300,7 @@ object ExaSearchTool {
     val url  = s"${toolConfig.apiUrl}/search"
     val body = buildRequestBody(query, config)
 
-        val responseEither: Either[String, HttpResponse] =
+    val responseEither: Either[String, HttpResponse] =
       Try {
         httpClient.post(
           url = url,
