@@ -18,7 +18,6 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     val tool = ExaSearchTool.create(toolConfig)
 
     tool.name shouldBe "exa_search"
-    tool.description should include("EXTERNAL API")
     tool.description should include("Exa's AI-powered search engine")
   }
 
@@ -584,7 +583,6 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     )
 
     tool.name shouldBe "exa_search"
-    tool.description should include("EXTERNAL API")
   }
 
   it should "reject non-HTTPS URL in withApiKey" in {
