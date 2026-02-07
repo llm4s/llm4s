@@ -1,7 +1,6 @@
 import sbt.Keys._
 import scoverage.ScoverageKeys._
 import Common._
-import com.typesafe.tools.mima.core._
 
 inThisBuild(
   List(
@@ -163,19 +162,6 @@ lazy val core = (project in file("modules/core"))
       Deps.prometheusCore,
       Deps.prometheusHttp
     )
-    // MiMa binary compatibility checking
-    // Uncomment after 0.1.4 is released:
-    // mimaPreviousArtifacts := Set(organization.value %% "llm4s-core" % "0.1.4"),
-    // Binary compatibility filters for memory consolidation API evolution
-    // Added consolidationConfig parameter with backward-compatible companion apply method
-    // The 5-parameter apply() in companion maintains binary compatibility for existing callers
-    // mimaBinaryIssueFilters ++= Seq(
-    //   ProblemFilters.exclude[DirectMissingMethodProblem]("org.llm4s.agent.memory.MemoryManagerConfig.apply"),
-    //   ProblemFilters.exclude[DirectMissingMethodProblem]("org.llm4s.agent.memory.MemoryManagerConfig.copy"),
-    //   ProblemFilters.exclude[DirectMissingMethodProblem]("org.llm4s.agent.memory.MemoryManagerConfig.copy$default$6"),
-    //   ProblemFilters.exclude[DirectMissingMethodProblem]("org.llm4s.agent.memory.MemoryManagerConfig.this"),
-    //   ProblemFilters.exclude[MissingTypesProblem]("org.llm4s.agent.memory.MemoryManagerConfig$")
-    // )
   )
 
 lazy val workspaceShared = (project in file("modules/workspace/workspaceShared"))
