@@ -35,7 +35,7 @@ object EnhancedTracingExample {
 
     result.fold(
       err => logger.error("EnhancedTracingExample failed: {}", err.formatted),
-      _   => logger.info("EnhancedTracingExample completed successfully.")
+      _ => logger.info("EnhancedTracingExample completed successfully.")
     )
   }
 
@@ -66,11 +66,11 @@ object EnhancedTracingExample {
         // Trace a simple agent state snapshot
         val finalConversation = conversation.copy(messages = conversation.messages :+ completion.message)
         val agentState = AgentState(
-          conversation  = finalConversation,
-          tools         = new ToolRegistry(Seq.empty),
-          initialQuery  = conversation.messages.collectFirst { case UserMessage(content) => content },
-          status        = AgentStatus.Complete,
-          logs          = Seq(s"Completion id=${completion.id}", s"Model=${completion.model}")
+          conversation = finalConversation,
+          tools = new ToolRegistry(Seq.empty),
+          initialQuery = conversation.messages.collectFirst { case UserMessage(content) => content },
+          status = AgentStatus.Complete,
+          logs = Seq(s"Completion id=${completion.id}", s"Model=${completion.model}")
         )
         tracer.traceAgentState(agentState)
 
@@ -84,4 +84,3 @@ object EnhancedTracingExample {
     tracer.traceEvent("EnhancedTracingExample: conversation finished")
   }
 }
-
