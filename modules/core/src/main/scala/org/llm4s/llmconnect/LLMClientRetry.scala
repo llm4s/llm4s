@@ -39,7 +39,7 @@ object LLMClientRetry {
     options: CompletionOptions = CompletionOptions(),
     maxAttempts: Int = 3,
     baseDelay: FiniteDuration = 1.second
-  ): Result[Completion] = {
+  ): Result[Completion] =
     validateRetryParams(maxAttempts, baseDelay) match {
       case Left(err) => Left(err)
       case Right(()) =>
@@ -60,7 +60,6 @@ object LLMClientRetry {
           }
         attempt(1)
     }
-  }
 
   /**
    * Calls `client.streamComplete` with retries only when failure occurs before any chunk is emitted.
@@ -80,12 +79,12 @@ object LLMClientRetry {
     options: CompletionOptions = CompletionOptions(),
     maxAttempts: Int = 3,
     baseDelay: FiniteDuration = 1.second
-  )(onChunk: StreamedChunk => Unit): Result[Completion] = {
+  )(onChunk: StreamedChunk => Unit): Result[Completion] =
     validateRetryParams(maxAttempts, baseDelay) match {
       case Left(err) => Left(err)
       case Right(()) =>
         var chunkEmitted = false
-        val wrappedOnChunk: StreamedChunk => Unit = (c) => {
+        val wrappedOnChunk: StreamedChunk => Unit = c => {
           chunkEmitted = true
           onChunk(c)
         }
@@ -109,17 +108,15 @@ object LLMClientRetry {
           }
         attempt(1)
     }
-  }
 
   /** Validate maxAttempts and baseDelay; return ValidationError if invalid so Result contract is preserved. */
-  private def validateRetryParams(maxAttempts: Int, baseDelay: FiniteDuration): Result[Unit] = {
+  private def validateRetryParams(maxAttempts: Int, baseDelay: FiniteDuration): Result[Unit] =
     if (maxAttempts <= 0)
       Left(ValidationError("maxAttempts", "must be positive"))
     else if (baseDelay.toMillis <= 0)
       Left(ValidationError("baseDelay", "must be positive"))
     else
       Right(())
-  }
 
   /**
    * Chooses retry delay in milliseconds: provider hint when valid, else exponential backoff; always capped.

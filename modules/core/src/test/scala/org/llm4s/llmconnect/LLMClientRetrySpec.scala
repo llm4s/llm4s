@@ -35,8 +35,8 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
     completeResults: Seq[Result[Completion]],
     streamBehaviors: Seq[(StreamedChunk => Unit) => Result[Completion]]
   ): LLMClient = new LLMClient {
-    private var completeCalls  = 0
-    private var streamCalls    = 0
+    private var completeCalls = 0
+    private var streamCalls   = 0
     override def complete(
       conversation: Conversation,
       options: CompletionOptions
@@ -54,8 +54,8 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       streamCalls += 1
       streamBehaviors(i)(onChunk)
     }
-    override def getContextWindow(): Int       = 4096
-    override def getReserveCompletion(): Int   = 1024
+    override def getContextWindow(): Int     = 4096
+    override def getReserveCompletion(): Int = 1024
   }
 
   private val conv = Conversation(Seq(UserMessage("hello")))
@@ -156,14 +156,14 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       streamBehaviors = Seq.empty
     )
     var result: Result[Completion] = Left(SimpleError("placeholder"))
-    val t = new Thread(() => {
+    val t = new Thread(() =>
       result = LLMClientRetry.completeWithRetry(
         client,
         conv,
         maxAttempts = 3,
         baseDelay = 10.seconds
       )
-    })
+    )
     t.start()
     Thread.sleep(50)
     t.interrupt()
@@ -192,7 +192,7 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       conv,
       maxAttempts = 3,
       baseDelay = 1.milli
-    )( _ => chunkCount += 1 )
+    )(_ => chunkCount += 1)
     result shouldBe Right(stubCompletion)
     chunkCount shouldBe 1
   }
@@ -201,10 +201,10 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
     val err = RateLimitError("p")
     val client = stubClient(
       completeResults = Seq.empty,
-      streamBehaviors = Seq((onChunk: StreamedChunk => Unit) => {
+      streamBehaviors = Seq { (onChunk: StreamedChunk => Unit) =>
         onChunk(stubChunk)
         Left(err)
-      })
+      }
     )
     var chunkCount = 0
     val result = LLMClientRetry.streamCompleteWithRetry(
@@ -212,7 +212,7 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       conv,
       maxAttempts = 3,
       baseDelay = 1.milli
-    )( _ => chunkCount += 1 )
+    )(_ => chunkCount += 1)
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe err
     chunkCount shouldBe 1

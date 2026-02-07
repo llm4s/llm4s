@@ -32,16 +32,15 @@ object RetryCompletionExample {
     val result = for {
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
-      completion  <- LLMClientRetry.completeWithRetry(
-                       client,
-                       conversation,
-                       CompletionOptions(),
-                       maxAttempts = 3,
-                       baseDelay = 1.second
-                     )
-      _ = {
+      completion <- LLMClientRetry.completeWithRetry(
+        client,
+        conversation,
+        CompletionOptions(),
+        maxAttempts = 3,
+        baseDelay = 1.second
+      )
+      _ =
         logger.info("Assistant: {}", completion.message.content)
-      }
     } yield ()
 
     result.fold(
