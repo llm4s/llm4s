@@ -456,7 +456,7 @@ VectorOps.topKBySimilarity(query, candidates, k)  // Top-K search
 sbt "samples/runMain org.llm4s.samples.memory.VectorMemoryExample"
 ```
 
-## LLM-Powered Memory Consolidation (Phase 1.4.2)
+## LLM-Powered Memory Consolidation (Phase 1.4.3)
 
 The LLM Memory Consolidation feature automatically summarizes and consolidates multiple related memories into concise summaries, reducing storage and improving retrieval efficiency.
 
@@ -472,6 +472,8 @@ The LLM Memory Consolidation feature automatically summarizes and consolidates m
 
 ```scala
 import org.llm4s.agent.memory._
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.LLMConnect
 
 // Enable consolidation with custom config
 val config = MemoryManagerConfig(
@@ -484,11 +486,10 @@ val config = MemoryManagerConfig(
 
 // Use with LLMMemoryManager
 val manager = for {
-  (provider, cfg) <- Llm4sConfig.completions()
-  client <- CompletionClient.from(provider, cfg)
-  model <- Llm4sConfig.completionModel()
-  store <- VectorMemoryStore.inMemory()
-} yield LLMMemoryManager(config, store, client, model.modelName)
+  providerConfig <- Llm4sConfig.provider()
+  client         <- LLMConnect.getClient(providerConfig)
+  store          <- VectorMemoryStore.inMemory()
+} yield LLMMemoryManager(config, store, client)
 ```
 
 ### How It Works
@@ -559,7 +560,7 @@ Phase 1.4 delivers a functional, composable memory system that:
 - ✅ Includes working in-memory implementation
 - ✅ Includes SQLite persistent storage with FTS5 search (Phase 1.4.1)
 - ✅ Includes vector store with semantic search (Phase 1.4.2)
-- ✅ Includes LLM-powered memory consolidation (Phase 1.4.2)
+- ✅ Includes LLM-powered memory consolidation (Phase 1.4.3)
 - ✅ Offers high-level manager API for common patterns
 - ✅ Has comprehensive test coverage (130+ tests)
 - ✅ Includes usage samples
