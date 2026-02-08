@@ -466,6 +466,21 @@ class ProviderConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValu
       error.message should include("Missing Gemini API key")
       error.message should include("GOOGLE_API_KEY")
     }
+
+    "fail when gemini section is completely missing" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "gemini/gemini-2.0-flash" }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isLeft shouldBe true
+      result.left.value.message should include("Gemini provider selected")
+      result.left.value.message should include("llm4s.gemini section is missing")
+    }
   }
 
   // --------------------------------------------------------------------------
@@ -512,6 +527,21 @@ class ProviderConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValu
       val error = result.left.value
       error.message should include("Missing Z.ai API key")
       error.message should include("ZAI_API_KEY")
+    }
+
+    "fail when zai section is completely missing" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "zai/zai-model" }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isLeft shouldBe true
+      result.left.value.message should include("Z.ai provider selected")
+      result.left.value.message should include("llm4s.zai section is missing")
     }
   }
 

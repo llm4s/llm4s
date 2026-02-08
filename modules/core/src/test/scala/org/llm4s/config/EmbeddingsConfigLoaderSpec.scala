@@ -288,7 +288,8 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
       result.isLeft shouldBe true
       val error = result.left.value
-      error.message should (include("Missing OpenAI API key").or(include("OPENAI_API_KEY")))
+      error.message should include("Missing OpenAI API key")
+      error.message should include("OPENAI_API_KEY")
     }
 
     "fail with clear error when OpenAI embeddings model is missing in legacy mode" in {
