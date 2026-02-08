@@ -51,8 +51,8 @@ class MCPServer(
   tools: Seq[ToolFunction[_, _]]
 ) {
   private val logger = LoggerFactory.getLogger(getClass)
-  @volatile private var server: Option[HttpServer] = None
-  @volatile private var executorService: ExecutorService = _
+  private var server: Option[HttpServer] = None
+  private var executorService: ExecutorService = _
   
   // Map for fast tool lookup
   private val toolMap: Map[String, ToolFunction[_, _]] = tools.map(t => t.name -> t).toMap
@@ -94,11 +94,11 @@ class MCPServer(
       s.stop(delay)
       if (executorService != null) {
         executorService.shutdown()
-        try {
+        Try {
           if (!executorService.awaitTermination(delay.toLong, TimeUnit.SECONDS)) {
              executorService.shutdownNow()
           }
-        } catch {
+        }.recover {
           case _: InterruptedException => executorService.shutdownNow()
         }
         executorService = null
@@ -348,24 +348,7 @@ class MCPServer(
       }
     }
 
-    /* SSE support explicitly disabled/removed as per mentor feedback
-    private def handleGET(exchange: HttpExchange): Unit = {
-       val acceptHeader = Option(exchange.getRequestHeaders.getFirst("Accept")).getOrElse("")
-       if (!acceptHeader.contains("text/event-stream")) {
-         sendErrorResponse(exchange, 406, "GET requires Accept: text/event-stream")
-         return
-       }
-       val sessionId = Option(exchange.getRequestHeaders.getFirst("mcp-session-id"))
-       sessionId match {
-         case Some(id) if SessionStore.getSession(id).isDefined =>
-           sendSSEStream(exchange, id)
-         case Some(id) =>
-           sendErrorResponse(exchange, 400, s"Invalid session: $id")
-         case None =>
-           sendErrorResponse(exchange, 400, "Missing mcp-session-id header for SSE")
-       }
-    }
-    */
+
 
     private def handleDELETE(exchange: HttpExchange): Unit = {
       val sessionId = Option(exchange.getRequestHeaders.getFirst("mcp-session-id"))
@@ -403,39 +386,36 @@ class MCPServer(
        Using(exchange.getResponseBody) { os =>
          os.write(bytes)
          os.flush()
-       }.get
+       }.failed.foreach { e =>
+         logger.warn(s"Failed to write response: ${e.getMessage}")
+       }
     }
 
     private def sendErrorResponse(exchange: HttpExchange, code: Int, message: String): Unit =
       sendResponse(exchange, code, "text/plain", message)
 
-    /* SSE support disabled
-    private def sendSSEStream(exchange: HttpExchange, sessionId: String): Unit = {
-       exchange.getResponseHeaders.set("Content-Type", "text/event-stream")
-       exchange.getResponseHeaders.set("Cache-Control", "no-cache")
-       exchange.getResponseHeaders.set("Connection", "keep-alive")
-       exchange.getResponseHeaders.set("mcp-session-id", sessionId)
 
-       val sseData = ": SSE stream opened\n\n" +
-          "data: {\"jsonrpc\":\"2.0\",\"method\":\"notification/stream_started\",\"params\":{\"session\":\"" + sessionId + "\"}}\n\n"
-       
-       sendResponse(exchange, 200, "text/event-stream", sseData)
-    }
-    */
     private def readBodyWithLimit(exchange: HttpExchange, limit: Int): Try[String] = {
        Using(exchange.getRequestBody) { is =>
          val buffer = new Array[Byte](4096)
          val out = new java.io.ByteArrayOutputStream()
          var total = 0
          var bytesRead = is.read(buffer)
-         while (bytesRead != -1) {
+         var overflow = false
+
+         while (bytesRead != -1 && !overflow) {
            total += bytesRead
-           if (total > limit) throw new RuntimeException("Payload too large")
-           out.write(buffer, 0, bytesRead)
-           bytesRead = is.read(buffer)
+           if (total > limit) {
+             overflow = true
+           } else {
+             out.write(buffer, 0, bytesRead)
+             bytesRead = is.read(buffer)
+           }
          }
-         out.toString("UTF-8")
-       }
+         
+         if (overflow) Failure(new RuntimeException("Payload too large"))
+         else Success(out.toString("UTF-8"))
+       }.flatten
     }
   }
 }

@@ -29,8 +29,6 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
     server = new MCPServer(options, Seq(pingTool))
     server.start().fold(e => throw e, _ => ())
     // Give it a moment to bind (though bind is synchronous, 0 port assignment happens then)
-    // Give it a moment to bind (though bind is synchronous, 0 port assignment happens then)
-    // Thread.sleep(100) - Removed as per mentor feedback code is synchronous
     port = server.boundPort
   }
 
