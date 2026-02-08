@@ -1,3 +1,10 @@
+---
+layout: page
+title: Production Deployment
+nav_order: 11
+parent: User Guide
+---
+
 # Production Deployment Guide
 
 This guide covers deploying LLM4S applications to production environments. It's specific to LLM4S patterns—not general application deployment advice.
@@ -152,7 +159,7 @@ def callWithBackoff(
 ): Result[Completion] = {
   def attempt(remaining: Int, delay: Long): Result[Completion] = {
     client.complete(conversation) match {
-      case Left(RateLimitError(_, retryAfter)) if remaining > 0 =>
+      case Left(RateLimitError(_, retryAfter, _)) if remaining > 0 =>
         val waitMs = retryAfter.map(_ * 1000L).getOrElse(delay)
         Thread.sleep(waitMs)
         attempt(remaining - 1, delay * 2)
@@ -503,11 +510,12 @@ Use `LLMClient.getContextBudget()` to stay within limits:
 ```scala
 import org.llm4s.agent.AgentState
 import org.llm4s.agent.ContextWindowConfig
+import org.llm4s.tool.ToolRegistry
 
 val budgetTokens = client.getContextBudget(HeadroomPercent.Standard)
 
 // Prune conversation using the AgentState pruning API
-val state = AgentState(conversation)
+val state = AgentState(conversation, ToolRegistry.empty)
 
 val prunedConversation =
   AgentState.pruneConversation(
@@ -522,16 +530,19 @@ For long-running conversations, use built-in pruning strategies:
 
 ```scala
 import org.llm4s.agent.AgentState
-import org.llm4s.context.ContextWindowConfig
-import org.llm4s.context.PruningStrategy.OldestFirst
+import org.llm4s.agent.ContextWindowConfig
+import org.llm4s.agent.PruningStrategy
+import org.llm4s.tool.ToolRegistry
 
 // Prune when context exceeds configured limits
+val state = AgentState(conversation, ToolRegistry.empty)
+
 val prunedConversation =
   AgentState.pruneConversation(
     state,
     ContextWindowConfig(
       maxMessages = Some(50),
-      pruningStrategy = OldestFirst
+      pruningStrategy = PruningStrategy.OldestFirst
     )
   )
 ```
