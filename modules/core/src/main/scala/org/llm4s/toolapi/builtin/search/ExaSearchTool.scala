@@ -66,7 +66,7 @@ object Category {
  * @param numResults Number of results (mandatory, default 10)
  * @param searchType Search type (mandatory, default Auto)
  * @param maxCharacters Max text characters (mandatory, default 500)
- * @param maxAgeHours Max content age in hours (optional, default None)
+ * @param maxAgeHours Max content age in hours (default 1)
  * @param category Data category (optional, default None)
  * @param additionalQueries Additional queries for deep search (optional, default None)
  * @param userLocation User location for local search (optional, default None)

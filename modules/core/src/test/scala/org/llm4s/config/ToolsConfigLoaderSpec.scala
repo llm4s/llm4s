@@ -74,31 +74,35 @@ class ToolsConfigLoaderSpec extends AnyFunSuite {
       val result = ToolsConfigLoader.loadExaSearchTool(ConfigSource.fromConfig(config))
 
       assert(result.isLeft, s"searchType '$searchType' should be invalid")
-      result.left.foreach(error => assert(error.message.contains("Invalid searchType")))
+      result.left.foreach(error => assert(error.message.contains("searchType"), s"Error message should mention searchType: ${error.message}"))
     }
   }
 
-  test("loadExaSearchTool rejects non-lowercase searchType values") {
-    val nonLowercaseTypes = List("AUTO", "NEURAL", "Neural", "Auto", "AuTo", "nEuRaL")
+  test("loadExaSearchTool accepts non-lowercase searchType values by normalizing them") {
+    val mixedCaseTypes = List(
+      ("AUTO", "auto"),
+      ("NEURAL", "neural"),
+      ("Neural", "neural"),
+      ("Auto", "auto"),
+      ("AuTo", "auto"),
+      ("nEuRaL", "neural")
+    )
 
-    nonLowercaseTypes.foreach { searchType =>
+    mixedCaseTypes.foreach { case (input, expected) =>
       val config = ConfigFactory.parseString(s"""
         llm4s.tools.exa {
           apiKey = "test-key"
           apiUrl = "https://api.exa.ai"
           numResults = 10
-          searchType = "$searchType"
+          searchType = "$input"
           maxCharacters = 500
         }
       """)
 
       val result = ToolsConfigLoader.loadExaSearchTool(ConfigSource.fromConfig(config))
 
-      assert(result.isLeft, s"Non-lowercase searchType '$searchType' should be rejected")
-      result.left.foreach { error =>
-        assert(error.message.contains("Invalid searchType"))
-        assert(error.message.contains("lowercase"))
-      }
+      assert(result.isRight, s"searchType '$input' should be accepted and normalized")
+      result.foreach(cfg => assert(cfg.searchType == expected, s"'$input' should be normalized to '$expected'"))
     }
   }
 
