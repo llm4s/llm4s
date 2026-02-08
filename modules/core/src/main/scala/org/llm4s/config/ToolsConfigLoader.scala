@@ -132,12 +132,18 @@ private[config] object ToolsConfigLoader {
       .flatMap { config =>
         // Use shared validators from ExaSearchTool
         for {
-          validatedNumResults    <- ExaSearchTool.validateNumResults(config.numResults)
-            .left.map(e => ConfigurationError(e.message))
-          validatedMaxCharacters <- ExaSearchTool.validateMaxCharacters(config.maxCharacters)
-            .left.map(e => ConfigurationError(e.message))
-          validatedSearchType    <- ExaSearchTool.validateSearchType(config.searchType)
-            .left.map(e => ConfigurationError(e.message))
+          validatedNumResults <- ExaSearchTool
+            .validateNumResults(config.numResults)
+            .left
+            .map(e => ConfigurationError(e.message))
+          validatedMaxCharacters <- ExaSearchTool
+            .validateMaxCharacters(config.maxCharacters)
+            .left
+            .map(e => ConfigurationError(e.message))
+          validatedSearchType <- ExaSearchTool
+            .validateSearchType(config.searchType)
+            .left
+            .map(e => ConfigurationError(e.message))
         } yield config.copy(
           numResults = validatedNumResults,
           maxCharacters = validatedMaxCharacters,

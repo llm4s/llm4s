@@ -186,15 +186,13 @@ object ExaSearchTool {
     else Left(ValidationError.invalid("apiUrl", "must use HTTPS protocol for secure communication"))
   }
 
-  private[llm4s] def validateNumResults(n: Int): Result[Int] = {
+  private[llm4s] def validateNumResults(n: Int): Result[Int] =
     if (n > 0) Right(n)
     else Left(ValidationError.invalid("numResults", s"must be greater than 0, got $n"))
-  }
 
-  private[llm4s] def validateMaxCharacters(n: Int): Result[Int] = {
+  private[llm4s] def validateMaxCharacters(n: Int): Result[Int] =
     if (n > 0) Right(n)
     else Left(ValidationError.invalid("maxCharacters", s"must be greater than 0, got $n"))
-  }
 
   private[llm4s] def validateSearchType(s: String): Result[String] = {
     val normalized = s.trim.toLowerCase
@@ -213,7 +211,7 @@ object ExaSearchTool {
    * Validate entire ExaSearchToolConfig.
    * Used by create() to ensure all fields are valid.
    */
-  private def validateToolConfig(config: ExaSearchToolConfig): Result[ExaSearchToolConfig] = {
+  private def validateToolConfig(config: ExaSearchToolConfig): Result[ExaSearchToolConfig] =
     for {
       validatedApiKey        <- validateApiKey(config.apiKey)
       validatedApiUrl        <- validateHttps(config.apiUrl)
@@ -227,7 +225,6 @@ object ExaSearchTool {
       searchType = validatedSearchType,
       maxCharacters = validatedMaxCharacters
     )
-  }
 
   private def createSchema = Schema
     .`object`[Map[String, Any]]("Exa Search parameters")
@@ -275,8 +272,7 @@ object ExaSearchTool {
     toolConfig: ExaSearchToolConfig,
     config: Option[ExaSearchConfig] = None,
     httpClient: BaseHttpClient = new JavaHttpClient()
-  ): Result[ToolFunction[Map[String, Any], ExaSearchResult]] = {
-
+  ): Result[ToolFunction[Map[String, Any], ExaSearchResult]] =
     // Validate entire config using shared validators
     for {
       validatedConfig <- validateToolConfig(toolConfig)
@@ -303,12 +299,11 @@ object ExaSearchTool {
       ).withHandler { extractor =>
         for {
           rawQuery <- extractor.getString("query")
-          query    <- validateQuery(rawQuery).left.map(_.message)  // Convert Result to Either[String, String]
+          query    <- validateQuery(rawQuery).left.map(_.message) // Convert Result to Either[String, String]
           result   <- search(query, finalConfig, validatedConfig, httpClient)
         } yield result
       }.build()
     } yield tool
-  }
 
   /**
    * Create an Exa search tool with explicit API key and defaults.
@@ -327,8 +322,7 @@ object ExaSearchTool {
     apiUrl: String = "https://api.exa.ai",
     config: Option[ExaSearchConfig] = None,
     httpClient: BaseHttpClient = new JavaHttpClient()
-  ): Result[ToolFunction[Map[String, Any], ExaSearchResult]] = {
-
+  ): Result[ToolFunction[Map[String, Any], ExaSearchResult]] =
     // Validate only the parameters this function receives
     for {
       validatedApiKey <- validateApiKey(apiKey)
@@ -344,7 +338,6 @@ object ExaSearchTool {
 
       tool <- create(toolConfig, config, httpClient)
     } yield tool
-  }
 
   private[search] def search(
     query: String,
