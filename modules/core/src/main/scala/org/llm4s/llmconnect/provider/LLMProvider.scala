@@ -21,6 +21,7 @@ sealed trait LLMProvider {
     case LLMProvider.Zai        => "zai"
     case LLMProvider.Gemini     => "gemini"
     case LLMProvider.DeepSeek   => "deepseek"
+    case LLMProvider.Cohere     => "cohere"
   }
 }
 
@@ -95,8 +96,15 @@ object LLMProvider {
    */
   case object DeepSeek extends LLMProvider
 
+  /**
+   * Cohere provider for Command models.
+   *
+   * Minimal v1 support: non-streaming chat/text generation only.
+   */
+  case object Cohere extends LLMProvider
+
   /** All available providers */
-  val all: Seq[LLMProvider] = Seq(OpenAI, Azure, Anthropic, OpenRouter, Ollama, Zai, Gemini, DeepSeek)
+  val all: Seq[LLMProvider] = Seq(OpenAI, Azure, Anthropic, OpenRouter, Ollama, Zai, Gemini, DeepSeek, Cohere)
 
   /**
    * Parses a provider name string to LLMProvider.
@@ -113,6 +121,7 @@ object LLMProvider {
     case "zai"               => Some(Zai)
     case "gemini" | "google" => Some(Gemini)
     case "deepseek"          => Some(DeepSeek)
+    case "cohere"            => Some(Cohere)
     case _                   => None
   }
 }
