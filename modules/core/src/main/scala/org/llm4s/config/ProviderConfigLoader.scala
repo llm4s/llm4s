@@ -90,7 +90,17 @@ private[config] object ProviderConfigLoader {
     PureConfigReader.forProduct2("baseUrl", "apiKey")(CohereSection.apply)
 
   implicit private val providerRootReader: PureConfigReader[ProviderRoot] =
-    PureConfigReader.forProduct9("llm", "openai", "azure", "anthropic", "ollama", "zai", "gemini", "deepseek", "cohere")(
+    PureConfigReader.forProduct9(
+      "llm",
+      "openai",
+      "azure",
+      "anthropic",
+      "ollama",
+      "zai",
+      "gemini",
+      "deepseek",
+      "cohere"
+    )(
       ProviderRoot.apply
     )
 
