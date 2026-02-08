@@ -74,7 +74,9 @@ class ToolsConfigLoaderSpec extends AnyFunSuite {
       val result = ToolsConfigLoader.loadExaSearchTool(ConfigSource.fromConfig(config))
 
       assert(result.isLeft, s"searchType '$searchType' should be invalid")
-      result.left.foreach(error => assert(error.message.contains("searchType"), s"Error message should mention searchType: ${error.message}"))
+      result.left.foreach(error =>
+        assert(error.message.contains("searchType"), s"Error message should mention searchType: ${error.message}")
+      )
     }
   }
 
