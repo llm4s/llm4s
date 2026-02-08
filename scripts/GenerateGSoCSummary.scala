@@ -45,37 +45,39 @@ object GenerateGSoCSummary {
   }
 
   def extractProjects(content: String): List[Project] = {
-    val sections = content.split("(?=\n### )").toList.tail // Skip header before first ###
+    val sections = content.split("(?=\n### )").toList.drop(1) // Skip header before first ### (safe for empty list)
     var projectNumber = 0
     var tripperNumber = 48
     
     sections.flatMap { section =>
       val lines = section.split("\n").toList
-      val headerLine = lines.head.stripPrefix("### ").trim
-      
-      // Skip template
-      if (headerLine.startsWith("Template:")) {
-        None
-      } else {
-        // Parse project number or generate for tripper
-        val (number, title) = if (headerLine.matches("^\\d+\\..*")) {
-          val parts = headerLine.split("\\.", 2)
-          (parts(0).toInt, if (parts.length > 1) parts(1).trim else "")
-        } else if (headerLine.contains("llm4s-tripper")) {
-          tripperNumber += 1
-          (tripperNumber, headerLine)
-        } else {
-          projectNumber += 1
-          (projectNumber, headerLine)
-        }
-        
-        // Extract table data
-        val mentor = extractTableValue(lines, "Mentor")
-        val coMentor = extractTableValue(lines, "Co-mentor")
-        val difficulty = extractTableValue(lines, "Difficulty").getOrElse("Medium")
-        val hours = extractTableValue(lines, "Expected Hours").flatMap(_.toIntOption).getOrElse(350)
-        
-        Some(Project(number, title, mentor.getOrElse("TBD"), coMentor.getOrElse(""), difficulty, hours))
+      lines.headOption.map(_.stripPrefix("### ").trim) match {
+        case None => None // Skip empty sections
+        case Some(headerLine) =>
+          // Skip template
+          if (headerLine.startsWith("Template:")) {
+            None
+          } else {
+            // Parse project number or generate for tripper
+            val (number, title) = if (headerLine.matches("^\\d+\\..*")) {
+              val parts = headerLine.split("\\.", 2)
+              (parts(0).toInt, if (parts.length > 1) parts(1).trim else "")
+            } else if (headerLine.contains("llm4s-tripper")) {
+              tripperNumber += 1
+              (tripperNumber, headerLine)
+            } else {
+              projectNumber += 1
+              (projectNumber, headerLine)
+            }
+            
+            // Extract table data
+            val mentor = extractTableValue(lines, "Mentor")
+            val coMentor = extractTableValue(lines, "Co-mentor")
+            val difficulty = extractTableValue(lines, "Difficulty").getOrElse("Medium")
+            val hours = extractTableValue(lines, "Expected Hours").flatMap(_.toIntOption).getOrElse(350)
+            
+            Some(Project(number, title, mentor.getOrElse("TBD"), coMentor.getOrElse(""), difficulty, hours))
+          }
       }
     }.sortBy(_.number)
   }
