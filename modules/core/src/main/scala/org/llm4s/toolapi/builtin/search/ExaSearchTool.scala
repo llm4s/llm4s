@@ -4,6 +4,7 @@ import org.llm4s.toolapi._
 import upickle.default._
 import org.llm4s.config.ExaSearchToolConfig
 import org.llm4s.error.ValidationError
+import org.llm4s.types.Result
 import scala.util.Try
 import java.net.http.{ HttpClient => JHttpClient, HttpRequest, HttpResponse => JHttpResponse }
 import java.net.URI
@@ -168,6 +169,66 @@ private[search] class JavaHttpClient extends BaseHttpClient {
 
 object ExaSearchTool {
 
+  // ===== Shared Validation Helpers =====
+  // These validators are used across config loader, create(), and withApiKey()
+  // to ensure consistent validation logic without duplication.
+  // Made private[llm4s] so config loader can access them.
+
+  private[llm4s] def validateApiKey(key: String): Result[String] = {
+    val trimmed = key.trim
+    if (trimmed.nonEmpty) Right(trimmed)
+    else Left(ValidationError.required("apiKey"))
+  }
+
+  private[llm4s] def validateHttps(url: String): Result[String] = {
+    val normalized = url.toLowerCase.trim
+    if (normalized.startsWith("https://")) Right(url.trim)
+    else Left(ValidationError.invalid("apiUrl", "must use HTTPS protocol for secure communication"))
+  }
+
+  private[llm4s] def validateNumResults(n: Int): Result[Int] = {
+    if (n > 0) Right(n)
+    else Left(ValidationError.invalid("numResults", s"must be greater than 0, got $n"))
+  }
+
+  private[llm4s] def validateMaxCharacters(n: Int): Result[Int] = {
+    if (n > 0) Right(n)
+    else Left(ValidationError.invalid("maxCharacters", s"must be greater than 0, got $n"))
+  }
+
+  private[llm4s] def validateSearchType(s: String): Result[String] = {
+    val normalized = s.trim.toLowerCase
+    val validTypes = Set("auto", "neural", "fast", "deep")
+    if (validTypes.contains(normalized)) Right(normalized)
+    else Left(ValidationError.invalid("searchType", s"must be one of: ${validTypes.mkString(", ")}"))
+  }
+
+  private[llm4s] def validateQuery(q: String): Result[String] = {
+    val trimmed = q.trim
+    if (trimmed.nonEmpty) Right(trimmed)
+    else Left(ValidationError.required("query"))
+  }
+
+  /**
+   * Validate entire ExaSearchToolConfig.
+   * Used by create() to ensure all fields are valid.
+   */
+  private def validateToolConfig(config: ExaSearchToolConfig): Result[ExaSearchToolConfig] = {
+    for {
+      validatedApiKey        <- validateApiKey(config.apiKey)
+      validatedApiUrl        <- validateHttps(config.apiUrl)
+      validatedNumResults    <- validateNumResults(config.numResults)
+      validatedSearchType    <- validateSearchType(config.searchType)
+      validatedMaxCharacters <- validateMaxCharacters(config.maxCharacters)
+    } yield ExaSearchToolConfig(
+      apiKey = validatedApiKey,
+      apiUrl = validatedApiUrl,
+      numResults = validatedNumResults,
+      searchType = validatedSearchType,
+      maxCharacters = validatedMaxCharacters
+    )
+  }
+
   private def createSchema = Schema
     .`object`[Map[String, Any]]("Exa Search parameters")
     .withProperty(
@@ -208,58 +269,45 @@ object ExaSearchTool {
    * @param toolConfig The Exa API configuration (must use HTTPS)
    * @param config Optional configuration overrides
    * @param httpClient HTTP client for making requests (injectable for testing)
-   * @return A configured ToolFunction
+   * @return Right(ToolFunction) if valid, Left(ValidationError) otherwise
    */
   def create(
     toolConfig: ExaSearchToolConfig,
     config: Option[ExaSearchConfig] = None,
     httpClient: BaseHttpClient = new JavaHttpClient()
-  ): ToolFunction[Map[String, Any], ExaSearchResult] = {
-    // Validate security boundaries at tool creation time
-    val apiUrl = toolConfig.apiUrl.toLowerCase.trim
-    if (!apiUrl.startsWith("https://")) {
-      throw new IllegalArgumentException(
-        ValidationError
-          .invalid("apiUrl", "must use HTTPS protocol for secure communication")
-          .message
-      )
-    }
-    if (toolConfig.apiKey.trim.isEmpty) {
-      throw new IllegalArgumentException(
-        ValidationError.required("apiKey").message
-      )
-    }
+  ): Result[ToolFunction[Map[String, Any], ExaSearchResult]] = {
 
-    ToolBuilder[Map[String, Any], ExaSearchResult](
-      name = "exa_search",
-      description =
-        "Search the web using Exa's AI-powered search engine. Use this for semantic and intent-based searches that understand natural language queries (e.g., 'companies working on AI safety', 'recent papers about transformers'). Returns high-quality structured results with titles, URLs, text snippets, authors, and publication dates. Best for research, technical documentation, finding specific companies or people, and discovering recent content.",
-      schema = createSchema
-    ).withHandler { extractor =>
-      for {
-        rawQuery <- extractor.getString("query")
-        query = rawQuery.trim
-        _ <- if (query.nonEmpty) Right(()) else Left(ValidationError.required("query").message)
+    // Validate entire config using shared validators
+    for {
+      validatedConfig <- validateToolConfig(toolConfig)
 
-        searchType <- SearchType
-          .fromString(toolConfig.searchType)
-          .toRight(
-            ValidationError
-              .invalid("searchType", s"'${toolConfig.searchType}' is not a valid search type")
-              .message
-          )
-
-        finalConfig = config.getOrElse(
-          ExaSearchConfig(
-            numResults = toolConfig.numResults,
-            searchType = searchType,
-            maxCharacters = toolConfig.maxCharacters
-          )
+      searchType <- SearchType
+        .fromString(validatedConfig.searchType)
+        .toRight(
+          ValidationError.invalid("searchType", s"'${validatedConfig.searchType}' is not a valid search type")
         )
 
-        result <- search(query, finalConfig, toolConfig, httpClient)
-      } yield result
-    }.build()
+      finalConfig = config.getOrElse(
+        ExaSearchConfig(
+          numResults = validatedConfig.numResults,
+          searchType = searchType,
+          maxCharacters = validatedConfig.maxCharacters
+        )
+      )
+
+      tool = ToolBuilder[Map[String, Any], ExaSearchResult](
+        name = "exa_search",
+        description =
+          "Search the web using Exa's AI-powered search engine. Use this for semantic and intent-based searches that understand natural language queries (e.g., 'companies working on AI safety', 'recent papers about transformers'). Returns high-quality structured results with titles, URLs, text snippets, authors, and publication dates. Best for research, technical documentation, finding specific companies or people, and discovering recent content.",
+        schema = createSchema
+      ).withHandler { extractor =>
+        for {
+          rawQuery <- extractor.getString("query")
+          query    <- validateQuery(rawQuery).left.map(_.message)  // Convert Result to Either[String, String]
+          result   <- search(query, finalConfig, validatedConfig, httpClient)
+        } yield result
+      }.build()
+    } yield tool
   }
 
   /**
@@ -272,23 +320,30 @@ object ExaSearchTool {
    * @param apiUrl The Exa API URL (must use HTTPS, default: https://api.exa.ai)
    * @param config Optional request configuration
    * @param httpClient HTTP client for making requests (injectable for testing)
-   * @return A configured ToolFunction
-   * @throws IllegalArgumentException if security boundaries are violated
+   * @return Right(ToolFunction) if valid, Left(ValidationError) otherwise
    */
   def withApiKey(
     apiKey: String,
     apiUrl: String = "https://api.exa.ai",
     config: Option[ExaSearchConfig] = None,
     httpClient: BaseHttpClient = new JavaHttpClient()
-  ): ToolFunction[Map[String, Any], ExaSearchResult] = {
-    val toolConfig = ExaSearchToolConfig(
-      apiKey = apiKey,
-      apiUrl = apiUrl,
-      numResults = 10,
-      searchType = "auto",
-      maxCharacters = 500
-    )
-    create(toolConfig, config, httpClient)
+  ): Result[ToolFunction[Map[String, Any], ExaSearchResult]] = {
+
+    // Validate only the parameters this function receives
+    for {
+      validatedApiKey <- validateApiKey(apiKey)
+      validatedApiUrl <- validateHttps(apiUrl)
+
+      toolConfig = ExaSearchToolConfig(
+        apiKey = validatedApiKey,
+        apiUrl = validatedApiUrl,
+        numResults = 10,
+        searchType = "auto",
+        maxCharacters = 500
+      )
+
+      tool <- create(toolConfig, config, httpClient)
+    } yield tool
   }
 
   private[search] def search(

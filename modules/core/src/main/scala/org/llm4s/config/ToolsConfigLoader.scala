@@ -113,11 +113,14 @@ private[config] object ToolsConfigLoader {
 
   /**
    * Load Exa Search tool configuration from `llm4s.tools.exa`.
+   * Validates config-specific fields: numResults, maxCharacters, searchType.
    *
    * @param source The configuration source
    * @return ExaSearchToolConfig or error
    */
-  def loadExaSearchTool(source: ConfigSource): Result[ExaSearchToolConfig] =
+  def loadExaSearchTool(source: ConfigSource): Result[ExaSearchToolConfig] = {
+    import org.llm4s.toolapi.builtin.search.ExaSearchTool
+
     source
       .at("llm4s.tools.exa")
       .load[ExaSearchToolConfig]
@@ -127,17 +130,19 @@ private[config] object ToolsConfigLoader {
         ConfigurationError(s"Failed to load Exa Search tool config: $msg")
       }
       .flatMap { config =>
-        val validSearchTypes  = Set("auto", "neural", "fast", "deep")
-        val trimmedSearchType = config.searchType.trim
-
-        if (validSearchTypes.contains(trimmedSearchType)) {
-          Right(config.copy(searchType = trimmedSearchType))
-        } else {
-          Left(
-            ConfigurationError(
-              s"Invalid searchType '${config.searchType}'. Must be one of (lowercase): ${validSearchTypes.mkString(", ")}"
-            )
-          )
-        }
+        // Use shared validators from ExaSearchTool
+        for {
+          validatedNumResults    <- ExaSearchTool.validateNumResults(config.numResults)
+            .left.map(e => ConfigurationError(e.message))
+          validatedMaxCharacters <- ExaSearchTool.validateMaxCharacters(config.maxCharacters)
+            .left.map(e => ConfigurationError(e.message))
+          validatedSearchType    <- ExaSearchTool.validateSearchType(config.searchType)
+            .left.map(e => ConfigurationError(e.message))
+        } yield config.copy(
+          numResults = validatedNumResults,
+          maxCharacters = validatedMaxCharacters,
+          searchType = validatedSearchType
+        )
       }
+  }
 }

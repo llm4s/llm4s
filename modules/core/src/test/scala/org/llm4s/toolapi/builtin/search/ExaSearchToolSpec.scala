@@ -15,57 +15,130 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       searchType = "auto",
       maxCharacters = 500
     )
-    val tool = ExaSearchTool.create(toolConfig)
+    val toolResult = ExaSearchTool.create(toolConfig)
 
+    toolResult.isRight shouldBe true
+    val tool = toolResult.getOrElse(fail("Expected Right but got Left"))
     tool.name shouldBe "exa_search"
     tool.description should include("Exa's AI-powered search engine")
   }
 
   it should "reject non-HTTPS API URL" in {
-    val thrown = intercept[IllegalArgumentException] {
-      ExaSearchTool.create(
-        ExaSearchToolConfig(
-          apiKey = "test-key",
-          apiUrl = "http://api.exa.ai", // HTTP instead of HTTPS
-          numResults = 10,
-          searchType = "auto",
-          maxCharacters = 500
-        )
+    val result = ExaSearchTool.create(
+      ExaSearchToolConfig(
+        apiKey = "test-key",
+        apiUrl = "http://api.exa.ai", // HTTP instead of HTTPS
+        numResults = 10,
+        searchType = "auto",
+        maxCharacters = 500
       )
-    }
-    thrown.getMessage should include("HTTPS")
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse(fail("Expected Left but got Right"))
+    error.message should include("HTTPS")
   }
 
   it should "reject empty API key" in {
-    val thrown = intercept[IllegalArgumentException] {
-      ExaSearchTool.create(
-        ExaSearchToolConfig(
-          apiKey = "",
-          apiUrl = "https://api.exa.ai",
-          numResults = 10,
-          searchType = "auto",
-          maxCharacters = 500
-        )
+    val result = ExaSearchTool.create(
+      ExaSearchToolConfig(
+        apiKey = "",
+        apiUrl = "https://api.exa.ai",
+        numResults = 10,
+        searchType = "auto",
+        maxCharacters = 500
       )
-    }
-    thrown.getMessage should include("apiKey")
-    thrown.getMessage should include("required")
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse(fail("Expected Left but got Right"))
+    error.message should include("apiKey")
+    error.message should include("required")
   }
 
   it should "reject whitespace-only API key" in {
-    val thrown = intercept[IllegalArgumentException] {
-      ExaSearchTool.create(
-        ExaSearchToolConfig(
-          apiKey = "   ",
-          apiUrl = "https://api.exa.ai",
-          numResults = 10,
-          searchType = "auto",
-          maxCharacters = 500
-        )
+    val result = ExaSearchTool.create(
+      ExaSearchToolConfig(
+        apiKey = "   ",
+        apiUrl = "https://api.exa.ai",
+        numResults = 10,
+        searchType = "auto",
+        maxCharacters = 500
       )
-    }
-    thrown.getMessage should include("apiKey")
-    thrown.getMessage should include("required")
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse(fail("Expected Left but got Right"))
+    error.message should include("apiKey")
+    error.message should include("required")
+  }
+
+  it should "reject negative numResults" in {
+    val result = ExaSearchTool.create(
+      ExaSearchToolConfig(
+        apiKey = "test-key",
+        apiUrl = "https://api.exa.ai",
+        numResults = -5,
+        searchType = "auto",
+        maxCharacters = 500
+      )
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse(fail("Expected Left but got Right"))
+    error.message should include("numResults")
+    error.message should include("greater than 0")
+  }
+
+  it should "reject zero numResults" in {
+    val result = ExaSearchTool.create(
+      ExaSearchToolConfig(
+        apiKey = "test-key",
+        apiUrl = "https://api.exa.ai",
+        numResults = 0,
+        searchType = "auto",
+        maxCharacters = 500
+      )
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse(fail("Expected Left but got Right"))
+    error.message should include("numResults")
+    error.message should include("greater than 0")
+  }
+
+  it should "reject negative maxCharacters" in {
+    val result = ExaSearchTool.create(
+      ExaSearchToolConfig(
+        apiKey = "test-key",
+        apiUrl = "https://api.exa.ai",
+        numResults = 10,
+        searchType = "auto",
+        maxCharacters = -100
+      )
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse(fail("Expected Left but got Right"))
+    error.message should include("maxCharacters")
+    error.message should include("greater than 0")
+  }
+
+  it should "reject zero maxCharacters" in {
+    val result = ExaSearchTool.create(
+      ExaSearchToolConfig(
+        apiKey = "test-key",
+        apiUrl = "https://api.exa.ai",
+        numResults = 10,
+        searchType = "auto",
+        maxCharacters = 0
+      )
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse(fail("Expected Left but got Right"))
+    error.message should include("maxCharacters")
+    error.message should include("greater than 0")
   }
 
   "ExaSearchConfig" should "initialize with valid default parameters" in {
@@ -576,23 +649,26 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
   }
 
   "withApiKey" should "create tool with correct configuration" in {
-    val tool = ExaSearchTool.withApiKey(
+    val toolResult = ExaSearchTool.withApiKey(
       apiKey = "test-api-key",
       apiUrl = "https://custom.exa.ai",
       config = Some(ExaSearchConfig(numResults = 20, searchType = SearchType.Neural))
     )
 
+    toolResult.isRight shouldBe true
+    val tool = toolResult.getOrElse(fail("Expected Right but got Left"))
     tool.name shouldBe "exa_search"
   }
 
   it should "reject non-HTTPS URL in withApiKey" in {
-    val thrown = intercept[IllegalArgumentException] {
-      ExaSearchTool.withApiKey(
-        apiKey = "test-key",
-        apiUrl = "http://insecure.api.com"
-      )
-    }
-    thrown.getMessage should include("HTTPS")
+    val result = ExaSearchTool.withApiKey(
+      apiKey = "test-key",
+      apiUrl = "http://insecure.api.com"
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse(fail("Expected Left but got Right"))
+    error.message should include("HTTPS")
   }
 
   "Input validation" should "trim whitespace from query through tool" in {
@@ -608,7 +684,9 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       searchType = "auto",
       maxCharacters = 500
     )
-    val tool = ExaSearchTool.create(toolConfig, None, mockClient)
+    val toolResult = ExaSearchTool.create(toolConfig, None, mockClient)
+    toolResult.isRight shouldBe true
+    val tool = toolResult.getOrElse(fail("Expected Right but got Left"))
 
     val result = tool.execute(ujson.Obj("query" -> ujson.Str("  valid query  ")))
 

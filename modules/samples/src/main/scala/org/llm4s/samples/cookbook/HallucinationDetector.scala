@@ -35,7 +35,7 @@ object HallucinationDetector {
         logger.info("✓ Exa Search configuration loaded\n")
 
         // Configure the tool to return the text content of the search results
-        val exaSearchTool = ExaSearchTool.create(
+        val exaToolResult = ExaSearchTool.create(
           exaConfig,
           Some(
             ExaSearchConfig(
@@ -51,50 +51,56 @@ object HallucinationDetector {
           )
         )
 
-        val registry = new ToolRegistry(List(exaSearchTool))
-        val agent    = new Agent(client)
+        exaToolResult match {
+          case Left(error) =>
+            logger.error("Failed to create Exa search tool: {}", error.formatted)
 
-        // Load text from config
-        val config = ConfigFactory.load()
-        val text   = config.getString("llm4s.samples.cookbook.hallucinationDetector.text")
+          case Right(exaSearchTool) =>
+            val registry = new ToolRegistry(List(exaSearchTool))
+            val agent    = new Agent(client)
 
-        logger.info(s"📄 Text to analyze: ${text.take(100)}...\n")
+            // Load text from config
+            val config = ConfigFactory.load()
+            val text   = config.getString("llm4s.samples.cookbook.hallucinationDetector.text")
 
-        // step 1 : extract claims from the text
-        logger.info("\n🔍 Extracting claims from text...")
-        val claims = extractClaims(text, agent)
-        logger.info(s"✓ Extracted ${claims.length} claims\n")
+            logger.info(s"📄 Text to analyze: ${text.take(100)}...\n")
 
-        // step 2 : verify each claim using exa search
-        val verifiedClaims = verifyClaims(claims, agent, registry)
+            // step 1 : extract claims from the text
+            logger.info("\n🔍 Extracting claims from text...")
+            val claims = extractClaims(text, agent)
+            logger.info(s"✓ Extracted ${claims.length} claims\n")
 
-        logger.info("\n" + "=" * 70)
-        logger.info("🔬 Hallucination Detection Results")
-        logger.info("=" * 70)
+            // step 2 : verify each claim using exa search
+            val verifiedClaims = verifyClaims(claims, agent, registry)
 
-        if (verifiedClaims.isEmpty) {
-          logger.info("⚠️  No verification results available")
-        } else {
-          verifiedClaims.zipWithIndex.foreach { case (v, idx) =>
-            val claim       = v("claim").str
-            val status      = v("status").str
-            val evidence    = v.obj.get("evidence").flatMap(_.strOpt).getOrElse("N/A")
-            val correctInfo = v.obj.get("correct_info").flatMap(_.strOpt)
+            logger.info("\n" + "=" * 70)
+            logger.info("🔬 Hallucination Detection Results")
+            logger.info("=" * 70)
 
-            logger.info(s"\n${idx + 1}. ${status match {
-                case "Verified"      => "✅"
-                case "Hallucination" => "❌"
-                case _               => "❓"
-              }} $status")
-            logger.info(s"   Claim: $claim")
-            logger.info(s"   Evidence: $evidence")
-            correctInfo.foreach(info => logger.info(s"   Correct Info: $info"))
-          }
+            if (verifiedClaims.isEmpty) {
+              logger.info("⚠️  No verification results available")
+            } else {
+              verifiedClaims.zipWithIndex.foreach { case (v, idx) =>
+                val claim       = v("claim").str
+                val status      = v("status").str
+                val evidence    = v.obj.get("evidence").flatMap(_.strOpt).getOrElse("N/A")
+                val correctInfo = v.obj.get("correct_info").flatMap(_.strOpt)
+
+                logger.info(s"\n${idx + 1}. ${status match {
+                    case "Verified"      => "✅"
+                    case "Hallucination" => "❌"
+                    case _               => "❓"
+                  }} $status")
+                logger.info(s"   Claim: $claim")
+                logger.info(s"   Evidence: $evidence")
+                correctInfo.foreach(info => logger.info(s"   Correct Info: $info"))
+              }
+            }
+
+            logger.info("\n" + "=" * 70)
+            logger.info("✓ Verification complete")
+            logger.info("=" * 70)
         }
-
-        logger.info("\n" + "=" * 70)
-        logger.info("✓ Verification complete")
-        logger.info("=" * 70)
     }
   }
 
