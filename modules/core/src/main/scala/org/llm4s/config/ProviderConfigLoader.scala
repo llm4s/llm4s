@@ -81,7 +81,9 @@ private[config] object ProviderConfigLoader {
     PureConfigReader.forProduct2("baseUrl", "apiKey")(DeepSeekSection.apply)
 
   implicit private val providerRootReader: PureConfigReader[ProviderRoot] =
-    PureConfigReader.forProduct8("llm", "openai", "azure", "anthropic", "ollama", "zai", "gemini", "deepseek")(ProviderRoot.apply)
+    PureConfigReader.forProduct8("llm", "openai", "azure", "anthropic", "ollama", "zai", "gemini", "deepseek")(
+      ProviderRoot.apply
+    )
 
   def load(source: ConfigSource): Result[ProviderConfig] = {
     val rootEither = source.at("llm4s").load[ProviderRoot]

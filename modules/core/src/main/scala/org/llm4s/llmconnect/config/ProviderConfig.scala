@@ -405,24 +405,22 @@ object DeepSeekConfig {
         (contextWindow, reserve)
       case None =>
         logger.debug(s"Model $modelName not found in registry, using fallback values")
-        
+
         // Explicit allowlist based on official DeepSeek API (as of Feb 2026)
         // Source: https://api-docs.deepseek.com/quick_start/pricing
         // Only two official API models: deepseek-chat and deepseek-reasoner
         modelName.toLowerCase match {
           // Official DeepSeek-V3.2 API models (both have 128K context)
-          case "deepseek-chat" | "deepseek/deepseek-chat" |
-               "deepseek-reasoner" | "deepseek/deepseek-reasoner" =>
+          case "deepseek-chat" | "deepseek/deepseek-chat" | "deepseek-reasoner" | "deepseek/deepseek-reasoner" =>
             (128000, standardReserve)
-          
+
           // Legacy/variant model names (for backward compatibility)
-          case "deepseek-chat-r1" | "deepseek/deepseek-chat-r1" |
-               "deepseek-r1-distill" | "deepseek/deepseek-r1-distill" |
-               "deepseek-coder" | "deepseek/deepseek-coder" |
-               "deepseek-v3" | "deepseek/deepseek-v3" =>
+          case "deepseek-chat-r1" | "deepseek/deepseek-chat-r1" | "deepseek-r1-distill" |
+              "deepseek/deepseek-r1-distill" | "deepseek-coder" | "deepseek/deepseek-coder" | "deepseek-v3" |
+              "deepseek/deepseek-v3" =>
             logger.warn(s"Legacy/variant model $modelName - may not be available via official API")
-            (128000, standardReserve)  // Conservative: assume 128K for all DeepSeek models
-          
+            (128000, standardReserve) // Conservative: assume 128K for all DeepSeek models
+
           // Unknown model - conservative fallback
           case _ =>
             logger.warn(s"Unknown DeepSeek model: $modelName, using conservative 128K fallback")

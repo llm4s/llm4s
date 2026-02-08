@@ -110,9 +110,7 @@ object DeepSeekTestExample {
         CompletionOptions(),
         onChunk = { chunk =>
           chunkCount += 1
-          chunk.content.foreach { c =>
-            fullContent.append(c)
-          }
+          chunk.content.foreach(c => fullContent.append(c))
         }
       )
     } yield completion
