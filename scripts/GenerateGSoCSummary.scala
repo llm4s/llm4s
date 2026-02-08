@@ -59,8 +59,8 @@ object GenerateGSoCSummary {
       } else {
         // Parse project number or generate for tripper
         val (number, title) = if (headerLine.matches("^\\d+\\..*")) {
-          val Array(num, rest*) = headerLine.split("\\.", 2)
-          (num.toInt, rest.mkString(".").trim)
+          val parts = headerLine.split("\\.", 2)
+          (parts(0).toInt, if (parts.length > 1) parts(1).trim else "")
         } else if (headerLine.contains("llm4s-tripper")) {
           tripperNumber += 1
           (tripperNumber, headerLine)
@@ -329,5 +329,3 @@ Our mentors are experienced developers and researchers passionate about LLMs, Sc
 """
   }
 }
-
-GenerateGSoCSummary.main(Array.empty)
