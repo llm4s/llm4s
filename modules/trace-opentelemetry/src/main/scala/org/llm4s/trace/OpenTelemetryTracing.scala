@@ -265,6 +265,22 @@ class OpenTelemetryTracing(
             .put("timestamp", e.timestamp.toString)
             .build()
         )
+
+      case e: TraceEvent.ImageGenerationCostRecorded =>
+        (
+          "Image Generation Cost - " + e.operation,
+          Attributes
+            .builder()
+            .put(TraceAttributes.EventType, "image-generation-cost")
+            .put("provider", e.provider)
+            .put("gen_ai.request.model", e.model)
+            .put("operation", e.operation)
+            .put("image_count", e.imageCount.toLong)
+            .put("image_size", e.imageSize)
+            .put("duration_ms", e.durationMs)
+            .put("cost.usd", e.costUsd)
+            .build()
+        )
     }
   }
 

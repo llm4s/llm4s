@@ -450,6 +450,39 @@ class LangfuseTracing(
             "metadata" -> metadataObj
           )
         )
+
+      case e: TraceEvent.ImageGenerationCostRecorded =>
+        ujson.Obj(
+          "id"        -> uuid,
+          "timestamp" -> now,
+          "type"      -> "event-create",
+          "body" -> ujson.Obj(
+            "id"        -> uuid,
+            "timestamp" -> now,
+            "name"      -> s"Image Generation Cost - ${e.operation}",
+            "level"     -> "DEFAULT",
+            "input" -> ujson.Obj(
+              "provider"    -> e.provider,
+              "model"       -> e.model,
+              "operation"   -> e.operation,
+              "image_count" -> e.imageCount,
+              "image_size"  -> e.imageSize
+            ),
+            "output" -> ujson.Obj(
+              "cost_usd"    -> e.costUsd,
+              "duration_ms" -> e.durationMs
+            ),
+            "metadata" -> ujson.Obj(
+              "provider"    -> e.provider,
+              "model"       -> e.model,
+              "operation"   -> e.operation,
+              "image_count" -> e.imageCount,
+              "image_size"  -> e.imageSize,
+              "cost_usd"    -> e.costUsd,
+              "duration_ms" -> e.durationMs
+            )
+          )
+        )
     }
 
     batchEvents += langfuseEvent

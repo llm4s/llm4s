@@ -4,7 +4,9 @@ import org.llm4s.imagegeneration._
 import org.slf4j.LoggerFactory
 import ujson._
 import java.time.Instant
+import java.nio.file.Path
 import scala.util.Try
+import scala.concurrent.{Future, ExecutionContext}
 
 /**
  * OpenAI DALL-E API client for image generation.
@@ -80,6 +82,108 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
   }
 
   /**
+   * Edit an existing image based on a prompt and optional mask.
+   *
+   * @param imagePath Path to the image to edit (PNG, < 4MB)
+   * @param prompt The text description of the desired edit
+   * @param maskPath Optional path to the mask image (PNG, < 4MB)
+   * @param options Optional generation parameters
+   * @return Either an error or a sequence of generated images
+   */
+  override def editImage(
+    imagePath: Path,
+    prompt: String,
+    maskPath: Option[Path] = None,
+    options: ImageEditOptions = ImageEditOptions()
+  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+    // Validate image format manually as simple check, real validation happens at API
+    if (!imagePath.toString.toLowerCase.endsWith(".png")) {
+      return Left(ValidationError("Image must be a PNG file"))
+    }
+    
+    val editUrl = "https://api.openai.com/v1/images/edits"
+    
+    val parts = scala.collection.mutable.ListBuffer[requests.MultiItem](
+      requests.MultiItem("image", imagePath, filename = imagePath.getFileName.toString),
+      requests.MultiItem("prompt", prompt),
+      requests.MultiItem("n", options.n.toString),
+      requests.MultiItem("response_format", options.responseFormat.getOrElse("b64_json"))
+    )
+
+    if (config.model.startsWith("dall-e")) {
+       parts += requests.MultiItem("model", "dall-e-2") // Edits only supported on DALL-E 2 currently
+    } else {
+       // Fallback to dall-e-2 for edits as GPT models don't support it yet
+       parts += requests.MultiItem("model", "dall-e-2") 
+    }
+
+    maskPath.foreach(path => parts += requests.MultiItem("mask", path, filename = path.getFileName.toString))
+    options.size.foreach(s => parts += requests.MultiItem("size", sizeToApiFormat(s)))
+    options.user.foreach(u => parts += requests.MultiItem("user", u))
+
+    val response = requests.post(
+      editUrl,
+      headers = Map("Authorization" -> s"Bearer ${config.apiKey}"),
+      data = requests.MultiPart(parts.toSeq: _*),
+      readTimeout = config.timeout,
+      connectTimeout = 10000
+    )
+
+    if (response.statusCode == 200) {
+       // reuse parseResponse logic but map ImageEditOptions to ImageGenerationOptions for compatibility
+       // Note: Size might be different if None was passed, but parseResponse uses options.size
+       // We'll create a dummy ImageGenerationOptions
+       val genOptions = ImageGenerationOptions(
+         size = options.size.getOrElse(ImageSize.Square1024), // API default
+         format = ImageFormat.PNG, // Default
+         responseFormat = options.responseFormat, // Pass through
+       )
+       parseResponse(response, prompt, genOptions)
+    } else {
+      handleErrorResponse(response) match {
+          case Left(e) => Left(e)
+          case Right(_) => Left(UnknownError(new RuntimeException("Unexpected successful response during error handling")))
+      }
+    }
+  }
+
+  /**
+   * Generate an image asynchronously
+   */
+  override def generateImageAsync(
+      prompt: String,
+      options: ImageGenerationOptions = ImageGenerationOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+    Future {
+      generateImage(prompt, options)
+    }
+
+  /**
+   * Generate multiple images asynchronously
+   */
+  override def generateImagesAsync(
+      prompt: String,
+      count: Int,
+      options: ImageGenerationOptions = ImageGenerationOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    Future {
+      generateImages(prompt, count, options)
+    }
+
+  /**
+   * Edit an existing image asynchronously
+   */
+  override def editImageAsync(
+      imagePath: Path,
+      prompt: String,
+      maskPath: Option[Path] = None,
+      options: ImageEditOptions = ImageEditOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    Future {
+      editImage(imagePath, prompt, maskPath, options)
+    }
+
+  /**
    * Check the health/status of the OpenAI API service.
    *
    * Note: OpenAI doesn't provide a dedicated health endpoint,
@@ -120,20 +224,22 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
   /**
    * Validate the prompt to ensure it meets OpenAI's requirements.
    */
-  private def validatePrompt(prompt: String): Either[ImageGenerationError, String] =
+  private def validatePrompt(prompt: String): Either[ImageGenerationError, String] = {
+    val maxChars = if (config.model.startsWith("gpt-image")) 32000 else 4000
     if (prompt.trim.isEmpty) {
       Left(ValidationError("Prompt cannot be empty"))
-    } else if (prompt.length > 4000) {
-      Left(ValidationError("Prompt cannot exceed 4000 characters"))
+    } else if (prompt.length > maxChars) {
+      Left(ValidationError(s"Prompt cannot exceed $maxChars characters"))
     } else {
       Right(prompt)
     }
+  }
 
   /**
    * Validate the count based on the model being used.
    */
   private def validateCount(count: Int): Either[ImageGenerationError, Int] = {
-    val maxCount = if (config.model == "dall-e-3") 1 else 10
+    val maxCount = if (config.model.startsWith("gpt-image")) 10 else if (config.model == "dall-e-3") 1 else 10
     if (count < 1 || count > maxCount) {
       Left(ValidationError(s"Count must be between 1 and $maxCount for ${config.model}"))
     } else {
@@ -151,6 +257,8 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
       case ImageSize.Square1024       => "1024x1024"
       case ImageSize.Landscape768x512 => if (config.model == "dall-e-3") "1792x1024" else "512x512"
       case ImageSize.Portrait512x768  => if (config.model == "dall-e-3") "1024x1792" else "512x512"
+      case ImageSize.Landscape1536x1024 => "1792x1024" // Closest matching for DALL-E 3/GPT
+      case ImageSize.Portrait1024x1536  => "1024x1792" // Closest matching for DALL-E 3/GPT
     }
 
   /**
@@ -161,17 +269,27 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
     count: Int,
     options: ImageGenerationOptions
   ): Either[ImageGenerationError, requests.Response] = {
+    // Deprecation warning
+    if (config.model.startsWith("dall-e")) {
+      logger.warn(s"Model ${config.model} is deprecated and will be removed on May 12, 2026. Please migrate to gpt-image models.")
+    }
+
     val requestBody = Obj(
       "model"           -> config.model,
       "prompt"          -> prompt,
       "n"               -> count,
       "size"            -> sizeToApiFormat(options.size),
-      "response_format" -> "b64_json"
+      "response_format" -> options.responseFormat.getOrElse("b64_json")
     )
 
-    // Add quality parameter for DALL-E 3
-    if (config.model == "dall-e-3") {
-      requestBody("quality") = "standard" // or "hd" for higher quality
+    // Optional parameters
+    options.quality.foreach(q => requestBody("quality") = q)
+    options.style.foreach(s => requestBody("style") = s)
+    options.user.foreach(u => requestBody("user") = u)
+
+    // Backward compatibility defaults for DALL-E 3 if not specified
+    if (config.model == "dall-e-3" && options.quality.isEmpty) {
+      requestBody("quality") = "standard"
     }
 
     val response = requests.post(
@@ -222,16 +340,23 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
     val imagesData = json("data").arr
 
     val images = imagesData.map { imageData =>
-      val base64Data = imageData("b64_json").str
+      val (data, url) = if (imageData.obj.contains("b64_json")) {
+        (imageData("b64_json").str, None)
+      } else if (imageData.obj.contains("url")) {
+        ("", Some(imageData("url").str))
+      } else {
+        ("", None)
+      }
 
       GeneratedImage(
-        data = base64Data,
+        data = data,
         format = options.format,
         size = options.size,
         createdAt = Instant.now(),
         prompt = prompt,
         seed = options.seed,
-        filePath = None
+        filePath = None,
+        url = url
       )
     }.toSeq
 

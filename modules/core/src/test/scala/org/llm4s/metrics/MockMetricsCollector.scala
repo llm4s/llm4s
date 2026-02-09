@@ -9,9 +9,11 @@ import scala.concurrent.duration.FiniteDuration
  */
 class MockMetricsCollector extends MetricsCollector {
   // Track all calls to metrics methods
-  val requestCalls: mutable.Buffer[(String, String, Outcome, FiniteDuration)] = mutable.Buffer.empty
-  val tokenCalls: mutable.Buffer[(String, String, Long, Long)]                = mutable.Buffer.empty
-  val costCalls: mutable.Buffer[(String, String, Double)]                     = mutable.Buffer.empty
+  val requestCalls: mutable.Buffer[(String, String, Outcome, FiniteDuration)]          = mutable.Buffer.empty
+  val tokenCalls: mutable.Buffer[(String, String, Long, Long)]                         = mutable.Buffer.empty
+  val costCalls: mutable.Buffer[(String, String, Double)]                              = mutable.Buffer.empty
+  val imageGenerationCalls: mutable.Buffer[(String, String, Outcome, Int, Double, FiniteDuration)] =
+    mutable.Buffer.empty
 
   override def observeRequest(
     provider: String,
@@ -36,11 +38,22 @@ class MockMetricsCollector extends MetricsCollector {
   ): Unit =
     costCalls += ((provider, model, costUsd))
 
+  override def recordImageGeneration(
+    provider: String,
+    model: String,
+    outcome: Outcome,
+    imageCount: Int,
+    costUsd: Double,
+    duration: FiniteDuration
+  ): Unit =
+    imageGenerationCalls += ((provider, model, outcome, imageCount, costUsd, duration))
+
   // Helper methods for test assertions
   def clearAll(): Unit = {
     requestCalls.clear()
     tokenCalls.clear()
     costCalls.clear()
+    imageGenerationCalls.clear()
   }
 
   def hasSuccessRequest(provider: String, model: String): Boolean =
@@ -55,7 +68,8 @@ class MockMetricsCollector extends MetricsCollector {
       case _                              => false
     }
 
-  def totalRequests: Int   = requestCalls.size
-  def totalTokenCalls: Int = tokenCalls.size
-  def totalCostCalls: Int  = costCalls.size
+  def totalRequests: Int            = requestCalls.size
+  def totalTokenCalls: Int          = tokenCalls.size
+  def totalCostCalls: Int           = costCalls.size
+  def totalImageGenerationCalls: Int = imageGenerationCalls.size
 }
