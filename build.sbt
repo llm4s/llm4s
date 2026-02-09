@@ -123,7 +123,7 @@ lazy val commonSettings = Seq(
 
 // ---- projects ----
 lazy val llm4s = (project in file("."))
-  .aggregate(core, samples, workspaceShared, workspaceRunner, workspaceClient, workspaceSamples, traceOpentelemetry)
+  .aggregate(core, samples, workspaceShared, workspaceRunner, workspaceClient, workspaceSamples, traceOpentelemetry, integrationTests)
   .settings(
     publish / skip := true
   )
@@ -281,6 +281,18 @@ lazy val crossTestScala3 = (project in file("modules/crossTest/scala3"))
     resolvers   += Resolver.mavenLocal,
     resolvers   += Resolver.defaultLocal,
     scalacOptions ++= scala3CompilerOptions,
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    )
+  )
+
+lazy val integrationTests = (project in file("modules/integration-tests"))
+  .dependsOn(core)
+  .settings(
+    name := "integrationTests",
+    commonSettings,
+    publish / skip := true,
+    Test / fork := true,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
     )
