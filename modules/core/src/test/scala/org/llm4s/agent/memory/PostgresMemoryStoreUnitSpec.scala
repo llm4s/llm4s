@@ -5,7 +5,7 @@ import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.agent.memory.PostgresMemoryStore.SqlParam._
-import org.llm4s.error.NotFoundError
+import org.llm4s.error.{ NotFoundError, OptimisticLockFailure }
 
 import java.sql.{ Connection, PreparedStatement, ResultSet, SQLException, Timestamp }
 import java.time.Instant
@@ -305,5 +305,192 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe a[NotFoundError]
     result.left.toOption.get.message should include("Memory not found")
+  }
+
+  behavior.of("PostgresMemoryStore optimistic locking (Issue #528)")
+
+  it should "detect concurrent updates and return OptimisticLockFailure" in {
+    // Setup: Mock successful read with version
+    (() => mockDataSource.getConnection()).expects().returning(mockConn).twice()
+    (mockConn.prepareStatement(_: String)).expects(*).returning(mockStmt).twice()
+    
+    // First call: getVersioned reads memory with version 1
+    (mockStmt.setString(_: Int, _: String)).expects(1, "test-id")
+    (() => mockStmt.executeQuery()).expects().returning(mockRs)
+    (() => mockRs.next()).expects().returning(true)
+    (mockRs.getString(_: String)).expects("id").returning("test-id")
+    (mockRs.getString(_: String)).expects("content").returning("original content")
+    (mockRs.getString(_: String)).expects("memory_type").returning("task")
+    (mockRs.getString(_: String)).expects("metadata").returning("{}")
+    (mockRs.getTimestamp(_: String)).expects("created_at").returning(Timestamp.from(Instant.now()))
+    (mockRs.getDouble(_: String)).expects("importance").returning(0.5)
+    (() => mockRs.wasNull()).expects().returning(false)
+    (mockRs.getString(_: String)).expects("embedding").returning(null)
+    (mockRs.getLong(_: String)).expects("version").returning(1L)
+    (() => mockRs.wasNull()).expects().returning(false)
+    (() => mockRs.close()).expects()
+    (() => mockStmt.close()).expects()
+    (() => mockConn.close()).expects()
+
+    // Second call: update fails because version changed (0 rows affected)
+    (mockStmt.setString(_: Int, _: String)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setTimestamp(_: Int, _: Timestamp)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setDouble(_: Int, _: Double)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setNull(_: Int, _: Int, _: String)).expects(*, *, *).anyNumberOfTimes()
+    (mockStmt.setLong(_: Int, _: Long)).expects(8, 1L)
+    (() => mockStmt.executeUpdate()).expects().returning(0) // Conflict: 0 rows affected
+    (() => mockStmt.close()).expects()
+    (() => mockConn.close()).expects()
+
+    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+    val result = store.update(
+      MemoryId("test-id"),
+      mem => mem.copy(content = "updated content")
+    )
+
+    result.isLeft shouldBe true
+    result.left.toOption.get shouldBe a[OptimisticLockFailure]
+    val error = result.left.toOption.get.asInstanceOf[OptimisticLockFailure]
+    error.memoryId shouldBe "test-id"
+    error.attemptedVersion shouldBe 1L
+    error.code shouldBe Some("OPTIMISTIC_LOCK_CONFLICT")
+  }
+
+  it should "successfully update when version matches" in {
+    // Setup: Mock successful read and update
+    (() => mockDataSource.getConnection()).expects().returning(mockConn).twice()
+    (mockConn.prepareStatement(_: String)).expects(*).returning(mockStmt).twice()
+    
+    // First call: getVersioned
+    (mockStmt.setString(_: Int, _: String)).expects(1, "test-id")
+    (() => mockStmt.executeQuery()).expects().returning(mockRs)
+    (() => mockRs.next()).expects().returning(true)
+    (mockRs.getString(_: String)).expects("id").returning("test-id")
+    (mockRs.getString(_: String)).expects("content").returning("original")
+    (mockRs.getString(_: String)).expects("memory_type").returning("task")
+    (mockRs.getString(_: String)).expects("metadata").returning("{}")
+    (mockRs.getTimestamp(_: String)).expects("created_at").returning(Timestamp.from(Instant.now()))
+    (mockRs.getDouble(_: String)).expects("importance").returning(0.5)
+    (() => mockRs.wasNull()).expects().returning(false)
+    (mockRs.getString(_: String)).expects("embedding").returning(null)
+    (mockRs.getLong(_: String)).expects("version").returning(2L)
+    (() => mockRs.wasNull()).expects().returning(false)
+    (() => mockRs.close()).expects()
+    (() => mockStmt.close()).expects()
+    (() => mockConn.close()).expects()
+
+    // Second call: update succeeds (1 row affected)
+    (mockStmt.setString(_: Int, _: String)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setTimestamp(_: Int, _: Timestamp)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setDouble(_: Int, _: Double)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setNull(_: Int, _: Int, _: String)).expects(*, *, *).anyNumberOfTimes()
+    (mockStmt.setLong(_: Int, _: Long)).expects(8, 2L)
+    (() => mockStmt.executeUpdate()).expects().returning(1)
+    (() => mockStmt.close()).expects()
+    (() => mockConn.close()).expects()
+
+    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+    val result = store.update(
+      MemoryId("test-id"),
+      mem => mem.copy(content = "updated")
+    )
+
+    result.isRight shouldBe true
+  }
+
+  it should "handle missing version column gracefully (backward compatibility)" in {
+    // Simulate reading from table without version column
+    setupMockExecution()
+    (() => mockStmt.executeQuery()).expects().returning(mockRs)
+    (() => mockRs.next()).expects().returning(true)
+    (mockRs.getString(_: String)).expects("id").returning("test-id")
+    (mockRs.getString(_: String)).expects("content").returning("content")
+    (mockRs.getString(_: String)).expects("memory_type").returning("task")
+    (mockRs.getString(_: String)).expects("metadata").returning("{}")
+    (mockRs.getTimestamp(_: String)).expects("created_at").returning(Timestamp.from(Instant.now()))
+    (mockRs.getDouble(_: String)).expects("importance").returning(0.5)
+    (() => mockRs.wasNull()).expects().returning(false)
+    (mockRs.getString(_: String)).expects("embedding").returning(null)
+    // Simulate SQLException when trying to get non-existent version column
+    (mockRs.getLong(_: String)).expects("version").throws(new SQLException("Column 'version' not found"))
+    (() => mockRs.close()).expects()
+
+    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+    val result = store.getVersioned(MemoryId("test-id"))
+
+    result.isRight shouldBe true
+    result.map { opt =>
+      opt shouldBe defined
+      opt.get.version shouldBe 0L // Should default to 0
+    }
+  }
+
+  it should "handle null version column gracefully" in {
+    setupMockExecution()
+    (() => mockStmt.executeQuery()).expects().returning(mockRs)
+    (() => mockRs.next()).expects().returning(true)
+    (mockRs.getString(_: String)).expects("id").returning("test-id")
+    (mockRs.getString(_: String)).expects("content").returning("content")
+    (mockRs.getString(_: String)).expects("memory_type").returning("task")
+    (mockRs.getString(_: String)).expects("metadata").returning("{}")
+    (mockRs.getTimestamp(_: String)).expects("created_at").returning(Timestamp.from(Instant.now()))
+    (mockRs.getDouble(_: String)).expects("importance").returning(0.5)
+    (() => mockRs.wasNull()).expects().returning(false)
+    (mockRs.getString(_: String)).expects("embedding").returning(null)
+    (mockRs.getLong(_: String)).expects("version").returning(0L)
+    (() => mockRs.wasNull()).expects().returning(true) // NULL version
+    (() => mockRs.close()).expects()
+
+    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+    val result = store.getVersioned(MemoryId("test-id"))
+
+    result.isRight shouldBe true
+    result.map { opt =>
+      opt shouldBe defined
+      opt.get.version shouldBe 0L // NULL should default to 0
+    }
+  }
+
+  it should "retry update on OptimisticLockFailure with retryingUpdate" in {
+    // Setup connection and statement mocks to be reused
+    (() => mockDataSource.getConnection()).expects().returning(mockConn).anyNumberOfTimes()
+    (mockConn.prepareStatement(_: String)).expects(*).returning(mockStmt).anyNumberOfTimes()
+    
+    // Mock all the database interaction methods to be called multiple times
+    (mockStmt.setString(_: Int, _: String)).expects(*, *).anyNumberOfTimes()
+    (() => mockStmt.executeQuery()).expects().returning(mockRs).anyNumberOfTimes()
+    (() => mockRs.next()).expects().returning(true).anyNumberOfTimes()
+    (mockRs.getString(_: String)).expects(*).onCall { (arg: String) => arg match {
+      case "id" => "test-id"
+      case "content" => "v1"  // Will cause the update function to try "v1-updated"
+      case "memory_type" => "task"
+      case "metadata" => "{}"
+      case "embedding" => null
+      case _ => ""
+    }}.anyNumberOfTimes()
+    (mockRs.getTimestamp(_: String)).expects(*).returning(Timestamp.from(Instant.now())).anyNumberOfTimes()
+    (mockRs.getDouble(_: String)).expects(*).returning(0.5).anyNumberOfTimes()
+    (() => mockRs.wasNull()).expects().returning(false).anyNumberOfTimes()
+    (mockRs.getLong(_: String)).expects("version").returning(1L).twice()  // First attempt gets version 1, retry gets version 1 again (or 2)
+    (() => mockRs.close()).expects().anyNumberOfTimes()
+    (() => mockStmt.close()).expects().anyNumberOfTimes()
+    (() => mockConn.close()).expects().anyNumberOfTimes()
+    (mockStmt.setTimestamp(_: Int, _: Timestamp)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setNull(_: Int, _: Int, _: String)).expects(*, *, *).anyNumberOfTimes()
+    (mockStmt.setDouble(_: Int, _: Double)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setLong(_: Int, _: Long)).expects(*, *).anyNumberOfTimes()
+    
+    // First update attempt returns 0 (conflict), second returns 1 (success)
+    (() => mockStmt.executeUpdate()).expects().returning(0).once()
+    (() => mockStmt.executeUpdate()).expects().returning(1).once()
+
+    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+    val result = store.retryingUpdate(
+      MemoryId("test-id"),
+      mem => mem.copy(content = mem.content + "-updated"),
+      maxRetries = 5
+    )
+
+    result.isRight shouldBe true
   }
 }

@@ -1,25 +1,43 @@
 package org.llm4s.agent.memory
 
 import org.llm4s.types.Result
-import org.llm4s.error.{ NotFoundError, ProcessingError }
+import org.llm4s.error.{ NotFoundError, OptimisticLockFailure, ProcessingError }
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import ujson.{ read, write, Obj, Str }
 
 import java.sql.{ Connection, PreparedStatement, ResultSet, Timestamp }
+import scala.annotation.tailrec
 import scala.util.{ Try, Using }
 
 /**
- * PostgreSQL implementation of MemoryStore.
- * Persists agent memories to a Postgres table using JDBC.
+ * PostgreSQL implementation of MemoryStore with optimistic locking.
+ *
+ * Persists agent memories to a Postgres table using JDBC with atomic updates
+ * via version-based optimistic locking to prevent race conditions under
+ * concurrent access.
+ *
  * DESIGN NOTES:
- * - This is an MVP implementation focused on persistence only.
+ * - Uses version column for optimistic locking (internal only, not exposed in public API)
+ * - update() performs atomic compare-and-swap operations
+ * - store() is an UPSERT that forces writes without version checks
  * - Compound filters (And/Or/Not) and semantic search will be added later.
+ *
+ * CONCURRENCY SEMANTICS:
+ * - store():  Force write (UPSERT) - always succeeds, increments version
+ * - update(): Atomic read-modify-write - fails with OptimisticLockFailure on conflict
+ * - Use retryingUpdate() for automatic retry with exponential backoff
  */
 final class PostgresMemoryStore private[memory] (
   private val dataSource: HikariDataSource,
   val tableName: String
 ) extends MemoryStore
     with AutoCloseable {
+
+  /**
+   * Internal wrapper for Memory + version.
+   * Used to track version for optimistic locking without exposing it in public API.
+   */
+  private[memory] final case class VersionedMemory(memory: Memory, version: Long)
 
   import PostgresMemoryStore.SqlParam
 
@@ -29,7 +47,7 @@ final class PostgresMemoryStore private[memory] (
         // 1. Enable pgvector extension
         stmt.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
-        // 2. Create table with proper VECTOR type
+        // 2. Create table with proper VECTOR type and version column
         stmt.execute(s"""
           CREATE TABLE IF NOT EXISTS $tableName (
             id TEXT PRIMARY KEY,
@@ -38,35 +56,63 @@ final class PostgresMemoryStore private[memory] (
             metadata JSONB DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL,
             importance DOUBLE PRECISION,
-            embedding vector
+            embedding vector,
+            version BIGINT NOT NULL DEFAULT 0
           )
         """)
 
-        // 3. Indexes for common access patterns
+        // 3. Add version column to existing tables (migration-safe)
+        // This is idempotent - will only add if column doesn't exist
+        Try {
+          stmt.execute(s"ALTER TABLE $tableName ADD COLUMN IF NOT EXISTS version BIGINT NOT NULL DEFAULT 0")
+        }
+
+        // 4. Indexes for common access patterns
         stmt.execute(s"CREATE INDEX IF NOT EXISTS idx_${tableName}_type ON $tableName(memory_type)")
         stmt.execute(s"CREATE INDEX IF NOT EXISTS idx_${tableName}_created ON $tableName(created_at)")
         stmt.execute(s"CREATE INDEX IF NOT EXISTS idx_${tableName}_metadata ON $tableName USING GIN(metadata)")
         stmt.execute(
           s"CREATE INDEX IF NOT EXISTS idx_${tableName}_conversation ON $tableName ((metadata->>'conversation_id'))"
         )
+        stmt.execute(s"CREATE INDEX IF NOT EXISTS idx_${tableName}_version ON $tableName(id, version)")
       }
       ()
     }
 
+  /**
+   * Store a memory (UPSERT semantics).
+   *
+   * This is a force-write operation that always succeeds and increments the version.
+   * It does NOT check version constraints - use update() for safe concurrent updates.
+   *
+   * SEMANTICS:
+   * - INSERT: Creates new memory with version = 0
+   * - UPDATE: Overwrites existing memory and increments version
+   * - Always succeeds (no OptimisticLockFailure)
+   *
+   * Use this when:
+   * - Creating new memories
+   * - Force-overwriting existing memories
+   * - You have exclusive access and don't need concurrency control
+   *
+   * @param memory The memory to store
+   * @return Updated store or error
+   */
   override def store(memory: Memory): Result[MemoryStore] =
     Try {
       withConnection { conn =>
         val sql = s"""
           INSERT INTO $tableName
-            (id, content, memory_type, metadata, created_at, importance, embedding)
-          VALUES (?, ?, ?, ?::jsonb, ?, ?, ?::vector)
+            (id, content, memory_type, metadata, created_at, importance, embedding, version)
+          VALUES (?, ?, ?, ?::jsonb, ?, ?, ?::vector, 0)
           ON CONFLICT (id) DO UPDATE SET
             content = EXCLUDED.content,
             memory_type = EXCLUDED.memory_type,
             metadata = EXCLUDED.metadata,
             created_at = EXCLUDED.created_at,
             importance = EXCLUDED.importance,
-            embedding = EXCLUDED.embedding
+            embedding = EXCLUDED.embedding,
+            version = $tableName.version + 1
         """
 
         Using.resource(conn.prepareStatement(sql)) { stmt =>
@@ -180,11 +226,159 @@ final class PostgresMemoryStore private[memory] (
       )
     }
 
+  /**
+   * Update a memory atomically with optimistic locking.
+   *
+   * This performs an atomic read-modify-write operation:
+   * 1. Read memory + current version
+   * 2. Apply updateFn to memory
+   * 3. Execute conditional UPDATE with version check
+   * 4. Fail with OptimisticLockFailure if version changed
+   *
+   * SEMANTICS:
+   * - Atomic: No race conditions between read and write
+   * - Fails fast: Returns OptimisticLockFailure on concurrent modification
+   * - Retryable: Caller can retry or use retryingUpdate()
+   *
+   * The public Memory API is preserved - version tracking is internal.
+   *
+   * @param id The memory identifier
+   * @param updateFn Function to transform the memory
+   * @return Updated store or error (OptimisticLockFailure on conflict)
+   */
   override def update(id: MemoryId, updateFn: Memory => Memory): Result[MemoryStore] =
-    get(id).flatMap {
-      case Some(existing) => store(updateFn(existing))
-      case None           => Left(NotFoundError(s"Memory not found: ${id.value}", id.value))
+    // Step 1: Read current memory + version
+    getVersioned(id).flatMap {
+      case None =>
+        Left(NotFoundError(s"Memory not found: ${id.value}", id.value))
+
+      case Some(VersionedMemory(existing, currentVersion)) =>
+        // Step 2: Apply update function to memory
+        val updated = updateFn(existing)
+
+        // Step 3: Execute atomic conditional write
+        Try {
+          withConnection { conn =>
+            val sql = s"""
+              UPDATE $tableName
+              SET content = ?,
+                  memory_type = ?,
+                  metadata = ?::jsonb,
+                  created_at = ?,
+                  importance = ?,
+                  embedding = ?::vector,
+                  version = version + 1
+              WHERE id = ? AND version = ?
+            """
+
+            Using.resource(conn.prepareStatement(sql)) { stmt =>
+              stmt.setString(1, updated.content)
+              stmt.setString(2, updated.memoryType.name)
+              stmt.setString(3, PostgresMemoryStore.metadataToJson(updated.metadata))
+              stmt.setTimestamp(4, Timestamp.from(updated.timestamp))
+
+              updated.importance match {
+                case Some(v) => stmt.setDouble(5, v)
+                case None    => stmt.setNull(5, java.sql.Types.DOUBLE)
+              }
+
+              updated.embedding match {
+                case Some(vec) => stmt.setString(6, PostgresMemoryStore.embeddingToString(vec))
+                case None      => stmt.setNull(6, java.sql.Types.OTHER, "vector")
+              }
+
+              stmt.setString(7, id.value)
+              stmt.setLong(8, currentVersion)
+
+              val rowsAffected = stmt.executeUpdate()
+
+              // Step 4: Check affected rows
+              if (rowsAffected == 0) {
+                // Version mismatch - concurrent modification detected
+                throw new PostgresMemoryStore.OptimisticLockException(id.value, currentVersion)
+              } else if (rowsAffected != 1) {
+                // Should never happen (id is primary key)
+                throw new IllegalStateException(s"Unexpected row count: $rowsAffected")
+              }
+            }
+          }
+          this
+        }.toEither.left.map {
+          case e: PostgresMemoryStore.OptimisticLockException =>
+            OptimisticLockFailure(e.memoryId, e.attemptedVersion)
+          case e =>
+            ProcessingError("postgres-memory-store", s"Failed to update memory: ${e.getMessage}", cause = Some(e))
+        }
     }
+
+  /**
+   * Update with automatic retry on optimistic lock conflicts.
+   *
+   * Retries the update operation with exponential backoff when OptimisticLockFailure
+   * occurs. Each retry re-reads the memory with its new version and re-applies the
+   * update function.
+   *
+   * USAGE EXAMPLE:
+   * {{{
+   * // Safe concurrent update with retry
+   * store.retryingUpdate(
+   *   memoryId,
+   *   mem => mem.withMetadata("counter", (mem.metadata.get("counter").map(_.toInt).getOrElse(0) + 1).toString),
+   *   maxRetries = 5
+   * )
+   * }}}
+   *
+   * @param id The memory identifier
+   * @param updateFn Function to transform the memory
+   * @param maxRetries Maximum number of retry attempts (default: 5)
+   * @return Updated store or error
+   */
+  def retryingUpdate(
+    id: MemoryId,
+    updateFn: Memory => Memory,
+    maxRetries: Int = 5
+  ): Result[MemoryStore] = {
+    @tailrec
+    def retry(attemptsLeft: Int, lastDelay: Long = 10L): Result[MemoryStore] =
+      update(id, updateFn) match {
+        case Right(store) =>
+          Right(store)
+
+        case Left(OptimisticLockFailure(_, _)) if attemptsLeft > 0 =>
+          // Exponential backoff: 10ms, 20ms, 40ms, 80ms, 160ms
+          Thread.sleep(lastDelay)
+          retry(attemptsLeft - 1, lastDelay * 2)
+
+        case Left(error) =>
+          Left(error)
+      }
+
+    retry(maxRetries)
+  }
+
+  /**
+   * Internal: Get memory with version for optimistic locking.
+   *
+   * This is used internally by update() to read both the memory and its
+   * current version. Not exposed in public API.
+   */
+  private[memory] def getVersioned(id: MemoryId): Result[Option[VersionedMemory]] =
+    Try {
+      withConnection { conn =>
+        Using.resource(conn.prepareStatement(s"SELECT * FROM $tableName WHERE id = ?")) { stmt =>
+          stmt.setString(1, id.value)
+          Using.resource(stmt.executeQuery()) { rs =>
+            if (rs.next()) {
+              Some(rowToVersionedMemory(rs))
+            } else {
+              None
+            }
+          }
+        }
+      }
+    }.toEither.left.map(e =>
+      ProcessingError("postgres-memory-store", s"Failed to get versioned memory: ${e.getMessage}", cause = Some(e))
+    )
 
   override def count(filter: MemoryFilter): Result[Long] =
     PostgresMemoryStore.filterToSql(filter).flatMap { case (whereClause, params) =>
@@ -238,6 +432,22 @@ final class PostgresMemoryStore private[memory] (
       importance = Option(rs.getDouble("importance")).filterNot(_ => rs.wasNull()),
       embedding = Option(embeddingStr).map(PostgresMemoryStore.stringToEmbedding)
     )
+  }
+
+  /**
+   * Internal: Convert result set row to VersionedMemory.
+   * Handles missing version column for backward compatibility (defaults to 0).
+   */
+  private def rowToVersionedMemory(rs: ResultSet): VersionedMemory = {
+    val memory = rowToMemory(rs)
+    
+    // Handle backward compatibility: treat missing/null version as 0
+    val version = Try(rs.getLong("version")).toOption match {
+      case Some(v) if !rs.wasNull() => v
+      case _                        => 0L
+    }
+    
+    VersionedMemory(memory, version)
   }
 
   private def setParameter(stmt: PreparedStatement, index: Int, value: SqlParam): Unit = value match {
@@ -382,4 +592,15 @@ object PostgresMemoryStore {
       if (cleaned.isEmpty) Array.empty
       else Try(cleaned.split(",").map(_.trim.toFloat)).getOrElse(Array.empty)
     }
+
+  /**
+   * Internal exception used to signal optimistic lock conflicts.
+   * Converted to OptimisticLockFailure error in update() method.
+   */
+  private[memory] final class OptimisticLockException(
+    val memoryId: String,
+    val attemptedVersion: Long
+  ) extends RuntimeException(
+        s"Optimistic lock conflict on memory '$memoryId' at version $attemptedVersion"
+      )
 }
