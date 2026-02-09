@@ -1,6 +1,6 @@
 ---
 layout: page
-title: API Reference
+title: API Referegnce
 nav_order: 6
 has_children: true
 ---
@@ -22,43 +22,7 @@ The **[Scaladoc](/scaladoc/)** provides comprehensive, auto-generated API docume
 | [LLM4S API Spec](/reference/llm4s-api-spec) | Complete API specification |
 | [Tool Calling API Design](/design/tool-calling-api-design) | Tool calling interface design |
 
-### Workspace  Agent Protocol
-
-The Workspace Agent Protocol (WAP) for LLM4S is a standardized interface that defines how LLMs interact with code workspaces.
-
-## Core Purpose
-
-It Enables LLMs to explore, read, write, and manipulate files, aslo execute commands within a development environment.
-
-## Key Features 
-
-**Flexible Path Handling** Relative to Workspace Root
-
-All file paths are specified relative to the workspace root unless otherwise specified
-Example: src/components/Button.jsx instead of /full/path/to/src/components/Button.jsx
-Simplifies operations and makes them portable across different environments
-
-**Size Protection** Hard limits to prevent excessive responses
-
-Prevents excessively large responses that could overwhelm LLM context
-Recommended limits include:
-Max file size: 1MB for reading
-Max directory entries: 500 entries per listing
-Max search results: 100 matches
-Max command output: 1MB
-Max execution time: 30 seconds
-
-
-**Structured Responses** All operations return consistent structured data
-
-File Operations: Always include path, size, modification time
-Search Results: Include line number, matched text, and context lines
-Command Execution: Return stdout, stderr, exit code, duration
-
-**Error Handling** Standardized error codes (FILE_NOT_FOUND, PERMISSION_DENIED,SIZE_LIMIT_EXCEEDED,INVALID_ARGUMENT,EXECUTION_FAILED,TIMEOUT  etc.)
-
-**Context Awareness** Operations include metadata and truncation indicators
-
+|[Workspace Agent Protocol](/workspace-agent-protocol)| Standardized interface for LLM workspace interaction |
 
 ## API Design Principles
 
