@@ -18,9 +18,11 @@ object OptimisticLockingExamples {
 
   /**
    * Example 1: Basic update with manual conflict handling
+   *
+   * Demonstrates bounded retry pattern to prevent infinite loops.
    */
-  def basicUpdateWithRetry(store: PostgresMemoryStore, memoryId: MemoryId): Unit = {
-    def attemptUpdate(attemptsLeft: Int = 3): Unit = {
+  def basicUpdateWithRetry(store: PostgresMemoryStore, memoryId: MemoryId, maxAttempts: Int = 3): Unit = {
+    def attemptUpdate(attemptsLeft: Int = maxAttempts): Unit = {
       store.update(memoryId, mem => mem.withMetadata("updated", "true")) match {
         case Right(_) =>
           println(s"✓ Update succeeded")
@@ -96,7 +98,11 @@ object OptimisticLockingExamples {
     val results = futures.map(f => Await.result(f, 10.seconds))
 
     // Verify final counter value
-    val finalMemory = store.get(memoryId).toOption.flatten.get
+    val finalMemory = store.get(memoryId) match {
+      case Right(Some(mem)) => mem
+      case Right(None) => throw new RuntimeException("Memory not found")
+      case Left(err) => throw new RuntimeException(s"Failed to get memory: ${err.message}")
+    }
     val finalCount = finalMemory.metadata("counter").toInt
 
     println(s"✓ All 10 concurrent increments completed")

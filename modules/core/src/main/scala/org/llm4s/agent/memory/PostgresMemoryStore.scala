@@ -318,6 +318,9 @@ final class PostgresMemoryStore private[memory] (
    * occurs. Each retry re-reads the memory with its new version and re-applies the
    * update function.
    *
+   * ⚠️  This method blocks the calling thread during retries using Thread.sleep.
+   * Not suitable for async/reactive code. Consider manual retry with async primitives instead.
+   *
    * USAGE EXAMPLE:
    * {{{
    * // Safe concurrent update with retry
