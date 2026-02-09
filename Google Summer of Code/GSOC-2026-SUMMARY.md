@@ -18,7 +18,7 @@ Welcome to the **LLM4S Google Summer of Code 2026** program! We're excited to of
 ## Summary Statistics
 
 - **Total Projects**: 75
-- **Total Mentors**: 35
+- **Total Mentors**: 37
 - **Community Members**: 300+
 - **Project Sizes**:
   - Large (350 hours): 64 projects
@@ -327,6 +327,18 @@ Our mentors are experienced developers and researchers passionate about LLMs, Sc
 35. **Anand Joshi**
 
     - LinkedIn: [linkedin.com/in/anandjoshi1](https://www.linkedin.com/in/anandjoshi1/)
+    - Location: US 🇺🇸
+    - Focus: Scala, LLM systems
+36. **Ullas Bangalore Suresh**
+
+    - LinkedIn: [linkedin.com/in/bsullas](https://www.linkedin.com/in/bsullas/)
+    - Email: bsullas@gmail.com
+    - Location: US 🇺🇸
+    - Focus: Scala, LLM systems
+37. **Abhinav Gupta**
+
+    - LinkedIn: [linkedin.com/in/abhinav-22](https://www.linkedin.com/in/abhinav-22/)
+    - Email: abhinavgupta2206@gmail.com
     - Location: US 🇺🇸
     - Focus: Scala, LLM systems
 
