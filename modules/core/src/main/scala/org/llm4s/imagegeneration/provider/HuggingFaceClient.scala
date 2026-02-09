@@ -3,8 +3,10 @@ package org.llm4s.imagegeneration.provider
 import org.llm4s.imagegeneration._
 
 import java.time.Instant
+import java.nio.file.Path
 import java.util.Base64
 import scala.util.Try
+import scala.concurrent.{Future, ExecutionContext}
 
 /**
  * HuggingFace Inference API client for image generation.
@@ -145,6 +147,46 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
 
     result
   }
+
+  /**
+   * Edit an existing image based on a prompt and optional mask.
+   *
+   * Not currently supported for HuggingFace provider.
+   */
+  override def editImage(
+    imagePath: Path,
+    prompt: String,
+    maskPath: Option[Path] = None,
+    options: ImageEditOptions = ImageEditOptions()
+  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
+    Left(ValidationError("Image editing is not yet supported for HuggingFace provider"))
+
+  override def generateImageAsync(
+      prompt: String,
+      options: ImageGenerationOptions = ImageGenerationOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+    Future {
+      generateImage(prompt, options)
+    }
+
+  override def generateImagesAsync(
+      prompt: String,
+      count: Int,
+      options: ImageGenerationOptions = ImageGenerationOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    Future {
+      generateImages(prompt, count, options)
+    }
+
+  override def editImageAsync(
+      imagePath: Path,
+      prompt: String,
+      maskPath: Option[Path] = None,
+      options: ImageEditOptions = ImageEditOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    Future {
+      editImage(imagePath, prompt, maskPath, options)
+    }
 
   /**
    * Check the health status of the HuggingFace Inference API.

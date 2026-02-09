@@ -1,9 +1,12 @@
 package org.llm4s.imagegeneration
 
+import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import scala.concurrent.{Future, ExecutionContext}
+import scala.concurrent.ExecutionContext.Implicits.global
 
-import java.nio.file.Files
+import java.nio.file.{Files, Path}
 import java.util.Base64
 
 /**
@@ -12,7 +15,7 @@ import java.util.Base64
  * Includes unit tests for models, integration tests for the factory,
  * and a mock implementation for testing without a real server.
  */
-class ImageGenerationTest extends AnyFunSuite with Matchers {
+class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
 
   // ===== MOCK CLIENT FOR TESTING =====
 
@@ -58,6 +61,26 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       }
     }
 
+    override def editImage(
+      imagePath: Path,
+      prompt: String,
+      maskPath: Option[Path] = None,
+      options: ImageEditOptions = ImageEditOptions()
+    ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+      if (prompt.trim.isEmpty) return Left(ValidationError("Prompt cannot be empty"))
+      
+      // Return a mock edited image
+      Right(Seq(
+        GeneratedImage(
+          data = mockImageData,
+          format = ImageFormat.PNG,
+          size = options.size.getOrElse(ImageSize.Square512),
+          prompt = prompt,
+          seed = None
+        )
+      ))
+    }
+
     override def health(): Either[ImageGenerationError, ServiceStatus] =
       Right(
         ServiceStatus(
@@ -67,6 +90,27 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
           averageGenerationTime = Some(100)
         )
       )
+
+    override def generateImageAsync(
+        prompt: String,
+        options: ImageGenerationOptions = ImageGenerationOptions()
+    )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+      Future.successful(generateImage(prompt, options))
+
+    override def generateImagesAsync(
+        prompt: String,
+        count: Int,
+        options: ImageGenerationOptions = ImageGenerationOptions()
+    )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+      Future.successful(generateImages(prompt, count, options))
+
+    override def editImageAsync(
+        imagePath: Path,
+        prompt: String,
+        maskPath: Option[Path] = None,
+        options: ImageEditOptions = ImageEditOptions()
+    )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+      Future.successful(editImage(imagePath, prompt, maskPath, options))
   }
 
   // ===== MODEL UNIT TESTS =====
@@ -79,6 +123,12 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     ImageSize.Landscape768x512.width shouldBe 768
     ImageSize.Landscape768x512.height shouldBe 512
     ImageSize.Landscape768x512.description shouldBe "768x512"
+
+    ImageSize.Landscape1536x1024.width shouldBe 1536
+    ImageSize.Landscape1536x1024.height shouldBe 1024
+
+    ImageSize.Portrait1024x1536.width shouldBe 1024
+    ImageSize.Portrait1024x1536.height shouldBe 1536
   }
 
   test("ImageFormat provides correct metadata") {
@@ -98,6 +148,22 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     options.guidanceScale shouldBe 7.5
     options.inferenceSteps shouldBe 20
     options.negativePrompt shouldBe None
+    
+    // New fields
+    options.quality shouldBe None
+    options.style shouldBe None
+    options.responseFormat shouldBe None
+    options.user shouldBe None
+  }
+
+  test("ImageEditOptions has sensible defaults") {
+    val options = ImageEditOptions()
+    options.size shouldBe None
+    options.n shouldBe 1
+    options.responseFormat shouldBe None
+    options.quality shouldBe None
+    options.strength shouldBe None
+    options.user shouldBe None
   }
 
   test("GeneratedImage decodes base64 data correctly") {
@@ -172,6 +238,11 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     client shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
   }
 
+  test("openAIClient creates client with correct config") {
+    val client = ImageGeneration.openAIClient(apiKey = "test-key")
+    client shouldBe a[org.llm4s.imagegeneration.provider.OpenAIImageClient]
+  }
+
   test("Config objects have correct default values") {
     val sdConfig = StableDiffusionConfig()
     sdConfig.baseUrl shouldBe "http://localhost:7860"
@@ -183,6 +254,69 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     hfConfig.model shouldBe "stabilityai/stable-diffusion-xl-base-1.0"
     hfConfig.timeout shouldBe 120000
     hfConfig.provider shouldBe ImageGenerationProvider.HuggingFace
+
+    val openAIConfig = OpenAIConfig(apiKey = "test-key")
+    openAIConfig.model shouldBe "gpt-image-1"
+    openAIConfig.provider shouldBe ImageGenerationProvider.DALLE
+
+    val vertexConfig = VertexAIConfig(projectId = "test-project")
+    vertexConfig.location shouldBe "us-central1"
+    vertexConfig.model shouldBe "imagen-4.0-generate-001"
+    vertexConfig.accessToken shouldBe None
+    vertexConfig.timeout shouldBe 120000
+    vertexConfig.provider shouldBe ImageGenerationProvider.VertexAI
+  }
+
+  test("ImageGeneration creates correct client for VertexAI config") {
+    val config = VertexAIConfig(projectId = "test-project")
+    val client = ImageGeneration.client(config)
+
+    client shouldBe a[org.llm4s.imagegeneration.provider.VertexAIClient]
+  }
+
+  test("ImageGeneration creates correct client for Bedrock config") {
+    val config = BedrockConfig()
+    val client = ImageGeneration.client(config)
+
+    client shouldBe a[org.llm4s.imagegeneration.provider.BedrockClient]
+  }
+
+  test("BedrockConfig has correct default values") {
+    val config = BedrockConfig()
+    config.region shouldBe "us-east-1"
+    config.model shouldBe "amazon.titan-image-generator-v1"
+    config.accessKeyId shouldBe None
+    config.secretAccessKey shouldBe None
+    config.timeout shouldBe 120000
+    config.provider shouldBe ImageGenerationProvider.Bedrock
+  }
+
+  test("ImageGeneration creates correct client for StabilityAI config") {
+    val config = StabilityAIConfig(apiKey = "test-key")
+    val client = ImageGeneration.client(config)
+
+    client shouldBe a[org.llm4s.imagegeneration.provider.StabilityAIClient]
+  }
+
+  test("StabilityAIConfig has correct default values") {
+    val config = StabilityAIConfig(apiKey = "test-key")
+    config.model shouldBe "ultra"
+    config.timeout shouldBe 120000
+    config.provider shouldBe ImageGenerationProvider.StabilityAI
+  }
+
+  test("ImageGeneration creates correct client for FalAI config") {
+    val config = FalAIConfig(apiKey = "test-key")
+    val client = ImageGeneration.client(config)
+
+    client shouldBe a[org.llm4s.imagegeneration.provider.FalAIClient]
+  }
+
+  test("FalAIConfig has correct default values") {
+    val config = FalAIConfig(apiKey = "test-key")
+    config.model shouldBe "fal-ai/flux/dev"
+    config.timeout shouldBe 120000
+    config.provider shouldBe ImageGenerationProvider.FalAI
   }
 
   test("Config objects can be customized") {
@@ -308,6 +442,24 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     }
   }
 
+  test("Mock client edits image successfully") {
+    val tempFile = Files.createTempFile("test_input", ".png")
+    val result = mockClient.editImage(tempFile, "edited prompt")
+
+    try {
+      result match {
+        case Right(images) =>
+          images.head.prompt shouldBe "edited prompt"
+          images.head.size shouldBe ImageSize.Square512
+
+        case Left(error) =>
+          fail(s"Expected successful edit, but got error: $error")
+      }
+    } finally {
+      Files.deleteIfExists(tempFile)
+    }
+  }
+
   // ===== ERROR HANDLING TESTS =====
 
   test("Error types have correct messages") {
@@ -336,5 +488,74 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       case Left(_)      => succeed
       case Right(value) => fail(s"Expected failure but got: $value")
     }
+  }
+
+  // ===== ASYNC TESTS =====
+
+  test("generateImageAsync returns Future[Either]") {
+    val futureResult = mockClient.generateImageAsync("Async test")
+
+    whenReady(futureResult) { result =>
+      result shouldBe a[Right[?, ?]]
+      result.map { image =>
+        image.prompt shouldBe "Async test"
+        image.size shouldBe ImageSize.Square512
+      }
+    }
+  }
+
+  test("generateImagesAsync returns Future[Either]") {
+    val futureResult = mockClient.generateImagesAsync("Async multiple", 2)
+
+    whenReady(futureResult) { result =>
+      result shouldBe a[Right[?, ?]]
+      result.map { images =>
+        images should have length 2
+        images.head.prompt shouldBe "Async multiple"
+      }
+    }
+  }
+
+  test("editImageAsync returns Future[Either]") {
+    val tempFile = Files.createTempFile("async_edit", ".png")
+    try {
+      val futureResult = mockClient.editImageAsync(tempFile, "Async edit")
+
+      whenReady(futureResult) { result =>
+        result shouldBe a[Right[?, ?]]
+        result.map { images =>
+          images.head.prompt shouldBe "Async edit"
+        }
+      }
+    } finally {
+      Files.deleteIfExists(tempFile)
+    }
+  }
+
+  // ===== Image Pricing Registry Tests =====
+
+  test("ImagePricingRegistry returns correct cost for OpenAI DALL-E 3") {
+    val cost = ImagePricingRegistry.getCostPerImage("openai", "dall-e-3", "1024x1024", Some("standard"))
+    cost shouldBe 0.040
+  }
+
+  test("ImagePricingRegistry returns correct cost for Stability AI") {
+    val cost = ImagePricingRegistry.getCostPerImage("stability", "ultra", "1024x1024")
+    cost shouldBe 0.080
+  }
+
+  test("ImagePricingRegistry estimates total cost correctly") {
+    val cost = ImagePricingRegistry.estimateCost("openai", "dall-e-3", 5, "1024x1024", Some("standard"))
+    cost shouldBe 0.200
+  }
+
+  test("ImagePricingRegistry returns default for unknown model") {
+    val cost = ImagePricingRegistry.getCostPerImage("unknown", "unknown-model", "1024x1024")
+    cost shouldBe 0.020 // default fallback
+  }
+
+  test("ImagePricingRegistry getCostForProvider works with enum") {
+    val cost = ImagePricingRegistry.getCostForProvider(ImageGenerationProvider.StabilityAI, "ultra")
+    cost shouldBe 0.080
   }
 }
