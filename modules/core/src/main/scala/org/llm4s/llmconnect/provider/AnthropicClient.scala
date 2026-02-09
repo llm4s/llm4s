@@ -95,10 +95,7 @@ class AnthropicClient(
     }
   }(
     extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
+    extractCost = _.estimatedCost
   )
 
   /*
@@ -285,15 +282,15 @@ curl https://api.anthropic.com/v1/messages \
             }
 
           // Return the accumulated completion
-          attempt.flatMap(_ => accumulator.toCompletion.map(c => c.copy(model = config.model)))
+          attempt.flatMap(_ => accumulator.toCompletion.map { c =>
+            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+            c.copy(model = config.model, estimatedCost = cost)
+          })
       }
     }
   }(
     extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
+    extractCost = _.estimatedCost
   )
 
   override def getContextWindow(): Int = providerConfig.contextWindow
@@ -408,6 +405,9 @@ curl https://api.anthropic.com/v1/messages \
     // Note: The SDK may expose thinking tokens differently - adjust as needed
     val tokenUsage = baseTokenUsage
 
+    // Estimate cost using CostEstimator
+    val cost = CostEstimator.estimate(response.model().asString(), tokenUsage)
+
     // Create completion
     Completion(
       id = response.id(),
@@ -417,7 +417,8 @@ curl https://api.anthropic.com/v1/messages \
       created = System.currentTimeMillis() / 1000, // Use current time as created timestamp
       message = message,
       usage = Some(tokenUsage),
-      thinking = thinkingContent
+      thinking = thinkingContent,
+      estimatedCost = cost
     )
   }
 

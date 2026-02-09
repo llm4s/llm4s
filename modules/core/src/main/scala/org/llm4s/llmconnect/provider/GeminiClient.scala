@@ -100,10 +100,7 @@ class GeminiClient(
     }
   }(
     extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
+    extractCost = _.estimatedCost
   )
 
   override def streamComplete(
@@ -165,16 +162,16 @@ class GeminiClient(
 
             processEither.left
               .map(_.toLLMError)
-              .flatMap(_ => accumulator.toCompletion.map(c => c.copy(model = config.model)))
+              .flatMap(_ => accumulator.toCompletion.map { c =>
+                val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+                c.copy(model = config.model, estimatedCost = cost)
+              })
           }
       }
     }
   }(
     extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens.toInt, usage.completionTokens.toInt)
-      }
+    extractCost = _.estimatedCost
   )
 
   override def getContextWindow(): Int = config.contextWindow
@@ -372,6 +369,9 @@ class GeminiClient(
           toolCalls = toolCalls
         )
 
+        // Estimate cost using CostEstimator
+        val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
+
         Right(
           Completion(
             id = UUID.randomUUID().toString,
@@ -380,7 +380,8 @@ class GeminiClient(
             toolCalls = toolCalls.toList,
             created = System.currentTimeMillis() / 1000,
             message = message,
-            usage = usageOpt
+            usage = usageOpt,
+            estimatedCost = cost
           )
         )
       }

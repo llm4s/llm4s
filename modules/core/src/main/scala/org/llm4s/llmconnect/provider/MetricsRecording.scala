@@ -10,7 +10,7 @@ import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
  * Helper trait for recording metrics consistently across all provider clients.
  *
  * Extracts the common pattern of timing requests, observing outcomes,
- * recording tokens, and calculating costs.
+ * recording tokens, and reading costs from completion results.
  */
 trait MetricsRecording {
   protected def metrics: MetricsCollector
@@ -18,11 +18,14 @@ trait MetricsRecording {
   /**
    * Execute a block of code while recording metrics for the operation.
    *
+   * This version extracts cost directly from the result (preferred approach).
+   * The cost should already be computed and stored in the Completion.estimatedCost field.
+   *
    * @param provider Provider name (e.g., "openai", "anthropic")
    * @param model Model name
    * @param f The operation to execute
    * @param extractUsage Function to extract usage from successful result
-   * @param estimateCost Optional function to estimate cost from usage
+   * @param extractCost Function to extract cost from successful result
    * @tparam A Result type
    * @return The result of the operation
    */
@@ -31,7 +34,47 @@ trait MetricsRecording {
     model: String
   )(
     f: => Result[A]
-  )(extractUsage: A => Option[TokenUsage], estimateCost: TokenUsage => Option[Double] = _ => None): Result[A] = {
+  )(extractUsage: A => Option[TokenUsage], extractCost: A => Option[Double]): Result[A] = {
+    val startNanos = System.nanoTime()
+    val result     = f
+    val duration   = FiniteDuration(System.nanoTime() - startNanos, NANOSECONDS)
+
+    result match {
+      case Right(value) =>
+        metrics.observeRequest(provider, model, Outcome.Success, duration)
+        extractUsage(value).foreach { usage =>
+          metrics.addTokens(provider, model, usage.promptTokens.toLong, usage.completionTokens.toLong)
+        }
+        // Record cost from the result itself (not computed here)
+        extractCost(value).foreach(cost => metrics.recordCost(provider, model, cost))
+      case Left(error) =>
+        val errorKind = ErrorKind.fromLLMError(error)
+        metrics.observeRequest(provider, model, Outcome.Error(errorKind), duration)
+    }
+
+    result
+  }
+
+  /**
+   * Execute a block of code while recording metrics for the operation.
+   *
+   * This is a backward-compatible version that computes cost from usage.
+   * Prefer the version that extracts cost directly from the result.
+   *
+   * @param provider Provider name (e.g., "openai", "anthropic")
+   * @param model Model name
+   * @param f The operation to execute
+   * @param extractUsage Function to extract usage from successful result
+   * @param estimateCost Function to estimate cost from usage (deprecated)
+   * @tparam A Result type
+   * @return The result of the operation
+   */
+  protected def withMetricsLegacy[A](
+    provider: String,
+    model: String
+  )(
+    f: => Result[A]
+  )(extractUsage: A => Option[TokenUsage], estimateCost: TokenUsage => Option[Double]): Result[A] = {
     val startNanos = System.nanoTime()
     val result     = f
     val duration   = FiniteDuration(System.nanoTime() - startNanos, NANOSECONDS)

@@ -120,14 +120,11 @@ class OpenAIClient private (
             logger.error(s"OpenAI completion failed for model $model", e)
             e.toLLMError
           }
-      } yield convertFromOpenAIFormat(completions)
+      } yield convertFromOpenAIFormat(completions, model)
     }
   }(
     extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
+    extractCost = _.estimatedCost
   )
 
   override def streamComplete(
@@ -152,10 +149,7 @@ class OpenAIClient private (
     }
   }(
     extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
+    extractCost = _.estimatedCost
   )
 
   override def close(): Unit =
@@ -203,7 +197,7 @@ class OpenAIClient private (
       }
 
     attempt.flatMap { completions =>
-      val completion = convertFromOpenAIFormat(completions)
+      val completion = convertFromOpenAIFormat(completions, model)
       emitCompletionAsChunks(completion, onChunk)
       Right(completion)
     }
@@ -231,7 +225,10 @@ class OpenAIClient private (
       e.toLLMError
     }
 
-    attempt.flatMap(_ => accumulator.toCompletion.map(_.copy(model = model)))
+    attempt.flatMap(_ => accumulator.toCompletion.map { c =>
+      val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
+      c.copy(model = model, estimatedCost = cost)
+    })
   }
 
   /**
@@ -501,18 +498,30 @@ class OpenAIClient private (
    * Converts OpenAI ChatCompletions response to llm4s Completion format.
    *
    * Extracts the first choice from the response and converts it to llm4s format,
-   * including content, tool calls, and token usage information.
+   * including content, tool calls, token usage information, and estimated cost.
    *
    * @param completions OpenAI API response
+   * @param model Model identifier for cost estimation
    * @return llm4s Completion with all response data
    */
-  private def convertFromOpenAIFormat(completions: ChatCompletions): Completion = {
+  private def convertFromOpenAIFormat(completions: ChatCompletions, model: String): Completion = {
     val choice    = completions.getChoices.get(0)
     val message   = choice.getMessage
     val toolCalls = extractToolCalls(message)
     val content   = Option(message.getContent).getOrElse("")
     val assistantMessage =
       AssistantMessage(contentOpt = if (content.isEmpty) None else Some(content), toolCalls = toolCalls)
+
+    val usage = Option(completions.getUsage).map(u =>
+      TokenUsage(
+        promptTokens = u.getPromptTokens,
+        completionTokens = u.getCompletionTokens,
+        totalTokens = u.getTotalTokens
+      )
+    )
+
+    // Estimate cost using CostEstimator
+    val cost = usage.flatMap(u => CostEstimator.estimate(model, u))
 
     Completion(
       id = completions.getId,
@@ -521,13 +530,8 @@ class OpenAIClient private (
       model = completions.getModel,
       message = assistantMessage,
       toolCalls = toolCalls.toList,
-      usage = Option(completions.getUsage).map(u =>
-        TokenUsage(
-          promptTokens = u.getPromptTokens,
-          completionTokens = u.getCompletionTokens,
-          totalTokens = u.getTotalTokens
-        )
-      )
+      usage = usage,
+      estimatedCost = cost
     )
   }
 

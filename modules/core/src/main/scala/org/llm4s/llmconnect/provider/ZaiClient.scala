@@ -77,10 +77,7 @@ class ZaiClient(
     }
   }(
     extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
+    extractCost = _.estimatedCost
   )
 
   override def streamComplete(
@@ -147,16 +144,16 @@ class ZaiClient(
             }
           }.toEither.left.map(_.toLLMError)
 
-          streamResult.flatMap(_ => accumulator.toCompletion)
+          streamResult.flatMap(_ => accumulator.toCompletion.map { c =>
+            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+            c.copy(model = config.model, estimatedCost = cost)
+          })
         }
       }
     }
   }(
     extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens.toInt, usage.completionTokens.toInt)
-      }
+    extractCost = _.estimatedCost
   )
 
   private def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
@@ -309,18 +306,23 @@ class ZaiClient(
       }
     }
 
+    // Estimate cost using CostEstimator
+    val modelId = json("model").str
+    val cost = usage.flatMap(u => CostEstimator.estimate(modelId, u))
+
     Completion(
       id = json("id").str,
       created = json("created").num.toLong,
       content = contentStr,
-      model = json("model").str,
+      model = modelId,
       message = AssistantMessage(
         contentOpt = Some(contentStr),
         toolCalls = toolCalls.toList
       ),
       toolCalls = toolCalls.toList,
       usage = usage,
-      thinking = None
+      thinking = None,
+      estimatedCost = cost
     )
   }
 
