@@ -94,6 +94,19 @@ LLM4S participated in Google Summer of Code 2025:
 
 ## 📚 Learning Resources
 
+### Learn About LLMs
+
+New to Large Language Models? These free courses cover the fundamentals:
+
+- **[API Fundamentals](https://github.com/anthropics/courses/tree/master/anthropic_api_fundamentals)** — Anthropic course covering SDK basics, model parameters, multimodal prompts, and streaming.
+- **[Prompt Engineering Interactive Tutorial](https://github.com/anthropics/courses/tree/master/prompt_engineering_interactive_tutorial)** — 9-chapter hands-on tutorial covering core prompt engineering techniques with exercises.
+- **[Real World Prompting](https://github.com/anthropics/courses/tree/master/real_world_prompting)** — Applying prompt techniques to complex, real-world application scenarios.
+- **[Prompt Evaluations](https://github.com/anthropics/courses/tree/master/prompt_evaluations)** — Measuring, testing, and improving prompt quality in production systems.
+- **[Tool Use Course](https://github.com/anthropics/courses/tree/master/tool_use)** — Tool-calling patterns and best practices (directly relevant to the LLM4S tool API).
+- **[ChatGPT Prompt Engineering for Developers](https://www.deeplearning.ai/short-courses/chatgpt-prompt-engineering-for-developers/)** — Free DeepLearning.AI course by Andrew Ng and Isa Fulford covering LLM fundamentals and practical prompt patterns.
+- **[Prompt Engineering Guide](https://www.promptingguide.ai/)** — Comprehensive reference for prompt engineering techniques, from zero-shot to chain-of-thought, including recent research.
+
+
 ### Documentation
 
 - **[Getting Started](/getting-started/installation)** - Installation and first steps
