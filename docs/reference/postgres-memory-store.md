@@ -172,7 +172,3 @@ The store follows a functional error handling model.
 ### Semantic Search
 Although the schema supports vector embeddings, calling ` search(...)` currently returns a ` ProcessingError`. This requires integration with an `EmbeddingService`.
 
-### Compound Filters
-
-Logical composition of filters (AND, OR, NOT) is not yet supported.
-

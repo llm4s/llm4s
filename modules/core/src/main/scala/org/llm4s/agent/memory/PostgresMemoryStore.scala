@@ -351,6 +351,25 @@ object PostgresMemoryStore {
         Right(s"metadata->>'$key' = ?" -> Seq(PString(value)))
       }
 
+    case MemoryFilter.And(left, right) =>
+      filterToSql(left).flatMap { case (leftSql, leftParams) =>
+        filterToSql(right).map { case (rightSql, rightParams) =>
+          (s"($leftSql AND $rightSql)", leftParams ++ rightParams)
+        }
+      }
+
+    case MemoryFilter.Or(left, right) =>
+      filterToSql(left).flatMap { case (leftSql, leftParams) =>
+        filterToSql(right).map { case (rightSql, rightParams) =>
+          (s"($leftSql OR $rightSql)", leftParams ++ rightParams)
+        }
+      }
+
+    case MemoryFilter.Not(inner) =>
+      filterToSql(inner).map { case (innerSql, innerParams) =>
+        (s"NOT ($innerSql)", innerParams)
+      }
+
     case unsupported =>
       Left(ProcessingError("postgres-memory-store", s"Unsupported filter: ${unsupported.getClass.getSimpleName}"))
   }
