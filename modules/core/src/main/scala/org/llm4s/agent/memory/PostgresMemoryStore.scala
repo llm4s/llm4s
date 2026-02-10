@@ -33,13 +33,7 @@ final class PostgresMemoryStore private[memory] (
 ) extends MemoryStore
     with AutoCloseable {
 
-  /**
-   * Internal wrapper for Memory + version.
-   * Used to track version for optimistic locking without exposing it in public API.
-   */
-  private[memory] final case class VersionedMemory(memory: Memory, version: Long)
-
-  import PostgresMemoryStore.SqlParam
+  import PostgresMemoryStore.{ SqlParam, VersionedMemory }
 
   private[memory] def initializeSchema(): Unit =
     withConnection { conn =>
@@ -443,13 +437,13 @@ final class PostgresMemoryStore private[memory] (
    */
   private def rowToVersionedMemory(rs: ResultSet): VersionedMemory = {
     val memory = rowToMemory(rs)
-    
+
     // Handle backward compatibility: treat missing/null version as 0
     val version = Try(rs.getLong("version")).toOption match {
       case Some(v) if !rs.wasNull() => v
       case _                        => 0L
     }
-    
+
     VersionedMemory(memory, version)
   }
 
@@ -466,6 +460,12 @@ final class PostgresMemoryStore private[memory] (
 }
 
 object PostgresMemoryStore {
+
+  /**
+   * Internal wrapper for Memory + version.
+   * Used to track version for optimistic locking without exposing it in public API.
+   */
+  final private[memory] case class VersionedMemory(memory: Memory, version: Long)
 
   sealed trait SqlParam
   object SqlParam {
@@ -600,7 +600,7 @@ object PostgresMemoryStore {
    * Internal exception used to signal optimistic lock conflicts.
    * Converted to OptimisticLockFailure error in update() method.
    */
-  private[memory] final class OptimisticLockException(
+  final private[memory] class OptimisticLockException(
     val memoryId: String,
     val attemptedVersion: Long
   ) extends RuntimeException(

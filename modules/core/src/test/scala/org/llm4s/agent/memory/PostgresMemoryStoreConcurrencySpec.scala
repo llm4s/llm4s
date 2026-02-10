@@ -41,7 +41,7 @@ class PostgresMemoryStoreConcurrencySpec extends AnyFlatSpec with Matchers with 
   )
 
   // Thread pool for concurrent operations
-  private implicit val ec: ExecutionContext =
+  implicit private val ec: ExecutionContext =
     ExecutionContext.fromExecutor(Executors.newFixedThreadPool(20))
 
   override def beforeEach(): Unit =
@@ -62,7 +62,7 @@ class PostgresMemoryStoreConcurrencySpec extends AnyFlatSpec with Matchers with 
     if (isEnabled) testBody
     else info("Skipping Postgres test (POSTGRES_TEST_ENABLED=true not set)")
 
-  behavior of "PostgresMemoryStore with optimistic locking"
+  behavior.of("PostgresMemoryStore with optimistic locking")
 
   it should "detect concurrent modifications and fail with OptimisticLockFailure" in skipIfDisabled {
     // Setup: Create initial memory
@@ -95,9 +95,9 @@ class PostgresMemoryStoreConcurrencySpec extends AnyFlatSpec with Matchers with 
   }
 
   it should "handle high contention with many concurrent updates" in skipIfDisabled {
-    val id        = MemoryId(UUID.randomUUID().toString)
+    val id         = MemoryId(UUID.randomUUID().toString)
     val numThreads = 50
-    val initial   = Memory(id, "counter: 0", MemoryType.Task, Map("counter" -> "0"))
+    val initial    = Memory(id, "counter: 0", MemoryType.Task, Map("counter" -> "0"))
 
     store.store(initial).isRight shouldBe true
 
@@ -114,7 +114,7 @@ class PostgresMemoryStoreConcurrencySpec extends AnyFlatSpec with Matchers with 
       }
     }
 
-    val results = futures.map(f => Await.result(f, 10.seconds))
+    val results               = futures.map(f => Await.result(f, 10.seconds))
     val (successes, failures) = results.partition(_.isRight)
 
     // Only one update should succeed per version
@@ -122,22 +122,20 @@ class PostgresMemoryStoreConcurrencySpec extends AnyFlatSpec with Matchers with 
     successes.size should be < numThreads
     failures.size should be > 0
 
-    failures.foreach { failure =>
-      failure.left.toOption.get shouldBe a[OptimisticLockFailure]
-    }
+    failures.foreach(failure => failure.left.toOption.get shouldBe a[OptimisticLockFailure])
 
     info(s"Concurrent updates: $numThreads attempted, ${successes.size} succeeded, ${failures.size} failed")
   }
 
   it should "successfully complete all updates when using retryingUpdate" in skipIfDisabled {
-    val id        = MemoryId(UUID.randomUUID().toString)
+    val id         = MemoryId(UUID.randomUUID().toString)
     val numThreads = 20
-    val initial   = Memory(id, "counter: 0", MemoryType.Task, Map("counter" -> "0"))
+    val initial    = Memory(id, "counter: 0", MemoryType.Task, Map("counter" -> "0"))
 
     store.store(initial).isRight shouldBe true
 
     // Use CountDownLatch to synchronize start
-    val startLatch = new CountDownLatch(1)
+    val startLatch   = new CountDownLatch(1)
     val successCount = new AtomicInteger(0)
 
     // Launch concurrent retrying updates
@@ -173,7 +171,7 @@ class PostgresMemoryStoreConcurrencySpec extends AnyFlatSpec with Matchers with 
 
     // Verify final counter value
     val finalMemory = store.get(id).toOption.flatten.get
-    val finalCount = finalMemory.metadata("counter").toInt
+    val finalCount  = finalMemory.metadata("counter").toInt
     finalCount shouldBe numThreads
 
     info(s"All $numThreads concurrent retrying updates succeeded. Final counter: $finalCount")
@@ -184,13 +182,9 @@ class PostgresMemoryStoreConcurrencySpec extends AnyFlatSpec with Matchers with 
     store.store(Memory(id, "v0", MemoryType.Task)).isRight shouldBe true
 
     // Sequential updates should all succeed
-    val updates = (1 to 10).map { i =>
-      store.update(id, _.copy(content = s"v$i"))
-    }
+    val updates = (1 to 10).map(i => store.update(id, _.copy(content = s"v$i")))
 
-    updates.foreach { result =>
-      result.isRight shouldBe true
-    }
+    updates.foreach(result => result.isRight shouldBe true)
 
     // Verify final state
     val finalMemory = store.get(id).toOption.flatten.get
@@ -207,16 +201,14 @@ class PostgresMemoryStoreConcurrencySpec extends AnyFlatSpec with Matchers with 
 
     // Concurrent updates on different memories should not interfere
     val futures = Seq(
-      Future { store.update(id1, _.copy(content = "mem1-updated")) },
-      Future { store.update(id2, _.copy(content = "mem2-updated")) }
+      Future(store.update(id1, _.copy(content = "mem1-updated"))),
+      Future(store.update(id2, _.copy(content = "mem2-updated")))
     )
 
     val results = futures.map(f => Await.result(f, 5.seconds))
 
     // Both should succeed (no conflict)
-    results.foreach { r =>
-      r.isRight shouldBe true
-    }
+    results.foreach(r => r.isRight shouldBe true)
   }
 
   it should "correctly increment version on successful updates" in skipIfDisabled {
@@ -224,9 +216,7 @@ class PostgresMemoryStoreConcurrencySpec extends AnyFlatSpec with Matchers with 
     store.store(Memory(id, "v0", MemoryType.Task)).isRight shouldBe true
 
     // Perform 5 sequential updates
-    (1 to 5).foreach { i =>
-      store.update(id, _.copy(content = s"v$i")).isRight shouldBe true
-    }
+    (1 to 5).foreach(i => store.update(id, _.copy(content = s"v$i")).isRight shouldBe true)
 
     // Check internal version (using getVersioned)
     val versioned = store.getVersioned(id).toOption.flatten.get
@@ -259,9 +249,7 @@ class PostgresMemoryStoreConcurrencySpec extends AnyFlatSpec with Matchers with 
 
     // With low maxRetries and high contention, some should fail
     failures.size should be > 0
-    failures.foreach { failure =>
-      failure.left.toOption.get shouldBe a[OptimisticLockFailure]
-    }
+    failures.foreach(failure => failure.left.toOption.get shouldBe a[OptimisticLockFailure])
 
     info(s"High contention test: ${successes.size} succeeded, ${failures.size} exhausted retries")
   }
@@ -280,9 +268,7 @@ class PostgresMemoryStoreConcurrencySpec extends AnyFlatSpec with Matchers with 
     val results = futures.map(f => Await.result(f, 5.seconds))
 
     // All store() operations should succeed (no OptimisticLockFailure)
-    results.foreach { r =>
-      r.isRight shouldBe true
-    }
+    results.foreach(r => r.isRight shouldBe true)
 
     // Final state is undefined (last writer wins)
     val finalMemory = store.get(id).toOption.flatten.get
@@ -305,7 +291,7 @@ class PostgresMemoryStoreConcurrencySpec extends AnyFlatSpec with Matchers with 
     versioned.version should be >= 0L
   }
 
-  behavior of "OptimisticLockFailure error"
+  behavior.of("OptimisticLockFailure error")
 
   it should "contain correct metadata for debugging" in skipIfDisabled {
     val id = MemoryId(UUID.randomUUID().toString)
@@ -328,16 +314,16 @@ class PostgresMemoryStoreConcurrencySpec extends AnyFlatSpec with Matchers with 
     lockFailure.memoryId shouldBe id.value
     lockFailure.attemptedVersion should be >= 0L
     lockFailure.code shouldBe Some("OPTIMISTIC_LOCK_CONFLICT")
-    lockFailure.context should contain key "memory_id"
-    lockFailure.context should contain key "attempted_version"
+    (lockFailure.context should contain).key("memory_id")
+    (lockFailure.context should contain).key("attempted_version")
   }
 
-  behavior of "Stress testing"
+  behavior.of("Stress testing")
 
   it should "handle sustained concurrent load" in skipIfDisabled {
-    val numMemories = 10
+    val numMemories      = 10
     val updatesPerMemory = 20
-    val totalOps = numMemories * updatesPerMemory
+    val totalOps         = numMemories * updatesPerMemory
 
     // Create memories
     val memoryIds = (1 to numMemories).map { i =>
@@ -374,11 +360,11 @@ class PostgresMemoryStoreConcurrencySpec extends AnyFlatSpec with Matchers with 
     // Verify counters
     memoryIds.foreach { id =>
       val memory = store.get(id).toOption.flatten.get
-      val count = memory.metadata("counter").toInt
+      val count  = memory.metadata("counter").toInt
       count shouldBe updatesPerMemory
     }
 
-    val duration = endTime - startTime
+    val duration   = endTime - startTime
     val throughput = (totalOps * 1000.0) / duration
 
     info(f"Stress test completed: $totalOps ops in ${duration}ms (${throughput}%.2f ops/sec)")

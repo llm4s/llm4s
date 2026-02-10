@@ -313,7 +313,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     // Setup: Mock successful read with version
     (() => mockDataSource.getConnection()).expects().returning(mockConn).twice()
     (mockConn.prepareStatement(_: String)).expects(*).returning(mockStmt).twice()
-    
+
     // First call: getVersioned reads memory with version 1
     (mockStmt.setString(_: Int, _: String)).expects(1, "test-id")
     (() => mockStmt.executeQuery()).expects().returning(mockRs)
@@ -360,7 +360,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     // Setup: Mock successful read and update
     (() => mockDataSource.getConnection()).expects().returning(mockConn).twice()
     (mockConn.prepareStatement(_: String)).expects(*).returning(mockStmt).twice()
-    
+
     // First call: getVersioned
     (mockStmt.setString(_: Int, _: String)).expects(1, "test-id")
     (() => mockStmt.executeQuery()).expects().returning(mockRs)
@@ -415,7 +415,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (mockRs.getLong(_: String)).expects("version").throws(new SQLException("Column 'version' not found"))
     (() => mockRs.close()).expects()
 
-    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
     val result = store.getVersioned(MemoryId("test-id"))
 
     result.isRight shouldBe true
@@ -441,7 +441,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (() => mockRs.wasNull()).expects().returning(true) // NULL version
     (() => mockRs.close()).expects()
 
-    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
     val result = store.getVersioned(MemoryId("test-id"))
 
     result.isRight shouldBe true
@@ -455,23 +455,33 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     // Setup connection and statement mocks to be reused
     (() => mockDataSource.getConnection()).expects().returning(mockConn).anyNumberOfTimes()
     (mockConn.prepareStatement(_: String)).expects(*).returning(mockStmt).anyNumberOfTimes()
-    
+
     // Mock all the database interaction methods to be called multiple times
     (mockStmt.setString(_: Int, _: String)).expects(*, *).anyNumberOfTimes()
     (() => mockStmt.executeQuery()).expects().returning(mockRs).anyNumberOfTimes()
     (() => mockRs.next()).expects().returning(true).anyNumberOfTimes()
-    (mockRs.getString(_: String)).expects(*).onCall { (arg: String) => arg match {
-      case "id" => "test-id"
-      case "content" => "v1"  // Will cause the update function to try "v1-updated"
-      case "memory_type" => "task"
-      case "metadata" => "{}"
-      case "embedding" => null
-      case _ => ""
-    }}.anyNumberOfTimes()
+    (mockRs
+      .getString(_: String))
+      .expects(*)
+      .onCall { (arg: String) =>
+        arg match {
+          case "id"          => "test-id"
+          case "content"     => "v1" // Will cause the update function to try "v1-updated"
+          case "memory_type" => "task"
+          case "metadata"    => "{}"
+          case "embedding"   => null
+          case _             => ""
+        }
+      }
+      .anyNumberOfTimes()
     (mockRs.getTimestamp(_: String)).expects(*).returning(Timestamp.from(Instant.now())).anyNumberOfTimes()
     (mockRs.getDouble(_: String)).expects(*).returning(0.5).anyNumberOfTimes()
     (() => mockRs.wasNull()).expects().returning(false).anyNumberOfTimes()
-    (mockRs.getLong(_: String)).expects("version").returning(1L).twice()  // First attempt gets version 1, retry gets version 1 again (or 2)
+    (mockRs
+      .getLong(_: String))
+      .expects("version")
+      .returning(1L)
+      .twice() // First attempt gets version 1, retry gets version 1 again (or 2)
     (() => mockRs.close()).expects().anyNumberOfTimes()
     (() => mockStmt.close()).expects().anyNumberOfTimes()
     (() => mockConn.close()).expects().anyNumberOfTimes()
@@ -479,7 +489,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (mockStmt.setNull(_: Int, _: Int, _: String)).expects(*, *, *).anyNumberOfTimes()
     (mockStmt.setDouble(_: Int, _: Double)).expects(*, *).anyNumberOfTimes()
     (mockStmt.setLong(_: Int, _: Long)).expects(*, *).anyNumberOfTimes()
-    
+
     // First update attempt returns 0 (conflict), second returns 1 (success)
     (() => mockStmt.executeUpdate()).expects().returning(0).once()
     (() => mockStmt.executeUpdate()).expects().returning(1).once()
