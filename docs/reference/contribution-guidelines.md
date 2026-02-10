@@ -47,9 +47,9 @@ https://github.com/llm4s/llm4s/issues?q=is:issue+label:good-first-issue
 **Good first issues** are marked with `good-first-issue` label.
 
 **Create if not found:**
-- For bugs: Use [Bug Report](../.github/ISSUE_TEMPLATE/bug_report.yml) template
-- For features: Use [Feature Request](../.github/ISSUE_TEMPLATE/feature_request.yml) template
-- For improvements: Use [Enhancement](../.github/ISSUE_TEMPLATE/enhancement.yml) template
+- For bugs: Use [Bug Report](https://github.com/llm4s/llm4s/issues/new/choose) template
+- For features: Use [Feature Request](https://github.com/llm4s/llm4s/issues/new/choose) template
+- For improvements: Use [Enhancement](https://github.com/llm4s/llm4s/issues/new/choose) template
 
 **Wait for response:**
 - Maintainers will provide guidance
@@ -159,8 +159,6 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md#adding-new-features) for detailed co
 
 ## Testing Standards
 
-## Testing Standards
-
 See [CONTRIBUTING.md](../../CONTRIBUTING.md#testing-guidelines) for testing requirements and examples.
 
 **Quick checklist:**
@@ -184,7 +182,6 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md#documentation-standards) for basic f
 2. **Guides** - Add to `docs/guide/` with overview, usage examples, troubleshooting
 3. **Examples** - Place in `modules/samples/` with clear comments
 4. **API Reference** - Generated from Scaladoc; ensure code examples compile
-```
 
 ---
 
