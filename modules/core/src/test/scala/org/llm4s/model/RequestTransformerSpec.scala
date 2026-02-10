@@ -268,4 +268,37 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
 
     result.isLeft shouldBe true
   }
+
+  // ============================================
+  // requiresMaxCompletionTokens tests
+  // ============================================
+
+  test("requiresMaxCompletionTokens should correctly identify models requiring max_completion_tokens") {
+    val testCases = Seq(
+      // O-series models require max_completion_tokens
+      ("o1", true),
+      ("o1-preview", true),
+      ("o1-mini", true),
+      ("o3", true),
+      // GPT-5 family requires max_completion_tokens
+      ("gpt-5", true),
+      ("gpt5", true),
+      ("openai/gpt-5", true),
+      // Standard models do NOT require max_completion_tokens
+      ("gpt-4o", false),
+      ("claude-3", false),
+      ("gemini-2.0", false),
+      // Case-insensitive detection
+      ("O1", true),
+      ("GPT-5", true),
+      // Unknown models should default to false (safe default)
+      ("unknown-model", false)
+    )
+
+    testCases.foreach { case (modelId, expected) =>
+      withClue(s"Model '$modelId' should return $expected for requiresMaxCompletionTokens: ") {
+        transformer.requiresMaxCompletionTokens(modelId) shouldBe expected
+      }
+    }
+  }
 }
