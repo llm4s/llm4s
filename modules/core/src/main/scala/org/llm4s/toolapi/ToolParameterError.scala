@@ -204,7 +204,8 @@ object ToolCallErrorJson {
         "parameterName" -> name,
         "kind"          -> "invalid_nesting",
         "expectedType"  -> "object",
-        "receivedType"  -> parentType
+        "receivedType"  -> parentType,
+        "parentPath"    -> parentPath
       )
 
     case ToolParameterError.MultipleErrors(errors) =>
