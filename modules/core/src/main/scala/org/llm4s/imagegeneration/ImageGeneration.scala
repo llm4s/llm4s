@@ -6,6 +6,7 @@ import org.llm4s.imagegeneration.provider.{
   HttpClient,
   HuggingFaceClient,
   OpenAIImageClient,
+  StabilityAIClient,
   StableDiffusionClient
 }
 
@@ -405,8 +406,10 @@ object ImageGeneration {
       case openAIConfig: OpenAIConfig =>
         val httpClient = HttpClient.create()
         new OpenAIImageClient(openAIConfig, httpClient)
+      case stabilityConfig: StabilityAIConfig =>
+        val httpClient = HttpClient.create()
+        new StabilityAIClient(stabilityConfig, httpClient)
       case _ =>
-        // For PR flow, other providers (Vertex, Bedrock, etc.) are not yet available in this branch
         throw new UnsupportedOperationException(s"Provider ${config.provider} is not yet integrated in this version.")
     }
   }
