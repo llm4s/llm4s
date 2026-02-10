@@ -82,4 +82,41 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     result.toOption.flatten.map(_.content) shouldBe Some("Persistence Check")
     store2.close()
   }
+
+  it should "perform semantic search using overloaded method with EmbeddingService" in skipIfDisabled {
+    val embeddingService = MockEmbeddingService.default
+
+    val query             = "apple"
+    val relevantContent   = "I like apples"
+    val irrelevantContent = "The sky is blue"
+
+    val embedding1 = embeddingService.embed(relevantContent).toOption.get
+    val embedding2 = embeddingService.embed(irrelevantContent).toOption.get
+
+    val mem1 = Memory(
+      id = MemoryId("1"),
+      content = relevantContent,
+      memoryType = MemoryType.Task,
+      embedding = Some(embedding1)
+    )
+
+    val mem2 = Memory(
+      id = MemoryId("2"),
+      content = irrelevantContent,
+      memoryType = MemoryType.Task,
+      embedding = Some(embedding2)
+    )
+
+    store.store(mem1).isRight shouldBe true
+    store.store(mem2).isRight shouldBe true
+
+    val searchResult = store.search(query, topK = 1, MemoryFilter.All, embeddingService)
+
+    searchResult.isRight shouldBe true
+    val scoredMemories = searchResult.toOption.get
+
+    scoredMemories.nonEmpty shouldBe true
+    scoredMemories.head.memory.content shouldBe relevantContent
+    scoredMemories.head.score should be > 0.0
+  }
 }

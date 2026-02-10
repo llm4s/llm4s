@@ -11,9 +11,6 @@ import scala.util.{ Try, Using }
 /**
  * PostgreSQL implementation of MemoryStore.
  * Persists agent memories to a Postgres table using JDBC.
- * DESIGN NOTES:
- * - This is an MVP implementation focused on persistence only.
- * - Compound filters (And/Or/Not) and semantic search will be added later.
  */
 final class PostgresMemoryStore private[memory] (
   private val dataSource: HikariDataSource,
@@ -140,9 +137,65 @@ final class PostgresMemoryStore private[memory] (
     Left(
       ProcessingError(
         "postgres-memory-store",
-        "Semantic search is not yet implemented for PostgresMemoryStore. Requires EmbeddingService integration."
+        "Semantic search is not available without an EmbeddingService. Use search(query, topK, filter, embeddingService)."
       )
     )
+
+  def search(
+    query: String,
+    topK: Int,
+    filter: MemoryFilter,
+    embeddingService: EmbeddingService
+  ): Result[Seq[ScoredMemory]] =
+    embeddingService.embed(query).flatMap { queryVector =>
+      if (queryVector.isEmpty) {
+        Left(ProcessingError("postgres-memory-store", "Query embedding is empty"))
+      } else {
+        PostgresMemoryStore.filterToSql(filter).flatMap { case (whereClause, params) =>
+          Try {
+            withConnection { conn =>
+              val sql =
+                s"""
+                   |SELECT *,
+                   |       1 - (embedding <=> ?::vector) AS similarity
+                   |FROM $tableName
+                   |WHERE $whereClause AND embedding IS NOT NULL
+                   |ORDER BY embedding <=> ?::vector
+                   |LIMIT ?
+                 """.stripMargin
+
+              Using.resource(conn.prepareStatement(sql)) { stmt =>
+                val vectorStr = PostgresVectorHelpers.embeddingToString(queryVector)
+
+                stmt.setString(1, vectorStr)
+
+                params.zipWithIndex.foreach { case (param, idx) =>
+                  setParameter(stmt, idx + 2, param)
+                }
+
+                stmt.setString(params.size + 2, vectorStr)
+                stmt.setInt(params.size + 3, topK)
+
+                Using.resource(stmt.executeQuery()) { rs =>
+                  val results = scala.collection.mutable.ArrayBuffer.empty[ScoredMemory]
+                  while (rs.next()) {
+                    val memory = rowToMemory(rs)
+                    val score  = rs.getDouble("similarity")
+                    results += ScoredMemory(
+                      memory,
+                      math.max(0.0, math.min(1.0, score))
+                    )
+                  }
+                  results.toSeq
+                }
+              }
+            }
+          }.toEither.left.map(e =>
+            ProcessingError("postgres-memory-store", s"Semantic search failed: ${e.getMessage}", cause = Some(e))
+          )
+        }
+      }
+    }
 
   override def delete(id: MemoryId): Result[MemoryStore] =
     Try {
@@ -373,13 +426,8 @@ object PostgresMemoryStore {
     }
 
   private[memory] def embeddingToString(embedding: Array[Float]): String =
-    embedding.mkString("[", ",", "]")
+    PostgresVectorHelpers.embeddingToString(embedding)
 
   private[memory] def stringToEmbedding(s: String): Array[Float] =
-    if (s == null || s.isEmpty) Array.empty
-    else {
-      val cleaned = s.stripPrefix("[").stripSuffix("]")
-      if (cleaned.isEmpty) Array.empty
-      else Try(cleaned.split(",").map(_.trim.toFloat)).getOrElse(Array.empty)
-    }
+    PostgresVectorHelpers.stringToEmbedding(s)
 }
