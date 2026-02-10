@@ -175,12 +175,22 @@ class ContainerisedWorkspace(
 
       // Capture and log stdout
       val stdoutReader = new BufferedReader(new InputStreamReader(process.getInputStream))
-      val stdout       = Iterator.continually(stdoutReader.readLine()).takeWhile(_ != null).mkString("\n")
+      val stdout = try {
+        Iterator.continually(stdoutReader.readLine()).takeWhile(_ != null).mkString("\n")
+      } 
+      finally {
+        stdoutReader.close()
+      }
       if (stdout.nonEmpty) logger.info(s"Docker stdout: $stdout")
 
       // Capture and log stderr
       val stderrReader = new BufferedReader(new InputStreamReader(process.getErrorStream))
-      val stderr       = Iterator.continually(stderrReader.readLine()).takeWhile(_ != null).mkString("\n")
+      val stderr = try {
+        Iterator.continually(stderrReader.readLine()).takeWhile(_ != null).mkString("\n")
+      } 
+      finally {
+        stderrReader.close()
+      }
       if (stderr.nonEmpty) logger.warn(s"Docker stderr: $stderr")
 
       (exitCode, stdout, stderr)
