@@ -69,6 +69,25 @@ trait MetricsCollector {
     model: String,
     costUsd: Double
   ): Unit
+
+  /**
+   * Record an image generation request with its outcome and metrics.
+   *
+   * @param provider Provider name (e.g., "openai", "stability", "vertex")
+   * @param model Model name (e.g., "dall-e-3", "ultra")
+   * @param outcome Success or Error with error kind
+   * @param imageCount Number of images generated
+   * @param costUsd Estimated cost in USD
+   * @param duration Request duration
+   */
+  def recordImageGeneration(
+    provider: String,
+    model: String,
+    outcome: Outcome,
+    imageCount: Int,
+    costUsd: Double,
+    duration: FiniteDuration
+  ): Unit
 }
 
 object MetricsCollector {
@@ -96,6 +115,15 @@ object MetricsCollector {
       provider: String,
       model: String,
       costUsd: Double
+    ): Unit = ()
+
+    override def recordImageGeneration(
+      provider: String,
+      model: String,
+      outcome: Outcome,
+      imageCount: Int,
+      costUsd: Double,
+      duration: FiniteDuration
     ): Unit = ()
   }
 }

@@ -12,6 +12,7 @@ class MockMetricsCollector extends MetricsCollector {
   val requestCalls: mutable.Buffer[(String, String, Outcome, FiniteDuration)] = mutable.Buffer.empty
   val tokenCalls: mutable.Buffer[(String, String, Long, Long)]                = mutable.Buffer.empty
   val costCalls: mutable.Buffer[(String, String, Double)]                     = mutable.Buffer.empty
+  val imageGenCalls: mutable.Buffer[(String, String, Outcome, Int, Double, FiniteDuration)] = mutable.Buffer.empty
 
   override def observeRequest(
     provider: String,
@@ -36,11 +37,22 @@ class MockMetricsCollector extends MetricsCollector {
   ): Unit =
     costCalls += ((provider, model, costUsd))
 
+  override def recordImageGeneration(
+    provider: String,
+    model: String,
+    outcome: Outcome,
+    imageCount: Int,
+    costUsd: Double,
+    duration: FiniteDuration
+  ): Unit =
+    imageGenCalls += ((provider, model, outcome, imageCount, costUsd, duration))
+
   // Helper methods for test assertions
   def clearAll(): Unit = {
     requestCalls.clear()
     tokenCalls.clear()
     costCalls.clear()
+    imageGenCalls.clear()
   }
 
   def hasSuccessRequest(provider: String, model: String): Boolean =

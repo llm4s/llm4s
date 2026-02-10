@@ -309,4 +309,39 @@ object TraceEvent {
     )
   }
 
+  /**
+   * Tracks image generation cost for billing and analytics.
+   *
+   * @param costUsd Estimated cost in US dollars
+   * @param provider Provider name (e.g., "openai", "stability", "vertex")
+   * @param model Model name used for generation
+   * @param operation Type of operation: "image_generation" or "image_edit"
+   * @param imageCount Number of images generated
+   * @param imageSize Size of generated images (e.g., "1024x1024")
+   * @param durationMs Request duration in milliseconds
+   */
+  case class ImageGenerationCostRecorded(
+    costUsd: Double,
+    provider: String,
+    model: String,
+    operation: String,
+    imageCount: Int,
+    imageSize: String,
+    durationMs: Long,
+    timestamp: Instant = Instant.now()
+  ) extends TraceEvent {
+    def eventType: String = "image_generation_cost_recorded"
+    def toJson: ujson.Value = ujson.Obj(
+      "event_type"  -> eventType,
+      "timestamp"   -> timestamp.toString,
+      "cost_usd"    -> costUsd,
+      "provider"    -> provider,
+      "model"       -> model,
+      "operation"   -> operation,
+      "image_count" -> imageCount,
+      "image_size"  -> imageSize,
+      "duration_ms" -> durationMs
+    )
+  }
+
 }

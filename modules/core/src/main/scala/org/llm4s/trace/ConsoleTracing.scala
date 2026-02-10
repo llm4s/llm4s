@@ -174,6 +174,19 @@ class ConsoleTracing extends Tracing {
           e.llmCompletionTokens.foreach(t => println(s"${CYAN}LLM Completion Tokens: $t$RESET"))
           e.totalCostUsd.foreach(c => println(s"${CYAN}Total Cost (USD): $$${f"$c%.6f"}$RESET"))
           println()
+
+        case e: TraceEvent.ImageGenerationCostRecorded =>
+          println()
+          printSubHeader("IMAGE GENERATION COST", YELLOW)
+          println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
+          println(s"${YELLOW}Provider: ${e.provider}$RESET")
+          println(s"${YELLOW}Model: ${e.model}$RESET")
+          println(s"${YELLOW}Operation: ${e.operation}$RESET")
+          println(s"${YELLOW}Image Count: ${e.imageCount}$RESET")
+          println(s"${YELLOW}Image Size: ${e.imageSize}$RESET")
+          println(s"${YELLOW}Duration: ${e.durationMs}ms$RESET")
+          println(s"${YELLOW}Cost (USD): $$${f"${e.costUsd}%.6f"}$RESET")
+          println()
       }
     }.toEither.left.map(error => UnknownError(error.getMessage, error))
 
