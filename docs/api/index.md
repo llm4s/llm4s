@@ -1,6 +1,6 @@
 ---
 layout: page
-title: API Referance
+title: API Reference
 nav_order: 6
 has_children: true
 ---
