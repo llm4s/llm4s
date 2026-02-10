@@ -109,7 +109,7 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     )
 
     val usage = TokenUsage(10, 5, 15)
-    val cost = CostEstimator.estimateFromMetadata(Some(precisePricing), usage)
+    val cost  = CostEstimator.estimateFromMetadata(Some(precisePricing), usage)
 
     cost shouldBe defined
     // 10 * 0.000001 + 5 * 0.000002 = 0.00001 + 0.00001 = 0.00002
@@ -118,7 +118,7 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
 
   it should "handle zero tokens" in {
     val usage = TokenUsage(0, 0, 0)
-    val cost = CostEstimator.estimateFromMetadata(Some(pricedMetadata), usage)
+    val cost  = CostEstimator.estimateFromMetadata(Some(pricedMetadata), usage)
 
     cost shouldBe defined
     cost.get shouldBe 0.0
@@ -126,7 +126,7 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
 
   it should "handle large token counts" in {
     val largeUsage = TokenUsage(100000, 50000, 150000)
-    val cost = CostEstimator.estimateFromMetadata(Some(pricedMetadata), largeUsage)
+    val cost       = CostEstimator.estimateFromMetadata(Some(pricedMetadata), largeUsage)
 
     cost shouldBe defined
     // 100000 * 0.00001 + 50000 * 0.00002 = 1.0 + 1.0 = 2.0

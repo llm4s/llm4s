@@ -225,10 +225,12 @@ class OpenAIClient private (
       e.toLLMError
     }
 
-    attempt.flatMap(_ => accumulator.toCompletion.map { c =>
-      val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
-      c.copy(model = model, estimatedCost = cost)
-    })
+    attempt.flatMap(_ =>
+      accumulator.toCompletion.map { c =>
+        val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
+        c.copy(model = model, estimatedCost = cost)
+      }
+    )
   }
 
   /**

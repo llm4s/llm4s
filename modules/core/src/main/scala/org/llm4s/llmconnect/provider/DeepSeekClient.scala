@@ -141,10 +141,14 @@ class DeepSeekClient(
             }
           }
           Try(reader.close()); Try(response.body().close())
-          loopTry.toEither.left.map(_.toLLMError).flatMap(_ => accumulator.toCompletion.map { c =>
-            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            c.copy(model = config.model, estimatedCost = cost)
-          })
+          loopTry.toEither.left
+            .map(_.toLLMError)
+            .flatMap(_ =>
+              accumulator.toCompletion.map { c =>
+                val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+                c.copy(model = config.model, estimatedCost = cost)
+              }
+            )
         }
       }
     }
@@ -284,7 +288,7 @@ class DeepSeekClient(
 
     // Estimate cost using CostEstimator
     val modelId = json("model").str
-    val cost = usage.flatMap(u => CostEstimator.estimate(modelId, u))
+    val cost    = usage.flatMap(u => CostEstimator.estimate(modelId, u))
 
     Completion(
       id = json("id").str,

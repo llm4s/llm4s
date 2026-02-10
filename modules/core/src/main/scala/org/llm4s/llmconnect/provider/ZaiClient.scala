@@ -144,10 +144,12 @@ class ZaiClient(
             }
           }.toEither.left.map(_.toLLMError)
 
-          streamResult.flatMap(_ => accumulator.toCompletion.map { c =>
-            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            c.copy(model = config.model, estimatedCost = cost)
-          })
+          streamResult.flatMap(_ =>
+            accumulator.toCompletion.map { c =>
+              val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+              c.copy(model = config.model, estimatedCost = cost)
+            }
+          )
         }
       }
     }
@@ -308,7 +310,7 @@ class ZaiClient(
 
     // Estimate cost using CostEstimator
     val modelId = json("model").str
-    val cost = usage.flatMap(u => CostEstimator.estimate(modelId, u))
+    val cost    = usage.flatMap(u => CostEstimator.estimate(modelId, u))
 
     Completion(
       id = json("id").str,

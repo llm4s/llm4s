@@ -162,10 +162,12 @@ class GeminiClient(
 
             processEither.left
               .map(_.toLLMError)
-              .flatMap(_ => accumulator.toCompletion.map { c =>
-                val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-                c.copy(model = config.model, estimatedCost = cost)
-              })
+              .flatMap(_ =>
+                accumulator.toCompletion.map { c =>
+                  val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+                  c.copy(model = config.model, estimatedCost = cost)
+                }
+              )
           }
       }
     }
