@@ -3,6 +3,7 @@ package org.llm4s.imagegeneration
 import java.time.Instant
 import java.nio.file.Path
 import org.llm4s.imagegeneration.provider.{
+  BedrockClient,
   HttpClient,
   HuggingFaceClient,
   OpenAIImageClient,
@@ -405,8 +406,9 @@ object ImageGeneration {
       case openAIConfig: OpenAIConfig =>
         val httpClient = HttpClient.create()
         new OpenAIImageClient(openAIConfig, httpClient)
+      case bedrockConfig: BedrockConfig =>
+        new BedrockClient(bedrockConfig)
       case _ =>
-        // For PR flow, other providers (Vertex, Bedrock, etc.) are not yet available in this branch
         throw new UnsupportedOperationException(s"Provider ${config.provider} is not yet integrated in this version.")
     }
   }
