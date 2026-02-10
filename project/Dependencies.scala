@@ -79,8 +79,9 @@ object Deps {
   val cask       = "com.lihaoyi" %% "cask" % Versions.cask
 
   // AWS SDK
-  val awsS3      = "software.amazon.awssdk" % "s3"  % Versions.awsSdk
-  val awsSts     = "software.amazon.awssdk" % "sts" % Versions.awsSdk
+  val awsS3               = "software.amazon.awssdk" % "s3"               % Versions.awsSdk
+  val awsSts              = "software.amazon.awssdk" % "sts"              % Versions.awsSdk
+  val awsBedrockRuntime   = "software.amazon.awssdk" % "bedrockruntime"   % Versions.awsSdk
 
   val opentelemetryApi = "io.opentelemetry" % "opentelemetry-api" % Versions.opentelemetry
   val opentelemetrySdk = "io.opentelemetry" % "opentelemetry-sdk" % Versions.opentelemetry

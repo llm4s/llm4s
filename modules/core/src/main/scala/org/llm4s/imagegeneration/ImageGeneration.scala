@@ -412,7 +412,6 @@ object ImageGeneration {
         val httpClient = HttpClient.create()
         new OpenAIImageClient(openAIConfig, httpClient)
       case vertexConfig: VertexAIConfig =>
-
         new VertexAIClient(vertexConfig)
       case bedrockConfig: BedrockConfig =>
         new BedrockClient(bedrockConfig)

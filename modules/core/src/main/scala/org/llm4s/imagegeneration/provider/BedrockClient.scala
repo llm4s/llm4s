@@ -131,6 +131,14 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
       options.seed.foreach { seed =>
         imageGenConfig("seed") = ujson.Num(seed.toDouble)
       }
+=======
+        "numberOfImages" -> count,
+        "width"          -> width,
+        "height"         -> height
+      )
+
+      options.seed.foreach(seed => imageGenConfig("seed") = seed)
+>>>>>>> a2fcb5a (feat(providers): Add AWS Bedrock Image Generation client)
 
       ujson.Obj(
         "taskType" -> "TEXT_IMAGE",
@@ -146,6 +154,7 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
           ujson.Obj("text" -> prompt)
         ),
         "cfg_scale" -> 7,
+<<<<<<< HEAD
         "seed" -> ujson.Num(options.seed.map(_.toDouble).getOrElse(0.0)),
         "steps" -> 50,
         "width" -> ujson.Num(width),
