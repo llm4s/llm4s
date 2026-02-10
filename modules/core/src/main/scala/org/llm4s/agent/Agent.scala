@@ -344,14 +344,8 @@ class Agent(client: LLMClient) {
               logger.error("[DEBUG]   Error type: {}", error.getClass.getSimpleName)
               logger.error("[DEBUG]   Error message: {}", errorMessage)
             }
-            // Escape the error message for JSON
-            val escapedMessage = errorMessage
-              .replace("\\", "\\\\")
-              .replace("\"", "\\\"")
-              .replace("\n", "\\n")
-              .replace("\r", "\\r")
-              .replace("\t", "\\t")
-            val errorJson = s"""{ "isError": true, "error": "$escapedMessage" }"""
+            // Build structured JSON error using ujson (no manual escaping needed)
+            val errorJson = ToolCallErrorJson.toJson(error).render()
             if (!debug) {
               logger.warn("Tool {} failed in {}ms with error: {}", toolCall.name, duration, errorMessage)
             }
@@ -428,13 +422,8 @@ class Agent(client: LLMClient) {
           if (debug) {
             logger.error("[DEBUG] Tool {} FAILED in {}ms: {}", toolCall.name, duration, errorMessage)
           }
-          val escapedMessage = errorMessage
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\t", "\\t")
-          s"""{ "isError": true, "error": "$escapedMessage" }"""
+          // Build structured JSON error using ujson (no manual escaping needed)
+          ToolCallErrorJson.toJson(error).render()
       }
 
       ToolMessage(resultContent, toolCall.id)
@@ -1389,9 +1378,9 @@ class Agent(client: LLMClient) {
           (jsonStr, true)
 
         case Left(error) =>
-          val errorMessage   = error.getFormattedMessage
-          val escapedMessage = errorMessage.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
-          val errorJson      = s"""{ "isError": true, "error": "$escapedMessage" }"""
+          val errorMessage = error.getFormattedMessage
+          // Build structured JSON error using ujson (no manual escaping needed)
+          val errorJson = ToolCallErrorJson.toJson(error).render()
           if (debug) {
             logger.error("[DEBUG] Tool {} FAILED in {}ms: {}", toolCall.name, duration, errorMessage)
           }

@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.agent.streaming.AgentEvent
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi._
@@ -7,6 +8,8 @@ import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default._
+
+import scala.collection.mutable.ArrayBuffer
 
 class AgentToolFailureTest extends AnyFlatSpec with Matchers with MockFactory {
 
@@ -235,5 +238,498 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers with MockFactory {
     // Verify validation passes
     (toolMessage.validate should be).a(Symbol("right"))
     (Message.validateConversation(stateAfterToolExecution.conversation.messages.toList) should be).a(Symbol("right"))
+  }
+
+  // ============================================================================
+  // Structured JSON Error Payload Tests
+  // ============================================================================
+
+  "Agent" should "produce structured JSON with errorType null_arguments" in {
+    val mockClient = mock[LLMClient]
+
+    // Create a tool that requires parameters
+    val schema = Schema
+      .`object`[Map[String, Any]]("Tool parameters")
+      .withRequiredField("query", Schema.string("Search query"))
+
+    val searchTool = ToolBuilder[Map[String, Any], ToolResult](
+      "search_tool",
+      "Search for items",
+      schema
+    ).withHandler(extractor => extractor.getString("query").map(q => ToolResult(s"Found: $q"))).build()
+
+    val toolRegistry = new ToolRegistry(Seq(searchTool))
+    val agent        = new Agent(mockClient)
+
+    val initialState = agent.initialize(query = "Search for apples", tools = toolRegistry)
+
+    val assistantResponseWithToolCall = AssistantMessage(
+      contentOpt = None,
+      toolCalls = Seq(
+        ToolCall(id = "call_null", name = "search_tool", arguments = ujson.Null)
+      )
+    )
+
+    val completionWithToolCall = Completion(
+      id = "completion-null",
+      created = System.currentTimeMillis() / 1000,
+      content = assistantResponseWithToolCall.content,
+      model = "test-model",
+      message = assistantResponseWithToolCall,
+      toolCalls = assistantResponseWithToolCall.toolCalls.toList,
+      usage = Some(TokenUsage(100, 50, 150))
+    )
+
+    (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
+
+    val step1Result        = agent.runStep(initialState)
+    val stateAfterToolCall = step1Result.getOrElse(fail("Expected successful step"))
+    val step2Result        = agent.runStep(stateAfterToolCall)
+    val stateAfterExec     = step2Result.getOrElse(fail("Expected successful step"))
+
+    val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
+    toolMessages should have size 1
+
+    val json = ujson.read(toolMessages.head.content)
+
+    // Validate structured JSON fields
+    json("isError").bool shouldBe true
+    json("toolName").str shouldBe "search_tool"
+    json("errorType").str shouldBe "null_arguments"
+    json("message").str should include("null arguments")
+    json("error").str should include("Tool call 'search_tool'") // Legacy field
+  }
+
+  "Agent" should "produce structured JSON with errorType handler_error" in {
+    val mockClient = mock[LLMClient]
+
+    val failingTool = createFailingTool("database_tool", "Connection timeout after 30s")
+
+    val toolRegistry = new ToolRegistry(Seq(failingTool))
+    val agent        = new Agent(mockClient)
+
+    val initialState = agent.initialize(query = "Query database", tools = toolRegistry)
+
+    val assistantResponseWithToolCall = AssistantMessage(
+      contentOpt = None,
+      toolCalls = Seq(
+        ToolCall(id = "call_handler", name = "database_tool", arguments = ujson.Obj("item" -> "test"))
+      )
+    )
+
+    val completionWithToolCall = Completion(
+      id = "completion-handler",
+      created = System.currentTimeMillis() / 1000,
+      content = assistantResponseWithToolCall.content,
+      model = "test-model",
+      message = assistantResponseWithToolCall,
+      toolCalls = assistantResponseWithToolCall.toolCalls.toList,
+      usage = Some(TokenUsage(100, 50, 150))
+    )
+
+    (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
+
+    val step1Result        = agent.runStep(initialState)
+    val stateAfterToolCall = step1Result.getOrElse(fail("Expected successful step"))
+    val step2Result        = agent.runStep(stateAfterToolCall)
+    val stateAfterExec     = step2Result.getOrElse(fail("Expected successful step"))
+
+    val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
+    toolMessages should have size 1
+
+    val json = ujson.read(toolMessages.head.content)
+
+    // Validate structured JSON fields
+    json("isError").bool shouldBe true
+    json("toolName").str shouldBe "database_tool"
+    json("errorType").str shouldBe "handler_error"
+    json("message").str should include("Connection timeout after 30s")
+    json("error").str should include("Tool call 'database_tool'")
+  }
+
+  "Agent" should "always include legacy error field for backward compatibility" in {
+    val mockClient = mock[LLMClient]
+
+    val failingTool = createFailingTool("legacy_test_tool", "Test error")
+
+    val toolRegistry = new ToolRegistry(Seq(failingTool))
+    val agent        = new Agent(mockClient)
+
+    val initialState = agent.initialize(query = "Test", tools = toolRegistry)
+
+    val assistantResponseWithToolCall = AssistantMessage(
+      contentOpt = None,
+      toolCalls = Seq(
+        ToolCall(id = "call_legacy", name = "legacy_test_tool", arguments = ujson.Obj())
+      )
+    )
+
+    val completionWithToolCall = Completion(
+      id = "completion-legacy",
+      created = System.currentTimeMillis() / 1000,
+      content = assistantResponseWithToolCall.content,
+      model = "test-model",
+      message = assistantResponseWithToolCall,
+      toolCalls = assistantResponseWithToolCall.toolCalls.toList,
+      usage = Some(TokenUsage(100, 50, 150))
+    )
+
+    (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
+
+    val step1Result        = agent.runStep(initialState)
+    val stateAfterToolCall = step1Result.getOrElse(fail("Expected successful step"))
+    val step2Result        = agent.runStep(stateAfterToolCall)
+    val stateAfterExec     = step2Result.getOrElse(fail("Expected successful step"))
+
+    val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
+    val json         = ujson.read(toolMessages.head.content)
+
+    // Legacy error field must always be present
+    json.obj.contains("error") shouldBe true
+    json("error").str should not be empty
+    json("error").str should include("Tool call")
+  }
+
+  "Agent" should "produce valid JSON without double-escaping special characters" in {
+    val mockClient = mock[LLMClient]
+
+    // Error with quotes, newlines, backslashes, tabs
+    val specialError = "Error: \"user\" not found\nPath: C:\\Users\\test\tEnd"
+    val failingTool  = createFailingTool("special_json_tool", specialError)
+
+    val toolRegistry = new ToolRegistry(Seq(failingTool))
+    val agent        = new Agent(mockClient)
+
+    val initialState = agent.initialize(query = "Test", tools = toolRegistry)
+
+    val assistantResponseWithToolCall = AssistantMessage(
+      contentOpt = None,
+      toolCalls = Seq(
+        ToolCall(id = "call_special", name = "special_json_tool", arguments = ujson.Obj())
+      )
+    )
+
+    val completionWithToolCall = Completion(
+      id = "completion-special",
+      created = System.currentTimeMillis() / 1000,
+      content = assistantResponseWithToolCall.content,
+      model = "test-model",
+      message = assistantResponseWithToolCall,
+      toolCalls = assistantResponseWithToolCall.toolCalls.toList,
+      usage = Some(TokenUsage(100, 50, 150))
+    )
+
+    (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
+
+    val step1Result        = agent.runStep(initialState)
+    val stateAfterToolCall = step1Result.getOrElse(fail("Expected successful step"))
+    val step2Result        = agent.runStep(stateAfterToolCall)
+    val stateAfterExec     = step2Result.getOrElse(fail("Expected successful step"))
+
+    val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
+    val content      = toolMessages.head.content
+
+    // Must be valid JSON (no parse errors)
+    val parseResult = scala.util.Try(ujson.read(content))
+    parseResult.isSuccess shouldBe true
+
+    val json = parseResult.get
+    // The message field should contain the special characters properly
+    json("message").str should include("\"user\"")
+    json("message").str should include("not found")
+  }
+
+  "Agent" should "pass ToolMessage validation with structured error content" in {
+    val mockClient = mock[LLMClient]
+
+    val failingTool = createFailingTool("validation_tool", "Validation test error")
+
+    val toolRegistry = new ToolRegistry(Seq(failingTool))
+    val agent        = new Agent(mockClient)
+
+    val initialState = agent.initialize(query = "Test", tools = toolRegistry)
+
+    val assistantResponseWithToolCall = AssistantMessage(
+      contentOpt = None,
+      toolCalls = Seq(
+        ToolCall(id = "call_validate", name = "validation_tool", arguments = ujson.Obj())
+      )
+    )
+
+    val completionWithToolCall = Completion(
+      id = "completion-validate",
+      created = System.currentTimeMillis() / 1000,
+      content = assistantResponseWithToolCall.content,
+      model = "test-model",
+      message = assistantResponseWithToolCall,
+      toolCalls = assistantResponseWithToolCall.toolCalls.toList,
+      usage = Some(TokenUsage(100, 50, 150))
+    )
+
+    (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
+
+    val step1Result        = agent.runStep(initialState)
+    val stateAfterToolCall = step1Result.getOrElse(fail("Expected successful step"))
+    val step2Result        = agent.runStep(stateAfterToolCall)
+    val stateAfterExec     = step2Result.getOrElse(fail("Expected successful step"))
+
+    val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
+
+    // All messages should pass validation
+    toolMessages.foreach(msg => (msg.validate should be).a(Symbol("right")))
+
+    // Conversation should also be valid
+    (Message.validateConversation(stateAfterExec.conversation.messages.toList) should be).a(Symbol("right"))
+  }
+
+  // ============================================================================
+  // ToolCallErrorJson Unit Tests (direct serialization)
+  // ============================================================================
+
+  "ToolCallErrorJson" should "serialize UnknownFunction correctly" in {
+    val error = ToolCallError.UnknownFunction("nonexistent_tool")
+    val json  = ToolCallErrorJson.toJson(error)
+
+    json("isError").bool shouldBe true
+    json("toolName").str shouldBe "nonexistent_tool"
+    json("errorType").str shouldBe "unknown_function"
+    json("message").str shouldBe "is not a recognized tool"
+    json("error").str should include("Tool call 'nonexistent_tool'")
+    json.obj.get("parameterErrors") shouldBe None
+  }
+
+  "ToolCallErrorJson" should "serialize NullArguments correctly" in {
+    val error = ToolCallError.NullArguments("my_tool")
+    val json  = ToolCallErrorJson.toJson(error)
+
+    json("isError").bool shouldBe true
+    json("toolName").str shouldBe "my_tool"
+    json("errorType").str shouldBe "null_arguments"
+    json("message").str should include("null arguments")
+  }
+
+  "ToolCallErrorJson" should "serialize InvalidArguments with parameterErrors" in {
+    val paramErrors = List(
+      ToolParameterError.MissingParameter("query", "string", List("q", "search")),
+      ToolParameterError.TypeMismatch("count", "integer", "string")
+    )
+    val error = ToolCallError.InvalidArguments("search_tool", paramErrors)
+    val json  = ToolCallErrorJson.toJson(error)
+
+    json("isError").bool shouldBe true
+    json("toolName").str shouldBe "search_tool"
+    json("errorType").str shouldBe "invalid_arguments"
+    json("parameterErrors").arr should have size 2
+
+    // First parameter error (MissingParameter)
+    val pe0 = json("parameterErrors")(0)
+    pe0("parameterName").str shouldBe "query"
+    pe0("kind").str shouldBe "missing_parameter"
+    pe0("expectedType").str shouldBe "string"
+    pe0("receivedType") shouldBe ujson.Null
+    (pe0("availableParameters").arr.map(_.str) should contain).allOf("q", "search")
+
+    // Second parameter error (TypeMismatch)
+    val pe1 = json("parameterErrors")(1)
+    pe1("parameterName").str shouldBe "count"
+    pe1("kind").str shouldBe "type_mismatch"
+    pe1("expectedType").str shouldBe "integer"
+    pe1("receivedType").str shouldBe "string"
+  }
+
+  "ToolCallErrorJson" should "serialize HandlerError correctly" in {
+    val error = ToolCallError.HandlerError("api_tool", "API rate limit exceeded")
+    val json  = ToolCallErrorJson.toJson(error)
+
+    json("isError").bool shouldBe true
+    json("toolName").str shouldBe "api_tool"
+    json("errorType").str shouldBe "handler_error"
+    json("message").str should include("API rate limit exceeded")
+    json.obj.get("parameterErrors") shouldBe None
+  }
+
+  "ToolCallErrorJson" should "serialize ExecutionError with exceptionType" in {
+    val error = ToolCallError.ExecutionError("crash_tool", new RuntimeException("Out of memory"))
+    val json  = ToolCallErrorJson.toJson(error)
+
+    json("isError").bool shouldBe true
+    json("toolName").str shouldBe "crash_tool"
+    json("errorType").str shouldBe "execution_error"
+    json("exceptionType").str shouldBe "RuntimeException"
+    json("message").str should include("Out of memory")
+  }
+
+  "ToolCallErrorJson" should "flatten MultipleErrors into parameterErrors array" in {
+    val nested = ToolParameterError.MultipleErrors(
+      List(
+        ToolParameterError.MissingParameter("param1", "string"),
+        ToolParameterError.MissingParameter("param2", "integer")
+      )
+    )
+    val error = ToolCallError.InvalidArguments("multi_tool", List(nested))
+    val json  = ToolCallErrorJson.toJson(error)
+
+    json("parameterErrors").arr should have size 2
+    json("parameterErrors")(0)("parameterName").str shouldBe "param1"
+    json("parameterErrors")(1)("parameterName").str shouldBe "param2"
+  }
+
+  "ToolCallErrorJson" should "handle NullParameter correctly" in {
+    val paramErrors = List(ToolParameterError.NullParameter("name", "string"))
+    val error       = ToolCallError.InvalidArguments("null_param_tool", paramErrors)
+    val json        = ToolCallErrorJson.toJson(error)
+
+    json("parameterErrors").arr should have size 1
+    val pe = json("parameterErrors")(0)
+    pe("parameterName").str shouldBe "name"
+    pe("kind").str shouldBe "null_parameter"
+    pe("expectedType").str shouldBe "string"
+    pe("receivedType").str shouldBe "null"
+  }
+
+  "ToolCallErrorJson" should "handle InvalidNesting correctly" in {
+    val paramErrors = List(ToolParameterError.InvalidNesting("child", "parent", "array"))
+    val error       = ToolCallError.InvalidArguments("nested_tool", paramErrors)
+    val json        = ToolCallErrorJson.toJson(error)
+
+    json("parameterErrors").arr should have size 1
+    val pe = json("parameterErrors")(0)
+    pe("parameterName").str shouldBe "child"
+    pe("kind").str shouldBe "invalid_nesting"
+    pe("expectedType").str shouldBe "object"
+    pe("receivedType").str shouldBe "array"
+  }
+
+  // ============================================================================
+  // Additional tests for coverage completeness
+  // ============================================================================
+
+  "ToolCallErrorJson" should "handle MissingParameter without available parameters" in {
+    // Test case: MissingParameter with empty availableParameters list
+    val paramErrors = List(ToolParameterError.MissingParameter("username", "string", Nil))
+    val error       = ToolCallError.InvalidArguments("user_tool", paramErrors)
+    val json        = ToolCallErrorJson.toJson(error)
+
+    json("parameterErrors").arr should have size 1
+    val pe = json("parameterErrors")(0)
+    pe("parameterName").str shouldBe "username"
+    pe("kind").str shouldBe "missing_parameter"
+    pe("expectedType").str shouldBe "string"
+    pe("receivedType") shouldBe ujson.Null
+    // Should NOT have availableParameters field when list is empty
+    pe.obj.get("availableParameters") shouldBe None
+  }
+
+  "ToolCallErrorJson.parameterErrorToJson" should "handle MultipleErrors directly" in {
+    // Tests the fallback case in parameterErrorToJson for MultipleErrors
+    // This case shouldn't normally occur (errors are flattened), but should handle gracefully
+    val multiError = ToolParameterError.MultipleErrors(
+      List(
+        ToolParameterError.MissingParameter("field1", "string"),
+        ToolParameterError.TypeMismatch("field2", "integer", "boolean")
+      )
+    )
+    val json = ToolCallErrorJson.parameterErrorToJson(multiError)
+
+    json("parameterName").str shouldBe "field1, field2"
+    json("kind").str shouldBe "multiple_errors"
+  }
+
+  "MissingParameter.getMessage" should "include available parameters when present" in {
+    val error = ToolParameterError.MissingParameter("query", "string", List("q", "search", "term"))
+    error.getMessage should include("available: q, search, term")
+  }
+
+  "MissingParameter.getMessage" should "not include available hint when list is empty" in {
+    val error = ToolParameterError.MissingParameter("query", "string", Nil)
+    error.getMessage shouldBe "required parameter 'query' (type: string) is missing"
+    (error.getMessage should not).include("available")
+  }
+
+  // ============================================================================
+  // Test for streaming events with tool failure (covers Agent line 1383)
+  // ============================================================================
+
+  /**
+   * Simple mock LLMClient for testing tool failures with streaming events.
+   */
+  class StreamingMockLLMClient(responses: Seq[Either[org.llm4s.error.APIError, Completion]]) extends LLMClient {
+
+    private var callIndex = 0
+
+    override def complete(
+      conversation: Conversation,
+      options: CompletionOptions
+    ): Either[org.llm4s.error.APIError, Completion] = {
+      val result = if (callIndex < responses.size) responses(callIndex) else responses.last
+      callIndex += 1
+      result
+    }
+
+    override def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Either[org.llm4s.error.APIError, Completion] = complete(conversation, options)
+
+    override def getContextWindow(): Int     = 4096
+    override def getReserveCompletion(): Int = 1024
+  }
+
+  "Agent.runWithEvents" should "emit ToolCallFailed event when tool execution fails" in {
+    // Create a tool that always fails
+    val failingTool  = createFailingTool("failing_stream_tool", "Simulated streaming failure")
+    val toolRegistry = new ToolRegistry(Seq(failingTool))
+
+    // Create tool call response
+    val toolCall = ToolCall(
+      id = "stream_call_001",
+      name = "failing_stream_tool",
+      arguments = ujson.Obj("item" -> "test", "quantity" -> 1)
+    )
+    val toolCallResponse = AssistantMessage(
+      contentOpt = Some("Let me use the tool"),
+      toolCalls = Seq(toolCall)
+    )
+    val completion1 = Completion(
+      id = "comp-1",
+      created = System.currentTimeMillis() / 1000,
+      content = toolCallResponse.content,
+      model = "test-model",
+      message = toolCallResponse,
+      toolCalls = List(toolCall),
+      usage = Some(TokenUsage(10, 10, 20))
+    )
+
+    // Final response after tool error
+    val finalResponse = AssistantMessage(contentOpt = Some("Tool failed, sorry."))
+    val completion2 = Completion(
+      id = "comp-2",
+      created = System.currentTimeMillis() / 1000,
+      content = finalResponse.content,
+      model = "test-model",
+      message = finalResponse,
+      toolCalls = Nil,
+      usage = Some(TokenUsage(10, 10, 20))
+    )
+
+    val mockClient = new StreamingMockLLMClient(Seq(Right(completion1), Right(completion2)))
+    val agent      = new Agent(mockClient)
+
+    val events = ArrayBuffer[AgentEvent]()
+
+    val result = agent.runWithEvents(
+      query = "Use the failing tool",
+      tools = toolRegistry,
+      onEvent = events += _
+    )
+
+    result.isRight shouldBe true
+
+    // Should have received ToolCallFailed event
+    val failedEvents = events.collect { case e: AgentEvent.ToolCallFailed => e }
+    failedEvents should have size 1
+    failedEvents.head.toolName shouldBe "failing_stream_tool"
+    failedEvents.head.error should include("isError")
   }
 }
