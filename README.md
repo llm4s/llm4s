@@ -151,6 +151,8 @@ sbt +compile
 # Build and test all versions
 sbt buildAll
 ```
+### Setup your IDE
+> **See:** [docs/reference/contributing.md#IDE-Setup](docs/reference/contributing.md#IDE-Setup)
 
 ### Setup your LLM Environment
 
