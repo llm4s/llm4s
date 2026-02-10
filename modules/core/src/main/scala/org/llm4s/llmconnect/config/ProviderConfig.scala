@@ -462,6 +462,8 @@ case class CohereConfig(
 object CohereConfig {
   private val logger = LoggerFactory.getLogger(getClass)
 
+  val DEFAULT_BASE_URL: String = "https://api.cohere.com"
+
   private val DefaultContextWindow     = 128000
   private val DefaultReserveCompletion = 4096
 

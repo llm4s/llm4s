@@ -94,7 +94,7 @@ GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta  # Optional
 # Cohere Configuration
 # ===================
 COHERE_API_KEY=your-cohere-api-key
-COHERE_BASE_URL=https://api.cohere.ai  # Optional
+COHERE_BASE_URL=https://api.cohere.com  # Optional
 
 # ===================
 # Tracing Configuration

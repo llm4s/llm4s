@@ -197,12 +197,12 @@ DEEPSEEK_API_KEY=<your_deepseek_api_key>
 
 > **Migration Note:** The `LLMProvider.DeepSeek` case has been added to the sealed `LLMProvider` ADT. If you have exhaustive pattern matches on `LLMProvider`, add a `case LLMProvider.DeepSeek => ...` handler, or use a wildcard `case _ => ...` to gracefully handle future providers.
 
-or Cohere:
+Or Cohere:
 
 ```
 LLM_MODEL=cohere/command-r
 COHERE_API_KEY=<your_cohere_api_key>
-COHERE_BASE_URL=https://api.cohere.ai
+COHERE_BASE_URL=https://api.cohere.com
 ```
 
 This will allow you to run the non-containerized examples.

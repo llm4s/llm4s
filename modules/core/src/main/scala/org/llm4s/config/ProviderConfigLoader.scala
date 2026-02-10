@@ -350,7 +350,7 @@ private[config] object ProviderConfigLoader {
 
         apiKeyResult.map { apiKey =>
           val baseUrl =
-            cohere.baseUrl.map(_.trim).filter(_.nonEmpty).getOrElse("https://api.cohere.ai")
+            cohere.baseUrl.map(_.trim).filter(_.nonEmpty).getOrElse(CohereConfig.DEFAULT_BASE_URL)
 
           CohereConfig.fromValues(modelName, apiKey, baseUrl)
         }

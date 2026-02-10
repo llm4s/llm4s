@@ -15,12 +15,12 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 /**
- * Minimal Cohere provider client (v1 scope).
+ * Minimal Cohere provider client (v2 scope).
  *
  * Supported:
- * - Non-streaming chat completion via Cohere v1 `/chat` API.
+ * - Non-streaming chat completion via Cohere v2 `/chat` API.
  *
- * Intentionally not supported in v1:
+ * Intentionally not supported in v2:
  * - Streaming
  * - Tool calling
  * - Embeddings
@@ -43,7 +43,7 @@ class CohereClient(
       buildChatRequest(conversation, options).flatMap { requestBody =>
         val request = HttpRequest
           .newBuilder()
-          .uri(URI.create(s"${config.baseUrl}/v1/chat"))
+          .uri(URI.create(s"${config.baseUrl}/v2/chat"))
           .header("Content-Type", "application/json")
           .header("Authorization", s"Bearer ${config.apiKey}")
           .timeout(Duration.ofMinutes(2))
@@ -79,7 +79,7 @@ class CohereClient(
   ): Result[Completion] =
     Left(
       ConfigurationError(
-        "Cohere streaming is not supported in this minimal v1 provider implementation"
+        "Cohere streaming is not supported in this minimal v2 provider implementation"
       )
     )
 
@@ -103,74 +103,85 @@ class CohereClient(
     conversation: Conversation,
     options: CompletionOptions
   ): Result[ujson.Obj] = {
-    val systemPreamble = conversation.messages.collectFirst { case SystemMessage(content) => content }
+    val messages = toCohereV2Messages(conversation)
 
-    val lastUserMessageOpt = conversation.messages.reverse.collectFirst { case UserMessage(content) => content }
-
-    val lastUserMessage =
-      lastUserMessageOpt.toRight(ValidationError("conversation", "Cohere requires a final user message"))
-
-    lastUserMessage.map { message =>
-      val chatHistory = toChatHistory(conversation)
-
+    if (messages.isEmpty)
+      Left(ValidationError("conversation", "Cohere requires at least one message"))
+    else {
       val req = ujson.Obj(
-        "model"   -> config.model,
-        "message" -> message
+        "model"    -> config.model,
+        "messages" -> ujson.Arr(messages: _*)
       )
 
-      systemPreamble.foreach(p => req("preamble") = p)
-      if (chatHistory.nonEmpty)
-        req("chat_history") = ujson.Arr(chatHistory: _*)
-
-      // Map supported completion options (minimal v1 scope).
       req("temperature") = options.temperature
       options.maxTokens.foreach(mt => req("max_tokens") = mt)
 
-      req
+      Right(req)
     }
   }
 
-  private def toChatHistory(conversation: Conversation): Seq[ujson.Value] = {
-    val systemIndexOpt = conversation.messages.indexWhere(_.isInstanceOf[SystemMessage]) match {
-      case -1 => None
-      case i  => Some(i)
-    }
+  private def toCohereV2Messages(conversation: Conversation): Seq[ujson.Value] =
+    conversation.messages.flatMap {
+      case SystemMessage(content) =>
+        Some(
+          ujson.Obj(
+            "role" -> "system",
+            "content" -> ujson.Arr(
+              ujson.Obj(
+                "type" -> "text",
+                "text" -> content
+              )
+            )
+          )
+        )
 
-    val lastUserIndexOpt = {
-      val idx = conversation.messages.lastIndexWhere(_.isInstanceOf[UserMessage])
-      if (idx == -1) None else Some(idx)
-    }
+      case UserMessage(content) =>
+        Some(
+          ujson.Obj(
+            "role" -> "user",
+            "content" -> ujson.Arr(
+              ujson.Obj(
+                "type" -> "text",
+                "text" -> content
+              )
+            )
+          )
+        )
 
-    (systemIndexOpt, lastUserIndexOpt) match {
-      case (_, None) =>
-        Seq.empty
-
-      case (sysIdxOpt, Some(lastUserIdx)) =>
-        val start = sysIdxOpt.map(_ + 1).getOrElse(0)
-        val end   = math.max(start, lastUserIdx)
-
-        conversation.messages.slice(start, end).flatMap {
-          case UserMessage(content) =>
-            Some(ujson.Obj("role" -> "USER", "message" -> content))
-
-          case AssistantMessage(contentOpt, _) =>
-            contentOpt.filter(_.nonEmpty).map(c => ujson.Obj("role" -> "CHATBOT", "message" -> c))
-
-          case _ =>
-            None
+      case AssistantMessage(contentOpt, _) =>
+        contentOpt.filter(_.nonEmpty).map { c =>
+          ujson.Obj(
+            "role" -> "assistant",
+            "content" -> ujson.Arr(
+              ujson.Obj(
+                "type" -> "text",
+                "text" -> c
+              )
+            )
+          )
         }
+
+      case _ =>
+        None
     }
-  }
 
   private def parseChatResponse(body: String): Result[Completion] =
     Try {
-      val json           = ujson.read(body)
-      val text           = json.obj.get("text").flatMap(_.strOpt).getOrElse("")
-      val generationId   = json.obj.get("generation_id").flatMap(_.strOpt).getOrElse("")
+      val json = ujson.read(body)
+      val text = json.obj
+        .get("message")
+        .flatMap(_.obj.get("content"))
+        .flatMap(_.arrOpt)
+        .flatMap(_.headOption)
+        .flatMap(_.obj.get("text"))
+        .flatMap(_.strOpt)
+        .getOrElse("")
+
+      val generationId   = json.obj.get("id").flatMap(_.strOpt).getOrElse("")
       val createdSeconds = System.currentTimeMillis() / 1000
 
       val usageOpt = json.obj
-        .get("meta")
+        .get("usage")
         .flatMap(_.obj.get("tokens"))
         .flatMap { tokens =>
           val input  = tokens.obj.get("input_tokens").flatMap(_.numOpt).map(_.toInt)

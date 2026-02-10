@@ -10,7 +10,7 @@ import scala.util.Try
 /**
  * Cohere Rerank API implementation.
  *
- * Calls POST https://api.cohere.ai/v1/rerank with:
+ * Calls POST https://api.cohere.com/v1/rerank with:
  * - model: reranking model name (e.g., "rerank-english-v3.0")
  * - query: search query
  * - documents: array of document strings
@@ -107,7 +107,7 @@ class CohereReranker(config: RerankProviderConfig) extends Reranker {
 object CohereReranker {
 
   /** Default Cohere API base URL */
-  val DEFAULT_BASE_URL: String = "https://api.cohere.ai"
+  val DEFAULT_BASE_URL: String = "https://api.cohere.com"
 
   /** Default reranking model */
   val DEFAULT_MODEL: String = "rerank-english-v3.0"
@@ -126,7 +126,7 @@ object CohereReranker {
    *
    * @param apiKey Cohere API key
    * @param model Reranking model (default: rerank-english-v3.0)
-   * @param baseUrl API base URL (default: https://api.cohere.ai)
+   * @param baseUrl API base URL (default: https://api.cohere.com)
    * @return Cohere reranker instance
    */
   def apply(

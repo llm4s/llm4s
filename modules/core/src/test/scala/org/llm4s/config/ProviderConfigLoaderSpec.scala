@@ -558,7 +558,7 @@ class ProviderConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValu
           |  llm { model = "cohere/command-r-08-2024" }
           |  cohere {
           |    apiKey = "cohere-test-key"
-          |    baseUrl = "https://api.cohere.ai"
+          |    baseUrl = "https://api.cohere.com"
           |  }
           |}
           |""".stripMargin
@@ -571,7 +571,7 @@ class ProviderConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValu
       val cohere = cfg.asInstanceOf[CohereConfig]
       cohere.model shouldBe "command-r-08-2024"
       cohere.apiKey shouldBe "cohere-test-key"
-      cohere.baseUrl shouldBe "https://api.cohere.ai"
+      cohere.baseUrl shouldBe "https://api.cohere.com"
     }
 
     "fail with clear error when Cohere API key is missing" in {
@@ -580,7 +580,7 @@ class ProviderConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValu
           |llm4s {
           |  llm { model = "cohere/command-r-08-2024" }
           |  cohere {
-          |    baseUrl = "https://api.cohere.ai"
+          |    baseUrl = "https://api.cohere.com"
           |  }
           |}
           |""".stripMargin
@@ -609,7 +609,7 @@ class ProviderConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValu
 
       result.isRight shouldBe true
       val cfg = result.value.asInstanceOf[CohereConfig]
-      cfg.baseUrl shouldBe "https://api.cohere.ai"
+      cfg.baseUrl shouldBe "https://api.cohere.com"
     }
 
     "fail when cohere section is completely missing" in {
