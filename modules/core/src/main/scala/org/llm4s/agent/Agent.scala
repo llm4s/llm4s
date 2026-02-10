@@ -198,6 +198,19 @@ class Agent(client: LLMClient) {
         // Request next step from LLM using system message injection
         client.complete(state.toApiConversation, options) match {
           case Right(completion) =>
+            val stateWithUsage = completion.usage match {
+              case Some(usage) =>
+                state.copy(
+                  usageSummary = state.usageSummary.add(
+                    model = completion.model,
+                    usage = usage,
+                    cost = completion.estimatedCost
+                  )
+                )
+              case None =>
+                state
+            }
+
             val logMessage = completion.message.toolCalls match {
               case Seq() => s"[assistant] text: ${completion.message.content}"
               case toolCalls =>
@@ -231,7 +244,7 @@ class Agent(client: LLMClient) {
               }
             }
 
-            val updatedState = state
+            val updatedState = stateWithUsage
               .log(logMessage)
               .addMessage(completion.message)
 
@@ -672,7 +685,11 @@ class Agent(client: LLMClient) {
     }
 
     // Run target agent from the prepared state; propagate context
-    handoff.targetAgent.run(targetState, maxSteps, context)
+    handoff.targetAgent.run(targetState, maxSteps, context).map { targetFinalState =>
+      targetFinalState.copy(
+        usageSummary = sourceState.usageSummary.merge(targetFinalState.usageSummary)
+      )
+    }
   }
 
   /**
@@ -1425,12 +1442,25 @@ class Agent(client: LLMClient) {
 
         streamResult match {
           case Right(completion) =>
+            val stateWithUsage = completion.usage match {
+              case Some(usage) =>
+                state.copy(
+                  usageSummary = state.usageSummary.add(
+                    model = completion.model,
+                    usage = usage,
+                    cost = completion.estimatedCost
+                  )
+                )
+              case None =>
+                state
+            }
+
             // Emit text complete
             if (completion.content.nonEmpty) {
               onEvent(AgentEvent.textComplete(completion.content))
             }
 
-            val updatedState = state
+            val updatedState = stateWithUsage
               .log(s"[assistant] text: ${completion.content}")
               .addMessage(completion.message)
 
