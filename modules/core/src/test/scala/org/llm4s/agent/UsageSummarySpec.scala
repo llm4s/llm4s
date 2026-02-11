@@ -20,14 +20,14 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
     s1.inputTokens shouldBe 10L
     s1.outputTokens shouldBe 5L
     s1.thinkingTokens shouldBe 0L
-    s1.totalCost shouldBe 0.01 +- 1e-9
+    s1.totalCost shouldBe BigDecimal("0.01")
 
     val mu = s1.byModel("openai/gpt-4o")
     mu.requestCount shouldBe 1L
     mu.inputTokens shouldBe 10L
     mu.outputTokens shouldBe 5L
     mu.thinkingTokens shouldBe 0L
-    mu.totalCost shouldBe 0.01 +- 1e-9
+    mu.totalCost shouldBe BigDecimal("0.01")
   }
 
   it should "not add cost when cost is None" in {
@@ -39,8 +39,8 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
       cost = None
     )
 
-    s1.totalCost shouldBe 0.0
-    s1.byModel("openai/gpt-4o").totalCost shouldBe 0.0
+    s1.totalCost shouldBe BigDecimal(0)
+    s1.byModel("openai/gpt-4o").totalCost shouldBe BigDecimal(0)
   }
 
   it should "accumulate thinking tokens" in {
@@ -81,7 +81,7 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
     merged.requestCount shouldBe 3L
     merged.inputTokens shouldBe 14L
     merged.outputTokens shouldBe 14L
-    merged.totalCost shouldBe 0.015 +- 1e-9
+    merged.totalCost shouldBe BigDecimal("0.015")
 
     merged.byModel.keySet shouldBe Set("openai/gpt-4o", "gemini/gemini-2.0-flash")
 
@@ -89,12 +89,12 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
     openAi.requestCount shouldBe 2L
     openAi.inputTokens shouldBe 13L
     openAi.outputTokens shouldBe 12L
-    openAi.totalCost shouldBe 0.01 +- 1e-9
+    openAi.totalCost shouldBe BigDecimal("0.01")
 
     val gemini = merged.byModel("gemini/gemini-2.0-flash")
     gemini.requestCount shouldBe 1L
     gemini.inputTokens shouldBe 1L
     gemini.outputTokens shouldBe 2L
-    gemini.totalCost shouldBe 0.005 +- 1e-9
+    gemini.totalCost shouldBe BigDecimal("0.005")
   }
 }

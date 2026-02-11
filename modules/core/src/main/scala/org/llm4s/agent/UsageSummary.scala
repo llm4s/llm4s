@@ -1,23 +1,24 @@
 package org.llm4s.agent
 
 import org.llm4s.llmconnect.model.TokenUsage
-import upickle.default.{ ReadWriter => RW, macroRW }
+import upickle.default.{ ReadWriter => RW, macroRW, readwriter }
 
 case class ModelUsage(
   requestCount: Long = 0L,
   inputTokens: Long = 0L,
   outputTokens: Long = 0L,
   thinkingTokens: Long = 0L,
-  totalCost: Double = 0.0
+  totalCost: BigDecimal = BigDecimal(0)
 ) {
   def add(usage: TokenUsage, cost: Option[Double]): ModelUsage = {
-    val thinking = usage.thinkingTokens.getOrElse(0)
+    val thinking  = usage.thinkingTokens.getOrElse(0)
+    val costValue = cost.map(BigDecimal.decimal).getOrElse(BigDecimal(0))
     copy(
       requestCount = requestCount + 1L,
       inputTokens = inputTokens + usage.promptTokens.toLong,
       outputTokens = outputTokens + usage.completionTokens.toLong,
       thinkingTokens = thinkingTokens + thinking.toLong,
-      totalCost = totalCost + cost.getOrElse(0.0)
+      totalCost = totalCost + costValue
     )
   }
 
@@ -40,12 +41,13 @@ case class UsageSummary(
   inputTokens: Long = 0L,
   outputTokens: Long = 0L,
   thinkingTokens: Long = 0L,
-  totalCost: Double = 0.0,
+  totalCost: BigDecimal = BigDecimal(0),
   byModel: Map[String, ModelUsage] = Map.empty
 ) {
 
   def add(model: String, usage: TokenUsage, cost: Option[Double]): UsageSummary = {
-    val thinking = usage.thinkingTokens.getOrElse(0)
+    val thinking  = usage.thinkingTokens.getOrElse(0)
+    val costValue = cost.map(BigDecimal.decimal).getOrElse(BigDecimal(0))
 
     val updatedModelUsage =
       byModel.getOrElse(model, ModelUsage()).add(usage, cost)
@@ -55,7 +57,7 @@ case class UsageSummary(
       inputTokens = inputTokens + usage.promptTokens.toLong,
       outputTokens = outputTokens + usage.completionTokens.toLong,
       thinkingTokens = thinkingTokens + thinking.toLong,
-      totalCost = totalCost + cost.getOrElse(0.0),
+      totalCost = totalCost + costValue,
       byModel = byModel.updated(model, updatedModelUsage)
     )
   }
@@ -78,5 +80,14 @@ case class UsageSummary(
 }
 
 object UsageSummary {
+  implicit val bigDecimalRw: RW[BigDecimal] = readwriter[ujson.Value].bimap[BigDecimal](
+    bd => ujson.Str(bd.toString),
+    {
+      case ujson.Num(n) => BigDecimal.decimal(n)
+      case ujson.Str(s) => BigDecimal(s)
+      case v            => throw new IllegalArgumentException(s"Invalid BigDecimal JSON: $v")
+    }
+  )
+
   implicit val rw: RW[UsageSummary] = macroRW
 }

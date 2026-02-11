@@ -65,7 +65,7 @@ class AgentUsageIntegrationSpec extends AnyFlatSpec with Matchers {
     state.usageSummary.requestCount shouldBe 2L
     state.usageSummary.inputTokens shouldBe 14L
     state.usageSummary.outputTokens shouldBe 5L
-    state.usageSummary.totalCost shouldBe 0.03 +- 1e-9
+    state.usageSummary.totalCost shouldBe BigDecimal("0.03")
 
     state.usageSummary.byModel.keySet shouldBe Set(model)
 
@@ -73,7 +73,7 @@ class AgentUsageIntegrationSpec extends AnyFlatSpec with Matchers {
     perModel.requestCount shouldBe 2L
     perModel.inputTokens shouldBe 14L
     perModel.outputTokens shouldBe 5L
-    perModel.totalCost shouldBe 0.03 +- 1e-9
+    perModel.totalCost shouldBe BigDecimal("0.03")
   }
 
   private class FakeLLMClient(completions: Vector[Completion]) extends LLMClient {
