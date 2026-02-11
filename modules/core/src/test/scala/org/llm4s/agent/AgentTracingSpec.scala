@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import org.llm4s.assistant.{ AssistantAgent, SessionState }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -7,9 +8,11 @@ import org.llm4s.toolapi._
 import org.llm4s.trace.Tracing
 import org.llm4s.trace.TraceEvent
 import org.llm4s.types.Result
+import org.llm4s.types.{ DirectoryPath, SessionId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default._
+import scala.concurrent.ExecutionContext.Implicits.global
 
 /**
  * Focused tests that verify Agent integrates with the Tracing API
@@ -76,6 +79,22 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
 
     override def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
       Left(ValidationError.invalid("tracing", "test failure"))
+  }
+
+  /** Tracer where only completion tracing fails with a non-Throwable error. */
+  private class CompletionErrorOnlyTracing extends Tracing {
+    override def traceEvent(event: TraceEvent): Result[Unit] = Right(())
+
+    override def traceAgentState(state: AgentState): Result[Unit] = Right(())
+
+    override def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Right(())
+
+    override def traceError(error: Throwable, context: String): Result[Unit] = Right(())
+
+    override def traceCompletion(completion: Completion, model: String): Result[Unit] =
+      Left(ValidationError.invalid("tracing", "boom"))
+
+    override def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = Right(())
   }
 
   // Minimal LLM client that returns a single configured completion
@@ -167,7 +186,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
 
     val tools   = new ToolRegistry(Seq.empty)
     val tracing = new RecordingTracing()
-    val result  = agent.run("test query", tools, tracing = Some(tracing))
+    val result  = agent.run("test query", tools, debug = true, tracing = Some(tracing))
 
     result.isRight shouldBe true
     tracing.completions should have size 1
@@ -204,6 +223,17 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     tracing.errors.head._2 shouldBe "agent_completion"
   }
 
+  it should "swallow non-throwable tracing errors in safeTrace" in {
+    val completion = createCompletion("Hello, world!")
+    val client     = new StubLLMClient(Right(completion))
+    val agent      = new Agent(client)
+    val tracing    = new CompletionErrorOnlyTracing()
+
+    val result = agent.run("test query", ToolRegistry.empty, tracing = Some(tracing))
+
+    result.isRight shouldBe true
+  }
+
   it should "succeed when tracer fails (safeTrace swallows errors)" in {
     val completion = createCompletion("Hello")
     val client     = new StubLLMClient(Right(completion))
@@ -234,6 +264,23 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     tracing.states.nonEmpty shouldBe true
   }
 
+  it should "trace streaming error path when LLM streaming fails" in {
+    val client  = new StubLLMClient(Left(ValidationError.invalid("api", "stream failure")))
+    val agent   = new Agent(client)
+    val tracing = new RecordingTracing()
+
+    val result = agent.runWithEvents(
+      query = "test",
+      tools = ToolRegistry.empty,
+      onEvent = _ => (),
+      tracing = Some(tracing)
+    )
+
+    result.isLeft shouldBe true
+    tracing.errors.nonEmpty shouldBe true
+    tracing.errors.head._2 shouldBe "agent_stream_completion"
+  }
+
   it should "trace tool call when tool returns error" in {
     val failingTool = ToolBuilder[Map[String, Any], Unit](
       "failing_tool",
@@ -250,7 +297,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     val tools              = new ToolRegistry(Seq(failingTool))
     val tracing            = new RecordingTracing()
 
-    val result = agent.run("use failing tool", tools, tracing = Some(tracing))
+    val result = agent.run("use failing tool", tools, debug = true, tracing = Some(tracing))
 
     result.isRight shouldBe true
     tracing.toolCalls should have size 1
@@ -273,13 +320,39 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     val tools              = new ToolRegistry(Seq(throwingTool))
     val tracing            = new RecordingTracing()
 
-    val result = agent.run("use throwing tool", tools, tracing = Some(tracing))
+    val result = agent.run("use throwing tool", tools, debug = true, tracing = Some(tracing))
 
     result.isRight shouldBe true
     tracing.toolCalls.nonEmpty shouldBe true
   }
 
-  it should "propagate tracing across handoff" in {
+  it should "trace unexpected tool processing failures when processToolCalls throws" in {
+    // Tool registry that throws from execute, causing processToolCalls to throw inside runStep
+    val throwingRegistry = new ToolRegistry(Seq.empty) {
+      override def execute(request: ToolCallRequest): Either[ToolCallError, ujson.Value] =
+        throw new RuntimeException("registry failure")
+    }
+
+    val toolCall         = createToolCall("throwing_tool", "{}")
+    val assistantMessage = AssistantMessage("", Seq(toolCall))
+    val state = AgentState(
+      conversation = Conversation(Seq(UserMessage("user"), assistantMessage)),
+      tools = throwingRegistry,
+      status = AgentStatus.WaitingForTools
+    )
+
+    val client  = new StubLLMClient(Right(createCompletion("ignored")))
+    val agent   = new Agent(client)
+    val tracing = new RecordingTracing()
+
+    val result = agent.runStep(state, tracing = Some(tracing), debug = true)
+
+    result.isRight shouldBe true
+    tracing.errors.nonEmpty shouldBe true
+    tracing.errors.head._2 shouldBe "agent_tool_execution"
+  }
+
+  it should "propagate tracing across handoff with debug enabled" in {
     val clientB     = new StubLLMClient(Right(createCompletion("Specialist response")))
     val agentB      = new Agent(clientB)
     val handoff     = Handoff(agentB, Some("delegate"))
@@ -294,11 +367,60 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
       query = "hand off",
       tools = ToolRegistry.empty,
       handoffs = Seq(handoff),
+      debug = true,
       tracing = Some(tracing)
     )
 
     result.isRight shouldBe true
     tracing.completions should have size 2
+    tracing.states.nonEmpty shouldBe true
+  }
+
+  "AssistantAgent.runSteps" should "execute agent.runStep recursion path" in {
+    val completion = createCompletion("assistant response")
+    val client     = new StubLLMClient(Right(completion))
+    val tools      = ToolRegistry.empty
+    val assistant  = new AssistantAgent(client, tools, sessionDir = "./sessions-test")
+
+    val agentState = AgentState(
+      conversation = Conversation(Seq(UserMessage("user query"))),
+      tools = tools,
+      status = AgentStatus.InProgress
+    )
+
+    val sessionState = SessionState(
+      agentState = Some(agentState),
+      sessionId = SessionId("test-session"),
+      sessionDir = DirectoryPath("./sessions-test")
+    )
+
+    val runAgentMethod =
+      classOf[AssistantAgent].getDeclaredMethod("runAgentToCompletion", classOf[SessionState])
+    runAgentMethod.setAccessible(true)
+
+    val result = runAgentMethod
+      .invoke(assistant, sessionState)
+      .asInstanceOf[Either[org.llm4s.error.LLMError, SessionState]]
+
+    result.isRight shouldBe true
+  }
+
+  "Agent.runWithStrategy" should "execute runWithStrategyInternal recursion path" in {
+    val completion = createCompletion("strategy response")
+    val client     = new StubLLMClient(Right(completion))
+    val agent      = new Agent(client)
+    val tools      = ToolRegistry.empty
+    val tracing    = new RecordingTracing()
+
+    val result = agent.runWithStrategy(
+      query = "test strategy",
+      tools = tools,
+      toolExecutionStrategy = ToolExecutionStrategy.Sequential,
+      debug = true,
+      tracing = Some(tracing)
+    )
+
+    result.isRight shouldBe true
     tracing.states.nonEmpty shouldBe true
   }
 }
