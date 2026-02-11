@@ -235,9 +235,7 @@ final class SQLiteMemoryStore private (
         case e: Throwable =>
           connection.rollback()
           throw e
-      } finally {
-        connection.setAutoCommit(wasAutoCommit)
-      }
+      } finally connection.setAutoCommit(wasAutoCommit)
     }.toEither.left.map(e =>
       ProcessingError("sqlite-delete-matching", s"Failed to delete matching memories: ${e.getMessage}")
     )
