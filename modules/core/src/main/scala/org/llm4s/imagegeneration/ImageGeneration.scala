@@ -2,7 +2,7 @@ package org.llm4s.imagegeneration
 
 import java.time.Instant
 import java.nio.file.Path
-import org.llm4s.imagegeneration.provider.{ HttpClient, HuggingFaceClient, OpenAIImageClient, StableDiffusionClient }
+import org.llm4s.imagegeneration.provider.{ HttpClient, HuggingFaceClient, OpenAIImageClient, StableDiffusionClient, StabilityAIClient }
 
 import scala.util.Try
 
@@ -138,6 +138,7 @@ object ImageGenerationProvider {
   case object DALLE           extends ImageGenerationProvider
   case object Midjourney      extends ImageGenerationProvider
   case object HuggingFace     extends ImageGenerationProvider
+  case object StabilityAI      extends ImageGenerationProvider
 }
 
 sealed trait ImageGenerationConfig {
@@ -192,6 +193,26 @@ case class OpenAIConfig(
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.DALLE
 }
+/**
+  * Configuration for Stability AI's API.
+  * 
+  * @param apiKey Your Stability AI API key. This is required for authentication.
+  * @param model The Stability AI model to use (e.g., "stable-diffusion-xl-1.0").
+  * @param timeout Request timeout in milliseconds.
+  */
+  case class StabilityAIConfig(
+    /** Stability AI API key */
+    apiKey: String,
+    /** Model to use (e.g., "stable-diffusion-xl-1024-v1-0") */
+    model: String = "stable-diffusion-xl-1024-v1-0",
+    /** Base URL for Stability AI API (default: https://api.stability.ai) */
+    baseUrl: String = "https://api.stability.ai",
+    /** Request timeout in milliseconds */
+    override val timeout: Int = 60000 // 60 seconds for image generation
+  ) extends ImageGenerationConfig {
+    def provider: ImageGenerationProvider = ImageGenerationProvider.StabilityAI
+  }
+  
 
 // ===== CLIENT INTERFACE =====
 
@@ -228,6 +249,8 @@ object ImageGeneration {
         new HuggingFaceClient(hfConfig, httpClient)
       case openAIConfig: OpenAIConfig =>
         new OpenAIImageClient(openAIConfig)
+      case stabilityConfig: StabilityAIConfig =>
+        new StabilityAIClient(stabilityConfig)
     }
 
   /** Convenience method for quick image generation */
@@ -291,6 +314,24 @@ object ImageGeneration {
     val config = OpenAIConfig(apiKey = apiKey, model = model)
     client(config)
   }
+  /**
+    * Get a Stability AI client with the required API key.
+    * 
+    * This is a convenience method for creating a client that connects to the
+    * Stability AI API for image generation.
+    * 
+    * @param apiKey Your Stability AI API key (required).
+    * @param model The Stability AI model to use. Defaults to stable-diffusion-xl-1024-v1-0.
+    * @return An `ImageGenerationClient` instance configured for Stability AI.
+     */
+  def stabilityAIClient(
+    apiKey: String,
+    model: String = "stable-diffusion-xl-1024-v1-0"
+  ): ImageGenerationClient = {
+    val config = StabilityAIConfig(apiKey = apiKey, model = model)
+    client(config)
+  }
+    
 
   /** Convenience method for quick Stable Diffusion image generation */
   def generateWithStableDiffusion(
