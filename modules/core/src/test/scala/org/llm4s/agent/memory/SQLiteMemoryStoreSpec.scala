@@ -371,13 +371,101 @@ class SQLiteMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
     val customFilter = MemoryFilter.Custom(_.content.contains("custom"))
 
     val result = for {
+      _        <- store.store(m1)
+      _        <- store.store(m2)
+      _        <- store.deleteMatching(customFilter)
+      count    <- store.count()
+      recalled <- store.recall()
+    } yield (count, recalled)
+
+    result.isRight shouldBe true
+    val (count, recalled) = result.toOption.get
+    count shouldBe 1L
+    recalled.map(_.content) shouldBe Seq("No match")
+  }
+
+  it should "deleteMatching with nested Custom filter uses safe fallback" in {
+    val m1 = Memory(MemoryId.generate(), "Match custom conv", MemoryType.Conversation)
+    val m2 = Memory(MemoryId.generate(), "Plain conversation", MemoryType.Conversation)
+    val m3 = Memory(MemoryId.generate(), "Match custom know", MemoryType.Knowledge)
+
+    // Nested Custom inside And: Custom && ByType
+    val nestedFilter = MemoryFilter.Custom(_.content.contains("custom")) &&
+      MemoryFilter.ByType(MemoryType.Conversation)
+
+    val result = for {
+      _        <- store.store(m1)
+      _        <- store.store(m2)
+      _        <- store.store(m3)
+      _        <- store.deleteMatching(nestedFilter)
+      count    <- store.count()
+      recalled <- store.recall()
+    } yield (count, recalled.map(_.content).toSet)
+
+    result.isRight shouldBe true
+    val (count, contents) = result.toOption.get
+    count shouldBe 2L
+    contents shouldBe Set("Plain conversation", "Match custom know")
+  }
+
+  it should "deleteMatching with Custom inside Or uses safe fallback" in {
+    val m1 = Memory(MemoryId.generate(), "Match custom", MemoryType.Conversation)
+    val m2 = Memory(MemoryId.generate(), "Entity type", MemoryType.Entity)
+    val m3 = Memory(MemoryId.generate(), "Knowledge type", MemoryType.Knowledge)
+
+    // Custom inside Or: Custom || ByType(Entity) should match m1 and m2
+    val orFilter = MemoryFilter.Custom(_.content.contains("custom")) ||
+      MemoryFilter.ByType(MemoryType.Entity)
+
+    val result = for {
+      _        <- store.store(m1)
+      _        <- store.store(m2)
+      _        <- store.store(m3)
+      _        <- store.deleteMatching(orFilter)
+      count    <- store.count()
+      recalled <- store.recall()
+    } yield (count, recalled.map(_.content).toSet)
+
+    result.isRight shouldBe true
+    val (count, contents) = result.toOption.get
+    count shouldBe 1L
+    contents shouldBe Set("Knowledge type")
+  }
+
+  it should "deleteMatching with Custom inside Not uses safe fallback" in {
+    val m1 = Memory(MemoryId.generate(), "Keep this custom", MemoryType.Conversation)
+    val m2 = Memory(MemoryId.generate(), "Delete me", MemoryType.Knowledge)
+
+    // Not(Custom): should delete memories that do NOT contain "custom"
+    val notFilter = !MemoryFilter.Custom(_.content.contains("custom"))
+
+    val result = for {
+      _        <- store.store(m1)
+      _        <- store.store(m2)
+      _        <- store.deleteMatching(notFilter)
+      count    <- store.count()
+      recalled <- store.recall()
+    } yield (count, recalled.map(_.content).toSet)
+
+    result.isRight shouldBe true
+    val (count, contents) = result.toOption.get
+    count shouldBe 1L
+    contents shouldBe Set("Keep this custom")
+  }
+
+  it should "deleteMatching with MemoryFilter.All falls back to safe row-by-row" in {
+    val m1 = Memory(MemoryId.generate(), "Memory 1", MemoryType.Conversation)
+    val m2 = Memory(MemoryId.generate(), "Memory 2", MemoryType.Knowledge)
+
+    // MemoryFilter.All produces empty WHERE, should use safe fallback
+    val result = for {
       _     <- store.store(m1)
       _     <- store.store(m2)
-      _     <- store.deleteMatching(customFilter)
+      _     <- store.deleteMatching(MemoryFilter.All)
       count <- store.count()
     } yield count
 
-    result shouldBe Right(1L)
+    result shouldBe Right(0L)
   }
 
   it should "update a memory" in {

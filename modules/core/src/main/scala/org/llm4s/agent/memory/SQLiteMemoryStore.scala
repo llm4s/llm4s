@@ -172,12 +172,11 @@ final class SQLiteMemoryStore private (
       this
     }.toEither.left.map(e => ProcessingError("sqlite-delete", s"Failed to delete memory: ${e.getMessage}"))
 
-  override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] = filter match {
-    case _: MemoryFilter.Custom =>
-      // Custom predicates cannot be translated to SQL; fallback to row-by-row
+  override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] =
+    if (containsCustom(filter)) {
+      // Custom predicates anywhere in tree cannot be translated to SQL; fallback to row-by-row
       deleteMatchingRowByRow(filter)
-
-    case _ =>
+    } else {
       val (whereClause, params) = filterToSql(filter)
       if (whereClause.isEmpty) {
         // Empty WHERE would delete all rows; fallback to safe row-by-row
@@ -185,43 +184,50 @@ final class SQLiteMemoryStore private (
       } else {
         deleteMatchingBulk(whereClause, params)
       }
+    }
+
+  /** Check if filter tree contains any Custom predicates (which cannot be translated to SQL). */
+  private def containsCustom(filter: MemoryFilter): Boolean = filter match {
+    case _: MemoryFilter.Custom     => true
+    case MemoryFilter.And(l, r)     => containsCustom(l) || containsCustom(r)
+    case MemoryFilter.Or(l, r)      => containsCustom(l) || containsCustom(r)
+    case MemoryFilter.Not(inner)    => containsCustom(inner)
+    case _                          => false
   }
 
-  /** Fallback: load all memories, filter in-memory, delete one-by-one (used for Custom filters). */
+  /** Fallback: recall matching memories via SQL (where possible), apply in-memory filter, delete one-by-one. */
   private def deleteMatchingRowByRow(filter: MemoryFilter): Result[MemoryStore] =
     for {
-      allMemories <- recall(MemoryFilter.All, Int.MaxValue)
-      matching = allMemories.filter(filter.matches)
-      _ <- matching.foldLeft[Result[Unit]](Right(())) { (acc, memory) =>
+      memories <- recall(filter, Int.MaxValue)
+      toDelete = memories.filter(filter.matches) // Re-apply filter for Custom predicates not handled by SQL
+      _ <- toDelete.foldLeft[Result[Unit]](Right(())) { (acc, memory) =>
         acc.flatMap(_ => delete(memory.id).map(_ => ()))
       }
     } yield this
 
-  /** Bulk delete with transaction: select IDs, delete FTS entries, bulk delete main table. */
+  /** Bulk delete with transaction: stream IDs, delete FTS entries row-by-row, bulk delete main table. */
   private def deleteMatchingBulk(whereClause: String, params: Seq[Any]): Result[MemoryStore] =
     Try {
       val wasAutoCommit = connection.getAutoCommit
       connection.setAutoCommit(false)
       try {
-        // 1. Select IDs matching the filter (needed for FTS cleanup)
-        val ids = Using.resource(connection.prepareStatement(s"SELECT id FROM memories $whereClause")) { stmt =>
+        // 1. Select IDs and delete FTS entries row-by-row (streaming, avoids materializing all IDs)
+        Using.resource(connection.prepareStatement(s"SELECT id FROM memories $whereClause")) { selectStmt =>
           params.zipWithIndex.foreach { case (param, idx) =>
-            setParameter(stmt, idx + 1, param)
+            setParameter(selectStmt, idx + 1, param)
           }
-          Using.resource(stmt.executeQuery()) { rs =>
-            Iterator.continually(rs).takeWhile(_.next()).map(_.getString("id")).toSeq
-          }
-        }
-
-        // 2. Delete from FTS table (row-by-row, FTS doesn't support subquery DELETE reliably)
-        Using.resource(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?")) { stmt =>
-          ids.foreach { id =>
-            stmt.setString(1, id)
-            stmt.executeUpdate()
+          Using.resource(selectStmt.executeQuery()) { rs =>
+            Using.resource(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?")) { deleteStmt =>
+              while (rs.next()) {
+                val id = rs.getString("id")
+                deleteStmt.setString(1, id)
+                deleteStmt.executeUpdate()
+              }
+            }
           }
         }
 
-        // 3. Bulk delete from main table
+        // 2. Bulk delete from main table
         Using.resource(connection.prepareStatement(s"DELETE FROM memories $whereClause")) { stmt =>
           params.zipWithIndex.foreach { case (param, idx) =>
             setParameter(stmt, idx + 1, param)
