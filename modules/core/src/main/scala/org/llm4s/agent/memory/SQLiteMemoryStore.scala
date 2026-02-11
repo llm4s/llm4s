@@ -172,13 +172,75 @@ final class SQLiteMemoryStore private (
       this
     }.toEither.left.map(e => ProcessingError("sqlite-delete", s"Failed to delete memory: ${e.getMessage}"))
 
-  override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] =
+  override def deleteMatching(filter: MemoryFilter): Result[MemoryStore] = filter match {
+    case _: MemoryFilter.Custom =>
+      // Custom predicates cannot be translated to SQL; fallback to row-by-row
+      deleteMatchingRowByRow(filter)
+
+    case _ =>
+      val (whereClause, params) = filterToSql(filter)
+      if (whereClause.isEmpty) {
+        // Empty WHERE would delete all rows; fallback to safe row-by-row
+        deleteMatchingRowByRow(filter)
+      } else {
+        deleteMatchingBulk(whereClause, params)
+      }
+  }
+
+  /** Fallback: load all memories, filter in-memory, delete one-by-one (used for Custom filters). */
+  private def deleteMatchingRowByRow(filter: MemoryFilter): Result[MemoryStore] =
     for {
-      memories <- recall(filter, Int.MaxValue)
-      _ <- memories.foldLeft[Result[Unit]](Right(())) { (acc, memory) =>
+      allMemories <- recall(MemoryFilter.All, Int.MaxValue)
+      matching = allMemories.filter(filter.matches)
+      _ <- matching.foldLeft[Result[Unit]](Right(())) { (acc, memory) =>
         acc.flatMap(_ => delete(memory.id).map(_ => ()))
       }
     } yield this
+
+  /** Bulk delete with transaction: select IDs, delete FTS entries, bulk delete main table. */
+  private def deleteMatchingBulk(whereClause: String, params: Seq[Any]): Result[MemoryStore] =
+    Try {
+      val wasAutoCommit = connection.getAutoCommit
+      connection.setAutoCommit(false)
+      try {
+        // 1. Select IDs matching the filter (needed for FTS cleanup)
+        val ids = Using.resource(connection.prepareStatement(s"SELECT id FROM memories $whereClause")) { stmt =>
+          params.zipWithIndex.foreach { case (param, idx) =>
+            setParameter(stmt, idx + 1, param)
+          }
+          Using.resource(stmt.executeQuery()) { rs =>
+            Iterator.continually(rs).takeWhile(_.next()).map(_.getString("id")).toSeq
+          }
+        }
+
+        // 2. Delete from FTS table (row-by-row, FTS doesn't support subquery DELETE reliably)
+        Using.resource(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?")) { stmt =>
+          ids.foreach { id =>
+            stmt.setString(1, id)
+            stmt.executeUpdate()
+          }
+        }
+
+        // 3. Bulk delete from main table
+        Using.resource(connection.prepareStatement(s"DELETE FROM memories $whereClause")) { stmt =>
+          params.zipWithIndex.foreach { case (param, idx) =>
+            setParameter(stmt, idx + 1, param)
+          }
+          stmt.executeUpdate()
+        }
+
+        connection.commit()
+        this
+      } catch {
+        case e: Throwable =>
+          connection.rollback()
+          throw e
+      } finally {
+        connection.setAutoCommit(wasAutoCommit)
+      }
+    }.toEither.left.map(e =>
+      ProcessingError("sqlite-delete-matching", s"Failed to delete matching memories: ${e.getMessage}")
+    )
 
   override def update(id: MemoryId, updateFn: Memory => Memory): Result[MemoryStore] =
     for {

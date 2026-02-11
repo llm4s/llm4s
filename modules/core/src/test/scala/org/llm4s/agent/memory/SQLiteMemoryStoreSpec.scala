@@ -322,6 +322,64 @@ class SQLiteMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAfte
     result shouldBe Right(1L)
   }
 
+  it should "deleteMatching deletes correctly for compound SQL filters" in {
+    val m1 = Memory(MemoryId.generate(), "Keep low", MemoryType.Conversation).withImportance(0.3)
+    val m2 = Memory(MemoryId.generate(), "Delete high conv", MemoryType.Conversation).withImportance(0.8)
+    val m3 = Memory(MemoryId.generate(), "Keep knowledge", MemoryType.Knowledge).withImportance(0.8)
+
+    val filter = MemoryFilter.ByType(MemoryType.Conversation) && MemoryFilter.MinImportance(0.5)
+
+    val result = for {
+      _        <- store.store(m1)
+      _        <- store.store(m2)
+      _        <- store.store(m3)
+      _        <- store.deleteMatching(filter)
+      count    <- store.count()
+      recalled <- store.recall()
+    } yield (count, recalled.map(_.content).toSet)
+
+    result.isRight shouldBe true
+    val (count, contents) = result.toOption.get
+    count shouldBe 2L
+    contents shouldBe Set("Keep low", "Keep knowledge")
+  }
+
+  it should "deleteMatching cleans up FTS entries" in {
+    val m1 = Memory(MemoryId.generate(), "searchable unique phrase alpha", MemoryType.Conversation)
+    val m2 = Memory(MemoryId.generate(), "keep this memory", MemoryType.Knowledge)
+
+    val result = for {
+      _            <- store.store(m1)
+      _            <- store.store(m2)
+      beforeSearch <- store.search("alpha")
+      _            <- store.deleteMatching(MemoryFilter.ByType(MemoryType.Conversation))
+      afterSearch  <- store.search("alpha")
+      count        <- store.count()
+    } yield (beforeSearch.length, afterSearch.length, count)
+
+    result.isRight shouldBe true
+    val (beforeLen, afterLen, count) = result.toOption.get
+    beforeLen shouldBe 1
+    afterLen shouldBe 0
+    count shouldBe 1L
+  }
+
+  it should "deleteMatching with Custom filter uses safe fallback" in {
+    val m1 = Memory(MemoryId.generate(), "Match custom", MemoryType.Conversation)
+    val m2 = Memory(MemoryId.generate(), "No match", MemoryType.Knowledge)
+
+    val customFilter = MemoryFilter.Custom(_.content.contains("custom"))
+
+    val result = for {
+      _     <- store.store(m1)
+      _     <- store.store(m2)
+      _     <- store.deleteMatching(customFilter)
+      count <- store.count()
+    } yield count
+
+    result shouldBe Right(1L)
+  }
+
   it should "update a memory" in {
     val memory = Memory(MemoryId.generate(), "Original", MemoryType.Knowledge)
 
