@@ -188,11 +188,11 @@ final class SQLiteMemoryStore private (
 
   /** Check if filter tree contains any Custom predicates (which cannot be translated to SQL). */
   private def containsCustom(filter: MemoryFilter): Boolean = filter match {
-    case _: MemoryFilter.Custom     => true
-    case MemoryFilter.And(l, r)     => containsCustom(l) || containsCustom(r)
-    case MemoryFilter.Or(l, r)      => containsCustom(l) || containsCustom(r)
-    case MemoryFilter.Not(inner)    => containsCustom(inner)
-    case _                          => false
+    case _: MemoryFilter.Custom  => true
+    case MemoryFilter.And(l, r)  => containsCustom(l) || containsCustom(r)
+    case MemoryFilter.Or(l, r)   => containsCustom(l) || containsCustom(r)
+    case MemoryFilter.Not(inner) => containsCustom(inner)
+    case _                       => false
   }
 
   /** Fallback: recall matching memories via SQL (where possible), apply in-memory filter, delete one-by-one. */
