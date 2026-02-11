@@ -271,6 +271,18 @@ object PostgresMemoryStore {
   private val ValidIdentifierPattern  = "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$".r
   private val ValidMetadataKeyPattern = "^[a-zA-Z_][a-zA-Z0-9_]*$".r
 
+  /** Helper for binary filter composition (And/Or) */
+  private def composeBinary(
+    left: MemoryFilter,
+    right: MemoryFilter,
+    operator: String
+  ): Result[(String, Seq[SqlParam])] =
+    filterToSql(left).flatMap { case (leftSql, leftParams) =>
+      filterToSql(right).map { case (rightSql, rightParams) =>
+        (s"($leftSql $operator $rightSql)", leftParams ++ rightParams)
+      }
+    }
+
   final case class Config(
     host: String = "localhost",
     port: Int = 5432,
@@ -351,19 +363,8 @@ object PostgresMemoryStore {
         Right(s"metadata->>'$key' = ?" -> Seq(PString(value)))
       }
 
-    case MemoryFilter.And(left, right) =>
-      filterToSql(left).flatMap { case (leftSql, leftParams) =>
-        filterToSql(right).map { case (rightSql, rightParams) =>
-          (s"($leftSql AND $rightSql)", leftParams ++ rightParams)
-        }
-      }
-
-    case MemoryFilter.Or(left, right) =>
-      filterToSql(left).flatMap { case (leftSql, leftParams) =>
-        filterToSql(right).map { case (rightSql, rightParams) =>
-          (s"($leftSql OR $rightSql)", leftParams ++ rightParams)
-        }
-      }
+    case MemoryFilter.And(l, r) => composeBinary(l, r, "AND")
+    case MemoryFilter.Or(l, r)  => composeBinary(l, r, "OR")
 
     case MemoryFilter.Not(inner) =>
       filterToSql(inner).map { case (innerSql, innerParams) =>

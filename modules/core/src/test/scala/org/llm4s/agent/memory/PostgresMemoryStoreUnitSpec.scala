@@ -110,6 +110,8 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
       MemoryFilter.ByMetadata("invalid-key; --", "value")
     )
     result.isLeft shouldBe true
+    val error = result.left.toOption.get
+    error.message should include("Invalid metadata key")
   }
 
   it should "generate SQL for MinImportance filter" in {
@@ -217,6 +219,8 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     val result = PostgresMemoryStore.filterToSql(filter)
 
     result.isLeft shouldBe true
+    val error = result.left.toOption.get
+    error.message should include("Invalid metadata key")
   }
 
   behavior.of("PostgresMemoryStore class execution")
