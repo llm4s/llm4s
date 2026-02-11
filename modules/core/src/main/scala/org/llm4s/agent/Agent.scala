@@ -98,7 +98,10 @@ class Agent(client: LLMClient) {
     tracing.foreach { tracer =>
       f(tracer) match {
         case Left(error) =>
-          logger.debug("Tracing failed: {}", error.message)
+          error match {
+            case t: Throwable => logger.debug("Tracing failed", t)
+            case _            => logger.debug("Tracing failed: {}", error)
+          }
         case Right(_) =>
           ()
       }
@@ -598,10 +601,8 @@ class Agent(client: LLMClient) {
   /**
    * Execute a handoff to another agent.
    *
-   * Note: Tracing is intentionally not propagated to target agents.
-   * Each agent instance should be configured with its own tracer if needed.
-   * This ensures clean separation of concerns and prevents accidental
-   * mixing of trace contexts across agents.
+   * Tracing is propagated to the target agent when provided, preserving
+   * end-to-end observability across multi-agent flows.
    *
    * @param sourceState The state from the source agent
    * @param handoff The handoff to execute
@@ -609,6 +610,7 @@ class Agent(client: LLMClient) {
    * @param maxSteps Maximum steps for target agent
    * @param traceLogPath Optional trace log file
    * @param debug Enable debug logging
+   * @param tracing Optional tracer; when provided, propagated to target agent
    * @return Result from target agent
    */
   private def executeHandoff(
@@ -617,7 +619,8 @@ class Agent(client: LLMClient) {
     reason: Option[String],
     maxSteps: Option[Int],
     traceLogPath: Option[String],
-    debug: Boolean
+    debug: Boolean,
+    tracing: Option[Tracing]
   ): Result[AgentState] = {
     // Log handoff
     val logEntry = s"[handoff] Executing handoff: ${handoff.handoffName}" +
@@ -637,8 +640,8 @@ class Agent(client: LLMClient) {
       logger.info("[DEBUG] Target state system message: {}", targetState.systemMessage.isDefined)
     }
 
-    // Run target agent from the prepared state
-    handoff.targetAgent.run(targetState, maxSteps, traceLogPath, debug, None)
+    // Run target agent from the prepared state; propagate tracing when provided
+    handoff.targetAgent.run(targetState, maxSteps, traceLogPath, debug, tracing)
   }
 
   /**
@@ -928,7 +931,7 @@ class Agent(client: LLMClient) {
           traceLogPath.foreach(path => writeTraceLog(state, path))
 
           // Execute handoff
-          executeHandoff(state, handoff, reason, maxSteps, traceLogPath, debug)
+          executeHandoff(state, handoff, reason, maxSteps, traceLogPath, debug, tracing)
 
         case (_, _) =>
           if (debug) {
@@ -1373,7 +1376,8 @@ class Agent(client: LLMClient) {
                         Some(reason),
                         maxSteps.map(_ - currentStep),
                         traceLogPath,
-                        debug
+                        debug,
+                        tracing
                       )
                     onEvent(AgentEvent.HandoffCompleted(handoff.handoffName, handoffResult.isRight, Instant.now()))
                     handoffResult
@@ -1414,7 +1418,7 @@ class Agent(client: LLMClient) {
         // Handle handoff
         onEvent(AgentEvent.HandoffStarted(handoff.handoffName, reason, handoff.preserveContext, Instant.now()))
         val handoffResult =
-          executeHandoff(state, handoff, reason, maxSteps.map(_ - currentStep), traceLogPath, debug)
+          executeHandoff(state, handoff, reason, maxSteps.map(_ - currentStep), traceLogPath, debug, tracing)
         onEvent(AgentEvent.HandoffCompleted(handoff.handoffName, handoffResult.isRight, Instant.now()))
         handoffResult
     }
@@ -1827,7 +1831,7 @@ class Agent(client: LLMClient) {
             logger.info("[DEBUG] Executing handoff: {}", handoff.handoffName)
           }
           traceLogPath.foreach(path => writeTraceLog(state, path))
-          executeHandoff(state, handoff, reason, maxSteps, traceLogPath, debug)
+          executeHandoff(state, handoff, reason, maxSteps, traceLogPath, debug, tracing)
 
         case (_, _) =>
           if (debug) {
