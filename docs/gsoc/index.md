@@ -20,8 +20,9 @@ LLM4S Foundation is proud to participate in Google Summer of Code, helping stude
 We bring impactful, open-source AI projects to the GSoC program. Our goal is to mentor students in building robust, type-safe LLM infrastructure while gaining real-world experience with Functional Programming, Agents, and RAG systems.
 
 ### Explore our GSoC Journey
-Select a page from the menu to see our yearly activities, project ideas, and contributor showcases.
+Select a page from the menu to see yearly activities, project ideas, and contributor resources.
 
-- **[GSoC 2026](/gsoc/2026/)**: Join us for Google Summer of Code 2026! Explore 75+ project ideas, application guidance, and how to get started with mentorship.
-- **[GSoC 2025](/gsoc/2025/)**: Meet our 2025 cohort and explore their groundbreaking projects in Agents, RAG, and Multimodal AI.
-- **[Student Resources](/gsoc/resources/)**: Guides, onboarding links, and how to get involved.
+- **[GSoC 2026 Summary](https://github.com/llm4s/llm4s/blob/main/Google%20Summer%20of%20Code/GSOC-2026-SUMMARY.md)**: Overview of 2026 projects, mentors, and statistics.
+- **[GSoC 2026 Project Ideas](https://github.com/llm4s/llm4s/blob/main/Google%20Summer%20of%20Code/Project%20Ideas/2026.md)**: Canonical list of all 2026 ideas.
+- **[GSoC 2025](/gsoc/2025/)**: Meet our 2025 cohort and explore their projects in Agents, RAG, and Multimodal AI.
+- **[Student Resources](/gsoc/resources/)**: Practical onboarding links and contribution guidance.
