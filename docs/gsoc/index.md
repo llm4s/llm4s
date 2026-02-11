@@ -22,5 +22,6 @@ We bring impactful, open-source AI projects to the GSoC program. Our goal is to 
 ### Explore our GSoC Journey
 Select a page from the menu to see our yearly activities, project ideas, and contributor showcases.
 
-- **[GSoC 2025](/gsoc/2025/)**: Meet our last cohort and explore their groundbreaking projects in Agents, RAG, and Multimodal AI.
+- **[GSoC 2026](/gsoc/2026/)**: Join us for Google Summer of Code 2026! Explore 75+ project ideas, application guidance, and how to get started with mentorship.
+- **[GSoC 2025](/gsoc/2025/)**: Meet our 2025 cohort and explore their groundbreaking projects in Agents, RAG, and Multimodal AI.
 - **[Student Resources](/gsoc/resources/)**: Guides, onboarding links, and how to get involved.
