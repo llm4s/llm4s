@@ -168,14 +168,18 @@ class CohereClient(
   private def parseChatResponse(body: String): Result[Completion] =
     Try {
       val json = ujson.read(body)
-      val text = json.obj
+
+      val textOpt = json.obj
         .get("message")
         .flatMap(_.obj.get("content"))
         .flatMap(_.arrOpt)
         .flatMap(_.headOption)
         .flatMap(_.obj.get("text"))
         .flatMap(_.strOpt)
-        .getOrElse("")
+        .map(_.trim)
+        .filter(_.nonEmpty)
+
+      val text = textOpt.getOrElse("")
 
       val generationId   = json.obj.get("id").flatMap(_.strOpt).getOrElse("")
       val createdSeconds = System.currentTimeMillis() / 1000
@@ -196,18 +200,23 @@ class CohereClient(
       val assistantMessage =
         AssistantMessage(contentOpt = if (text.nonEmpty) Some(text) else None, toolCalls = Seq.empty)
 
-      Right(
-        Completion(
-          id = if (generationId.nonEmpty) generationId else java.util.UUID.randomUUID().toString,
-          created = createdSeconds,
-          content = text,
-          model = config.model,
-          message = assistantMessage,
-          toolCalls = List.empty,
-          usage = usageOpt,
-          thinking = None
-        )
-      )
+      textOpt match {
+        case None =>
+          Left(ValidationError("response", "Missing required text in Cohere v2 response"))
+        case Some(_) =>
+          Right(
+            Completion(
+              id = if (generationId.nonEmpty) generationId else java.util.UUID.randomUUID().toString,
+              created = createdSeconds,
+              content = text,
+              model = config.model,
+              message = assistantMessage,
+              toolCalls = List.empty,
+              usage = usageOpt,
+              thinking = None
+            )
+          )
+      }
     }.toEither.left.map(_.toLLMError).flatten
 
   private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] = {
