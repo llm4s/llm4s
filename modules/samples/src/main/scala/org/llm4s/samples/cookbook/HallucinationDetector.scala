@@ -5,8 +5,10 @@ import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.builtin.search.{ ExaSearchTool, ExaSearchConfig }
 import org.llm4s.agent.Agent
+import org.llm4s.types.TryOps
 import org.slf4j.LoggerFactory
 import com.typesafe.config.ConfigFactory
+import scala.util.Try
 
 object HallucinationDetector {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -148,14 +150,18 @@ object HallucinationDetector {
           .map(_.content)
           .getOrElse("No claims extracted")
 
-        try {
-          val cleaned = cleanJsonResponse(finalResponse)
-          val parsed  = ujson.read(cleaned)
-          parsed.arr.map(_.str).toList
-        } catch {
-          case e: Exception =>
-            logger.error("❌ Failed to parse claims: {}", e.getMessage)
+        val parseResult = for {
+          cleaned <- Try(cleanJsonResponse(finalResponse)).toResult
+          parsed  <- Try(ujson.read(cleaned)).toResult
+          claims  <- Try(parsed.arr.map(_.str).toList).toResult
+        } yield claims
+
+        parseResult match {
+          case Left(error) =>
+            logger.error("❌ Failed to parse claims: {}", error.formatted)
             List.empty[String]
+          case Right(claims) =>
+            claims
         }
     }
   }
@@ -201,13 +207,18 @@ For each claim, use the exa_search tool to find evidence, then return the struct
           .map(_.content)
           .getOrElse("[]")
 
-        try {
-          val cleaned = cleanJsonResponse(finalResponse)
-          ujson.read(cleaned).arr.toList
-        } catch {
-          case e: Exception =>
-            logger.error("❌ Failed to parse verification results: {}", e.getMessage)
+        val parseResult = for {
+          cleaned <- Try(cleanJsonResponse(finalResponse)).toResult
+          parsed  <- Try(ujson.read(cleaned)).toResult
+          results <- Try(parsed.arr.toList).toResult
+        } yield results
+
+        parseResult match {
+          case Left(error) =>
+            logger.error("❌ Failed to parse verification results: {}", error.formatted)
             List.empty[ujson.Value]
+          case Right(results) =>
+            results
         }
     }
   }
