@@ -183,10 +183,10 @@ class OpenAIImageClient(
   ): Either[ImageGenerationError, requests.Response] = {
 
     val requestBody = Obj(
-      "model"           -> config.model,
-      "prompt"          -> prompt,
-      "n"               -> count,
-      "size"            -> sizeToApiFormat(options.size),
+      "model"  -> config.model,
+      "prompt" -> prompt,
+      "n"      -> count,
+      "size"   -> sizeToApiFormat(options.size),
     )
 
     if (config.model == "dall-e-3")
