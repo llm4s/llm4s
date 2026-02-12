@@ -598,6 +598,7 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers with MockFactory {
     pe("kind").str shouldBe "invalid_nesting"
     pe("expectedType").str shouldBe "object"
     pe("receivedType").str shouldBe "array"
+    pe("parentPath").str shouldBe "parent"
   }
 
   // ============================================================================
