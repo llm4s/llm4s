@@ -12,8 +12,8 @@ import scala.util.{ Try, Using }
  * PostgreSQL implementation of MemoryStore.
  * Persists agent memories to a Postgres table using JDBC.
  * DESIGN NOTES:
- * - This is an MVP implementation focused on persistence only.
- * - Compound filters (And/Or/Not) and semantic search will be added later.
+ * - Supports compound filters (And/Or/Not) and basic metadata filtering.
+ * - Semantic search will be added later.
  */
 final class PostgresMemoryStore private[memory] (
   private val dataSource: HikariDataSource,
