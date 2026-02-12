@@ -279,6 +279,7 @@ object ModelCapabilities {
 /**
  * Detailed pricing information for a model.
  */
+
 case class ModelPricing(
   inputCostPerToken: Option[Double] = None,
   outputCostPerToken: Option[Double] = None,
@@ -299,10 +300,6 @@ case class ModelPricing(
 
   /**
    * Estimate the cost of a completion given token counts.
-   *
-   * @param inputTokens Number of input tokens
-   * @param outputTokens Number of output tokens
-   * @return Estimated cost in dollars
    */
   def estimateCost(inputTokens: Int, outputTokens: Int): Option[Double] =
     for {
@@ -312,18 +309,45 @@ case class ModelPricing(
 
   /**
    * Estimate the cost with caching.
-   *
-   * @param inputTokens Number of input tokens
-   * @param cachedTokens Number of cached tokens read
-   * @param outputTokens Number of output tokens
-   * @return Estimated cost in dollars
    */
-  def estimateCostWithCaching(inputTokens: Int, cachedTokens: Int, outputTokens: Int): Option[Double] =
+  def estimateCostWithCaching(
+    inputTokens: Int,
+    cachedTokens: Int,
+    outputTokens: Int
+  ): Option[Double] =
     for {
       inCost    <- inputCostPerToken
       outCost   <- outputCostPerToken
       cacheRead <- cacheReadInputTokenCost
     } yield (inputTokens * inCost) + (cachedTokens * cacheRead) + (outputTokens * outCost)
+
+  /**
+   * Estimate image generation cost.
+   *
+   * Supports:
+   *  - per-image pricing
+   *  - per-pixel pricing
+   */
+  def estimateImageCost(
+    imageCount: Int,
+    pixelCount: Option[Int] = None
+  ): Option[Double] = {
+
+    // Per-image pricing
+    val perImageCost =
+      inputCostPerImage
+        .map(_ * imageCount)
+        .orElse(outputCostPerImage.map(_ * imageCount))
+
+    // Per-pixel pricing
+    val perPixelCost =
+      for {
+        pixels <- pixelCount
+        cost   <- inputCostPerPixel.orElse(outputCostPerPixel)
+      } yield pixels * cost
+
+    perImageCost.orElse(perPixelCost)
+  }
 }
 
 object ModelPricing {

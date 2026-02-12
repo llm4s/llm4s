@@ -1,8 +1,9 @@
 package org.llm4s.imagegeneration.provider
 
 import org.llm4s.imagegeneration._
-import org.llm4s.metrics.{ MetricsCollector, Outcome }
+import org.llm4s.metrics.{ ErrorKind, MetricsCollector, Outcome }
 import org.llm4s.model.ModelRegistry
+import org.llm4s.trace.Tracing
 import org.slf4j.LoggerFactory
 import ujson._
 import java.time.Instant
@@ -16,7 +17,8 @@ import scala.util.Try
  */
 class OpenAIImageClient(
   config: OpenAIConfig,
-  metrics: MetricsCollector = MetricsCollector.noop
+  metrics: MetricsCollector = MetricsCollector.noop,
+  tracer: Option[Tracing] = None
 ) extends ImageGenerationClient {
 
   private val logger   = LoggerFactory.getLogger(getClass)
@@ -56,23 +58,57 @@ class OpenAIImageClient(
     val duration = FiniteDuration(System.nanoTime() - startNanos, NANOSECONDS)
 
     result match {
+
       case Right(images) =>
         metrics.observeRequest(provider, modelName, Outcome.Success, duration)
 
-        // Attempt cost estimation (image APIs usually priced per image)
+        // Compute pixel count based on image size
+        val pixelCountPerImage: Int = options.size match {
+          case ImageSize.Square512        => 512 * 512
+          case ImageSize.Square1024       => 1024 * 1024
+          case ImageSize.Landscape768x512 => 768 * 512
+          case ImageSize.Portrait512x768  => 512 * 768
+        }
+
+        val totalPixelCount = pixelCountPerImage * count
+
+        // Estimate cost using ModelRegistry
         ModelRegistry.lookup(provider, modelName).foreach { meta =>
-          meta.pricing.estimateCost(0, count).foreach(cost => metrics.recordCost(provider, modelName, cost))
+          meta.pricing
+            .estimateImageCost(
+              imageCount = count,
+              pixelCount = Some(totalPixelCount)
+            )
+            .foreach { cost =>
+
+              // Metrics
+              metrics.recordCost(provider, modelName, cost)
+
+              // Tracing
+              tracer.foreach(
+                _.traceCost(
+                  costUsd = cost,
+                  model = modelName,
+                  operation = "image_generation",
+                  tokenCount = count,
+                  costType = "image"
+                )
+              )
+            }
         }
 
         Right(images)
 
       case Left(error) =>
+        val errorKind = mapErrorKind(error)
+
         metrics.observeRequest(
           provider,
           modelName,
-          Outcome.Error(org.llm4s.metrics.ErrorKind.Unknown),
+          Outcome.Error(errorKind),
           duration
         )
+
         Left(error)
     }
   }
@@ -88,19 +124,29 @@ class OpenAIImageClient(
       connectTimeout = 5000
     )
 
-    if (response.statusCode == 200) {
+    if (response.statusCode == 200)
       Right(ServiceStatus(HealthStatus.Healthy, "OpenAI API is responding"))
-    } else if (response.statusCode == 429) {
+    else if (response.statusCode == 429)
       Right(ServiceStatus(HealthStatus.Degraded, "Rate limited but operational"))
-    } else {
+    else
       Right(
         ServiceStatus(
           HealthStatus.Unhealthy,
           s"API returned status ${response.statusCode}"
         )
       )
-    }
   }
+
+  private def mapErrorKind(error: ImageGenerationError): ErrorKind =
+    error match {
+      case AuthenticationError(_)        => ErrorKind.Authentication
+      case RateLimitError(_)             => ErrorKind.RateLimit
+      case ValidationError(_)            => ErrorKind.Validation
+      case InvalidPromptError(_)         => ErrorKind.Validation
+      case ServiceError(_, _)            => ErrorKind.Unknown
+      case InsufficientResourcesError(_) => ErrorKind.Unknown
+      case UnknownError(_)               => ErrorKind.Unknown
+    }
 
   private def validatePrompt(prompt: String): Either[ImageGenerationError, String] =
     if (prompt.trim.isEmpty)
@@ -120,13 +166,17 @@ class OpenAIImageClient(
 
   private def sizeToApiFormat(size: ImageSize): String =
     size match {
-      case ImageSize.Square512        => if (config.model == "dall-e-3") "1024x1024" else "512x512"
-      case ImageSize.Square1024       => "1024x1024"
-      case ImageSize.Landscape768x512 => if (config.model == "dall-e-3") "1792x1024" else "512x512"
-      case ImageSize.Portrait512x768  => if (config.model == "dall-e-3") "1024x1792" else "512x512"
+      case ImageSize.Square512 =>
+        if (config.model == "dall-e-3") "1024x1024" else "512x512"
+      case ImageSize.Square1024 =>
+        "1024x1024"
+      case ImageSize.Landscape768x512 =>
+        if (config.model == "dall-e-3") "1792x1024" else "512x512"
+      case ImageSize.Portrait512x768 =>
+        if (config.model == "dall-e-3") "1024x1792" else "512x512"
     }
 
-  private def makeApiRequest(
+  protected def makeApiRequest(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions
@@ -137,12 +187,10 @@ class OpenAIImageClient(
       "prompt"          -> prompt,
       "n"               -> count,
       "size"            -> sizeToApiFormat(options.size),
-      "response_format" -> "b64_json"
     )
 
-    if (config.model == "dall-e-3") {
+    if (config.model == "dall-e-3")
       requestBody("quality") = "standard"
-    }
 
     val response = requests.post(
       apiUrl,
@@ -178,7 +226,7 @@ class OpenAIImageClient(
     }
   }
 
-  private def parseResponse(
+  protected def parseResponse(
     response: requests.Response,
     prompt: String,
     options: ImageGenerationOptions
