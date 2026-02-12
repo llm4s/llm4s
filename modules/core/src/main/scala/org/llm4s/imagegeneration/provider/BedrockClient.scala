@@ -12,6 +12,44 @@ import java.time.format.DateTimeFormatter
 import java.security.MessageDigest
 import ujson._
 
+object BedrockClient {
+
+  /**
+   * Dedicated execution context for blocking AWS SDK operations.
+   *
+   * This keeps Bedrock network calls off the caller's shared execution context
+   * and makes the blocking IO boundary explicit.
+   */
+  private[imagegeneration] val blockingEc: ExecutionContext =
+    ExecutionContext.fromExecutor(
+      java.util.concurrent.Executors.newCachedThreadPool()
+    )
+
+  private def buildClient(config: BedrockConfig): BedrockRuntimeClient = {
+    val builder = BedrockRuntimeClient
+      .builder()
+      .region(Region.of(config.region))
+      .overrideConfiguration(
+        ClientOverrideConfiguration
+          .builder()
+          .apiCallTimeout(java.time.Duration.ofMillis(config.timeout))
+          .build()
+      )
+
+    (config.accessKeyId, config.secretAccessKey) match {
+      case (Some(accessKey), Some(secretKey)) =>
+        builder.credentialsProvider(
+          StaticCredentialsProvider.create(AwsBasicCredentials.create(accessKey, secretKey))
+        )
+      case _ =>
+        // Default credential provider chain (env, profile, instance role, etc.)
+        builder
+    }
+
+    builder.build()
+  }
+}
+
 /**
  * AWS Bedrock client for image generation.
  *
@@ -77,18 +115,22 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
-    Future {
-      generateImage(prompt, options)
-    }
+    Future(
+      blocking {
+        generateImage(prompt, options)
+      }
+    )(BedrockClient.blockingEc)
 
   override def generateImagesAsync(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    Future {
-      generateImages(prompt, count, options)
-    }
+    Future(
+      blocking {
+        generateImages(prompt, count, options)
+      }
+    )(BedrockClient.blockingEc)
 
   override def editImageAsync(
     imagePath: Path,
@@ -96,9 +138,11 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    Future {
-      editImage(imagePath, prompt, maskPath, options)
-    }
+    Future(
+      blocking {
+        editImage(imagePath, prompt, maskPath, options)
+      }
+    )(BedrockClient.blockingEc)
 
   override def health(): Either[ImageGenerationError, ServiceStatus] = {
     // Bedrock doesn't have a dedicated health endpoint
@@ -154,7 +198,6 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
           ujson.Obj("text" -> prompt)
         ),
         "cfg_scale" -> 7,
-<<<<<<< HEAD
         "seed" -> ujson.Num(options.seed.map(_.toDouble).getOrElse(0.0)),
         "steps" -> 50,
         "width" -> ujson.Num(width),

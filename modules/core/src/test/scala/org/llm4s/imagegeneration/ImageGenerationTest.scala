@@ -205,13 +205,13 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
   test("ImageGeneration creates correct client for StableDiffusion config") {
     val config = StableDiffusionConfig()
     val client = ImageGeneration.client(config)
-    client shouldBe a[org.llm4s.imagegeneration.provider.StableDiffusionClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.StableDiffusionClient) => }
   }
 
   test("ImageGeneration creates correct client for HuggingFace config") {
     val config = HuggingFaceConfig(apiKey = "test-key")
     val client = ImageGeneration.client(config)
-    client shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.HuggingFaceClient) => }
   }
 
   test("stableDiffusionClient creates client with correct config") {
@@ -219,18 +219,19 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
       baseUrl = "http://test:8080",
       apiKey = Some("test-key")
     )
-    client shouldBe a[org.llm4s.imagegeneration.provider.StableDiffusionClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.StableDiffusionClient) => }
   }
 
   test("huggingFaceClient creates client with correct config") {
     val client = ImageGeneration.huggingFaceClient(apiKey = "test-key")
-    client shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.HuggingFaceClient) => }
   }
 
   test("openAIClient creates client with correct config") {
     val client = ImageGeneration.openAIClient(apiKey = "test-key")
-    client shouldBe a[org.llm4s.imagegeneration.provider.OpenAIImageClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.OpenAIImageClient) => }
   }
+
 
 
   test("Config objects have correct default values") {
@@ -246,7 +247,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
     hfConfig.provider shouldBe ImageGenerationProvider.HuggingFace
 
     val openAIConfig = OpenAIConfig(apiKey = "test-key")
-    openAIConfig.model shouldBe "dall-e-2"
+    openAIConfig.model shouldBe "gpt-image-1"
     openAIConfig.provider shouldBe ImageGenerationProvider.DALLE
 
     val vertexConfig = VertexAIConfig(projectId = "test-project")
@@ -261,14 +262,14 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
     val config = VertexAIConfig(projectId = "test-project")
     val client = ImageGeneration.client(config)
 
-    client shouldBe a[org.llm4s.imagegeneration.provider.VertexAIClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.VertexAIClient) => }
   }
 
   test("ImageGeneration creates correct client for Bedrock config") {
     val config = BedrockConfig()
     val client = ImageGeneration.client(config)
 
-    client shouldBe a[org.llm4s.imagegeneration.provider.BedrockClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.BedrockClient) => }
   }
 
   test("BedrockConfig has correct default values") {
@@ -285,7 +286,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
     val config = StabilityAIConfig(apiKey = "test-key")
     val client = ImageGeneration.client(config)
 
-    client shouldBe a[org.llm4s.imagegeneration.provider.StabilityAIClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.StabilityAIClient) => }
   }
 
   test("StabilityAIConfig has correct default values") {
@@ -299,7 +300,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
     val config = FalAIConfig(apiKey = "test-key")
     val client = ImageGeneration.client(config)
 
-    client shouldBe a[org.llm4s.imagegeneration.provider.FalAIClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.FalAIClient) => }
   }
 
   test("FalAIConfig has correct default values") {
