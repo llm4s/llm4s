@@ -314,18 +314,24 @@ class ContainerisedWorkspace(
 
     // Execute stop and remove as separate commands
     val stopResult = Try {
-      val process  = Runtime.getRuntime.exec(Array("docker", "stop", containerName))
+      val process = Runtime.getRuntime.exec(Array("docker", "stop", containerName))
+
+      val stderr =
+        Using(scala.io.Source.fromInputStream(process.getErrorStream))(source => source.mkString.trim).getOrElse("")
+
       val exitCode = process.waitFor()
-      val stderr   = scala.io.Source.fromInputStream(process.getErrorStream).mkString.trim
       (exitCode, stderr)
     }
 
     val rmResult = stopResult match {
       case Success((0, _)) =>
         Try {
-          val process  = Runtime.getRuntime.exec(Array("docker", "rm", containerName))
+          val process = Runtime.getRuntime.exec(Array("docker", "rm", containerName))
+
+          val stderr = Using(scala.io.Source.fromInputStream(process.getErrorStream))(source => source.mkString.trim)
+            .getOrElse("")
+
           val exitCode = process.waitFor()
-          val stderr   = scala.io.Source.fromInputStream(process.getErrorStream).mkString.trim
           (exitCode, stderr)
         }
       case Success((_, stderr)) =>
