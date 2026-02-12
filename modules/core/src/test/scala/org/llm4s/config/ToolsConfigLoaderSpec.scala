@@ -9,7 +9,7 @@ class ToolsConfigLoaderSpec extends AnyFunSuite {
   test("loadExaSearchTool loads valid configuration with different values") {
     val testCases = List(
       ("test-api-key-12345", "https://api.exa.ai", 10, "auto", 500),
-      ("custom-key", "https://custom.exa.ai", 20, "neural", 1000)
+      ("custom-key", "https://custom.exa.ai", 5, "neural", 1000)
     )
 
     testCases.foreach { case (apiKey, apiUrl, numResults, searchType, maxCharacters) =>

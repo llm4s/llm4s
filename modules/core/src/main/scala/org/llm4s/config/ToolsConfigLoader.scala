@@ -54,8 +54,6 @@ final case class ExaSearchToolConfig(
 object ExaSearchToolConfig {
   // Exa API-specific validation constants
   private val ValidSearchTypes = Set("auto", "neural", "fast", "deep")
-  private val MinResults       = 1
-  private val MaxResults       = 10
 
   /**
    * Validate API key is non-empty.
@@ -63,7 +61,7 @@ object ExaSearchToolConfig {
   def validateApiKey(key: String): Result[String] = {
     val trimmed = key.trim
     if (trimmed.nonEmpty) Right(trimmed)
-    else Left(ConfigurationError("API key must not be empty", List("apiKey")))
+    else Left(ConfigurationError("apiKey is required", List("apiKey")))
   }
 
   /**
@@ -78,15 +76,15 @@ object ExaSearchToolConfig {
   }
 
   /**
-   * Validate number of search results is within Exa API limits [1, 10].
+   * Validate number of search results is positive.
    */
   def validateNumResults(n: Int): Result[Int] =
-    if (n >= MinResults && n <= MaxResults)
+    if (n > 0)
       Right(n)
     else
       Left(
         ConfigurationError(
-          s"numResults must be between $MinResults and $MaxResults (Exa API limit), got: $n",
+          s"numResults must be greater than 0, got: $n",
           List("numResults")
         )
       )
@@ -98,7 +96,7 @@ object ExaSearchToolConfig {
     if (n > 0)
       Right(n)
     else
-      Left(ConfigurationError(s"maxCharacters must be positive, got: $n", List("maxCharacters")))
+      Left(ConfigurationError(s"maxCharacters must be greater than 0, got: $n", List("maxCharacters")))
 
   /**
    * Validate search type is one of Exa's allowed values.
