@@ -508,9 +508,9 @@ object ImageGeneration {
    * This is a convenience method for creating a client that connects to the
    * OpenAI API for image generation.
    *
-   * @param apiKey Your OpenAI API key (required).
-   * @param model The model version to use. Defaults to gpt-image-1.
-   * @return An `ImageGenerationClient` instance configured for OpenAI.
+   * @param apiKey Your OpenAI API key (required)
+   * @param model The model version to use (defaults to gpt-image-1)
+   * @return An `ImageGenerationClient` instance configured for OpenAI
    */
   def openAIClient(
     apiKey: String,
