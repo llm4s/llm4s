@@ -110,6 +110,8 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
       MemoryFilter.ByMetadata("invalid-key; --", "value")
     )
     result.isLeft shouldBe true
+    val error = result.left.toOption.get
+    error.message should include("Invalid metadata key")
   }
 
   it should "generate SQL for MinImportance filter" in {
@@ -152,6 +154,73 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     val (sql, params) = result.toOption.get
     sql shouldBe "FALSE"
     params shouldBe Seq.empty
+  }
+
+  // Compound Filter Tests
+  it should "generate SQL for And filter" in {
+    val filter = MemoryFilter.And(
+      MemoryFilter.ByType(MemoryType.Task),
+      MemoryFilter.MinImportance(0.5)
+    )
+    val result = PostgresMemoryStore.filterToSql(filter)
+
+    result.isRight shouldBe true
+    val (sql, params) = result.toOption.get
+    sql shouldBe "(memory_type = ? AND importance >= ?)"
+    params shouldBe Seq(PString("task"), PDouble(0.5))
+  }
+
+  it should "generate SQL for Or filter" in {
+    val filter = MemoryFilter.Or(
+      MemoryFilter.ByType(MemoryType.Task),
+      MemoryFilter.ByType(MemoryType.Conversation)
+    )
+    val result = PostgresMemoryStore.filterToSql(filter)
+
+    result.isRight shouldBe true
+    val (sql, params) = result.toOption.get
+    sql shouldBe "(memory_type = ? OR memory_type = ?)"
+    params shouldBe Seq(PString("task"), PString("conversation"))
+  }
+
+  it should "generate SQL for Not filter" in {
+    val filter = MemoryFilter.Not(MemoryFilter.ByType(MemoryType.Task))
+    val result = PostgresMemoryStore.filterToSql(filter)
+
+    result.isRight shouldBe true
+    val (sql, params) = result.toOption.get
+    sql shouldBe "NOT (memory_type = ?)"
+    params shouldBe Seq(PString("task"))
+  }
+
+  it should "generate SQL for nested compound filters" in {
+    // And(Or(A, B), Not(C))
+    val filter = MemoryFilter.And(
+      MemoryFilter.Or(
+        MemoryFilter.ByType(MemoryType.Task),
+        MemoryFilter.ByType(MemoryType.Conversation)
+      ),
+      MemoryFilter.Not(MemoryFilter.MinImportance(0.9))
+    )
+    val result = PostgresMemoryStore.filterToSql(filter)
+
+    result.isRight shouldBe true
+    val (sql, params) = result.toOption.get
+    sql shouldBe "((memory_type = ? OR memory_type = ?) AND NOT (importance >= ?))"
+    params shouldBe Seq(PString("task"), PString("conversation"), PDouble(0.9))
+  }
+
+  it should "propagate errors from nested compound filters" in {
+    // And with invalid metadata key should fail
+    val filter = MemoryFilter.And(
+      MemoryFilter.ByType(MemoryType.Task),
+      MemoryFilter.ByMetadata("invalid-key; --", "value")
+    )
+    val result = PostgresMemoryStore.filterToSql(filter)
+
+    result.isLeft shouldBe true
+    val error = result.left.toOption.get
+    error.message should include("Invalid metadata key")
   }
 
   behavior.of("PostgresMemoryStore class execution")

@@ -12,8 +12,8 @@ import scala.util.{ Try, Using }
  * PostgreSQL implementation of MemoryStore.
  * Persists agent memories to a Postgres table using JDBC.
  * DESIGN NOTES:
- * - This is an MVP implementation focused on persistence only.
- * - Compound filters (And/Or/Not) and semantic search will be added later.
+ * - Supports compound filters (And/Or/Not) and basic metadata filtering.
+ * - Semantic search will be added later.
  */
 final class PostgresMemoryStore private[memory] (
   private val dataSource: HikariDataSource,
@@ -271,6 +271,18 @@ object PostgresMemoryStore {
   private val ValidIdentifierPattern  = "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$".r
   private val ValidMetadataKeyPattern = "^[a-zA-Z_][a-zA-Z0-9_]*$".r
 
+  /** Helper for binary filter composition (And/Or) */
+  private def composeBinary(
+    left: MemoryFilter,
+    right: MemoryFilter,
+    operator: String
+  ): Result[(String, Seq[SqlParam])] =
+    filterToSql(left).flatMap { case (leftSql, leftParams) =>
+      filterToSql(right).map { case (rightSql, rightParams) =>
+        (s"($leftSql $operator $rightSql)", leftParams ++ rightParams)
+      }
+    }
+
   final case class Config(
     host: String = "localhost",
     port: Int = 5432,
@@ -349,6 +361,14 @@ object PostgresMemoryStore {
         Left(ProcessingError("postgres-memory-store", s"Invalid metadata key: '$key'"))
       } else {
         Right(s"metadata->>'$key' = ?" -> Seq(PString(value)))
+      }
+
+    case MemoryFilter.And(l, r) => composeBinary(l, r, "AND")
+    case MemoryFilter.Or(l, r)  => composeBinary(l, r, "OR")
+
+    case MemoryFilter.Not(inner) =>
+      filterToSql(inner).map { case (innerSql, innerParams) =>
+        (s"NOT ($innerSql)", innerParams)
       }
 
     case unsupported =>
