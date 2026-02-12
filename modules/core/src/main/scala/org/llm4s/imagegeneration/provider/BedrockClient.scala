@@ -5,13 +5,51 @@ import org.slf4j.LoggerFactory
 import upickle.default._
 import java.nio.file.Path
 import scala.util.Try
-import scala.concurrent.{ Future, ExecutionContext }
+import scala.concurrent.{ Future, ExecutionContext, blocking }
 import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient
 import software.amazon.awssdk.services.bedrockruntime.model.{ InvokeModelRequest, InvokeModelResponse }
 import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration
 import software.amazon.awssdk.auth.credentials.{ AwsBasicCredentials, StaticCredentialsProvider }
 import software.amazon.awssdk.core.SdkBytes
+
+object BedrockClient {
+
+  /**
+   * Dedicated execution context for blocking AWS SDK operations.
+   *
+   * This keeps Bedrock network calls off the caller's shared execution context
+   * and makes the blocking IO boundary explicit.
+   */
+  private[imagegeneration] val blockingEc: ExecutionContext =
+    ExecutionContext.fromExecutor(
+      java.util.concurrent.Executors.newCachedThreadPool()
+    )
+
+  private def buildClient(config: BedrockConfig): BedrockRuntimeClient = {
+    val builder = BedrockRuntimeClient
+      .builder()
+      .region(Region.of(config.region))
+      .overrideConfiguration(
+        ClientOverrideConfiguration
+          .builder()
+          .apiCallTimeout(java.time.Duration.ofMillis(config.timeout))
+          .build()
+      )
+
+    (config.accessKeyId, config.secretAccessKey) match {
+      case (Some(accessKey), Some(secretKey)) =>
+        builder.credentialsProvider(
+          StaticCredentialsProvider.create(AwsBasicCredentials.create(accessKey, secretKey))
+        )
+      case _ =>
+        // Default credential provider chain (env, profile, instance role, etc.)
+        builder
+    }
+
+    builder.build()
+  }
+}
 
 /**
  * AWS Bedrock client for image generation.
@@ -40,31 +78,6 @@ import software.amazon.awssdk.core.SdkBytes
 class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
 
   private val logger = LoggerFactory.getLogger(getClass)
-
-  private lazy val client: BedrockRuntimeClient = {
-    val builder = BedrockRuntimeClient
-      .builder()
-      .region(Region.of(config.region))
-      .overrideConfiguration(
-        ClientOverrideConfiguration
-          .builder()
-          .apiCallTimeout(java.time.Duration.ofMillis(config.timeout))
-          .build()
-      )
-
-    // Use specific credentials if provided, otherwise default chain
-    (config.accessKeyId, config.secretAccessKey) match {
-      case (Some(accessKey), Some(secretKey)) =>
-        builder.credentialsProvider(
-          StaticCredentialsProvider.create(AwsBasicCredentials.create(accessKey, secretKey))
-        )
-      case _ =>
-        // Default credential provider chain (env, profile, instance role, etc.)
-        builder
-    }
-
-    builder.build()
-  }
 
   override def generateImage(
     prompt: String,
@@ -102,18 +115,22 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
-    Future {
-      generateImage(prompt, options)
-    }
+    Future(
+      blocking {
+        generateImage(prompt, options)
+      }
+    )(BedrockClient.blockingEc)
 
   override def generateImagesAsync(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    Future {
-      generateImages(prompt, count, options)
-    }
+    Future(
+      blocking {
+        generateImages(prompt, count, options)
+      }
+    )(BedrockClient.blockingEc)
 
   override def editImageAsync(
     imagePath: Path,
@@ -121,17 +138,20 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    Future {
-      editImage(imagePath, prompt, maskPath, options)
-    }
+    Future(
+      blocking {
+        editImage(imagePath, prompt, maskPath, options)
+      }
+    )(BedrockClient.blockingEc)
 
   override def health(): Either[ImageGenerationError, ServiceStatus] =
     // Bedrock doesn't have a standardized "ping" for the service itself,
     // but we can check if the client can be built and credentials are sane.
     Try {
-      // Just accessing the lazy val triggers build
-      val _ = client
-      ServiceStatus(HealthStatus.Healthy, "AWS Bedrock client initialized")
+      val client = BedrockClient.buildClient(config)
+      try
+        ServiceStatus(HealthStatus.Healthy, "AWS Bedrock client initialized")
+      finally client.close()
     }.toEither.left.map(e => ServiceError(s"Failed to initialize AWS Bedrock client: ${e.getMessage}", 0))
 
   private def validatePrompt(prompt: String): Either[ImageGenerationError, String] =
@@ -167,7 +187,7 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
           ujson.Obj("text" -> prompt)
         ),
         "cfg_scale" -> 7,
-        "seed"      -> options.seed.map(_.toInt).getOrElse(0),
+        "seed"      -> ujson.Num(options.seed.map(_.toInt).getOrElse(0).toDouble),
         "steps"     -> 50,
         "width"     -> width,
         "height"    -> height,
@@ -188,7 +208,9 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
         .accept("application/json")
         .build()
 
-      client.invokeModel(request)
+      val client = BedrockClient.buildClient(config)
+      try client.invokeModel(request)
+      finally client.close()
     }.toEither.left.map {
       case e: software.amazon.awssdk.services.bedrockruntime.model.AccessDeniedException =>
         AuthenticationError(s"Access denied: ${e.getMessage}")
@@ -204,22 +226,25 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
     response: InvokeModelResponse,
     prompt: String,
     options: ImageGenerationOptions
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
-    Try {
-      val responseBodyString = response.body().asUtf8String()
-      val responseJson       = read[ujson.Value](responseBodyString)
+  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+    val parsed: Either[ImageGenerationError, Seq[Any]] =
+      Try {
+        val responseBodyString = response.body().asUtf8String()
+        val responseJson       = read[ujson.Value](responseBodyString)
 
-      // Titan returns images in "images" array
-      val imagesOpt = responseJson.obj.get("images").map(_.arr.toSeq)
-      // Stability returns in "artifacts" array
-      val artifactsOpt = responseJson.obj.get("artifacts").map(_.arr.toSeq)
+        // Titan returns images in "images" array
+        val imagesOpt = responseJson.obj.get("images").map(_.arr.toSeq)
+        // Stability returns in "artifacts" array
+        val artifactsOpt = responseJson.obj.get("artifacts").map(_.arr.toSeq)
 
-      val imageDataList = imagesOpt
-        .orElse(artifactsOpt.map(_.flatMap(artifact => artifact.obj.get("base64").map(_.str))))
-        .getOrElse(Seq.empty)
+        imagesOpt
+          .orElse(artifactsOpt.map(_.flatMap(artifact => artifact.obj.get("base64").map(_.str))))
+          .getOrElse(Seq.empty)
+      }.toEither.left.map(e => ServiceError(s"Failed to parse response: ${e.getMessage}", 500))
 
+    parsed.flatMap { imageDataList =>
       if (imageDataList.isEmpty) {
-        throw new RuntimeException("No images returned from the API")
+        Left(ValidationError("No images returned from the API"))
       } else {
         val generatedImages = imageDataList.map { imageData =>
           val data = imageData match {
@@ -235,7 +260,8 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
           )
         }
         logger.info(s"Successfully generated ${generatedImages.length} image(s)")
-        generatedImages
+        Right(generatedImages)
       }
-    }.toEither.left.map(e => ServiceError(s"Failed to parse response: ${e.getMessage}", 500))
+    }
+  }
 }

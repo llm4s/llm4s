@@ -6,7 +6,20 @@ import java.time.Instant
 import java.nio.file.Path
 import java.util.Base64
 import scala.util.Try
-import scala.concurrent.{ Future, ExecutionContext }
+import scala.concurrent.{ Future, ExecutionContext, blocking }
+
+object HuggingFaceClient {
+
+  /**
+   * Dedicated execution context for blocking HTTP operations.
+   *
+   * This keeps HuggingFace network calls off the caller's shared execution context.
+   */
+  private[imagegeneration] val blockingEc: ExecutionContext =
+    ExecutionContext.fromExecutor(
+      java.util.concurrent.Executors.newCachedThreadPool()
+    )
+}
 
 /**
  * HuggingFace Inference API client for image generation.
@@ -165,18 +178,22 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
-    Future {
-      generateImage(prompt, options)
-    }
+    Future(
+      blocking {
+        generateImage(prompt, options)
+      }
+    )(HuggingFaceClient.blockingEc)
 
   override def generateImagesAsync(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    Future {
-      generateImages(prompt, count, options)
-    }
+    Future(
+      blocking {
+        generateImages(prompt, count, options)
+      }
+    )(HuggingFaceClient.blockingEc)
 
   override def editImageAsync(
     imagePath: Path,
@@ -184,9 +201,11 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    Future {
-      editImage(imagePath, prompt, maskPath, options)
-    }
+    Future(
+      blocking {
+        editImage(imagePath, prompt, maskPath, options)
+      }
+    )(HuggingFaceClient.blockingEc)
 
   /**
    * Check the health status of the HuggingFace Inference API.

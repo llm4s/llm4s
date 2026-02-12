@@ -6,7 +6,21 @@ import ujson._
 import java.time.Instant
 import java.nio.file.Path
 import scala.util.Try
-import scala.concurrent.{ Future, ExecutionContext }
+import scala.concurrent.{ Future, ExecutionContext, blocking }
+
+object OpenAIImageClient {
+
+  /**
+   * Dedicated execution context for blocking HTTP operations.
+   *
+   * This keeps OpenAI image network calls off the caller's shared execution context,
+   * aligning with the guideline to avoid running blocking work on shared pools.
+   */
+  private[imagegeneration] val blockingEc: ExecutionContext =
+    ExecutionContext.fromExecutor(
+      java.util.concurrent.Executors.newCachedThreadPool()
+    )
+}
 
 /**
  * OpenAI DALL-E API client for image generation.
@@ -94,18 +108,19 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     prompt: String,
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
     // Validate image format manually as simple check, real validation happens at API
     if (!imagePath.toString.toLowerCase.endsWith(".png")) {
       Left(ValidationError("Image must be a PNG file"))
     } else {
       val editUrl = s"${config.baseUrl}/images/edits"
 
+      val responseFormatStr = options.responseFormat.getOrElse("b64_json")
       val parts = scala.collection.mutable.ListBuffer[requests.MultiItem](
         requests.MultiItem("image", imagePath, filename = imagePath.getFileName.toString),
         requests.MultiItem("prompt", prompt),
         requests.MultiItem("n", options.n.toString),
-        requests.MultiItem("response_format", options.responseFormat.getOrElse("b64_json"))
+        requests.MultiItem("response_format", responseFormatStr)
       )
 
       // Always use dall-e-2 for edits as it's the only supported model for this endpoint
@@ -144,7 +159,6 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
         }
       }
     }
-  }
 
   /**
    * Generate an image asynchronously
@@ -153,9 +167,11 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
-    Future {
-      generateImage(prompt, options)
-    }
+    Future(
+      blocking {
+        generateImage(prompt, options)
+      }
+    )(OpenAIImageClient.blockingEc)
 
   /**
    * Generate multiple images asynchronously
@@ -165,9 +181,11 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    Future {
-      generateImages(prompt, count, options)
-    }
+    Future(
+      blocking {
+        generateImages(prompt, count, options)
+      }
+    )(OpenAIImageClient.blockingEc)
 
   /**
    * Edit an existing image asynchronously
@@ -178,9 +196,11 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    Future {
-      editImage(imagePath, prompt, maskPath, options)
-    }
+    Future(
+      blocking {
+        editImage(imagePath, prompt, maskPath, options)
+      }
+    )(OpenAIImageClient.blockingEc)
 
   /**
    * Check the health/status of the OpenAI API service.
@@ -280,13 +300,13 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       "prompt"          -> prompt,
       "n"               -> count,
       "size"            -> sizeToApiFormat(options.size),
-      "response_format" -> options.responseFormat.getOrElse("b64_json")
+      "response_format" -> ujson.Str(options.responseFormat.getOrElse("b64_json"))
     )
 
     // Optional parameters
-    options.quality.foreach(q => requestBody("quality") = q)
-    options.style.foreach(s => requestBody("style") = s)
-    options.user.foreach(u => requestBody("user") = u)
+    options.quality.foreach(requestBody("quality") = _)
+    options.style.foreach(requestBody("style") = _)
+    options.user.foreach(requestBody("user") = _)
 
     // Backward compatibility defaults for DALL-E 3 if not specified
     if (config.model == "dall-e-3" && options.quality.isEmpty) {
