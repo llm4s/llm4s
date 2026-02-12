@@ -2,12 +2,13 @@ package org.llm4s.samples.cookbook
 
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.samples.config.SamplesConfigLoader
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.builtin.search.{ ExaSearchTool, ExaSearchConfig }
 import org.llm4s.agent.Agent
 import org.llm4s.types.TryOps
 import org.slf4j.LoggerFactory
-import com.typesafe.config.ConfigFactory
+import pureconfig.ConfigSource
 import scala.util.Try
 
 object HallucinationDetector {
@@ -19,22 +20,28 @@ object HallucinationDetector {
       client      <- LLMConnect.getClient(providerCfg)
     } yield client
 
-    val exaConfigResult = Llm4sConfig.loadExaSearchTool()
+    val exaConfigResult      = Llm4sConfig.loadExaSearchTool()
+    val detectorConfigResult = SamplesConfigLoader.loadHallucinationDetector(ConfigSource.default)
 
-    (clientResult, exaConfigResult) match {
-      case (Left(error), _) =>
-        logger.error("Failed to create LLM client: {}", error)
+    (clientResult, exaConfigResult, detectorConfigResult) match {
+      case (Left(error), _, _) =>
+        logger.error("Failed to create LLM client: {}", error.formatted)
         logger.error("Make sure LLM_MODEL and appropriate API key are set")
         logger.error("Example: export LLM_MODEL=openai/gpt-4o")
 
-      case (_, Left(error)) =>
-        logger.error("Failed to load Exa Search configuration: {}", error)
+      case (_, Left(error), _) =>
+        logger.error("Failed to load Exa Search configuration: {}", error.formatted)
         logger.error("Make sure EXA_API_KEY is set")
         logger.error("Example: export EXA_API_KEY=your-api-key")
 
-      case (Right(client), Right(exaConfig)) =>
+      case (_, _, Left(error)) =>
+        logger.error("Failed to load sample configuration: {}", error.formatted)
+        logger.error("Make sure llm4s.samples.cookbook.hallucinationDetector.text is set in application.conf")
+
+      case (Right(client), Right(exaConfig), Right(detectorConfig)) =>
         logger.info("✓ LLM client created successfully")
-        logger.info("✓ Exa Search configuration loaded\n")
+        logger.info("✓ Exa Search configuration loaded")
+        logger.info("✓ Sample configuration loaded\n")
 
         // Configure the tool to return the text content of the search results
         val exaToolResult = ExaSearchTool.create(
@@ -61,9 +68,8 @@ object HallucinationDetector {
             val registry = new ToolRegistry(List(exaSearchTool))
             val agent    = new Agent(client)
 
-            // Load text from config
-            val config = ConfigFactory.load()
-            val text   = config.getString("llm4s.samples.cookbook.hallucinationDetector.text")
+            // Use the typed config loaded at the edge
+            val text = detectorConfig.text
 
             logger.info(s"📄 Text to analyze: ${text.take(100)}...\n")
 
