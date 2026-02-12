@@ -115,34 +115,12 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
   def getOpenAITools(strict: Boolean = true): ujson.Arr =
     ujson.Arr.from(tools.map(_.toOpenAITool(strict)))
 
- // Generate a specific format of tool definitions for a particular LLM provider
-  def getToolDefinitions(provider: String): ujson.Value = {
-    val openAITools = getOpenAITools()
-
-    provider.toLowerCase match {
-      case "openai" => openAITools
-      
-      case "anthropic" =>
-        // Anthropic requires 'input_schema' instead of OpenAI's 'parameters'
-        ujson.Arr.from(openAITools.arr.map { tool =>
-          val function = tool("function")
-          ujson.Obj(
-            "name"        -> function("name"),
-            "description" -> function("description"),
-            "input_schema" -> function("parameters")
-          )
-        })
-
-      case "gemini" =>
-        // Gemini expects a 'function_declarations' array wrapper
-        ujson.Arr(
-          ujson.Obj(
-            "function_declarations" -> ujson.Arr.from(openAITools.arr.map(t => t("function")))
-          )
-        )
-
-      case _ => throw new IllegalArgumentException(s"Unsupported LLM provider: $provider")
-    }
+  // Generate a specific format of tool definitions for a particular LLM provider
+  def getToolDefinitions(provider: String): ujson.Value = provider.toLowerCase match {
+    case "openai"    => getOpenAITools()
+    case "anthropic" => getOpenAITools() // Currently using the same format
+    case "gemini"    => getOpenAITools() // May need adjustment for Google's format
+    case _           => throw new IllegalArgumentException(s"Unsupported LLM provider: $provider")
   }
 
   /**
