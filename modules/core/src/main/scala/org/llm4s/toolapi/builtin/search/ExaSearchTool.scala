@@ -3,7 +3,7 @@ package org.llm4s.toolapi.builtin.search
 import org.llm4s.toolapi._
 import upickle.default._
 import org.llm4s.config.ExaSearchToolConfig
-import org.llm4s.error.ValidationError
+import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.types.Result
 import scala.util.Try
 import java.net.http.{ HttpClient => JHttpClient, HttpRequest, HttpResponse => JHttpResponse }
@@ -169,37 +169,62 @@ private[search] class JavaHttpClient extends BaseHttpClient {
 
 object ExaSearchTool {
 
-  // ===== Shared Validation Helpers =====
-  // These validators are used across config loader, create(), and withApiKey()
-  // to ensure consistent validation logic without duplication.
-  // Made private[llm4s] so config loader can access them.
+  // ===== Validation Helpers =====
+  // These validators delegate to ExaSearchToolConfig from the config layer.
+  // This maintains consistency between config loading and tool creation validation,
+  // while respecting proper layering (tool layer can depend on config layer).
+  //
+  // ConfigurationError is converted to ValidationError for consistency with tool error types.
 
-  private[llm4s] def validateApiKey(key: String): Result[String] = {
-    val trimmed = key.trim
-    if (trimmed.nonEmpty) Right(trimmed)
-    else Left(ValidationError.required("apiKey"))
-  }
+  private[llm4s] def validateApiKey(key: String): Result[String] =
+    ExaSearchToolConfig
+      .validateApiKey(key)
+      .left
+      .map {
+        case ConfigurationError(msg, keys) =>
+          ValidationError(keys.headOption.getOrElse("apiKey"), msg)
+        case other => ValidationError("apiKey", other.message)
+      }
 
-  private[llm4s] def validateHttps(url: String): Result[String] = {
-    val normalized = url.toLowerCase.trim
-    if (normalized.startsWith("https://")) Right(url.trim)
-    else Left(ValidationError.invalid("apiUrl", "must use HTTPS protocol for secure communication"))
-  }
+  private[llm4s] def validateHttps(url: String): Result[String] =
+    ExaSearchToolConfig
+      .validateHttps(url)
+      .left
+      .map {
+        case ConfigurationError(msg, keys) =>
+          ValidationError(keys.headOption.getOrElse("apiUrl"), msg)
+        case other => ValidationError("apiUrl", other.message)
+      }
 
   private[llm4s] def validateNumResults(n: Int): Result[Int] =
-    if (n > 0) Right(n)
-    else Left(ValidationError.invalid("numResults", s"must be greater than 0, got $n"))
+    ExaSearchToolConfig
+      .validateNumResults(n)
+      .left
+      .map {
+        case ConfigurationError(msg, keys) =>
+          ValidationError(keys.headOption.getOrElse("numResults"), msg)
+        case other => ValidationError("numResults", other.message)
+      }
 
   private[llm4s] def validateMaxCharacters(n: Int): Result[Int] =
-    if (n > 0) Right(n)
-    else Left(ValidationError.invalid("maxCharacters", s"must be greater than 0, got $n"))
+    ExaSearchToolConfig
+      .validateMaxCharacters(n)
+      .left
+      .map {
+        case ConfigurationError(msg, keys) =>
+          ValidationError(keys.headOption.getOrElse("maxCharacters"), msg)
+        case other => ValidationError("maxCharacters", other.message)
+      }
 
-  private[llm4s] def validateSearchType(s: String): Result[String] = {
-    val normalized = s.trim.toLowerCase
-    val validTypes = Set("auto", "neural", "fast", "deep")
-    if (validTypes.contains(normalized)) Right(normalized)
-    else Left(ValidationError.invalid("searchType", s"must be one of: ${validTypes.mkString(", ")}"))
-  }
+  private[llm4s] def validateSearchType(s: String): Result[String] =
+    ExaSearchToolConfig
+      .validateSearchType(s)
+      .left
+      .map {
+        case ConfigurationError(msg, keys) =>
+          ValidationError(keys.headOption.getOrElse("searchType"), msg)
+        case other => ValidationError("searchType", other.message)
+      }
 
   private[llm4s] def validateQuery(q: String): Result[String] = {
     val trimmed = q.trim

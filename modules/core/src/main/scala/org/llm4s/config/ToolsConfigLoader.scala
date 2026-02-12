@@ -51,6 +51,91 @@ final case class ExaSearchToolConfig(
   maxCharacters: Int,
 )
 
+object ExaSearchToolConfig {
+  // Exa API-specific validation constants
+  private val ValidSearchTypes = Set("auto", "neural", "fast", "deep")
+  private val MinResults       = 1
+  private val MaxResults       = 10
+
+  /**
+   * Validate API key is non-empty.
+   */
+  def validateApiKey(key: String): Result[String] = {
+    val trimmed = key.trim
+    if (trimmed.nonEmpty) Right(trimmed)
+    else Left(ConfigurationError("API key must not be empty", List("apiKey")))
+  }
+
+  /**
+   * Validate URL uses HTTPS protocol.
+   */
+  def validateHttps(url: String): Result[String] = {
+    val trimmed = url.trim
+    if (trimmed.startsWith("https://"))
+      Right(trimmed)
+    else
+      Left(ConfigurationError(s"URL must use HTTPS protocol, got: $trimmed", List("apiUrl")))
+  }
+
+  /**
+   * Validate number of search results is within Exa API limits [1, 10].
+   */
+  def validateNumResults(n: Int): Result[Int] =
+    if (n >= MinResults && n <= MaxResults)
+      Right(n)
+    else
+      Left(
+        ConfigurationError(
+          s"numResults must be between $MinResults and $MaxResults (Exa API limit), got: $n",
+          List("numResults")
+        )
+      )
+
+  /**
+   * Validate maximum characters is positive.
+   */
+  def validateMaxCharacters(n: Int): Result[Int] =
+    if (n > 0)
+      Right(n)
+    else
+      Left(ConfigurationError(s"maxCharacters must be positive, got: $n", List("maxCharacters")))
+
+  /**
+   * Validate search type is one of Exa's allowed values.
+   */
+  def validateSearchType(s: String): Result[String] = {
+    val normalized = s.trim.toLowerCase
+    if (ValidSearchTypes.contains(normalized))
+      Right(normalized)
+    else
+      Left(
+        ConfigurationError(
+          s"searchType must be one of ${ValidSearchTypes.mkString(", ")} (Exa API types), got: $s",
+          List("searchType")
+        )
+      )
+  }
+
+  /**
+   * Validate entire ExaSearchToolConfig.
+   * Used by both config loading (fail-fast) and tool creation (defensive).
+   */
+  def validated(config: ExaSearchToolConfig): Result[ExaSearchToolConfig] =
+    for {
+      validatedApiKey        <- validateApiKey(config.apiKey)
+      validatedApiUrl        <- validateHttps(config.apiUrl)
+      validatedNumResults    <- validateNumResults(config.numResults)
+      validatedSearchType    <- validateSearchType(config.searchType)
+      validatedMaxCharacters <- validateMaxCharacters(config.maxCharacters)
+    } yield config.copy(
+      apiKey = validatedApiKey,
+      apiUrl = validatedApiUrl,
+      numResults = validatedNumResults,
+      searchType = validatedSearchType,
+      maxCharacters = validatedMaxCharacters
+    )
+}
+
 /**
  * Internal PureConfig-based loader for tools configuration.
  *
@@ -118,9 +203,7 @@ private[config] object ToolsConfigLoader {
    * @param source The configuration source
    * @return ExaSearchToolConfig or error
    */
-  def loadExaSearchTool(source: ConfigSource): Result[ExaSearchToolConfig] = {
-    import org.llm4s.toolapi.builtin.search.ExaSearchTool
-
+  def loadExaSearchTool(source: ConfigSource): Result[ExaSearchToolConfig] =
     source
       .at("llm4s.tools.exa")
       .load[ExaSearchToolConfig]
@@ -129,26 +212,5 @@ private[config] object ToolsConfigLoader {
         val msg = failures.toList.map(_.description).mkString("; ")
         ConfigurationError(s"Failed to load Exa Search tool config: $msg")
       }
-      .flatMap { config =>
-        // Use shared validators from ExaSearchTool
-        for {
-          validatedNumResults <- ExaSearchTool
-            .validateNumResults(config.numResults)
-            .left
-            .map(e => ConfigurationError(e.message))
-          validatedMaxCharacters <- ExaSearchTool
-            .validateMaxCharacters(config.maxCharacters)
-            .left
-            .map(e => ConfigurationError(e.message))
-          validatedSearchType <- ExaSearchTool
-            .validateSearchType(config.searchType)
-            .left
-            .map(e => ConfigurationError(e.message))
-        } yield config.copy(
-          numResults = validatedNumResults,
-          maxCharacters = validatedMaxCharacters,
-          searchType = validatedSearchType
-        )
-      }
-  }
+      .flatMap(ExaSearchToolConfig.validated)
 }
