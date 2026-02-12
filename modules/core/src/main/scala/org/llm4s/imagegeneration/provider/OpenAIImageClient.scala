@@ -1,50 +1,30 @@
 package org.llm4s.imagegeneration.provider
 
 import org.llm4s.imagegeneration._
+import org.llm4s.metrics.{ MetricsCollector, Outcome }
+import org.llm4s.model.ModelRegistry
 import org.slf4j.LoggerFactory
 import ujson._
 import java.time.Instant
+import scala.concurrent.duration._
 import scala.util.Try
 
 /**
  * OpenAI DALL-E API client for image generation.
  *
- * This client connects to OpenAI's DALL-E API for text-to-image generation.
- * It supports both DALL-E 2 and DALL-E 3 models with their respective capabilities
- * and limitations.
- *
- * @param config Configuration containing API key, model selection, and timeout settings
- *
- * @example
- * {{{
- * val config = OpenAIConfig(
- *   apiKey = "your-openai-api-key",
- *   model = "dall-e-2"  // or "dall-e-3"
- * )
- * val client = new OpenAIImageClient(config)
- *
- * val options = ImageGenerationOptions(
- *   size = ImageSize.Square1024,
- *   format = ImageFormat.PNG
- * )
- *
- * client.generateImage("a beautiful landscape", options) match {
- *   case Right(image) => println(s"Generated image: $${image.size}")
- *   case Left(error) => println(s"Error: $${error.message}")
- * }
- * }}}
+ * Supports both DALL-E 2 and DALL-E 3 models.
  */
-class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
+class OpenAIImageClient(
+  config: OpenAIConfig,
+  metrics: MetricsCollector = MetricsCollector.noop
+) extends ImageGenerationClient {
 
-  private val logger = LoggerFactory.getLogger(getClass)
-  private val apiUrl = "https://api.openai.com/v1/images/generations"
+  private val logger   = LoggerFactory.getLogger(getClass)
+  private val apiUrl   = "https://api.openai.com/v1/images/generations"
+  private val provider = "openai"
 
   /**
-   * Generate a single image from a text prompt using OpenAI DALL-E API.
-   *
-   * @param prompt The text description of the image to generate
-   * @param options Optional generation parameters like size, format, etc.
-   * @return Either an error or the generated image
+   * Generate a single image.
    */
   override def generateImage(
     prompt: String,
@@ -53,37 +33,52 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
     generateImages(prompt, 1, options).map(_.head)
 
   /**
-   * Generate multiple images from a text prompt using OpenAI DALL-E API.
-   *
-   * Note: DALL-E 3 only supports generating 1 image at a time.
-   *
-   * @param prompt The text description of the images to generate
-   * @param count The number of images to generate (1-10 for DALL-E 2, 1 for DALL-E 3)
-   * @param options Optional generation parameters
-   * @return Either an error or a sequence of generated images
+   * Generate multiple images.
    */
   override def generateImages(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+
+    val startNanos = System.nanoTime()
+    val modelName  = config.model
+
     logger.info(s"Generating $count image(s) with prompt: ${prompt.take(100)}...")
 
-    // Validate input
     val result = for {
       validPrompt <- validatePrompt(prompt)
       validCount  <- validateCount(count)
       response    <- makeApiRequest(validPrompt, validCount, options)
       images      <- parseResponse(response, validPrompt, options)
     } yield images
-    result
+
+    val duration = FiniteDuration(System.nanoTime() - startNanos, NANOSECONDS)
+
+    result match {
+      case Right(images) =>
+        metrics.observeRequest(provider, modelName, Outcome.Success, duration)
+
+        // Attempt cost estimation (image APIs usually priced per image)
+        ModelRegistry.lookup(provider, modelName).foreach { meta =>
+          meta.pricing.estimateCost(0, count).foreach(cost => metrics.recordCost(provider, modelName, cost))
+        }
+
+        Right(images)
+
+      case Left(error) =>
+        metrics.observeRequest(
+          provider,
+          modelName,
+          Outcome.Error(org.llm4s.metrics.ErrorKind.Unknown),
+          duration
+        )
+        Left(error)
+    }
   }
 
   /**
-   * Check the health/status of the OpenAI API service.
-   *
-   * Note: OpenAI doesn't provide a dedicated health endpoint,
-   * so we use a minimal models list request as a health check.
+   * Health check using minimal models request.
    */
   override def health(): Either[ImageGenerationError, ServiceStatus] = {
     val response = requests.get(
@@ -94,58 +89,36 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
     )
 
     if (response.statusCode == 200) {
-      Right(
-        ServiceStatus(
-          status = HealthStatus.Healthy,
-          message = "OpenAI API is responding"
-        )
-      )
+      Right(ServiceStatus(HealthStatus.Healthy, "OpenAI API is responding"))
     } else if (response.statusCode == 429) {
-      Right(
-        ServiceStatus(
-          status = HealthStatus.Degraded,
-          message = "Rate limited but operational"
-        )
-      )
+      Right(ServiceStatus(HealthStatus.Degraded, "Rate limited but operational"))
     } else {
       Right(
         ServiceStatus(
-          status = HealthStatus.Unhealthy,
-          message = s"API returned status ${response.statusCode}"
+          HealthStatus.Unhealthy,
+          s"API returned status ${response.statusCode}"
         )
       )
     }
   }
 
-  /**
-   * Validate the prompt to ensure it meets OpenAI's requirements.
-   */
   private def validatePrompt(prompt: String): Either[ImageGenerationError, String] =
-    if (prompt.trim.isEmpty) {
+    if (prompt.trim.isEmpty)
       Left(ValidationError("Prompt cannot be empty"))
-    } else if (prompt.length > 4000) {
+    else if (prompt.length > 4000)
       Left(ValidationError("Prompt cannot exceed 4000 characters"))
-    } else {
+    else
       Right(prompt)
-    }
 
-  /**
-   * Validate the count based on the model being used.
-   */
   private def validateCount(count: Int): Either[ImageGenerationError, Int] = {
     val maxCount = if (config.model == "dall-e-3") 1 else 10
-    if (count < 1 || count > maxCount) {
+    if (count < 1 || count > maxCount)
       Left(ValidationError(s"Count must be between 1 and $maxCount for ${config.model}"))
-    } else {
+    else
       Right(count)
-    }
   }
 
-  /**
-   * Convert ImageSize to DALL-E API format string.
-   */
   private def sizeToApiFormat(size: ImageSize): String =
-    // Map our generic sizes to DALL-E supported sizes
     size match {
       case ImageSize.Square512        => if (config.model == "dall-e-3") "1024x1024" else "512x512"
       case ImageSize.Square1024       => "1024x1024"
@@ -153,14 +126,12 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
       case ImageSize.Portrait512x768  => if (config.model == "dall-e-3") "1024x1792" else "512x512"
     }
 
-  /**
-   * Make the actual API request to OpenAI.
-   */
   private def makeApiRequest(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions
   ): Either[ImageGenerationError, requests.Response] = {
+
     val requestBody = Obj(
       "model"           -> config.model,
       "prompt"          -> prompt,
@@ -169,9 +140,8 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
       "response_format" -> "b64_json"
     )
 
-    // Add quality parameter for DALL-E 3
     if (config.model == "dall-e-3") {
-      requestBody("quality") = "standard" // or "hd" for higher quality
+      requestBody("quality") = "standard"
     }
 
     val response = requests.post(
@@ -185,22 +155,20 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
       connectTimeout = 10000
     )
 
-    if (response.statusCode == 200) {
+    if (response.statusCode == 200)
       Right(response)
-    } else {
+    else
       handleErrorResponse(response)
-    }
   }
 
-  /**
-   * Handle error responses from the API.
-   */
-  private def handleErrorResponse(response: requests.Response): Either[ImageGenerationError, requests.Response] = {
+  private def handleErrorResponse(
+    response: requests.Response
+  ): Either[ImageGenerationError, requests.Response] = {
+
     val errorMessage = Try {
       val json = read(response.text())
       json("error")("message").str
-    }
-      .getOrElse(response.text())
+    }.getOrElse(response.text())
 
     response.statusCode match {
       case 401  => Left(AuthenticationError("Invalid API key"))
@@ -210,14 +178,12 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
     }
   }
 
-  /**
-   * Parse the API response into GeneratedImage objects.
-   */
   private def parseResponse(
     response: requests.Response,
     prompt: String,
     options: ImageGenerationOptions
   ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+
     val json       = read(response.text())
     val imagesData = json("data").arr
 
