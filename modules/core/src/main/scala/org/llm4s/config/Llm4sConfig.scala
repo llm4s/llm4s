@@ -147,11 +147,33 @@ object Llm4sConfig {
     fromConf
   }
 
+  /**
+   * Load Brave Search API configuration.
+   *
+   * Requires BRAVE_SEARCH_API_KEY environment variable.
+   *
+   * @return Result containing BraveSearchToolConfig with API key and settings
+   */
   def loadBraveSearchTool(): Result[BraveSearchToolConfig] =
     org.llm4s.config.ToolsConfigLoader.loadBraveSearchTool(ConfigSource.default)
+
+  /**
+   * Load DuckDuckGo Search configuration.
+   *
+   * No API key required.
+   *
+   * @return Result containing DuckDuckGoSearchToolConfig with settings
+   */
   def loadDuckDuckGoSearchTool(): Result[DuckDuckGoSearchToolConfig] =
     org.llm4s.config.ToolsConfigLoader.loadDuckDuckGoSearchTool(ConfigSource.default)
 
+  /**
+   * Load Exa Search API configuration.
+   *
+   * Requires EXA_API_KEY environment variable.
+   *
+   * @return Result containing ExaSearchToolConfig with API key and settings
+   */
   def loadExaSearchTool(): Result[ExaSearchToolConfig] =
     org.llm4s.config.ToolsConfigLoader.loadExaSearchTool(ConfigSource.default)
 }
