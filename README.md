@@ -136,35 +136,30 @@ To ensure code quality, we use a Git pre-commit hook that automatically checks c
 
 ### Prerequisites
 
-JDK 17 or JDK 21 (LTS) 
-  > ⚠️ Newer Java versions (22, 23+) may cause sbt or dependency issues.
+- JDK 21+
+- SBT
+- Docker
 
-  Check your Java version:
-  
-  java -version
-Windows users:
+#### Verify Java installation
 
-Ensure JAVA_HOME is set correctly.
+```bash
+java -version
+```
 
-Add %JAVA_HOME%\bin to your PATH.
+#### Windows
 
-Restart your terminal after setting it.
+Set `JAVA_HOME` and update your `PATH`.
 
-macOS users:
-Install via Homebrew:
+#### macOS (Homebrew)
 
+```bash
 brew install openjdk@21
-
-Add to your shell profile:
-
 echo 'export PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH"' >> ~/.zshrc
-source ~/.zshrc
-
-(Intel Macs may use /usr/local/opt/openjdk@21/bin)
+```
 
 ### Building the Project
 
-
+```bash
 sbt compile
 
 # For all supported Scala versions (2.13 and 3)
@@ -173,6 +168,7 @@ sbt +compile
 # Build and test all versions
 sbt buildAll
 ```
+
 
 ### Setup your LLM Environment
 
