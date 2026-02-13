@@ -17,14 +17,14 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
     model = "dall-e-2"
   )
 
-  class TestClient(cfg: OpenAIConfig, met: MetricsCollector = MetricsCollector.noop) 
-    extends OpenAIImageClient(cfg, met) {
-    def exposeSizeToApiFormat(s: ImageSize): String = sizeToApiFormat(s)
+  class TestClient(cfg: OpenAIConfig, met: MetricsCollector = MetricsCollector.noop)
+      extends OpenAIImageClient(cfg, met) {
+    def exposeSizeToApiFormat(s: ImageSize): String                                = sizeToApiFormat(s)
     def exposeEstimateImageCost(c: Int, o: ImageGenerationOptions): Option[Double] = estimateImageCost(c, o)
     def exposeMapErrorKind(e: ImageGenerationError): ErrorKind = {
-        val method = classOf[OpenAIImageClient].getDeclaredMethod("mapErrorKind", classOf[ImageGenerationError])
-        method.setAccessible(true)
-        method.invoke(this, e).asInstanceOf[ErrorKind]
+      val method = classOf[OpenAIImageClient].getDeclaredMethod("mapErrorKind", classOf[ImageGenerationError])
+      method.setAccessible(true)
+      method.invoke(this, e).asInstanceOf[ErrorKind]
     }
   }
 
@@ -36,16 +36,16 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "successfully parse a real JSON response and record metrics" in {
-    val metrics = mock[MetricsCollector]
+    val metrics      = mock[MetricsCollector]
     val jsonResponse = """{"data": [{"b64_json": "base64data"}]}"""
-    
+
     val client = new OpenAIImageClient(config, metrics) {
-      override protected def makeApiRequest(p: String, c: Int, o: ImageGenerationOptions) = 
+      override protected def makeApiRequest(p: String, c: Int, o: ImageGenerationOptions) =
         Right(createResponse(200, jsonResponse))
     }
 
     (metrics.observeRequest _).expects("openai", "dall-e-2", Outcome.Success, *).once()
-    
+
     val result = client.generateImage("space cat")
     result.isRight shouldBe true
     result.toOption.get.data shouldBe "base64data"
@@ -53,7 +53,7 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "handle all internal error mapping cases" in {
     val client = new TestClient(config)
-    
+
     client.exposeMapErrorKind(AuthenticationError("fail")) shouldBe ErrorKind.Authentication
     client.exposeMapErrorKind(RateLimitError("fail")) shouldBe ErrorKind.RateLimit
     client.exposeMapErrorKind(ValidationError("fail")) shouldBe ErrorKind.Validation
@@ -73,7 +73,7 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "validate prompt boundaries" in {
     val metrics = mock[MetricsCollector]
-    val client = new OpenAIImageClient(config, metrics)
+    val client  = new OpenAIImageClient(config, metrics)
 
     (metrics.observeRequest _).expects(*, *, Outcome.Error(ErrorKind.Validation), *).repeated(3).times()
 
@@ -84,7 +84,7 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "validate count limits for different models" in {
     val metrics = mock[MetricsCollector]
-    
+
     val de2Client = new OpenAIImageClient(config, metrics)
     (metrics.observeRequest _).expects(*, *, Outcome.Error(ErrorKind.Validation), *).once()
     de2Client.generateImages("test", 11).isLeft shouldBe true
@@ -96,11 +96,11 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   it should "execute real cost estimation logic" in {
-    val client = new TestClient(config)
+    val client  = new TestClient(config)
     val options = ImageGenerationOptions(size = ImageSize.Landscape768x512)
-    
+
     client.exposeEstimateImageCost(1, options)
-    
+
     val badClient = new TestClient(config) {
       override protected def sizeToApiFormat(s: ImageSize) = "invalid_format"
     }
@@ -109,23 +109,23 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "handle health check statuses" in {
     val client = new OpenAIImageClient(config) {
-        override def health() = super.health() 
+      override def health() = super.health()
     }
-    // We can't easily mock the static 'requests.get' inside health() 
+    // We can't easily mock the static 'requests.get' inside health()
     // without a wrapper, so we test the result logic via override for coverage
     val h1 = new OpenAIImageClient(config) {
-        override def health() = Right(ServiceStatus(HealthStatus.Healthy, "ok"))
+      override def health() = Right(ServiceStatus(HealthStatus.Healthy, "ok"))
     }
     h1.health().isRight shouldBe true
   }
 
   it should "emit trace events and record costs on success" in {
-    val metrics = mock[MetricsCollector]
-    val tracer = mock[Tracing]
+    val metrics      = mock[MetricsCollector]
+    val tracer       = mock[Tracing]
     val jsonResponse = """{"data": [{"b64_json": "fake"}]}"""
 
     val client = new OpenAIImageClient(config, metrics, Some(tracer)) {
-      override protected def makeApiRequest(p: String, c: Int, o: ImageGenerationOptions) = 
+      override protected def makeApiRequest(p: String, c: Int, o: ImageGenerationOptions) =
         Right(createResponse(200, jsonResponse))
       override protected def estimateImageCost(c: Int, o: ImageGenerationOptions) = Some(0.12)
     }
@@ -140,7 +140,7 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
   it should "handle service errors with custom codes" in {
     val metrics = mock[MetricsCollector]
     val client = new OpenAIImageClient(config, metrics) {
-      override protected def makeApiRequest(p: String, c: Int, o: ImageGenerationOptions) = 
+      override protected def makeApiRequest(p: String, c: Int, o: ImageGenerationOptions) =
         Left(ServiceError("API down", 503))
     }
 
