@@ -3,6 +3,7 @@ package org.llm4s.config
 object DefaultConfig {
   val DEFAULT_OPENAI_BASE_URL           = "https://api.openai.com/v1"
   val DEFAULT_ANTHROPIC_BASE_URL        = "https://api.anthropic.com"
+  val DEFAULT_COHERE_BASE_URL           = "https://api.cohere.ai"
   val DEFAULT_GEMINI_BASE_URL           = "https://generativelanguage.googleapis.com/v1beta"
   val DEFAULT_DEEPSEEK_BASE_URL         = "https://api.deepseek.com"
   val DEFAULT_LANGFUSE_URL              = "https://cloud.langfuse.com/api/public/ingestion"
