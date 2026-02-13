@@ -68,8 +68,10 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
 
   /**
    * Generates multiple images via sequential requests.
-   * Fail-fast semantics: on first request failure, returns that error immediately
-   * and does not accumulate or continue with remaining requests.
+   *
+   * Fail-fast contract: On any request failure, returns the first error encountered
+   * and does not accumulate or continue processing remaining requests. This is an
+   * explicit design decision to fail fast rather than accumulate partial results.
    */
   private def generateMultipleImages(
     prompt: String,
@@ -79,6 +81,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
     // Stability AI generates one image per request, so loop for multiple
     val results = (1 to count).map(_ => generateSingleImage(prompt, options))
 
+    // Fail-fast: return first error if any request failed (does not accumulate errors)
     val errors = results.collect { case Left(e) => e }
     if (errors.nonEmpty) {
       Left(errors.head)
