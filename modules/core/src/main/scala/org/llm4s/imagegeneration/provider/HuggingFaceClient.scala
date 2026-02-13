@@ -15,10 +15,33 @@ object HuggingFaceClient {
    *
    * This keeps HuggingFace network calls off the caller's shared execution context.
    */
-  private[imagegeneration] val blockingEc: ExecutionContext =
-    ExecutionContext.fromExecutor(
-      java.util.concurrent.Executors.newCachedThreadPool()
+  private[imagegeneration] val blockingEc: ExecutionContext = {
+    val threadFactory = new java.util.concurrent.ThreadFactory {
+      private val counter = new java.util.concurrent.atomic.AtomicInteger(0)
+      override def newThread(r: Runnable): Thread = {
+        val thread = new Thread(r, s"huggingface-blocking-${counter.incrementAndGet()}")
+        thread.setDaemon(true)
+        thread
+      }
+    }
+
+    val executor = new java.util.concurrent.ThreadPoolExecutor(
+      2, // core pool size
+      8, // maximum pool size
+      60L,
+      java.util.concurrent.TimeUnit.SECONDS,                       // keep alive time
+      new java.util.concurrent.LinkedBlockingQueue[Runnable](100), // bounded queue
+      threadFactory
     )
+
+    // Allow core threads to timeout to prevent resource leaks
+    executor.allowCoreThreadTimeOut(true)
+    sys.addShutdownHook {
+      executor.shutdown()
+    }
+
+    ExecutionContext.fromExecutor(executor)
+  }
 }
 
 /**
@@ -59,7 +82,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, GeneratedImage] =
-    generateImages(prompt, 1, options).map(_.head)
+    generateImages(prompt, 1, options).flatMap(_.headOption.toRight(ValidationError("No image returned")))
 
   /**
    * Validates the provided prompt to ensure it is not empty or blank.

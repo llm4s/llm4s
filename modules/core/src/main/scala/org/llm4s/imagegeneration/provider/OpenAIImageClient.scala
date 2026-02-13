@@ -16,10 +16,33 @@ object OpenAIImageClient {
    * This keeps OpenAI image network calls off the caller's shared execution context,
    * aligning with the guideline to avoid running blocking work on shared pools.
    */
-  private[imagegeneration] val blockingEc: ExecutionContext =
-    ExecutionContext.fromExecutor(
-      java.util.concurrent.Executors.newCachedThreadPool()
+  private[imagegeneration] val blockingEc: ExecutionContext = {
+    val threadFactory = new java.util.concurrent.ThreadFactory {
+      private val counter = new java.util.concurrent.atomic.AtomicInteger(0)
+      override def newThread(r: Runnable): Thread = {
+        val thread = new Thread(r, s"openai-blocking-${counter.incrementAndGet()}")
+        thread.setDaemon(true)
+        thread
+      }
+    }
+
+    val executor = new java.util.concurrent.ThreadPoolExecutor(
+      2, // core pool size
+      8, // maximum pool size
+      60L,
+      java.util.concurrent.TimeUnit.SECONDS,                       // keep alive time
+      new java.util.concurrent.LinkedBlockingQueue[Runnable](100), // bounded queue
+      threadFactory
     )
+
+    // Allow core threads to timeout to prevent resource leaks
+    executor.allowCoreThreadTimeOut(true)
+    sys.addShutdownHook {
+      executor.shutdown()
+    }
+
+    ExecutionContext.fromExecutor(executor)
+  }
 }
 
 /**
@@ -65,7 +88,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, GeneratedImage] =
-    generateImages(prompt, 1, options).map(_.head)
+    generateImages(prompt, 1, options).flatMap(_.headOption.toRight(ValidationError("No image returned")))
 
   /**
    * Generate multiple images from a text prompt using OpenAI DALL-E API.
@@ -154,7 +177,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
           handleErrorResponse(response) match {
             case Left(e) => Left(e)
             case Right(_) =>
-              Left(UnknownError(new RuntimeException("Unexpected successful response during error handling")))
+              Left(ServiceError("Unexpected successful response during error handling", 500))
           }
         }
       }

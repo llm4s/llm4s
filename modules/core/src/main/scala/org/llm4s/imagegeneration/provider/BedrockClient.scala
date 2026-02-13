@@ -21,10 +21,33 @@ object BedrockClient {
    * This keeps Bedrock network calls off the caller's shared execution context
    * and makes the blocking IO boundary explicit.
    */
-  private[imagegeneration] val blockingEc: ExecutionContext =
-    ExecutionContext.fromExecutor(
-      java.util.concurrent.Executors.newCachedThreadPool()
+  private[imagegeneration] val blockingEc: ExecutionContext = {
+    val threadFactory = new java.util.concurrent.ThreadFactory {
+      private val counter = new java.util.concurrent.atomic.AtomicInteger(0)
+      override def newThread(r: Runnable): Thread = {
+        val thread = new Thread(r, s"bedrock-blocking-${counter.incrementAndGet()}")
+        thread.setDaemon(true)
+        thread
+      }
+    }
+
+    val executor = new java.util.concurrent.ThreadPoolExecutor(
+      2, // core pool size
+      8, // maximum pool size
+      60L,
+      java.util.concurrent.TimeUnit.SECONDS,                       // keep alive time
+      new java.util.concurrent.LinkedBlockingQueue[Runnable](100), // bounded queue
+      threadFactory
     )
+
+    // Allow core threads to timeout to prevent resource leaks
+    executor.allowCoreThreadTimeOut(true)
+    sys.addShutdownHook {
+      executor.shutdown()
+    }
+
+    ExecutionContext.fromExecutor(executor)
+  }
 
   private def buildClient(config: BedrockConfig): BedrockRuntimeClient = {
     val builder = BedrockRuntimeClient
@@ -83,7 +106,7 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, GeneratedImage] =
-    generateImages(prompt, 1, options).map(_.head)
+    generateImages(prompt, 1, options).flatMap(_.headOption.toRight(ValidationError("No image returned from Bedrock")))
 
   override def generateImages(
     prompt: String,

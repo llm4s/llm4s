@@ -180,7 +180,7 @@ object ImageGenerationProvider {
   case object FalAI           extends ImageGenerationProvider
 }
 
-trait ImageGenerationConfig {
+sealed trait ImageGenerationConfig {
   def provider: ImageGenerationProvider
   def model: String
   def timeout: Int = 30000 // 30 seconds default
