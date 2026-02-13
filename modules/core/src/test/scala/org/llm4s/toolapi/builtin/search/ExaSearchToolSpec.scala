@@ -729,7 +729,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       maxCharacters = 500
     )
 
-    val result = ExaSearchTool.search("test query", ExaSearchConfig(), toolConfig, mockClient)
+    val result = ExaSearchTool.search("test query", ExaSearchConfig(), toolConfig, mockClient, () => ())
 
     result.isRight shouldBe true
     val searchResult = result.getOrElse(fail("Expected Right but got Left"))
@@ -759,7 +759,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       maxCharacters = 500
     )
 
-    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient)
+    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient, () => ())
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse("")
@@ -782,7 +782,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       maxCharacters = 500
     )
 
-    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient)
+    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient, () => ())
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse("")
@@ -804,7 +804,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       maxCharacters = 500
     )
 
-    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient)
+    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient, () => ())
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse("")
@@ -822,7 +822,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       maxCharacters = 500
     )
 
-    val result = ExaSearchTool.search("test", ExaSearchConfig(timeoutMs = 5000), toolConfig, failingClient)
+    val result = ExaSearchTool.search("test", ExaSearchConfig(timeoutMs = 5000), toolConfig, failingClient, () => ())
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse("")
@@ -840,7 +840,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       maxCharacters = 500
     )
 
-    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, failingClient)
+    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, failingClient, () => ())
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse("")
@@ -862,12 +862,43 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       maxCharacters = 500
     )
 
-    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient)
+    val result = ExaSearchTool.search("test", ExaSearchConfig(), toolConfig, mockClient, () => ())
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse("")
     error should (include("parse").or(include("process")))
     error should (include("invalid").or(include("try again")))
+  }
+
+  it should "call restoreInterrupt function when HTTP request is interrupted" in {
+    var interruptRestored = false
+    val mockRestore       = () => interruptRestored = true
+
+    val interruptingClient = new FailingHttpClient(new InterruptedException("Request interrupted"))
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    // The restoreInterrupt function is called, but we don't actually restore the flag in tests
+    // to avoid affecting the test framework
+    val result = ExaSearchTool.search(
+      "test",
+      ExaSearchConfig(),
+      toolConfig,
+      interruptingClient,
+      mockRestore
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse("")
+    error should (include("cancelled").or(include("interrupted")))
+
+    // Verify restoreInterrupt was called - this is the key test!
+    interruptRestored shouldBe true
   }
 
   "Override config validation" should "reject invalid numResults in override config" in {

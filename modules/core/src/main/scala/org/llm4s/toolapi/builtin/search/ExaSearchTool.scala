@@ -339,12 +339,14 @@ object ExaSearchTool {
    * @param toolConfig The Exa API configuration (must use HTTPS)
    * @param config Optional configuration overrides (will be validated)
    * @param httpClient HTTP client for making requests (injectable for testing)
+   * @param restoreInterrupt Function to restore interrupt flag (injectable for testing)
    * @return Right(ToolFunction) if valid, Left(ValidationError) otherwise
    */
   def create(
     toolConfig: ExaSearchToolConfig,
     config: Option[ExaSearchConfig] = None,
-    httpClient: BaseHttpClient = new JavaHttpClient()
+    httpClient: BaseHttpClient = new JavaHttpClient(),
+    restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
   ): Result[ToolFunction[Map[String, Any], ExaSearchResult]] =
     // Validate entire config using shared validators
     for {
@@ -378,7 +380,7 @@ object ExaSearchTool {
         for {
           rawQuery <- extractor.getString("query")
           query    <- validateQuery(rawQuery).left.map(_.message) // Convert Result to Either[String, String]
-          result   <- search(query, finalConfig, validatedConfig, httpClient)
+          result   <- search(query, finalConfig, validatedConfig, httpClient, restoreInterrupt)
         } yield result
       }.build()
     } yield tool
@@ -393,13 +395,15 @@ object ExaSearchTool {
    * @param apiUrl The Exa API URL (must use HTTPS, default: https://api.exa.ai)
    * @param config Optional request configuration
    * @param httpClient HTTP client for making requests (injectable for testing)
+   * @param restoreInterrupt Function to restore interrupt flag (injectable for testing)
    * @return Right(ToolFunction) if valid, Left(ValidationError) otherwise
    */
   def withApiKey(
     apiKey: String,
     apiUrl: String = "https://api.exa.ai",
     config: Option[ExaSearchConfig] = None,
-    httpClient: BaseHttpClient = new JavaHttpClient()
+    httpClient: BaseHttpClient = new JavaHttpClient(),
+    restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
   ): Result[ToolFunction[Map[String, Any], ExaSearchResult]] =
     // Validate only the parameters this function receives
     for {
@@ -414,14 +418,15 @@ object ExaSearchTool {
         maxCharacters = 500
       )
 
-      tool <- create(toolConfig, config, httpClient)
+      tool <- create(toolConfig, config, httpClient, restoreInterrupt)
     } yield tool
 
   private[search] def search(
     query: String,
     config: ExaSearchConfig,
     toolConfig: ExaSearchToolConfig,
-    httpClient: BaseHttpClient
+    httpClient: BaseHttpClient,
+    restoreInterrupt: () => Unit
   ): Either[String, ExaSearchResult] = {
 
     val url  = s"${toolConfig.apiUrl}/search"
@@ -444,7 +449,7 @@ object ExaSearchTool {
         e match {
           case _: InterruptedException =>
             // Restore interrupt flag for proper thread shutdown and timeout semantics
-            Thread.currentThread().interrupt()
+            restoreInterrupt()
             "Search request was cancelled or interrupted."
           case _: java.net.http.HttpTimeoutException =>
             s"Search request timed out after ${config.timeoutMs}ms. Please try again with a simpler query."
@@ -469,7 +474,7 @@ object ExaSearchTool {
           e match {
             case _: InterruptedException =>
               // Restore interrupt flag for proper thread shutdown and timeout semantics
-              Thread.currentThread().interrupt()
+              restoreInterrupt()
               "Response parsing was cancelled or interrupted."
             case _: ujson.ParseException =>
               "Failed to parse search results. The response format may be invalid."
