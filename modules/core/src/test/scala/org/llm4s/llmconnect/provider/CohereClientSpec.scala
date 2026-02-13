@@ -17,7 +17,8 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
       )
     )
 
-  "CohereClient.buildChatRequest" should "include preamble, message, and chat history" in {
+  "CohereClient.buildChatRequest" should
+    "include preamble, message, and chat history" in {
     val client = createClient
     val conversation = Conversation(
       Seq(
@@ -64,7 +65,8 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
     completion.usage.get.completionTokens shouldBe 7
   }
 
-  "CohereClient.processStreamingResponse" should "accumulate chunks and usage" in {
+  "CohereClient.processStreamingResponse" should
+    "accumulate chunks and usage" in {
     val client = createClient
     val sse =
       """data: {"event_type":"stream-start","generation_id":"gen-stream"}
