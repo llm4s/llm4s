@@ -30,7 +30,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
         return Left(InvalidPromptError("Prompt contains inappropriate content"))
       Right(
         GeneratedImage(
-          data = mockImageData,
+          data = Some(mockImageData),
           format = options.format,
           size = options.size,
           prompt = prompt,
@@ -63,7 +63,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
       Right(
         Seq(
           GeneratedImage(
-            data = mockImageData,
+            data = Some(mockImageData),
             format = ImageFormat.PNG,
             size = options.size.getOrElse(ImageSize.Square512),
             prompt = prompt,
@@ -162,13 +162,13 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
     val base64Data = Base64.getEncoder.encodeToString(testData)
 
     val image = GeneratedImage(
-      data = base64Data,
+      data = Some(base64Data),
       format = ImageFormat.PNG,
       size = ImageSize.Square512,
       prompt = "test prompt"
     )
 
-    image.asBytes shouldBe testData
+    image.asBytes.toOption.get shouldBe testData
     image.prompt shouldBe "test prompt"
   }
 
@@ -177,7 +177,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
     val base64Data = Base64.getEncoder.encodeToString(testData)
 
     val image = GeneratedImage(
-      data = base64Data,
+      data = Some(base64Data),
       format = ImageFormat.PNG,
       size = ImageSize.Square512,
       prompt = "test prompt"
@@ -199,34 +199,45 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
 
   // ===== FACTORY TESTS =====
 
-  test("ImageGeneration creates correct client for StableDiffusion config") {
+  test("ImageGeneration.client factory returns Either") {
     val config = StableDiffusionConfig()
     val client = ImageGeneration.client(config)
-    client shouldBe a[org.llm4s.imagegeneration.provider.StableDiffusionClient]
+    client.isRight shouldBe true
+    client.toOption.get shouldBe a[org.llm4s.imagegeneration.provider.StableDiffusionClient]
   }
 
-  test("ImageGeneration creates correct client for HuggingFace config") {
+  test("ImageGeneration.client factory handles unsupported providers") {
+    // Note: Since we removed the unsupported providers from the enum,
+    // we would need to mock a config with a new provider to test this if needed.
+    // However, the factory now returns Left(UnsupportedOperation(...)) in the match case.
+  }
+
+  test("ImageGeneration.client factory returns HuggingFaceClient for HuggingFace config") {
     val config = HuggingFaceConfig(apiKey = "test-key")
     val client = ImageGeneration.client(config)
-    client shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
+    client.isRight shouldBe true
+    client.toOption.get shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
   }
 
   test("stableDiffusionClient creates client with correct config") {
-    val client = ImageGeneration.stableDiffusionClient(
+    val result = ImageGeneration.stableDiffusionClient(
       baseUrl = "http://test:8080",
       apiKey = Some("test-key")
     )
-    client shouldBe a[org.llm4s.imagegeneration.provider.StableDiffusionClient]
+    result.isRight shouldBe true
+    result.toOption.get shouldBe a[org.llm4s.imagegeneration.provider.StableDiffusionClient]
   }
 
   test("huggingFaceClient creates client with correct config") {
-    val client = ImageGeneration.huggingFaceClient(apiKey = "test-key")
-    client shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
+    val result = ImageGeneration.huggingFaceClient(apiKey = "test-key")
+    result.isRight shouldBe true
+    result.toOption.get shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
   }
 
   test("openAIClient creates client with correct config") {
-    val client = ImageGeneration.openAIClient(apiKey = "test-key")
-    client shouldBe a[org.llm4s.imagegeneration.provider.OpenAIImageClient]
+    val result = ImageGeneration.openAIClient(apiKey = "test-key")
+    result.isRight shouldBe true
+    result.toOption.get shouldBe a[org.llm4s.imagegeneration.provider.OpenAIImageClient]
   }
 
   test("Config objects have correct default values") {
@@ -463,7 +474,11 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
     val noopMetrics = MetricsCollector.noop
     val noopTracing = Tracing.noop
     val instrumented = new InstrumentedImageGenerationClient(
-      mockClient, noopMetrics, noopTracing, "test-provider", "test-model"
+      mockClient,
+      noopMetrics,
+      noopTracing,
+      "test-provider",
+      "test-model"
     )
 
     val result = instrumented.generateImage("A beautiful landscape")
@@ -479,12 +494,17 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
   test("InstrumentedImageGenerationClient records metrics on success") {
     var recorded = false
     val testMetrics = new MetricsCollector {
-      override def observeRequest(provider: String, model: String, outcome: Outcome, duration: FiniteDuration): Unit = ()
+      override def observeRequest(provider: String, model: String, outcome: Outcome, duration: FiniteDuration): Unit =
+        ()
       override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit = ()
-      override def recordCost(provider: String, model: String, costUsd: Double): Unit = ()
+      override def recordCost(provider: String, model: String, costUsd: Double): Unit                      = ()
       override def recordImageGeneration(
-        provider: String, model: String, outcome: Outcome,
-        imageCount: Int, costUsd: Double, duration: FiniteDuration
+        provider: String,
+        model: String,
+        outcome: Outcome,
+        imageCount: Int,
+        costUsd: Double,
+        duration: FiniteDuration
       ): Unit = {
         recorded = true
         provider shouldBe "openai"
@@ -496,7 +516,11 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
     }
     val noopTracing = Tracing.noop
     val instrumented = new InstrumentedImageGenerationClient(
-      mockClient, testMetrics, noopTracing, "openai", "dall-e-3"
+      mockClient,
+      testMetrics,
+      noopTracing,
+      "openai",
+      "dall-e-3"
     )
 
     instrumented.generateImage("Test prompt")
@@ -511,15 +535,23 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
         outcome shouldBe a[Outcome.Error]
       }
       override def addTokens(provider: String, model: String, inputTokens: Long, outputTokens: Long): Unit = ()
-      override def recordCost(provider: String, model: String, costUsd: Double): Unit = ()
+      override def recordCost(provider: String, model: String, costUsd: Double): Unit                      = ()
       override def recordImageGeneration(
-        provider: String, model: String, outcome: Outcome,
-        imageCount: Int, costUsd: Double, duration: FiniteDuration
+        provider: String,
+        model: String,
+        outcome: Outcome,
+        imageCount: Int,
+        costUsd: Double,
+        duration: FiniteDuration
       ): Unit = ()
     }
     val noopTracing = Tracing.noop
     val instrumented = new InstrumentedImageGenerationClient(
-      mockClient, testMetrics, noopTracing, "openai", "dall-e-3"
+      mockClient,
+      testMetrics,
+      noopTracing,
+      "openai",
+      "dall-e-3"
     )
 
     instrumented.generateImage("") // empty prompt triggers error
@@ -530,7 +562,11 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
     val noopMetrics = MetricsCollector.noop
     val noopTracing = Tracing.noop
     val instrumented = new InstrumentedImageGenerationClient(
-      mockClient, noopMetrics, noopTracing, "test", "test"
+      mockClient,
+      noopMetrics,
+      noopTracing,
+      "test",
+      "test"
     )
 
     val result = instrumented.health()

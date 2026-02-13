@@ -31,7 +31,7 @@ class InstrumentedImageGenerationClient(
   ): Either[ImageGenerationError, GeneratedImage] = {
     val start  = System.nanoTime()
     val result = underlying.generateImage(prompt, options)
-    recordMetrics(start, 1, options.size, result)
+    recordMetrics(start, 1, Some(options.size), result)
     result
   }
 
@@ -42,7 +42,7 @@ class InstrumentedImageGenerationClient(
   ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
     val start  = System.nanoTime()
     val result = underlying.generateImages(prompt, count, options)
-    recordMetrics(start, count, options.size, result)
+    recordMetrics(start, count, Some(options.size), result)
     result
   }
 
@@ -54,8 +54,7 @@ class InstrumentedImageGenerationClient(
   ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
     val start  = System.nanoTime()
     val result = underlying.editImage(imagePath, prompt, maskPath, options)
-    val size   = options.size.getOrElse(ImageSize.Square512)
-    recordMetrics(start, options.n, size, result, "image_edit")
+    recordMetrics(start, options.n, options.size, result, "image_edit")
     result
   }
 
@@ -66,7 +65,7 @@ class InstrumentedImageGenerationClient(
     val start  = System.nanoTime()
     val future = underlying.generateImageAsync(prompt, options)
     future.onComplete {
-      case Success(result) => recordMetrics(start, 1, options.size, result)
+      case Success(result) => recordMetrics(start, 1, Some(options.size), result)
       case Failure(exception) =>
         val duration = FiniteDuration(System.nanoTime() - start, NANOSECONDS)
         metrics.observeRequest(provider, model, Outcome.Error(ErrorKind.Unknown), duration)
@@ -83,7 +82,7 @@ class InstrumentedImageGenerationClient(
     val start  = System.nanoTime()
     val future = underlying.generateImagesAsync(prompt, count, options)
     future.onComplete {
-      case Success(result) => recordMetrics(start, count, options.size, result)
+      case Success(result) => recordMetrics(start, count, Some(options.size), result)
       case Failure(exception) =>
         val duration = FiniteDuration(System.nanoTime() - start, NANOSECONDS)
         metrics.observeRequest(provider, model, Outcome.Error(ErrorKind.Unknown), duration)
@@ -100,9 +99,8 @@ class InstrumentedImageGenerationClient(
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] = {
     val start  = System.nanoTime()
     val future = underlying.editImageAsync(imagePath, prompt, maskPath, options)
-    val size   = options.size.getOrElse(ImageSize.Square512)
     future.onComplete {
-      case Success(result) => recordMetrics(start, options.n, size, result, "image_edit")
+      case Success(result) => recordMetrics(start, options.n, options.size, result, "image_edit")
       case Failure(exception) =>
         val duration = FiniteDuration(System.nanoTime() - start, NANOSECONDS)
         metrics.observeRequest(provider, model, Outcome.Error(ErrorKind.Unknown), duration)
@@ -116,15 +114,24 @@ class InstrumentedImageGenerationClient(
   private def recordMetrics[T](
     startNanos: Long,
     count: Int,
-    size: ImageSize,
+    requestSize: Option[ImageSize],
     result: Either[ImageGenerationError, T],
     operation: String = "image_generation"
   ): Unit = {
     val duration = FiniteDuration(System.nanoTime() - startNanos, NANOSECONDS)
 
     result match {
-      case Right(_) =>
-        val cost = ImagePricingRegistry.estimateCost(provider, model, count, size.description)
+      case Right(data) =>
+        // Derive the actual size from the response if possible, otherwise fallback to request size or default
+        val actualSize = data match {
+          case img: GeneratedImage => Some(img.size)
+          case seq: Seq[?] if seq.nonEmpty && seq.head.isInstanceOf[GeneratedImage] =>
+            Some(seq.head.asInstanceOf[GeneratedImage].size)
+          case _ => requestSize
+        }
+
+        val finalSize = actualSize.getOrElse(ImageSize.Square1024) // Final fallback for billing
+        val cost      = ImagePricingRegistry.estimateCost(provider, model, count, finalSize.description)
         metrics.recordImageGeneration(provider, model, Outcome.Success, count, cost, duration)
         tracing.traceImageGeneration(
           costUsd = cost,
@@ -132,7 +139,7 @@ class InstrumentedImageGenerationClient(
           model = model,
           operation = operation,
           imageCount = count,
-          imageSize = size.description,
+          imageSize = finalSize.description,
           durationMs = duration.toMillis
         )
 

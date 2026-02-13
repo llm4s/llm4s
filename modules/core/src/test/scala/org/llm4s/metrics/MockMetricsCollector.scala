@@ -9,9 +9,9 @@ import scala.concurrent.duration.FiniteDuration
  */
 class MockMetricsCollector extends MetricsCollector {
   // Track all calls to metrics methods
-  val requestCalls: mutable.Buffer[(String, String, Outcome, FiniteDuration)] = mutable.Buffer.empty
-  val tokenCalls: mutable.Buffer[(String, String, Long, Long)]                = mutable.Buffer.empty
-  val costCalls: mutable.Buffer[(String, String, Double)]                     = mutable.Buffer.empty
+  val requestCalls: mutable.Buffer[(String, String, Outcome, FiniteDuration)]               = mutable.Buffer.empty
+  val tokenCalls: mutable.Buffer[(String, String, Long, Long)]                              = mutable.Buffer.empty
+  val costCalls: mutable.Buffer[(String, String, Double)]                                   = mutable.Buffer.empty
   val imageGenCalls: mutable.Buffer[(String, String, Outcome, Int, Double, FiniteDuration)] = mutable.Buffer.empty
 
   override def observeRequest(

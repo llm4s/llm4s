@@ -94,7 +94,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     prompt: String,
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
     // Validate image format manually as simple check, real validation happens at API
     if (!imagePath.toString.toLowerCase.endsWith(".png")) {
       Left(ValidationError("Image must be a PNG file"))
@@ -105,7 +105,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
         requests.MultiItem("image", imagePath, filename = imagePath.getFileName.toString),
         requests.MultiItem("prompt", prompt),
         requests.MultiItem("n", options.n.toString),
-        requests.MultiItem("response_format", options.responseFormat.getOrElse("b64_json"))
+        requests.MultiItem("response_format", options.responseFormat.getOrElse("b64_json"): String)
       )
 
       // Always use dall-e-2 for edits as it's the only supported model for this endpoint
@@ -144,7 +144,6 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
         }
       }
     }
-  }
 
   /**
    * Generate an image asynchronously
@@ -276,17 +275,17 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     }
 
     val requestBody = Obj(
-      "model"           -> config.model,
-      "prompt"          -> prompt,
-      "n"               -> count,
-      "size"            -> sizeToApiFormat(options.size),
-      "response_format" -> options.responseFormat.getOrElse("b64_json")
+      "model"           -> ujson.Str(config.model),
+      "prompt"          -> ujson.Str(prompt),
+      "n"               -> ujson.Num(count.toDouble),
+      "size"            -> ujson.Str(sizeToApiFormat(options.size)),
+      "response_format" -> ujson.Str(options.responseFormat.getOrElse("b64_json"))
     )
 
     // Optional parameters
-    options.quality.foreach(q => requestBody("quality") = q)
-    options.style.foreach(s => requestBody("style") = s)
-    options.user.foreach(u => requestBody("user") = u)
+    options.quality.foreach(valQ => requestBody("quality") = ujson.Str(valQ))
+    options.style.foreach(valS => requestBody("style") = ujson.Str(valS))
+    options.user.foreach(valU => requestBody("user") = ujson.Str(valU))
 
     // Backward compatibility defaults for DALL-E 3 if not specified
     if (config.model == "dall-e-3" && options.quality.isEmpty) {
@@ -348,11 +347,11 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
 
     val images = imagesData.map { imageData =>
       val (data, url) = if (imageData.obj.contains("b64_json")) {
-        (imageData("b64_json").str, None)
+        (Some(imageData("b64_json").str), None)
       } else if (imageData.obj.contains("url")) {
-        ("", Some(imageData("url").str))
+        (None, Some(imageData("url").str))
       } else {
-        ("", None)
+        (None, None)
       }
 
       GeneratedImage(

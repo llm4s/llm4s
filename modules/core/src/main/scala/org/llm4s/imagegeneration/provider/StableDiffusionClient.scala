@@ -276,7 +276,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
         else {
           val generatedImages = images.map { imageData =>
             GeneratedImage(
-              data = imageData.str,
+              data = Some(imageData.str),
               format = options.format,
               size = options.size,
               prompt = prompt,
