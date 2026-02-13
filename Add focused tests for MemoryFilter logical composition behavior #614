@@ -1,0 +1,104 @@
+Understand the Real Problem
+The issue likely means:
+
+MemoryFilter supports logical operations like:
+
+AND
+
+OR
+
+NOT
+
+Nested filters
+But currently:
+
+Tests are missing for logical composition
+
+Edge cases may not be covered
+
+Complex nested filters may break silently
+
+So we must:
+
+✔ Add tests for correct logical behavior
+✔ Add tests for nested combinations
+✔ Add tests for edge cases
+✔ Ensure regression safety
+What We Need to Test
+
+Assuming something like:
+MemoryFilter.And(filter1, filter2)
+MemoryFilter.Or(filter1, filter2)
+MemoryFilter.Not(filter)
+
+Example Scala Test Implementation
+src/test/scala/.../MemoryFilterLogicalSpec.scala
+
+class MemoryFilterLogicalSpec extends AnyFlatSpec with Matchers {
+
+  "MemoryFilter AND" should "return true when both filters match" in {
+    val f1 = MemoryFilter.Equals("type", "note")
+    val f2 = MemoryFilter.Equals("status", "active")
+
+    val composed = MemoryFilter.And(f1, f2)
+
+    val metadata = Map("type" -> "note", "status" -> "active")
+
+    composed.matches(metadata) shouldBe true
+  }
+
+  it should "return false when one filter fails" in {
+    val f1 = MemoryFilter.Equals("type", "note")
+    val f2 = MemoryFilter.Equals("status", "archived")
+
+    val composed = MemoryFilter.And(f1, f2)
+
+    val metadata = Map("type" -> "note", "status" -> "active")
+
+    composed.matches(metadata) shouldBe false
+  }
+
+  "MemoryFilter OR" should "return true if one filter matches" in {
+    val f1 = MemoryFilter.Equals("type", "note")
+    val f2 = MemoryFilter.Equals("status", "archived")
+
+    val composed = MemoryFilter.Or(f1, f2)
+
+    val metadata = Map("type" -> "note", "status" -> "active")
+
+    composed.matches(metadata) shouldBe true
+  }
+
+  "MemoryFilter NOT" should "invert filter result" in {
+    val f = MemoryFilter.Equals("status", "active")
+    val notFilter = MemoryFilter.Not(f)
+
+    val metadata = Map("status" -> "active")
+
+    notFilter.matches(metadata) shouldBe false
+  }
+
+  "Nested filters" should "evaluate correctly" in {
+    val f1 = MemoryFilter.Equals("type", "note")
+    val f2 = MemoryFilter.Equals("status", "active")
+    val f3 = MemoryFilter.Equals("priority", "high")
+
+    val nested = MemoryFilter.Or(
+      MemoryFilter.And(f1, f2),
+      f3
+    )
+
+    val metadata = Map("type" -> "note", "status" -> "active")
+
+    nested.matches(metadata) shouldBe true
+  }
+
+  "Contradictory filters" should "behave logically" in {
+    val f = MemoryFilter.Equals("type", "note")
+    val contradictory = MemoryFilter.And(f, MemoryFilter.Not(f))
+
+    val metadata = Map("type" -> "note")
+
+    contradictory.matches(metadata) shouldBe false
+  }
+}
