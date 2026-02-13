@@ -1,0 +1,25 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 🎥 Getting Started Video
+    url: https://www.youtube.com/watch?v=SXybj2P3_DE
+    about: Watch the LLM4S teaser talk at Bay Area Scala Conference
+  
+  - name: 💬 Discord Community
+    url: https://discord.gg/4uvTPn6qww
+    about: Join our Discord server for quick questions and community support
+  
+  - name: 📖 Documentation
+    url: https://llm4s.org
+    about: Browse our comprehensive documentation and guides
+  
+  - name: 🔧 Configuration Reference
+    url: https://github.com/llm4s/llm4s/blob/main/docs/getting-started/configuration.md
+    about: Check environment variables and configuration options
+  
+  - name: 🤝 Contributing Guidelines
+    url: https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md
+    about: Learn how to contribute to LLM4S
+  
+  - name: 💡 Discussions
+    url: https://github.com/llm4s/llm4s/discussions
+    about: Share ideas, design proposals, and general discussions
