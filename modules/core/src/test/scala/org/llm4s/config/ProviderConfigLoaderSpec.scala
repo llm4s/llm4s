@@ -546,6 +546,87 @@ class ProviderConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValu
   }
 
   // --------------------------------------------------------------------------
+  // Cohere Provider Tests
+  // --------------------------------------------------------------------------
+
+  "ProviderConfigLoader for Cohere" should {
+
+    "successfully load valid Cohere config" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "cohere/command-r" }
+          |  cohere {
+          |    apiKey = "cohere-key-test"
+          |    baseUrl = "https://api.cohere.ai"
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isRight shouldBe true
+      val cfg = result.value
+      cfg shouldBe a[CohereConfig]
+      val cohere = cfg.asInstanceOf[CohereConfig]
+      cohere.model shouldBe "command-r"
+      cohere.apiKey shouldBe "cohere-key-test"
+      cohere.baseUrl shouldBe "https://api.cohere.ai"
+    }
+
+    "use default base URL when not provided" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "cohere/command-r-plus" }
+          |  cohere {
+          |    apiKey = "cohere-key-test"
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isRight shouldBe true
+      val cfg = result.value.asInstanceOf[CohereConfig]
+      cfg.baseUrl shouldBe CohereConfig.DEFAULT_BASE_URL
+    }
+
+    "fail with clear error when Cohere API key is missing" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "cohere/command-r" }
+          |  cohere {
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isLeft shouldBe true
+      val error = result.left.value
+      error.message should include("Missing Cohere API key")
+      error.message should include("COHERE_API_KEY")
+    }
+
+    "fail when cohere section is completely missing" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "cohere/command-r" }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isLeft shouldBe true
+      result.left.value.message should include("Cohere provider selected")
+      result.left.value.message should include("llm4s.cohere section is missing")
+    }
+  }
+
+  // --------------------------------------------------------------------------
   // Model Spec Validation Tests
   // --------------------------------------------------------------------------
 

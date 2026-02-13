@@ -229,6 +229,50 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers {
     config.reserveCompletion should be > 0
   }
 
+  // ================================= COHERE CONFIG =================================
+
+  test("CohereConfig.fromValues creates config with correct model") {
+    val config = CohereConfig.fromValues(
+      modelName = "command-r",
+      apiKey = "test-key",
+      baseUrl = "https://api.cohere.ai"
+    )
+
+    config.model shouldBe "command-r"
+    config.apiKey shouldBe "test-key"
+    config.baseUrl shouldBe "https://api.cohere.ai"
+  }
+
+  test("CohereConfig.fromValues sets correct context window for command-r-plus") {
+    val config = CohereConfig.fromValues(
+      modelName = "command-r-plus",
+      apiKey = "test-key",
+      baseUrl = "https://api.cohere.ai"
+    )
+
+    config.contextWindow shouldBe 128000
+  }
+
+  test("CohereConfig.fromValues throws for empty apiKey") {
+    an[IllegalArgumentException] should be thrownBy {
+      CohereConfig.fromValues(
+        modelName = "command-r",
+        apiKey = "",
+        baseUrl = "https://api.cohere.ai"
+      )
+    }
+  }
+
+  test("CohereConfig.fromValues throws for empty baseUrl") {
+    an[IllegalArgumentException] should be thrownBy {
+      CohereConfig.fromValues(
+        modelName = "command-r",
+        apiKey = "test-key",
+        baseUrl = ""
+      )
+    }
+  }
+
   // ================================= PROVIDER CONFIG TRAIT =================================
 
   test("All config types implement ProviderConfig trait") {
@@ -240,11 +284,14 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers {
       AzureConfig.fromValues("gpt-4o", "https://azure.openai.com", "key", "2024-02-15")
     val zai: ProviderConfig =
       ZaiConfig.fromValues("GLM-4.7", "key", "https://api.z.ai/api/paas/v4")
+    val cohere: ProviderConfig =
+      CohereConfig.fromValues("command-r", "key", "https://api.cohere.ai")
 
     openai.model shouldBe "gpt-4o"
     anthropic.model shouldBe "claude-3-sonnet"
     ollama.model shouldBe "llama3"
     azure.model shouldBe "gpt-4o"
     zai.model shouldBe "GLM-4.7"
+    cohere.model shouldBe "command-r"
   }
 }
