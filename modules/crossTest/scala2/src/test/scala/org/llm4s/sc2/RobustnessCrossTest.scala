@@ -3,14 +3,41 @@ package org.llm4s.sc2
 import org.llm4s.agent.{ Agent, AgentStatus }
 import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk, ToolCall }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+/**
+ * Comprehensive cross-version robustness test suite for the LLM4S Agent framework.
+ * 
+ * Ensures that the Agent can gracefully recover from LLM failures, hallucinations, and network-related issues.
+ * 
+ * Test Coverage:
+ * 1. **ServiceError Handling**: Validates cross-version status code handling for HTTP errors.
+ *    Included here to verify that ServiceError.isRecoverableStatus behaves identically across Scala 2.13 and 3.x.
+ *    - Recoverable: 408 (Timeout), 5xx (Server Error), 429 (Rate Limit)
+ *    - Non-Recoverable: 400 (Bad Request), 401 (Unauthorized), 404 (Not Found)
+ * 
+ * 2. **Malformed JSON Response**: Protects against LLM providers returning invalid JSON in tool call arguments.
+ *    Verifies the Agent handles corrupted data packets without crashing.
+ * 
+ * 3. **Hallucinated Tool Names**: Prevents crashes when the LLM attempts to call non-existent tools.
+ *    Confirms the Agent transitions to WaitingForTools state and captures the hallucination in conversation history.
+ * 
+ * 4. **Agent Lifecycle Robustness**: Ensures the Agent remains stable even if the initial LLM connection fails.
+ *    Validates that errors are correctly propagated through runStep as Left(ServiceError).
+ * 
+ * 5. **Cross-Version Compatibility**: Logic is 100% identical between Scala 2 and Scala 3 modules,
+ *    using consistent List types and canonical helpers for identical behavior across environments.
+ * 
+ * Run with:
+ * sbt "++2.13.16 crossTestScala2/testOnly org.llm4s.sc2.RobustnessCrossTest"
+ */
 class RobustnessCrossTest extends AnyFlatSpec with Matchers {
 
+  // ServiceError tests: Verified here for cross-version consistency in HTTP status handling
   "ServiceError" should "keep the details correctly" in {
     val e = ServiceError(500, "openai", "server go boom")
     e.httpStatus shouldBe 500
@@ -102,11 +129,9 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
     }
   }
 
-  // New Test to match README coverage
   it should "handle malformed JSON responses gracefully" in {
     val malformedJsonClient = new LLMClient {
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
-        // Mock a tool call with invalid JSON in arguments
         val badToolCall = ToolCall("id", "tool", ujson.Str("{invalid_json_here}"))
         Right(Completion(
           id = "test-id",
@@ -125,7 +150,11 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
     val agent = new Agent(malformedJsonClient)
     val state = agent.initialize("test", new ToolRegistry(Nil))
 
-    // Verification: Protects against LLM provider API changes or malformed responses
-    noException should be thrownBy agent.runStep(state)
+    agent.runStep(state) match {
+      case Right(newState) =>
+        newState.status shouldBe AgentStatus.WaitingForTools
+      case Left(error) =>
+        fail(s"Expected successful handling of malformed JSON, got error: ${error.message}")
+    }
   }
 }
