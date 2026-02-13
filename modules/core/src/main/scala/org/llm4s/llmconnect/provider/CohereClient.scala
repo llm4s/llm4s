@@ -196,18 +196,20 @@ class CohereClient(
 
       val history = scala.collection.mutable.ArrayBuffer[ujson.Value]()
 
-      messages.zipWithIndex.foreach {
-        case (SystemMessage(content), idx) if idx != firstSystemIdx && content.trim.nonEmpty =>
-          history += ujson.Obj("role" -> "SYSTEM", "message" -> content)
-        case (UserMessage(content), idx) if idx != lastUserIndex =>
-          history += ujson.Obj("role" -> "USER", "message" -> content)
-        case (AssistantMessage(contentOpt, _), _) =>
-          contentOpt.filter(_.nonEmpty).foreach { content =>
-            history += ujson.Obj("role" -> "CHATBOT", "message" -> content)
-          }
-        case (_: ToolMessage, _) =>
-        case _                   =>
-      }
+      messages.zipWithIndex
+        .takeWhile { case (_, idx) => idx <= lastUserIndex }
+        .foreach {
+          case (SystemMessage(content), idx) if idx != firstSystemIdx && content.trim.nonEmpty =>
+            history += ujson.Obj("role" -> "SYSTEM", "message" -> content)
+          case (UserMessage(content), idx) if idx != lastUserIndex =>
+            history += ujson.Obj("role" -> "USER", "message" -> content)
+          case (AssistantMessage(contentOpt, _), _) =>
+            contentOpt.filter(_.nonEmpty).foreach { content =>
+              history += ujson.Obj("role" -> "CHATBOT", "message" -> content)
+            }
+          case (_: ToolMessage, _) =>
+          case _                   =>
+        }
 
       val lastUserContent = messages(lastUserIndex).asInstanceOf[UserMessage].content
       Right((preambleOpt, history.toSeq, lastUserContent))
