@@ -165,7 +165,8 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
       .expects("openai", "dall-e-2", 0.05)
       .once()
 
-    (tracer.traceEvent(_: TraceEvent))
+    (tracer
+      .traceEvent(_: TraceEvent))
       .expects(*)
       .once()
       .returning(Right(()))
