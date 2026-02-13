@@ -10,6 +10,10 @@ import org.llm4s.error.ThrowableOps._
 import org.slf4j.{ Logger, LoggerFactory }
 import sttp.client4._
 import ujson.{ Arr, Null, Obj }
+import java.io.{ BufferedReader, InputStreamReader }
+import java.net.URI
+import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
+import java.nio.charset.StandardCharsets
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
@@ -42,6 +46,7 @@ class CohereClient(
   private lazy val logger: Logger   = LoggerFactory.getLogger(getClass)
   private val closed: AtomicBoolean = new AtomicBoolean(false)
   private val backend               = DefaultSyncBackend()
+  private val httpClient            = HttpClient.newHttpClient()
 
   override def complete(
     conversation: Conversation,
@@ -90,18 +95,28 @@ class CohereClient(
           val payload                 = buildChatRequest(transformedConversation, transformed.options, stream = true)
           val url                     = uri"${config.baseUrl}/v1/chat"
           logger.debug(s"[CohereClient] POST $url model=${config.model} (streaming)")
+          val request = HttpRequest
+            .newBuilder()
+            .uri(URI.create(url.toString()))
+            .header("Authorization", s"Bearer ${config.apiKey}")
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(payload.render()))
+            .build()
+
           val attempt = Try {
-            basicRequest
-              .post(url)
-              .header("Authorization", s"Bearer ${config.apiKey}")
-              .header("Content-Type", "application/json")
-              .body(payload.render())
-              .send(backend)
+            httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
           }.toEither.left.map(e => e.toLLMError)
+
           attempt.flatMap { response =>
-            response.body match {
-              case Right(body)    => processStreamingResponse(body, onChunk)
-              case Left(errorMsg) => parseErrorResponse(errorMsg, response.code.code)
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+              val reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
+              val result = processStreamingResponse(reader, onChunk)
+              Try(reader.close()); Try(response.body().close())
+              result
+            } else {
+              val errorMsg = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
+              Try(response.body().close())
+              parseErrorResponse(errorMsg, response.statusCode())
             }
           }
       }
@@ -199,19 +214,19 @@ class CohereClient(
       ProcessingError("cohere", s"Failed to parse response: ${ex.getMessage}")
     }
 
-  private def processStreamingResponse(body: String, onChunk: StreamedChunk => Unit): Result[Completion] =
+  private def processStreamingResponse(reader: BufferedReader, onChunk: StreamedChunk => Unit): Result[Completion] =
     Try {
-      val lines                          = body.split("\n").filter(_.trim.nonEmpty)
       val contentBuilder                 = new StringBuilder
       var lastResponseId                 = ""
       var finalUsage: Option[TokenUsage] = None
+      var line: String                   = null
 
-      lines.foreach { line =>
-        if (line.startsWith("data: ")) {
-          val jsonStr = line.substring(6).trim
-          if (jsonStr != "[DONE]") {
-            Try {
-              val json = ujson.read(jsonStr)
+      while ({ line = reader.readLine(); line != null }) {
+        val trimmed = line.trim
+        if (trimmed.startsWith("data: ")) {
+          val jsonStr = trimmed.stripPrefix("data: ").trim
+          if (jsonStr.nonEmpty && jsonStr != "[DONE]") {
+            Try(ujson.read(jsonStr)).foreach { json =>
               json.obj.get("event_type").foreach { eventType =>
                 eventType.str match {
                   case "stream-start" =>
@@ -251,7 +266,7 @@ class CohereClient(
                   case _ =>
                 }
               }
-            }.failed.foreach(ex => logger.warn(s"Failed to process streaming event: ${ex.getMessage}"))
+            }
           }
         }
       }
