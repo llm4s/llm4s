@@ -170,7 +170,7 @@ class CohereClient(
     }
   }
 
-  private def buildChatRequest(
+  private[provider] def buildChatRequest(
     conversation: Conversation,
     options: CompletionOptions,
     stream: Boolean = false
@@ -206,7 +206,7 @@ class CohereClient(
     payload
   }
 
-  private def parseResponse(body: String): Result[Completion] =
+  private[provider] def parseResponse(body: String): Result[Completion] =
     Try {
       val json       = ujson.read(body)
       val text       = json("text").str
@@ -239,7 +239,10 @@ class CohereClient(
       ProcessingError("cohere", s"Failed to parse response: ${ex.getMessage}")
     }
 
-  private def processStreamingResponse(reader: BufferedReader, onChunk: StreamedChunk => Unit): Result[Completion] =
+  private[provider] def processStreamingResponse(
+    reader: BufferedReader,
+    onChunk: StreamedChunk => Unit
+  ): Result[Completion] =
     Try {
       val contentBuilder                 = new StringBuilder
       var lastResponseId                 = ""
