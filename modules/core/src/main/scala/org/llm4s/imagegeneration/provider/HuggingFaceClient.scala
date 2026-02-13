@@ -107,7 +107,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
 
     val images = (1 to count).map { i =>
       GeneratedImage(
-        data = base64Data,
+        data = Some(base64Data),
         format = options.format,
         size = options.size,
         prompt = prompt,

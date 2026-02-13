@@ -131,8 +131,8 @@ case class ServiceStatus(
 
 /** Represents a generated image */
 case class GeneratedImage(
-  /** Base64 encoded image data */
-  data: String,
+  /** Optional Base64 encoded image data */
+  data: Option[String] = None,
   /** Image format */
   format: ImageFormat,
   /** Image dimensions */
@@ -149,15 +149,18 @@ case class GeneratedImage(
   url: Option[String] = None
 ) {
 
-  /** Get the image data as bytes. Returns an error if data is empty (url-only response). */
+  /** Get the image data as bytes. Returns an error if data is missing (url-only response). */
   def asBytes: Either[ImageGenerationError, Array[Byte]] =
-    if (data.isEmpty)
-      Left(ValidationError("No image data available; this is a URL-only response. Use the 'url' field instead."))
-    else
-      Try {
-        import java.util.Base64
-        Base64.getDecoder.decode(data)
-      }.toEither.left.map(e => ValidationError(s"Failed to decode image data: ${e.getMessage}"))
+    data
+      .map { b64 =>
+        Try {
+          import java.util.Base64
+          Base64.getDecoder.decode(b64)
+        }.toEither.left.map(e => ValidationError(s"Failed to decode image data: ${e.getMessage}"))
+      }
+      .getOrElse(
+        Left(ValidationError("No image data available; this is a URL-only response. Use the 'url' field instead."))
+      )
 
   /** Save image to file and return updated GeneratedImage with file path */
   def saveToFile(path: Path): Either[ImageGenerationError, GeneratedImage] = {
@@ -178,11 +181,7 @@ sealed trait ImageGenerationProvider
 object ImageGenerationProvider {
   case object StableDiffusion extends ImageGenerationProvider
   case object DALLE           extends ImageGenerationProvider
-  case object Midjourney      extends ImageGenerationProvider
   case object HuggingFace     extends ImageGenerationProvider
-  case object VertexAI        extends ImageGenerationProvider
-  case object Bedrock         extends ImageGenerationProvider
-  case object StabilityAI     extends ImageGenerationProvider
   case object FalAI           extends ImageGenerationProvider
 }
 
@@ -246,77 +245,6 @@ case class OpenAIConfig(
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.DALLE
   override def toString: String         = s"OpenAIConfig(apiKey=***, model=$model, baseUrl=$baseUrl, timeout=$timeout)"
-}
-
-/**
- * Configuration for Google Vertex AI Imagen API.
- *
- * @param projectId Your Google Cloud project ID
- * @param location The Google Cloud region (default: us-central1)
- * @param model The Imagen model to use
- * @param accessToken OAuth2 access token (if None, uses Application Default Credentials)
- * @param timeout Request timeout in milliseconds
- */
-case class VertexAIConfig(
-  /** Google Cloud project ID */
-  projectId: String,
-  /** Google Cloud region */
-  location: String = "us-central1",
-  /** Model to use */
-  model: String = "imagen-4.0-generate-001",
-  /** OAuth2 access token (optional, uses ADC if not provided) */
-  accessToken: Option[String] = None,
-  /** Request timeout in milliseconds */
-  override val timeout: Int = 120000 // 2 minutes for image generation
-) extends ImageGenerationConfig {
-  def provider: ImageGenerationProvider = ImageGenerationProvider.VertexAI
-  override def toString: String =
-    s"VertexAIConfig(projectId=$projectId, location=$location, model=$model, accessToken=${accessToken.map(_ => "***")}, timeout=$timeout)"
-}
-
-/**
- * Configuration for AWS Bedrock Image Generation API.
- *
- * @param region AWS region (default: us-east-1)
- * @param model The Bedrock model ID to use
- * @param accessKeyId AWS access key ID (optional, uses environment/IAM if not provided)
- * @param secretAccessKey AWS secret access key (optional, uses environment/IAM if not provided)
- * @param timeout Request timeout in milliseconds
- */
-case class BedrockConfig(
-  /** AWS region */
-  region: String = "us-east-1",
-  /** Model ID to use */
-  model: String = "amazon.titan-image-generator-v1",
-  /** AWS Access Key ID (optional, uses default credentials if not provided) */
-  accessKeyId: Option[String] = None,
-  /** AWS Secret Access Key (optional, uses default credentials if not provided) */
-  secretAccessKey: Option[String] = None,
-  /** Request timeout in milliseconds */
-  override val timeout: Int = 120000 // 2 minutes for image generation
-) extends ImageGenerationConfig {
-  def provider: ImageGenerationProvider = ImageGenerationProvider.Bedrock
-  override def toString: String = s"BedrockConfig(region=$region, model=$model, accessKeyId=${accessKeyId
-      .map(_ => "***")}, secretAccessKey=${secretAccessKey.map(_ => "***")}, timeout=$timeout)"
-}
-
-/**
- * Configuration for Stability AI Direct API.
- *
- * @param apiKey Your Stability AI API key
- * @param model The model endpoint to use (ultra or core)
- * @param timeout Request timeout in milliseconds
- */
-case class StabilityAIConfig(
-  /** Stability AI API key */
-  apiKey: String,
-  /** Model endpoint (ultra or core) */
-  model: String = "ultra",
-  /** Request timeout in milliseconds */
-  override val timeout: Int = 120000 // 2 minutes for image generation
-) extends ImageGenerationConfig {
-  def provider: ImageGenerationProvider = ImageGenerationProvider.StabilityAI
-  override def toString: String         = s"StabilityAIConfig(apiKey=***, model=$model, timeout=$timeout)"
 }
 
 /**

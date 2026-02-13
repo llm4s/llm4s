@@ -177,7 +177,7 @@ class FalAIClient(config: FalAIConfig, httpClient: HttpClient) extends ImageGene
                     logger.info(s"Generated image URL: $imageUrl")
                     Some(
                       GeneratedImage(
-                        data = "", // No base64 data available
+                        data = None, // No base64 data available
                         format = ImageFormat.PNG,
                         size = options.size,
                         prompt = prompt,

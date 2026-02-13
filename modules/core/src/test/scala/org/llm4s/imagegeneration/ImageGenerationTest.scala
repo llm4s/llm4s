@@ -26,7 +26,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
         return Left(InvalidPromptError("Prompt contains inappropriate content"))
       Right(
         GeneratedImage(
-          data = mockImageData,
+          data = Some(mockImageData),
           format = options.format,
           size = options.size,
           prompt = prompt,
@@ -59,7 +59,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
       Right(
         Seq(
           GeneratedImage(
-            data = mockImageData,
+            data = Some(mockImageData),
             format = ImageFormat.PNG,
             size = options.size.getOrElse(ImageSize.Square512),
             prompt = prompt,
@@ -158,7 +158,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
     val base64Data = Base64.getEncoder.encodeToString(testData)
 
     val image = GeneratedImage(
-      data = base64Data,
+      data = Some(base64Data),
       format = ImageFormat.PNG,
       size = ImageSize.Square512,
       prompt = "test prompt"
@@ -173,7 +173,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
     val base64Data = Base64.getEncoder.encodeToString(testData)
 
     val image = GeneratedImage(
-      data = base64Data,
+      data = Some(base64Data),
       format = ImageFormat.PNG,
       size = ImageSize.Square512,
       prompt = "test prompt"
