@@ -3,8 +3,46 @@ package org.llm4s.imagegeneration.provider
 import org.llm4s.imagegeneration._
 
 import java.time.Instant
+import java.nio.file.Path
 import java.util.Base64
 import scala.util.Try
+import scala.concurrent.{ Future, ExecutionContext, blocking }
+
+object HuggingFaceClient {
+
+  /**
+   * Dedicated execution context for blocking HTTP operations.
+   *
+   * This keeps HuggingFace network calls off the caller's shared execution context.
+   */
+  private[imagegeneration] val blockingEc: ExecutionContext = {
+    val threadFactory = new java.util.concurrent.ThreadFactory {
+      private val counter = new java.util.concurrent.atomic.AtomicInteger(0)
+      override def newThread(r: Runnable): Thread = {
+        val thread = new Thread(r, s"huggingface-blocking-${counter.incrementAndGet()}")
+        thread.setDaemon(true)
+        thread
+      }
+    }
+
+    val executor = new java.util.concurrent.ThreadPoolExecutor(
+      2, // core pool size
+      8, // maximum pool size
+      60L,
+      java.util.concurrent.TimeUnit.SECONDS,                       // keep alive time
+      new java.util.concurrent.LinkedBlockingQueue[Runnable](100), // bounded queue
+      threadFactory
+    )
+
+    // Allow core threads to timeout to prevent resource leaks
+    executor.allowCoreThreadTimeOut(true)
+    sys.addShutdownHook {
+      executor.shutdown()
+    }
+
+    ExecutionContext.fromExecutor(executor)
+  }
+}
 
 /**
  * HuggingFace Inference API client for image generation.
@@ -29,7 +67,7 @@ import scala.util.Try
  * }
  * }}}
  */
-class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) extends ImageGenerationClient {
+class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) extends ImageGenerationClient {
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
@@ -44,7 +82,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, GeneratedImage] =
-    generateImages(prompt, 1, options).map(_.head)
+    generateImages(prompt, 1, options).flatMap(_.headOption.toRight(ValidationError("No image returned")))
 
   /**
    * Validates the provided prompt to ensure it is not empty or blank.
@@ -147,20 +185,65 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
   }
 
   /**
+   * Edit an existing image based on a prompt and optional mask.
+   *
+   * Not currently supported for HuggingFace provider.
+   */
+  override def editImage(
+    imagePath: Path,
+    prompt: String,
+    maskPath: Option[Path] = None,
+    options: ImageEditOptions = ImageEditOptions()
+  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
+    Left(ValidationError("Image editing is not yet supported for HuggingFace provider"))
+
+  override def generateImageAsync(
+    prompt: String,
+    options: ImageGenerationOptions = ImageGenerationOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+    Future(
+      blocking {
+        generateImage(prompt, options)
+      }
+    )(HuggingFaceClient.blockingEc)
+
+  override def generateImagesAsync(
+    prompt: String,
+    count: Int,
+    options: ImageGenerationOptions = ImageGenerationOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    Future(
+      blocking {
+        generateImages(prompt, count, options)
+      }
+    )(HuggingFaceClient.blockingEc)
+
+  override def editImageAsync(
+    imagePath: Path,
+    prompt: String,
+    maskPath: Option[Path] = None,
+    options: ImageEditOptions = ImageEditOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    Future(
+      blocking {
+        editImage(imagePath, prompt, maskPath, options)
+      }
+    )(HuggingFaceClient.blockingEc)
+
+  /**
    * Check the health status of the HuggingFace Inference API.
    *
    * @return Either an error or the current service status
    */
-  override def health(): Either[ImageGenerationError, ServiceStatus] =
-    scala.util
-      .Try {
-        val testUrl = s"https://api-inference.huggingface.co/models/${config.model}"
-        val headers = Map(
-          "Authorization" -> s"Bearer ${config.apiKey}",
-          "Content-Type"  -> "application/json"
-        )
-        requests.get(testUrl, headers = headers, readTimeout = 10000)
-      }
+  override def health(): Either[ImageGenerationError, ServiceStatus] = {
+    val testUrl = s"https://api-inference.huggingface.co/models/${config.model}"
+    val headers = Map(
+      "Authorization" -> s"Bearer ${config.apiKey}",
+      "Content-Type"  -> "application/json"
+    )
+
+    httpClient
+      .get(testUrl, headers, 10000)
       .toEither
       .left
       .map(e => ServiceError(s"Health check failed: ${e.getMessage}", 0))
@@ -169,6 +252,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
           ServiceStatus(HealthStatus.Healthy, "HuggingFace Inference API is responding")
         else ServiceStatus(HealthStatus.Degraded, s"Service returned status code: ${response.statusCode}")
       }
+  }
 
   /**
    * Serializes a `HuggingClientPayload` object into a JSON string.
@@ -203,13 +287,23 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
    * @return Either an ImageGenerationError if the request fails or a successful `requests.Response` object.
    */
   def makeHttpRequest(payload: String): Either[ImageGenerationError, requests.Response] = {
-    val result = Try(httpClient.post(payload)).toEither.left.map(exception => ServiceError(exception.getMessage, 500))
-    result.flatMap { response =>
-      if (response.statusCode == 200) {
-        Right(response)
-      } else {
-        Left(ServiceError(response.text(), 500))
+    val url = s"https://api-inference.huggingface.co/models/${config.model}"
+    val headers = Map(
+      "Authorization" -> s"Bearer ${config.apiKey}",
+      "Content-Type"  -> "application/json"
+    )
+
+    httpClient
+      .post(url, headers, payload, config.timeout)
+      .toEither
+      .left
+      .map(exception => ServiceError(exception.getMessage, 500))
+      .flatMap { response =>
+        if (response.statusCode == 200) {
+          Right(response)
+        } else {
+          Left(ServiceError(response.text(), 500))
+        }
       }
-    }
   }
 }
