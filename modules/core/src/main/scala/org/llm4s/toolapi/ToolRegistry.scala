@@ -2,7 +2,7 @@ package org.llm4s.toolapi
 
 import org.llm4s.core.safety.Safety
 
-import scala.concurrent.{ExecutionContext, Future, blocking}
+import scala.concurrent.{ ExecutionContext, Future, blocking }
 import java.util.concurrent.atomic.AtomicInteger
 import scala.util.control.NonFatal // Added for safer exception handling
 
@@ -38,7 +38,7 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
 
   /**
    * Execute a tool call asynchronously.
-   * * NOTE: Tool execution typically involves blocking I/O. 
+   * * NOTE: Tool execution typically involves blocking I/O.
    * We use `blocking` to hint the ExecutionContext to expand its pool if necessary.
    */
   def executeAsync(request: ToolCallRequest)(implicit
@@ -60,9 +60,8 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
   private def executeSequential(
     requests: Seq[ToolCallRequest]
   )(implicit ec: ExecutionContext): Future[Seq[Either[ToolCallError, ujson.Value]]] =
-    requests.foldLeft(Future.successful(Seq.empty[Either[ToolCallError, ujson.Value]])) {
-      (accFuture, request) =>
-        accFuture.flatMap(acc => executeAsync(request).map(result => acc :+ result))
+    requests.foldLeft(Future.successful(Seq.empty[Either[ToolCallError, ujson.Value]])) { (accFuture, request) =>
+      accFuture.flatMap(acc => executeAsync(request).map(result => acc :+ result))
     }
 
   private def executeParallel(
@@ -85,10 +84,10 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
 
     if (requests.isEmpty) return Future.successful(Seq.empty)
 
-    val tasks = requests.toVector
-    val totalTasks = tasks.length
+    val tasks        = requests.toVector
+    val totalTasks   = tasks.length
     val currentIndex = new AtomicInteger(0)
-    
+
     // Using an Array for O(1) random access. Memory footprint is O(N) where N is number of tool calls.
     // For LLMs, N is typically small enough that this is the most performant approach.
     val results = new Array[Either[ToolCallError, ujson.Value]](totalTasks)
@@ -115,7 +114,7 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
 
     // Spin up workers up to the concurrency limit or total tasks
     val workerCount = math.min(maxConcurrency, totalTasks)
-    val workers = (1 to workerCount).map(_ => worker())
+    val workers     = (1 to workerCount).map(_ => worker())
 
     // Combine all worker futures and return results in original order
     Future.sequence(workers).map(_ => results.toSeq)
