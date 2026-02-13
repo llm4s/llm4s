@@ -11,8 +11,8 @@ import scala.util.{ Failure, Success }
 class HuggingFaceClientTest extends AnyFlatSpec with Matchers with MockFactory with EitherValues {
 
   val httpClient: HttpClient = stub[HttpClient]
-  val config = HuggingFaceConfig("test-key", "test-model")
-  val client = new HuggingFaceClient(config, httpClient)
+  val config                 = HuggingFaceConfig("test-key", "test-model")
+  val client                 = new HuggingFaceClient(config, httpClient)
 
   "buildPayload" should "create a valid JSON payload with all parameters" in {
     val prompt = "A beautiful sunset over mountains"

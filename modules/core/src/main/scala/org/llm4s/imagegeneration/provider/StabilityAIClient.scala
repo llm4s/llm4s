@@ -197,7 +197,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
     response: requests.Response,
     prompt: String,
     options: ImageGenerationOptions
-  ): Either[ImageGenerationError, GeneratedImage] = {
+  ): Either[ImageGenerationError, GeneratedImage] =
     if (response.statusCode == 401 || response.statusCode == 403) {
       Left(AuthenticationError("Invalid or missing Stability AI API key"))
     } else if (response.statusCode != 200) {
@@ -206,32 +206,31 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
       Left(ServiceError(errorMsg, response.statusCode))
     } else {
 
-    Try {
-      val responseJson = read[ujson.Value](response.text())
-      responseJson
-    }.toEither.left
-      .map(e => UnknownError(e))
-      .flatMap { responseJson =>
-        // Response contains base64 image data
-        responseJson.obj
-          .get("image")
-          .orElse(responseJson.obj.get("artifacts").flatMap(_.arr.headOption.flatMap(_.obj.get("base64")))) match {
-          case Some(imageData) =>
-            val data = imageData.str
-            logger.info("Successfully generated 1 image")
-            Right(
-              GeneratedImage(
-                data = data,
-                format = ImageFormat.PNG,
-                size = options.size,
-                prompt = prompt,
-                seed = options.seed
+      Try {
+        val responseJson = read[ujson.Value](response.text())
+        responseJson
+      }.toEither.left
+        .map(e => UnknownError(e))
+        .flatMap { responseJson =>
+          // Response contains base64 image data
+          responseJson.obj
+            .get("image")
+            .orElse(responseJson.obj.get("artifacts").flatMap(_.arr.headOption.flatMap(_.obj.get("base64")))) match {
+            case Some(imageData) =>
+              val data = imageData.str
+              logger.info("Successfully generated 1 image")
+              Right(
+                GeneratedImage(
+                  data = data,
+                  format = ImageFormat.PNG,
+                  size = options.size,
+                  prompt = prompt,
+                  seed = options.seed
+                )
               )
-            )
-          case None =>
-            Left(ValidationError("No image data in API response"))
+            case None =>
+              Left(ValidationError("No image data in API response"))
+          }
         }
-      }
     }
-  }
 }

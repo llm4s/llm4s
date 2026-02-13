@@ -394,7 +394,7 @@ object ImageGeneration {
   /** Factory method for getting a client with the right configuration */
   def client(
     config: ImageGenerationConfig
-  ): Either[ImageGenerationError, ImageGenerationClient] = {
+  ): Either[ImageGenerationError, ImageGenerationClient] =
     // metrics and tracing are ignored in this PR 1 version as instrumentation is added in a later PR
     config match {
       case sdConfig: StableDiffusionConfig =>
@@ -412,7 +412,6 @@ object ImageGeneration {
       case _ =>
         Left(UnsupportedOperation(s"Provider ${config.provider} is not supported."))
     }
-  }
 
   /** Convenience method for quick image generation */
   def generateImage(
@@ -449,7 +448,7 @@ object ImageGeneration {
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
     client(config) match {
       case Right(c) => c.generateImageAsync(prompt, options)
-      case Left(e)   => Future.successful(Left(e))
+      case Left(e)  => Future.successful(Left(e))
     }
 
   /** Convenience method for generating multiple images asynchronously */
@@ -461,7 +460,7 @@ object ImageGeneration {
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
     client(config) match {
       case Right(c) => c.generateImagesAsync(prompt, count, options)
-      case Left(e)   => Future.successful(Left(e))
+      case Left(e)  => Future.successful(Left(e))
     }
 
   /** Convenience method for editing an image asynchronously */
@@ -474,7 +473,7 @@ object ImageGeneration {
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
     client(config) match {
       case Right(c) => c.editImageAsync(imagePath, prompt, maskPath, options)
-      case Left(e)   => Future.successful(Left(e))
+      case Left(e)  => Future.successful(Left(e))
     }
 
   /** Get a Stable Diffusion client with default local configuration */
