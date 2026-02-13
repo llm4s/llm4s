@@ -71,6 +71,43 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
     completion.usage.get.completionTokens shouldBe 5
   }
 
+  it should "pick the first non-empty text element from message.content" in withServer { exchange =>
+    val body =
+      """{
+        |  "message": {
+        |    "content": [
+        |      { "text": "   " },
+        |      { "type": "text" },
+        |      { "text": "  Hello world  " }
+        |    ]
+        |  },
+        |  "usage": {
+        |    "tokens": {
+        |      "input_tokens": 1,
+        |      "output_tokens": 2
+        |    }
+        |  }
+        |}""".stripMargin
+
+    val bytes = body.getBytes(StandardCharsets.UTF_8)
+    exchange.getResponseHeaders.add("Content-Type", "application/json")
+    exchange.sendResponseHeaders(200, bytes.length)
+    val os = exchange.getResponseBody
+    os.write(bytes)
+    os.close()
+  } { baseUrl =>
+    val client = new CohereClient(config(baseUrl))
+
+    val result = client.complete(conversation, CompletionOptions())
+    result.isRight shouldBe true
+
+    val completion = result.toOption.get
+    completion.content shouldBe "Hello world"
+    completion.usage.isDefined shouldBe true
+    completion.usage.get.promptTokens shouldBe 1
+    completion.usage.get.completionTokens shouldBe 2
+  }
+
   it should "fail with ValidationError when required text is missing" in withServer { exchange =>
     val body =
       """{

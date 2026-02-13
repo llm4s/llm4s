@@ -173,11 +173,15 @@ class CohereClient(
         .get("message")
         .flatMap(_.obj.get("content"))
         .flatMap(_.arrOpt)
-        .flatMap(_.headOption)
-        .flatMap(_.obj.get("text"))
-        .flatMap(_.strOpt)
-        .map(_.trim)
-        .filter(_.nonEmpty)
+        .flatMap { contentArr =>
+          contentArr.collectFirst(Function.unlift { v =>
+            v.obj
+              .get("text")
+              .flatMap(_.strOpt)
+              .map(_.trim)
+              .filter(_.nonEmpty)
+          })
+        }
 
       val text = textOpt.getOrElse("")
 
