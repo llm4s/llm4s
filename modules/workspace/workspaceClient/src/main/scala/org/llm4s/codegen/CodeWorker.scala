@@ -1,6 +1,6 @@
 package org.llm4s.codegen
 
-import org.llm4s.agent.{ Agent, AgentState, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentContext, AgentState, AgentStatus }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.toolapi._
 import org.llm4s.workspace.ContainerisedWorkspace
@@ -59,14 +59,8 @@ class CodeWorker(sourceDirectory: String, imageName: String, hostPort: Int, clie
     val result = agent.run(
       query = task,
       tools = toolRegistry,
-      inputGuardrails = Seq.empty,
-      outputGuardrails = Seq.empty,
-      handoffs = Seq.empty,
       maxSteps = maxSteps,
-      traceLogPath = traceLogPath,
-      systemPromptAddition = None,
-      completionOptions = org.llm4s.llmconnect.model.CompletionOptions(),
-      debug = false
+      context = AgentContext(traceLogPath = traceLogPath)
     )
 
     result match {

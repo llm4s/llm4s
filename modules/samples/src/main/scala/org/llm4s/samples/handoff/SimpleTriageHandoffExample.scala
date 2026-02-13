@@ -1,6 +1,6 @@
 package org.llm4s.samples.handoff
 
-import org.llm4s.agent.{ Agent, Handoff }
+import org.llm4s.agent.{ Agent, AgentContext, Handoff }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
@@ -53,7 +53,7 @@ object SimpleTriageHandoffExample extends App {
           |IMPORTANT: You MUST hand off to one of the specialist agents.
           |Do not try to answer the question yourself.""".stripMargin
       ),
-      debug = true
+      context = AgentContext(debug = true)
     )
   } yield finalState
 
