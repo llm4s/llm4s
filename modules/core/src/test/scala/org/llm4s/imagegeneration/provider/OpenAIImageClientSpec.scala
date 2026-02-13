@@ -27,6 +27,10 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
       filePath = None
     )
 
+  // -----------------------------
+  // SUCCESS PATH
+  // -----------------------------
+
   it should "record success metrics when generation succeeds" in {
 
     val metrics = mock[MetricsCollector]
@@ -54,13 +58,16 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
         Right(Seq.empty)
     }
 
-    // 👇 IMPORTANT FIX
     (metrics.observeRequest _)
       .expects("openai", "dall-e-2", Outcome.Success, *)
       .once()
 
     client.generateImage("test").isLeft shouldBe true
   }
+
+  // -----------------------------
+  // ERROR METRICS
+  // -----------------------------
 
   it should "record authentication error metrics" in {
 
@@ -93,6 +100,10 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
 
     client.generateImage("test").isLeft shouldBe true
   }
+
+  // -----------------------------
+  // COST LOGIC
+  // -----------------------------
 
   it should "record cost when pricing exists" in {
 
@@ -131,14 +142,11 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
         None
     }
 
-    // 👇 IMPORTANT FIX
     (metrics.observeRequest _)
       .expects("openai", "dall-e-2", Outcome.Success, *)
       .once()
 
-    (metrics.recordCost _)
-      .expects(*, *, *)
-      .never()
+    (metrics.recordCost _).expects(*, *, *).never()
 
     client.generateImage("test")
   }
@@ -174,6 +182,10 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
     client.generateImage("test")
   }
 
+  // -----------------------------
+  // VALIDATION BRANCHES
+  // -----------------------------
+
   it should "validate empty prompt" in {
 
     val metrics = mock[MetricsCollector]
@@ -186,7 +198,21 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
     client.generateImage("   ").isLeft shouldBe true
   }
 
-  it should "validate count limit" in {
+  it should "validate too long prompt" in {
+
+    val metrics = mock[MetricsCollector]
+    val client  = new OpenAIImageClient(config, metrics)
+
+    val longPrompt = "a" * 5001
+
+    (metrics.observeRequest _)
+      .expects("openai", "dall-e-2", Outcome.Error(ErrorKind.Validation), *)
+      .once()
+
+    client.generateImage(longPrompt).isLeft shouldBe true
+  }
+
+  it should "validate negative count" in {
 
     val metrics = mock[MetricsCollector]
     val client  = new OpenAIImageClient(config, metrics)
@@ -195,6 +221,7 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
       .expects("openai", "dall-e-2", Outcome.Error(ErrorKind.Validation), *)
       .once()
 
-    client.generateImages("test", 100).isLeft shouldBe true
+    client.generateImages("test", -1).isLeft shouldBe true
   }
+
 }
