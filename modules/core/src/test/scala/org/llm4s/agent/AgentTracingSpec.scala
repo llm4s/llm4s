@@ -201,7 +201,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
 
     val tools   = new ToolRegistry(Seq.empty)
     val tracing = new RecordingTracing()
-    val result  = agent.run("test query", tools, debug = true, tracing = Some(tracing))
+    val result  = agent.run("test query", tools, context = AgentContext(tracing = Some(tracing), debug = true))
 
     result.isRight shouldBe true
     tracing.completions should have size 1
@@ -220,7 +220,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     val agent   = new Agent(client)
     val tools   = new ToolRegistry(Seq(createCalculatorTool()))
     val tracing = new RecordingTracing()
-    val result  = agent.run("use calculator", tools, debug = true, tracing = Some(tracing))
+    val result  = agent.run("use calculator", tools, context = AgentContext(tracing = Some(tracing), debug = true))
 
     result.isRight shouldBe true
     tracing.toolCalls.nonEmpty shouldBe true
@@ -231,7 +231,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     val agent   = new Agent(client)
     val tracing = new RecordingTracing()
 
-    val result = agent.run("test", ToolRegistry.empty, debug = true, tracing = Some(tracing))
+    val result = agent.run("test", ToolRegistry.empty, context = AgentContext(tracing = Some(tracing), debug = true))
 
     result.isLeft shouldBe true
     tracing.errors.nonEmpty shouldBe true
@@ -244,7 +244,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     val agent      = new Agent(client)
     val tracing    = new CompletionErrorOnlyTracing()
 
-    val result = agent.run("test query", ToolRegistry.empty, tracing = Some(tracing))
+    val result = agent.run("test query", ToolRegistry.empty, context = AgentContext(tracing = Some(tracing)))
 
     result.isRight shouldBe true
   }
@@ -255,7 +255,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     val agent      = new Agent(client)
     val tracing    = new ThrowableCompletionTracing()
 
-    val result = agent.run("test query", ToolRegistry.empty, tracing = Some(tracing))
+    val result = agent.run("test query", ToolRegistry.empty, context = AgentContext(tracing = Some(tracing)))
 
     result.isRight shouldBe true
   }
@@ -266,7 +266,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     val agent      = new Agent(client)
     val failing    = new FailingTracing()
 
-    val result = agent.run("test", ToolRegistry.empty, tracing = Some(failing))
+    val result = agent.run("test", ToolRegistry.empty, context = AgentContext(tracing = Some(failing)))
 
     result.isRight shouldBe true
   }
@@ -281,7 +281,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
       query = "test",
       tools = ToolRegistry.empty,
       onEvent = _ => (),
-      tracing = Some(tracing)
+      context = AgentContext(tracing = Some(tracing))
     )
 
     result.isRight shouldBe true
@@ -299,7 +299,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
       query = "test",
       tools = ToolRegistry.empty,
       onEvent = _ => (),
-      tracing = Some(tracing)
+      context = AgentContext(tracing = Some(tracing))
     )
 
     result.isLeft shouldBe true
@@ -323,7 +323,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     val tools              = new ToolRegistry(Seq(failingTool))
     val tracing            = new RecordingTracing()
 
-    val result = agent.run("use failing tool", tools, debug = true, tracing = Some(tracing))
+    val result = agent.run("use failing tool", tools, context = AgentContext(tracing = Some(tracing), debug = true))
 
     result.isRight shouldBe true
     tracing.toolCalls should have size 1
@@ -346,7 +346,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     val tools              = new ToolRegistry(Seq(throwingTool))
     val tracing            = new RecordingTracing()
 
-    val result = agent.run("use throwing tool", tools, debug = true, tracing = Some(tracing))
+    val result = agent.run("use throwing tool", tools, context = AgentContext(tracing = Some(tracing), debug = true))
 
     result.isRight shouldBe true
     tracing.toolCalls.nonEmpty shouldBe true
@@ -371,7 +371,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     val agent   = new Agent(client)
     val tracing = new RecordingTracing()
 
-    val result = agent.runStep(state, tracing = Some(tracing), debug = true)
+    val result = agent.runStep(state, context = AgentContext(tracing = Some(tracing), debug = true))
 
     result.isRight shouldBe true
     tracing.errors.nonEmpty shouldBe true
@@ -393,8 +393,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
       query = "hand off",
       tools = ToolRegistry.empty,
       handoffs = Seq(handoff),
-      debug = true,
-      tracing = Some(tracing)
+      context = AgentContext(tracing = Some(tracing), debug = true)
     )
 
     result.isRight shouldBe true
@@ -419,8 +418,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
       tools = ToolRegistry.empty,
       onEvent = e => events = events :+ e,
       handoffs = Seq(handoff),
-      debug = true,
-      tracing = Some(tracing)
+      context = AgentContext(tracing = Some(tracing), debug = true)
     )
 
     result.isRight shouldBe true
@@ -439,8 +437,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
       query = "test strategy",
       tools = tools,
       toolExecutionStrategy = ToolExecutionStrategy.Sequential,
-      debug = true,
-      tracing = Some(tracing)
+      context = AgentContext(tracing = Some(tracing), debug = true)
     )
 
     result.isRight shouldBe true
@@ -457,8 +454,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
       query = "test strategy",
       tools = tools,
       toolExecutionStrategy = ToolExecutionStrategy.Sequential,
-      debug = true,
-      tracing = Some(tracing)
+      context = AgentContext(tracing = Some(tracing), debug = true)
     )
 
     result.isLeft shouldBe true

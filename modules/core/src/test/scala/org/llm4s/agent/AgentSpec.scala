@@ -637,7 +637,7 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(completion)))
     val agent      = new Agent(mockClient)
 
-    val result = agent.run("Test debug mode", testTools, debug = true)
+    val result = agent.run("Test debug mode", testTools, context = AgentContext(debug = true))
 
     result.isRight shouldBe true
     result.toOption.get.status shouldBe AgentStatus.Complete
