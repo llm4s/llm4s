@@ -28,8 +28,9 @@ object ConfigKeys {
   val DEEPSEEK_API_KEY  = "DEEPSEEK_API_KEY"
   val DEEPSEEK_BASE_URL = "DEEPSEEK_BASE_URL"
 
-  // Gemini
-  val GEMINI_API_KEY  = "GEMINI_API_KEY"
+  // Gemini (Google AI)
+  val GOOGLE_API_KEY  = "GOOGLE_API_KEY"
+  val GEMINI_API_KEY  = GOOGLE_API_KEY // backward-compatible alias
   val GEMINI_BASE_URL = "GEMINI_BASE_URL"
 
   // Cohere

@@ -56,21 +56,23 @@ class CohereClient(
       TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
         transformed =>
           val transformedConversation = conversation.copy(messages = transformed.messages)
-          val payload                 = buildChatRequest(transformedConversation, transformed.options)
-          val url                     = uri"${config.baseUrl}/v1/chat"
-          logger.debug(s"[CohereClient] POST $url model=${config.model}")
-          val attempt = Try {
-            basicRequest
-              .post(url)
-              .header("Authorization", s"Bearer ${config.apiKey}")
-              .header("Content-Type", "application/json")
-              .body(payload.render())
-              .send(backend)
-          }.toEither.left.map(e => e.toLLMError)
-          attempt.flatMap { response =>
-            response.body match {
-              case Right(body)    => parseResponse(body)
-              case Left(errorMsg) => parseErrorResponse(errorMsg, response.code.code)
+          validateConversationForCohere(transformedConversation, transformed.options).flatMap { _ =>
+            val payload = buildChatRequest(transformedConversation, transformed.options)
+            val url     = uri"${config.baseUrl}/v1/chat"
+            logger.debug(s"[CohereClient] POST $url model=${config.model}")
+            val attempt = Try {
+              basicRequest
+                .post(url)
+                .header("Authorization", s"Bearer ${config.apiKey}")
+                .header("Content-Type", "application/json")
+                .body(payload.render())
+                .send(backend)
+            }.toEither.left.map(e => e.toLLMError)
+            attempt.flatMap { response =>
+              response.body match {
+                case Right(body)    => parseResponse(body)
+                case Left(errorMsg) => parseErrorResponse(errorMsg, response.code.code)
+              }
             }
           }
       }
@@ -92,31 +94,33 @@ class CohereClient(
       TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
         transformed =>
           val transformedConversation = conversation.copy(messages = transformed.messages)
-          val payload                 = buildChatRequest(transformedConversation, transformed.options, stream = true)
-          val url                     = uri"${config.baseUrl}/v1/chat"
-          logger.debug(s"[CohereClient] POST $url model=${config.model} (streaming)")
-          val request = HttpRequest
-            .newBuilder()
-            .uri(URI.create(url.toString()))
-            .header("Authorization", s"Bearer ${config.apiKey}")
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(payload.render()))
-            .build()
+          validateConversationForCohere(transformedConversation, transformed.options).flatMap { _ =>
+            val payload = buildChatRequest(transformedConversation, transformed.options, stream = true)
+            val url     = uri"${config.baseUrl}/v1/chat"
+            logger.debug(s"[CohereClient] POST $url model=${config.model} (streaming)")
+            val request = HttpRequest
+              .newBuilder()
+              .uri(URI.create(url.toString()))
+              .header("Authorization", s"Bearer ${config.apiKey}")
+              .header("Content-Type", "application/json")
+              .POST(HttpRequest.BodyPublishers.ofString(payload.render()))
+              .build()
 
-          val attempt = Try {
-            httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
-          }.toEither.left.map(e => e.toLLMError)
+            val attempt = Try {
+              httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
+            }.toEither.left.map(e => e.toLLMError)
 
-          attempt.flatMap { response =>
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
-              val reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
-              val result = processStreamingResponse(reader, onChunk)
-              Try(reader.close()); Try(response.body().close())
-              result
-            } else {
-              val errorMsg = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
-              Try(response.body().close())
-              parseErrorResponse(errorMsg, response.statusCode())
+            attempt.flatMap { response =>
+              if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                val reader = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
+                val result = processStreamingResponse(reader, onChunk)
+                Try(reader.close()); Try(response.body().close())
+                result
+              } else {
+                val errorMsg = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
+                Try(response.body().close())
+                parseErrorResponse(errorMsg, response.statusCode())
+              }
             }
           }
       }
@@ -144,6 +148,27 @@ class CohereClient(
   private def validateNotClosed: Result[Unit] =
     if (closed.get()) Left(ConfigurationError("Cohere client has been closed"))
     else Right(())
+
+  private def validateConversationForCohere(
+    conversation: Conversation,
+    options: CompletionOptions
+  ): Result[Unit] = {
+    val hasToolMessages = conversation.messages.exists {
+      case _: ToolMessage                                       => true
+      case AssistantMessage(_, toolCalls) if toolCalls.nonEmpty => true
+      case _                                                    => false
+    }
+
+    if (options.tools.nonEmpty || hasToolMessages) {
+      Left(ValidationError("tools", "Cohere tool calling is not supported yet"))
+    } else {
+      conversation.messages.lastOption match {
+        case Some(UserMessage(_)) => Right(())
+        case Some(_) => Left(ValidationError("conversation", "Cohere requires the last message to be a user prompt"))
+        case None    => Left(ValidationError("conversation", "Cohere requires at least one user message"))
+      }
+    }
+  }
 
   private def buildChatRequest(
     conversation: Conversation,
