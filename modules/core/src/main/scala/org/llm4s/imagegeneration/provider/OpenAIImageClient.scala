@@ -11,9 +11,7 @@ import scala.concurrent.duration._
 import scala.util.Try
 
 /**
- * OpenAI DALL-E API client for image generation.
- *
- * Supports both DALL-E 2 and DALL-E 3 models.
+ * OpenAI Image Generation client.
  */
 class OpenAIImageClient(
   config: OpenAIConfig,
@@ -25,18 +23,21 @@ class OpenAIImageClient(
   private val apiUrl   = "https://api.openai.com/v1/images/generations"
   private val provider = "openai"
 
-  /**
-   * Generate a single image.
-   */
   override def generateImage(
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, GeneratedImage] =
-    generateImages(prompt, 1, options).map(_.head)
+    generateImages(prompt, 1, options).flatMap {
+      case head +: _ => Right(head)
+      case _ =>
+        Left(
+          ServiceError(
+            message = "Image generation succeeded but returned empty result",
+            code = 500
+          )
+        )
+    }
 
-  /**
-   * Generate multiple images.
-   */
   override def generateImages(
     prompt: String,
     count: Int,
@@ -62,39 +63,18 @@ class OpenAIImageClient(
       case Right(images) =>
         metrics.observeRequest(provider, modelName, Outcome.Success, duration)
 
-        // Compute pixel count based on image size
-        val pixelCountPerImage: Int = options.size match {
-          case ImageSize.Square512        => 512 * 512
-          case ImageSize.Square1024       => 1024 * 1024
-          case ImageSize.Landscape768x512 => 768 * 512
-          case ImageSize.Portrait512x768  => 512 * 768
-        }
+        estimateImageCost(count, options).foreach { cost =>
+          metrics.recordCost(provider, modelName, cost)
 
-        val totalPixelCount = pixelCountPerImage * count
-
-        // Estimate cost using ModelRegistry
-        ModelRegistry.lookup(provider, modelName).foreach { meta =>
-          meta.pricing
-            .estimateImageCost(
-              imageCount = count,
-              pixelCount = Some(totalPixelCount)
+          tracer.foreach(
+            _.traceCost(
+              costUsd = cost,
+              model = modelName,
+              operation = "image_generation",
+              tokenCount = count,
+              costType = "image"
             )
-            .foreach { cost =>
-
-              // Metrics
-              metrics.recordCost(provider, modelName, cost)
-
-              // Tracing
-              tracer.foreach(
-                _.traceCost(
-                  costUsd = cost,
-                  model = modelName,
-                  operation = "image_generation",
-                  tokenCount = count,
-                  costType = "image"
-                )
-              )
-            }
+          )
         }
 
         Right(images)
@@ -114,8 +94,33 @@ class OpenAIImageClient(
   }
 
   /**
-   * Health check using minimal models request.
+   * Centralized cost estimation (overrideable in tests).
    */
+  protected def estimateImageCost(
+    count: Int,
+    options: ImageGenerationOptions
+  ): Option[Double] = {
+
+    val apiSize = sizeToApiFormat(options.size)
+
+    val pixelCountPerImage: Option[Int] =
+      apiSize.split("x").toList match {
+        case width :: height :: Nil =>
+          for {
+            w <- Try(width.toInt).toOption
+            h <- Try(height.toInt).toOption
+          } yield w * h
+        case _ => None
+      }
+
+    val totalPixelCount = pixelCountPerImage.map(_ * count)
+
+    ModelRegistry
+      .lookup(provider, config.model)
+      .toOption
+      .flatMap(_.pricing.estimateImageCost(count, totalPixelCount))
+  }
+
   override def health(): Either[ImageGenerationError, ServiceStatus] = {
     val response = requests.get(
       "https://api.openai.com/v1/models",
@@ -159,21 +164,24 @@ class OpenAIImageClient(
   private def validateCount(count: Int): Either[ImageGenerationError, Int] = {
     val maxCount = if (config.model == "dall-e-3") 1 else 10
     if (count < 1 || count > maxCount)
-      Left(ValidationError(s"Count must be between 1 and $maxCount for ${config.model}"))
+      Left(
+        ValidationError(
+          s"Count must be between 1 and $maxCount for ${config.model}"
+        )
+      )
     else
       Right(count)
   }
 
+  /**
+   * Only use sizes supported by current OpenAI Images API.
+   */
   private def sizeToApiFormat(size: ImageSize): String =
     size match {
-      case ImageSize.Square512 =>
-        if (config.model == "dall-e-3") "1024x1024" else "512x512"
-      case ImageSize.Square1024 =>
-        "1024x1024"
-      case ImageSize.Landscape768x512 =>
-        if (config.model == "dall-e-3") "1792x1024" else "512x512"
-      case ImageSize.Portrait512x768 =>
-        if (config.model == "dall-e-3") "1024x1792" else "512x512"
+      case ImageSize.Square512        => "1024x1024"
+      case ImageSize.Square1024       => "1024x1024"
+      case ImageSize.Landscape768x512 => "1536x1024"
+      case ImageSize.Portrait512x768  => "1024x1536"
     }
 
   protected def makeApiRequest(
@@ -186,11 +194,8 @@ class OpenAIImageClient(
       "model"  -> config.model,
       "prompt" -> prompt,
       "n"      -> count,
-      "size"   -> sizeToApiFormat(options.size),
+      "size"   -> sizeToApiFormat(options.size)
     )
-
-    if (config.model == "dall-e-3")
-      requestBody("quality") = "standard"
 
     val response = requests.post(
       apiUrl,
