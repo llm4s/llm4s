@@ -145,65 +145,53 @@ final class SQLiteVectorStore private (
   ): Result[Seq[ScoredRecord]] =
     Try {
       // Fail-fast: Check dimension compatibility before loading vectors
-      // Query uses indexed column (idx_vectors_dim) for efficiency
-      val storedDimensions = Using.resource(connection.createStatement()) { stmt =>
-        Using.resource(stmt.executeQuery("SELECT DISTINCT embedding_dim FROM vectors")) { rs =>
-          val dims = ArrayBuffer.empty[Int]
-          while (rs.next())
-            dims += rs.getInt(1)
-          dims.toSet
+      // O(1) query using indexed column (idx_vectors_dim)
+      val storedDimOpt = Using.resource(connection.createStatement()) { stmt =>
+        Using.resource(stmt.executeQuery("SELECT embedding_dim FROM vectors LIMIT 1")) { rs =>
+          if (rs.next()) Some(rs.getInt(1))
+          else None
         }
       }
 
-      // If table is empty, return empty results
-      if (storedDimensions.isEmpty) {
-        Seq.empty
-      } else {
-        // Validate all stored vectors have same dimension
-        if (storedDimensions.size > 1) {
-          throw new IllegalStateException(
-            s"Database contains vectors with inconsistent dimensions: ${storedDimensions.mkString(", ")}"
-          )
-        }
-
-        val storedDim = storedDimensions.head
+      // Validate dimension if table is not empty
+      storedDimOpt.foreach { storedDim =>
         if (storedDim != queryVector.length) {
           throw new IllegalArgumentException(
             s"Dimension mismatch: query vector has ${queryVector.length} dimensions, but stored vectors have $storedDim dimensions"
           )
         }
+      }
 
-        val (whereClause, params) = filter.map(filterToSql).getOrElse(("1=1", Seq.empty))
-        val sql                   = s"SELECT * FROM vectors WHERE $whereClause"
+      val (whereClause, params) = filter.map(filterToSql).getOrElse(("1=1", Seq.empty))
+      val sql                   = s"SELECT * FROM vectors WHERE $whereClause"
 
-        Using.resource(connection.prepareStatement(sql)) { stmt =>
-          params.zipWithIndex.foreach { case (param, idx) =>
-            setParameter(stmt, idx + 1, param)
-          }
+      Using.resource(connection.prepareStatement(sql)) { stmt =>
+        params.zipWithIndex.foreach { case (param, idx) =>
+          setParameter(stmt, idx + 1, param)
+        }
 
-          Using.resource(stmt.executeQuery()) { rs =>
-            val candidates = ArrayBuffer.empty[(VectorRecord, Array[Float])]
+        Using.resource(stmt.executeQuery()) { rs =>
+          val candidates = ArrayBuffer.empty[(VectorRecord, Array[Float])]
 
-            while (rs.next()) {
-              val record    = rowToRecord(rs)
-              val embedding = record.embedding
-              if (embedding.nonEmpty) {
-                candidates += ((record, embedding))
-              }
+          while (rs.next()) {
+            val record    = rowToRecord(rs)
+            val embedding = record.embedding
+            if (embedding.nonEmpty) {
+              candidates += ((record, embedding))
             }
-
-            // Calculate cosine similarities and return top-K
-            candidates
-              .map { case (record, embedding) =>
-                val similarity = cosineSimilarity(queryVector, embedding)
-                // Normalize to 0-1 range (cosine similarity is -1 to 1)
-                val normalizedScore = (similarity + 1) / 2
-                ScoredRecord(record, normalizedScore)
-              }
-              .sortBy(-_.score)
-              .take(topK)
-              .toSeq
           }
+
+          // Calculate cosine similarities and return top-K
+          candidates
+            .map { case (record, embedding) =>
+              val similarity = cosineSimilarity(queryVector, embedding)
+              // Normalize to 0-1 range (cosine similarity is -1 to 1)
+              val normalizedScore = (similarity + 1) / 2
+              ScoredRecord(record, normalizedScore)
+            }
+            .sortBy(-_.score)
+            .take(topK)
+            .toSeq
         }
       }
     }.toEither.left.map(e => ProcessingError("sqlite-vector-store", s"Search failed: ${e.getMessage}"))
