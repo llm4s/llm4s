@@ -30,10 +30,10 @@ import scala.util.Try
  */
 class CohereClient(
   config: CohereConfig,
-  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
+  private[provider] val httpClient: HttpClient = HttpClient.newHttpClient()
 ) extends LLMClient
     with MetricsRecording {
-  private val httpClient            = HttpClient.newHttpClient()
   private val logger                = LoggerFactory.getLogger(getClass)
   private val closed: AtomicBoolean = new AtomicBoolean(false)
 
