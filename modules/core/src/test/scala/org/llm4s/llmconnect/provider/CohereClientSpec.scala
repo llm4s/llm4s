@@ -28,8 +28,10 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
       )
     )
 
-    val payload =
-      client.buildChatRequest(conversation, CompletionOptions(maxTokens = Some(12)))
+    val payload = client.buildChatRequest(
+      conversation,
+      CompletionOptions(maxTokens = Some(12))
+    )
 
     payload("model").str shouldBe "command-r"
     payload("message").str shouldBe "How are you?"
