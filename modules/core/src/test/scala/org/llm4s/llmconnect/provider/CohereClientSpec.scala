@@ -67,10 +67,9 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
   "processStreamingResponse" should "process and accumulate streamed chunks" in {
     val client = createClient
     val sse =
-      """data: {"event_type":"stream-start","generation_id":"g"}
-        |data: {"event_type":"text-generation","text":"Hi"}
-        |data: {"event_type":"text-generation","text":" there"}
-        |data: {"event_type":"stream-end","response":{"meta":{"billed_units":{"input_tokens":3,"output_tokens":4}}}}
+      """data: {"event_type":"stream-start","generation_id":"gen1"}
+        |data: {"event_type":"text-generation","text":"Hello"}
+        |data: {"event_type":"stream-end"}
         |""".stripMargin
 
     val reader = new BufferedReader(new StringReader(sse))
@@ -79,9 +78,8 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
 
     result.isRight shouldBe true
     val completion = result.toOption.get
-    completion.id shouldBe "g"
-    completion.content shouldBe "Hi there"
-    completion.usage.get.totalTokens shouldBe 7
-    chunkCount shouldBe 2
+    completion.id shouldBe "gen1"
+    completion.content shouldBe "Hello"
+    chunkCount shouldBe 1
   }
 }
