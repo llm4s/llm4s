@@ -180,7 +180,7 @@ object ImageGenerationProvider {
   case object FalAI           extends ImageGenerationProvider
 }
 
-trait ImageGenerationConfig {
+sealed trait ImageGenerationConfig {
   def provider: ImageGenerationProvider
   def model: String
   def timeout: Int = 30000 // 30 seconds default
@@ -446,10 +446,7 @@ object ImageGeneration {
     config: ImageGenerationConfig,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
-    client(config) match {
-      case Right(c) => c.generateImageAsync(prompt, options)
-      case Left(e)  => Future.successful(Left(e))
-    }
+    client(config).fold(e => Future.successful(Left(e)), _.generateImageAsync(prompt, options))
 
   /** Convenience method for generating multiple images asynchronously */
   def generateImagesAsync(
@@ -458,10 +455,7 @@ object ImageGeneration {
     config: ImageGenerationConfig,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    client(config) match {
-      case Right(c) => c.generateImagesAsync(prompt, count, options)
-      case Left(e)  => Future.successful(Left(e))
-    }
+    client(config).fold(e => Future.successful(Left(e)), _.generateImagesAsync(prompt, count, options))
 
   /** Convenience method for editing an image asynchronously */
   def editImageAsync(
@@ -471,10 +465,7 @@ object ImageGeneration {
     config: ImageGenerationConfig,
     options: ImageEditOptions = ImageEditOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    client(config) match {
-      case Right(c) => c.editImageAsync(imagePath, prompt, maskPath, options)
-      case Left(e)  => Future.successful(Left(e))
-    }
+    client(config).fold(e => Future.successful(Left(e)), _.editImageAsync(imagePath, prompt, maskPath, options))
 
   /** Get a Stable Diffusion client with default local configuration */
   def stableDiffusionClient(

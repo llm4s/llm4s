@@ -177,4 +177,48 @@ class HuggingFaceClientTest extends AnyFlatSpec with Matchers with MockFactory w
     result.isRight should be(true)
     result.value should be(response)
   }
+
+  "generateImages" should "successfully generate multiple images" in {
+    val prompt = "test prompt"
+    val count  = 2
+    // Mock response for makeHttpRequest
+    val response = requests.Response(
+      url = "https://api-inference.huggingface.co/models/test-model",
+      statusCode = 200,
+      statusMessage = "OK",
+      data = new geny.Bytes("image_data".getBytes), // Simulating raw image bytes
+      headers = Map.empty,
+      history = None
+    )
+    // HuggingFaceClient.generateImages calls makeHttpRequest ONCE
+    (httpClient.post _).when(*, *, *, *).returns(Success(response))
+
+    val result = client.generateImages(prompt, count)
+
+    (result.value should have).length(2)
+    result.value.foreach { img =>
+      img.prompt shouldBe prompt
+      img.data should not be empty
+    }
+  }
+
+  it should "propagate error status codes correctly" in {
+    val prompt = "test"
+    val errorResponse = requests.Response(
+      url = "https://api-inference.huggingface.co/models/test-model",
+      statusCode = 503, // Service Unavailable
+      statusMessage = "Service Unavailable",
+      data = new geny.Bytes("Model loading".getBytes),
+      headers = Map.empty,
+      history = None
+    )
+
+    (httpClient.post _).when(*, *, *, *).returns(Success(errorResponse))
+
+    val result = client.generateImages(prompt, 1)
+
+    result.left.value shouldBe a[ServiceError]
+    result.left.value.asInstanceOf[ServiceError].code shouldBe 503
+    result.left.value.message should include("Model loading")
+  }
 }

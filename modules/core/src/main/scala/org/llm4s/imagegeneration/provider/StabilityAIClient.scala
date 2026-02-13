@@ -3,6 +3,8 @@ package org.llm4s.imagegeneration.provider
 import org.llm4s.imagegeneration._
 import org.slf4j.LoggerFactory
 import upickle.default._
+import java.util.concurrent.{ ThreadPoolExecutor, LinkedBlockingQueue, ThreadFactory, TimeUnit }
+import java.util.concurrent.atomic.AtomicInteger
 import java.nio.file.Path
 import scala.util.Try
 import scala.concurrent.{ Future, ExecutionContext, blocking }
@@ -13,11 +15,35 @@ object StabilityAIClient {
    * Dedicated execution context for blocking HTTP operations.
    *
    * Keeps Stability AI network calls off the caller's shared execution context.
+   * Uses a bounded thread pool with named thread factory for better resource management.
    */
-  private[imagegeneration] val blockingEc: ExecutionContext =
-    ExecutionContext.fromExecutor(
-      java.util.concurrent.Executors.newCachedThreadPool()
+  private[imagegeneration] val blockingEc: ExecutionContext = {
+    val threadFactory = new ThreadFactory {
+      private val counter = new AtomicInteger(0)
+      override def newThread(r: Runnable): Thread = {
+        val thread = new Thread(r, s"stability-ai-blocking-${counter.incrementAndGet()}")
+        thread.setDaemon(true)
+        thread
+      }
+    }
+
+    val executor = new ThreadPoolExecutor(
+      2, // core pool size
+      8, // maximum pool size
+      60L,
+      TimeUnit.SECONDS,                       // keep alive time
+      new LinkedBlockingQueue[Runnable](100), // bounded queue
+      threadFactory
     )
+
+    // Allow core threads to timeout to prevent resource leaks
+    executor.allowCoreThreadTimeOut(true)
+    sys.addShutdownHook {
+      executor.shutdown()
+    }
+
+    ExecutionContext.fromExecutor(executor)
+  }
 }
 
 /**

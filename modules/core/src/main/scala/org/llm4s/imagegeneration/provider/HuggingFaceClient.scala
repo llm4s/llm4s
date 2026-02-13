@@ -5,6 +5,8 @@ import org.llm4s.imagegeneration._
 import java.time.Instant
 import java.nio.file.Path
 import java.util.Base64
+import java.util.concurrent.{ LinkedBlockingQueue, ThreadFactory, ThreadPoolExecutor, TimeUnit }
+import java.util.concurrent.atomic.AtomicInteger
 import scala.util.Try
 import scala.concurrent.{ Future, ExecutionContext, blocking }
 
@@ -15,10 +17,33 @@ object HuggingFaceClient {
    *
    * This keeps HuggingFace network calls off the caller's shared execution context.
    */
-  private[imagegeneration] val blockingEc: ExecutionContext =
-    ExecutionContext.fromExecutor(
-      java.util.concurrent.Executors.newCachedThreadPool()
+  private[imagegeneration] val blockingEc: ExecutionContext = {
+    val threadFactory = new ThreadFactory {
+      private val counter = new AtomicInteger(0)
+      override def newThread(r: Runnable): Thread = {
+        val thread = new Thread(r, s"huggingface-blocking-${counter.incrementAndGet()}")
+        thread.setDaemon(true)
+        thread
+      }
+    }
+
+    val executor = new ThreadPoolExecutor(
+      2, // core pool size
+      8, // maximum pool size
+      60L,
+      TimeUnit.SECONDS,                       // keep alive time
+      new LinkedBlockingQueue[Runnable](100), // bounded queue
+      threadFactory
     )
+
+    // Allow core threads to timeout to prevent resource leaks
+    executor.allowCoreThreadTimeOut(true)
+    sys.addShutdownHook {
+      executor.shutdown()
+    }
+
+    ExecutionContext.fromExecutor(executor)
+  }
 }
 
 /**
@@ -267,7 +292,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
         if (response.statusCode == 200) {
           Right(response)
         } else {
-          Left(ServiceError(response.text(), 500))
+          Left(ServiceError(response.text(), response.statusCode))
         }
       }
   }
