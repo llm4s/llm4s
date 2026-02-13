@@ -283,13 +283,26 @@ object ExaSearchTool {
     }
 
   /**
+   * Validate runtime ExaSearchConfig values.
+   * Ensures all configurable parameters meet requirements before use.
+   */
+  private def validateSearchConfig(config: ExaSearchConfig): Result[ExaSearchConfig] =
+    for {
+      validatedNumResults    <- validateNumResults(config.numResults)
+      validatedMaxCharacters <- validateMaxCharacters(config.maxCharacters)
+    } yield config.copy(
+      numResults = validatedNumResults,
+      maxCharacters = validatedMaxCharacters
+    )
+
+  /**
    * Create an Exa search tool with explicit configuration.
    *
    * Security: This tool makes external HTTPS calls to the Exa API.
    * Ensure proper API key management and network access controls.
    *
    * @param toolConfig The Exa API configuration (must use HTTPS)
-   * @param config Optional configuration overrides
+   * @param config Optional configuration overrides (will be validated)
    * @param httpClient HTTP client for making requests (injectable for testing)
    * @return Right(ToolFunction) if valid, Left(ValidationError) otherwise
    */
@@ -308,13 +321,18 @@ object ExaSearchTool {
           ValidationError.invalid("searchType", s"'${validatedConfig.searchType}' is not a valid search type")
         )
 
-      finalConfig = config.getOrElse(
-        ExaSearchConfig(
-          numResults = validatedConfig.numResults,
-          searchType = searchType,
-          maxCharacters = validatedConfig.maxCharacters
-        )
+      // Build default config from validated toolConfig
+      defaultConfig = ExaSearchConfig(
+        numResults = validatedConfig.numResults,
+        searchType = searchType,
+        maxCharacters = validatedConfig.maxCharacters
       )
+
+      // If override config provided, validate it; otherwise use default
+      finalConfig <- config match {
+        case Some(overrideConfig) => validateSearchConfig(overrideConfig)
+        case None                 => Right(defaultConfig)
+      }
 
       tool = ToolBuilder[Map[String, Any], ExaSearchResult](
         name = "exa_search",
@@ -389,6 +407,10 @@ object ExaSearchTool {
       }.toEither.left.map { e =>
         // Sanitize exception messages to avoid leaking internal details
         e match {
+          case _: InterruptedException =>
+            // Restore interrupt flag for proper thread shutdown and timeout semantics
+            Thread.currentThread().interrupt()
+            "Search request was cancelled or interrupted."
           case _: java.net.http.HttpTimeoutException =>
             s"Search request timed out after ${config.timeoutMs}ms. Please try again with a simpler query."
           case _: java.net.UnknownHostException =>
@@ -410,6 +432,10 @@ object ExaSearchTool {
         }.toEither.left.map { e =>
           // Sanitize parsing errors
           e match {
+            case _: InterruptedException =>
+              // Restore interrupt flag for proper thread shutdown and timeout semantics
+              Thread.currentThread().interrupt()
+              "Response parsing was cancelled or interrupted."
             case _: ujson.ParseException =>
               "Failed to parse search results. The response format may be invalid."
             case _ =>
