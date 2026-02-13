@@ -184,7 +184,7 @@ object ImageGenerationProvider {
   case object FalAI           extends ImageGenerationProvider
 }
 
-trait ImageGenerationConfig {
+sealed trait ImageGenerationConfig {
   def provider: ImageGenerationProvider
   def model: String
   def timeout: Int = 30000 // 30 seconds default
@@ -416,7 +416,8 @@ object ImageGeneration {
       case bedrockConfig: BedrockConfig =>
         Right(new BedrockClient(bedrockConfig))
       case stabilityConfig: StabilityAIConfig =>
-        Right(new StabilityAIClient(stabilityConfig))
+        val httpClient = HttpClient.create()
+        Right(new StabilityAIClient(stabilityConfig, httpClient))
       case falConfig: FalAIConfig =>
         Right(new FalAIClient(falConfig))
       case _ =>
