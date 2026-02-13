@@ -5,7 +5,7 @@ import upickle.default._
 import org.llm4s.config.ExaSearchToolConfig
 import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.types.Result
-import scala.util.Try
+import scala.util.control.Exception.catchingPromiscuously
 import java.net.http.{ HttpClient => JHttpClient, HttpRequest, HttpResponse => JHttpResponse }
 import java.net.URI
 import java.time.Duration
@@ -432,8 +432,10 @@ object ExaSearchTool {
     val url  = s"${toolConfig.apiUrl}/search"
     val body = buildRequestBody(query, config)
 
+    // Use catchingPromiscuously instead of Try — Try skips fatal exceptions
+    // like InterruptedException, but we need to catch and handle them properly
     val responseEither: Either[String, HttpResponse] =
-      Try {
+      catchingPromiscuously(classOf[Throwable]).either {
         httpClient.post(
           url = url,
           headers = Map(
@@ -444,7 +446,7 @@ object ExaSearchTool {
           body = ujson.write(body),
           timeout = config.timeoutMs
         )
-      }.toEither.left.map { e =>
+      }.left.map { e =>
         // Sanitize exception messages to avoid leaking internal details
         e match {
           case _: InterruptedException =>
@@ -466,10 +468,10 @@ object ExaSearchTool {
     responseEither.flatMap { response =>
       if (response.statusCode == 200) {
         // Parse successful response
-        Try {
+        catchingPromiscuously(classOf[Throwable]).either {
           val json = ujson.read(response.body)
           parseResponse(json, query)
-        }.toEither.left.map { e =>
+        }.left.map { e =>
           // Sanitize parsing errors
           e match {
             case _: InterruptedException =>
