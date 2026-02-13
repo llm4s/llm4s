@@ -86,7 +86,9 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, GeneratedImage] =
-    generateImages(prompt, 1, options).map(_.head)
+    generateImages(prompt, 1, options).flatMap(
+      _.headOption.toRight(ValidationError("No image returned from Stable Diffusion"))
+    )
 
   override def generateImages(
     prompt: String,

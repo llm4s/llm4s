@@ -40,7 +40,7 @@ class FalAIClient(config: FalAIConfig, httpClient: HttpClient) extends ImageGene
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, GeneratedImage] =
-    generateImages(prompt, 1, options).map(_.head)
+    generateImages(prompt, 1, options).flatMap(_.headOption.toRight(ValidationError("No image returned from Fal AI")))
 
   override def generateImages(
     prompt: String,
@@ -122,7 +122,11 @@ class FalAIClient(config: FalAIConfig, httpClient: HttpClient) extends ImageGene
 
     options.negativePrompt.foreach(np => payload("negative_prompt") = np)
 
-    options.seed.foreach(seed => payload("seed") = seed.toInt)
+    options.seed.foreach { seed =>
+      if (seed > Int.MaxValue || seed < Int.MinValue)
+        logger.warn(s"Seed value $seed exceeds Int range, using Long value directly")
+      payload("seed") = seed
+    }
 
     payload
   }
@@ -150,7 +154,7 @@ class FalAIClient(config: FalAIConfig, httpClient: HttpClient) extends ImageGene
     response: requests.Response,
     prompt: String,
     options: ImageGenerationOptions
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
     if (response.statusCode == 401 || response.statusCode == 403) {
       Left(AuthenticationError("Invalid or missing Fal AI API key"))
     } else if (response.statusCode != 200) {
@@ -159,36 +163,41 @@ class FalAIClient(config: FalAIConfig, httpClient: HttpClient) extends ImageGene
       Left(ServiceError(errorMsg, response.statusCode))
     } else {
       Try {
-      val responseJson = read[ujson.Value](response.text())
-      responseJson
-    }.toEither.left
-      .map(e => UnknownError(e))
-      .flatMap { responseJson =>
-        // Fal AI returns images in "images" array with "url" field
-        responseJson.obj.get("images") match {
-          case Some(imagesArr) =>
-            val generatedImages = imagesArr.arr.map { imageObj =>
-              val imageUrl = imageObj.obj.get("url").map(_.str).getOrElse("")
-              logger.info(s"Generated image URL: $imageUrl")
-              GeneratedImage(
-                data = "", // No base64 data available
-                format = ImageFormat.PNG,
-                size = options.size,
-                prompt = prompt,
-                seed = options.seed,
-                url = Some(imageUrl)
-              )
-            }.toSeq
-            if (generatedImages.isEmpty) {
-              Left(ValidationError("No images returned from the API"))
-            } else {
-              Right(generatedImages)
-            }
-          case None =>
-            Left(ValidationError("No 'images' field in API response"))
+        val responseJson = read[ujson.Value](response.text())
+        responseJson
+      }.toEither.left
+        .map(e => UnknownError(e))
+        .flatMap { responseJson =>
+          // Fal AI returns images in "images" array with "url" field
+          responseJson.obj.get("images") match {
+            case Some(imagesArr) =>
+              val generatedImages = imagesArr.arr.flatMap { imageObj =>
+                imageObj.obj.get("url").map(_.str).filter(_.nonEmpty) match {
+                  case Some(imageUrl) =>
+                    logger.info(s"Generated image URL: $imageUrl")
+                    Some(
+                      GeneratedImage(
+                        data = "", // No base64 data available
+                        format = ImageFormat.PNG,
+                        size = options.size,
+                        prompt = prompt,
+                        seed = options.seed,
+                        url = Some(imageUrl)
+                      )
+                    )
+                  case None =>
+                    logger.warn("Skipping image with missing or blank URL")
+                    None
+                }
+              }.toSeq
+              if (generatedImages.isEmpty) {
+                Left(ValidationError("No images returned from the API"))
+              } else {
+                Right(generatedImages)
+              }
+            case None =>
+              Left(ValidationError("No 'images' field in API response"))
+          }
         }
-      }
-  }
-  }
+    }
 }
-

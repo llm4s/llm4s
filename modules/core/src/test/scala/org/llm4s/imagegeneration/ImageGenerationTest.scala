@@ -164,7 +164,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
       prompt = "test prompt"
     )
 
-    image.asBytes shouldBe testData
+    image.asBytes.toOption.get shouldBe testData
     image.prompt shouldBe "test prompt"
   }
 
@@ -198,13 +198,15 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
   test("ImageGeneration creates correct client for StableDiffusion config") {
     val config = StableDiffusionConfig()
     val client = ImageGeneration.client(config)
-    client shouldBe a[org.llm4s.imagegeneration.provider.StableDiffusionClient]
+    client.isRight shouldBe true
+    client.toOption.get shouldBe a[org.llm4s.imagegeneration.provider.StableDiffusionClient]
   }
 
   test("ImageGeneration creates correct client for HuggingFace config") {
     val config = HuggingFaceConfig(apiKey = "test-key")
     val client = ImageGeneration.client(config)
-    client shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
+    client.isRight shouldBe true
+    client.toOption.get shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
   }
 
   test("stableDiffusionClient creates client with correct config") {
@@ -212,23 +214,27 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
       baseUrl = "http://test:8080",
       apiKey = Some("test-key")
     )
-    client shouldBe a[org.llm4s.imagegeneration.provider.StableDiffusionClient]
+    client.isRight shouldBe true
+    client.toOption.get shouldBe a[org.llm4s.imagegeneration.provider.StableDiffusionClient]
   }
 
   test("huggingFaceClient creates client with correct config") {
     val client = ImageGeneration.huggingFaceClient(apiKey = "test-key")
-    client shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
+    client.isRight shouldBe true
+    client.toOption.get shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
   }
 
   test("openAIClient creates client with correct config") {
     val client = ImageGeneration.openAIClient(apiKey = "test-key")
-    client shouldBe a[org.llm4s.imagegeneration.provider.OpenAIImageClient]
+    client.isRight shouldBe true
+    client.toOption.get shouldBe a[org.llm4s.imagegeneration.provider.OpenAIImageClient]
   }
 
   test("ImageGeneration creates correct client for FalAI config") {
     val config = FalAIConfig(apiKey = "test-key")
     val client = ImageGeneration.client(config)
-    client shouldBe a[org.llm4s.imagegeneration.provider.FalAIClient]
+    client.isRight shouldBe true
+    client.toOption.get shouldBe a[org.llm4s.imagegeneration.provider.FalAIClient]
   }
 
   test("Config objects have correct default values") {

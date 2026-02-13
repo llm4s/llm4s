@@ -46,7 +46,9 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, GeneratedImage] =
-    generateImages(prompt, 1, options).map(_.head)
+    generateImages(prompt, 1, options).flatMap(
+      _.headOption.toRight(ValidationError("No image returned from HuggingFace"))
+    )
 
   /**
    * Validates the provided prompt to ensure it is not empty or blank.
@@ -80,7 +82,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
   def convertToBase64(response: requests.Response): Either[ImageGenerationError, String] = Try {
     val imageData = response.bytes
     Base64.getEncoder.encodeToString(imageData)
-  }.toEither.left.map(exception => ServiceError(exception.getMessage, 500))
+  }.toEither.left.map(exception => ServiceError(exception.getMessage, 0))
 
   /**
    * Generates multiple images based on the given text prompt using predefined options and base64-encoded image data.
@@ -115,7 +117,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     }
     (1 to count).foreach(i => logger.debug("Generated image: {}", i))
     images
-  }.toEither.left.map(exception => ServiceError(exception.getMessage, 500))
+  }.toEither.left.map(exception => ServiceError(exception.getMessage, 0))
 
   /**
    * Generate multiple images from a text prompt using HuggingFace Inference API.
@@ -236,7 +238,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     val jsonStr = createJsonPayload(payload)
     logger.debug("Payload: {} - Json: {}", payload, jsonStr)
     jsonStr
-  }.toEither.left.map(exception => ServiceError(exception.getMessage, 500))
+  }.toEither.left.map(exception => ServiceError(exception.getMessage, 0))
 
   /**
    * Makes an HTTP POST request to the HuggingFace Inference API to send a payload and retrieve a response.
@@ -255,12 +257,12 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       .post(url, headers, payload, config.timeout)
       .toEither
       .left
-      .map(exception => ServiceError(exception.getMessage, 500))
+      .map(exception => ServiceError(exception.getMessage, 0))
       .flatMap { response =>
         if (response.statusCode == 200) {
           Right(response)
         } else {
-          Left(ServiceError(response.text(), 500))
+          Left(ServiceError(response.text(), response.statusCode))
         }
       }
   }

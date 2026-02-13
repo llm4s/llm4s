@@ -51,7 +51,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, GeneratedImage] =
-    generateImages(prompt, 1, options).map(_.head)
+    generateImages(prompt, 1, options).flatMap(_.headOption.toRight(ValidationError("No image returned from OpenAI")))
 
   /**
    * Generate multiple images from a text prompt using OpenAI DALL-E API.
@@ -94,7 +94,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     prompt: String,
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
     // Validate image format manually as simple check, real validation happens at API
     if (!imagePath.toString.toLowerCase.endsWith(".png")) {
       Left(ValidationError("Image must be a PNG file"))
@@ -105,7 +105,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
         requests.MultiItem("image", imagePath, filename = imagePath.getFileName.toString),
         requests.MultiItem("prompt", prompt),
         requests.MultiItem("n", options.n.toString),
-        requests.MultiItem("response_format", options.responseFormat.getOrElse("b64_json"))
+        requests.MultiItem("response_format", options.responseFormat.getOrElse("b64_json"): String)
       )
 
       // Always use dall-e-2 for edits as it's the only supported model for this endpoint
@@ -144,7 +144,6 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
         }
       }
     }
-  }
 
   /**
    * Generate an image asynchronously
@@ -280,13 +279,13 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       "prompt"          -> prompt,
       "n"               -> count,
       "size"            -> sizeToApiFormat(options.size),
-      "response_format" -> options.responseFormat.getOrElse("b64_json")
+      "response_format" -> (options.responseFormat.getOrElse("b64_json"): String)
     )
 
     // Optional parameters
-    options.quality.foreach(q => requestBody("quality") = q)
-    options.style.foreach(s => requestBody("style") = s)
-    options.user.foreach(u => requestBody("user") = u)
+    options.quality.foreach(q => requestBody("quality") = ujson.Str(q))
+    options.style.foreach(s => requestBody("style") = ujson.Str(s))
+    options.user.foreach(u => requestBody("user") = ujson.Str(u))
 
     // Backward compatibility defaults for DALL-E 3 if not specified
     if (config.model == "dall-e-3" && options.quality.isEmpty) {
