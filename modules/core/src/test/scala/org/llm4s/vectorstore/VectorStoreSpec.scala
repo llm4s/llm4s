@@ -209,6 +209,23 @@ class VectorStoreSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach 
       results.toOption.get.size shouldBe 2
       results.toOption.get.map(_.record.id).toSet shouldBe Set("f1", "f3")
     }
+
+    "fail-fast on dimension mismatch during search" in {
+      // Upsert a record with 2 dimensions
+      val record = VectorRecord("dim-test", Array(1.0f, 1.0f))
+      store.upsert(record) shouldBe Right(())
+
+      // Attempt search with a different dimension (3 dimensions)
+      val queryVector = Array(1.0f, 2.0f, 3.0f)
+      val result      = store.search(queryVector, topK = 5)
+
+      // Should return Left with error
+      result.isLeft shouldBe true
+      val error = result.left.toOption.get
+      error.formatted should include("Dimension mismatch")
+      error.formatted should include("query vector has 3 dimensions")
+      error.formatted should include("stored vectors have 2 dimensions")
+    }
   }
 
   "VectorStoreFactory" should {
