@@ -1,11 +1,10 @@
 package org.llm4s.llmconnect.provider
 
+import java.io.{ BufferedReader, StringReader }
 import org.llm4s.llmconnect.config.CohereConfig
 import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-
-import java.io.{ BufferedReader, StringReader }
 
 class CohereClientSpec extends AnyFlatSpec with Matchers {
 
@@ -29,7 +28,8 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
       )
     )
 
-    val payload = client.buildChatRequest(conversation, CompletionOptions(maxTokens = Some(12)))
+    val payload =
+      client.buildChatRequest(conversation, CompletionOptions(maxTokens = Some(12)))
 
     payload("model").str shouldBe "command-r"
     payload("message").str shouldBe "How are you?"
