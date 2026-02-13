@@ -100,12 +100,12 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       Left(ValidationError("Image must be a PNG file"))
     } else {
       val editUrl = s"${config.baseUrl}/images/edits"
-
+      val responseFormatStr = options.responseFormat.getOrElse("b64_json")
       val parts = scala.collection.mutable.ListBuffer[requests.MultiItem](
         requests.MultiItem("image", imagePath, filename = imagePath.getFileName.toString),
         requests.MultiItem("prompt", prompt),
         requests.MultiItem("n", options.n.toString),
-        requests.MultiItem("response_format", options.responseFormat.getOrElse("b64_json"))
+        requests.MultiItem("response_format", responseFormatStr)
       )
 
       // Always use dall-e-2 for edits as it's the only supported model for this endpoint
@@ -280,13 +280,13 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       "prompt"          -> prompt,
       "n"               -> count,
       "size"            -> sizeToApiFormat(options.size),
-      "response_format" -> options.responseFormat.getOrElse("b64_json")
+      "response_format" -> ujson.Str(options.responseFormat.getOrElse("b64_json"))
     )
 
     // Optional parameters
-    options.quality.foreach(q => requestBody("quality") = q)
-    options.style.foreach(s => requestBody("style") = s)
-    options.user.foreach(u => requestBody("user") = u)
+    options.quality.foreach(requestBody("quality") = _)
+    options.style.foreach(requestBody("style") = _)
+    options.user.foreach(requestBody("user") = _)
 
     // Backward compatibility defaults for DALL-E 3 if not specified
     if (config.model == "dall-e-3" && options.quality.isEmpty) {

@@ -5,7 +5,20 @@ import org.slf4j.LoggerFactory
 import upickle.default._
 import java.nio.file.Path
 import scala.util.Try
-import scala.concurrent.{ Future, ExecutionContext }
+import scala.concurrent.{ Future, ExecutionContext, blocking }
+
+object StabilityAIClient {
+
+  /**
+   * Dedicated execution context for blocking HTTP operations.
+   *
+   * Keeps Stability AI network calls off the caller's shared execution context.
+   */
+  private[imagegeneration] val blockingEc: ExecutionContext =
+    ExecutionContext.fromExecutor(
+      java.util.concurrent.Executors.newCachedThreadPool()
+    )
+}
 
 /**
  * Stability AI Direct API client for image generation.
@@ -53,6 +66,11 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
       images <- generateMultipleImages(prompt, count, options)
     } yield images
 
+  /**
+   * Generates multiple images via sequential requests.
+   * Fail-fast semantics: on first request failure, returns that error immediately
+   * and does not accumulate or continue with remaining requests.
+   */
   private def generateMultipleImages(
     prompt: String,
     count: Int,
@@ -123,18 +141,14 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
-    Future {
-      generateImage(prompt, options)
-    }
+    Future(blocking(generateImage(prompt, options)))(StabilityAIClient.blockingEc)
 
   override def generateImagesAsync(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    Future {
-      generateImages(prompt, count, options)
-    }
+    Future(blocking(generateImages(prompt, count, options)))(StabilityAIClient.blockingEc)
 
   override def editImageAsync(
     imagePath: Path,
@@ -142,17 +156,36 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    Future {
-      editImage(imagePath, prompt, maskPath, options)
-    }
+    Future(blocking(editImage(imagePath, prompt, maskPath, options)))(StabilityAIClient.blockingEc)
 
-  override def health(): Either[ImageGenerationError, ServiceStatus] =
-    // Check if API key is provided
+  override def health(): Either[ImageGenerationError, ServiceStatus] = {
     if (config.apiKey.isEmpty) {
-      Right(ServiceStatus(HealthStatus.Degraded, "Stability AI API key not configured"))
-    } else {
-      Right(ServiceStatus(HealthStatus.Healthy, "Stability AI API key configured"))
+      return Right(ServiceStatus(HealthStatus.Degraded, "Stability AI API key not configured"))
     }
+    // Lightweight connectivity check: GET user/account (no generation, minimal quota impact)
+    val healthUrl = "https://api.stability.ai/v1/user/account"
+    httpClient
+      .get(
+        url = healthUrl,
+        headers = Map(
+          "Authorization" -> s"Bearer ${config.apiKey}",
+          "Accept"        -> "application/json"
+        ),
+        timeout = 5000
+      )
+      .toEither
+      .left
+      .map(e => ServiceError(s"Health check failed: ${e.getMessage}", 0))
+      .map { response =>
+        if (response.statusCode == 200) {
+          ServiceStatus(HealthStatus.Healthy, "Stability AI API is reachable")
+        } else if (response.statusCode == 401 || response.statusCode == 403) {
+          ServiceStatus(HealthStatus.Degraded, s"Authentication issue: ${response.statusCode}")
+        } else {
+          ServiceStatus(HealthStatus.Degraded, s"Service returned status code: ${response.statusCode}")
+        }
+      }
+  }
 
   private def validatePrompt(prompt: String): Either[ImageGenerationError, String] =
     Either.cond(prompt.trim.nonEmpty, prompt, ValidationError("Prompt cannot be empty"))
