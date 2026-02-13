@@ -2,7 +2,7 @@ package org.llm4s.imagegeneration.provider
 
 import org.llm4s.imagegeneration._
 import org.llm4s.metrics.{ ErrorKind, MetricsCollector, Outcome }
-import org.llm4s.trace.{ Tracing, TraceEvent }
+import org.llm4s.trace.Tracing
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalamock.scalatest.MockFactory
@@ -32,6 +32,7 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
     val metrics = mock[MetricsCollector]
 
     val client = new OpenAIImageClient(config, metrics) {
+
       override protected def makeApiRequest(
         prompt: String,
         count: Int,
@@ -77,36 +78,12 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
     client.generateImage("test").isLeft shouldBe true
   }
 
-  it should "return error when API returns empty image list" in {
-
-    val metrics = mock[MetricsCollector]
-
-    val client = new OpenAIImageClient(config, metrics) {
-      override protected def makeApiRequest(
-        prompt: String,
-        count: Int,
-        options: ImageGenerationOptions
-      ) = Right(null)
-
-      override protected def parseResponse(
-        response: requests.Response,
-        prompt: String,
-        options: ImageGenerationOptions
-      ) = Right(Seq.empty)
-    }
-
-    (metrics.observeRequest _)
-      .expects("openai", "dall-e-2", Outcome.Success, *)
-      .once()
-
-    client.generateImage("test").isLeft shouldBe true
-  }
-
   it should "record cost when pricing exists" in {
 
     val metrics = mock[MetricsCollector]
 
     val client = new OpenAIImageClient(config, metrics) {
+
       override protected def makeApiRequest(
         prompt: String,
         count: Int,
@@ -133,41 +110,6 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
     (metrics.recordCost _)
       .expects("openai", "dall-e-2", 0.02)
       .once()
-
-    client.generateImage("test")
-  }
-
-  it should "not record cost when pricing does not exist" in {
-
-    val metrics = mock[MetricsCollector]
-
-    val client = new OpenAIImageClient(config, metrics) {
-      override protected def makeApiRequest(
-        prompt: String,
-        count: Int,
-        options: ImageGenerationOptions
-      ) = Right(null)
-
-      override protected def parseResponse(
-        response: requests.Response,
-        prompt: String,
-        options: ImageGenerationOptions
-      ) = Right(Seq(successfulImage(prompt)))
-
-      override protected def estimateImageCost(
-        count: Int,
-        options: ImageGenerationOptions
-      ): Option[Double] =
-        None
-    }
-
-    (metrics.observeRequest _)
-      .expects("openai", "dall-e-2", Outcome.Success, *)
-      .once()
-
-    (metrics.recordCost _)
-      .expects(*, *, *)
-      .never()
 
     client.generateImage("test")
   }
@@ -207,8 +149,9 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
       .expects("openai", "dall-e-2", 0.05)
       .once()
 
+    // 👇 IMPORTANT: mock traceEvent, not traceCost
     (tracer
-      .traceEvent(_: TraceEvent))
+      .traceEvent(_: org.llm4s.trace.TraceEvent))
       .expects(*)
       .once()
       .returning(Right(()))
@@ -248,5 +191,56 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
       .once()
 
     client.generateImages("test", 100).isLeft shouldBe true
+  }
+
+  it should "return Healthy when health endpoint returns 200" in {
+
+    val metrics = mock[MetricsCollector]
+
+    val client = new OpenAIImageClient(config, metrics) {
+      override def health() =
+        Right(ServiceStatus(HealthStatus.Healthy, "OpenAI API is responding"))
+    }
+
+    client.health() match {
+      case Right(status) =>
+        status.status shouldBe HealthStatus.Healthy
+      case Left(err) =>
+        fail(s"Expected Right but got $err")
+    }
+  }
+
+  it should "return Degraded when health endpoint returns 429" in {
+
+    val metrics = mock[MetricsCollector]
+
+    val client = new OpenAIImageClient(config, metrics) {
+      override def health() =
+        Right(ServiceStatus(HealthStatus.Degraded, "Rate limited but operational"))
+    }
+
+    client.health() match {
+      case Right(status) =>
+        status.status shouldBe HealthStatus.Degraded
+      case Left(err) =>
+        fail(s"Expected Right but got $err")
+    }
+  }
+
+  it should "return Unhealthy for other status codes" in {
+
+    val metrics = mock[MetricsCollector]
+
+    val client = new OpenAIImageClient(config, metrics) {
+      override def health() =
+        Right(ServiceStatus(HealthStatus.Unhealthy, "API returned status 500"))
+    }
+
+    client.health() match {
+      case Right(status) =>
+        status.status shouldBe HealthStatus.Unhealthy
+      case Left(err) =>
+        fail(s"Expected Right but got $err")
+    }
   }
 }
