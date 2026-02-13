@@ -322,7 +322,7 @@ class AssistantAgent(
         def runSteps(currentState: AgentState): Either[org.llm4s.error.LLMError, AgentState] =
           currentState.status match {
             case AgentStatus.InProgress | AgentStatus.WaitingForTools =>
-              agent.runStep(currentState) match {
+              agent.runStep(currentState, None) match {
                 case Right(newState) => runSteps(newState)
                 case Left(error)     => Left(error)
               }

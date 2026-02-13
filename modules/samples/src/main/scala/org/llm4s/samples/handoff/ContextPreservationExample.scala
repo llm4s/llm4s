@@ -64,7 +64,8 @@ object ContextPreservationExample extends App {
       handoffState,
       maxSteps = Some(10),
       traceLogPath = None,
-      debug = false
+      debug = false,
+      tracing = None
     )
 
   } yield (state2, finalState)

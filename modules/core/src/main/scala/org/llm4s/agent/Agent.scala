@@ -3,10 +3,12 @@ package org.llm4s.agent
 import org.llm4s.agent.guardrails.{ CompositeGuardrail, InputGuardrail, OutputGuardrail }
 import org.llm4s.agent.streaming.AgentEvent
 import org.llm4s.core.safety.Safety
+import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.toolapi._
+import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -88,6 +90,27 @@ class Agent(client: LLMClient) {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
+   * Best-effort tracing helper.
+   *
+   * Tracing failures must never impact agent control flow, so this helper
+   * swallows errors and logs them at debug level.
+   */
+  private def safeTrace(tracing: Option[Tracing])(f: Tracing => Result[Unit]): Unit =
+    tracing.foreach { tracer =>
+      f(tracer) match {
+        case Left(error) =>
+          error match {
+            case UnknownError(msg, cause) =>
+              logger.debug("Tracing failed: " + msg, cause)
+            case _ =>
+              logger.debug("Tracing failed: {}", error)
+          }
+        case Right(_) =>
+          ()
+      }
+    }
+
+  /**
    * Initializes a new agent state with the given query
    *
    * @param query The user query to process
@@ -140,7 +163,14 @@ class Agent(client: LLMClient) {
   /**
    * Runs a single step of the agent's reasoning process
    */
-  def runStep(state: AgentState, debug: Boolean = false): Result[AgentState] =
+  def runStep(state: AgentState): Result[AgentState] =
+    runStep(state, None, debug = false)
+
+  @deprecated("Use runStep(state, tracing, debug)", "0.2.0")
+  def runStep(state: AgentState, debug: Boolean): Result[AgentState] =
+    runStep(state, None, debug)
+
+  def runStep(state: AgentState, tracing: Option[Tracing], debug: Boolean = false): Result[AgentState] =
     state.status match {
       case AgentStatus.InProgress =>
         // Get tools from registry and merge with completion options from state
@@ -163,6 +193,12 @@ class Agent(client: LLMClient) {
               case toolCalls =>
                 val toolNames = toolCalls.map(_.name).mkString(", ")
                 s"[assistant] tools: ${toolCalls.size} tool calls requested ($toolNames)"
+            }
+
+            // Trace successful completion and token usage (best-effort)
+            safeTrace(tracing)(tracer => tracer.traceCompletion(completion, completion.model))
+            completion.usage.foreach { usage =>
+              safeTrace(tracing)(tracer => tracer.traceTokenUsage(usage, completion.model, "agent_completion"))
             }
 
             if (debug) {
@@ -211,6 +247,8 @@ class Agent(client: LLMClient) {
             if (debug) {
               logger.error("[DEBUG] LLM completion failed: {}", error.message)
             }
+            // Trace completion error (best-effort)
+            safeTrace(tracing)(tracer => tracer.traceError(new RuntimeException(error.message), "agent_completion"))
             Left(error)
         }
 
@@ -238,7 +276,7 @@ class Agent(client: LLMClient) {
               } else {
                 logger.debug("Processing {} tool calls", assistantMessage.toolCalls.size)
               }
-              processToolCalls(stateWithLog, assistantMessage.toolCalls, debug)
+              processToolCalls(stateWithLog, assistantMessage.toolCalls, tracing, debug)
             } match {
               case Success(newState) =>
                 if (debug) {
@@ -271,6 +309,8 @@ class Agent(client: LLMClient) {
                   logger.error("[DEBUG] Status: WaitingForTools -> Failed")
                   logger.error("[DEBUG] Error: {}", error.getMessage)
                 }
+                // Trace unexpected tool processing failure (best-effort)
+                safeTrace(tracing)(tracer => tracer.traceError(error, "agent_tool_execution"))
                 Right(stateWithLog.withStatus(AgentStatus.Failed(error.getMessage)))
             }
 
@@ -293,7 +333,12 @@ class Agent(client: LLMClient) {
   /**
    * Process tool calls and add the results to the conversation
    */
-  private def processToolCalls(state: AgentState, toolCalls: Seq[ToolCall], debug: Boolean): AgentState = {
+  private def processToolCalls(
+    state: AgentState,
+    toolCalls: Seq[ToolCall],
+    tracing: Option[Tracing],
+    debug: Boolean
+  ): AgentState = {
     val toolRegistry = state.tools
 
     if (debug) {
@@ -336,6 +381,8 @@ class Agent(client: LLMClient) {
             } else {
               logger.info("Tool {} completed successfully in {}ms. Result: {}", toolCall.name, duration, jsonStr)
             }
+            // Trace successful tool call (best-effort)
+            safeTrace(tracing)(tracer => tracer.traceToolCall(toolCall.name, toolCall.arguments.render(), jsonStr))
             jsonStr
           case Left(error) =>
             val errorMessage = error.getFormattedMessage
@@ -349,6 +396,8 @@ class Agent(client: LLMClient) {
             if (!debug) {
               logger.warn("Tool {} failed in {}ms with error: {}", toolCall.name, duration, errorMessage)
             }
+            // Trace failed tool call (best-effort)
+            safeTrace(tracing)(tracer => tracer.traceToolCall(toolCall.name, toolCall.arguments.render(), errorJson))
             errorJson
         }
 
@@ -384,7 +433,8 @@ class Agent(client: LLMClient) {
     state: AgentState,
     toolCalls: Seq[ToolCall],
     strategy: ToolExecutionStrategy,
-    debug: Boolean
+    debug: Boolean,
+    tracing: Option[Tracing]
   )(implicit ec: ExecutionContext): AgentState = {
     val toolRegistry = state.tools
 
@@ -415,6 +465,8 @@ class Agent(client: LLMClient) {
           } else {
             logger.info("Tool {} completed successfully in {}ms", toolCall.name, duration)
           }
+          // Trace successful tool call (best-effort)
+          safeTrace(tracing)(tracer => tracer.traceToolCall(toolCall.name, toolCall.arguments.render(), jsonStr))
           jsonStr
 
         case Left(error) =>
@@ -423,7 +475,10 @@ class Agent(client: LLMClient) {
             logger.error("[DEBUG] Tool {} FAILED in {}ms: {}", toolCall.name, duration, errorMessage)
           }
           // Build structured JSON error using ujson (no manual escaping needed)
-          ToolCallErrorJson.toJson(error).render()
+          val errorJson = ToolCallErrorJson.toJson(error).render()
+          // Trace failed tool call (best-effort)
+          safeTrace(tracing)(tracer => tracer.traceToolCall(toolCall.name, toolCall.arguments.render(), errorJson))
+          errorJson
       }
 
       ToolMessage(resultContent, toolCall.id)
@@ -553,12 +608,16 @@ class Agent(client: LLMClient) {
   /**
    * Execute a handoff to another agent.
    *
+   * Tracing is propagated to the target agent when provided, preserving
+   * end-to-end observability across multi-agent flows.
+   *
    * @param sourceState The state from the source agent
    * @param handoff The handoff to execute
    * @param reason Optional reason provided by the LLM
    * @param maxSteps Maximum steps for target agent
    * @param traceLogPath Optional trace log file
    * @param debug Enable debug logging
+   * @param tracing Optional tracer; when provided, propagated to target agent
    * @return Result from target agent
    */
   private def executeHandoff(
@@ -567,7 +626,8 @@ class Agent(client: LLMClient) {
     reason: Option[String],
     maxSteps: Option[Int],
     traceLogPath: Option[String],
-    debug: Boolean
+    debug: Boolean,
+    tracing: Option[Tracing]
   ): Result[AgentState] = {
     // Log handoff
     val logEntry = s"[handoff] Executing handoff: ${handoff.handoffName}" +
@@ -587,8 +647,8 @@ class Agent(client: LLMClient) {
       logger.info("[DEBUG] Target state system message: {}", targetState.systemMessage.isDefined)
     }
 
-    // Run target agent from the prepared state
-    handoff.targetAgent.run(targetState, maxSteps, traceLogPath, debug)
+    // Run target agent from the prepared state; propagate tracing when provided
+    handoff.targetAgent.run(targetState, maxSteps, traceLogPath, debug, tracing)
   }
 
   /**
@@ -785,7 +845,8 @@ class Agent(client: LLMClient) {
     initialState: AgentState,
     maxSteps: Option[Int],
     traceLogPath: Option[String],
-    debug: Boolean
+    debug: Boolean,
+    tracing: Option[Tracing]
   ): Result[AgentState] = {
     if (debug) {
       logger.info("[DEBUG] ========================================")
@@ -832,7 +893,7 @@ class Agent(client: LLMClient) {
             logger.info("[DEBUG] ========================================")
           }
 
-          runStep(state, debug) match {
+          runStep(state, tracing, debug) match {
             case Right(newState) =>
               // Only decrement steps when going from InProgress to WaitingForTools or back to InProgress
               // This means one "logical step" includes both the LLM call and tool execution
@@ -851,6 +912,8 @@ class Agent(client: LLMClient) {
 
               // Write updated state if tracing is enabled
               traceLogPath.foreach(path => writeTraceLog(newState, path))
+              // Trace updated agent state (best-effort)
+              safeTrace(tracing)(_.traceAgentState(newState))
 
               runUntilCompletion(newState, nextSteps, iteration + 1)
 
@@ -875,7 +938,7 @@ class Agent(client: LLMClient) {
           traceLogPath.foreach(path => writeTraceLog(state, path))
 
           // Execute handoff
-          executeHandoff(state, handoff, reason, maxSteps, traceLogPath, debug)
+          executeHandoff(state, handoff, reason, maxSteps, traceLogPath, debug, tracing)
 
         case (_, _) =>
           if (debug) {
@@ -919,7 +982,8 @@ class Agent(client: LLMClient) {
     traceLogPath: Option[String] = None,
     systemPromptAddition: Option[String] = None,
     completionOptions: CompletionOptions = CompletionOptions(),
-    debug: Boolean = false
+    debug: Boolean = false,
+    tracing: Option[Tracing] = None
   ): Result[AgentState] =
     for {
       // 1. Validate input
@@ -937,7 +1001,7 @@ class Agent(client: LLMClient) {
         logger.info("[DEBUG] ========================================")
       }
       initialState = initialize(validatedQuery, tools, handoffs, systemPromptAddition, completionOptions)
-      finalState <- run(initialState, maxSteps, traceLogPath, debug)
+      finalState <- run(initialState, maxSteps, traceLogPath, debug, tracing)
 
       // 3. Validate output
       validatedState <- validateOutput(finalState, outputGuardrails)
@@ -981,7 +1045,8 @@ class Agent(client: LLMClient) {
     maxSteps: Option[Int] = None,
     traceLogPath: Option[String] = None,
     contextWindowConfig: Option[ContextWindowConfig] = None,
-    debug: Boolean = false
+    debug: Boolean = false,
+    tracing: Option[Tracing] = None
   ): Result[AgentState] = {
     import org.llm4s.error.ValidationError
 
@@ -1008,7 +1073,7 @@ class Agent(client: LLMClient) {
           }
 
           // Run from the new state
-          run(stateToRun, maxSteps, traceLogPath, debug)
+          run(stateToRun, maxSteps, traceLogPath, debug, tracing)
 
         case AgentStatus.InProgress | AgentStatus.WaitingForTools | AgentStatus.HandoffRequested(_, _) =>
           Left(
@@ -1062,7 +1127,8 @@ class Agent(client: LLMClient) {
     systemPromptAddition: Option[String] = None,
     completionOptions: CompletionOptions = CompletionOptions(),
     contextWindowConfig: Option[ContextWindowConfig] = None,
-    debug: Boolean = false
+    debug: Boolean = false,
+    tracing: Option[Tracing] = None
   ): Result[AgentState] = {
     // Run first turn
     val firstTurn = run(
@@ -1075,7 +1141,8 @@ class Agent(client: LLMClient) {
       traceLogPath = None,
       systemPromptAddition = systemPromptAddition,
       completionOptions = completionOptions,
-      debug = debug
+      debug = debug,
+      tracing = tracing
     )
 
     // Fold over follow-up queries, threading state through
@@ -1089,7 +1156,8 @@ class Agent(client: LLMClient) {
           maxSteps = maxStepsPerTurn,
           traceLogPath = None,
           contextWindowConfig = contextWindowConfig,
-          debug = debug
+          debug = debug,
+          tracing = tracing
         )
       }
     }
@@ -1149,7 +1217,8 @@ class Agent(client: LLMClient) {
     traceLogPath: Option[String] = None,
     systemPromptAddition: Option[String] = None,
     completionOptions: CompletionOptions = CompletionOptions(),
-    debug: Boolean = false
+    debug: Boolean = false,
+    tracing: Option[Tracing] = None
   ): Result[AgentState] = {
     val startTime = System.currentTimeMillis()
 
@@ -1180,7 +1249,8 @@ class Agent(client: LLMClient) {
         0,
         startTime,
         traceLogPath,
-        debug
+        debug,
+        tracing
       ).flatMap { finalState =>
         // Emit output guardrail events
         outputGuardrails.foreach(g => onEvent(AgentEvent.OutputGuardrailStarted(g.name, Instant.now())))
@@ -1214,7 +1284,8 @@ class Agent(client: LLMClient) {
     currentStep: Int,
     startTime: Long,
     traceLogPath: Option[String],
-    debug: Boolean
+    debug: Boolean,
+    tracing: Option[Tracing]
   ): Result[AgentState] = {
 
     // Check step limit - only check if maxSteps is defined (None means unlimited, matching non-streaming behavior)
@@ -1262,6 +1333,14 @@ class Agent(client: LLMClient) {
               .log(s"[assistant] text: ${completion.content}")
               .addMessage(completion.message)
 
+            // Trace successful completion and token usage (best-effort)
+            safeTrace(tracing)(tracer => tracer.traceCompletion(completion, completion.model))
+            completion.usage.foreach { usage =>
+              safeTrace(tracing) { tracer =>
+                tracer.traceTokenUsage(usage, completion.model, "agent_stream_completion")
+              }
+            }
+
             completion.message.toolCalls match {
               case Seq() =>
                 // No tool calls - complete
@@ -1272,6 +1351,8 @@ class Agent(client: LLMClient) {
                 onEvent(AgentEvent.agentCompleted(finalState, currentStep + 1, totalDuration))
 
                 traceLogPath.foreach(path => writeTraceLog(finalState, path))
+                // Trace final agent state (best-effort)
+                safeTrace(tracing)(_.traceAgentState(finalState))
                 Right(finalState)
 
               case toolCalls =>
@@ -1282,7 +1363,8 @@ class Agent(client: LLMClient) {
                   updatedState.withStatus(AgentStatus.WaitingForTools),
                   toolCalls,
                   onEvent,
-                  debug
+                  debug,
+                  tracing
                 )
 
                 // Check for handoffs
@@ -1304,7 +1386,8 @@ class Agent(client: LLMClient) {
                         Some(reason),
                         maxSteps.map(_ - currentStep),
                         traceLogPath,
-                        debug
+                        debug,
+                        tracing
                       )
                     onEvent(AgentEvent.HandoffCompleted(handoff.handoffName, handoffResult.isRight, Instant.now()))
                     handoffResult
@@ -1318,13 +1401,18 @@ class Agent(client: LLMClient) {
                       currentStep + 1,
                       startTime,
                       traceLogPath,
-                      debug
+                      debug,
+                      tracing
                     )
                 }
             }
 
           case Left(error) =>
             onEvent(AgentEvent.agentFailed(error, Some(currentStep)))
+            // Trace streaming completion error (best-effort)
+            safeTrace(tracing) { tracer =>
+              tracer.traceError(new RuntimeException(error.message), "agent_stream_completion")
+            }
             Left(error)
         }
 
@@ -1340,7 +1428,7 @@ class Agent(client: LLMClient) {
         // Handle handoff
         onEvent(AgentEvent.HandoffStarted(handoff.handoffName, reason, handoff.preserveContext, Instant.now()))
         val handoffResult =
-          executeHandoff(state, handoff, reason, maxSteps.map(_ - currentStep), traceLogPath, debug)
+          executeHandoff(state, handoff, reason, maxSteps.map(_ - currentStep), traceLogPath, debug, tracing)
         onEvent(AgentEvent.HandoffCompleted(handoff.handoffName, handoffResult.isRight, Instant.now()))
         handoffResult
     }
@@ -1353,7 +1441,8 @@ class Agent(client: LLMClient) {
     state: AgentState,
     toolCalls: Seq[ToolCall],
     onEvent: AgentEvent => Unit,
-    debug: Boolean
+    debug: Boolean,
+    tracing: Option[Tracing]
   ): AgentState = {
     val toolRegistry = state.tools
 
@@ -1375,6 +1464,8 @@ class Agent(client: LLMClient) {
           if (debug) {
             logger.info("[DEBUG] Tool {} SUCCESS in {}ms", toolCall.name, duration)
           }
+          // Trace successful tool call (best-effort)
+          safeTrace(tracing)(tracer => tracer.traceToolCall(toolCall.name, toolCall.arguments.render(), jsonStr))
           (jsonStr, true)
 
         case Left(error) =>
@@ -1384,6 +1475,8 @@ class Agent(client: LLMClient) {
           if (debug) {
             logger.error("[DEBUG] Tool {} FAILED in {}ms: {}", toolCall.name, duration, errorMessage)
           }
+          // Trace failed tool call (best-effort)
+          safeTrace(tracing)(tracer => tracer.traceToolCall(toolCall.name, toolCall.arguments.render(), errorJson))
           (errorJson, false)
       }
 
@@ -1423,7 +1516,8 @@ class Agent(client: LLMClient) {
     maxSteps: Option[Int] = None,
     traceLogPath: Option[String] = None,
     contextWindowConfig: Option[ContextWindowConfig] = None,
-    debug: Boolean = false
+    debug: Boolean = false,
+    tracing: Option[Tracing] = None
   ): Result[AgentState] = {
     import org.llm4s.error.ValidationError
 
@@ -1467,7 +1561,8 @@ class Agent(client: LLMClient) {
             0,
             startTime,
             traceLogPath,
-            debug
+            debug,
+            tracing
           )
 
         case _ =>
@@ -1523,7 +1618,8 @@ class Agent(client: LLMClient) {
     maxSteps: Option[Int] = Some(Agent.DefaultMaxSteps),
     systemPromptAddition: Option[String] = None,
     completionOptions: CompletionOptions = CompletionOptions(),
-    debug: Boolean = false
+    debug: Boolean = false,
+    tracing: Option[Tracing] = None
   ): Result[(AgentState, Seq[AgentEvent])] = {
     val events = scala.collection.mutable.ArrayBuffer[AgentEvent]()
 
@@ -1534,7 +1630,8 @@ class Agent(client: LLMClient) {
       maxSteps = maxSteps,
       systemPromptAddition = systemPromptAddition,
       completionOptions = completionOptions,
-      debug = debug
+      debug = debug,
+      tracing = tracing
     ).map(state => (state, events.toSeq))
   }
 
@@ -1597,7 +1694,8 @@ class Agent(client: LLMClient) {
     traceLogPath: Option[String] = None,
     systemPromptAddition: Option[String] = None,
     completionOptions: CompletionOptions = CompletionOptions(),
-    debug: Boolean = false
+    debug: Boolean = false,
+    tracing: Option[Tracing] = None
   )(implicit ec: ExecutionContext): Result[AgentState] =
     for {
       // 1. Validate input
@@ -1612,7 +1710,14 @@ class Agent(client: LLMClient) {
         logger.info("[DEBUG] ========================================")
       }
       initialState = initialize(validatedQuery, tools, handoffs, systemPromptAddition, completionOptions)
-      finalState <- runWithStrategyInternal(initialState, toolExecutionStrategy, maxSteps, traceLogPath, debug)
+      finalState <- runWithStrategyInternal(
+        initialState,
+        toolExecutionStrategy,
+        maxSteps,
+        traceLogPath,
+        debug,
+        tracing
+      )
 
       // 3. Validate output
       validatedState <- validateOutput(finalState, outputGuardrails)
@@ -1626,7 +1731,8 @@ class Agent(client: LLMClient) {
     strategy: ToolExecutionStrategy,
     maxSteps: Option[Int],
     traceLogPath: Option[String],
-    debug: Boolean
+    debug: Boolean,
+    tracing: Option[Tracing]
   )(implicit ec: ExecutionContext): Result[AgentState] = {
     if (debug) {
       logger.info("[DEBUG] ========================================")
@@ -1662,12 +1768,14 @@ class Agent(client: LLMClient) {
             logger.info("[DEBUG] ITERATION {}: InProgress -> requesting LLM completion", iteration)
           }
 
-          runStep(state, debug) match {
+          runStep(state, tracing, debug) match {
             case Right(newState) =>
               val shouldDecrement = newState.status == AgentStatus.WaitingForTools
-              val nextSteps       = if (shouldDecrement) stepsRemaining.map(_ - 1) else stepsRemaining
+              val updatedSteps    = if (shouldDecrement) stepsRemaining.map(_ - 1) else stepsRemaining
               traceLogPath.foreach(path => writeTraceLog(newState, path))
-              runUntilCompletion(newState, nextSteps, iteration + 1)
+              // Trace updated agent state (best-effort)
+              safeTrace(tracing)(_.traceAgentState(newState))
+              runUntilCompletion(newState, updatedSteps, iteration + 1)
 
             case Left(error) =>
               if (debug) {
@@ -1700,7 +1808,8 @@ class Agent(client: LLMClient) {
                   state.log(s"[tools] executing ${assistantMessage.toolCalls.size} tools ($toolNames) with $strategy"),
                   assistantMessage.toolCalls,
                   strategy,
-                  debug
+                  debug,
+                  tracing
                 )
               } match {
                 case Success(newState) =>
@@ -1734,7 +1843,7 @@ class Agent(client: LLMClient) {
             logger.info("[DEBUG] Executing handoff: {}", handoff.handoffName)
           }
           traceLogPath.foreach(path => writeTraceLog(state, path))
-          executeHandoff(state, handoff, reason, maxSteps, traceLogPath, debug)
+          executeHandoff(state, handoff, reason, maxSteps, traceLogPath, debug, tracing)
 
         case (_, _) =>
           if (debug) {
@@ -1771,7 +1880,8 @@ class Agent(client: LLMClient) {
     maxSteps: Option[Int] = None,
     traceLogPath: Option[String] = None,
     contextWindowConfig: Option[ContextWindowConfig] = None,
-    debug: Boolean = false
+    debug: Boolean = false,
+    tracing: Option[Tracing] = None
   )(implicit ec: ExecutionContext): Result[AgentState] = {
     import org.llm4s.error.ValidationError
 
@@ -1793,7 +1903,7 @@ class Agent(client: LLMClient) {
             case None         => stateWithNewMessage
           }
 
-          runWithStrategyInternal(stateToRun, toolExecutionStrategy, maxSteps, traceLogPath, debug)
+          runWithStrategyInternal(stateToRun, toolExecutionStrategy, maxSteps, traceLogPath, debug, tracing)
 
         case AgentStatus.InProgress | AgentStatus.WaitingForTools | AgentStatus.HandoffRequested(_, _) =>
           Left(
