@@ -144,6 +144,42 @@ final class PrometheusMetrics(
     }.recover { case e: Exception =>
       logger.warn(s"Failed to record cost metrics: ${e.getMessage}")
     }
+
+  /**
+   * Record an image generation request with its outcome and metrics.
+   *
+   * Safe: catches and logs any Prometheus errors without propagating.
+   */
+  override def recordImageGeneration(
+    provider: String,
+    model: String,
+    outcome: Outcome,
+    imageCount: Int,
+    costUsd: Double,
+    duration: FiniteDuration
+  ): Unit =
+    Try {
+      val status = outcome match {
+        case Outcome.Success => "success"
+        case Outcome.Error(errorKind) =>
+          val kindStr   = errorKind.toString
+          val snakeCase = kindStr.replaceAll("([A-Z])", "_$1").toLowerCase.drop(1)
+          s"error_$snakeCase"
+      }
+
+      requestsTotal.labelValues(provider, model, status).inc()
+      requestDuration.labelValues(provider, model).observe(duration.toMillis / 1000.0)
+      costUsdTotal.labelValues(provider, model).inc(costUsd)
+
+      outcome match {
+        case Outcome.Error(errorKind) =>
+          val errorLabel = errorKind.toString.toLowerCase
+          errorsTotal.labelValues(provider, errorLabel).inc()
+        case _ => // Success - no additional action
+      }
+    }.recover { case e: Exception =>
+      logger.warn(s"Failed to record image generation metrics: ${e.getMessage}")
+    }
 }
 
 object PrometheusMetrics {

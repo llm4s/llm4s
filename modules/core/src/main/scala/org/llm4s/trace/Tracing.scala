@@ -127,6 +127,38 @@ trait Tracing {
   }
 
   /**
+   * Trace image generation operation with cost and metrics.
+   *
+   * @param costUsd Estimated cost in USD
+   * @param provider Provider name
+   * @param model Model name
+   * @param operation Operation type (generation/edit)
+   * @param imageCount Number of images
+   * @param imageSize Image dimensions
+   * @param durationMs Duration in milliseconds
+   */
+  final def traceImageGeneration(
+    costUsd: Double,
+    provider: String,
+    model: String,
+    operation: String,
+    imageCount: Int,
+    imageSize: String,
+    durationMs: Long
+  ): Result[Unit] = {
+    val event = TraceEvent.ImageGenerationCostRecorded(
+      costUsd,
+      provider,
+      model,
+      operation,
+      imageCount,
+      imageSize,
+      durationMs
+    )
+    this.traceEvent(event)
+  }
+
+  /**
    * Shutdown the tracing backend.
    * Alias for close() to maintain terminology consistency.
    */
@@ -301,6 +333,9 @@ object TracingMode {
  * @see [[TracingMode]] for available modes
  */
 object Tracing {
+
+  /** No-op tracing instance for testing or when tracing is disabled. */
+  val noop: Tracing = new NoOpTracing()
 
   /**
    * Create a tracing instance from configuration settings.
