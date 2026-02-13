@@ -435,55 +435,61 @@ object ExaSearchTool {
     // Use catchingPromiscuously instead of Try — Try skips fatal exceptions
     // like InterruptedException, but we need to catch and handle them properly
     val responseEither: Either[String, HttpResponse] =
-      catchingPromiscuously(classOf[Throwable]).either {
-        httpClient.post(
-          url = url,
-          headers = Map(
-            "Content-Type" -> "application/json",
-            "x-api-key"    -> toolConfig.apiKey,
-            "User-Agent"   -> "llm4s-exa-search/1.0"
-          ),
-          body = ujson.write(body),
-          timeout = config.timeoutMs
-        )
-      }.left.map { e =>
-        // Sanitize exception messages to avoid leaking internal details
-        e match {
-          case _: InterruptedException =>
-            // Restore interrupt flag for proper thread shutdown and timeout semantics
-            restoreInterrupt()
-            "Search request was cancelled or interrupted."
-          case _: java.net.http.HttpTimeoutException =>
-            s"Search request timed out after ${config.timeoutMs}ms. Please try again with a simpler query."
-          case _: java.net.UnknownHostException =>
-            "Unable to reach search service. Please check network connectivity."
-          case _: java.net.ConnectException =>
-            "Failed to connect to search service. The service may be temporarily unavailable."
-          case _ =>
-            // Generic error without exposing stack traces or internal details
-            "Search request failed due to a network error. Please try again."
+      catchingPromiscuously(classOf[Throwable])
+        .either {
+          httpClient.post(
+            url = url,
+            headers = Map(
+              "Content-Type" -> "application/json",
+              "x-api-key"    -> toolConfig.apiKey,
+              "User-Agent"   -> "llm4s-exa-search/1.0"
+            ),
+            body = ujson.write(body),
+            timeout = config.timeoutMs
+          )
         }
-      }
-
-    responseEither.flatMap { response =>
-      if (response.statusCode == 200) {
-        // Parse successful response
-        catchingPromiscuously(classOf[Throwable]).either {
-          val json = ujson.read(response.body)
-          parseResponse(json, query)
-        }.left.map { e =>
-          // Sanitize parsing errors
+        .left
+        .map { e =>
+          // Sanitize exception messages to avoid leaking internal details
           e match {
             case _: InterruptedException =>
               // Restore interrupt flag for proper thread shutdown and timeout semantics
               restoreInterrupt()
-              "Response parsing was cancelled or interrupted."
-            case _: ujson.ParseException =>
-              "Failed to parse search results. The response format may be invalid."
+              "Search request was cancelled or interrupted."
+            case _: java.net.http.HttpTimeoutException =>
+              s"Search request timed out after ${config.timeoutMs}ms. Please try again with a simpler query."
+            case _: java.net.UnknownHostException =>
+              "Unable to reach search service. Please check network connectivity."
+            case _: java.net.ConnectException =>
+              "Failed to connect to search service. The service may be temporarily unavailable."
             case _ =>
-              "Failed to process search results. Please try again."
+              // Generic error without exposing stack traces or internal details
+              "Search request failed due to a network error. Please try again."
           }
         }
+
+    responseEither.flatMap { response =>
+      if (response.statusCode == 200) {
+        // Parse successful response
+        catchingPromiscuously(classOf[Throwable])
+          .either {
+            val json = ujson.read(response.body)
+            parseResponse(json, query)
+          }
+          .left
+          .map { e =>
+            // Sanitize parsing errors
+            e match {
+              case _: InterruptedException =>
+                // Restore interrupt flag for proper thread shutdown and timeout semantics
+                restoreInterrupt()
+                "Response parsing was cancelled or interrupted."
+              case _: ujson.ParseException =>
+                "Failed to parse search results. The response format may be invalid."
+              case _ =>
+                "Failed to process search results. Please try again."
+            }
+          }
       } else {
         // Use sanitized error messages for non-200 responses
         Left(sanitizeErrorMessage(response.statusCode, response.body))
