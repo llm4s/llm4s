@@ -527,6 +527,62 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
 
     result.isRight shouldBe true
   }
+  // ============================================================
+  //  Determinism and Stability tests
+  // ============================================================
+
+  it should "process memory consolidation deterministically without flaky ordering" in {
+    val cut = Instant.now().plus(1, ChronoUnit.DAYS)
+    val runs = (1 to 6).map { _ =>
+      val manager = createManager()
+
+      val result = for {
+        // Conversations(3 messages)
+        m1 <- manager.recordMessage(UserMessage("Conv A"), conversationId = "conv-det", importance = Some(0.2))
+        m2 <- m1.recordMessage(AssistantMessage("Conv B"), conversationId = "conv-det", importance = Some(0.3))
+        m3 <- m2.recordMessage(UserMessage("Conv C"), conversationId = "conv-det", importance = Some(0.4))
+        // User facts(3 facts, same user)
+        m4 <- m3.recordUserFact("Fact A", Some("user-det"), Some(0.5))
+        m5 <- m4.recordUserFact("Fact B", Some("user-det"), Some(0.7))
+        m6 <- m5.recordUserFact("Fact C", Some("user-det"), Some(0.6))
+        // Knowledge(3 entries, same source)
+        m7 <- m6.recordKnowledge("Know A", "doc-det.md", Map("source" -> "doc-det"))
+        m8 <- m7.recordKnowledge("Know B", "doc-det.md", Map("source" -> "doc-det"))
+        m9 <- m8.recordKnowledge("Know C", "doc-det.md", Map("source" -> "doc-det"))
+        // Consolidate all eligible groups
+        cons <- m9.consolidateMemories(olderThan = cut, minCount = 3)
+
+        st   <- cons.stats
+        conv <- cons.store.recall(MemoryFilter.conversations, 10)
+        usr  <- cons.store.recall(MemoryFilter.userFacts, 10)
+        kn   <- cons.store.recall(MemoryFilter.knowledge, 10)
+      } yield (st.totalMemories, conv, usr, kn)
+      result.isRight shouldBe true
+      result.toOption.get
+    }
+    val ref = runs.head
+    // Consolidation happened (9->3)
+    ref._1 should be < 9L
+    ref._2.length shouldBe 1
+    ref._3.length shouldBe 1
+    ref._4.length shouldBe 1
+
+    runs.foreach { r =>
+      r._1 shouldBe ref._1
+      // Exact order/content
+      r._2.map(_.content) shouldBe ref._2.map(_.content)
+      r._3.map(_.content) shouldBe ref._3.map(_.content)
+      r._4.map(_.content) shouldBe ref._4.map(_.content)
+      // Importance preserved (max per group)
+      r._2.flatMap(_.importance) shouldBe ref._2.flatMap(_.importance)
+      r._3.flatMap(_.importance) shouldBe ref._3.flatMap(_.importance)
+      r._4.flatMap(_.importance) shouldBe ref._4.flatMap(_.importance)
+      // Consolidation metadata stable
+      r._2.flatMap(_.getMetadata("consolidated_from")) shouldBe ref._2.flatMap(_.getMetadata("consolidated_from"))
+      r._3.flatMap(_.getMetadata("consolidated_from")) shouldBe ref._3.flatMap(_.getMetadata("consolidated_from"))
+      r._4.flatMap(_.getMetadata("consolidated_from")) shouldBe ref._4.flatMap(_.getMetadata("consolidated_from"))
+    }
+  }
 
   // ============================================================
   // Error path tests
