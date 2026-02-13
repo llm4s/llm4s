@@ -232,6 +232,35 @@ object ExaSearchTool {
     else Left(ValidationError.required("query"))
   }
 
+  private[llm4s] def validateTimeoutMs(timeout: Int): Result[Int] =
+    if (timeout >= 1000 && timeout <= 300000) Right(timeout)
+    else Left(ValidationError.invalid("timeoutMs", s"must be between 1000 and 300000 (1s to 5min), got $timeout"))
+  private[llm4s] def validateUserLocation(location: Option[String]): Result[Option[String]] =
+    location match {
+      case Some(loc) =>
+        val trimmed = loc.trim
+        if (trimmed.nonEmpty) Right(Some(trimmed))
+        else Left(ValidationError.invalid("userLocation", "must not be empty"))
+      case None => Right(None)
+    }
+
+  private[llm4s] def validateAdditionalQueries(queries: Option[List[String]]): Result[Option[List[String]]] =
+    queries match {
+      case Some(qs) =>
+        val trimmed = qs.map(_.trim).filter(_.nonEmpty)
+        if (trimmed.isEmpty) {
+          Left(ValidationError.invalid("additionalQueries", "must contain at least one non-empty query"))
+        } else if (trimmed.size != qs.size) {
+          Left(ValidationError.invalid("additionalQueries", "contains empty queries"))
+        } else {
+          Right(Some(trimmed))
+        }
+      case None => Right(None)
+    }
+
+  private[llm4s] def validateSearchTypeValue(searchType: SearchType): Result[SearchType] =
+    Right(searchType) // Already type-safe via sealed trait
+
   /**
    * Validate entire ExaSearchToolConfig.
    * Used by create() to ensure all fields are valid.
@@ -284,15 +313,21 @@ object ExaSearchTool {
 
   /**
    * Validate runtime ExaSearchConfig values.
-   * Ensures all configurable parameters meet requirements before use.
+   * Validates all externally configurable inputs at the boundary
    */
   private def validateSearchConfig(config: ExaSearchConfig): Result[ExaSearchConfig] =
     for {
-      validatedNumResults    <- validateNumResults(config.numResults)
-      validatedMaxCharacters <- validateMaxCharacters(config.maxCharacters)
+      validatedTimeoutMs         <- validateTimeoutMs(config.timeoutMs)
+      validatedNumResults        <- validateNumResults(config.numResults)
+      validatedMaxCharacters     <- validateMaxCharacters(config.maxCharacters)
+      validatedUserLocation      <- validateUserLocation(config.userLocation)
+      validatedAdditionalQueries <- validateAdditionalQueries(config.additionalQueries)
     } yield config.copy(
+      timeoutMs = validatedTimeoutMs,
       numResults = validatedNumResults,
-      maxCharacters = validatedMaxCharacters
+      maxCharacters = validatedMaxCharacters,
+      userLocation = validatedUserLocation,
+      additionalQueries = validatedAdditionalQueries
     )
 
   /**

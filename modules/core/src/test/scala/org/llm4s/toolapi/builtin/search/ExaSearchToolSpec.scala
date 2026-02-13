@@ -870,4 +870,132 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     error should (include("invalid").or(include("try again")))
   }
 
+  "Override config validation" should "reject invalid numResults in override config" in {
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    val invalidConfig = Some(ExaSearchConfig(numResults = -100))
+    val result        = ExaSearchTool.create(toolConfig, invalidConfig)
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse(fail("Expected Left"))
+    error.message should include("numResults")
+  }
+
+  it should "reject invalid maxCharacters in override config" in {
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    val invalidConfig = Some(ExaSearchConfig(maxCharacters = -500))
+    val result        = ExaSearchTool.create(toolConfig, invalidConfig)
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse(fail("Expected Left"))
+    error.message should include("maxCharacters")
+  }
+
+  it should "reject invalid timeoutMs below minimum in override config" in {
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    val invalidConfig = Some(ExaSearchConfig(timeoutMs = 500)) // too low
+    val result        = ExaSearchTool.create(toolConfig, invalidConfig)
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse(fail("Expected Left"))
+    error.message should include("timeoutMs")
+    error.message should include("1000")
+  }
+
+  it should "reject timeoutMs above maximum in override config" in {
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    val invalidConfig = Some(ExaSearchConfig(timeoutMs = 500000)) // 500 seconds, too high
+    val result        = ExaSearchTool.create(toolConfig, invalidConfig)
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse(fail("Expected Left"))
+    error.message should include("timeoutMs")
+  }
+
+  it should "reject empty userLocation in override config" in {
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    val invalidConfig = Some(ExaSearchConfig(userLocation = Some("   ")))
+    val result        = ExaSearchTool.create(toolConfig, invalidConfig)
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse(fail("Expected Left"))
+    error.message should include("userLocation")
+  }
+
+  it should "reject empty additionalQueries in override config" in {
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    val invalidConfig = Some(ExaSearchConfig(additionalQueries = Some(List("valid", "", "also valid"))))
+    val result        = ExaSearchTool.create(toolConfig, invalidConfig)
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse(fail("Expected Left"))
+    error.message should include("additionalQueries")
+  }
+  it should "accept valid override config with all fields" in {
+    val toolConfig = ExaSearchToolConfig(
+      apiKey = "test-key",
+      apiUrl = "https://api.exa.ai",
+      numResults = 10,
+      searchType = "auto",
+      maxCharacters = 500
+    )
+
+    val validConfig = Some(
+      ExaSearchConfig(
+        timeoutMs = 15000,
+        numResults = 20,
+        searchType = SearchType.Neural,
+        maxCharacters = 1000,
+        maxAgeHours = 48,
+        livecrawlTimeout = Some(5000),
+        userLocation = Some("San Francisco"),
+        additionalQueries = Some(List("query1", "query2"))
+      )
+    )
+
+    val result = ExaSearchTool.create(toolConfig, validConfig)
+    result.isRight shouldBe true
+  }
+
 }

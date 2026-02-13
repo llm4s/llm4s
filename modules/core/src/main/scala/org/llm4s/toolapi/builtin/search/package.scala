@@ -31,34 +31,63 @@ package org.llm4s.toolapi.builtin
  *
  * == Usage Pattern ==
  *
- * All search tools require configuration to be loaded at the application edge:
+ * All search tools follow the Result-based error handling pattern.
+ * Use for-comprehensions to chain operations and handle errors gracefully:
  *
  * @example
  * {{{
  * import org.llm4s.config.Llm4sConfig
  * import org.llm4s.toolapi.builtin.search._
  * import org.llm4s.toolapi.ToolRegistry
+ * import org.llm4s.types.Result
  *
- * // Load DuckDuckGo configuration
- * val duckDuckGoConfig = Llm4sConfig.loadDuckDuckGoSearchTool().getOrElse(
- *   throw new RuntimeException("Failed to load DuckDuckGo config")
- * )
- * val duckDuckGoTool = DuckDuckGoSearchTool.create(duckDuckGoConfig)
+ * // Load and create all search tools using Result
+ * val toolsResult: Result[ToolRegistry] = for {
+ *   // Load DuckDuckGo configuration and create tool
+ *   duckDuckGoConfig <- Llm4sConfig.loadDuckDuckGoSearchTool()
+ *   duckDuckGoTool   <- DuckDuckGoSearchTool.create(duckDuckGoConfig)
  *
- * // Load Brave Search configuration
- * val braveConfig = Llm4sConfig.loadBraveSearchTool().getOrElse(
- *   throw new RuntimeException("Failed to load Brave Search config")
- * )
- * val braveTool = BraveSearchTool.create(braveConfig)
+ *   // Load Brave Search configuration and create tool
+ *   braveConfig <- Llm4sConfig.loadBraveSearchTool()
+ *   braveTool   <- BraveSearchTool.create(braveConfig)
  *
- * // Load Exa Search configuration
- * val exaConfig = Llm4sConfig.loadExaSearchTool().getOrElse(
- *   throw new RuntimeException("Failed to load Exa Search config")
- * )
- * val exaTool = ExaSearchTool.create(exaConfig)
+ *   // Load Exa Search configuration and create tool
+ *   exaConfig <- Llm4sConfig.loadExaSearchTool()
+ *   exaTool   <- ExaSearchTool.create(exaConfig)
  *
- * // Register tools with the agent
- * val tools = new ToolRegistry(Seq(duckDuckGoTool, braveTool, exaTool))
+ *   // Register all tools
+ *   tools = new ToolRegistry(Seq(duckDuckGoTool, braveTool, exaTool))
+ * } yield tools
+ *
+ * // Handle the result
+ * toolsResult match {
+ *   case Right(tools) =>
+ *     // Use tools with agent
+ *     println(s"Successfully loaded ${tools.tools.size} search tools")
+ *   case Left(error) =>
+ *     // Handle configuration or validation errors
+ *     println(s"Failed to load search tools: ${error.message}")
+ * }
+ * }}}
+ *
+ * == Individual Tool Usage ==
+ *
+ * You can also load and use tools individually:
+ *
+ * @example
+ * {{{
+ * import org.llm4s.toolapi.builtin.search.ExaSearchTool
+ *
+ * // Load just Exa Search
+ * val exaToolResult = for {
+ *   config <- Llm4sConfig.loadExaSearchTool()
+ *   tool   <- ExaSearchTool.create(config)
+ * } yield tool
+ *
+ * exaToolResult match {
+ *   case Right(tool) => // Use tool
+ *   case Left(error) => // Handle error
+ * }
  * }}}
  *
  * == Configuration ==
