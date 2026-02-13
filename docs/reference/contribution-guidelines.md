@@ -153,13 +153,13 @@ For detailed conventions (naming, style, import organization), see [CONTRIBUTING
 3. **Type Safety**: Use newtypes for domain values (`ApiKey`, `ModelName`, `ConversationId`)
 4. **Immutability**: Prefer immutable data structures and functional updates
 
-See [CONTRIBUTING.md](../../CONTRIBUTING.md#adding-new-features) for detailed code pattern examples and validation using Scalafix.
+See [CONTRIBUTING.md](../../CONTRIBUTING.md#code-conventions) for detailed code pattern examples.
 
 ---
 
 ## Testing Standards
 
-See [CONTRIBUTING.md](../../CONTRIBUTING.md#testing-guidelines) for testing requirements and examples.
+See [CONTRIBUTING.md](../../CONTRIBUTING.md#testing) for testing requirements and examples.
 
 **Quick checklist:**
 - ✅ Place tests in `modules/core/src/test/scala/org/llm4s/` (mirror source structure)
@@ -174,7 +174,7 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md#testing-guidelines) for testing requ
 
 ## Documentation Standards
 
-See [CONTRIBUTING.md](../../CONTRIBUTING.md#documentation-standards) for basic format guidelines.
+See [CONTRIBUTING.md](../../CONTRIBUTING.md#documentation) for basic format guidelines.
 
 **For advanced contributions:**
 
@@ -228,4 +228,4 @@ lazy val config = Llm4sConfig.provider()
 - **Discord:** https://discord.gg/4uvTPn6qww
 - **GitHub Discussions:** https://github.com/llm4s/llm4s/discussions
 
-For troubleshooting, common issues, and build problems, see [CONTRIBUTING.md](../../CONTRIBUTING.md#troubleshooting).
+For help, common issues, and build problems, see [CONTRIBUTING.md](../../CONTRIBUTING.md#getting-help).
