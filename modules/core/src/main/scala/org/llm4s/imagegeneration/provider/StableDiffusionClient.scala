@@ -6,7 +6,24 @@ import upickle.default._
 import java.nio.file.{ Files, Path }
 import java.util.Base64
 import scala.util.Try
-import scala.concurrent.{ Future, ExecutionContext }
+import scala.concurrent.{ Future, ExecutionContext, blocking }
+
+object StableDiffusionPayload {
+  implicit val writer: Writer[StableDiffusionPayload] = macroW
+}
+
+object StableDiffusionClient {
+
+  /**
+   * Dedicated execution context for blocking HTTP operations.
+   *
+   * This keeps Stable Diffusion network calls off the caller's shared execution context.
+   */
+  private[imagegeneration] val blockingEc: ExecutionContext =
+    ExecutionContext.fromExecutor(
+      java.util.concurrent.Executors.newCachedThreadPool()
+    )
+}
 
 /**
  * Represents the JSON payload for the Stable Diffusion WebUI API's text-to-image endpoint.
@@ -24,10 +41,6 @@ case class StableDiffusionPayload(
   seed: Long,
   sampler_name: String = "Euler a" // Default sampler
 )
-
-object StableDiffusionPayload {
-  implicit val writer: Writer[StableDiffusionPayload] = macroW
-}
 
 case class StableDiffusionImg2ImgPayload(
   init_images: Seq[String],
@@ -104,18 +117,14 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
-    Future {
-      generateImage(prompt, options)
-    }
+    Future(blocking(generateImage(prompt, options)))(StableDiffusionClient.blockingEc)
 
   override def generateImagesAsync(
     prompt: String,
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    Future {
-      generateImages(prompt, count, options)
-    }
+    Future(blocking(generateImages(prompt, count, options)))(StableDiffusionClient.blockingEc)
 
   override def editImageAsync(
     imagePath: Path,
@@ -123,9 +132,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    Future {
-      editImage(imagePath, prompt, maskPath, options)
-    }
+    Future(blocking(editImage(imagePath, prompt, maskPath, options)))(StableDiffusionClient.blockingEc)
 
   override def editImage(
     imagePath: Path,

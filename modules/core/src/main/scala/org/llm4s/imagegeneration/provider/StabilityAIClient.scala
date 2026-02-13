@@ -81,12 +81,11 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
     // Stability AI generates one image per request, so loop for multiple
     val results = (1 to count).map(_ => generateSingleImage(prompt, options))
 
-    // Fail-fast: return first error if any request failed (does not accumulate errors)
-    val errors = results.collect { case Left(e) => e }
-    if (errors.nonEmpty) {
-      Left(errors.head)
-    } else {
-      Right(results.collect { case Right(img) => img })
+    // Fail-fast contract: return first error immediately if any request failed.
+    // This explicitly does NOT accumulate errors - we stop on first failure.
+    results.find(_.isLeft) match {
+      case Some(Left(error)) => Left(error)
+      case _                 => Right(results.collect { case Right(img) => img })
     }
   }
 

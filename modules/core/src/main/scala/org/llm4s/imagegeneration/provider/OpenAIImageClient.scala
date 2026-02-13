@@ -6,7 +6,21 @@ import ujson._
 import java.time.Instant
 import java.nio.file.Path
 import scala.util.Try
-import scala.concurrent.{ Future, ExecutionContext }
+import scala.concurrent.{ Future, ExecutionContext, blocking }
+
+object OpenAIImageClient {
+
+  /**
+   * Dedicated execution context for blocking HTTP operations.
+   *
+   * This keeps OpenAI image network calls off the caller's shared execution context,
+   * aligning with the guideline to avoid running blocking work on shared pools.
+   */
+  private[imagegeneration] val blockingEc: ExecutionContext =
+    ExecutionContext.fromExecutor(
+      java.util.concurrent.Executors.newCachedThreadPool()
+    )
+}
 
 /**
  * OpenAI DALL-E API client for image generation.
@@ -152,9 +166,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
-    Future {
-      generateImage(prompt, options)
-    }
+    Future(blocking(generateImage(prompt, options)))(OpenAIImageClient.blockingEc)
 
   /**
    * Generate multiple images asynchronously
@@ -164,9 +176,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     count: Int,
     options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    Future {
-      generateImages(prompt, count, options)
-    }
+    Future(blocking(generateImages(prompt, count, options)))(OpenAIImageClient.blockingEc)
 
   /**
    * Edit an existing image asynchronously
@@ -177,9 +187,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     maskPath: Option[Path] = None,
     options: ImageEditOptions = ImageEditOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
-    Future {
-      editImage(imagePath, prompt, maskPath, options)
-    }
+    Future(blocking(editImage(imagePath, prompt, maskPath, options)))(OpenAIImageClient.blockingEc)
 
   /**
    * Check the health/status of the OpenAI API service.
