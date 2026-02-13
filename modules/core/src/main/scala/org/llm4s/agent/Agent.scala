@@ -3,6 +3,7 @@ package org.llm4s.agent
 import org.llm4s.agent.guardrails.{ CompositeGuardrail, InputGuardrail, OutputGuardrail }
 import org.llm4s.agent.streaming.AgentEvent
 import org.llm4s.core.safety.Safety
+import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
@@ -99,8 +100,10 @@ class Agent(client: LLMClient) {
       f(tracer) match {
         case Left(error) =>
           error match {
-            case t: Throwable => logger.debug("Tracing failed", t)
-            case _            => logger.debug("Tracing failed: {}", error)
+            case UnknownError(msg, cause) =>
+              logger.debug("Tracing failed: " + msg, cause)
+            case _ =>
+              logger.debug("Tracing failed: {}", error)
           }
         case Right(_) =>
           ()
@@ -162,6 +165,10 @@ class Agent(client: LLMClient) {
    */
   def runStep(state: AgentState): Result[AgentState] =
     runStep(state, None, debug = false)
+
+  @deprecated("Use runStep(state, tracing, debug)", "0.2.0")
+  def runStep(state: AgentState, debug: Boolean): Result[AgentState] =
+    runStep(state, None, debug)
 
   def runStep(state: AgentState, tracing: Option[Tracing], debug: Boolean = false): Result[AgentState] =
     state.status match {
@@ -1120,7 +1127,8 @@ class Agent(client: LLMClient) {
     systemPromptAddition: Option[String] = None,
     completionOptions: CompletionOptions = CompletionOptions(),
     contextWindowConfig: Option[ContextWindowConfig] = None,
-    debug: Boolean = false
+    debug: Boolean = false,
+    tracing: Option[Tracing] = None
   ): Result[AgentState] = {
     // Run first turn
     val firstTurn = run(
@@ -1133,7 +1141,8 @@ class Agent(client: LLMClient) {
       traceLogPath = None,
       systemPromptAddition = systemPromptAddition,
       completionOptions = completionOptions,
-      debug = debug
+      debug = debug,
+      tracing = tracing
     )
 
     // Fold over follow-up queries, threading state through
@@ -1147,7 +1156,8 @@ class Agent(client: LLMClient) {
           maxSteps = maxStepsPerTurn,
           traceLogPath = None,
           contextWindowConfig = contextWindowConfig,
-          debug = debug
+          debug = debug,
+          tracing = tracing
         )
       }
     }
@@ -1608,7 +1618,8 @@ class Agent(client: LLMClient) {
     maxSteps: Option[Int] = Some(Agent.DefaultMaxSteps),
     systemPromptAddition: Option[String] = None,
     completionOptions: CompletionOptions = CompletionOptions(),
-    debug: Boolean = false
+    debug: Boolean = false,
+    tracing: Option[Tracing] = None
   ): Result[(AgentState, Seq[AgentEvent])] = {
     val events = scala.collection.mutable.ArrayBuffer[AgentEvent]()
 
@@ -1619,7 +1630,8 @@ class Agent(client: LLMClient) {
       maxSteps = maxSteps,
       systemPromptAddition = systemPromptAddition,
       completionOptions = completionOptions,
-      debug = debug
+      debug = debug,
+      tracing = tracing
     ).map(state => (state, events.toSeq))
   }
 

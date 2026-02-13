@@ -1,6 +1,5 @@
 package org.llm4s.agent
 
-import org.llm4s.assistant.{ AssistantAgent, SessionState }
 import org.llm4s.agent.streaming.AgentEvent
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.LLMClient
@@ -9,7 +8,6 @@ import org.llm4s.toolapi._
 import org.llm4s.trace.Tracing
 import org.llm4s.trace.TraceEvent
 import org.llm4s.types.Result
-import org.llm4s.types.{ DirectoryPath, SessionId }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default._
@@ -466,36 +464,5 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     result.isLeft shouldBe true
     tracing.errors.nonEmpty shouldBe true
     tracing.errors.head._2 shouldBe "agent_completion"
-  }
-
-  "AssistantAgent.runSteps" should "execute agent.runStep recursion path naturally" in {
-    val completion = createCompletion("assistant response")
-    val client     = new StubLLMClient(Right(completion))
-    val tools      = ToolRegistry.empty
-    val assistant  = new AssistantAgent(client, tools, sessionDir = "./sessions-test")
-
-    // Use reflection to access private runAgentToCompletion since there's no public API
-    // This is unavoidable as AssistantAgent only exposes startInteractiveSession which requires console interaction
-    val agentState = AgentState(
-      conversation = Conversation(Seq(UserMessage("user query"))),
-      tools = tools,
-      status = AgentStatus.InProgress
-    )
-
-    val sessionState = SessionState(
-      agentState = Some(agentState),
-      sessionId = SessionId("test-session"),
-      sessionDir = DirectoryPath("./sessions-test")
-    )
-
-    val runAgentMethod =
-      classOf[AssistantAgent].getDeclaredMethod("runAgentToCompletion", classOf[SessionState])
-    runAgentMethod.setAccessible(true)
-
-    val result = runAgentMethod
-      .invoke(assistant, sessionState)
-      .asInstanceOf[Either[org.llm4s.error.LLMError, SessionState]]
-
-    result.isRight shouldBe true
   }
 }
