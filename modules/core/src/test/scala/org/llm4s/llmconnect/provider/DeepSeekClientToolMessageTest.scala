@@ -151,5 +151,3 @@ class DeepSeekClientToolMessageTest extends AnyFlatSpec with Matchers {
     toolMsg2("content").str shouldBe """{"temp": 45}"""
   }
 }
-
-
