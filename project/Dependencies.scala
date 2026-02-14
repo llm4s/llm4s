@@ -33,7 +33,6 @@ object Versions {
   val jna         = "5.13.0"
   val vosk        = "0.3.45"
 
-  val sttp       = "4.0.9"
   val cask       = "0.10.2"
 
   // AWS SDK
@@ -75,7 +74,6 @@ object Deps {
   val jna         = "net.java.dev.jna" % "jna"          % Versions.jna
   val vosk        = "com.alphacephei"  % "vosk"         % Versions.vosk
 
-  val sttp       = "com.softwaremill.sttp.client4" %% "core" % Versions.sttp
   val cask       = "com.lihaoyi" %% "cask" % Versions.cask
 
   // AWS SDK

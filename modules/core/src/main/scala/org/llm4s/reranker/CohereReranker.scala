@@ -10,6 +10,7 @@ import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
 import java.time.Duration
 import scala.util.Try
+import scala.util.control.NonFatal
 
 /**
  * Cohere Rerank API implementation.
@@ -53,14 +54,14 @@ class CohereReranker(config: RerankProviderConfig) extends Reranker {
       .build()
 
     val respEither: Either[RerankError, HttpResponse[String]] =
-      Try(httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))).toEither.left
-        .map(e =>
-          RerankError(
-            code = None,
-            message = s"HTTP request failed: ${e.getMessage}",
-            provider = "cohere"
-          )
-        )
+      try Right(httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)))
+      catch {
+        case e: InterruptedException =>
+          Thread.currentThread().interrupt()
+          Left(RerankError(code = None, message = s"HTTP request interrupted: ${e.getMessage}", provider = "cohere"))
+        case NonFatal(e) =>
+          Left(RerankError(code = None, message = s"HTTP request failed: ${e.getMessage}", provider = "cohere"))
+      }
 
     respEither.flatMap { response =>
       response.statusCode() match {

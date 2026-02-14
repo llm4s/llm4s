@@ -186,7 +186,6 @@ lazy val workspaceClient = (project in file("modules/workspace/workspaceClient")
       Deps.websocket,
       Deps.scalatest % Test,
       Deps.scalamock % Test,
-      Deps.sttp,
       Deps.ujson,
       Deps.pdfbox,
       Deps.commonsIO,

@@ -12,6 +12,7 @@ import java.nio.file.{ Files, Paths }
 import java.time.{ Duration, Instant }
 import java.util.Base64
 import scala.util.Try
+import scala.util.control.NonFatal
 
 /**
  * OpenAI Vision client for AI-powered image analysis using GPT-4 Vision.
@@ -166,7 +167,7 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
     }
 
   private def callOpenAIVisionAPI(base64Image: String, prompt: String, mediaType: MediaType): Try[String] =
-    Try {
+    try {
       // Use type-safe serialization
       val requestBody = OpenAIRequestBody.serialize(
         model = config.model,
@@ -189,7 +190,7 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
 
       response.statusCode() match {
         case 200 =>
-          extractContentFromResponse(response.body())
+          scala.util.Success(extractContentFromResponse(response.body()))
         case statusCode =>
           val responseBody = response.body()
           val errorMessage =
@@ -215,11 +216,14 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
             statusCode.asInstanceOf[AnyRef],
             org.llm4s.util.Redaction.truncateForLog(responseBody)
           )
-          throw new RuntimeException(s"OpenAI API call failed - $errorMessage")
+          scala.util.Failure(new RuntimeException(s"OpenAI API call failed - $errorMessage"))
       }
-    }.recoverWith { case e: InterruptedException =>
-      Thread.currentThread().interrupt()
-      scala.util.Failure(e)
+    } catch {
+      case e: InterruptedException =>
+        Thread.currentThread().interrupt()
+        scala.util.Failure(e)
+      case NonFatal(e) =>
+        scala.util.Failure(e)
     }
 
   private def extractContentFromResponse(jsonResponse: String): String =

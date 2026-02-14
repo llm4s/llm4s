@@ -13,6 +13,7 @@ import java.nio.file.{ Files, Paths }
 import java.time.{ Duration, Instant }
 import java.util.Base64
 import scala.util.Try
+import scala.util.control.NonFatal
 
 /**
  * Anthropic Claude Vision client for AI-powered image analysis.
@@ -183,7 +184,7 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
     prompt: String,
     mediaType: MediaType
   ): Try[String] =
-    Try {
+    try {
       // Use type-safe serialization
       val requestBody = AnthropicRequestBody.serialize(
         model = config.model,
@@ -207,7 +208,7 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
 
       response.statusCode() match {
         case 200 =>
-          extractContentFromResponse(response.body())
+          scala.util.Success(extractContentFromResponse(response.body()))
         case statusCode =>
           val responseBody = response.body()
           val errorMessage =
@@ -231,11 +232,14 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
             statusCode.asInstanceOf[AnyRef],
             org.llm4s.util.Redaction.truncateForLog(responseBody)
           )
-          throw new RuntimeException(s"Anthropic API call failed - $errorMessage")
+          scala.util.Failure(new RuntimeException(s"Anthropic API call failed - $errorMessage"))
       }
-    }.recoverWith { case e: InterruptedException =>
-      Thread.currentThread().interrupt()
-      scala.util.Failure(e)
+    } catch {
+      case e: InterruptedException =>
+        Thread.currentThread().interrupt()
+        scala.util.Failure(e)
+      case NonFatal(e) =>
+        scala.util.Failure(e)
     }
 
   private def extractContentFromResponse(jsonResponse: String): String =

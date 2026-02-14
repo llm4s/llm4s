@@ -11,6 +11,7 @@ import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
 import java.time.Duration
 import scala.util.Try
+import scala.util.control.NonFatal
 
 /**
  * OpenAI embedding provider implementation.
@@ -63,8 +64,16 @@ object OpenAIEmbeddingProvider {
         .build()
 
       val respEither: Either[EmbeddingError, HttpResponse[String]] =
-        Try(httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))).toEither.left
-          .map(e => EmbeddingError(code = None, message = s"HTTP request failed: ${e.getMessage}", provider = "openai"))
+        try Right(httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)))
+        catch {
+          case e: InterruptedException =>
+            Thread.currentThread().interrupt()
+            Left(
+              EmbeddingError(code = None, message = s"HTTP request interrupted: ${e.getMessage}", provider = "openai")
+            )
+          case NonFatal(e) =>
+            Left(EmbeddingError(code = None, message = s"HTTP request failed: ${e.getMessage}", provider = "openai"))
+        }
 
       respEither.flatMap { response =>
         response.statusCode() match {
