@@ -1,4 +1,4 @@
-﻿# Phase 1.3: Handoff Mechanism
+ Phase 1.3: Handoff Mechanism
 
 > **Date:** 2025-01-16
 > **Status:** Design Phase
@@ -1358,7 +1358,6 @@ for {
     handoffs = handoffs  // Can hand off on any turn
   )
 } yield state2
-```
 ```
 
 ---
