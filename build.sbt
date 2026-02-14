@@ -144,7 +144,6 @@ lazy val core = (project in file("modules/core"))
       Deps.websocket,
       Deps.scalatest % Test,
       Deps.scalamock % Test,
-      Deps.sttp,
       Deps.ujson,
       Deps.pdfbox,
       Deps.commonsIO,
