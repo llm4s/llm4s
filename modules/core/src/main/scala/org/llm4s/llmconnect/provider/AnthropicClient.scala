@@ -347,17 +347,17 @@ curl https://api.anthropic.com/v1/messages \
    * to maintain compatibility with the Anthropic API.
    */
   private def convertToolToAnthropicTool(toolFunction: ToolFunction[_, _]): Tool = {
-    val objectSchema  = toolFunction.schema.asInstanceOf[ObjectSchema[_]]
+    val objectSchema = toolFunction.schema.asInstanceOf[ObjectSchema[_]]
     // Generate raw schema without 'strict' mode
     val jsonSchemaStr = objectSchema.toJsonSchema(false).render()
 
     // Parse the JSON and sanitize the schema
     val jsonNode = ujson.read(jsonSchemaStr)
-    
+
     // Fix: Remove OpenAI-only top-level fields
     jsonNode.obj.remove("strict")
     jsonNode.obj.remove("additionalProperties")
-    
+
     // Recursively strip additionalProperties from nested parts
     stripAdditionalProperties(jsonNode)
 
@@ -367,16 +367,19 @@ curl https://api.anthropic.com/v1/messages \
     val jsonSchemaMap = jsonSchema.values()
 
     val inputSchemaBuilder = Tool.InputSchema.builder()
-    val propertiesValue = jsonSchemaMap.get("properties")
+    val propertiesValue    = jsonSchemaMap.get("properties")
     if (propertiesValue != null) {
-      val propertiesObj = ObjectMappers.jsonMapper().readValue(
+      val propertiesObj = ObjectMappers
+        .jsonMapper()
+        .readValue(
           ObjectMappers.jsonMapper().writeValueAsString(propertiesValue),
           classOf[Tool.InputSchema.Properties]
         )
       inputSchemaBuilder.properties(propertiesObj)
     }
 
-    Tool.builder()
+    Tool
+      .builder()
       .name(toolFunction.name)
       .description(toolFunction.description)
       .inputSchema(inputSchemaBuilder.build().validate())
