@@ -6,15 +6,16 @@ import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers._
 import requests.Response
+import scala.util.{ Failure, Success }
 
 class HuggingFaceHttpClientTest extends AnyFlatSpec with MockFactory with EitherValues {
 
-  val httpClient: BaseHttpClient = stub[BaseHttpClient]
+  val httpClient: HttpClient = stub[HttpClient]
   val huggingFaceClient          = new HuggingFaceClient(HuggingFaceConfig("test-key", "test-model"), httpClient)
 
   it should "return a Left(error) on exception" in {
 
-    (httpClient.post _).when("something").throws(new RuntimeException("Something went wrong"))
+    (httpClient.post _).when(*, *, "something", *).returns(Failure(new RuntimeException("Something went wrong")))
 
     val result = huggingFaceClient.makeHttpRequest("something")
 
@@ -25,7 +26,7 @@ class HuggingFaceHttpClientTest extends AnyFlatSpec with MockFactory with Either
   it should "return a Right(value) on success" in {
 
     val response = Response("", 200, "OK", new geny.Bytes("something".getBytes), Map.empty, None)
-    (httpClient.post _).when("something").returns(response)
+    (httpClient.post _).when(*, *, "something", *).returns(Success(response))
 
     val result = huggingFaceClient.makeHttpRequest("something")
 

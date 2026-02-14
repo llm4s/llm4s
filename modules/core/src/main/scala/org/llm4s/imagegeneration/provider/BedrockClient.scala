@@ -2,7 +2,6 @@ package org.llm4s.imagegeneration.provider
 
 import org.llm4s.imagegeneration._
 import org.slf4j.LoggerFactory
-import upickle.default._
 import java.nio.file.Path
 import scala.util.Try
 import scala.concurrent.{Future, ExecutionContext}
@@ -11,6 +10,7 @@ import javax.crypto.spec.SecretKeySpec
 import java.time.{ZonedDateTime, ZoneOffset}
 import java.time.format.DateTimeFormatter
 import java.security.MessageDigest
+import ujson._
 
 /**
  * AWS Bedrock client for image generation.
@@ -123,13 +123,13 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
     // Titan Image Generator format
     if (config.model.startsWith("amazon.titan")) {
       val imageGenConfig = ujson.Obj(
-        "numberOfImages" -> count,
-        "width" -> width,
-        "height" -> height
+        "numberOfImages" -> ujson.Num(count),
+        "width" -> ujson.Num(width),
+        "height" -> ujson.Num(height)
       )
 
       options.seed.foreach { seed =>
-        imageGenConfig("seed") = seed
+        imageGenConfig("seed") = ujson.Num(seed.toDouble)
       }
 
       ujson.Obj(
@@ -146,11 +146,11 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
           ujson.Obj("text" -> prompt)
         ),
         "cfg_scale" -> 7,
-        "seed" -> options.seed.map(_.toInt).getOrElse(0),
+        "seed" -> ujson.Num(options.seed.map(_.toDouble).getOrElse(0.0)),
         "steps" -> 50,
-        "width" -> width,
-        "height" -> height,
-        "samples" -> count
+        "width" -> ujson.Num(width),
+        "height" -> ujson.Num(height),
+        "samples" -> ujson.Num(count)
       )
     }
   }
@@ -254,30 +254,24 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
     }
 
     Try {
-      val responseJson = read[ujson.Value](response.text())
+      val responseJson = read(response.text())
       responseJson
     }.toEither.left
       .map(e => UnknownError(e))
       .flatMap { responseJson =>
         // Titan returns images in "images" array
-        val imagesOpt = responseJson.obj.get("images").map(_.arr.toSeq)
+        val imagesOpt = responseJson.obj.get("images").map(_.arr.toSeq.map(_.str))
         // Stability returns in "artifacts" array
-        val artifactsOpt = responseJson.obj.get("artifacts").map(_.arr.toSeq)
+        val artifactsOpt = responseJson.obj.get("artifacts").map(_.arr.toSeq.flatMap(_.obj.get("base64").map(_.str)))
 
-        val imageDataList = imagesOpt.orElse(artifactsOpt.map(_.flatMap { artifact =>
-          artifact.obj.get("base64").map(_.str)
-        })).getOrElse(Seq.empty)
+        val imageDataList = imagesOpt.orElse(artifactsOpt).getOrElse(Seq.empty)
 
         if (imageDataList.isEmpty) {
           Left(ValidationError("No images returned from the API"))
         } else {
           val generatedImages = imageDataList.map { imageData =>
-            val data = imageData match {
-              case s: ujson.Str => s.str
-              case other => other.toString
-            }
             GeneratedImage(
-              data = data,
+              data = imageData,
               format = ImageFormat.PNG,
               size = options.size,
               prompt = prompt,

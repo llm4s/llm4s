@@ -7,7 +7,7 @@ trait BaseHttpClient {
   def post(payload: String): requests.Response
 }
 
-class HttpClient(url: String, headers: Map[String, String], timeout: Int) extends BaseHttpClient {
+class LegacyHuggingFaceHttpClient(url: String, headers: Map[String, String], timeout: Int) extends BaseHttpClient {
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
   override def post(payload: String): Response = {
@@ -24,9 +24,9 @@ class HttpClient(url: String, headers: Map[String, String], timeout: Int) extend
   }
 }
 
-object HttpClient {
+object LegacyHuggingFaceHttpClient {
   def createHttpClient(config: HuggingFaceConfig) =
-    new HttpClient(
+    new LegacyHuggingFaceHttpClient(
       url = s"https://api-inference.huggingface.co/models/${config.model}",
       headers = Map(
         "Authorization" -> s"Bearer ${config.apiKey}",

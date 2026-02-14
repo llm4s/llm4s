@@ -6,7 +6,7 @@ import ujson._
 import java.time.Instant
 import java.nio.file.Path
 import scala.util.Try
-import scala.concurrent.{Future, ExecutionContext}
+import scala.concurrent.{ Future, ExecutionContext }
 
 /**
  * OpenAI DALL-E API client for image generation.
@@ -31,15 +31,14 @@ import scala.concurrent.{Future, ExecutionContext}
  * )
  *
  * client.generateImage("a beautiful landscape", options) match {
- *   case Right(image) => println(s"Generated image: $${image.size}")
- *   case Left(error) => println(s"Error: $${error.message}")
+ *   case Right(image) => println(s"Generated image: ${image.size}")
+ *   case Left(error) => println(s"Error: ${error.message}")
  * }
  * }}}
  */
-class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
+class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends ImageGenerationClient {
 
   private val logger = LoggerFactory.getLogger(getClass)
-  private val apiUrl = "https://api.openai.com/v1/images/generations"
 
   /**
    * Generate a single image from a text prompt using OpenAI DALL-E API.
@@ -98,51 +97,51 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
   ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
     // Validate image format manually as simple check, real validation happens at API
     if (!imagePath.toString.toLowerCase.endsWith(".png")) {
-      return Left(ValidationError("Image must be a PNG file"))
-    }
-    
-    val editUrl = "https://api.openai.com/v1/images/edits"
-    
-    val parts = scala.collection.mutable.ListBuffer[requests.MultiItem](
-      requests.MultiItem("image", imagePath, filename = imagePath.getFileName.toString),
-      requests.MultiItem("prompt", prompt),
-      requests.MultiItem("n", options.n.toString),
-      requests.MultiItem("response_format", options.responseFormat.getOrElse("b64_json"))
-    )
-
-    if (config.model.startsWith("dall-e")) {
-       parts += requests.MultiItem("model", "dall-e-2") // Edits only supported on DALL-E 2 currently
+      Left(ValidationError("Image must be a PNG file"))
     } else {
-       // Fallback to dall-e-2 for edits as GPT models don't support it yet
-       parts += requests.MultiItem("model", "dall-e-2") 
-    }
+      val editUrl = s"${config.baseUrl}/images/edits"
 
-    maskPath.foreach(path => parts += requests.MultiItem("mask", path, filename = path.getFileName.toString))
-    options.size.foreach(s => parts += requests.MultiItem("size", sizeToApiFormat(s)))
-    options.user.foreach(u => parts += requests.MultiItem("user", u))
+      val parts = scala.collection.mutable.ListBuffer[requests.MultiItem](
+        requests.MultiItem("image", imagePath, filename = imagePath.getFileName.toString),
+        requests.MultiItem("prompt", prompt),
+        requests.MultiItem("n", options.n.toString),
+        requests.MultiItem("response_format", options.responseFormat.getOrElse("b64_json"): String)
+      )
 
-    val response = requests.post(
-      editUrl,
-      headers = Map("Authorization" -> s"Bearer ${config.apiKey}"),
-      data = requests.MultiPart(parts.toSeq: _*),
-      readTimeout = config.timeout,
-      connectTimeout = 10000
-    )
+      // Always use dall-e-2 for edits as it's the only supported model for this endpoint
+      parts += requests.MultiItem("model", "dall-e-2")
 
-    if (response.statusCode == 200) {
-       // reuse parseResponse logic but map ImageEditOptions to ImageGenerationOptions for compatibility
-       // Note: Size might be different if None was passed, but parseResponse uses options.size
-       // We'll create a dummy ImageGenerationOptions
-       val genOptions = ImageGenerationOptions(
-         size = options.size.getOrElse(ImageSize.Square1024), // API default
-         format = ImageFormat.PNG, // Default
-         responseFormat = options.responseFormat, // Pass through
-       )
-       parseResponse(response, prompt, genOptions)
-    } else {
-      handleErrorResponse(response) match {
-          case Left(e) => Left(e)
-          case Right(_) => Left(UnknownError(new RuntimeException("Unexpected successful response during error handling")))
+      maskPath.foreach(path => parts += requests.MultiItem("mask", path, filename = path.getFileName.toString))
+      options.size.foreach(s => parts += requests.MultiItem("size", sizeToApiFormat(s)))
+      options.user.foreach(u => parts += requests.MultiItem("user", u))
+
+      val result = httpClient
+        .postMultipart(
+          editUrl,
+          headers = Map("Authorization" -> s"Bearer ${config.apiKey}"),
+          data = requests.MultiPart(parts.toSeq: _*),
+          timeout = config.timeout
+        )
+        .toEither
+        .left
+        .map(e => UnknownError(e))
+
+      result.flatMap { response =>
+        if (response.statusCode == 200) {
+          // reuse parseResponse logic but map ImageEditOptions to ImageGenerationOptions for compatibility
+          val genOptions = ImageGenerationOptions(
+            size = options.size.getOrElse(ImageSize.Square1024), // API default
+            format = ImageFormat.PNG,                            // Default
+            responseFormat = options.responseFormat,             // Pass through
+          )
+          parseResponse(response, prompt, genOptions)
+        } else {
+          handleErrorResponse(response) match {
+            case Left(e) => Left(e)
+            case Right(_) =>
+              Left(UnknownError(new RuntimeException("Unexpected successful response during error handling")))
+          }
+        }
       }
     }
   }
@@ -151,8 +150,8 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
    * Generate an image asynchronously
    */
   override def generateImageAsync(
-      prompt: String,
-      options: ImageGenerationOptions = ImageGenerationOptions()
+    prompt: String,
+    options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
     Future {
       generateImage(prompt, options)
@@ -162,9 +161,9 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
    * Generate multiple images asynchronously
    */
   override def generateImagesAsync(
-      prompt: String,
-      count: Int,
-      options: ImageGenerationOptions = ImageGenerationOptions()
+    prompt: String,
+    count: Int,
+    options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
     Future {
       generateImages(prompt, count, options)
@@ -174,10 +173,10 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
    * Edit an existing image asynchronously
    */
   override def editImageAsync(
-      imagePath: Path,
-      prompt: String,
-      maskPath: Option[Path] = None,
-      options: ImageEditOptions = ImageEditOptions()
+    imagePath: Path,
+    prompt: String,
+    maskPath: Option[Path] = None,
+    options: ImageEditOptions = ImageEditOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
     Future {
       editImage(imagePath, prompt, maskPath, options)
@@ -190,35 +189,35 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
    * so we use a minimal models list request as a health check.
    */
   override def health(): Either[ImageGenerationError, ServiceStatus] = {
-    val response = requests.get(
-      "https://api.openai.com/v1/models",
-      headers = Map("Authorization" -> s"Bearer ${config.apiKey}"),
-      readTimeout = 5000,
-      connectTimeout = 5000
-    )
+    val healthUrl = s"${config.baseUrl.stripSuffix("/images/generations").stripSuffix("/v1")}/v1/models"
 
-    if (response.statusCode == 200) {
-      Right(
-        ServiceStatus(
-          status = HealthStatus.Healthy,
-          message = "OpenAI API is responding"
-        )
+    httpClient
+      .get(
+        healthUrl,
+        headers = Map("Authorization" -> s"Bearer ${config.apiKey}"),
+        timeout = 5000
       )
-    } else if (response.statusCode == 429) {
-      Right(
-        ServiceStatus(
-          status = HealthStatus.Degraded,
-          message = "Rate limited but operational"
-        )
-      )
-    } else {
-      Right(
-        ServiceStatus(
-          status = HealthStatus.Unhealthy,
-          message = s"API returned status ${response.statusCode}"
-        )
-      )
-    }
+      .toEither
+      .left
+      .map(e => ServiceError(s"Health check failed: ${e.getMessage}", 0))
+      .map { response =>
+        if (response.statusCode == 200) {
+          ServiceStatus(
+            status = HealthStatus.Healthy,
+            message = "OpenAI API is responding"
+          )
+        } else if (response.statusCode == 429) {
+          ServiceStatus(
+            status = HealthStatus.Degraded,
+            message = "Rate limited but operational"
+          )
+        } else {
+          ServiceStatus(
+            status = HealthStatus.Unhealthy,
+            message = s"API returned status ${response.statusCode}"
+          )
+        }
+      }
   }
 
   /**
@@ -253,10 +252,10 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
   private def sizeToApiFormat(size: ImageSize): String =
     // Map our generic sizes to DALL-E supported sizes
     size match {
-      case ImageSize.Square512        => if (config.model == "dall-e-3") "1024x1024" else "512x512"
-      case ImageSize.Square1024       => "1024x1024"
-      case ImageSize.Landscape768x512 => if (config.model == "dall-e-3") "1792x1024" else "512x512"
-      case ImageSize.Portrait512x768  => if (config.model == "dall-e-3") "1024x1792" else "512x512"
+      case ImageSize.Square512          => if (config.model == "dall-e-3") "1024x1024" else "512x512"
+      case ImageSize.Square1024         => "1024x1024"
+      case ImageSize.Landscape768x512   => if (config.model == "dall-e-3") "1792x1024" else "512x512"
+      case ImageSize.Portrait512x768    => if (config.model == "dall-e-3") "1024x1792" else "512x512"
       case ImageSize.Landscape1536x1024 => "1792x1024" // Closest matching for DALL-E 3/GPT
       case ImageSize.Portrait1024x1536  => "1024x1792" // Closest matching for DALL-E 3/GPT
     }
@@ -271,7 +270,9 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
   ): Either[ImageGenerationError, requests.Response] = {
     // Deprecation warning
     if (config.model.startsWith("dall-e")) {
-      logger.warn(s"Model ${config.model} is deprecated and will be removed on May 12, 2026. Please migrate to gpt-image models.")
+      logger.warn(
+        s"Model ${config.model} is deprecated and will be removed on May 12, 2026. Please migrate to gpt-image models."
+      )
     }
 
     val requestBody = Obj(
@@ -279,35 +280,41 @@ class OpenAIImageClient(config: OpenAIConfig) extends ImageGenerationClient {
       "prompt"          -> prompt,
       "n"               -> count,
       "size"            -> sizeToApiFormat(options.size),
-      "response_format" -> options.responseFormat.getOrElse("b64_json")
+      "response_format" -> (options.responseFormat.getOrElse("b64_json"): String)
     )
 
     // Optional parameters
-    options.quality.foreach(q => requestBody("quality") = q)
-    options.style.foreach(s => requestBody("style") = s)
-    options.user.foreach(u => requestBody("user") = u)
+    options.quality.foreach(q => requestBody("quality") = ujson.Str(q))
+    options.style.foreach(s => requestBody("style") = ujson.Str(s))
+    options.user.foreach(u => requestBody("user") = ujson.Str(u))
 
     // Backward compatibility defaults for DALL-E 3 if not specified
     if (config.model == "dall-e-3" && options.quality.isEmpty) {
       requestBody("quality") = "standard"
     }
 
-    val response = requests.post(
-      apiUrl,
-      headers = Map(
-        "Authorization" -> s"Bearer ${config.apiKey}",
-        "Content-Type"  -> "application/json"
-      ),
-      data = requestBody.toString,
-      readTimeout = config.timeout,
-      connectTimeout = 10000
-    )
+    val url = s"${config.baseUrl}/images/generations"
 
-    if (response.statusCode == 200) {
-      Right(response)
-    } else {
-      handleErrorResponse(response)
-    }
+    httpClient
+      .post(
+        url,
+        headers = Map(
+          "Authorization" -> s"Bearer ${config.apiKey}",
+          "Content-Type"  -> "application/json"
+        ),
+        data = requestBody.toString,
+        timeout = config.timeout
+      )
+      .toEither
+      .left
+      .map(e => UnknownError(e))
+      .flatMap { response =>
+        if (response.statusCode == 200) {
+          Right(response)
+        } else {
+          handleErrorResponse(response)
+        }
+      }
   }
 
   /**

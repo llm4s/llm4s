@@ -9,7 +9,7 @@ import upickle.default._
 
 class HuggingFaceClientTest extends AnyFlatSpec with Matchers with MockFactory with EitherValues {
 
-  val httpClient: BaseHttpClient = stub[BaseHttpClient]
+  val httpClient: HttpClient = stub[HttpClient]
 
   "buildPayload" should "create a valid JSON payload with all parameters" in {
     // Arrange

@@ -6,7 +6,7 @@ import java.time.Instant
 import java.nio.file.Path
 import java.util.Base64
 import scala.util.Try
-import scala.concurrent.{Future, ExecutionContext}
+import scala.concurrent.{ Future, ExecutionContext }
 
 /**
  * HuggingFace Inference API client for image generation.
@@ -31,7 +31,7 @@ import scala.concurrent.{Future, ExecutionContext}
  * }
  * }}}
  */
-class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) extends ImageGenerationClient {
+class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) extends ImageGenerationClient {
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
@@ -162,27 +162,27 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
     Left(ValidationError("Image editing is not yet supported for HuggingFace provider"))
 
   override def generateImageAsync(
-      prompt: String,
-      options: ImageGenerationOptions = ImageGenerationOptions()
+    prompt: String,
+    options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
     Future {
       generateImage(prompt, options)
     }
 
   override def generateImagesAsync(
-      prompt: String,
-      count: Int,
-      options: ImageGenerationOptions = ImageGenerationOptions()
+    prompt: String,
+    count: Int,
+    options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
     Future {
       generateImages(prompt, count, options)
     }
 
   override def editImageAsync(
-      imagePath: Path,
-      prompt: String,
-      maskPath: Option[Path] = None,
-      options: ImageEditOptions = ImageEditOptions()
+    imagePath: Path,
+    prompt: String,
+    maskPath: Option[Path] = None,
+    options: ImageEditOptions = ImageEditOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
     Future {
       editImage(imagePath, prompt, maskPath, options)
@@ -193,16 +193,15 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
    *
    * @return Either an error or the current service status
    */
-  override def health(): Either[ImageGenerationError, ServiceStatus] =
-    scala.util
-      .Try {
-        val testUrl = s"https://api-inference.huggingface.co/models/${config.model}"
-        val headers = Map(
-          "Authorization" -> s"Bearer ${config.apiKey}",
-          "Content-Type"  -> "application/json"
-        )
-        requests.get(testUrl, headers = headers, readTimeout = 10000)
-      }
+  override def health(): Either[ImageGenerationError, ServiceStatus] = {
+    val testUrl = s"https://api-inference.huggingface.co/models/${config.model}"
+    val headers = Map(
+      "Authorization" -> s"Bearer ${config.apiKey}",
+      "Content-Type"  -> "application/json"
+    )
+
+    httpClient
+      .get(testUrl, headers, 10000)
       .toEither
       .left
       .map(e => ServiceError(s"Health check failed: ${e.getMessage}", 0))
@@ -211,6 +210,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
           ServiceStatus(HealthStatus.Healthy, "HuggingFace Inference API is responding")
         else ServiceStatus(HealthStatus.Degraded, s"Service returned status code: ${response.statusCode}")
       }
+  }
 
   /**
    * Serializes a `HuggingClientPayload` object into a JSON string.
@@ -245,13 +245,23 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
    * @return Either an ImageGenerationError if the request fails or a successful `requests.Response` object.
    */
   def makeHttpRequest(payload: String): Either[ImageGenerationError, requests.Response] = {
-    val result = Try(httpClient.post(payload)).toEither.left.map(exception => ServiceError(exception.getMessage, 500))
-    result.flatMap { response =>
-      if (response.statusCode == 200) {
-        Right(response)
-      } else {
-        Left(ServiceError(response.text(), 500))
+    val url = s"https://api-inference.huggingface.co/models/${config.model}"
+    val headers = Map(
+      "Authorization" -> s"Bearer ${config.apiKey}",
+      "Content-Type"  -> "application/json"
+    )
+
+    httpClient
+      .post(url, headers, payload, config.timeout)
+      .toEither
+      .left
+      .map(exception => ServiceError(exception.getMessage, 500))
+      .flatMap { response =>
+        if (response.statusCode == 200) {
+          Right(response)
+        } else {
+          Left(ServiceError(response.text(), 500))
+        }
       }
-    }
   }
 }

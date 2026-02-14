@@ -2,10 +2,20 @@ package org.llm4s.imagegeneration
 
 import java.time.Instant
 import java.nio.file.Path
-import org.llm4s.imagegeneration.provider.{ BedrockClient, FalAIClient, HttpClient, HuggingFaceClient, OpenAIImageClient, StabilityAIClient, StableDiffusionClient, VertexAIClient }
+import org.llm4s.imagegeneration.provider.{
+  BedrockClient,
+  FalAIClient,
+  HttpClient,
+  HuggingFaceClient,
+  OpenAIImageClient,
+  StabilityAIClient,
+  StableDiffusionClient,
+  VertexAIClient
+}
 
+import scala.annotation.unused
 import scala.util.Try
-import scala.concurrent.{Future, ExecutionContext}
+import scala.concurrent.{ Future, ExecutionContext }
 
 // ===== ERROR HANDLING =====
 
@@ -19,6 +29,7 @@ case class ServiceError(message: String, code: Int)    extends ImageGenerationEr
 case class ValidationError(message: String)            extends ImageGenerationError
 case class InvalidPromptError(message: String)         extends ImageGenerationError
 case class InsufficientResourcesError(message: String) extends ImageGenerationError
+case class UnsupportedOperation(message: String)       extends ImageGenerationError
 case class UnknownError(throwable: Throwable) extends ImageGenerationError {
   def message: String = throwable.getMessage
 }
@@ -88,10 +99,10 @@ case class ImageGenerationOptions(
   negativePrompt: Option[String] = None,
   samplerName: Option[String] = None, // Optional sampler name
   // New options for GPT Image models
-  quality: Option[String] = None,     // "standard" or "hd"
-  style: Option[String] = None,       // "vivid" or "natural"
+  quality: Option[String] = None,        // "standard" or "hd"
+  style: Option[String] = None,          // "vivid" or "natural"
   responseFormat: Option[String] = None, // "url" or "b64_json"
-  user: Option[String] = None         // End-user identifier for abuse monitoring
+  user: Option[String] = None            // End-user identifier for abuse monitoring
 )
 
 /** Options for image editing */
@@ -99,8 +110,8 @@ case class ImageEditOptions(
   size: Option[ImageSize] = None,
   n: Int = 1,
   responseFormat: Option[String] = None,
-  quality: Option[String] = None,     // "standard" or "hd" (OpenAI)
-  strength: Option[Double] = None,    // 0.0 to 1.0 (Stable Diffusion)
+  quality: Option[String] = None,  // "standard" or "hd" (OpenAI)
+  strength: Option[Double] = None, // 0.0 to 1.0 (Stable Diffusion)
   user: Option[String] = None
 )
 
@@ -110,6 +121,7 @@ object HealthStatus {
   case object Healthy   extends HealthStatus
   case object Degraded  extends HealthStatus
   case object Unhealthy extends HealthStatus
+  case object Unknown   extends HealthStatus
 }
 
 /** Represents the status of the image generation service */
@@ -172,8 +184,9 @@ object ImageGenerationProvider {
   case object FalAI           extends ImageGenerationProvider
 }
 
-sealed trait ImageGenerationConfig {
+trait ImageGenerationConfig {
   def provider: ImageGenerationProvider
+  def model: String
   def timeout: Int = 30000 // 30 seconds default
 }
 
@@ -183,10 +196,14 @@ case class StableDiffusionConfig(
   baseUrl: String = "http://localhost:7860",
   /** API key if required */
   apiKey: Option[String] = None,
+  /** Model name (informational for Stable Diffusion web UI) */
+  model: String = "stable-diffusion-v1-5",
   /** Request timeout in milliseconds */
   override val timeout: Int = 60000 // 60 seconds for image generation
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.StableDiffusion
+  override def toString: String =
+    s"StableDiffusionConfig(baseUrl=$baseUrl, apiKey=${apiKey.map(_ => "***")}, timeout=$timeout)"
 }
 
 /**
@@ -205,6 +222,7 @@ case class HuggingFaceConfig(
   override val timeout: Int = 120000 // 2 minutes for cloud generation
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.HuggingFace
+  override def toString: String         = s"HuggingFaceConfig(apiKey=***, model=$model, timeout=$timeout)"
 }
 
 /**
@@ -218,11 +236,14 @@ case class OpenAIConfig(
   /** OpenAI API key */
   apiKey: String,
   /** Model to use (dall-e-2 or dall-e-3) */
-  model: String = "gpt-image-1",
+  model: String = "dall-e-2",
+  /** Base URL for OpenAI API */
+  baseUrl: String = "https://api.openai.com/v1",
   /** Request timeout in milliseconds */
   override val timeout: Int = 30000 // 30 seconds for image generation
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.DALLE
+  override def toString: String         = s"OpenAIConfig(apiKey=***, model=$model, baseUrl=$baseUrl, timeout=$timeout)"
 }
 
 /**
@@ -247,6 +268,8 @@ case class VertexAIConfig(
   override val timeout: Int = 120000 // 2 minutes for image generation
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.VertexAI
+  override def toString: String =
+    s"VertexAIConfig(projectId=$projectId, location=$location, model=$model, accessToken=${accessToken.map(_ => "***")}, timeout=$timeout)"
 }
 
 /**
@@ -271,6 +294,8 @@ case class BedrockConfig(
   override val timeout: Int = 120000 // 2 minutes for image generation
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.Bedrock
+  override def toString: String = s"BedrockConfig(region=$region, model=$model, accessKeyId=${accessKeyId
+      .map(_ => "***")}, secretAccessKey=${secretAccessKey.map(_ => "***")}, timeout=$timeout)"
 }
 
 /**
@@ -289,6 +314,7 @@ case class StabilityAIConfig(
   override val timeout: Int = 120000 // 2 minutes for image generation
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.StabilityAI
+  override def toString: String         = s"StabilityAIConfig(apiKey=***, model=$model, timeout=$timeout)"
 }
 
 /**
@@ -307,7 +333,9 @@ case class FalAIConfig(
   override val timeout: Int = 120000 // 2 minutes for image generation
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.FalAI
+  override def toString: String         = s"FalAIConfig(apiKey=***, model=$model, timeout=$timeout)"
 }
+
 
 // ===== CLIENT INTERFACE =====
 
@@ -328,35 +356,40 @@ trait ImageGenerationClient {
 
   /** Edit an existing image based on a prompt and optional mask */
   def editImage(
-    imagePath: Path,
-    prompt: String,
-    maskPath: Option[Path] = None,
-    options: ImageEditOptions = ImageEditOptions()
-  ): Either[ImageGenerationError, Seq[GeneratedImage]]
+    @unused imagePath: Path,
+    @unused prompt: String,
+    @unused maskPath: Option[Path] = None,
+    @unused options: ImageEditOptions = ImageEditOptions()
+  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
+    Left(UnsupportedOperation("Image editing is not supported by this provider"))
 
   /** Generate an image asynchronously */
   def generateImageAsync(
-      prompt: String,
-      options: ImageGenerationOptions = ImageGenerationOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]]
+    @unused prompt: String,
+    @unused options: ImageGenerationOptions = ImageGenerationOptions()
+  )(implicit @unused ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+    Future.successful(Left(UnsupportedOperation("Async generation is not supported by this provider")))
 
   /** Generate multiple images asynchronously */
   def generateImagesAsync(
-      prompt: String,
-      count: Int,
-      options: ImageGenerationOptions = ImageGenerationOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]]
+    @unused prompt: String,
+    @unused count: Int,
+    @unused options: ImageGenerationOptions = ImageGenerationOptions()
+  )(implicit @unused ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    Future.successful(Left(UnsupportedOperation("Async generation is not supported by this provider")))
 
   /** Edit an existing image asynchronously */
   def editImageAsync(
-      imagePath: Path,
-      prompt: String,
-      maskPath: Option[Path] = None,
-      options: ImageEditOptions = ImageEditOptions()
-  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]]
+    @unused imagePath: Path,
+    @unused prompt: String,
+    @unused maskPath: Option[Path] = None,
+    @unused options: ImageEditOptions = ImageEditOptions()
+  )(implicit @unused ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    Future.successful(Left(UnsupportedOperation("Async editing is not supported by this provider")))
 
   /** Check the health/status of the image generation service */
-  def health(): Either[ImageGenerationError, ServiceStatus]
+  def health(): Either[ImageGenerationError, ServiceStatus] =
+    Right(ServiceStatus(HealthStatus.Unknown, "Health check not implemented"))
 }
 
 // ===== FACTORY OBJECT =====
@@ -364,16 +397,22 @@ trait ImageGenerationClient {
 object ImageGeneration {
 
   /** Factory method for getting a client with the right configuration */
-  def client(config: ImageGenerationConfig): ImageGenerationClient =
+  def client(
+    config: ImageGenerationConfig
+  ): ImageGenerationClient = {
+    // metrics and tracing are ignored in this PR 1 version as instrumentation is added in a later PR
     config match {
       case sdConfig: StableDiffusionConfig =>
-        new StableDiffusionClient(sdConfig)
+        val httpClient = HttpClient.create()
+        new StableDiffusionClient(sdConfig, httpClient)
       case hfConfig: HuggingFaceConfig =>
-        val httpClient = HttpClient.createHttpClient(hfConfig)
+        val httpClient = HttpClient.create()
         new HuggingFaceClient(hfConfig, httpClient)
       case openAIConfig: OpenAIConfig =>
-        new OpenAIImageClient(openAIConfig)
+        val httpClient = HttpClient.create()
+        new OpenAIImageClient(openAIConfig, httpClient)
       case vertexConfig: VertexAIConfig =>
+
         new VertexAIClient(vertexConfig)
       case bedrockConfig: BedrockConfig =>
         new BedrockClient(bedrockConfig)
@@ -382,6 +421,7 @@ object ImageGeneration {
       case falConfig: FalAIConfig =>
         new FalAIClient(falConfig)
     }
+  }
 
   /** Convenience method for quick image generation */
   def generateImage(
@@ -412,28 +452,28 @@ object ImageGeneration {
 
   /** Convenience method for generating an image asynchronously */
   def generateImageAsync(
-      prompt: String,
-      config: ImageGenerationConfig,
-      options: ImageGenerationOptions = ImageGenerationOptions()
+    prompt: String,
+    config: ImageGenerationConfig,
+    options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
     client(config).generateImageAsync(prompt, options)
 
   /** Convenience method for generating multiple images asynchronously */
   def generateImagesAsync(
-      prompt: String,
-      count: Int,
-      config: ImageGenerationConfig,
-      options: ImageGenerationOptions = ImageGenerationOptions()
+    prompt: String,
+    count: Int,
+    config: ImageGenerationConfig,
+    options: ImageGenerationOptions = ImageGenerationOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
     client(config).generateImagesAsync(prompt, count, options)
 
   /** Convenience method for editing an image asynchronously */
   def editImageAsync(
-      imagePath: Path,
-      prompt: String,
-      maskPath: Option[Path] = None,
-      config: ImageGenerationConfig,
-      options: ImageEditOptions = ImageEditOptions()
+    imagePath: Path,
+    prompt: String,
+    maskPath: Option[Path] = None,
+    config: ImageGenerationConfig,
+    options: ImageEditOptions = ImageEditOptions()
   )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
     client(config).editImageAsync(imagePath, prompt, maskPath, options)
 
