@@ -62,7 +62,7 @@
 | **State & Session Management** | 10/10 | 10/10 | None | ✅ Phase 1.1, 4.3 + Context Management |
 | **Error Handling & Validation** | 9/10 | 10/10 | Small | ✅ Phase 1.2 |
 | **Streaming** | 9/10 | 10/10 | Small | ✅ Phase 2.1 |
-| **Observability** | 10/10 | 10/10 | None | ✅ Langfuse, OpenTelemetry, Console, Prometheus |
+| **Observability** | 10/10 | 10/10 | Medium | ✅ Langfuse, OpenTelemetry, Console, Prometheus |
 | **Production Features** | 7/10 | 10/10 | Medium | Prometheus complete, workflow engines parked |
 | **Built-in Tools** | 9/10 | 10/10 | Small | ✅ Phase 3.2 |
 | **Memory System** | 9/10 | 8/10 | None | ✅ Phase 1.4 (llm4s advantage) |
