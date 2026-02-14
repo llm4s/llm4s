@@ -554,7 +554,7 @@ class OpenAIClient private (
           ToolCall(
             id = ftc.getId,
             name = ftc.getFunction.getName,
-            arguments = Try(ujson.read(ftc.getFunction.getArguments)).getOrElse(ujson.Obj())
+            arguments = ujson.read(ftc.getFunction.getArguments)
           )
       })
       .getOrElse(Seq.empty)
