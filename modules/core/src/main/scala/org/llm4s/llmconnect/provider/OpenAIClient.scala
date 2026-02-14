@@ -99,8 +99,10 @@ class OpenAIClient private (
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics("openai", model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "openai",
+    model = model,
+    operation = validateNotClosed.flatMap { _ =>
       // Transform options and messages for model-specific constraints
       for {
         transformed <- TransformationResult.transform(
@@ -120,19 +122,20 @@ class OpenAIClient private (
             logger.error(s"OpenAI completion failed for model $model", e)
             e.toLLMError
           }
-      } yield convertFromOpenAIFormat(completions, model)
-    }
-  }(
-    extractUsage = _.usage,
-    extractCost = _.estimatedCost
+      } yield convertFromOpenAIFormat(completions)
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics("openai", model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "openai",
+    model = model,
+    operation = validateNotClosed.flatMap { _ =>
       // Transform options and messages for model-specific constraints
       TransformationResult.transform(model, options, conversation.messages, dropUnsupported = true).flatMap {
         transformed =>
@@ -146,10 +149,9 @@ class OpenAIClient private (
             executeNativeStreaming(chatOptions, onChunk)
           }
       }
-    }
-  }(
-    extractUsage = _.usage,
-    extractCost = _.estimatedCost
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   override def close(): Unit =
@@ -197,7 +199,7 @@ class OpenAIClient private (
       }
 
     attempt.flatMap { completions =>
-      val completion = convertFromOpenAIFormat(completions, model)
+      val completion = convertFromOpenAIFormat(completions)
       emitCompletionAsChunks(completion, onChunk)
       Right(completion)
     }
@@ -506,7 +508,7 @@ class OpenAIClient private (
    * @param model Model identifier for cost estimation
    * @return llm4s Completion with all response data
    */
-  private def convertFromOpenAIFormat(completions: ChatCompletions, model: String): Completion = {
+  private def convertFromOpenAIFormat(completions: ChatCompletions): Completion = {
     val choice    = completions.getChoices.get(0)
     val message   = choice.getMessage
     val toolCalls = extractToolCalls(message)
@@ -523,7 +525,7 @@ class OpenAIClient private (
     )
 
     // Estimate cost using CostEstimator
-    val cost = usage.flatMap(u => CostEstimator.estimate(model, u))
+    val cost = usage.flatMap(u => CostEstimator.estimate(this.model, u))
 
     Completion(
       id = completions.getId,

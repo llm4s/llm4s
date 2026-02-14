@@ -26,11 +26,12 @@ class OllamaClient(
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics("ollama", config.model) {
-    validateNotClosed.flatMap(_ => connect(conversation, options))
-  }(
-    extractUsage = _.usage,
-    extractCost = _.estimatedCost
+  ): Result[Completion] = withMetrics(
+    provider = "ollama",
+    model = config.model,
+    operation = validateNotClosed.flatMap(_ => connect(conversation, options)),
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   private def connect(conversation: Conversation, options: CompletionOptions) = {
@@ -58,8 +59,10 @@ class OllamaClient(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics("ollama", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "ollama",
+    model = config.model,
+    operation = validateNotClosed.flatMap { _ =>
       val requestBody = createRequestBody(conversation, options, stream = true)
       val request = HttpRequest
         .newBuilder()
@@ -126,10 +129,9 @@ class OllamaClient(
           c.copy(model = config.model, estimatedCost = cost)
         }
       }
-    }
-  }(
-    extractUsage = _.usage,
-    extractCost = _.estimatedCost
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   private def createRequestBody(

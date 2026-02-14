@@ -29,8 +29,10 @@ class OpenRouterClient(
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics("openrouter", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "openrouter",
+    model = config.model,
+    operation = validateNotClosed.flatMap { _ =>
       // Convert conversation to OpenRouter format
       val requestBody = createRequestBody(conversation, options)
 
@@ -62,18 +64,19 @@ class OpenRouterClient(
           case status => Left(ServiceError(status, "openrouter", s"OpenRouter API error: ${response.body()}"))
         }
       }
-    }
-  }(
-    extractUsage = _.usage,
-    extractCost = _.estimatedCost
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics("openrouter", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "openrouter",
+    model = config.model,
+    operation = validateNotClosed.flatMap { _ =>
       val requestBody = createRequestBody(conversation, options)
       requestBody("stream") = true
 
@@ -138,10 +141,9 @@ class OpenRouterClient(
           c.copy(model = config.model, estimatedCost = cost)
         }
       )
-    }
-  }(
-    extractUsage = _.usage,
-    extractCost = _.estimatedCost
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   private def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
@@ -350,7 +352,7 @@ class OpenRouterClient(
 
     // Estimate cost using CostEstimator
     val modelId = json("model").str
-    val cost    = usage.flatMap(u => CostEstimator.estimate(modelId, u))
+    val cost    = usage.flatMap(u => CostEstimator.estimate(config.model, u))
 
     Completion(
       id = json("id").str,

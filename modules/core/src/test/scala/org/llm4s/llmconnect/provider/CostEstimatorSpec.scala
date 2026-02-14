@@ -84,11 +84,46 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
     cost shouldBe 0.002 +- 0.0001
   }
 
-  it should "estimate cost directly with thinking tokens" in {
-    val cost = CostEstimator.estimateDirect(0.00001, 0.00002, sampleUsageWithThinking)
+  it should "bill reasoning tokens separately without double counting" in {
 
-    // 100 * 0.00001 + (50 + 50) * 0.00002 = 0.003
-    cost shouldBe 0.003 +- 0.0001
+    val pricingWithReasoning = ModelPricing(
+      inputCostPerToken = Some(0.000001),
+      outputCostPerToken = Some(0.000002),
+      outputCostPerReasoningToken = Some(0.000004)
+    )
+
+    val metadataWithReasoning = ModelMetadata(
+      modelId = "reasoning-model",
+      provider = "test",
+      mode = ModelMode.Chat,
+      maxInputTokens = Some(4096),
+      maxOutputTokens = Some(4096),
+      inputCostPerToken = Some(0.000001),
+      outputCostPerToken = Some(0.000002),
+      capabilities = ModelCapabilities(),
+      pricing = pricingWithReasoning,
+      deprecationDate = None
+    )
+
+    val usage = TokenUsage(
+      promptTokens = 1000,
+      completionTokens = 500,
+      totalTokens = 1500,
+      thinkingTokens = Some(200)
+    )
+
+    val cost = CostEstimator.estimateFromMetadata(Some(metadataWithReasoning), usage)
+
+    cost shouldBe defined
+
+    // Expected:
+    // input = 1000 * 0.000001 = 0.001
+    // normalCompletion = 500 - 200 = 300
+    // normalOutput = 300 * 0.000002 = 0.0006
+    // reasoningOutput = 200 * 0.000004 = 0.0008
+    // total = 0.0024
+
+    cost.get shouldBe 0.0024 +- 1e-9
   }
 
   it should "preserve precision of micro-cost values" in {

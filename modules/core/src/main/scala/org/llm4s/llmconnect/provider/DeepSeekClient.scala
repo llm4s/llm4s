@@ -42,8 +42,10 @@ class DeepSeekClient(
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics("deepseek", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "deepseek",
+    model = config.model,
+    operation = validateNotClosed.flatMap { _ =>
       val requestBody = createRequestBody(conversation, options)
 
       logger.debug(s"Sending request to DeepSeek API at ${config.baseUrl}/chat/completions")
@@ -79,18 +81,19 @@ class DeepSeekClient(
           case status => Left(ServiceError(status, "deepseek", s"DeepSeek API error: ${response.body()}"))
         }
       }
-    }
-  }(
-    extractUsage = _.usage,
-    extractCost = _.estimatedCost
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics("deepseek", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "deepseek",
+    model = config.model,
+    operation = validateNotClosed.flatMap { _ =>
       val requestBody = createRequestBody(conversation, options)
       requestBody("stream") = true
 
@@ -151,10 +154,9 @@ class DeepSeekClient(
             )
         }
       }
-    }
-  }(
-    extractUsage = _.usage,
-    extractCost = _.estimatedCost
+    },
+    extractUsage = { (c: Completion) => c.usage },
+    extractCost = { (c: Completion) => c.estimatedCost }
   )
 
   private def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
@@ -288,7 +290,7 @@ class DeepSeekClient(
 
     // Estimate cost using CostEstimator
     val modelId = json("model").str
-    val cost    = usage.flatMap(u => CostEstimator.estimate(modelId, u))
+    val cost    = usage.flatMap(u => CostEstimator.estimate(config.model, u))
 
     Completion(
       id = json("id").str,

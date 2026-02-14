@@ -63,8 +63,10 @@ class GeminiClient(
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics("gemini", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "gemini",
+    model = config.model,
+    operation = validateNotClosed.flatMap { _ =>
       TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
         transformed =>
           val transformedConversation = conversation.copy(messages = transformed.messages)
@@ -97,18 +99,19 @@ class GeminiClient(
 
           attempt
       }
-    }
-  }(
-    extractUsage = _.usage,
-    extractCost = _.estimatedCost
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics("gemini", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "gemini",
+    model = config.model,
+    operation = validateNotClosed.flatMap { _ =>
       TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
         transformed =>
           val transformedConversation = conversation.copy(messages = transformed.messages)
@@ -170,10 +173,9 @@ class GeminiClient(
               )
           }
       }
-    }
-  }(
-    extractUsage = _.usage,
-    extractCost = _.estimatedCost
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   override def getContextWindow(): Int = config.contextWindow

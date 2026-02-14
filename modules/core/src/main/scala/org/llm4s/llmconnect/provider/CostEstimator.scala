@@ -53,10 +53,29 @@ object CostEstimator {
    */
   def estimateFromMetadata(metadata: Option[ModelMetadata], usage: TokenUsage): Option[Double] =
     metadata.flatMap { meta =>
-      // For models with thinking tokens, include them in the output token count
-      // as they are typically billed at the completion token rate
-      val effectiveOutputTokens = usage.totalOutputTokens
-      meta.pricing.estimateCost(usage.promptTokens, effectiveOutputTokens)
+      val pricing = meta.pricing
+
+      (usage.thinkingTokens, pricing.outputCostPerReasoningToken) match {
+        case (Some(thinkingTokens), Some(reasoningCostPerToken)) =>
+          for {
+            inputCostPerToken  <- pricing.inputCostPerToken
+            outputCostPerToken <- pricing.outputCostPerToken
+          } yield {
+            val effectiveThinkingTokens   = math.max(0, thinkingTokens)
+            val effectiveCompletionTokens = math.max(0, usage.completionTokens)
+            val normalCompletionTokens    = math.max(0, effectiveCompletionTokens - effectiveThinkingTokens)
+            val inputCost                 = usage.promptTokens * inputCostPerToken
+            val normalOutputCost          = normalCompletionTokens * outputCostPerToken
+            val reasoningOutputCost       = effectiveThinkingTokens * reasoningCostPerToken
+            inputCost + normalOutputCost + reasoningOutputCost
+          }
+
+        case _ =>
+          // For models with thinking tokens, include them in the output token count
+          // as they are typically billed at the completion token rate
+          val effectiveOutputTokens = usage.totalOutputTokens
+          pricing.estimateCost(usage.promptTokens, effectiveOutputTokens)
+      }
     }
 
   /**
@@ -70,7 +89,7 @@ object CostEstimator {
    * @param usage Token usage statistics
    * @return Estimated cost in USD
    */
-  def estimateDirect(inputCost: Double, outputCost: Double, usage: TokenUsage): Double = {
+  private[provider] def estimateDirect(inputCost: Double, outputCost: Double, usage: TokenUsage): Double = {
     val effectiveOutputTokens = usage.totalOutputTokens
     (usage.promptTokens * inputCost) + (effectiveOutputTokens * outputCost)
   }
