@@ -160,7 +160,7 @@ object DuckDuckGoSearchTool {
 
   private val SAFE_SEARCH   = "1"
   private val UNSAFE_SEARCH = "-1"
-  private def search(
+  private[search] def search(
     apiUrl: String,
     query: String,
     config: DuckDuckGoSearchConfig,
