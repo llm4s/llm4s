@@ -3,8 +3,10 @@ package org.llm4s.imagegeneration.provider
 import org.llm4s.imagegeneration._
 
 import java.time.Instant
+import java.nio.file.Path
 import java.util.Base64
 import scala.util.Try
+import scala.concurrent.{ Future, ExecutionContext }
 
 /**
  * HuggingFace Inference API client for image generation.
@@ -29,7 +31,7 @@ import scala.util.Try
  * }
  * }}}
  */
-class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) extends ImageGenerationClient {
+class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) extends ImageGenerationClient {
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
@@ -44,7 +46,9 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, GeneratedImage] =
-    generateImages(prompt, 1, options).map(_.head)
+    generateImages(prompt, 1, options).flatMap(
+      _.headOption.toRight(ValidationError("No image returned from HuggingFace"))
+    )
 
   /**
    * Validates the provided prompt to ensure it is not empty or blank.
@@ -78,7 +82,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
   def convertToBase64(response: requests.Response): Either[ImageGenerationError, String] = Try {
     val imageData = response.bytes
     Base64.getEncoder.encodeToString(imageData)
-  }.toEither.left.map(exception => ServiceError(exception.getMessage, 500))
+  }.toEither.left.map(exception => ServiceError(exception.getMessage, 0))
 
   /**
    * Generates multiple images based on the given text prompt using predefined options and base64-encoded image data.
@@ -103,7 +107,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
 
     val images = (1 to count).map { i =>
       GeneratedImage(
-        data = base64Data,
+        data = Some(base64Data),
         format = options.format,
         size = options.size,
         prompt = prompt,
@@ -113,7 +117,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
     }
     (1 to count).foreach(i => logger.debug("Generated image: {}", i))
     images
-  }.toEither.left.map(exception => ServiceError(exception.getMessage, 500))
+  }.toEither.left.map(exception => ServiceError(exception.getMessage, 0))
 
   /**
    * Generate multiple images from a text prompt using HuggingFace Inference API.
@@ -147,20 +151,59 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
   }
 
   /**
+   * Edit an existing image based on a prompt and optional mask.
+   *
+   * Not currently supported for HuggingFace provider.
+   */
+  override def editImage(
+    imagePath: Path,
+    prompt: String,
+    maskPath: Option[Path] = None,
+    options: ImageEditOptions = ImageEditOptions()
+  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
+    Left(ValidationError("Image editing is not yet supported for HuggingFace provider"))
+
+  override def generateImageAsync(
+    prompt: String,
+    options: ImageGenerationOptions = ImageGenerationOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+    Future {
+      generateImage(prompt, options)
+    }
+
+  override def generateImagesAsync(
+    prompt: String,
+    count: Int,
+    options: ImageGenerationOptions = ImageGenerationOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    Future {
+      generateImages(prompt, count, options)
+    }
+
+  override def editImageAsync(
+    imagePath: Path,
+    prompt: String,
+    maskPath: Option[Path] = None,
+    options: ImageEditOptions = ImageEditOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    Future {
+      editImage(imagePath, prompt, maskPath, options)
+    }
+
+  /**
    * Check the health status of the HuggingFace Inference API.
    *
    * @return Either an error or the current service status
    */
-  override def health(): Either[ImageGenerationError, ServiceStatus] =
-    scala.util
-      .Try {
-        val testUrl = s"https://api-inference.huggingface.co/models/${config.model}"
-        val headers = Map(
-          "Authorization" -> s"Bearer ${config.apiKey}",
-          "Content-Type"  -> "application/json"
-        )
-        requests.get(testUrl, headers = headers, readTimeout = 10000)
-      }
+  override def health(): Either[ImageGenerationError, ServiceStatus] = {
+    val testUrl = s"https://api-inference.huggingface.co/models/${config.model}"
+    val headers = Map(
+      "Authorization" -> s"Bearer ${config.apiKey}",
+      "Content-Type"  -> "application/json"
+    )
+
+    httpClient
+      .get(testUrl, headers, 10000)
       .toEither
       .left
       .map(e => ServiceError(s"Health check failed: ${e.getMessage}", 0))
@@ -169,6 +212,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
           ServiceStatus(HealthStatus.Healthy, "HuggingFace Inference API is responding")
         else ServiceStatus(HealthStatus.Degraded, s"Service returned status code: ${response.statusCode}")
       }
+  }
 
   /**
    * Serializes a `HuggingClientPayload` object into a JSON string.
@@ -194,7 +238,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
     val jsonStr = createJsonPayload(payload)
     logger.debug("Payload: {} - Json: {}", payload, jsonStr)
     jsonStr
-  }.toEither.left.map(exception => ServiceError(exception.getMessage, 500))
+  }.toEither.left.map(exception => ServiceError(exception.getMessage, 0))
 
   /**
    * Makes an HTTP POST request to the HuggingFace Inference API to send a payload and retrieve a response.
@@ -203,13 +247,23 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
    * @return Either an ImageGenerationError if the request fails or a successful `requests.Response` object.
    */
   def makeHttpRequest(payload: String): Either[ImageGenerationError, requests.Response] = {
-    val result = Try(httpClient.post(payload)).toEither.left.map(exception => ServiceError(exception.getMessage, 500))
-    result.flatMap { response =>
-      if (response.statusCode == 200) {
-        Right(response)
-      } else {
-        Left(ServiceError(response.text(), 500))
+    val url = s"https://api-inference.huggingface.co/models/${config.model}"
+    val headers = Map(
+      "Authorization" -> s"Bearer ${config.apiKey}",
+      "Content-Type"  -> "application/json"
+    )
+
+    httpClient
+      .post(url, headers, payload, config.timeout)
+      .toEither
+      .left
+      .map(exception => ServiceError(exception.getMessage, 0))
+      .flatMap { response =>
+        if (response.statusCode == 200) {
+          Right(response)
+        } else {
+          Left(ServiceError(response.text(), response.statusCode))
+        }
       }
-    }
   }
 }
