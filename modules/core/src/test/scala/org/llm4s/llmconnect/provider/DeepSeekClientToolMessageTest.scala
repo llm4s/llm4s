@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.llmconnect.model.{
   Conversation,
   CompletionOptions,
@@ -12,48 +13,22 @@ import org.llm4s.llmconnect.model.{
 }
 
 /**
- * Test helper for building DeepSeek request bodies without reflection.
- * This replaces reflection-based introspection with a pure function approach.
+ * Test helper for building DeepSeek request bodies.
+ * Delegates to the real production implementation to ensure tests validate actual behavior.
  */
 private[provider] object DeepSeekRequestBodyTestHelper {
-  def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
-    val messages = conversation.messages.map {
-      case UserMessage(content) =>
-        ujson.Obj("role" -> "user", "content" -> content)
-      case org.llm4s.llmconnect.model.SystemMessage(content) =>
-        ujson.Obj("role" -> "system", "content" -> content)
-      case AssistantMessage(content, toolCalls) =>
-        val base = ujson.Obj("role" -> "assistant")
-        content.filter(_.nonEmpty).foreach(c => base("content") = c)
-        if (toolCalls.nonEmpty) {
-          base("tool_calls") = ujson.Arr.from(toolCalls.map { tc =>
-            ujson.Obj(
-              "id"   -> tc.id,
-              "type" -> "function",
-              "function" -> ujson.Obj(
-                "name"      -> tc.name,
-                "arguments" -> tc.arguments.render()
-              )
-            )
-          })
-        }
-        base
-      case ToolMessage(content, toolCallId) =>
-        ujson.Obj(
-          "role"         -> "tool",
-          "tool_call_id" -> toolCallId,
-          "content"      -> content
-        )
-    }
+  private val testConfig = DeepSeekConfig(
+    apiKey = "test-key",
+    model = "deepseek-chat",
+    baseUrl = "https://api.deepseek.com/beta",
+    contextWindow = 4000,
+    reserveCompletion = 512
+  )
 
-    val base = ujson.Obj(
-      "model"       -> "deepseek-chat",
-      "messages"    -> ujson.Arr.from(messages),
-      "temperature" -> options.temperature
-    )
-    options.maxTokens.foreach(t => base("max_tokens") = t)
-    base
-  }
+  private val client = new DeepSeekClient(testConfig)
+
+  def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj =
+    client.createRequestBody(conversation, options)
 }
 
 /**

@@ -6,35 +6,25 @@ import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.metrics.MockMetricsCollector
 
 /**
- * Test helper for building Ollama request bodies without reflection.
- * This replaces reflection-based introspection with a pure function approach.
+ * Test helper for building Ollama request bodies.
+ * Delegates to the real production implementation to ensure tests validate actual behavior.
  */
 private[provider] object OllamaRequestBodyTestHelper {
+  private val testConfig = OllamaConfig(
+    model = "llama3.1",
+    baseUrl = "http://localhost:11434",
+    contextWindow = 4096,
+    reserveCompletion = 512
+  )
+
+  private val client = new OllamaClient(testConfig)
+
   def createRequestBody(
     conversation: Conversation,
     options: CompletionOptions,
     stream: Boolean
-  ): ujson.Obj = {
-    val msgs = ujson.Arr.from(conversation.messages.collect {
-      case SystemMessage(content) => ujson.Obj("role" -> "system", "content" -> content)
-      case UserMessage(content)   => ujson.Obj("role" -> "user", "content" -> content)
-      case am: AssistantMessage   => ujson.Obj("role" -> "assistant", "content" -> am.content)
-      // Tool messages are not supported by Ollama chat API; drop them
-    })
-
-    val opts = ujson.Obj(
-      "temperature" -> options.temperature,
-      "top_p"       -> options.topP
-    )
-    options.maxTokens.foreach(t => opts("num_predict") = t)
-
-    ujson.Obj(
-      "model"    -> "llama3.1",
-      "messages" -> msgs,
-      "stream"   -> stream,
-      "options"  -> opts
-    )
-  }
+  ): ujson.Obj =
+    client.createRequestBody(conversation, options, stream)
 }
 
 class OllamaClientSpec extends AnyFunSuite {

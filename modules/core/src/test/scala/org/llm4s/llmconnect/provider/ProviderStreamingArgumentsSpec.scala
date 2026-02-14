@@ -54,7 +54,7 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
     finally server.stop(0)
   }
 
-  "OpenRouterClient" should "normalize empty and invalid tool-call arguments" in {
+  "OpenRouterClient" should "preserve invalid tool-call arguments as raw string" in {
     val payload = ssePayload(
       Seq(
         toolCallEvent("call-1", ""),
@@ -82,11 +82,11 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
       )
 
       result.isRight shouldBe true
-      captured.toList shouldBe List(ujson.Obj(), ujson.Obj())
+      captured.toList shouldBe List(ujson.Obj(), ujson.Str("{not json"))
     }
   }
 
-  "ZaiClient" should "normalize empty and invalid tool-call arguments" in {
+  "ZaiClient" should "preserve invalid tool-call arguments as raw string" in {
     val payload = ssePayload(
       Seq(
         toolCallEvent("call-1", ""),
@@ -113,7 +113,7 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
       )
 
       result.isRight shouldBe true
-      captured.toList shouldBe List(ujson.Obj(), ujson.Obj())
+      captured.toList shouldBe List(ujson.Obj(), ujson.Str("{not json"))
     }
   }
 

@@ -222,7 +222,7 @@ class DeepSeekClient(
   private def parseStreamingArguments(raw: String): ujson.Value =
     if (raw.isEmpty) ujson.Obj() else scala.util.Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
 
-  private def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
+  private[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val messages = conversation.messages.map {
       case UserMessage(content) =>
         ujson.Obj("role" -> "user", "content" -> content)
