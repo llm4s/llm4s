@@ -26,14 +26,12 @@ class OllamaClient(
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics("ollama", config.model) {
-    validateNotClosed.flatMap(_ => connect(conversation, options))
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
+  ): Result[Completion] = withMetrics(
+    provider = "ollama",
+    model = config.model,
+    operation = validateNotClosed.flatMap(_ => connect(conversation, options)),
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   private def connect(conversation: Conversation, options: CompletionOptions) = {
@@ -61,8 +59,10 @@ class OllamaClient(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics("ollama", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "ollama",
+    model = config.model,
+    operation = validateNotClosed.flatMap { _ =>
       val requestBody = createRequestBody(conversation, options, stream = true)
       val request = HttpRequest
         .newBuilder()
@@ -124,15 +124,14 @@ class OllamaClient(
         }.toEither
         processEither.left.foreach(_ => ())
 
-        accumulator.toCompletion
+        accumulator.toCompletion.map { c =>
+          val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+          c.copy(model = config.model, estimatedCost = cost)
+        }
       }
-    }
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens.toInt, usage.completionTokens.toInt)
-      }
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   private def createRequestBody(
@@ -175,6 +174,9 @@ class OllamaClient(
       comp   <- json.obj.get("eval_count").flatMap(_.numOpt).map(_.toInt)
     } yield TokenUsage(prompt, comp, prompt + comp)).orElse(None)
 
+    // Estimate cost using CostEstimator
+    val cost = usage.flatMap(u => CostEstimator.estimate(config.model, u))
+
     Completion(
       id = id,
       created = created,
@@ -182,7 +184,8 @@ class OllamaClient(
       toolCalls = List.empty,
       usage = usage,
       model = config.model,
-      message = AssistantMessage(content)
+      message = AssistantMessage(content),
+      estimatedCost = cost
     )
   }
 

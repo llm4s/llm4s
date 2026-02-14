@@ -138,7 +138,24 @@ To ensure code quality, we use a Git pre-commit hook that automatically checks c
 
 - JDK 21+
 - SBT
-- Docker (for containerized workspace)
+- Docker
+
+#### Verify Java installation
+
+```bash
+java -version
+```
+
+#### Windows
+
+Set `JAVA_HOME` and update your `PATH`.
+
+#### macOS (Homebrew)
+
+```bash
+brew install openjdk@21
+echo 'export PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH"' >> ~/.zshrc
+```
 
 ### Building the Project
 
@@ -151,6 +168,7 @@ sbt +compile
 # Build and test all versions
 sbt buildAll
 ```
+
 
 ### Setup your LLM Environment
 

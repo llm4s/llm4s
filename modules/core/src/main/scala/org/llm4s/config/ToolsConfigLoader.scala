@@ -35,6 +35,106 @@ final case class DuckDuckGoSearchToolConfig(
 )
 
 /**
+ * Configuration data for Exa Search tool.
+ *
+ * @param apiKey The Exa API key
+ * @param apiUrl Base URL (default: https://api.exa.ai)
+ * @param numResults Number of results to return
+ * @param searchType Search type (auto, neural, fast, deep)
+ * @param maxCharacters Maximum characters for text content
+ */
+final case class ExaSearchToolConfig(
+  apiKey: String,
+  apiUrl: String,
+  numResults: Int,
+  searchType: String,
+  maxCharacters: Int,
+)
+
+object ExaSearchToolConfig {
+  // Exa API-specific validation constants
+  private val ValidSearchTypes = Set("auto", "neural", "fast", "deep")
+
+  /**
+   * Validate API key is non-empty.
+   */
+  def validateApiKey(key: String): Result[String] = {
+    val trimmed = key.trim
+    if (trimmed.nonEmpty) Right(trimmed)
+    else Left(ConfigurationError("apiKey is required", List("apiKey")))
+  }
+
+  /**
+   * Validate URL uses HTTPS protocol.
+   */
+  def validateHttps(url: String): Result[String] = {
+    val trimmed = url.trim
+    if (trimmed.startsWith("https://"))
+      Right(trimmed)
+    else
+      Left(ConfigurationError(s"URL must use HTTPS protocol, got: $trimmed", List("apiUrl")))
+  }
+
+  /**
+   * Validate number of search results is positive.
+   */
+  def validateNumResults(n: Int): Result[Int] =
+    if (n > 0)
+      Right(n)
+    else
+      Left(
+        ConfigurationError(
+          s"numResults must be greater than 0, got: $n",
+          List("numResults")
+        )
+      )
+
+  /**
+   * Validate maximum characters is positive.
+   */
+  def validateMaxCharacters(n: Int): Result[Int] =
+    if (n > 0)
+      Right(n)
+    else
+      Left(ConfigurationError(s"maxCharacters must be greater than 0, got: $n", List("maxCharacters")))
+
+  /**
+   * Validate search type is one of Exa's allowed values.
+   */
+  def validateSearchType(s: String): Result[String] = {
+    val normalized = s.trim.toLowerCase
+    if (ValidSearchTypes.contains(normalized))
+      Right(normalized)
+    else
+      Left(
+        ConfigurationError(
+          s"searchType must be one of ${ValidSearchTypes.mkString(", ")} (Exa API types), got: $s",
+          List("searchType")
+        )
+      )
+  }
+
+  /**
+   * Validate entire ExaSearchToolConfig.
+   * Used by both config loading (fail-fast) and tool creation (defensive).
+   */
+  def validated(config: ExaSearchToolConfig): Result[ExaSearchToolConfig] =
+    for {
+      validatedApiKey        <- validateApiKey(config.apiKey)
+      validatedApiUrl        <- validateHttps(config.apiUrl)
+      validatedNumResults    <- validateNumResults(config.numResults)
+      validatedSearchType    <- validateSearchType(config.searchType)
+      validatedMaxCharacters <- validateMaxCharacters(config.maxCharacters)
+    } yield config.copy(
+      apiKey = validatedApiKey,
+      apiUrl = validatedApiUrl,
+      numResults = validatedNumResults,
+      searchType = validatedSearchType,
+      maxCharacters = validatedMaxCharacters
+    )
+}
+
+/**
  * Internal PureConfig-based loader for tools configuration.
  *
  * This loader follows the "config at the edge" pattern used throughout llm4s:
@@ -59,38 +159,22 @@ private[config] object ToolsConfigLoader {
   implicit private val duckDuckGoSectionReader: PureConfigReader[DuckDuckGoSearchToolConfig] =
     PureConfigReader.forProduct1("apiUrl")(DuckDuckGoSearchToolConfig.apply)
 
+  implicit private val exaSearchSectionReader: PureConfigReader[ExaSearchToolConfig] =
+    PureConfigReader.forProduct5(
+      "apiKey",
+      "apiUrl",
+      "numResults",
+      "searchType",
+      "maxCharacters"
+    )(ExaSearchToolConfig.apply)
+
   // ---- Public API used by Llm4sConfig ----
 
   /**
-   * Load Brave Search tool configuration from the given configuration source.
+   * Load Brave Search tool configuration from `llm4s.tools.brave`.
    *
-   * This method reads configuration from application.conf and returns a BraveSearchToolConfig
-   * that should be passed to BraveSearchTool.create().
-   *
-   * Loads the complete BraveSearchToolConfig configuration including:
-   * - apiKey: The Brave Search API key
-   * - apiUrl: The base URL for the Brave Search API
-   * - count: The number of search results to return
-   * - safeSearch: The safe search level setting
-   *
-   * Configuration is expected at path: llm4s.tools.brave
-   *
-   * Example application.conf:
-   * {{{
-   * llm4s {
-   *   tools {
-   *     brave {
-   *       apiKey = "your-api-key"
-   *       apiUrl = "https://api.search.brave.com/res/v1"
-   *       count = 10
-   *       safeSearch = "moderate"
-   *     }
-   *   }
-   * }
-   * }}}
-   *
-   * @param source The configuration source to load from (typically ConfigSource.default)
-   * @return Right(BraveSearchToolConfig) if configuration is valid, Left(ConfigurationError) otherwise
+   * @param source The configuration source
+   * @return BraveSearchToolConfig or error
    */
   def loadBraveSearchTool(source: ConfigSource): Result[BraveSearchToolConfig] =
     source.at("llm4s.tools.brave").load[BraveSearchToolConfig].left.map { failures =>
@@ -99,30 +183,32 @@ private[config] object ToolsConfigLoader {
     }
 
   /**
-   * Load DuckDuckGo Search tool configuration from the given configuration source.
+   * Load DuckDuckGo Search tool configuration from `llm4s.tools.duckduckgo`.
    *
-   * This method reads configuration from application.conf and returns a DuckDuckGoSearchToolConfig
-   * that should be passed to DuckDuckGoSearchTool.create().
-   *
-   * Configuration is expected at path: llm4s.tools.duckduckgo
-   *
-   * Example application.conf:
-   * {{{
-   * llm4s {
-   *   tools {
-   *     duckduckgo {
-   *       apiUrl = "https://api.duckduckgo.com"
-   *     }
-   *   }
-   * }
-   * }}}
-   *
-   * @param source The configuration source to load from (typically ConfigSource.default)
-   * @return Right(DuckDuckGoSearchToolConfig) if configuration is valid, Left(ConfigurationError) otherwise
+   * @param source The configuration source
+   * @return DuckDuckGoSearchToolConfig or error
    */
   def loadDuckDuckGoSearchTool(source: ConfigSource): Result[DuckDuckGoSearchToolConfig] =
     source.at("llm4s.tools.duckduckgo").load[DuckDuckGoSearchToolConfig].left.map { failures =>
       val msg = failures.toList.map(_.description).mkString("; ")
       ConfigurationError(s"Failed to load llm4s tools config via PureConfig: $msg")
     }
+
+  /**
+   * Load Exa Search tool configuration from `llm4s.tools.exa`.
+   * Validates config-specific fields: numResults, maxCharacters, searchType.
+   *
+   * @param source The configuration source
+   * @return ExaSearchToolConfig or error
+   */
+  def loadExaSearchTool(source: ConfigSource): Result[ExaSearchToolConfig] =
+    source
+      .at("llm4s.tools.exa")
+      .load[ExaSearchToolConfig]
+      .left
+      .map { failures =>
+        val msg = failures.toList.map(_.description).mkString("; ")
+        ConfigurationError(s"Failed to load Exa Search tool config: $msg")
+      }
+      .flatMap(ExaSearchToolConfig.validated)
 }

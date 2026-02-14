@@ -85,16 +85,14 @@ object LLMCompressor {
   private def compressDigestMessages(
     digestMessages: Seq[Message],
     llmClient: LLMClient
-  ): Result[Seq[Message]] = {
-    // Compress each digest message individually to maintain structure
-    val compressionResults = digestMessages.map(message => compressSingleDigest(message, llmClient))
-
-    // Check if all compressions succeeded
-    compressionResults.find(_.isLeft) match {
-      case Some(error) => error.asInstanceOf[Result[Seq[Message]]]
-      case None        => Right(compressionResults.map(_.toOption.get))
-    }
-  }
+  ): Result[Seq[Message]] =
+    digestMessages
+      .map(compressSingleDigest(_, llmClient))
+      .foldLeft[Result[Seq[Message]]](Right(Seq.empty)) {
+        case (Right(acc), Right(msg)) => Right(acc :+ msg)
+        case (Left(err), _)           => Left(err)
+        case (_, Left(err))           => Left(err)
+      }
 
   private def compressSingleDigest(
     digestMessage: Message,

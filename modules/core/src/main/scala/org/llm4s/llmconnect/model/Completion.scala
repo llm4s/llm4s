@@ -13,6 +13,8 @@ package org.llm4s.llmconnect.model
  * @param usage Optional token usage statistics for the completion.
  * @param thinking Optional thinking/reasoning content from extended thinking models.
  *                 Present when using reasoning modes with Claude or o1/o3 models.
+ * @param estimatedCost Optional estimated cost of this completion in USD.
+ *                      Computed from token usage and model pricing when available.
  */
 case class Completion(
   id: String,
@@ -22,7 +24,8 @@ case class Completion(
   message: AssistantMessage,
   toolCalls: List[ToolCall] = List.empty,
   usage: Option[TokenUsage] = None,
-  thinking: Option[String] = None
+  thinking: Option[String] = None,
+  estimatedCost: Option[Double] = None
 ) {
 
   /**

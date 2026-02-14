@@ -4,11 +4,16 @@ import org.llm4s.imageprocessing._
 import org.llm4s.imageprocessing.config.AnthropicVisionConfig
 import org.llm4s.imageprocessing.provider.LocalImageProcessor
 import org.llm4s.error.LLMError
+import ujson.read
 
+import java.net.URI
+import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
+import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Paths }
-import java.time.Instant
+import java.time.{ Duration, Instant }
 import java.util.Base64
 import scala.util.Try
+import scala.util.control.NonFatal
 
 /**
  * Anthropic Claude Vision client for AI-powered image analysis.
@@ -19,6 +24,11 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
   private val localProcessor = new LocalImageProcessor()
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
+
+  private val httpClient = HttpClient
+    .newBuilder()
+    .connectTimeout(Duration.ofSeconds(config.connectTimeoutSeconds))
+    .build()
 
   /**
    * Analyzes an image using Anthropic's Claude Vision API.
@@ -174,11 +184,7 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
     prompt: String,
     mediaType: MediaType
   ): Try[String] =
-    Try {
-      import sttp.client4._
-      import ujson._
-      import scala.concurrent.duration._
-
+    try {
       // Use type-safe serialization
       val requestBody = AnthropicRequestBody.serialize(
         model = config.model,
@@ -188,61 +194,55 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
         mediaType = mediaType
       )
 
-      val backend = DefaultSyncBackend(
-        options = BackendOptions.Default.connectionTimeout(config.connectTimeoutSeconds.seconds)
-      )
-
-      val request = basicRequest
-        .post(uri"${config.baseUrl}/v1/messages")
+      val httpRequest = HttpRequest
+        .newBuilder()
+        .uri(URI.create(s"${config.baseUrl}/v1/messages"))
         .header("Content-Type", "application/json")
         .header("x-api-key", config.apiKey)
         .header("anthropic-version", "2023-06-01")
-        .body(requestBody)
-        .readTimeout(config.requestTimeoutSeconds.seconds)
+        .timeout(Duration.ofSeconds(config.requestTimeoutSeconds))
+        .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+        .build()
 
-      val response = request.send(backend)
-      backend.close()
+      val response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
 
-      response.code.code match {
+      response.statusCode() match {
         case 200 =>
-          response.body match {
-            case Right(responseBody) =>
-              extractContentFromResponse(responseBody)
-            case Left(errorBody) =>
-              throw new RuntimeException(s"Unexpected error parsing successful response: $errorBody")
-          }
+          scala.util.Success(extractContentFromResponse(response.body()))
         case statusCode =>
-          val errorMessage = response.body match {
-            case Left(errorBody) =>
-              Try(read(errorBody)).toOption
-                .flatMap(js => js.obj.get("error"))
-                .map { err =>
-                  val message   = err.obj.get("message").flatMap(_.strOpt)
-                  val errorType = err.obj.get("type").flatMap(_.strOpt)
-                  (message, errorType) match {
-                    case (Some(msg), Some(typ)) => s"$typ: $msg"
-                    case (Some(msg), None)      => msg
-                    case _                      => org.llm4s.util.Redaction.truncateForLog(errorBody)
-                  }
+          val responseBody = response.body()
+          val errorMessage =
+            Try(read(responseBody)).toOption
+              .flatMap(js => js.obj.get("error"))
+              .map { err =>
+                val message   = err.obj.get("message").flatMap(_.strOpt)
+                val errorType = err.obj.get("type").flatMap(_.strOpt)
+                (message, errorType) match {
+                  case (Some(msg), Some(typ)) => s"$typ: $msg"
+                  case (Some(msg), None)      => msg
+                  case _                      => org.llm4s.util.Redaction.truncateForLog(responseBody)
                 }
-                .map(d => s"Status $statusCode: $d")
-                .getOrElse(s"Status $statusCode: ${org.llm4s.util.Redaction.truncateForLog(errorBody)}")
-            case Right(body) => s"Status $statusCode: ${org.llm4s.util.Redaction.truncateForLog(body)}"
-          }
+              }
+              .map(d => s"Status $statusCode: $d")
+              .getOrElse(s"Status $statusCode: ${org.llm4s.util.Redaction.truncateForLog(responseBody)}")
 
           // Log a truncated version to avoid leaking very large or sensitive payloads
           logger.error(
             "[AnthropicVisionClient] HTTP error {}: {}",
             statusCode.asInstanceOf[AnyRef],
-            org.llm4s.util.Redaction.truncateForLog(response.body.fold(identity, identity))
+            org.llm4s.util.Redaction.truncateForLog(responseBody)
           )
-          throw new RuntimeException(s"Anthropic API call failed - $errorMessage")
+          scala.util.Failure(new RuntimeException(s"Anthropic API call failed - $errorMessage"))
       }
+    } catch {
+      case e: InterruptedException =>
+        Thread.currentThread().interrupt()
+        scala.util.Failure(e)
+      case NonFatal(e) =>
+        scala.util.Failure(e)
     }
 
-  private def extractContentFromResponse(jsonResponse: String): String = {
-    import ujson._
-
+  private def extractContentFromResponse(jsonResponse: String): String =
     Try(read(jsonResponse)).toOption
       .flatMap { json =>
         json("content").arr.headOption
@@ -250,7 +250,6 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
           .map(_.str)
       }
       .getOrElse("Could not parse response from Anthropic Vision API")
-  }
 
   private def parseVisionResponse(response: String, metadata: ImageMetadata): ImageAnalysisResult = {
     // This is a simplified parser - in practice, you'd want more sophisticated parsing

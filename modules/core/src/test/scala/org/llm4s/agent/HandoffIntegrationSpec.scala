@@ -108,8 +108,7 @@ class HandoffIntegrationSpec extends AnyFlatSpec with Matchers {
       "What is the derivative of x^2?",
       ToolRegistry.empty,
       handoffs = Seq(handoff),
-      maxSteps = Some(10),
-      debug = false
+      maxSteps = Some(10)
     )
 
     result.isRight shouldBe true

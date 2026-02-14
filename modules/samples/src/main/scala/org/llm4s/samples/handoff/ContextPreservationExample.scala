@@ -1,6 +1,6 @@
 package org.llm4s.samples.handoff
 
-import org.llm4s.agent.{ Agent, Handoff }
+import org.llm4s.agent.{ Agent, AgentContext, Handoff }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
@@ -31,9 +31,7 @@ object ContextPreservationExample extends App {
 
     state1 <- generalAgent.run(
       query = "I'm working on a quantum computing project",
-      tools = ToolRegistry.empty,
-      handoffs = Seq.empty,
-      debug = false
+      tools = ToolRegistry.empty
     )
 
     _ = logger.info("Response: {}", state1.conversation.messages.last.content)
@@ -42,8 +40,7 @@ object ContextPreservationExample extends App {
 
     state2 <- generalAgent.continueConversation(
       previousState = state1,
-      newUserMessage = "Can you explain quantum entanglement in detail?",
-      debug = false
+      newUserMessage = "Can you explain quantum entanglement in detail?"
     )
 
     // For this example, we'll manually demonstrate handoff with context
@@ -63,8 +60,7 @@ object ContextPreservationExample extends App {
     finalState <- specialistAgent.run(
       handoffState,
       maxSteps = Some(10),
-      traceLogPath = None,
-      debug = false
+      context = AgentContext.Default
     )
 
   } yield (state2, finalState)

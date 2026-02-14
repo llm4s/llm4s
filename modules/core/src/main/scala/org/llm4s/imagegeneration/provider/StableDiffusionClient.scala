@@ -3,7 +3,10 @@ package org.llm4s.imagegeneration.provider
 import org.llm4s.imagegeneration._
 import org.slf4j.LoggerFactory
 import upickle.default._
+import java.nio.file.{ Files, Path }
+import java.util.Base64
 import scala.util.Try
+import scala.concurrent.{ Future, ExecutionContext, blocking }
 
 /**
  * Represents the JSON payload for the Stable Diffusion WebUI API's text-to-image endpoint.
@@ -24,6 +27,26 @@ case class StableDiffusionPayload(
 
 object StableDiffusionPayload {
   implicit val writer: Writer[StableDiffusionPayload] = macroW
+}
+
+case class StableDiffusionImg2ImgPayload(
+  init_images: Seq[String],
+  mask: Option[String],
+  prompt: String,
+  negative_prompt: String,
+  width: Int,
+  height: Int,
+  steps: Int,
+  cfg_scale: Double,
+  denoising_strength: Double,
+  batch_size: Int,
+  n_iter: Int,
+  seed: Long,
+  sampler_name: String = "Euler a"
+)
+
+object StableDiffusionImg2ImgPayload {
+  implicit val writer: Writer[StableDiffusionImg2ImgPayload] = macroW
 }
 
 /**
@@ -55,7 +78,7 @@ object StableDiffusionPayload {
  * }
  * }}}
  */
-class StableDiffusionClient(config: StableDiffusionConfig) extends ImageGenerationClient {
+class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClient) extends ImageGenerationClient {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -71,24 +94,129 @@ class StableDiffusionClient(config: StableDiffusionConfig) extends ImageGenerati
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, Seq[GeneratedImage]] =
     for {
-      _       <- Right(logger.info(s"Generating $count image(s) with prompt: $prompt"))
-      payload <- Right(buildPayload(prompt, count, options))
-      response <- Try(makeHttpRequest(payload)).toEither.left
-        .map(e => UnknownError(e))
-      result <- parseResponse(response, prompt, options)
+      _        <- Right(logger.info(s"Generating $count image(s) with prompt: $prompt"))
+      payload  <- Right(buildPayload(prompt, count, options))
+      response <- makeHttpRequest(payload)
+      result   <- parseResponse(response, prompt, options)
     } yield result
 
-  override def health(): Either[ImageGenerationError, ServiceStatus] = Try {
-    val url      = s"${config.baseUrl}/sdapi/v1/options"
-    val response = requests.get(url, readTimeout = 5000, connectTimeout = 5000)
-    response
-  }.toEither.left
-    .map(e => ServiceError(s"Health check failed: ${e.getMessage}", 0))
-    .map { response =>
-      if (response.statusCode == 200)
-        ServiceStatus(HealthStatus.Healthy, "Stable Diffusion service is responding")
-      else ServiceStatus(HealthStatus.Degraded, s"Service returned status code: ${response.statusCode}")
+  override def generateImageAsync(
+    prompt: String,
+    options: ImageGenerationOptions = ImageGenerationOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+    Future {
+      blocking {
+        generateImage(prompt, options)
+      }
     }
+
+  override def generateImagesAsync(
+    prompt: String,
+    count: Int,
+    options: ImageGenerationOptions = ImageGenerationOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    Future {
+      blocking {
+        generateImages(prompt, count, options)
+      }
+    }
+
+  override def editImageAsync(
+    imagePath: Path,
+    prompt: String,
+    maskPath: Option[Path] = None,
+    options: ImageEditOptions = ImageEditOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    Future {
+      blocking {
+        editImage(imagePath, prompt, maskPath, options)
+      }
+    }
+
+  override def editImage(
+    imagePath: Path,
+    prompt: String,
+    maskPath: Option[Path] = None,
+    options: ImageEditOptions = ImageEditOptions()
+  ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+    // 1. Read files and convert to Base64
+    val imageBase64 = Try {
+      Base64.getEncoder.encodeToString(Files.readAllBytes(imagePath))
+    }.toEither.left.map(e => ValidationError(s"Failed to read input image: ${e.getMessage}"))
+
+    val maskBase64 = maskPath match {
+      case Some(path) =>
+        Try {
+          Some(Base64.getEncoder.encodeToString(Files.readAllBytes(path)))
+        }.toEither.left.map(e => ValidationError(s"Failed to read mask image: ${e.getMessage}"))
+      case None => Right(None)
+    }
+
+    // 2. Build payload and execute request
+    for {
+      img  <- imageBase64
+      mask <- maskBase64
+      // Convert ImageEditOptions to ImageGenerationOptions for response parsing
+      genOptions = ImageGenerationOptions(
+        size = options.size.getOrElse(ImageSize.Square512),
+        format = ImageFormat.PNG
+      )
+      payload = StableDiffusionImg2ImgPayload(
+        init_images = Seq(img),
+        mask = mask,
+        prompt = prompt,
+        negative_prompt = genOptions.negativePrompt.getOrElse(""),
+        width = genOptions.size.width,
+        height = genOptions.size.height,
+        steps = genOptions.inferenceSteps,
+        cfg_scale = genOptions.guidanceScale,
+        denoising_strength = options.strength.getOrElse(0.75),
+        batch_size = options.n,
+        n_iter = 1,
+        seed = genOptions.seed.getOrElse(-1L),
+        sampler_name = genOptions.samplerName.getOrElse("Euler a")
+      )
+      response <- makeImg2ImgRequest(payload)
+      result   <- parseResponse(response, prompt, genOptions)
+    } yield result
+  }
+
+  private def makeImg2ImgRequest(
+    payload: StableDiffusionImg2ImgPayload
+  ): Either[ImageGenerationError, requests.Response] = {
+    val url = s"${config.baseUrl}/sdapi/v1/img2img"
+    val headers = Map(
+      "Content-Type" -> "application/json"
+    ) ++ config.apiKey.map(key => "Authorization" -> s"Bearer $key").toMap
+
+    logger.debug(s"Making img2img request to: $url")
+    // logger.debug(s"Payload: ${write(payload, indent = 2)}") // Too large to log with base64 images
+
+    httpClient
+      .post(
+        url = url,
+        headers = headers,
+        data = write(payload),
+        timeout = config.timeout
+      )
+      .toEither
+      .left
+      .map(e => UnknownError(e))
+  }
+
+  override def health(): Either[ImageGenerationError, ServiceStatus] = {
+    val url = s"${config.baseUrl}/sdapi/v1/options"
+    httpClient
+      .get(url, Map.empty, 5000)
+      .toEither
+      .left
+      .map(e => ServiceError(s"Health check failed: ${e.getMessage}", 0))
+      .map { response =>
+        if (response.statusCode == 200)
+          ServiceStatus(HealthStatus.Healthy, "Stable Diffusion service is responding")
+        else ServiceStatus(HealthStatus.Degraded, s"Service returned status code: ${response.statusCode}")
+      }
+  }
 
   private def buildPayload(
     prompt: String,
@@ -110,7 +238,7 @@ class StableDiffusionClient(config: StableDiffusionConfig) extends ImageGenerati
     writeJs(payload)
   }
 
-  private def makeHttpRequest(payload: ujson.Value): requests.Response = {
+  private def makeHttpRequest(payload: ujson.Value): Either[ImageGenerationError, requests.Response] = {
     val url = s"${config.baseUrl}/sdapi/v1/txt2img"
     val headers = Map(
       "Content-Type" -> "application/json"
@@ -119,13 +247,16 @@ class StableDiffusionClient(config: StableDiffusionConfig) extends ImageGenerati
     logger.debug(s"Making request to: $url")
     logger.debug(s"Payload: ${write(payload, indent = 2)}")
 
-    requests.post(
-      url = url,
-      data = write(payload),
-      headers = headers,
-      readTimeout = config.timeout,
-      connectTimeout = 10000
-    )
+    httpClient
+      .post(
+        url = url,
+        headers = headers,
+        data = write(payload),
+        timeout = config.timeout
+      )
+      .toEither
+      .left
+      .map(e => UnknownError(e))
   }
 
   private def parseResponse(
@@ -134,10 +265,14 @@ class StableDiffusionClient(config: StableDiffusionConfig) extends ImageGenerati
     options: ImageGenerationOptions
   ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
 
-    if (response.statusCode != 200) {
-      val errorMsg = s"API request failed with status ${response.statusCode}: ${response.text()}"
-      logger.error(errorMsg)
-      return Left(ServiceError(errorMsg, response.statusCode))
+    response.statusCode match {
+      case 200 => // succeed
+      case 401 => return Left(AuthenticationError("API request failed with status 401: Unauthorized"))
+      case 429 => return Left(RateLimitError("API request failed with status 429: Rate limit"))
+      case _ =>
+        val errorMsg = s"API request failed with status ${response.statusCode}: ${response.text()}"
+        logger.error(errorMsg)
+        return Left(ServiceError(errorMsg, response.statusCode))
     }
 
     Try {
