@@ -32,7 +32,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{LLMClient, LLMConnect}
 import org.llm4s.llmconnect.model.UserMessage
 
-//1.Core Logic: Depends only on the injected client, not configuration
+// 1. Core Logic: Depends only on the injected client, not configuration
 class HelloLLM(client: LLMClient) {
   def sayHello(): Unit = {
     val result = client.complete(
@@ -91,13 +91,13 @@ providerConfig <- Llm4sConfig.provider()
 client <- LLMConnect.getClient(providerConfig)
 ```
 
-In LLM4S, we follow a strict configuration boundary. The entry point (```Main```) builds the client:
+In LLM4S, we follow a strict configuration boundary. The entry point (`Main`) builds the client:
 
 - Loads typed config from env vars / application.conf
 
 - Selects the appropriate provider (OpenAI, Anthropic, etc.)
 
-- Injects the ```LLMClient``` into your core logic (```HelloLLM```).
+- Injects the `LLMClient` into your core logic (`HelloLLM`).
 
 ### 2. Complete with Messages
 
@@ -354,10 +354,12 @@ class ComprehensiveAgent(client: LLMClient) {
 
 // Application Entry Point
 object ComprehensiveMain extends App {
-  for {
+  val startup = for {
     providerConfig <- Llm4sConfig.provider()
     client <- LLMConnect.getClient(providerConfig)
   } yield new ComprehensiveAgent(client).run()
+
+  startup.left.foreach(err => println(s"Startup Error: $err"))
 }
 ```
 
@@ -572,6 +574,10 @@ response match {
   case Left(error) => println(s"Error: $error")
 }
 ```
+
+## Running the Examples
+
+**Note:** Use the same `Main` pattern shown above to run the `ConversationExample`, `ToolExample`, and `StreamingExample` classes.
 
 ---
 
