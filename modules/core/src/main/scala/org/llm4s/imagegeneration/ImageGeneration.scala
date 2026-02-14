@@ -420,8 +420,7 @@ object ImageGeneration {
         Right(new StabilityAIClient(stabilityConfig, httpClient))
       case falConfig: FalAIConfig =>
         Right(new FalAIClient(falConfig))
-      case _ =>
-         Left(UnsupportedOperation(s"Provider ${config.provider} is not supported."))
+
     }
 
   /** Convenience method for quick image generation */

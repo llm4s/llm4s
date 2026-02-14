@@ -4,7 +4,7 @@ import org.llm4s.imagegeneration._
 import org.slf4j.LoggerFactory
 import java.nio.file.Path
 import scala.util.Try
-import scala.concurrent.{Future, ExecutionContext}
+import scala.concurrent.{Future, ExecutionContext, blocking}
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import java.time.{ZonedDateTime, ZoneOffset}
@@ -48,29 +48,7 @@ object BedrockClient {
     ExecutionContext.fromExecutor(executor)
   }
 
-  private def buildClient(config: BedrockConfig): BedrockRuntimeClient = {
-    val builder = BedrockRuntimeClient
-      .builder()
-      .region(Region.of(config.region))
-      .overrideConfiguration(
-        ClientOverrideConfiguration
-          .builder()
-          .apiCallTimeout(java.time.Duration.ofMillis(config.timeout))
-          .build()
-      )
 
-    (config.accessKeyId, config.secretAccessKey) match {
-      case (Some(accessKey), Some(secretKey)) =>
-        builder.credentialsProvider(
-          StaticCredentialsProvider.create(AwsBasicCredentials.create(accessKey, secretKey))
-        )
-      case _ =>
-        // Default credential provider chain (env, profile, instance role, etc.)
-        builder
-    }
-
-    builder.build()
-  }
 }
 
 /**
@@ -198,14 +176,6 @@ class BedrockClient(config: BedrockConfig) extends ImageGenerationClient {
       options.seed.foreach { seed =>
         imageGenConfig("seed") = ujson.Num(seed.toDouble)
       }
-=======
-        "numberOfImages" -> count,
-        "width"          -> width,
-        "height"         -> height
-      )
-
-      options.seed.foreach(seed => imageGenConfig("seed") = seed)
->>>>>>> a2fcb5a (feat(providers): Add AWS Bedrock Image Generation client)
 
       ujson.Obj(
         "taskType" -> "TEXT_IMAGE",

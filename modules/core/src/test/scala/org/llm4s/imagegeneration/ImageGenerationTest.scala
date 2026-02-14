@@ -250,16 +250,16 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
     openAIConfig.model shouldBe "gpt-image-1"
     openAIConfig.provider shouldBe ImageGenerationProvider.DALLE
 
-    val vertexConfig = VertexAIConfig(projectId = "test-project")
+    val vertexConfig = VertexAIConfig(projectId = "test-project", accessToken = "test-token")
     vertexConfig.location shouldBe "us-central1"
     vertexConfig.model shouldBe "imagen-4.0-generate-001"
-    vertexConfig.accessToken shouldBe None
+    vertexConfig.accessToken shouldBe "test-token"
     vertexConfig.timeout shouldBe 120000
     vertexConfig.provider shouldBe ImageGenerationProvider.VertexAI
   }
 
   test("ImageGeneration creates correct client for VertexAI config") {
-    val config = VertexAIConfig(projectId = "test-project")
+    val config = VertexAIConfig(projectId = "test-project", accessToken = "test-token")
     val client = ImageGeneration.client(config)
 
     client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.VertexAIClient) => }
@@ -417,7 +417,6 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
 
   test("Mock client edits image successfully") {
     val tempFile = Files.createTempFile("test_input", ".png")
-<<<<<<< HEAD
     val result = mockClient.editImage(tempFile, "edited prompt")
 
     try {
