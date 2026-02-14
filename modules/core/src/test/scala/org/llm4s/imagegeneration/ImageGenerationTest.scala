@@ -147,14 +147,21 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     val config = StableDiffusionConfig()
     val client = ImageGeneration.client(config)
 
-    client shouldBe a[org.llm4s.imagegeneration.provider.StableDiffusionClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.StableDiffusionClient) => }
   }
 
   test("ImageGeneration creates correct client for HuggingFace config") {
     val config = HuggingFaceConfig(apiKey = "test-key")
     val client = ImageGeneration.client(config)
 
-    client shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.HuggingFaceClient) => }
+  }
+
+  test("ImageGeneration creates correct client for OpenAI config") {
+    val config = OpenAIConfig(apiKey = "test-key")
+    val client = ImageGeneration.client(config)
+
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.OpenAIImageClient) => }
   }
 
   test("stableDiffusionClient creates client with correct config") {
@@ -163,13 +170,19 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       apiKey = Some("test-key")
     )
 
-    client shouldBe a[org.llm4s.imagegeneration.provider.StableDiffusionClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.StableDiffusionClient) => }
   }
 
   test("huggingFaceClient creates client with correct config") {
     val client = ImageGeneration.huggingFaceClient(apiKey = "test-key")
 
-    client shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.HuggingFaceClient) => }
+  }
+
+  test("openAIClient creates client with correct config") {
+    val client = ImageGeneration.openAIClient(apiKey = "test-key")
+
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.OpenAIImageClient) => }
   }
 
   test("Config objects have correct default values") {

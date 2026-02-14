@@ -57,8 +57,7 @@ object AsyncToolAgentExample {
         query = "What's the weather in London, Paris, and Tokyo? Give me a brief summary.",
         tools = tools,
         toolExecutionStrategy = ToolExecutionStrategy.Parallel,
-        maxSteps = Some(5),
-        debug = false
+        maxSteps = Some(5)
       )
 
       duration = System.currentTimeMillis() - startTime

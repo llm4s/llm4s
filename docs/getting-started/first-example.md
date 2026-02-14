@@ -29,25 +29,34 @@ Create `HelloLLM.scala`:
 
 ```scala
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.{LLMClient, LLMConnect}
 import org.llm4s.llmconnect.model.UserMessage
 
-object HelloLLM extends App {
-  val result = for {
-    providerConfig <- Llm4sConfig.provider()
-    client <- LLMConnect.getClient(providerConfig)
-    response <- client.complete(
+// 1. Core Logic: Depends only on the injected client, not configuration
+class HelloLLM(client: LLMClient) {
+  def sayHello(): Unit = {
+    val result = client.complete(
       messages = List(UserMessage("What is Scala?")),
       model = None
     )
-  } yield response
 
-  result match {
-    case Right(completion) =>
-      println(s"Response: ${completion.content}")
-    case Left(error) =>
-      println(s"Error: $error")
+    result match {
+      case Right(completion) =>
+        println(s"Response: ${completion.content}")
+      case Left(error) =>
+        println(s"Error: $error")
+    }
   }
+}
+
+// 2. Configuration Boundary: The application entry point
+object Main extends App {
+  val startup = for {
+    providerConfig <- Llm4sConfig.provider()
+    client <- LLMConnect.getClient(providerConfig)
+  } yield new HelloLLM(client).sayHello()
+
+  startup.left.foreach(err => println(s"Startup Error: $err"))
 }
 ```
 
@@ -75,17 +84,20 @@ JVM and is known for its strong type system and concurrency support.
 
 Let's break down what's happening:
 
-### 1. Load Config and Build a Client
+### 1. The Configuration Boundary
 
 ```scala
 providerConfig <- Llm4sConfig.provider()
 client <- LLMConnect.getClient(providerConfig)
 ```
 
-This builds an LLM client based on your configured provider:
+In LLM4S, we follow a strict configuration boundary. The entry point (`Main`) builds the client:
+
 - Loads typed config from env vars / application.conf
+
 - Selects the appropriate provider (OpenAI, Anthropic, etc.)
-- Returns a `Result[LLMClient]` (Either[LLMError, LLMClient])
+
+- Injects the `LLMClient` into your core logic (`HelloLLM`).
 
 ### 2. Complete with Messages
 
@@ -122,15 +134,12 @@ This makes error handling **explicit** and **type-safe**.
 Let's make our program more interesting with a multi-turn conversation:
 
 ```scala
-import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 
-object ConversationExample extends App {
-  val result = for {
-    providerConfig <- Llm4sConfig.provider()
-    client <- LLMConnect.getClient(providerConfig)
-    response <- client.complete(
+class ConversationExample(client: LLMClient) {
+  def run(): Unit = {
+    val result = client.complete(
       messages = List(
         SystemMessage("You are a helpful programming tutor."),
         UserMessage("What is Scala?"),
@@ -139,12 +148,12 @@ object ConversationExample extends App {
       ),
       model = None
     )
-  } yield response
 
-  result.fold(
-    error => println(s"Error: $error"),
-    completion => println(s"Response: ${completion.content}")
-  )
+    result.fold(
+      error => println(s"Error: $error"),
+      completion => println(s"Response: ${completion.content}")
+    )
+  }
 }
 ```
 
@@ -165,36 +174,33 @@ LLM4S provides three message types:
 Now let's give the LLM access to a tool:
 
 ```scala
-import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model.UserMessage
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }
 import org.llm4s.agent.Agent
 
-object ToolExample extends App {
+class ToolExample(client: LLMClient) {
   // Define a simple tool
   def getWeather(location: String): String = {
     s"The weather in $location is sunny and 72°F"
   }
 
-  val weatherTool = ToolFunction(
-    name = "get_weather",
-    description = "Get current weather for a location",
-    function = getWeather _
-  )
+  def run(): Unit = {
+    val weatherTool = ToolFunction(
+      name = "get_weather",
+      description = "Get current weather for a location",
+      function = getWeather _
+    )
 
-  val result = for {
-    providerConfig <- Llm4sConfig.provider()
-    client <- LLMConnect.getClient(providerConfig)
-    tools = new ToolRegistry(Seq(weatherTool))
-    agent = new Agent(client)
-    state <- agent.run("What's the weather in Paris?", tools)
-  } yield state
+    val tools = new ToolRegistry(Seq(weatherTool))
+    val agent = new Agent(client)
+    
+    val result = agent.run("What's the weather in Paris?", tools)
 
-  result.fold(
-    error => println(s"Error: $error"),
-    state => println(s"Final response: ${state.finalResponse}")
-  )
+    result.fold(
+      error => println(s"Error: $error"),
+      state => println(s"Final response: ${state.finalResponse}")
+    )
+  }
 }
 ```
 
@@ -210,25 +216,22 @@ The agent will:
 For real-time output, use streaming:
 
 ```scala
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
-import org.llm4s.config.Llm4sConfig
 
-object StreamingExample extends App {
-  val result = for {
-    providerConfig <- Llm4sConfig.provider()
-    client <- LLMConnect.getClient(providerConfig)
-    completion <- client.streamComplete(
+class StreamingExample(client: LLMClient) {
+  def run(): Unit = {
+    val result = client.streamComplete(
       conversation = Conversation(Seq(UserMessage("Write a short poem about Scala")))
     ) { chunk =>
       chunk.content.foreach(print)  // Print each token as it arrives
     }
-  } yield completion
 
-  result.fold(
-    error => println(s"Error: $error"),
-    _ => println("\nDone!")
-  )
+    result.fold(
+      error => println(s"Error: $error"),
+      _ => println("\nDone!")
+    )
+  }
 }
 ```
 
@@ -241,12 +244,8 @@ Output appears token-by-token in real-time, like ChatGPT!
 ### Basic Error Handling
 
 ```scala
-val result = for {
-  providerConfig <- Llm4sConfig.provider()
-  client <- LLMConnect.getClient(providerConfig)
-  response <- client.complete(messages, None)
-} yield response
-
+// Assuming client is injected
+val result = client.complete(messages, None)
 result match {
   case Right(completion) =>
     // Success
@@ -311,50 +310,56 @@ Here's a complete example combining everything we've learned:
 
 ```scala
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.{LLMClient, LLMConnect}
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }
 import org.llm4s.agent.Agent
 
-object ComprehensiveExample extends App {
-  // Define tools
+class ComprehensiveAgent(client: LLMClient) {
   def calculate(expression: String): String = {
     // Simple calculator (use proper eval in production!)
     s"Result: ${expression} = 42"
   }
 
-  val calcTool = ToolFunction(
-    name = "calculate",
-    description = "Evaluate a mathematical expression",
-    function = calculate _
-  )
+  def run(): Unit = {
+    println("🚀 Starting LLM4S Example...")
 
-  // Main program
-  println("🚀 Starting LLM4S Example...")
+    val calcTool = ToolFunction(
+      name = "calculate",
+      description = "Evaluate a mathematical expression",
+      function = calculate _
+    )
 
-  val result = for {
-    providerConfig <- Llm4sConfig.provider()
-    client <- LLMConnect.getClient(providerConfig)
-    tools = new ToolRegistry(Seq(calcTool))
-    agent = new Agent(client)
+    val tools = new ToolRegistry(Seq(calcTool))
+    val agent = new Agent(client)
 
     // Run agent with tool support
-    state <- agent.run(
+    val result = agent.run(
       "What is 6 times 7? Please use the calculator.",
       tools
     )
-  } yield state
 
-  result match {
-    case Right(state) =>
-      println(s"✅ Success!")
-      println(s"Response: ${state.finalResponse}")
-      println(s"Messages exchanged: ${state.messages.length}")
+    result match {
+      case Right(state) =>
+        println(s"✅ Success!")
+        println(s"Response: ${state.finalResponse}")
+        println(s"Messages exchanged: ${state.messages.length}")
 
-    case Left(error) =>
-      println(s"❌ Error: $error")
-      System.exit(1)
+      case Left(error) =>
+        println(s"❌ Error: $error")
+        System.exit(1)
+    }
   }
+}
+
+// Application Entry Point
+object ComprehensiveMain extends App {
+  val startup = for {
+    providerConfig <- Llm4sConfig.provider()
+    client <- LLMConnect.getClient(providerConfig)
+  } yield new ComprehensiveAgent(client).run()
+
+  startup.left.foreach(err => println(s"Startup Error: $err"))
 }
 ```
 
@@ -365,54 +370,42 @@ object ComprehensiveExample extends App {
 ### Pattern 1: Simple Query
 
 ```scala
-for {
-  providerConfig <- Llm4sConfig.provider()
-  client <- LLMConnect.getClient(providerConfig)
-  response <- client.complete(
-    Conversation(Seq(UserMessage("Your question here")))
-  )
-} yield response.content
+// Assuming client is injected
+val response = client.complete(
+  Conversation(Seq(UserMessage("Your question here")))
+)
 ```
 
 ### Pattern 2: With System Prompt
 
 ```scala
-for {
-  providerConfig <- Llm4sConfig.provider()
-  client <- LLMConnect.getClient(providerConfig)
-  response <- client.complete(
-    Conversation(Seq(
-      SystemMessage("You are an expert in..."),
-      UserMessage("Question")
-    ))
-  )
-} yield response.content
+// Assuming client is injected
+val response = client.complete(
+  Conversation(Seq(
+    SystemMessage("You are an expert in..."),
+    UserMessage("Question")
+  ))
+)
 ```
 
 ### Pattern 3: Agent with Tools
 
 ```scala
-for {
-  providerConfig <- Llm4sConfig.provider()
-  client <- LLMConnect.getClient(providerConfig)
-  tools = new ToolRegistry(myTools)
-  agent = new Agent(client)
-  state <- agent.run("User query", tools)
-} yield state.finalResponse
+// Assuming client is injected
+val tools = new ToolRegistry(myTools)
+val agent = new Agent(client)
+val state = agent.run("User query", tools)
 ```
 
 ### Pattern 4: Streaming
 
 ```scala
-for {
-  providerConfig <- Llm4sConfig.provider()
-  client <- LLMConnect.getClient(providerConfig)
-  completion <- client.streamComplete(
-    Conversation(Seq(UserMessage("Your question here")))
-  ) { chunk =>
-    chunk.content.foreach(print)
-  }
-} yield completion
+// Assuming client is injected
+val completion = client.streamComplete(
+  Conversation(Seq(UserMessage("Your question here")))
+) { chunk =>
+  chunk.content.foreach(print)
+}
 ```
 
 ---
@@ -424,27 +417,19 @@ for {
 Don't create a new client for every request:
 
 ```scala
-// ✅ Good: Create once, reuse
-val clientResult = for {
-  providerConfig <- Llm4sConfig.provider()
-  client <- LLMConnect.getClient(providerConfig)
-} yield client
+// Assuming client: LLMClient is injected into your class
 
-clientResult match {
-  case Right(client) =>
-    // Reuse for multiple requests
-    (1 to 10).foreach { i =>
-      client.complete(Conversation(Seq(UserMessage(s"Question $i"))))
-    }
-  case Left(error) => println(s"Error: $error")
+// ✅ Good: Reuse existing injected client
+(1 to 10).foreach { i =>
+  client.complete(Conversation(Seq(UserMessage(s"Question $i"))))
 }
 
-// ❌ Bad: Creating new client each time (wasteful)
+// ❌ Bad: Creating new client inside the loop (wasteful and violates boundaries)
 (1 to 10).foreach { i =>
   for {
     providerConfig <- Llm4sConfig.provider()
-    client <- LLMConnect.getClient(providerConfig)  // Don't do this!
-    response <- client.complete(
+    badClient <- LLMConnect.getClient(providerConfig)  // Don't do this!
+    response <- badClient.complete(
       Conversation(Seq(UserMessage(s"Q$i")))
     )
   } yield response
@@ -458,15 +443,12 @@ Streaming gets you the first token faster and improves perceived latency:
 ```scala
 import org.llm4s.llmconnect.model._
 
-val streamResult = for {
-  providerConfig <- Llm4sConfig.provider()
-  client <- LLMConnect.getClient(providerConfig)
-  completion <- client.streamComplete(
-    Conversation(Seq(UserMessage("Write a long essay about Scala")))
-  ) { chunk =>
-    chunk.content.foreach(print)  // Prints as tokens arrive
-  }
-} yield completion
+// Assuming client is injected
+val streamResult = client.streamComplete(
+  Conversation(Seq(UserMessage("Write a long essay about Scala")))
+) { chunk =>
+  chunk.content.foreach(print)  // Prints as tokens arrive
+}
 
 streamResult match {
   case Right(completion) => println(s"\nCompleted with ${completion.usage.map(_.totalTokens).getOrElse(0)} tokens")
@@ -493,32 +475,23 @@ import scala.concurrent.{Future, ExecutionContext, Await}
 import scala.concurrent.duration._
 import ExecutionContext.Implicits.global
 
-val clientResult = for {
-  providerConfig <- Llm4sConfig.provider()
-  client <- LLMConnect.getClient(providerConfig)
-} yield client
+// Assuming client is injected
+val queries = List(
+  "What is Scala?",
+  "What is functional programming?",
+  "What is the JVM?"
+)
 
-clientResult match {
-  case Right(client) =>
-    val queries = List(
-      "What is Scala?",
-      "What is functional programming?",
-      "What is the JVM?"
-    )
+// Run all queries in parallel
+val futures = queries.map { query =>
+  Future {
+    client.complete(Conversation(Seq(UserMessage(query))))
+  }
+}
 
-    // Run all queries in parallel
-    val futures = queries.map { query =>
-      Future {
-        client.complete(Conversation(Seq(UserMessage(query))))
-      }
-    }
-
-    val results = Await.result(Future.sequence(futures), 30.seconds)
-    results.foreach {
-      case Right(response) => println(response.content)
-      case Left(error) => println(s"Error: $error")
-    }
-
+val results = Await.result(Future.sequence(futures), 30.seconds)
+results.foreach {
+  case Right(response) => println(response.content)
   case Left(error) => println(s"Error: $error")
 }
 ```
@@ -601,6 +574,10 @@ response match {
   case Left(error) => println(s"Error: $error")
 }
 ```
+
+## Running the Examples
+
+**Note:** Use the same `Main` pattern shown above to run the `ConversationExample`, `ToolExample`, and `StreamingExample` classes.
 
 ---
 

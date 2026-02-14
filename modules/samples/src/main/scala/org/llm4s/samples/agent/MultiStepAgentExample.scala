@@ -1,6 +1,6 @@
 package org.llm4s.samples.agent
 
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentContext }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole.Tool
@@ -38,14 +38,8 @@ object MultiStepAgentExample {
       _ = agent.run(
         query = query,
         tools = toolRegistry,
-        inputGuardrails = Seq.empty,
-        outputGuardrails = Seq.empty,
-        handoffs = Seq.empty,
         maxSteps = Some(1),
-        traceLogPath = Some(limitedTraceLogPath),
-        systemPromptAddition = None,
-        completionOptions = org.llm4s.llmconnect.model.CompletionOptions(),
-        debug = false
+        context = AgentContext(traceLogPath = Some(limitedTraceLogPath))
       ) match {
         case Right(finalState) =>
           logger.info("Final status: {}", finalState.status)

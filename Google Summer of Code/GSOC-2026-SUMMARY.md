@@ -1,8 +1,6 @@
 # Google Summer of Code 2026 - LLM4S Organization Summary
 
-Welcome to the **LLM4S Google Summer of Code 2026** program! We're excited to offer **75 innovative projects** across multiple domains including AI agents, RAG systems, data pipelines, hardware design, tooling, and applications. Our projects span from beginner-friendly to advanced challenges, providing opportunities for contributors at all skill levels.
-
----
+Welcome to the **LLM4S Google Summer of Code 2026** program! We're excited to offer **77 innovative projects** across multiple domains including AI agents, RAG systems, data pipelines, scala langauge and JVM based application. Our projects span from beginner-friendly to advanced challenges, providing opportunities for contributors at all skill levels.
 
 ## Quick Navigation
 
@@ -13,24 +11,20 @@ Welcome to the **LLM4S Google Summer of Code 2026** program! We're excited to of
 - [Project Repositories](#project-repositories)
 - [Contact &amp; Community](#contact--community)
 
----
-
 ## Summary Statistics
 
-- **Total Projects**: 75
+- **Total Projects**: 77
 - **Total Mentors**: 50
 - **Community Members**: 300+
 - **Project Sizes**:
   - Large (350 hours): 64 projects
-  - Medium (175 hours): 11 projects
+  - Medium (175 hours): 13 projects
 - **Difficulty Levels**:
   - Easy: 3 projects
-  - Medium: 33 projects
+  - Medium: 35 projects
   - Hard: 39 projects
 - **Primary Technology**: Scala, LLMs, AI/ML, Chisel/FIRRTL
-- **Main Repositories**: LLM4S, llm4s-tripper, Trumbo
-
----
+- **Main Repositories**: [LLM4S](https://github.com/llm4s/llm4s), [llm4s-tripper](https://github.com/gruggiero/llm4s-tripper), [Trumbo](https://github.com/dmamonov/trumbo), [Creative Scala](https://github.com/creativescala)
 
 ## All Projects Table
 
@@ -112,8 +106,8 @@ Welcome to the **LLM4S Google Summer of Code 2026** program! We're excited to of
 | 73                                 | [LLM4S - RISC-V Core Generator Agent](https://github.com/llm4s/llm4s/blob/main/Google%20Summer%20of%20Code/Project%20Ideas/2026.md#73-llm4s---risc-v-core-generator-agent)                                                                                                          | Adrien Piquerez            | Crupanshu Udani                            | Hard        | 350   |
 | 74                                 | [LLM4S - Formal Property Synthesis Agent](https://github.com/llm4s/llm4s/blob/main/Google%20Summer%20of%20Code/Project%20Ideas/2026.md#74-llm4s---formal-property-synthesis-agent)                                                                                                  | James Thompson             | Shubham Gupta                              | Hard        | 350   |
 | 75                                 | [LLM4S - Chisel IDE Plugin with LLM Assistance](https://github.com/llm4s/llm4s/blob/main/Google%20Summer%20of%20Code/Project%20Ideas/2026.md#75-llm4s---chisel-ide-plugin-with-llm-assistance)                                                                                      | Shubham Gupta              | Gagandeep Kalra                            | Hard        | 350   |
-
----
+| 76                                 | [Copilot Lens — Semantic Session Search &amp; Knowledge Base](https://github.com/llm4s/llm4s/blob/main/Google%20Summer%20of%20Code/Project%20Ideas/2026.md#76-copilot-lens--semantic-session-search--knowledge-base)                                                                  | Vamshi Salagala            | Kannupriya Kalra                           | Medium      | 175   |
+| 77                                 | [Copilot Lens — Natural Language Query Interface for Analytics](https://github.com/llm4s/llm4s/blob/main/Google%20Summer%20of%20Code/Project%20Ideas/2026.md#77-copilot-lens--natural-language-query-interface-for-analytics)                                                          | Vamshi Salagala            | Kannupriya Kalra                           | Medium      | 175   |
 
 ## Mentors & Contact Information
 
@@ -341,82 +335,69 @@ Our mentors are experienced developers and researchers passionate about LLMs, Sc
     - Email: abhinavgupta2206@gmail.com
     - Location: India 🇮🇳
     - Focus: Scala, LLM systems
-
 38. **Nitin Wahie**
 
     - LinkedIn: [linkedin.com/in/nitin-wahie-0017366a](https://www.linkedin.com/in/nitin-wahie-0017366a/)
     - Location: India 🇮🇳
     - Focus: Scala, LLM systems
-
 39. **Darpan Vedi**
 
     - LinkedIn: [linkedin.com/in/darpanvedi](https://www.linkedin.com/in/darpanvedi/)
     - Email: darpanvedi0@gmail.com
     - Location: India 🇮🇳
     - Focus: Scala, LLM systems
-
 40. **Sai Chandra Phani Surya Mutnuri**
 
     - LinkedIn: [linkedin.com/in/mutnuri](https://www.linkedin.com/in/mutnuri/)
     - Email: surya.mutnuri.ek@gmail.com
     - Location: India 🇮🇳
     - Focus: Scala, LLM systems
-
 41. **Yadu Krishnan Alakodan**
 
     - Email: yadualakodan@gmail.com
     - Location: India 🇮🇳
     - Focus: Scala, LLM systems
-
 42. **Piyush Ghai**
 
     - LinkedIn: [linkedin.com/in/piyush-ghai](https://www.linkedin.com/in/piyush-ghai/)
     - Location: India 🇮🇳
     - Focus: Scala, LLM systems
-
 43. **Ipsit Sahoo**
 
     - LinkedIn: [linkedin.com/in/ipsit-sahoo](https://www.linkedin.com/in/ipsit-sahoo/)
     - Location: India 🇮🇳
     - Focus: Scala, LLM systems
-
 44. **Chris W**
 
     - LinkedIn: [linkedin.com/in/chris-w-1499161a](https://www.linkedin.com/in/chris-w-1499161a/)
     - Location: US 🇺🇸
     - Focus: Scala, LLM systems
-
 45. **Suleyman Kalif Abdi**
 
     - LinkedIn: [linkedin.com/in/suleymanabdi](https://www.linkedin.com/in/suleymanabdi/)
     - Email: suleyman.abdi@gmail.com
     - Location: Ethiopia 🇪🇹
     - Focus: Scala, LLM systems
-
 46. **Pedro Mll**
 
     - LinkedIn: [linkedin.com/in/pedro-mll](https://www.linkedin.com/in/pedro-mll/)
     - Location: Spain 🇪🇸
     - Focus: Scala, LLM systems
-
 47. **Modestas Rukšnaitis**
 
     - LinkedIn: [linkedin.com/in/modestas-rukšnaitis-6211331b4](https://www.linkedin.com/in/modestas-rukšnaitis-6211331b4/)
     - Location: Lithuania 🇱🇹
     - Focus: Scala, LLM systems
-
 48. **Yoshita Sharma**
 
     - LinkedIn: [linkedin.com/in/yoshita-sharma-trojan](https://www.linkedin.com/in/yoshita-sharma-trojan/)
     - Location: India 🇮🇳
     - Focus: Scala, LLM systems
-
 49. **Nishant Adi**
 
     - LinkedIn: [linkedin.com/in/nishant92adi](https://www.linkedin.com/in/nishant92adi/)
     - Location: India 🇮🇳
     - Focus: Scala, LLM systems
-
 50. **Mani Mukesh Reddy Nukal**
 
     - LinkedIn: [linkedin.com/in/mani-mukesh-reddy-40a773b6](https://www.linkedin.com/in/mani-mukesh-reddy-40a773b6/)
@@ -424,24 +405,22 @@ Our mentors are experienced developers and researchers passionate about LLMs, Sc
     - Location: India 🇮🇳
     - Focus: Scala, LLM systems
 
----
-
 ## Project Statistics
 
 ### By Difficulty Level
 
 | Difficulty | Count | Percentage |
 | ---------- | ----- | ---------- |
-| Easy       | 3     | 4.0%       |
-| Medium     | 35    | 46.7%      |
-| Hard       | 37    | 49.3%      |
+| Easy       | 3     | 3.9%       |
+| Medium     | 35    | 45.5%      |
+| Hard       | 39    | 50.6%      |
 
 ### By Project Duration
 
 | Duration           | Count | Percentage |
 | ------------------ | ----- | ---------- |
-| 175 hours (Medium) | 11    | 14.7%      |
-| 350 hours (Large)  | 64    | 85.3%      |
+| 175 hours (Medium) | 13    | 16.9%      |
+| 350 hours (Large)  | 64    | 83.1%      |
 
 ### By Focus Area
 
@@ -454,6 +433,7 @@ Our mentors are experienced developers and researchers passionate about LLMs, Sc
 | **Trumbo/Screenwriting IDE**        | 5 projects    |
 | **Hardware Design (Chisel/FIRRTL)** | 10 projects   |
 | **Tooling & Developer Experience**  | 9 projects    |
+| **Copilot Lens (GitHub Copilot Analytics)** | 2 projects    |
 
 ### GCP/Enterprise Integration Projects
 
@@ -471,8 +451,6 @@ Our mentors are experienced developers and researchers passionate about LLMs, Sc
 - Verilog/VHDL to Chisel migration, RISC-V core generation
 - Protocol compliance (AXI/AHB/APB), timing constraints, security analysis
 - See the [Hardware Design Roadmap](../docs/roadmap/llm4s-hardware-design-roadmap.md) for context
-
----
 
 ## Project Repositories
 
@@ -498,6 +476,11 @@ Our mentors are experienced developers and researchers passionate about LLMs, Sc
    - Chisel/FIRRTL integration for hardware design
    - Projects: 66-75
    - Verification, synthesis, formal methods, IDE integration
+5. **Copilot Lens**
+
+   - GitHub Copilot session analytics and semantic search
+   - Projects: 76-77
+   - [github.com/nicobao/copilot-lens](https://github.com/nicobao/copilot-lens)
 
 ### Related Resources
 
@@ -505,8 +488,6 @@ Our mentors are experienced developers and researchers passionate about LLMs, Sc
 - **API Docs**: [llm4s.org/api](https://llm4s.org/api)
 - **Examples**: [llm4s.org/examples](https://llm4s.org/examples)
 - **Getting Started**: [llm4s.org/getting-started](https://llm4s.org/getting-started)
-
----
 
 ## Contact & Community
 

@@ -30,8 +30,10 @@ class ZaiClient(
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics("zai", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "zai",
+    model = config.model,
+    operation = validateNotClosed.flatMap { _ =>
       val requestBody = createRequestBody(conversation, options)
 
       logger.debug(s"Sending request to Z.ai API at ${config.baseUrl}/chat/completions")
@@ -74,21 +76,19 @@ class ZaiClient(
             )
         }
       }
-    }
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics("zai", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "zai",
+    model = config.model,
+    operation = validateNotClosed.flatMap { _ =>
       val requestBody = createRequestBody(conversation, options)
       requestBody("stream") = true
 
@@ -147,16 +147,17 @@ class ZaiClient(
             }
           }.toEither.left.map(_.toLLMError)
 
-          streamResult.flatMap(_ => accumulator.toCompletion)
+          streamResult.flatMap(_ =>
+            accumulator.toCompletion.map { c =>
+              val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+              c.copy(model = config.model, estimatedCost = cost)
+            }
+          )
         }
       }
-    }
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens.toInt, usage.completionTokens.toInt)
-      }
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   private def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
@@ -309,18 +310,23 @@ class ZaiClient(
       }
     }
 
+    // Estimate cost using CostEstimator
+    val modelId = json("model").str
+    val cost    = usage.flatMap(u => CostEstimator.estimate(config.model, u))
+
     Completion(
       id = json("id").str,
       created = json("created").num.toLong,
       content = contentStr,
-      model = json("model").str,
+      model = modelId,
       message = AssistantMessage(
         contentOpt = Some(contentStr),
         toolCalls = toolCalls.toList
       ),
       toolCalls = toolCalls.toList,
       usage = usage,
-      thinking = None
+      thinking = None,
+      estimatedCost = cost
     )
   }
 

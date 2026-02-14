@@ -280,6 +280,8 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
       ("o1-preview", true),
       ("o1-mini", true),
       ("o3", true),
+      ("openai/o1", true),
+      ("openai/o3", true),
       // GPT-5 family requires max_completion_tokens
       ("gpt-5", true),
       ("gpt5", true),

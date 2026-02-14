@@ -121,6 +121,14 @@ object ConversationTokenCounter {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
+   * Test-only factory to avoid reflection in tests.
+   */
+  private[context] def forTest(
+    tokenizer: org.llm4s.context.tokens.StringTokenizer
+  ): ConversationTokenCounter =
+    new ConversationTokenCounter(tokenizer)
+
+  /**
    * Create a token counter for a specific tokenizer.
    *
    * @param tokenizerId The tokenizer to use (e.g., `TokenizerId.CL100K_BASE`)

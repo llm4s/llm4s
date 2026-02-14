@@ -14,8 +14,13 @@ LLM4S Foundation is proud to participate in Google Summer of Code, helping stude
 {: .fs-6 .fw-300 }
 
 <p align="center">
-  <img src="https://github.com/llm4s/llm4s/blob/main/docs/image_assets/gsoc_assets/gsoc_2025/gsoc_llm4s_images/GSoC-LLM4S-2026.webp" alt="GSoC and LLM4S" width="600"/>
+  <img 
+    src="https://raw.githubusercontent.com/llm4s/llm4s/main/docs/image_assets/gsoc_assets/gsoc_2025/gsoc_llm4s_images/GSoC-LLM4S-2026.webp"
+    alt="GSoC and LLM4S"
+    width="600"
+  />
 </p>
+
 
 We bring impactful, open-source AI projects to the GSoC program. Our goal is to mentor students in building robust, type-safe LLM infrastructure while gaining real-world experience with Functional Programming, Agents, and RAG systems.
 
