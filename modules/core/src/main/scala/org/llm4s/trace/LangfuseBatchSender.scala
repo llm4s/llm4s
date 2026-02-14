@@ -1,7 +1,10 @@
 package org.llm4s.trace
 
+import org.llm4s.http.Llm4sHttpClient
 import org.slf4j.LoggerFactory
-import scala.util.{ Try, Success, Failure }
+
+import java.util.Base64
+import scala.util.control.Exception.catchingPromiscuously
 
 /**
  * Abstraction for sending trace events to Langfuse in batches.
@@ -45,7 +48,10 @@ case class LangfuseHttpApiCaller(
  * Logs warnings if credentials are not configured and errors
  * if the HTTP request fails.
  */
-class DefaultLangfuseBatchSender extends LangfuseBatchSender {
+class DefaultLangfuseBatchSender(
+  httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
+  restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
+) extends LangfuseBatchSender {
   private val logger = LoggerFactory.getLogger(getClass)
 
   override def sendBatch(events: Seq[ujson.Obj], config: LangfuseHttpApiCaller): Unit = {
@@ -61,38 +67,44 @@ class DefaultLangfuseBatchSender extends LangfuseBatchSender {
     logger.debug(s"[Langfuse] Events in batch: ${events.length}")
 
     val batchPayload = ujson.Obj("batch" -> ujson.Arr(events: _*))
+    val credentials  = Base64.getEncoder.encodeToString(s"${config.publicKey}:${config.secretKey}".getBytes)
 
-    Try {
-      val response = requests.post(
-        config.langfuseUrl,
-        data = batchPayload.render(),
-        headers = Map(
-          "Content-Type" -> "application/json",
-          "User-Agent"   -> "llm4s-scala/1.0.0"
-        ),
-        auth = (config.publicKey, config.secretKey),
-        readTimeout = 30000,
-        connectTimeout = 30000
-      )
-
-      if (response.statusCode == 207 || (response.statusCode >= 200 && response.statusCode < 300)) {
-        logger.info(s"[Langfuse] Batch export successful: ${response.statusCode}")
-        if (response.statusCode == 207) {
-          logger.info(
-            s"[Langfuse] Partial success response: ${org.llm4s.util.Redaction.truncateForLog(response.text())}"
-          )
+    catchingPromiscuously(classOf[Throwable])
+      .either {
+        httpClient.post(
+          url = config.langfuseUrl,
+          headers = Map(
+            "Content-Type"  -> "application/json",
+            "User-Agent"    -> "llm4s-scala/1.0.0",
+            "Authorization" -> s"Basic $credentials"
+          ),
+          body = batchPayload.render(),
+          timeout = 30000
+        )
+      } match {
+      case Left(e) =>
+        e match {
+          case _: InterruptedException =>
+            restoreInterrupt()
+            logger.warn("[Langfuse] Batch export was interrupted.")
+          case _ =>
+            logger.error(s"[Langfuse] Batch export failed with exception: ${e.getMessage}", e)
+            logger.error(s"[Langfuse] Request URL: ${config.langfuseUrl}")
         }
-      } else {
-        logger.error(s"[Langfuse] Batch export failed: ${response.statusCode}")
-        logger.error(s"[Langfuse] Response body: ${org.llm4s.util.Redaction.truncateForLog(response.text())}")
-        logger.error(s"[Langfuse] Request URL: ${config.langfuseUrl}")
-        logger.error(s"[Langfuse] Request payload size: ${batchPayload.render().length} bytes")
-      }
-    } match {
-      case Failure(e) =>
-        logger.error(s"[Langfuse] Batch export failed with exception: ${e.getMessage}", e)
-        logger.error(s"[Langfuse] Request URL: ${config.langfuseUrl}")
-      case Success(_) =>
+      case Right(response) =>
+        if (response.statusCode == 207 || (response.statusCode >= 200 && response.statusCode < 300)) {
+          logger.info(s"[Langfuse] Batch export successful: ${response.statusCode}")
+          if (response.statusCode == 207) {
+            logger.info(
+              s"[Langfuse] Partial success response: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
+            )
+          }
+        } else {
+          logger.error(s"[Langfuse] Batch export failed: ${response.statusCode}")
+          logger.error(s"[Langfuse] Response body: ${org.llm4s.util.Redaction.truncateForLog(response.body)}")
+          logger.error(s"[Langfuse] Request URL: ${config.langfuseUrl}")
+          logger.error(s"[Langfuse] Request payload size: ${batchPayload.render().length} bytes")
+        }
     }
   }
 }

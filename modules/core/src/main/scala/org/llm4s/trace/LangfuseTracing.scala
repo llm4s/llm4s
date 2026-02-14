@@ -3,13 +3,14 @@ package org.llm4s.trace
 import org.llm4s.agent.AgentState
 import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
 import java.time.Instant
 import java.time.format.DateTimeFormatter
-import java.util.UUID
-import scala.util.Try
+import java.util.{ Base64, UUID }
+import scala.util.control.Exception.catchingPromiscuously
 
 /**
  * Langfuse [[Tracing]] implementation for production observability.
@@ -76,7 +77,9 @@ class LangfuseTracing(
   secretKey: String,
   environment: String,
   release: String,
-  version: String
+  version: String,
+  httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
+  restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
 ) extends Tracing {
 
   private val logger         = LoggerFactory.getLogger(getClass)
@@ -103,39 +106,44 @@ class LangfuseTracing(
     logger.debug(s"[Langfuse] Events in batch: ${events.length}")
 
     val batchPayload = ujson.Obj("batch" -> ujson.Arr(events: _*))
+    val credentials  = Base64.getEncoder.encodeToString(s"$publicKey:$secretKey".getBytes)
 
-    val attempt = Try {
-      val response = requests.post(
-        apiUrl,
-        data = batchPayload.render(),
-        headers = Map(
-          "Content-Type" -> "application/json",
-          "User-Agent"   -> "llm4s-scala/1.0.0"
-        ),
-        auth = (publicKey, secretKey),
-        readTimeout = 30000,
-        connectTimeout = 30000
-      )
-      response
-    }
-    attempt.toEither.left
-      .map { e =>
-        logger.error(s"[Langfuse] Batch export failed with exception: ${e.getMessage}", e)
-        logger.error(s"[Langfuse] Request URL: $langfuseUrl")
-        UnknownError(e.getMessage, e)
+    val attempt = catchingPromiscuously(classOf[Throwable])
+      .either {
+        httpClient.post(
+          url = apiUrl,
+          headers = Map(
+            "Content-Type"  -> "application/json",
+            "User-Agent"    -> "llm4s-scala/1.0.0",
+            "Authorization" -> s"Basic $credentials"
+          ),
+          body = batchPayload.render(),
+          timeout = 30000
+        )
+      }
+    attempt.left
+      .map {
+        case e: InterruptedException =>
+          restoreInterrupt()
+          logger.warn("[Langfuse] Batch export was interrupted.")
+          UnknownError("Batch export was interrupted", e)
+        case e =>
+          logger.error(s"[Langfuse] Batch export failed with exception: ${e.getMessage}", e)
+          logger.error(s"[Langfuse] Request URL: $langfuseUrl")
+          UnknownError(e.getMessage, e)
       }
       .flatMap { response =>
         if (response.statusCode == 207 || (response.statusCode >= 200 && response.statusCode < 300)) {
           logger.info(s"[Langfuse] Batch export successful: ${response.statusCode}")
           if (response.statusCode == 207) {
             logger.info(
-              s"[Langfuse] Partial success response: ${org.llm4s.util.Redaction.truncateForLog(response.text())}"
+              s"[Langfuse] Partial success response: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
             )
           }
           Right(())
         } else {
           logger.error(s"[Langfuse] Batch export failed: ${response.statusCode}")
-          logger.error(s"[Langfuse] Response body: ${org.llm4s.util.Redaction.truncateForLog(response.text())}")
+          logger.error(s"[Langfuse] Response body: ${org.llm4s.util.Redaction.truncateForLog(response.body)}")
           val runtimeException = new RuntimeException(s"Langfuse export failed: ${response.statusCode}")
           Left(UnknownError(runtimeException.getMessage, runtimeException))
         }
