@@ -53,7 +53,7 @@ Create a `.env` file in your project root:
 # Model Selection
 # ===================
 # Format: <provider>/<model-name>
-# Supported providers: openai, anthropic, azure, ollama, gemini
+# Supported providers: openai, anthropic, azure, ollama, gemini, cohere
 LLM_MODEL=openai/gpt-4o
 
 # ===================
@@ -89,6 +89,12 @@ OLLAMA_BASE_URL=http://localhost:11434
 # ===================
 GOOGLE_API_KEY=your-google-api-key
 GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta  # Optional
+
+# ===================
+# Cohere Configuration
+# ===================
+COHERE_API_KEY=your-cohere-api-key
+COHERE_BASE_URL=https://api.cohere.com  # Optional
 
 # ===================
 # Tracing Configuration

@@ -57,18 +57,18 @@ class CohereRerankerSpec extends AnyFlatSpec with Matchers {
 
   "RerankProviderConfig" should "store configuration" in {
     val config = RerankProviderConfig(
-      baseUrl = "https://api.cohere.ai",
+      baseUrl = "https://api.cohere.com",
       apiKey = "test-key",
       model = "rerank-english-v3.0"
     )
 
-    config.baseUrl shouldBe "https://api.cohere.ai"
+    config.baseUrl shouldBe "https://api.cohere.com"
     config.apiKey shouldBe "test-key"
     config.model shouldBe "rerank-english-v3.0"
   }
 
   "CohereReranker" should "have correct default values" in {
-    CohereReranker.DEFAULT_BASE_URL shouldBe "https://api.cohere.ai"
+    CohereReranker.DEFAULT_BASE_URL shouldBe "https://api.cohere.com"
     CohereReranker.DEFAULT_MODEL shouldBe "rerank-english-v3.0"
   }
 

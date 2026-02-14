@@ -639,7 +639,7 @@ import org.llm4s.reranker._
 val cohereReranker = RerankerFactory.cohere(
   apiKey = "your-api-key",
   model = "rerank-english-v3.0",  // or rerank-multilingual-v3.0
-  baseUrl = "https://api.cohere.ai"
+  baseUrl = "https://api.cohere.com"
 )
 
 // Passthrough reranker (no-op, preserves original order)
@@ -649,7 +649,7 @@ val passthrough = RerankerFactory.passthrough
 val config = RerankProviderConfig(
   apiKey = "your-api-key",
   model = "rerank-english-v3.0",
-  baseUrl = "https://api.cohere.ai"
+  baseUrl = "https://api.cohere.com"
 )
 val fromConfig = RerankerFactory.fromConfig(Some(config))
 ```
@@ -686,7 +686,7 @@ response.foreach { r =>
 | `RERANK_PROVIDER` | Provider: cohere, none | none |
 | `COHERE_API_KEY` | Cohere API key | - |
 | `COHERE_RERANK_MODEL` | Model name | rerank-english-v3.0 |
-| `COHERE_RERANK_BASE_URL` | API base URL | https://api.cohere.ai |
+| `COHERE_RERANK_BASE_URL` | API base URL | https://api.cohere.com |
 
 ---
 

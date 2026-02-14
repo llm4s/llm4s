@@ -446,3 +446,60 @@ object DeepSeekConfig {
     )
   }
 }
+
+case class CohereConfig(
+  apiKey: String,
+  model: String,
+  baseUrl: String,
+  contextWindow: Int,
+  reserveCompletion: Int
+) extends ProviderConfig {
+  override def toString: String =
+    s"CohereConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
+      s"reserveCompletion=$reserveCompletion)"
+}
+
+object CohereConfig {
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  val DEFAULT_BASE_URL: String = "https://api.cohere.com"
+
+  private val DefaultContextWindow     = 128000
+  private val DefaultReserveCompletion = 4096
+
+  private def getContextWindowForModel(modelName: String): (Int, Int) = {
+    val registryResult =
+      ModelRegistry
+        .lookup("cohere", modelName)
+        .toOption
+        .orElse(ModelRegistry.lookup(modelName).toOption)
+
+    registryResult match {
+      case Some(metadata) =>
+        val contextWindow = metadata.maxInputTokens.getOrElse(DefaultContextWindow)
+        val reserve       = metadata.maxOutputTokens.getOrElse(DefaultReserveCompletion)
+        logger.debug(s"Using ModelRegistry metadata for $modelName: context=$contextWindow, reserve=$reserve")
+        (contextWindow, reserve)
+      case None =>
+        logger.debug(s"Model $modelName not found in registry, using fallback values")
+        (DefaultContextWindow, DefaultReserveCompletion)
+    }
+  }
+
+  def fromValues(
+    modelName: String,
+    apiKey: String,
+    baseUrl: String
+  ): CohereConfig = {
+    require(apiKey.trim.nonEmpty, "Cohere apiKey must be non-empty")
+    require(baseUrl.trim.nonEmpty, "Cohere baseUrl must be non-empty")
+    val (cw, rc) = getContextWindowForModel(modelName)
+    CohereConfig(
+      apiKey = apiKey,
+      model = modelName,
+      baseUrl = baseUrl,
+      contextWindow = cw,
+      reserveCompletion = rc
+    )
+  }
+}

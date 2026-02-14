@@ -138,6 +138,7 @@ object PrometheusMetricsExample {
                 case _: org.llm4s.llmconnect.config.ZaiConfig       => "zai"
                 case _: org.llm4s.llmconnect.config.GeminiConfig    => "gemini"
                 case _: org.llm4s.llmconnect.config.DeepSeekConfig  => "deepseek"
+                case _: org.llm4s.llmconnect.config.CohereConfig    => "cohere"
               }
 
               println(s"Using model: ${config.model}")

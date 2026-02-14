@@ -215,6 +215,14 @@ DEEPSEEK_API_KEY=<your_deepseek_api_key>
 
 > **Migration Note:** The `LLMProvider.DeepSeek` case has been added to the sealed `LLMProvider` ADT. If you have exhaustive pattern matches on `LLMProvider`, add a `case LLMProvider.DeepSeek => ...` handler, or use a wildcard `case _ => ...` to gracefully handle future providers.
 
+Or Cohere:
+
+```
+LLM_MODEL=cohere/command-r
+COHERE_API_KEY=<your_cohere_api_key>
+COHERE_BASE_URL=https://api.cohere.com
+```
+
 This will allow you to run the non-containerized examples.
 
 ### Running the Examples
@@ -488,8 +496,8 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
     - **Ollama** (local): `OLLAMA_EMBEDDING_BASE_URL` (default: `http://localhost:11434`), `OLLAMA_EMBEDDING_MODEL`
 
 - Provider API keys and endpoints
-  - Keys: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `AZURE_API_BASE`, `AZURE_API_KEY`, `AZURE_API_VERSION`, `OLLAMA_BASE_URL`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`
-  - Type: concrete `ProviderConfig` (e.g., `OpenAIConfig`, `AnthropicConfig`, `AzureConfig`, `OllamaConfig`, `DeepSeekConfig`)
+  - Keys: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `AZURE_API_BASE`, `AZURE_API_KEY`, `AZURE_API_VERSION`, `OLLAMA_BASE_URL`, `GEMINI_BASE_URL`, `GOOGLE_API_KEY`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `COHERE_BASE_URL`, `COHERE_API_KEY`
+  - Type: concrete `ProviderConfig` (e.g., `OpenAIConfig`, `AnthropicConfig`, `AzureConfig`, `OllamaConfig`, `GeminiConfig`, `DeepSeekConfig`, `CohereConfig`)
   - Loader: `Llm4sConfig.provider()` → then provider-specific config constructors
 
 Tracing
