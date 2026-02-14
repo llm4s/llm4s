@@ -3,11 +3,10 @@ package org.llm4s.toolapi.builtin.search
 import org.llm4s.toolapi._
 import upickle.default._
 
-import java.net.URLEncoder
-import scala.util.Try
-import requests.Response
+import scala.util.control.Exception.catchingPromiscuously
 
 import org.llm4s.config.DuckDuckGoSearchToolConfig
+import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 
 /**
  * A related topic from web search.
@@ -142,7 +141,9 @@ object DuckDuckGoSearchTool {
    */
   def create(
     toolConfig: DuckDuckGoSearchToolConfig,
-    config: DuckDuckGoSearchConfig = DuckDuckGoSearchConfig()
+    config: DuckDuckGoSearchConfig = DuckDuckGoSearchConfig(),
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
+    restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
   ): ToolFunction[Map[String, Any], DuckDuckGoSearchResult] =
     ToolBuilder[Map[String, Any], DuckDuckGoSearchResult](
       name = "duckduckgo_search",
@@ -153,7 +154,7 @@ object DuckDuckGoSearchTool {
       for {
         searchQuery <- extractor.getString("search_query")
         _           <- if (searchQuery.trim.isEmpty) Left("search_query cannot be empty") else Right(())
-        result      <- search(toolConfig.apiUrl, searchQuery, config)
+        result      <- search(toolConfig.apiUrl, searchQuery, config, httpClient, restoreInterrupt)
       } yield result
     }.build()
 
@@ -162,36 +163,81 @@ object DuckDuckGoSearchTool {
   private def search(
     apiUrl: String,
     query: String,
-    config: DuckDuckGoSearchConfig
+    config: DuckDuckGoSearchConfig,
+    httpClient: Llm4sHttpClient,
+    restoreInterrupt: () => Unit
   ): Either[String, DuckDuckGoSearchResult] = {
 
-    val encodedQuery = URLEncoder.encode(query, "UTF-8")
-    val safeSearch   = if (config.safeSearch) SAFE_SEARCH else UNSAFE_SEARCH
-    val url =
-      s"$apiUrl?q=$encodedQuery&format=json&no_html=1&skip_disambig=0&t=llm4s&safesearch=$safeSearch"
-
-    val responseEither: Either[String, Response] =
-      Try {
-        requests.get(
-          url = url,
-          headers = Map(
-            "User-Agent" -> "llm4s-duckduckgo-search/1.0"
-          ),
-          readTimeout = config.timeoutMs
-        )
-      }.toEither.left.map(e => s"DuckDuckGo search request failed: ${e.getMessage}")
-
-    responseEither.flatMap(response =>
-      if (response.statusCode == 200) {
-        Try {
-          val json = ujson.read(response.text())
-          parseResults(query, json, config)
-
-        }.toEither.left.map(e => s"DuckDuckGo search JSON parsing failed: ${e.getMessage}")
-      } else {
-        Left(s"DuckDuckGo search returned status ${response.statusCode}: ${response.text()}")
-      }
+    val safeSearch = if (config.safeSearch) SAFE_SEARCH else UNSAFE_SEARCH
+    val params = Map(
+      "q"             -> query,
+      "format"        -> "json",
+      "no_html"       -> "1",
+      "skip_disambig" -> "0",
+      "t"             -> "llm4s",
+      "safesearch"    -> safeSearch
     )
+
+    // Use catchingPromiscuously instead of Try — Try skips fatal exceptions
+    // like InterruptedException, but we need to catch and handle them properly
+    val responseEither: Either[String, HttpResponse] =
+      catchingPromiscuously(classOf[Throwable])
+        .either {
+          httpClient.get(
+            url = apiUrl,
+            headers = Map(
+              "User-Agent" -> "llm4s-duckduckgo-search/1.0"
+            ),
+            params = params,
+            timeout = config.timeoutMs
+          )
+        }
+        .left
+        .map { e =>
+          // Sanitize exception messages to avoid leaking internal details
+          e match {
+            case _: InterruptedException =>
+              // Restore interrupt flag for proper thread shutdown and timeout semantics
+              restoreInterrupt()
+              "Search request was cancelled or interrupted."
+            case _: java.net.http.HttpTimeoutException =>
+              s"Search request timed out after ${config.timeoutMs}ms. Please try again with a simpler query."
+            case _: java.net.UnknownHostException =>
+              "Unable to reach search service. Please check network connectivity."
+            case _: java.net.ConnectException =>
+              "Failed to connect to search service. The service may be temporarily unavailable."
+            case _ =>
+              // Generic error without exposing stack traces or internal details
+              "Search request failed due to a network error. Please try again."
+          }
+        }
+
+    responseEither.flatMap { response =>
+      if (response.statusCode == 200) {
+        // Parse successful response
+        catchingPromiscuously(classOf[Throwable])
+          .either {
+            val json = ujson.read(response.body)
+            parseResults(query, json, config)
+          }
+          .left
+          .map { e =>
+            // Sanitize parsing errors
+            e match {
+              case _: InterruptedException =>
+                // Restore interrupt flag for proper thread shutdown and timeout semantics
+                restoreInterrupt()
+                "Response parsing was cancelled or interrupted."
+              case _: ujson.ParseException =>
+                "Failed to parse search results. The response format may be invalid."
+              case _ =>
+                "Failed to process search results. Please try again."
+            }
+          }
+      } else {
+        Left(s"DuckDuckGo search returned status ${response.statusCode}: ${response.body}")
+      }
+    }
   }
 
   /**

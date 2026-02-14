@@ -5,10 +5,8 @@ import upickle.default._
 import org.llm4s.config.ExaSearchToolConfig
 import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.types.Result
+import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import scala.util.control.Exception.catchingPromiscuously
-import java.net.http.{ HttpClient => JHttpClient, HttpRequest, HttpResponse => JHttpResponse }
-import java.net.URI
-import java.time.Duration
 
 sealed trait SearchType {
   def value: String
@@ -114,57 +112,6 @@ case class ExaSearchResult(
 
 object ExaSearchResult {
   implicit val exaSearchResultRW: ReadWriter[ExaSearchResult] = macroRW[ExaSearchResult]
-}
-
-/**
- * Simple HTTP response wrapper.
- */
-private[search] case class HttpResponse(
-  statusCode: Int,
-  body: String
-)
-
-/**
- * Abstraction for HTTP client to enable dependency injection and testing.
- */
-private[search] trait BaseHttpClient {
-  def post(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: Int
-  ): HttpResponse
-}
-
-/**
- * Java HttpClient implementation using JDK 11+ built-in HTTP client.
- */
-private[search] class JavaHttpClient extends BaseHttpClient {
-  private val client = JHttpClient.newHttpClient()
-
-  override def post(
-    url: String,
-    headers: Map[String, String],
-    body: String,
-    timeout: Int
-  ): HttpResponse = {
-    val requestBuilder = HttpRequest
-      .newBuilder()
-      .uri(URI.create(url))
-      .timeout(Duration.ofMillis(timeout.toLong))
-      .POST(HttpRequest.BodyPublishers.ofString(body))
-
-    headers.foreach { case (key, value) =>
-      requestBuilder.header(key, value)
-    }
-
-    val response = client.send(
-      requestBuilder.build(),
-      JHttpResponse.BodyHandlers.ofString()
-    )
-
-    HttpResponse(response.statusCode(), response.body())
-  }
 }
 
 object ExaSearchTool {
@@ -345,7 +292,7 @@ object ExaSearchTool {
   def create(
     toolConfig: ExaSearchToolConfig,
     config: Option[ExaSearchConfig] = None,
-    httpClient: BaseHttpClient = new JavaHttpClient(),
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
     restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
   ): Result[ToolFunction[Map[String, Any], ExaSearchResult]] =
     // Validate entire config using shared validators
@@ -402,7 +349,7 @@ object ExaSearchTool {
     apiKey: String,
     apiUrl: String = "https://api.exa.ai",
     config: Option[ExaSearchConfig] = None,
-    httpClient: BaseHttpClient = new JavaHttpClient(),
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
     restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
   ): Result[ToolFunction[Map[String, Any], ExaSearchResult]] =
     // Validate only the parameters this function receives
@@ -425,7 +372,7 @@ object ExaSearchTool {
     query: String,
     config: ExaSearchConfig,
     toolConfig: ExaSearchToolConfig,
-    httpClient: BaseHttpClient,
+    httpClient: Llm4sHttpClient,
     restoreInterrupt: () => Unit
   ): Either[String, ExaSearchResult] = {
 
