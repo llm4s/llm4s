@@ -449,8 +449,15 @@ class OpenAIClient private (
       )
       .getOrElse(Seq.empty)
 
+  /**
+   * Parse argument JSON from a string, returning an empty object if parsing fails.
+   * This avoids null semantics in Scala code by using an Option-compatible pattern.
+   *
+   * @param raw Raw JSON string to parse
+   * @return Parsed JSON, or empty object if parsing fails
+   */
   private def parseStreamingArguments(raw: String): ujson.Value =
-    if (raw.isEmpty) ujson.Null else Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
+    if (raw.isEmpty) ujson.Obj() else Try(ujson.read(raw)).getOrElse(ujson.Obj())
 
   /**
    * Converts llm4s Conversation to OpenAI ChatRequestMessage format.
@@ -547,7 +554,7 @@ class OpenAIClient private (
           ToolCall(
             id = ftc.getId,
             name = ftc.getFunction.getName,
-            arguments = Try(ujson.read(ftc.getFunction.getArguments)).getOrElse(ujson.Null)
+            arguments = Try(ujson.read(ftc.getFunction.getArguments)).getOrElse(ujson.Obj())
           )
       })
       .getOrElse(Seq.empty)

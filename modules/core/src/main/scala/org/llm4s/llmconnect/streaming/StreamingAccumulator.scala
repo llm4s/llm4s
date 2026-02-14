@@ -92,7 +92,7 @@ class StreamingAccumulator {
     val completed = toolCalls.toSeq
     val partial = partialToolCalls.values.map { p =>
       val args =
-        if (p.argumentsBuilder.isEmpty) ujson.Null
+        if (p.argumentsBuilder.isEmpty) ujson.Obj()
         else {
           val raw = p.argumentsBuilder.toString
           Try(ujson.read(raw)).getOrElse(ujson.Str(raw))

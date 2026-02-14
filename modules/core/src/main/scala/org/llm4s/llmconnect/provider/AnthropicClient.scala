@@ -238,7 +238,7 @@ curl https://api.anthropic.com/v1/messages \
                     val chunk = StreamedChunk(
                       id = currentMessageId.getOrElse(""),
                       content = None,
-                      toolCall = Some(ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = ujson.Null)),
+                      toolCall = Some(ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = ujson.Obj())),
                       finishReason = None
                     )
                     accumulator.addChunk(chunk)
