@@ -38,8 +38,10 @@ class CohereClient(
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics("cohere", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    "cohere",
+    config.model,
+    operation = validateNotClosed.flatMap { _ =>
       buildChatRequest(conversation, options).flatMap { requestBody =>
         val request = HttpRequest
           .newBuilder()
@@ -63,12 +65,13 @@ class CohereClient(
           }
         }
       }
-    }
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
+    },
+    extractUsage = (completion: Completion) => completion.usage,
+    extractCost = (completion: Completion) =>
+      completion.usage.flatMap { u =>
+        org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
+          meta.pricing.estimateCost(u.promptTokens, u.completionTokens)
+        }
       }
   )
 
