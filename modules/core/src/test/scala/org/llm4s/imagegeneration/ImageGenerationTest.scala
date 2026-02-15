@@ -1,9 +1,13 @@
 package org.llm4s.imagegeneration
 
+import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import scala.concurrent.{ Future, ExecutionContext }
+import scala.concurrent.ExecutionContext.Implicits.global
 
-import java.nio.file.Files
+import org.llm4s.imagegeneration.provider.VertexAIClient
+import java.nio.file.{ Files, Path }
 import java.util.Base64
 
 /**
@@ -12,7 +16,7 @@ import java.util.Base64
  * Includes unit tests for models, integration tests for the factory,
  * and a mock implementation for testing without a real server.
  */
-class ImageGenerationTest extends AnyFunSuite with Matchers {
+class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
 
   // ===== MOCK CLIENT FOR TESTING =====
 
@@ -58,6 +62,28 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       }
     }
 
+    override def editImage(
+      imagePath: Path,
+      prompt: String,
+      maskPath: Option[Path] = None,
+      options: ImageEditOptions = ImageEditOptions()
+    ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+      if (prompt.trim.isEmpty) return Left(ValidationError("Prompt cannot be empty"))
+
+      // Return a mock edited image
+      Right(
+        Seq(
+          GeneratedImage(
+            data = mockImageData,
+            format = ImageFormat.PNG,
+            size = options.size.getOrElse(ImageSize.Square512),
+            prompt = prompt,
+            seed = None
+          )
+        )
+      )
+    }
+
     override def health(): Either[ImageGenerationError, ServiceStatus] =
       Right(
         ServiceStatus(
@@ -67,6 +93,27 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
           averageGenerationTime = Some(100)
         )
       )
+
+    override def generateImageAsync(
+      prompt: String,
+      options: ImageGenerationOptions = ImageGenerationOptions()
+    )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+      Future.successful(generateImage(prompt, options))
+
+    override def generateImagesAsync(
+      prompt: String,
+      count: Int,
+      options: ImageGenerationOptions = ImageGenerationOptions()
+    )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+      Future.successful(generateImages(prompt, count, options))
+
+    override def editImageAsync(
+      imagePath: Path,
+      prompt: String,
+      maskPath: Option[Path] = None,
+      options: ImageEditOptions = ImageEditOptions()
+    )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+      Future.successful(editImage(imagePath, prompt, maskPath, options))
   }
 
   // ===== MODEL UNIT TESTS =====
@@ -79,6 +126,12 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     ImageSize.Landscape768x512.width shouldBe 768
     ImageSize.Landscape768x512.height shouldBe 512
     ImageSize.Landscape768x512.description shouldBe "768x512"
+
+    ImageSize.Landscape1536x1024.width shouldBe 1536
+    ImageSize.Landscape1536x1024.height shouldBe 1024
+
+    ImageSize.Portrait1024x1536.width shouldBe 1024
+    ImageSize.Portrait1024x1536.height shouldBe 1536
   }
 
   test("ImageFormat provides correct metadata") {
@@ -98,6 +151,22 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     options.guidanceScale shouldBe 7.5
     options.inferenceSteps shouldBe 20
     options.negativePrompt shouldBe None
+
+    // New fields
+    options.quality shouldBe None
+    options.style shouldBe None
+    options.responseFormat shouldBe None
+    options.user shouldBe None
+  }
+
+  test("ImageEditOptions has sensible defaults") {
+    val options = ImageEditOptions()
+    options.size shouldBe None
+    options.n shouldBe 1
+    options.responseFormat shouldBe None
+    options.quality shouldBe None
+    options.strength shouldBe None
+    options.user shouldBe None
   }
 
   test("GeneratedImage decodes base64 data correctly") {
@@ -185,6 +254,11 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.OpenAIImageClient) => }
   }
 
+  test("openAIClient factory method returns correct type") {
+    val client = ImageGeneration.openAIClient(apiKey = "test-key")
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.OpenAIImageClient) => }
+  }
+
   test("Config objects have correct default values") {
     val sdConfig = StableDiffusionConfig()
     sdConfig.baseUrl shouldBe "http://localhost:7860"
@@ -196,6 +270,34 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     hfConfig.model shouldBe "stabilityai/stable-diffusion-xl-base-1.0"
     hfConfig.timeout shouldBe 120000
     hfConfig.provider shouldBe ImageGenerationProvider.HuggingFace
+
+    val openAIConfig = OpenAIConfig(apiKey = "test-key")
+    openAIConfig.model shouldBe "gpt-image-1"
+    openAIConfig.provider shouldBe ImageGenerationProvider.DALLE
+
+    val vertexConfig = VertexAIConfig(projectId = "test-project", location = "us-central1", accessToken = "test-token")
+    vertexConfig.location shouldBe "us-central1"
+    vertexConfig.model shouldBe "imagegeneration@005"
+    vertexConfig.accessToken shouldBe "test-token"
+    vertexConfig.timeout shouldBe 30000
+    vertexConfig.provider shouldBe ImageGenerationProvider.VertexAI
+  }
+
+  test("ImageGeneration creates correct client for VertexAI config") {
+    val vertexConfig = VertexAIConfig(projectId = "test-project", location = "us-central1", accessToken = "test-token")
+    val client       = ImageGeneration.client(vertexConfig)
+    client.isRight shouldBe true
+    client.map(_.isInstanceOf[VertexAIClient]) shouldBe Right(true)
+  }
+
+  test("VertexAIClient should be created via factory method with config") {
+    val client = ImageGeneration.vertexAIClient(
+      projectId = "test-project",
+      location = "us-central1",
+      accessToken = "test-token"
+    )
+    client.isRight shouldBe true
+    client.map(_.isInstanceOf[VertexAIClient]) shouldBe Right(true)
   }
 
   test("Config objects can be customized") {
@@ -321,6 +423,23 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     }
   }
 
+  test("Mock client edits image successfully") {
+    val tempFile = Files.createTempFile("test_input", ".png")
+    val result   = mockClient.editImage(tempFile, "edited prompt")
+
+    try
+      result match {
+        case Right(images) =>
+          images.head.prompt shouldBe "edited prompt"
+          images.head.size shouldBe ImageSize.Square512
+
+        case Left(error) =>
+          fail(s"Expected successful edit, but got error: $error")
+      }
+    finally
+      Files.deleteIfExists(tempFile)
+  }
+
   // ===== ERROR HANDLING TESTS =====
 
   test("Error types have correct messages") {
@@ -349,5 +468,44 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       case Left(_)      => succeed
       case Right(value) => fail(s"Expected failure but got: $value")
     }
+  }
+
+  // ===== ASYNC TESTS =====
+
+  test("generateImageAsync returns Future[Either]") {
+    val futureResult = mockClient.generateImageAsync("Async test")
+
+    whenReady(futureResult) { result =>
+      result shouldBe a[Right[?, ?]]
+      result.map { image =>
+        image.prompt shouldBe "Async test"
+        image.size shouldBe ImageSize.Square512
+      }
+    }
+  }
+
+  test("generateImagesAsync returns Future[Either]") {
+    val futureResult = mockClient.generateImagesAsync("Async multiple", 2)
+
+    whenReady(futureResult) { result =>
+      result shouldBe a[Right[?, ?]]
+      result.map { images =>
+        (images should have).length(2)
+        images.head.prompt shouldBe "Async multiple"
+      }
+    }
+  }
+
+  test("editImageAsync returns Future[Either]") {
+    val tempFile = Files.createTempFile("async_edit", ".png")
+    try {
+      val futureResult = mockClient.editImageAsync(tempFile, "Async edit")
+
+      whenReady(futureResult) { result =>
+        result shouldBe a[Right[?, ?]]
+        result.map(images => images.head.prompt shouldBe "Async edit")
+      }
+    } finally
+      Files.deleteIfExists(tempFile)
   }
 }
