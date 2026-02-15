@@ -74,7 +74,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
       Right(
         Seq(
           GeneratedImage(
-            data = mockImageData,
+            data = Some(mockImageData),
             format = ImageFormat.PNG,
             size = options.size.getOrElse(ImageSize.Square512),
             prompt = prompt,
@@ -422,24 +422,6 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
     validationError.message shouldBe "Invalid prompt"
     unknownError.message shouldBe "Something went wrong"
   }
-<<<<<<< HEAD
-=======
-
-  // ===== INTEGRATION TESTS =====
-
-  test("generateWithStableDiffusion handles connection errors gracefully") {
-    // This will fail because no real SD server is running at this port
-    val result = ImageGeneration.generateWithStableDiffusion(
-      "test prompt",
-      baseUrl = "http://localhost:99999"
-    )
-
-    result match {
-      case Left(_)      => succeed
-      case Right(value) => fail(s"Expected failure but got: $value")
-    }
-  }
-
   // ===== ASYNC TESTS =====
 
   test("generateImageAsync returns Future[Either]") {
@@ -478,5 +460,4 @@ class ImageGenerationTest extends AnyFunSuite with Matchers with ScalaFutures {
     } finally
       Files.deleteIfExists(tempFile)
   }
->>>>>>> 60f15f8 ([FEATURE] Add Vertex AI Image Generation client)
 }

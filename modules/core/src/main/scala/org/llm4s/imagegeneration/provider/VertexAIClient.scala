@@ -224,7 +224,7 @@ class VertexAIClient(config: VertexAIConfig, httpClient: HttpClient) extends Ima
             // Vertex AI returns bytesBase64Encoded for each image
             prediction.obj.get("bytesBase64Encoded").map { imageData =>
               GeneratedImage(
-                data = imageData.str,
+                data = Some(imageData.str),
                 format = ImageFormat.PNG,
                 size = options.size,
                 prompt = prompt,

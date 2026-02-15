@@ -127,8 +127,8 @@ class VertexAIClientTest extends AnyFunSuite with Matchers with ScalaFutures {
     )
 
     images should have size 2
-    images(0).data shouldBe "img1"
-    images(1).data shouldBe "img2"
+    images(0).data shouldBe Some("img1")
+    images(1).data shouldBe Some("img2")
   }
 
   test("generateImages handles empty predictions") {
