@@ -57,7 +57,7 @@ object RerankerFactory {
    *
    * @param apiKey Cohere API key
    * @param model Reranking model (default: rerank-english-v3.0)
-   * @param baseUrl API base URL (default: https://api.cohere.ai)
+   * @param baseUrl API base URL (default: https://api.cohere.com)
    * @return Cohere reranker
    */
   def cohere(

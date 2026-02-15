@@ -48,6 +48,7 @@ import org.slf4j.LoggerFactory
  * - '''Anthropic''': `LLM_MODEL=anthropic/claude-3-5-sonnet-latest`, requires `ANTHROPIC_API_KEY`
  * - '''Azure''': `LLM_MODEL=azure/<deployment>`, requires `AZURE_API_KEY` and `AZURE_API_BASE`
  * - '''Ollama''': `LLM_MODEL=ollama/llama2`, no API key needed (local)
+ * - '''Cohere''': `LLM_MODEL=cohere/command-r`, requires `COHERE_API_KEY`
  *
  * == Troubleshooting ==
  * If you see configuration errors, this example will guide you through
