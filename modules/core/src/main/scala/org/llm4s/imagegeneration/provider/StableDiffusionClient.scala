@@ -8,6 +8,16 @@ import java.util.Base64
 import scala.util.Try
 import scala.concurrent.{ Future, ExecutionContext, blocking }
 
+object StableDiffusionClient {
+
+  /*
+   * Dedicated ExecutionContext for blocking I/O operations.
+   * This ensures we don't block the caller's ExecutionContext (e.g. standard global).
+   */
+  private[imagegeneration] val blockingEc: ExecutionContext =
+    ImageGenerationExecutionContext.bounded("stable-diffusion-blocking")
+}
+
 /**
  * Represents the JSON payload for the Stable Diffusion WebUI API's text-to-image endpoint.
  * This case class ensures type-safe construction of the request body.
@@ -86,7 +96,9 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, GeneratedImage] =
-    generateImages(prompt, 1, options).map(_.head)
+    generateImages(prompt, 1, options).flatMap(
+      _.headOption.toRight(ValidationError("No image returned from Stable Diffusion"))
+    )
 
   override def generateImages(
     prompt: String,
@@ -108,7 +120,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
       blocking {
         generateImage(prompt, options)
       }
-    }
+    }(StableDiffusionClient.blockingEc)
 
   override def generateImagesAsync(
     prompt: String,
@@ -119,7 +131,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
       blocking {
         generateImages(prompt, count, options)
       }
-    }
+    }(StableDiffusionClient.blockingEc)
 
   override def editImageAsync(
     imagePath: Path,
@@ -131,7 +143,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
       blocking {
         editImage(imagePath, prompt, maskPath, options)
       }
-    }
+    }(StableDiffusionClient.blockingEc)
 
   override def editImage(
     imagePath: Path,
