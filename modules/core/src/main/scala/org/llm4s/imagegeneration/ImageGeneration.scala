@@ -2,12 +2,7 @@ package org.llm4s.imagegeneration
 
 import java.time.Instant
 import java.nio.file.Path
-import org.llm4s.imagegeneration.provider.{
-  HttpClient,
-  HuggingFaceClient,
-  OpenAIImageClient,
-  VertexAIClient
-}
+import org.llm4s.imagegeneration.provider.{ HttpClient, HuggingFaceClient, OpenAIImageClient, VertexAIClient }
 
 import scala.annotation.unused
 import scala.util.Try
@@ -173,9 +168,9 @@ case class GeneratedImage(
 sealed trait ImageGenerationProvider
 
 object ImageGenerationProvider {
-  case object DALLE           extends ImageGenerationProvider
-  case object HuggingFace     extends ImageGenerationProvider
-  case object VertexAI        extends ImageGenerationProvider
+  case object DALLE       extends ImageGenerationProvider
+  case object HuggingFace extends ImageGenerationProvider
+  case object VertexAI    extends ImageGenerationProvider
 }
 
 trait ImageGenerationConfig {

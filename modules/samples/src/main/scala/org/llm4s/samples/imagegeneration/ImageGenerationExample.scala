@@ -120,7 +120,7 @@ object ImageGenerationExample {
       case Left(error) =>
         error match {
           case AuthenticationError(msg) =>
-             logger.info(s"Expected authentication error: $msg")
+            logger.info(s"Expected authentication error: $msg")
           case ServiceError(msg, code) =>
             logger.info(s"Expected service error: $msg (code: $code)")
           case UnknownError(throwable) =>
@@ -136,7 +136,9 @@ object ImageGenerationExample {
       case Right(status) =>
         logger.info(s"Service status: ${status.status} - ${status.message}")
       case Left(error) =>
-        logger.info(s"Health check failed as expected (OpenAI doesn't support generic health check yet): ${error.message}")
+        logger.info(
+          s"Health check failed as expected (OpenAI doesn't support generic health check yet): ${error.message}"
+        )
     }
   }
 }

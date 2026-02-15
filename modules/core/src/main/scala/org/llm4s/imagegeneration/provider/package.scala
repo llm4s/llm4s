@@ -1,6 +1,6 @@
 package org.llm4s.imagegeneration
 
-import java.util.concurrent.{Executors, ThreadFactory}
+import java.util.concurrent.{ Executors, ThreadFactory }
 import scala.concurrent.ExecutionContext
 
 package object provider {
