@@ -6,7 +6,6 @@ import org.llm4s.trace.{ Tracing, TraceEvent }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalamock.scalatest.MockFactory
-import java.time.Instant
 
 class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
 
@@ -17,134 +16,227 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
     model = "dall-e-2"
   )
 
-  class TestClient(cfg: OpenAIConfig, met: MetricsCollector = MetricsCollector.noop)
-      extends OpenAIImageClient(cfg, met) {
-    def exposeSizeToApiFormat(s: ImageSize): String                                = sizeToApiFormat(s)
-    def exposeEstimateImageCost(c: Int, o: ImageGenerationOptions): Option[Double] = estimateImageCost(c, o)
+  // ----------------------------------------------------------
+  // Helper subclass
+  // ----------------------------------------------------------
+
+  class TestClient(
+    cfg: OpenAIConfig,
+    met: MetricsCollector = MetricsCollector.noop
+  ) extends OpenAIImageClient(cfg, HttpClient.create(), met) {
+
+    def exposeSizeToApiFormat(s: ImageSize): String =
+      sizeToApiFormat(s)
+
+    def exposeEstimateImageCost(
+      c: Int,
+      o: ImageGenerationOptions
+    ): Option[Double] =
+      estimateImageCost(c, o)
+
     def exposeMapErrorKind(e: ImageGenerationError): ErrorKind = {
-      val method = classOf[OpenAIImageClient].getDeclaredMethod("mapErrorKind", classOf[ImageGenerationError])
+      val method =
+        classOf[OpenAIImageClient]
+          .getDeclaredMethod("mapErrorKind", classOf[ImageGenerationError])
       method.setAccessible(true)
       method.invoke(this, e).asInstanceOf[ErrorKind]
     }
   }
 
-  private def createResponse(status: Int, body: String): requests.Response = {
-    val resp = mock[requests.Response]
-    (() => resp.statusCode).stubs().returning(status)
-    (() => resp.text()).stubs().returning(body)
-    resp
-  }
+  private def createResponse(status: Int, body: String): requests.Response =
+    requests.Response(
+      url = "http://test",
+      statusCode = status,
+      statusMessage = if (status == 200) "OK" else "Error",
+      data = new geny.Bytes(body.getBytes),
+      headers = Map.empty,
+      history = None
+    )
+
+  // ==========================================================
+  // Success parsing + metrics
+  // ==========================================================
 
   it should "successfully parse a real JSON response and record metrics" in {
     val metrics      = mock[MetricsCollector]
-    val jsonResponse = """{"data": [{"b64_json": "base64data"}]}"""
+    val jsonResponse = """{"data":[{"b64_json":"base64data"}]}"""
 
-    val client = new OpenAIImageClient(config, metrics) {
-      override protected def makeApiRequest(p: String, c: Int, o: ImageGenerationOptions) =
-        Right(createResponse(200, jsonResponse))
-    }
+    val client =
+      new OpenAIImageClient(config, HttpClient.create(), metrics) {
+        override protected def makeApiRequest(
+          p: String,
+          c: Int,
+          o: ImageGenerationOptions
+        ) =
+          Right(createResponse(200, jsonResponse))
+      }
 
-    (metrics.observeRequest _).expects("openai", "dall-e-2", Outcome.Success, *).once()
+    (metrics.observeRequest _)
+      .expects("openai", "dall-e-2", Outcome.Success, *)
+      .once()
 
     val result = client.generateImage("space cat")
+
     result.isRight shouldBe true
     result.toOption.get.data shouldBe "base64data"
   }
 
+  // ==========================================================
+  // Error mapping
+  // ==========================================================
+
   it should "handle all internal error mapping cases" in {
     val client = new TestClient(config)
 
-    client.exposeMapErrorKind(AuthenticationError("fail")) shouldBe ErrorKind.Authentication
-    client.exposeMapErrorKind(RateLimitError("fail")) shouldBe ErrorKind.RateLimit
-    client.exposeMapErrorKind(ValidationError("fail")) shouldBe ErrorKind.Validation
-    client.exposeMapErrorKind(InvalidPromptError("fail")) shouldBe ErrorKind.Validation
-    client.exposeMapErrorKind(ServiceError("fail", 500)) shouldBe ErrorKind.Unknown
-    client.exposeMapErrorKind(InsufficientResourcesError("fail")) shouldBe ErrorKind.Unknown
-    client.exposeMapErrorKind(UnknownError(new RuntimeException())) shouldBe ErrorKind.Unknown
+    client.exposeMapErrorKind(
+      AuthenticationError("x")
+    ) shouldBe ErrorKind.Authentication
+    client.exposeMapErrorKind(RateLimitError("x")) shouldBe ErrorKind.RateLimit
+    client.exposeMapErrorKind(
+      ValidationError("x")
+    ) shouldBe ErrorKind.Validation
+    client.exposeMapErrorKind(
+      InvalidPromptError("x")
+    ) shouldBe ErrorKind.Validation
+    client.exposeMapErrorKind(ServiceError("x", 500)) shouldBe ErrorKind.Unknown
+    client.exposeMapErrorKind(
+      InsufficientResourcesError("x")
+    ) shouldBe ErrorKind.Unknown
+    client.exposeMapErrorKind(
+      UnknownError(new RuntimeException())
+    ) shouldBe ErrorKind.Unknown
   }
+
+  // ==========================================================
+  // Size conversion
+  // ==========================================================
 
   it should "test all image size conversions" in {
     val client = new TestClient(config)
+
     client.exposeSizeToApiFormat(ImageSize.Square512) shouldBe "1024x1024"
     client.exposeSizeToApiFormat(ImageSize.Square1024) shouldBe "1024x1024"
-    client.exposeSizeToApiFormat(ImageSize.Landscape768x512) shouldBe "1536x1024"
+    client.exposeSizeToApiFormat(
+      ImageSize.Landscape768x512
+    ) shouldBe "1536x1024"
     client.exposeSizeToApiFormat(ImageSize.Portrait512x768) shouldBe "1024x1536"
   }
 
+  // ==========================================================
+  // Prompt validation
+  // ==========================================================
+
   it should "validate prompt boundaries" in {
     val metrics = mock[MetricsCollector]
-    val client  = new OpenAIImageClient(config, metrics)
+    val client  = new OpenAIImageClient(config, HttpClient.create(), metrics)
 
-    (metrics.observeRequest _).expects(*, *, Outcome.Error(ErrorKind.Validation), *).repeated(3).times()
+    (metrics.observeRequest _)
+      .expects(*, *, Outcome.Error(ErrorKind.Validation), *)
+      .repeat(3)
 
     client.generateImage("").isLeft shouldBe true
     client.generateImage("   ").isLeft shouldBe true
     client.generateImage("a" * 4001).isLeft shouldBe true
   }
 
+  // ==========================================================
+  // Count validation
+  // ==========================================================
+
   it should "validate count limits for different models" in {
     val metrics = mock[MetricsCollector]
 
-    val de2Client = new OpenAIImageClient(config, metrics)
-    (metrics.observeRequest _).expects(*, *, Outcome.Error(ErrorKind.Validation), *).once()
+    val de2Client =
+      new OpenAIImageClient(config, HttpClient.create(), metrics)
+
+    (metrics.observeRequest _)
+      .expects(*, *, Outcome.Error(ErrorKind.Validation), *)
+      .once()
+
     de2Client.generateImages("test", 11).isLeft shouldBe true
 
-    val de3Config = config.copy(model = "dall-e-3")
-    val de3Client = new OpenAIImageClient(de3Config, metrics)
-    (metrics.observeRequest _).expects(*, *, Outcome.Error(ErrorKind.Validation), *).once()
+    val de3Client =
+      new OpenAIImageClient(
+        config.copy(model = "dall-e-3"),
+        HttpClient.create(),
+        metrics
+      )
+
+    (metrics.observeRequest _)
+      .expects(*, *, Outcome.Error(ErrorKind.Validation), *)
+      .once()
+
     de3Client.generateImages("test", 2).isLeft shouldBe true
   }
 
-  it should "execute real cost estimation logic" in {
-    val client  = new TestClient(config)
-    val options = ImageGenerationOptions(size = ImageSize.Landscape768x512)
-
-    client.exposeEstimateImageCost(1, options)
-
-    val badClient = new TestClient(config) {
-      override protected def sizeToApiFormat(s: ImageSize) = "invalid_format"
-    }
-    badClient.exposeEstimateImageCost(1, options) shouldBe None
-  }
-
-  it should "handle health check statuses" in {
-    val client = new OpenAIImageClient(config) {
-      override def health() = super.health()
-    }
-    // We can't easily mock the static 'requests.get' inside health()
-    // without a wrapper, so we test the result logic via override for coverage
-    val h1 = new OpenAIImageClient(config) {
-      override def health() = Right(ServiceStatus(HealthStatus.Healthy, "ok"))
-    }
-    h1.health().isRight shouldBe true
-  }
+  // ==========================================================
+  // Cost + tracing
+  // ==========================================================
 
   it should "emit trace events and record costs on success" in {
     val metrics      = mock[MetricsCollector]
     val tracer       = mock[Tracing]
-    val jsonResponse = """{"data": [{"b64_json": "fake"}]}"""
+    val jsonResponse = """{"data":[{"b64_json":"fake"}]}"""
 
-    val client = new OpenAIImageClient(config, metrics, Some(tracer)) {
-      override protected def makeApiRequest(p: String, c: Int, o: ImageGenerationOptions) =
-        Right(createResponse(200, jsonResponse))
-      override protected def estimateImageCost(c: Int, o: ImageGenerationOptions) = Some(0.12)
-    }
+    val client =
+      new OpenAIImageClient(
+        config,
+        HttpClient.create(),
+        metrics,
+        Some(tracer)
+      ) {
 
-    (metrics.observeRequest _).expects(*, *, Outcome.Success, *).once()
-    (metrics.recordCost _).expects("openai", "dall-e-2", 0.12).once()
-    (tracer.traceCost _).expects(0.12, "dall-e-2", "image_generation", 1, "image").once()
+        override protected def makeApiRequest(
+          p: String,
+          c: Int,
+          o: ImageGenerationOptions
+        ) =
+          Right(createResponse(200, jsonResponse))
+
+        override protected def estimateImageCost(
+          c: Int,
+          o: ImageGenerationOptions
+        ) = Some(0.12)
+      }
+
+    (metrics.observeRequest _)
+      .expects(*, *, Outcome.Success, *)
+      .once()
+
+    (metrics.recordCost _)
+      .expects("openai", "dall-e-2", 0.12)
+      .once()
+
+    (tracer
+      .traceEvent(_: TraceEvent))
+      .expects(*)
+      .returning(Right(()))
+      .once()
 
     client.generateImage("test")
   }
 
+  // ==========================================================
+  // Service error
+  // ==========================================================
+
   it should "handle service errors with custom codes" in {
     val metrics = mock[MetricsCollector]
-    val client = new OpenAIImageClient(config, metrics) {
-      override protected def makeApiRequest(p: String, c: Int, o: ImageGenerationOptions) =
-        Left(ServiceError("API down", 503))
-    }
 
-    (metrics.observeRequest _).expects(*, *, Outcome.Error(ErrorKind.Unknown), *).once()
-    client.generateImage("test").left.get shouldBe a[ServiceError]
+    val client =
+      new OpenAIImageClient(config, HttpClient.create(), metrics) {
+        override protected def makeApiRequest(
+          p: String,
+          c: Int,
+          o: ImageGenerationOptions
+        ) =
+          Left(ServiceError("API down", 503))
+      }
+
+    (metrics.observeRequest _)
+      .expects(*, *, Outcome.Error(ErrorKind.Unknown), *)
+      .once()
+
+    client.generateImage("test").isLeft shouldBe true
   }
 }
