@@ -38,39 +38,38 @@ class CohereClient(
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics("cohere", config.model) {
-    validateNotClosed.flatMap { _ =>
-      buildChatRequest(conversation, options).flatMap { requestBody =>
-        val request = HttpRequest
-          .newBuilder()
-          .uri(URI.create(s"${config.baseUrl}/v2/chat"))
-          .header("Content-Type", "application/json")
-          .header("Authorization", s"Bearer ${config.apiKey}")
-          .timeout(Duration.ofMinutes(2))
-          .POST(HttpRequest.BodyPublishers.ofString(requestBody.render(), StandardCharsets.UTF_8))
-          .build()
+  ): Result[Completion] =
+    withMetrics(
+      provider = "cohere",
+      model = config.model,
+      operation = validateNotClosed.flatMap { _ =>
+        buildChatRequest(conversation, options).flatMap { requestBody =>
+          val request = HttpRequest
+            .newBuilder()
+            .uri(URI.create(s"${config.baseUrl}/v2/chat"))
+            .header("Content-Type", "application/json")
+            .header("Authorization", s"Bearer ${config.apiKey}")
+            .timeout(Duration.ofMinutes(2))
+            .POST(HttpRequest.BodyPublishers.ofString(requestBody.render(), StandardCharsets.UTF_8))
+            .build()
 
-        val attempt = Try {
-          httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
-        }.toEither.left.map(_.toLLMError)
+          val attempt = Try {
+            httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+          }.toEither.left.map(_.toLLMError)
 
-        attempt.flatMap { response =>
-          val status = response.statusCode()
-          if (status >= 200 && status < 300) {
-            parseChatResponse(response.body())
-          } else {
-            handleErrorResponse(status, response.body())
+          attempt.flatMap { response =>
+            val status = response.statusCode()
+            if (status >= 200 && status < 300) {
+              parseChatResponse(response.body())
+            } else {
+              handleErrorResponse(status, response.body())
+            }
           }
         }
-      }
-    }
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
-  )
+      },
+      extractUsage = (c: Completion) => c.usage,
+      extractCost = (c: Completion) => c.estimatedCost
+    )
 
   override def streamComplete(
     conversation: Conversation,
@@ -201,6 +200,8 @@ class CohereClient(
           }
         }
 
+      val costOpt = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
+
       val assistantMessage =
         AssistantMessage(contentOpt = if (text.nonEmpty) Some(text) else None, toolCalls = Seq.empty)
 
@@ -217,7 +218,8 @@ class CohereClient(
               message = assistantMessage,
               toolCalls = List.empty,
               usage = usageOpt,
-              thinking = None
+              thinking = None,
+              estimatedCost = costOpt
             )
           )
       }
