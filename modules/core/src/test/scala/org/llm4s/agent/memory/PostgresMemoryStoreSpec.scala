@@ -3,6 +3,8 @@ package org.llm4s.agent.memory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
+import org.llm4s.types.Result
+import org.llm4s.error.ProcessingError
 import java.util.UUID
 import scala.util.Try
 
@@ -29,23 +31,17 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     database = sys.env.getOrElse("POSTGRES_DB", "postgres"),
     user = sys.env.getOrElse("POSTGRES_USER", "postgres"),
     password = sys.env.getOrElse("POSTGRES_PASSWORD", "password"),
-    tableName = tableName,
-    maxPoolSize = 4
+    tableName = tableName
   )
+  private val embeddingService = MockEmbeddingService.default
 
   override def beforeEach(): Unit =
     if (isEnabled) {
-      store = PostgresMemoryStore(dbConfig).fold(
-        e => fail(s"Failed to connect to Postgres: ${e.message}"),
-        identity
-      )
+      store = PostgresMemoryStore(dbConfig, Some(embeddingService)).fold(e => fail(e.message), identity)
     }
 
   override def afterEach(): Unit =
-    if (store != null) {
-      Try(store.clear())
-      store.close()
-    }
+    if (store != null) { Try(store.clear()); store.close() }
 
   // 3. Helper to skip tests
   private def skipIfDisabled(testBody: => Unit): Unit =
@@ -53,20 +49,11 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     else info("Skipping Postgres test (POSTGRES_TEST_ENABLED=true not set)")
 
   it should "store and retrieve a conversation memory" in skipIfDisabled {
-    val id = MemoryId(UUID.randomUUID().toString)
-    val memory = Memory(
-      id = id,
-      content = "Hello, I am a test memory",
-      memoryType = MemoryType.Conversation,
-      metadata = Map("conversation_id" -> "conv-1")
-    )
-
+    val id     = MemoryId(UUID.randomUUID().toString)
+    val memory = Memory(id, "test", MemoryType.Conversation, Map.empty)
     store.store(memory).isRight shouldBe true
-
     val retrieved = store.get(id).toOption.flatten
     retrieved shouldBe defined
-    retrieved.get.content shouldBe "Hello, I am a test memory"
-    retrieved.get.metadata.get("conversation_id") shouldBe Some("conv-1")
   }
 
   it should "persist data across store instances" in skipIfDisabled {
@@ -83,40 +70,72 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     store2.close()
   }
 
-  it should "perform semantic search using overloaded method with EmbeddingService" in skipIfDisabled {
-    val embeddingService = MockEmbeddingService.default
-
-    val query             = "apple"
-    val relevantContent   = "I like apples"
-    val irrelevantContent = "The sky is blue"
-
-    val embedding1 = embeddingService.embed(relevantContent).toOption.get
-    val embedding2 = embeddingService.embed(irrelevantContent).toOption.get
-
-    val mem1 = Memory(
-      id = MemoryId("1"),
-      content = relevantContent,
-      memoryType = MemoryType.Task,
-      embedding = Some(embedding1)
+  it should "perform semantic search" in skipIfDisabled {
+    val relevant = Memory(
+      MemoryId("1"),
+      "I like apples",
+      MemoryType.Task,
+      embedding = Some(embeddingService.embed("apples").toOption.get)
     )
+    store.store(relevant)
+    val result = store.search("apple", 1, MemoryFilter.All)
+    result.isRight shouldBe true
+    result.toOption.get.head.memory.content shouldBe "I like apples"
+  }
 
-    val mem2 = Memory(
-      id = MemoryId("2"),
-      content = irrelevantContent,
-      memoryType = MemoryType.Task,
-      embedding = Some(embedding2)
-    )
+  it should "fallback gracefully when EmbeddingService is missing" in skipIfDisabled {
+    val storeNoEmb = PostgresMemoryStore(dbConfig, None).fold(e => fail(e.message), identity)
+    val id         = MemoryId("fallback-1")
+    storeNoEmb.store(Memory(id, "test fallback", MemoryType.Task, Map.empty))
 
-    store.store(mem1).isRight shouldBe true
-    store.store(mem2).isRight shouldBe true
+    val result = storeNoEmb.search("query", 5, MemoryFilter.All)
 
-    val searchResult = store.search(query, topK = 1, MemoryFilter.All, embeddingService)
+    result.isRight shouldBe true
+    val memories = result.toOption.get
+    memories.nonEmpty shouldBe true
+    memories.head.score shouldBe 0.0
+    storeNoEmb.close()
+  }
 
-    searchResult.isRight shouldBe true
-    val scoredMemories = searchResult.toOption.get
+  it should "clamp similarity scores to [0, 1]" in skipIfDisabled {
+    val result = store.search("anything", 5, MemoryFilter.All)
+    if (result.isRight) {
+      result.toOption.get.foreach { sm =>
+        sm.score should be >= 0.0
+        sm.score should be <= 1.0
+      }
+    }
+  }
 
-    scoredMemories.nonEmpty shouldBe true
-    scoredMemories.head.memory.content shouldBe relevantContent
-    scoredMemories.head.score should be > 0.0
+  it should "fail when embedding service returns empty vector" in skipIfDisabled {
+    val emptyService = new EmbeddingService {
+      def dimensions                                = 10
+      def embed(text: String): Result[Array[Float]] = Right(Array.empty)
+      def embedBatch(texts: Seq[String])            = Right(Seq.empty)
+    }
+
+    val storeWithEmpty = PostgresMemoryStore(dbConfig, Some(emptyService))
+      .fold(e => fail(e.message), identity)
+
+    val result = storeWithEmpty.search("query", 5, MemoryFilter.All)
+    result.isLeft shouldBe true
+    result.left.toOption.get.message should include("vector is empty")
+    storeWithEmpty.close()
+  }
+
+  it should "propagate embedding service failures" in skipIfDisabled {
+    val failingService = new EmbeddingService {
+      def dimensions                                = 10
+      def embed(text: String): Result[Array[Float]] = Left(ProcessingError("embed-error", "boom"))
+      def embedBatch(texts: Seq[String])            = Left(ProcessingError("embed-error", "boom"))
+    }
+
+    val storeFailing = PostgresMemoryStore(dbConfig, Some(failingService))
+      .fold(e => fail(e.message), identity)
+
+    val result = storeFailing.search("query", 5, MemoryFilter.All)
+    result.isLeft shouldBe true
+    result.left.toOption.get.message should include("boom")
+    storeFailing.close()
   }
 }

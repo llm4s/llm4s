@@ -126,24 +126,25 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
   // Embedding Tests
   it should "convert embedding array to vector string" in {
     val vec = Array(0.1f, 0.2f, 0.3f)
-    PostgresMemoryStore.embeddingToString(vec) shouldBe "[0.1,0.2,0.3]"
+    PostgresVectorHelpers.embeddingToString(vec) shouldBe "[0.1,0.2,0.3]"
   }
 
   it should "parse vector string back to array" in {
-    val vec = PostgresMemoryStore.stringToEmbedding("[0.5, 0.6, 0.7]")
-    vec shouldBe Array(0.5f, 0.6f, 0.7f)
+    val vec = PostgresVectorHelpers.stringToEmbedding("[0.5, 0.6, 0.7]")
+    vec.isRight shouldBe true
+    vec.toOption.get shouldBe Array(0.5f, 0.6f, 0.7f)
   }
 
   it should "handle empty embedding string" in {
-    PostgresMemoryStore.stringToEmbedding("[]") shouldBe Array.empty[Float]
-    PostgresMemoryStore.stringToEmbedding("") shouldBe Array.empty[Float]
-    PostgresMemoryStore.stringToEmbedding(null) shouldBe Array.empty[Float]
+    PostgresVectorHelpers.stringToEmbedding("[]").toOption.get shouldBe Array.empty[Float]
+    PostgresVectorHelpers.stringToEmbedding("").toOption.get shouldBe Array.empty[Float]
+    PostgresVectorHelpers.stringToEmbedding(null).toOption.get shouldBe Array.empty[Float]
   }
 
   it should "handle malformed embedding string gracefully" in {
-    PostgresMemoryStore.stringToEmbedding("[not,valid,floats]") shouldBe Array.empty[Float]
-    PostgresMemoryStore.stringToEmbedding("[1.0,abc,3.0]") shouldBe Array.empty[Float]
-    PostgresMemoryStore.stringToEmbedding("garbage") shouldBe Array.empty[Float]
+    PostgresVectorHelpers.stringToEmbedding("[not,valid,floats]").isLeft shouldBe true
+    PostgresVectorHelpers.stringToEmbedding("[1.0,abc,3.0]").isLeft shouldBe true
+    PostgresVectorHelpers.stringToEmbedding("garbage").isLeft shouldBe true
   }
 
   it should "generate SQL for None filter" in {
@@ -181,8 +182,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
   it should "store a memory successfully" in {
     setupMockExecution()
     (() => mockStmt.executeUpdate()).expects().returning(1)
-
-    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val mem   = Memory(MemoryId("1"), "test", MemoryType.Task, Map.empty, Instant.now(), None, None)
 
     val result = store.store(mem)
@@ -205,7 +205,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
 
     (() => mockRs.close()).expects()
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.get(MemoryId("1"))
 
     result.isRight shouldBe true
@@ -220,7 +220,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     setupMockExecution()
     (() => mockStmt.executeUpdate()).expects().throws(new SQLException("Mock DB Error"))
 
-    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val mem   = Memory(MemoryId("1"), "test", MemoryType.Task, Map.empty, Instant.now(), None, None)
 
     // It runs all the lines inside store()
@@ -232,7 +232,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     setupMockExecution()
     (() => mockStmt.executeQuery()).expects().throws(new SQLException("Mock DB Error"))
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.get(MemoryId("1"))
 
     result.isLeft shouldBe true
@@ -242,7 +242,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     setupMockExecution()
     (() => mockStmt.executeQuery()).expects().throws(new SQLException("Mock DB Error"))
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.recall(MemoryFilter.ByType(MemoryType.Task), 10)
 
     result.isLeft shouldBe true
@@ -252,7 +252,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     setupMockExecution()
     (() => mockStmt.executeUpdate()).expects().throws(new SQLException("Mock DB Error"))
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.delete(MemoryId("1"))
 
     result.isLeft shouldBe true
@@ -262,7 +262,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     setupMockExecution()
     (() => mockStmt.executeQuery()).expects().throws(new SQLException("Mock DB Error"))
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.count(MemoryFilter.All)
 
     result.isLeft shouldBe true
@@ -275,7 +275,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (() => mockStmt.close()).expects()
     (() => mockConn.close()).expects()
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.clear()
 
     result.isLeft shouldBe true
@@ -288,7 +288,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (() => mockStmt.close()).expects()
     (() => mockConn.close()).expects()
 
-    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store = new PostgresMemoryStore(mockDataSource, "test_table", None)
 
     an[SQLException] should be thrownBy store.initializeSchema()
   }
@@ -299,7 +299,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (() => mockRs.next()).expects().returning(false)
     (() => mockRs.close()).expects()
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.update(MemoryId("non-existent"), identity)
 
     result.isLeft shouldBe true

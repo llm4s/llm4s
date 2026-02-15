@@ -1,9 +1,9 @@
 package org.llm4s.agent.memory
 
 import org.llm4s.types.Result
-import org.llm4s.error.{ NotFoundError, ProcessingError }
+import org.llm4s.error.{ NotFoundError, ProcessingError, LLMError }
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
-import ujson.{ read, write, Obj, Str }
+import ujson.{ Obj, Str, read, write }
 
 import java.sql.{ Connection, PreparedStatement, ResultSet, Timestamp }
 import scala.util.{ Try, Using }
@@ -14,7 +14,8 @@ import scala.util.{ Try, Using }
  */
 final class PostgresMemoryStore private[memory] (
   private val dataSource: HikariDataSource,
-  val tableName: String
+  val tableName: String,
+  val embeddingService: Option[EmbeddingService]
 ) extends MemoryStore
     with AutoCloseable {
 
@@ -79,7 +80,7 @@ final class PostgresMemoryStore private[memory] (
           }
 
           memory.embedding match {
-            case Some(vec) => stmt.setString(7, PostgresMemoryStore.embeddingToString(vec))
+            case Some(vec) => stmt.setString(7, PostgresVectorHelpers.embeddingToString(vec))
             case None      => stmt.setNull(7, java.sql.Types.OTHER, "vector")
           }
 
@@ -96,12 +97,20 @@ final class PostgresMemoryStore private[memory] (
       withConnection { conn =>
         Using.resource(conn.prepareStatement(s"SELECT * FROM $tableName WHERE id = ?")) { stmt =>
           stmt.setString(1, id.value)
-          Using.resource(stmt.executeQuery())(rs => if (rs.next()) Some(rowToMemory(rs)) else None)
+          Using.resource(stmt.executeQuery()) { rs =>
+            if (rs.next()) {
+              rowToMemory(rs).map(Some(_))
+            } else {
+              Right(None)
+            }
+          }
         }
       }
-    }.toEither.left.map(e =>
-      ProcessingError("postgres-memory-store", s"Failed to get memory: ${e.getMessage}", cause = Some(e))
-    )
+    }.toEither.left
+      .map[LLMError](e =>
+        ProcessingError("postgres-memory-store", s"Failed to get memory: ${e.getMessage}", cause = Some(e))
+      )
+      .flatMap(identity)
 
   override def recall(filter: MemoryFilter, limit: Int): Result[Seq[Memory]] =
     PostgresMemoryStore.filterToSql(filter).flatMap { case (whereClause, params) =>
@@ -116,17 +125,27 @@ final class PostgresMemoryStore private[memory] (
             setParameter(stmt, params.size + 1, SqlParam.PInt(limit))
 
             Using.resource(stmt.executeQuery()) { rs =>
-              Iterator
-                .continually(rs)
-                .takeWhile(_.next())
-                .map(rowToMemory)
-                .toVector
+              val buffer                  = scala.collection.mutable.ArrayBuffer.empty[Memory]
+              var error: Option[LLMError] = None
+
+              while (rs.next() && error.isEmpty)
+                rowToMemory(rs) match {
+                  case Right(m) => buffer += m
+                  case Left(e)  => error = Some(e)
+                }
+
+              error match {
+                case Some(e) => Left(e)
+                case None    => Right(buffer.toSeq)
+              }
             }
           }
         }
-      }.toEither.left.map(e =>
-        ProcessingError("postgres-memory-store", s"Failed to recall memories: ${e.getMessage}", cause = Some(e))
-      )
+      }.toEither.left
+        .map[LLMError](e =>
+          ProcessingError("postgres-memory-store", s"Failed to recall memories: ${e.getMessage}", cause = Some(e))
+        )
+        .flatMap(identity)
     }
 
   override def search(
@@ -134,67 +153,77 @@ final class PostgresMemoryStore private[memory] (
     topK: Int,
     filter: MemoryFilter
   ): Result[Seq[ScoredMemory]] =
-    Left(
-      ProcessingError(
-        "postgres-memory-store",
-        "Semantic search is not available without an EmbeddingService. Use search(query, topK, filter, embeddingService)."
-      )
-    )
+    embeddingService match {
+      case Some(service) =>
+        service.embed(query).flatMap { queryVector =>
+          if (queryVector.isEmpty) {
+            Left(ProcessingError("postgres-memory-store", "Generated embedding vector is empty"))
+          } else {
+            performVectorSearch(queryVector, topK, filter)
+          }
+        }
+      case None =>
+        recall(filter, topK).map(memories => memories.map(m => ScoredMemory(m, 0.0)))
+    }
 
-  def search(
-    query: String,
+  private def performVectorSearch(
+    queryVector: Array[Float],
     topK: Int,
-    filter: MemoryFilter,
-    embeddingService: EmbeddingService
+    filter: MemoryFilter
   ): Result[Seq[ScoredMemory]] =
-    embeddingService.embed(query).flatMap { queryVector =>
-      if (queryVector.isEmpty) {
-        Left(ProcessingError("postgres-memory-store", "Query embedding is empty"))
-      } else {
-        PostgresMemoryStore.filterToSql(filter).flatMap { case (whereClause, params) =>
-          Try {
-            withConnection { conn =>
-              val sql =
-                s"""
-                   |SELECT *,
-                   |       1 - (embedding <=> ?::vector) AS similarity
-                   |FROM $tableName
-                   |WHERE $whereClause AND embedding IS NOT NULL
-                   |ORDER BY embedding <=> ?::vector
-                   |LIMIT ?
-                 """.stripMargin
+    PostgresMemoryStore.filterToSql(filter).flatMap { case (whereClause, params) =>
+      Try {
+        withConnection { conn =>
+          val sql =
+            s"""
+               |SELECT *,
+               |       1 - (embedding <=> ?::vector) AS similarity
+               |FROM $tableName
+               |WHERE $whereClause AND embedding IS NOT NULL
+               |ORDER BY embedding <=> ?::vector
+               |LIMIT ?
+             """.stripMargin
 
-              Using.resource(conn.prepareStatement(sql)) { stmt =>
-                val vectorStr = PostgresVectorHelpers.embeddingToString(queryVector)
+          Using.resource(conn.prepareStatement(sql)) { stmt =>
+            val vectorStr = PostgresVectorHelpers.embeddingToString(queryVector)
 
-                stmt.setString(1, vectorStr)
+            stmt.setString(1, vectorStr)
 
-                params.zipWithIndex.foreach { case (param, idx) =>
-                  setParameter(stmt, idx + 2, param)
-                }
+            params.zipWithIndex.foreach { case (param, idx) =>
+              setParameter(stmt, idx + 2, param)
+            }
 
-                stmt.setString(params.size + 2, vectorStr)
-                stmt.setInt(params.size + 3, topK)
+            stmt.setString(params.size + 2, vectorStr)
+            stmt.setInt(params.size + 3, topK)
 
-                Using.resource(stmt.executeQuery()) { rs =>
-                  val results = scala.collection.mutable.ArrayBuffer.empty[ScoredMemory]
-                  while (rs.next()) {
-                    val memory = rowToMemory(rs)
-                    val score  = rs.getDouble("similarity")
+            Using.resource(stmt.executeQuery()) { rs =>
+              val results                 = scala.collection.mutable.ArrayBuffer.empty[ScoredMemory]
+              var error: Option[LLMError] = None
+
+              while (rs.next() && error.isEmpty)
+                rowToMemory(rs) match {
+                  case Right(memory) =>
+                    val score = rs.getDouble("similarity")
                     results += ScoredMemory(
                       memory,
                       math.max(0.0, math.min(1.0, score))
                     )
-                  }
-                  results.toSeq
+                  case Left(e) =>
+                    error = Some(e)
                 }
+
+              error match {
+                case Some(e) => Left(e)
+                case None    => Right(results.toSeq)
               }
             }
-          }.toEither.left.map(e =>
-            ProcessingError("postgres-memory-store", s"Semantic search failed: ${e.getMessage}", cause = Some(e))
-          )
+          }
         }
-      }
+      }.toEither.left
+        .map[LLMError](e =>
+          ProcessingError("postgres-memory-store", s"Vector search failed: ${e.getMessage}", cause = Some(e))
+        )
+        .flatMap(identity)
     }
 
   override def delete(id: MemoryId): Result[MemoryStore] =
@@ -279,18 +308,24 @@ final class PostgresMemoryStore private[memory] (
   private def withConnection[A](f: Connection => A): A =
     Using.resource(dataSource.getConnection)(f)
 
-  private def rowToMemory(rs: ResultSet): Memory = {
+  private def rowToMemory(rs: ResultSet): Result[Memory] = {
     val embeddingStr = rs.getString("embedding")
 
-    Memory(
-      id = MemoryId(rs.getString("id")),
-      content = rs.getString("content"),
-      memoryType = MemoryType.fromString(rs.getString("memory_type")),
-      metadata = PostgresMemoryStore.jsonToMetadata(rs.getString("metadata")),
-      timestamp = rs.getTimestamp("created_at").toInstant,
-      importance = Option(rs.getDouble("importance")).filterNot(_ => rs.wasNull()),
-      embedding = Option(embeddingStr).map(PostgresMemoryStore.stringToEmbedding)
-    )
+    val embeddingResult =
+      if (embeddingStr == null) Right(None)
+      else PostgresVectorHelpers.stringToEmbedding(embeddingStr).map(Some(_))
+
+    embeddingResult.map { embedding =>
+      Memory(
+        id = MemoryId(rs.getString("id")),
+        content = rs.getString("content"),
+        memoryType = MemoryType.fromString(rs.getString("memory_type")),
+        metadata = PostgresMemoryStore.jsonToMetadata(rs.getString("metadata")),
+        timestamp = rs.getTimestamp("created_at").toInstant,
+        importance = Option(rs.getDouble("importance")).filterNot(_ => rs.wasNull()),
+        embedding = embedding
+      )
+    }
   }
 
   private def setParameter(stmt: PreparedStatement, index: Int, value: SqlParam): Unit = value match {
@@ -340,7 +375,10 @@ object PostgresMemoryStore {
     def jdbcUrl: String = s"jdbc:postgresql://$host:$port/$database"
   }
 
-  def apply(config: Config): Result[PostgresMemoryStore] =
+  def apply(
+    config: Config,
+    embeddingService: Option[EmbeddingService] = None
+  ): Result[PostgresMemoryStore] =
     Try {
       val hikariConfig = new HikariConfig()
       hikariConfig.setJdbcUrl(config.jdbcUrl)
@@ -350,7 +388,7 @@ object PostgresMemoryStore {
       hikariConfig.setMinimumIdle(1)
 
       val dataSource = new HikariDataSource(hikariConfig)
-      val store      = new PostgresMemoryStore(dataSource, config.tableName)
+      val store      = new PostgresMemoryStore(dataSource, config.tableName, embeddingService)
       store.initializeSchema()
       store
     }.toEither.left.map(e =>
@@ -428,6 +466,6 @@ object PostgresMemoryStore {
   private[memory] def embeddingToString(embedding: Array[Float]): String =
     PostgresVectorHelpers.embeddingToString(embedding)
 
-  private[memory] def stringToEmbedding(s: String): Array[Float] =
+  private[memory] def stringToEmbedding(s: String): Result[Array[Float]] =
     PostgresVectorHelpers.stringToEmbedding(s)
 }
