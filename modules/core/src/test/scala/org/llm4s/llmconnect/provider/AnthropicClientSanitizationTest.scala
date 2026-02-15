@@ -28,7 +28,8 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
       )
     )
 
-    val method = client.getClass.getDeclaredMethod("convertToolToAnthropicTool", classOf[org.llm4s.toolapi.ToolFunction[_, _]])
+    val method =
+      client.getClass.getDeclaredMethod("convertToolToAnthropicTool", classOf[org.llm4s.toolapi.ToolFunction[_, _]])
     method.setAccessible(true)
     method.invoke(client, toolFunction).asInstanceOf[Tool]
   }
@@ -52,8 +53,8 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
 
     // Verify schema doesn't contain 'strict' or 'additionalProperties' at top level
     val schemaJson = anthropicTool.inputSchema().toString
-    schemaJson should not include "\"strict\""
-    schemaJson should not include "\"additionalProperties\""
+    (schemaJson should not).include("\"strict\"")
+    (schemaJson should not).include("\"additionalProperties\"")
   }
 
   it should "handle nested objects with properties" in {
@@ -77,7 +78,7 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
     val schemaJson    = anthropicTool.inputSchema().toString
 
     // Verify no 'additionalProperties' in nested address object
-    schemaJson should not include "\"additionalProperties\""
+    (schemaJson should not).include("\"additionalProperties\"")
   }
 
   it should "handle arrays with items schema" in {
@@ -94,7 +95,7 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
     val anthropicTool = convertToolToAnthropicTool(tool)
     val schemaJson    = anthropicTool.inputSchema().toString
 
-    schemaJson should not include "\"additionalProperties\""
+    (schemaJson should not).include("\"additionalProperties\"")
   }
 
   it should "handle optional properties" in {
@@ -112,7 +113,7 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
     val anthropicTool = convertToolToAnthropicTool(tool)
     val schemaJson    = anthropicTool.inputSchema().toString
 
-    schemaJson should not include "\"additionalProperties\""
+    (schemaJson should not).include("\"additionalProperties\"")
   }
 
   it should "handle deeply nested structures" in {
@@ -138,7 +139,7 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
     val schemaJson    = anthropicTool.inputSchema().toString
 
     // Verify 'additionalProperties' is stripped at all nesting levels
-    schemaJson should not include "\"additionalProperties\""
+    (schemaJson should not).include("\"additionalProperties\"")
   }
 
   it should "handle complex schemas with multiple nested types" in {
@@ -162,7 +163,7 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
     val anthropicTool = convertToolToAnthropicTool(tool)
     val schemaJson    = anthropicTool.inputSchema().toString
 
-    schemaJson should not include "\"additionalProperties\""
+    (schemaJson should not).include("\"additionalProperties\"")
     anthropicTool.name() shouldBe "complex_tool"
   }
 
@@ -178,7 +179,7 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
     val anthropicTool = convertToolToAnthropicTool(tool)
     val schemaJson    = anthropicTool.inputSchema().toString
 
-    schemaJson should not include "\"additionalProperties\""
+    (schemaJson should not).include("\"additionalProperties\"")
   }
 
   it should "preserve required properties in schema" in {
@@ -221,6 +222,6 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
     val schemaJson    = anthropicTool.inputSchema().toString
 
     // Verify nested array items don't have additionalProperties
-    schemaJson should not include "\"additionalProperties\""
+    (schemaJson should not).include("\"additionalProperties\"")
   }
 }

@@ -27,7 +27,8 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
       )
     )
 
-    val method = client.getClass.getDeclaredMethod("convertToolToGeminiFormat", classOf[org.llm4s.toolapi.ToolFunction[_, _]])
+    val method =
+      client.getClass.getDeclaredMethod("convertToolToGeminiFormat", classOf[org.llm4s.toolapi.ToolFunction[_, _]])
     method.setAccessible(true)
     method.invoke(client, toolFunction).asInstanceOf[ujson.Value]
   }
@@ -48,10 +49,10 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
     val schemaJson = geminiTool.toString
 
     // Verify schema doesn't contain 'strict' or 'additionalProperties'
-    schemaJson should not include "\"strict\""
-    schemaJson should not include "\"additionalProperties\""
-    schemaJson should not include "additionalProperties"
-    
+    (schemaJson should not).include("\"strict\"")
+    (schemaJson should not).include("\"additionalProperties\"")
+    (schemaJson should not).include("additionalProperties")
+
     // Verify tool has correct name and description
     geminiTool("name").str shouldBe "test_tool"
     geminiTool("description").str shouldBe "A test tool"
@@ -78,7 +79,7 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
     val schemaJson = geminiTool.toString
 
     // Verify no 'additionalProperties' in nested address object
-    schemaJson should not include "additionalProperties"
+    (schemaJson should not).include("additionalProperties")
   }
 
   it should "handle arrays with items schema" in {
@@ -95,7 +96,7 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
     val geminiTool = convertToolToGeminiFormat(tool)
     val schemaJson = geminiTool.toString
 
-    schemaJson should not include "additionalProperties"
+    (schemaJson should not).include("additionalProperties")
   }
 
   it should "handle non-object JSON values gracefully" in {
@@ -130,7 +131,7 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
     val schemaJson = geminiTool.toString
 
     // Verify schema is sanitized
-    schemaJson should not include "additionalProperties"
+    (schemaJson should not).include("additionalProperties")
   }
 
   it should "handle oneOf schema compositions" in {
@@ -148,7 +149,7 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
     val geminiTool = convertToolToGeminiFormat(tool)
     val schemaJson = geminiTool.toString
 
-    schemaJson should not include "additionalProperties"
+    (schemaJson should not).include("additionalProperties")
   }
 
   it should "handle allOf schema compositions" in {
@@ -166,7 +167,7 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
     val geminiTool = convertToolToGeminiFormat(tool)
     val schemaJson = geminiTool.toString
 
-    schemaJson should not include "additionalProperties"
+    (schemaJson should not).include("additionalProperties")
   }
 
   it should "handle optional properties" in {
@@ -184,7 +185,7 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
     val geminiTool = convertToolToGeminiFormat(tool)
     val schemaJson = geminiTool.toString
 
-    schemaJson should not include "additionalProperties"
+    (schemaJson should not).include("additionalProperties")
   }
 
   it should "handle deeply nested structures" in {
@@ -210,7 +211,7 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
     val schemaJson = geminiTool.toString
 
     // Verify 'additionalProperties' is stripped at all nesting levels
-    schemaJson should not include "additionalProperties"
+    (schemaJson should not).include("additionalProperties")
   }
 
   it should "handle complex schemas with multiple nested types" in {
@@ -234,7 +235,7 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
     val geminiTool = convertToolToGeminiFormat(tool)
     val schemaJson = geminiTool.toString
 
-    schemaJson should not include "additionalProperties"
+    (schemaJson should not).include("additionalProperties")
   }
 
   it should "handle empty objects" in {
@@ -249,7 +250,7 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
     val geminiTool = convertToolToGeminiFormat(tool)
     val schemaJson = geminiTool.toString
 
-    schemaJson should not include "additionalProperties"
+    (schemaJson should not).include("additionalProperties")
   }
 
   it should "preserve required properties in schema" in {
@@ -290,6 +291,6 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
     val schemaJson = geminiTool.toString
 
     // Verify nested array items don't have additionalProperties
-    schemaJson should not include "additionalProperties"
+    (schemaJson should not).include("additionalProperties")
   }
 }
