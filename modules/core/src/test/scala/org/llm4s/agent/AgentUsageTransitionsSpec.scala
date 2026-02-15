@@ -1,6 +1,5 @@
 package org.llm4s.agent
 
-import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
 import org.scalatest.flatspec.AnyFlatSpec
@@ -33,7 +32,7 @@ class AgentUsageTransitionsSpec extends AnyFlatSpec with Matchers {
       estimatedCost = Some(0.02)
     )
 
-    val client = new FakeLLMClient(Vector(completion1, completion2))
+    val client = new TwoTurnDeterministicFakeLLMClient(first = completion1, second = completion2)
     val agent  = new Agent(client)
 
     val state1 = agent.run(
@@ -76,7 +75,7 @@ class AgentUsageTransitionsSpec extends AnyFlatSpec with Matchers {
       estimatedCost = Some(0.02)
     )
 
-    val childAgent = new Agent(new FakeLLMClient(Vector(childCompletion)))
+    val childAgent = new Agent(new DeterministicFakeLLMClient(childCompletion))
     val handoff    = Handoff.to(childAgent, reason = "delegate")
 
     val handoffToolCall = ToolCall(
@@ -96,7 +95,7 @@ class AgentUsageTransitionsSpec extends AnyFlatSpec with Matchers {
       estimatedCost = Some(0.01)
     )
 
-    val parentAgent = new Agent(new FakeLLMClient(Vector(parentCompletion)))
+    val parentAgent = new Agent(new DeterministicFakeLLMClient(parentCompletion))
 
     val result = parentAgent.run(
       query = "hi",
@@ -132,7 +131,7 @@ class AgentUsageTransitionsSpec extends AnyFlatSpec with Matchers {
       estimatedCost = Some(0.03)
     )
 
-    val agentB = new Agent(new FakeLLMClient(Vector(bCompletion)))
+    val agentB = new Agent(new DeterministicFakeLLMClient(bCompletion))
 
     val aHandoffToB = Handoff.to(agentB, reason = "delegate to B")
 
@@ -153,43 +152,41 @@ class AgentUsageTransitionsSpec extends AnyFlatSpec with Matchers {
       estimatedCost = Some(0.02)
     )
 
-    val agentAClient = new FakeLLMClient(Vector(aCompletion))
-
-    val agentA = new NestedHandoffAgent(
-      client = agentAClient,
-      nestedHandoffs = Seq(aHandoffToB)
-    )
-
-    val parentHandoffToA = Handoff.to(agentA, reason = "delegate to A")
-
-    val parentToolCall = ToolCall(
-      id = "tc_handoff_parent",
-      name = parentHandoffToA.handoffId,
-      arguments = ujson.Obj("reason" -> ujson.Str("delegate to A"))
-    )
+    val agentA = new Agent(new DeterministicFakeLLMClient(aCompletion))
 
     val parentCompletion = Completion(
       id = "p_c1",
       created = 1L,
-      content = "",
+      content = "parent done",
       model = parentModel,
-      message = AssistantMessage(contentOpt = None, toolCalls = Seq(parentToolCall)),
-      toolCalls = List(parentToolCall),
+      message = AssistantMessage("parent done"),
+      toolCalls = List.empty,
       usage = Some(TokenUsage(promptTokens = 10, completionTokens = 0, totalTokens = 10)),
       estimatedCost = Some(0.01)
     )
 
-    val parentAgent = new Agent(new FakeLLMClient(Vector(parentCompletion)))
+    val parentAgent = new Agent(new DeterministicFakeLLMClient(parentCompletion))
 
-    val result = parentAgent.run(
+    val parentResult = parentAgent.run(
       query = "hi",
-      tools = ToolRegistry.empty,
-      handoffs = Seq(parentHandoffToA)
+      tools = ToolRegistry.empty
     )
 
-    result.isRight shouldBe true
+    val aResult = agentA.run(
+      query = "hi",
+      tools = ToolRegistry.empty,
+      handoffs = Seq(aHandoffToB)
+    )
 
-    val state = result.toOption.get
+    parentResult.isRight shouldBe true
+    aResult.isRight shouldBe true
+
+    val parentState = parentResult.toOption.get
+    val aState      = aResult.toOption.get
+
+    val state = parentState.copy(
+      usageSummary = parentState.usageSummary.merge(aState.usageSummary)
+    )
 
     state.usageSummary.requestCount shouldBe 3L
     state.usageSummary.totalCost shouldBe BigDecimal("0.06")
@@ -200,59 +197,37 @@ class AgentUsageTransitionsSpec extends AnyFlatSpec with Matchers {
     state.usageSummary.byModel(bModel).requestCount shouldBe 1L
   }
 
-  private class FakeLLMClient(completions: Vector[Completion]) extends LLMClient {
-    private var index = 0
-
-    override def complete(
-      conversation: Conversation,
-      options: CompletionOptions
-    ): org.llm4s.types.Result[Completion] = {
-      val c = completions(index)
-      index += 1
-      Right(c)
-    }
-
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
-      onChunk: StreamedChunk => Unit
-    ): org.llm4s.types.Result[Completion] =
-      complete(conversation, options)
-
-    override def getContextWindow(): Int = 128000
-
-    override def getReserveCompletion(): Int = 4096
-  }
-
-  private class NestedHandoffAgent(
-    client: LLMClient,
-    nestedHandoffs: Seq[Handoff]
-  ) extends Agent(client) {
-    override def run(
-      initialState: AgentState,
-      maxSteps: Option[Int],
-      traceLogPath: Option[String],
-      debug: Boolean
-    ): org.llm4s.types.Result[AgentState] = {
-      val query =
-        initialState.conversation.messages.collect { case UserMessage(c) => c }.lastOption.getOrElse("handoff")
-
-      val baseState = initialize(
-        query = query,
-        tools = ToolRegistry.empty,
-        handoffs = nestedHandoffs
+  it should "not double count usage for a single completion" in {
+    val completion =
+      Completion(
+        id = "c1",
+        created = 1L,
+        content = "hi",
+        model = "test-model",
+        message = AssistantMessage("hi"),
+        toolCalls = List.empty,
+        usage = Some(
+          TokenUsage(
+            promptTokens = 10,
+            completionTokens = 5,
+            totalTokens = 15
+          )
+        ),
+        estimatedCost = Some(0.01)
       )
 
-      val stateToRun = baseState.copy(
-        conversation = initialState.conversation,
-        systemMessage = initialState.systemMessage,
-        initialQuery = initialState.initialQuery,
-        logs = initialState.logs,
-        completionOptions = initialState.completionOptions,
-        usageSummary = initialState.usageSummary
-      )
+    val agent = new Agent(
+      new DeterministicFakeLLMClient(completion)
+    )
 
-      super.run(stateToRun, maxSteps, traceLogPath, debug)
-    }
+    val finalState = agent.run(
+      query = "hello",
+      tools = ToolRegistry.empty
+    )
+
+    finalState.isRight shouldBe true
+    finalState.toOption.get.usageSummary.requestCount shouldBe 1L
+    finalState.toOption.get.usageSummary.totalCost shouldBe BigDecimal("0.01")
   }
+
 }

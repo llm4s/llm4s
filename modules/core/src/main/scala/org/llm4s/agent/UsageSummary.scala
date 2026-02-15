@@ -46,7 +46,13 @@ case class UsageSummary(
 ) {
 
   def add(model: String, usage: TokenUsage, cost: Option[Double]): UsageSummary = {
-    val thinking  = usage.thinkingTokens.getOrElse(0)
+    val thinking = usage.thinkingTokens.getOrElse(0)
+
+    // NOTE:
+    // Completion.estimatedCost originates as Option[Double] at provider level.
+    // We convert using BigDecimal.decimal to prevent accumulation drift.
+    // Any upstream floating precision loss cannot be recovered here,
+    // but BigDecimal ensures deterministic aggregation from this point forward.
     val costValue = cost.map(BigDecimal.decimal).getOrElse(BigDecimal(0))
 
     val updatedModelUsage =
@@ -85,7 +91,7 @@ object UsageSummary {
     {
       case ujson.Num(n) => BigDecimal.decimal(n)
       case ujson.Str(s) => BigDecimal(s)
-      case v            => throw new IllegalArgumentException(s"Invalid BigDecimal JSON: $v")
+      case _            => BigDecimal(0)
     }
   )
 

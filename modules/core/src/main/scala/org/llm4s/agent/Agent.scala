@@ -106,6 +106,22 @@ class Agent(client: LLMClient) {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
+  private def accumulateUsage(
+    state: AgentState,
+    completion: Completion
+  ): AgentState =
+    completion.usage match {
+      case Some(usage) =>
+        state.copy(
+          usageSummary = state.usageSummary.add(
+            completion.model,
+            usage,
+            completion.estimatedCost
+          )
+        )
+      case None => state
+    }
+
   /**
    * Best-effort tracing helper.
    *
@@ -198,18 +214,7 @@ class Agent(client: LLMClient) {
         // Request next step from LLM using system message injection
         client.complete(state.toApiConversation, options) match {
           case Right(completion) =>
-            val stateWithUsage = completion.usage match {
-              case Some(usage) =>
-                state.copy(
-                  usageSummary = state.usageSummary.add(
-                    model = completion.model,
-                    usage = usage,
-                    cost = completion.estimatedCost
-                  )
-                )
-              case None =>
-                state
-            }
+            val stateWithUsage = accumulateUsage(state, completion)
 
             val logMessage = completion.message.toolCalls match {
               case Seq() => s"[assistant] text: ${completion.message.content}"
@@ -1442,18 +1447,7 @@ class Agent(client: LLMClient) {
 
         streamResult match {
           case Right(completion) =>
-            val stateWithUsage = completion.usage match {
-              case Some(usage) =>
-                state.copy(
-                  usageSummary = state.usageSummary.add(
-                    model = completion.model,
-                    usage = usage,
-                    cost = completion.estimatedCost
-                  )
-                )
-              case None =>
-                state
-            }
+            val stateWithUsage = accumulateUsage(state, completion)
 
             // Emit text complete
             if (completion.content.nonEmpty) {

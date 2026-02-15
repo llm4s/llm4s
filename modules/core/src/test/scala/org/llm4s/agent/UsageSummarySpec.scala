@@ -3,6 +3,7 @@ package org.llm4s.agent
 import org.llm4s.llmconnect.model.TokenUsage
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import upickle.default.{ read, write }
 
 class UsageSummarySpec extends AnyFlatSpec with Matchers {
 
@@ -96,5 +97,31 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
     gemini.inputTokens shouldBe 1L
     gemini.outputTokens shouldBe 2L
     gemini.totalCost shouldBe BigDecimal("0.005")
+  }
+
+  "UsageSummary JSON" should "round-trip correctly" in {
+    val original =
+      UsageSummary(
+        requestCount = 2,
+        inputTokens = 100,
+        outputTokens = 50,
+        thinkingTokens = 10,
+        totalCost = BigDecimal("0.1234"),
+        byModel = Map(
+          "test-model" ->
+            ModelUsage(
+              requestCount = 2,
+              inputTokens = 100,
+              outputTokens = 50,
+              thinkingTokens = 10,
+              totalCost = BigDecimal("0.1234")
+            )
+        )
+      )
+
+    val json    = write(original)
+    val decoded = read[UsageSummary](json)
+
+    decoded shouldBe original
   }
 }

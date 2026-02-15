@@ -1,6 +1,5 @@
 package org.llm4s.agent
 
-import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.{ Schema, ToolFunction }
 import org.llm4s.toolapi.ToolRegistry
@@ -50,7 +49,7 @@ class AgentUsageIntegrationSpec extends AnyFlatSpec with Matchers {
       estimatedCost = Some(0.02)
     )
 
-    val client = new FakeLLMClient(Vector(completion1, completion2))
+    val client = new TwoTurnDeterministicFakeLLMClient(first = completion1, second = completion2)
     val agent  = new Agent(client)
 
     val finalState = agent.run(
@@ -74,29 +73,5 @@ class AgentUsageIntegrationSpec extends AnyFlatSpec with Matchers {
     perModel.inputTokens shouldBe 14L
     perModel.outputTokens shouldBe 5L
     perModel.totalCost shouldBe BigDecimal("0.03")
-  }
-
-  private class FakeLLMClient(completions: Vector[Completion]) extends LLMClient {
-    private var index = 0
-
-    override def complete(
-      conversation: Conversation,
-      options: CompletionOptions
-    ): org.llm4s.types.Result[Completion] = {
-      val c = completions(index)
-      index += 1
-      Right(c)
-    }
-
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
-      onChunk: StreamedChunk => Unit
-    ): org.llm4s.types.Result[Completion] =
-      complete(conversation, options)
-
-    override def getContextWindow(): Int = 128000
-
-    override def getReserveCompletion(): Int = 4096
   }
 }
