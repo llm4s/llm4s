@@ -9,8 +9,8 @@ import java.util.Base64
 /**
  * Comprehensive test suite for the Image Generation API.
  *
- * Includes unit tests for models, integration tests for the factory,
- * and a mock implementation for testing without a real server.
+ * Includes unit tests for models, integration tests for the factory, and a
+ * mock implementation for testing without a real server.
  */
 class ImageGenerationTest extends AnyFunSuite with Matchers {
 
@@ -48,7 +48,12 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       options: ImageGenerationOptions = ImageGenerationOptions()
     ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
       if (count <= 0) return Left(ValidationError("Count must be positive"))
-      if (count > 10) return Left(InsufficientResourcesError("Cannot generate more than 10 images at once"))
+      if (count > 10)
+        return Left(
+          InsufficientResourcesError(
+            "Cannot generate more than 10 images at once"
+          )
+        )
 
       generateImage(prompt, options) match {
         case Right(singleImage) =>
@@ -147,21 +152,24 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     val config = StableDiffusionConfig()
     val client = ImageGeneration.client(config)
 
-    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.StableDiffusionClient) => }
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.StableDiffusionClient) =>
+    }
   }
 
   test("ImageGeneration creates correct client for HuggingFace config") {
     val config = HuggingFaceConfig(apiKey = "test-key")
     val client = ImageGeneration.client(config)
 
-    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.HuggingFaceClient) => }
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.HuggingFaceClient) =>
+    }
   }
 
   test("ImageGeneration creates correct client for OpenAI config") {
     val config = OpenAIConfig(apiKey = "test-key")
     val client = ImageGeneration.client(config)
 
-    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.OpenAIImageClient) => }
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.OpenAIImageClient) =>
+    }
   }
 
   test("stableDiffusionClient creates client with correct config") {
@@ -170,19 +178,22 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       apiKey = Some("test-key")
     )
 
-    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.StableDiffusionClient) => }
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.StableDiffusionClient) =>
+    }
   }
 
   test("huggingFaceClient creates client with correct config") {
     val client = ImageGeneration.huggingFaceClient(apiKey = "test-key")
 
-    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.HuggingFaceClient) => }
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.HuggingFaceClient) =>
+    }
   }
 
   test("openAIClient creates client with correct config") {
     val client = ImageGeneration.openAIClient(apiKey = "test-key")
 
-    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.OpenAIImageClient) => }
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.OpenAIImageClient) =>
+    }
   }
 
   test("Config objects have correct default values") {
@@ -296,14 +307,17 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
 
   test("Mock client validates image count") {
     // Test negative/zero count
-    mockClient.generateImages("Test", -1) should matchPattern { case Left(_: ValidationError) => }
-    mockClient.generateImages("Test", 0) should matchPattern { case Left(_: ValidationError) => }
+    mockClient.generateImages("Test", -1) should matchPattern { case Left(_: ValidationError) =>
+    }
+    mockClient.generateImages("Test", 0) should matchPattern { case Left(_: ValidationError) =>
+    }
 
     // Test too many images
     mockClient.generateImages("Test", 15) match {
       case Left(_: InsufficientResourcesError) => succeed
-      case Left(other)                         => fail(s"Expected InsufficientResourcesError, but got $other")
-      case Right(_)                            => fail("Expected failure, but got success")
+      case Left(other) =>
+        fail(s"Expected InsufficientResourcesError, but got $other")
+      case Right(_) => fail("Expected failure, but got success")
     }
   }
 
@@ -327,7 +341,8 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     val authError       = AuthenticationError("Invalid API key")
     val serviceError    = ServiceError("Server error", 500)
     val validationError = ValidationError("Invalid prompt")
-    val unknownError    = UnknownError(new RuntimeException("Something went wrong"))
+    val unknownError =
+      UnknownError(new RuntimeException("Something went wrong"))
 
     authError.message shouldBe "Invalid API key"
     serviceError.message shouldBe "Server error"
@@ -350,4 +365,36 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       case Right(value) => fail(s"Expected failure but got: $value")
     }
   }
+
+  test("generateWithOpenAI wrapper delegates correctly") {
+    val result = ImageGeneration.generateWithOpenAI(
+      prompt = "test prompt",
+      apiKey = "test-key"
+    )
+
+    // No real API call → should return error
+    result shouldBe a[Left[_, _]]
+  }
+
+  test("healthCheck delegates to client health method") {
+    val config = OpenAIConfig(apiKey = "test-key")
+
+    val result = ImageGeneration.healthCheck(config)
+
+    result shouldBe a[Right[_, _]]
+  }
+
+  test("generateImageAsync wrapper delegates properly") {
+    import scala.concurrent.ExecutionContext.Implicits.global
+
+    val config = OpenAIConfig(apiKey = "test-key")
+
+    val future = ImageGeneration.generateImageAsync(
+      prompt = "test",
+      config = config
+    )
+
+    future.map(result => result shouldBe a[Left[_, _]])
+  }
+
 }

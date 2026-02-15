@@ -224,19 +224,27 @@ class OpenAIImageClient(
         headers = Map("Authorization" -> s"Bearer ${config.apiKey}"),
         timeout = 5000
       )
-      .toEither
-      .left
-      .map(e => ServiceError(e.getMessage, 0))
-      .flatMap { response =>
+      .toEither match {
+
+      case Right(response) =>
         response.statusCode match {
           case 200 =>
             Right(ServiceStatus(HealthStatus.Healthy, "OpenAI API reachable"))
+
+          case 401 =>
+            Right(ServiceStatus(HealthStatus.Degraded, "Authentication failed"))
+
           case 429 =>
             Right(ServiceStatus(HealthStatus.Degraded, "Rate limited"))
+
           case code =>
-            Left(ServiceError(s"HTTP $code", code))
+            Right(ServiceStatus(HealthStatus.Unhealthy, s"HTTP $code"))
         }
-      }
+
+      case Left(_) =>
+        // Network failure / connection issue
+        Right(ServiceStatus(HealthStatus.Unhealthy, "Service unreachable"))
+    }
 
   // ==========================================================
   // VALIDATION
