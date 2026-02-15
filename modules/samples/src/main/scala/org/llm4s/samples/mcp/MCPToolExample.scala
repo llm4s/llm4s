@@ -36,7 +36,13 @@ object MCPToolExample {
     )
 
     // Create local weather tool for comparison
-    val localWeatherTool = WeatherTool.tool
+    val localWeatherTool = WeatherTool.toolSafe match {
+      case Right(tool) => tool
+      case Left(err) =>
+        logger.error("Failed to load weather tool: {}", err.formatted)
+        sys.exit(1)
+        return
+    }
 
     // Create MCP registry combining local and MCP tools using loaded settings
     val mcpRegistry = new MCPToolRegistry(

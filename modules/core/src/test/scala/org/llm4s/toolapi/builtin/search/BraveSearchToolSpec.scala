@@ -129,11 +129,16 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
           category: BraveSearchCategory[R],
           expectedName: String,
           expectedDescription: String
-        ): Unit = {
-          val tool = BraveSearchTool.create(config, category)
-          tool.name shouldBe expectedName
-          tool.description shouldBe expectedDescription
-        }
+        ): Unit =
+          BraveSearchTool
+            .create(config, category)
+            .fold(
+              e => fail(s"Tool creation failed: ${e.formatted}"),
+              tool => {
+                tool.name shouldBe expectedName
+                tool.description shouldBe expectedDescription
+              }
+            )
 
         testCategory(BraveSearchCategory.Web, "brave_web_search", "Searches the web using Brave Search")
         testCategory(BraveSearchCategory.Image, "brave_image_search", "Searches for images using Brave Search")

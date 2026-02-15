@@ -122,7 +122,12 @@ class AssistantAgent(
     for {
       updatedState <- addUserMessage(query, state)
       finalState <- runAgentToCompletion(updatedState).leftMap(llmError =>
-        AssistantError.SessionError(s"Agent execution failed: ${llmError.message}", state.sessionId, "agent-execution")
+        AssistantError.SessionError(
+          s"Agent execution failed: ${llmError.message}",
+          state.sessionId,
+          "agent-execution",
+          llmCause = Some(llmError)
+        )
       )
       response <- extractFinalResponse(finalState)
     } yield {
@@ -296,21 +301,27 @@ class AssistantAgent(
    * Adds user message to the conversation - initializes if first message
    */
   private def addUserMessage(query: String, state: SessionState): Either[AssistantError, SessionState] =
-    Right(
-      state.agentState
-        .map { agentState =>
-          // Some case - add to existing conversation
-          val updatedAgentState = agentState
-            .addMessage(UserMessage(query))
-            .withStatus(AgentStatus.InProgress)
-          state.withAgentState(updatedAgentState)
-        }
-        .getOrElse {
-          // None case - initialize agent
-          val initialState = agent.initialize(query, tools)
-          state.withAgentState(initialState)
-        }
-    )
+    state.agentState match {
+      case Some(agentState) =>
+        // Existing conversation - add message
+        val updatedAgentState = agentState
+          .addMessage(UserMessage(query))
+          .withStatus(AgentStatus.InProgress)
+        Right(state.withAgentState(updatedAgentState))
+      case None =>
+        // First message - initialize agent
+        agent
+          .initializeSafe(query, tools)
+          .map(state.withAgentState)
+          .leftMap(llmError =>
+            AssistantError.SessionError(
+              s"Agent initialization failed: ${llmError.message}",
+              state.sessionId,
+              "agent-initialization",
+              llmCause = Some(llmError)
+            )
+          )
+    }
 
   /**
    * Runs the agent until completion or failure

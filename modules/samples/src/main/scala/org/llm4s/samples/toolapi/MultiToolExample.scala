@@ -59,12 +59,6 @@ object MultiToolExample {
         }
       } yield CalculationResult(result)
 
-    val calculatorTool = ToolBuilder[Map[String, Any], CalculationResult](
-      "calculator",
-      "Performs basic arithmetic operations",
-      calculatorSchema
-    ).withHandler(calculatorHandler).build()
-
     // 2. Search tool
     val searchSchema = Schema
       .`object`[Map[String, Any]]("Search parameters")
@@ -93,58 +87,67 @@ object MultiToolExample {
         SearchResult(query, mockResults)
       }
 
-    val searchTool = ToolBuilder[Map[String, Any], SearchResult](
-      "search",
-      "Searches for information",
-      searchSchema
-    ).withHandler(searchHandler).build()
+    val result = for {
+      calculatorTool <- ToolBuilder[Map[String, Any], CalculationResult](
+        "calculator",
+        "Performs basic arithmetic operations",
+        calculatorSchema
+      ).withHandler(calculatorHandler).buildSafe()
+      searchTool <- ToolBuilder[Map[String, Any], SearchResult](
+        "search",
+        "Searches for information",
+        searchSchema
+      ).withHandler(searchHandler).buildSafe()
+    } yield {
+      // Create registry with both tools
+      val toolRegistry = new ToolRegistry(Seq(calculatorTool, searchTool))
 
-    // Create registry with both tools
-    val toolRegistry = new ToolRegistry(Seq(calculatorTool, searchTool))
-
-    // Example executions
-    val calcRequest = ToolCallRequest(
-      functionName = "calculator",
-      arguments = ujson.Obj(
-        "operation" -> "multiply",
-        "a"         -> 5.2,
-        "b"         -> 3.0
+      // Example executions
+      val calcRequest = ToolCallRequest(
+        functionName = "calculator",
+        arguments = ujson.Obj(
+          "operation" -> "multiply",
+          "a"         -> 5.2,
+          "b"         -> 3.0
+        )
       )
-    )
 
-    val searchRequest = ToolCallRequest(
-      functionName = "search",
-      arguments = ujson.Obj(
-        "query" -> "scala programming",
-        "limit" -> 3
+      val searchRequest = ToolCallRequest(
+        functionName = "search",
+        arguments = ujson.Obj(
+          "query" -> "scala programming",
+          "limit" -> 3
+        )
       )
-    )
 
-    // Execute tool calls
-    logger.info("Executing calculator tool...")
-    val startTime1 = System.currentTimeMillis()
-    toolRegistry.execute(calcRequest) match {
-      case Right(json) =>
-        val duration = System.currentTimeMillis() - startTime1
-        logger.info("Calculator tool completed in {}ms. Result: {}", duration, json.render(indent = 2))
-      case Left(error) =>
-        val duration = System.currentTimeMillis() - startTime1
-        logger.error("Calculator tool failed in {}ms with error: {}", duration, error)
+      // Execute tool calls
+      logger.info("Executing calculator tool...")
+      val startTime1 = System.currentTimeMillis()
+      toolRegistry.execute(calcRequest) match {
+        case Right(json) =>
+          val duration = System.currentTimeMillis() - startTime1
+          logger.info("Calculator tool completed in {}ms. Result: {}", duration, json.render(indent = 2))
+        case Left(error) =>
+          val duration = System.currentTimeMillis() - startTime1
+          logger.error("Calculator tool failed in {}ms with error: {}", duration, error)
+      }
+
+      logger.info("Executing search tool...")
+      val startTime2 = System.currentTimeMillis()
+      toolRegistry.execute(searchRequest) match {
+        case Right(json) =>
+          val duration = System.currentTimeMillis() - startTime2
+          logger.info("Search tool completed in {}ms. Result: {}", duration, json.render(indent = 2))
+        case Left(error) =>
+          val duration = System.currentTimeMillis() - startTime2
+          logger.error("Search tool failed in {}ms with error: {}", duration, error)
+      }
+
+      // Generate OpenAI tool definitions
+      logger.info("Tool definitions for OpenAI:")
+      logger.info(toolRegistry.getToolDefinitions("openai").render(indent = 2))
     }
 
-    logger.info("Executing search tool...")
-    val startTime2 = System.currentTimeMillis()
-    toolRegistry.execute(searchRequest) match {
-      case Right(json) =>
-        val duration = System.currentTimeMillis() - startTime2
-        logger.info("Search tool completed in {}ms. Result: {}", duration, json.render(indent = 2))
-      case Left(error) =>
-        val duration = System.currentTimeMillis() - startTime2
-        logger.error("Search tool failed in {}ms with error: {}", duration, error)
-    }
-
-    // Generate OpenAI tool definitions
-    logger.info("Tool definitions for OpenAI:")
-    logger.info(toolRegistry.getToolDefinitions("openai").render(indent = 2))
+    result.left.foreach(err => logger.error("Failed to build tools: {}", err.formatted))
   }
 }

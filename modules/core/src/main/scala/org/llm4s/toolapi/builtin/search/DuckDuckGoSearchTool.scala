@@ -1,6 +1,7 @@
 package org.llm4s.toolapi.builtin.search
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 
 import scala.util.control.NonFatal
@@ -156,7 +157,7 @@ object DuckDuckGoSearchTool {
         _           <- if (searchQuery.trim.isEmpty) Left("search_query cannot be empty") else Right(())
         result      <- search(toolConfig.apiUrl, searchQuery, config, httpClient, restoreInterrupt)
       } yield result
-    }.build()
+    }.buildSafe()
 
   private val SAFE_SEARCH   = "1"
   private val UNSAFE_SEARCH = "-1"

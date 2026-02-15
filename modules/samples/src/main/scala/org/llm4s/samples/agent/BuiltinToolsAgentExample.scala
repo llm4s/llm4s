@@ -56,52 +56,59 @@ object BuiltinToolsAgentExample {
           blockedPaths = Seq("/etc", "/var", "/sys", "/proc")
         )
 
-        val tools = BuiltinTools.custom(
+        val toolsResult = BuiltinTools.customSafe(
           fileConfig = Some(fileConfig),
           shellConfig = Some(ShellConfig.readOnly())
         )
 
-        logger.info("Available tools: {}", tools.map(_.name).mkString(", "))
+        toolsResult match {
+          case Left(err) =>
+            logger.error("Failed to load tools: {}", err.formatted)
+            return
 
-        val registry = new ToolRegistry(tools)
-        val agent    = new Agent(client)
+          case Right(tools) =>
+            logger.info("Available tools: {}", tools.map(_.name).mkString(", "))
 
-        // Example queries that use different built-in tools
-        val queries = Seq(
-          "What is today's date and what day of the week is it?",
-          "Calculate 15% of 850 and also compute the square root of 144",
-          s"List the files in $homeDir and tell me how many there are",
-          "Generate 3 UUIDs for me",
-          "What is the current working directory?"
-        )
+            val registry = new ToolRegistry(tools)
+            val agent    = new Agent(client)
 
-        for (query <- queries) {
-          logger.info("\n--- Query: {} ---", query)
+            // Example queries that use different built-in tools
+            val queries = Seq(
+              "What is today's date and what day of the week is it?",
+              "Calculate 15% of 850 and also compute the square root of 144",
+              s"List the files in $homeDir and tell me how many there are",
+              "Generate 3 UUIDs for me",
+              "What is the current working directory?"
+            )
 
-          agent.run(query, registry) match {
-            case Left(error) =>
-              logger.error("Agent error: {}", error.formatted)
+            for (query <- queries) {
+              logger.info("\n--- Query: {} ---", query)
 
-            case Right(state) =>
-              // Get the final assistant response from the conversation
-              val lastAssistantMsg = state.conversation.messages
-                .filter(_.role == org.llm4s.llmconnect.model.MessageRole.Assistant)
-                .lastOption
-                .map(_.content)
-                .getOrElse("No response")
+              agent.run(query, registry) match {
+                case Left(error) =>
+                  logger.error("Agent error: {}", error.formatted)
 
-              // Count tool messages to see which tools were used
-              val toolMsgCount = state.conversation.messages.count(
-                _.role == org.llm4s.llmconnect.model.MessageRole.Tool
-              )
+                case Right(state) =>
+                  // Get the final assistant response from the conversation
+                  val lastAssistantMsg = state.conversation.messages
+                    .filter(_.role == org.llm4s.llmconnect.model.MessageRole.Assistant)
+                    .lastOption
+                    .map(_.content)
+                    .getOrElse("No response")
 
-              logger.info("Agent response: {}", lastAssistantMsg)
-              logger.info("Tool calls made: {}", toolMsgCount)
-              logger.info("Status: {}", state.status)
-          }
+                  // Count tool messages to see which tools were used
+                  val toolMsgCount = state.conversation.messages.count(
+                    _.role == org.llm4s.llmconnect.model.MessageRole.Tool
+                  )
+
+                  logger.info("Agent response: {}", lastAssistantMsg)
+                  logger.info("Tool calls made: {}", toolMsgCount)
+                  logger.info("Status: {}", state.status)
+              }
+            }
+
+            logger.info("\n=== Example Complete ===")
         }
-
-        logger.info("\n=== Example Complete ===")
     }
   }
 }

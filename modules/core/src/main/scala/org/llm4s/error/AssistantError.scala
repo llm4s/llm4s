@@ -63,13 +63,15 @@ object AssistantError {
     override val message: String,
     sessionId: SessionId,
     operation: String, // "load", "save", "create", "list", etc.
-    cause: Option[Throwable] = None
+    cause: Option[Throwable] = None,
+    llmCause: Option[LLMError] = None
   ) extends AssistantError {
     override val context: Map[String, String] = Map(
       "component" -> "session-manager",
       "sessionId" -> sessionId.value,
       "operation" -> operation
-    ) ++ cause.map(ex => "cause" -> ex.getClass.getSimpleName)
+    ) ++ cause.map(ex => "cause" -> ex.getClass.getSimpleName) ++
+      llmCause.map(e => "llmErrorType" -> e.getClass.getSimpleName)
   }
 
   final case class FileError(

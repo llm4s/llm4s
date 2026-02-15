@@ -102,11 +102,16 @@ class DuckDuckGoSearchToolSpec extends AnyFlatSpec with Matchers {
 
   "DuckDuckGoSearchTool" should "have the correct metadata" in {
     val toolConfig = DuckDuckGoSearchToolConfig(apiUrl = "https://api.duckduckgo.com")
-    val tool       = DuckDuckGoSearchTool.create(toolConfig)
-    tool.name shouldBe "duckduckgo_search"
-    tool.description shouldBe
-      "Search the web for definitions, facts, and quick answers using DuckDuckGo. Best for factual queries and definitions. Does not provide full web search results."
-
+    DuckDuckGoSearchTool
+      .create(toolConfig)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          tool.name shouldBe "duckduckgo_search"
+          tool.description shouldBe
+            "Search the web for definitions, facts, and quick answers using DuckDuckGo. Best for factual queries and definitions. Does not provide full web search results."
+        }
+      )
   }
 
   "RelatedTopic" should "serialize and deserialize correctly" in {

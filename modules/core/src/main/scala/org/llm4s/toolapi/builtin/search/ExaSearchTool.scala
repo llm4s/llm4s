@@ -318,7 +318,7 @@ object ExaSearchTool {
         case None                 => Right(defaultConfig)
       }
 
-      tool = ToolBuilder[Map[String, Any], ExaSearchResult](
+      tool <- ToolBuilder[Map[String, Any], ExaSearchResult](
         name = "exa_search",
         description =
           "Search the web using Exa's AI-powered search engine. Use this for semantic and intent-based searches that understand natural language queries (e.g., 'companies working on AI safety', 'recent papers about transformers'). Returns high-quality structured results with titles, URLs, text snippets, authors, and publication dates. Best for research, technical documentation, finding specific companies or people, and discovering recent content.",
@@ -329,7 +329,7 @@ object ExaSearchTool {
           query    <- validateQuery(rawQuery).left.map(_.message) // Convert Result to Either[String, String]
           result   <- search(query, finalConfig, validatedConfig, httpClient, restoreInterrupt)
         } yield result
-      }.build()
+      }.buildSafe()
     } yield tool
 
   /**

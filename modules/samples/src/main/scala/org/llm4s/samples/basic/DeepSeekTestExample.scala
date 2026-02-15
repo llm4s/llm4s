@@ -127,7 +127,13 @@ object DeepSeekTestExample {
   }
 
   private def testToolCalling(config: DeepSeekConfig): Unit = {
-    val toolRegistry = new ToolRegistry(Seq(WeatherTool.tool))
+    val weatherTool = WeatherTool.toolSafe match {
+      case Right(tool) => tool
+      case Left(err) =>
+        logger.error(s"Failed to load weather tool: ${err.formatted}")
+        return
+    }
+    val toolRegistry = new ToolRegistry(Seq(weatherTool))
     val conversation = Conversation(
       Seq(
         SystemMessage(
@@ -136,7 +142,7 @@ object DeepSeekTestExample {
         UserMessage("What's the weather in Paris, France in celsius? Call the tool now.")
       )
     )
-    val options = CompletionOptions(tools = Seq(WeatherTool.tool))
+    val options = CompletionOptions(tools = Seq(weatherTool))
 
     val result = for {
       client     <- LLMConnect.getClient(config)

@@ -1,6 +1,7 @@
 package org.llm4s.toolapi.builtin.search
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 import org.llm4s.config.BraveSearchToolConfig
 
@@ -251,7 +252,7 @@ object BraveSearchTool {
         )
         result <- search(query, finalConfig, toolConfig, category, httpClient, restoreInterrupt)
       } yield result
-    }.build()
+    }.buildSafe()
 
   /**
    * Create a Brave search tool with explicit API key and optional overrides.
