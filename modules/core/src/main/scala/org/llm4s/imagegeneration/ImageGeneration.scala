@@ -2,7 +2,12 @@ package org.llm4s.imagegeneration
 
 import java.time.Instant
 import java.nio.file.Path
-import org.llm4s.imagegeneration.provider.{ HttpClient, HuggingFaceClient, OpenAIImageClient }
+import org.llm4s.imagegeneration.provider.{
+  HttpClient,
+  HuggingFaceClient,
+  OpenAIImageClient,
+  VertexAIClient
+}
 
 import scala.annotation.unused
 import scala.util.Try
@@ -170,6 +175,7 @@ sealed trait ImageGenerationProvider
 object ImageGenerationProvider {
   case object DALLE           extends ImageGenerationProvider
   case object HuggingFace     extends ImageGenerationProvider
+  case object VertexAI        extends ImageGenerationProvider
 }
 
 trait ImageGenerationConfig {
@@ -216,6 +222,27 @@ case class OpenAIConfig(
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.DALLE
   override def toString: String         = s"OpenAIConfig(apiKey=***, model=$model, baseUrl=$baseUrl, timeout=$timeout)"
+}
+
+/**
+ * Configuration for Google Vertex AI Imagen.
+ *
+ * @param projectId   Google Cloud Project ID
+ * @param location    Google Cloud Location (e.g., "us-central1")
+ * @param model       Model name (default: "imagegeneration@005")
+ * @param accessToken Optional OAuth2 access token
+ * @param timeout     Request timeout in milliseconds
+ */
+case class VertexAIConfig(
+  projectId: String,
+  location: String,
+  model: String = "imagegeneration@005",
+  accessToken: String,
+  override val timeout: Int = 30000
+) extends ImageGenerationConfig {
+  def provider: ImageGenerationProvider = ImageGenerationProvider.VertexAI
+  override def toString: String =
+    s"VertexAIConfig(projectId=$projectId, location=$location, model=$model, accessToken=***)"
 }
 
 // ===== CLIENT INTERFACE =====
@@ -289,6 +316,9 @@ object ImageGeneration {
       case openAIConfig: OpenAIConfig =>
         val httpClient = HttpClient.create()
         Right(new OpenAIImageClient(openAIConfig, httpClient))
+      case vertexConfig: VertexAIConfig =>
+        val httpClient = HttpClient.create()
+        Right(new VertexAIClient(vertexConfig, httpClient))
       case _ =>
         Left(UnsupportedOperation(s"Provider ${config.provider} is not supported."))
     }
@@ -389,6 +419,24 @@ object ImageGeneration {
     model: String = "gpt-image-1"
   ): Either[ImageGenerationError, ImageGenerationClient] = {
     val config = OpenAIConfig(apiKey = apiKey, model = model)
+    client(config)
+  }
+
+  /**
+   * Get a Vertex AI client with the required configuration.
+   *
+   * @param projectId Google Cloud Project ID
+   * @param location Google Cloud Location
+   * @param accessToken Optional OAuth2 access token
+   * @param model Model name (default: imagegeneration@005)
+   */
+  def vertexAIClient(
+    projectId: String,
+    location: String,
+    accessToken: String,
+    model: String = "imagegeneration@005"
+  ): Either[ImageGenerationError, ImageGenerationClient] = {
+    val config = VertexAIConfig(projectId, location, model, accessToken)
     client(config)
   }
 

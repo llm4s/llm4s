@@ -8,6 +8,16 @@ import java.util.Base64
 import scala.util.Try
 import scala.concurrent.{ Future, ExecutionContext, blocking }
 
+object HuggingFaceClient {
+
+  /*
+   * Dedicated ExecutionContext for blocking I/O operations.
+   * This ensures we don't block the caller's ExecutionContext (e.g. standard global).
+   */
+  private[imagegeneration] val blockingEc: ExecutionContext =
+    ImageGenerationExecutionContext.bounded("huggingface-blocking")
+}
+
 /**
  * HuggingFace Inference API client for image generation.
  *
@@ -46,7 +56,9 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, GeneratedImage] =
-    generateImages(prompt, 1, options).map(_.head)
+    generateImages(prompt, 1, options).flatMap(
+      _.headOption.toRight(ValidationError("No image returned from HuggingFace"))
+    )
 
   /**
    * Validates the provided prompt to ensure it is not empty or blank.
@@ -169,7 +181,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       blocking {
         generateImage(prompt, options)
       }
-    }
+    }(HuggingFaceClient.blockingEc)
 
   override def generateImagesAsync(
     prompt: String,
@@ -180,7 +192,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       blocking {
         generateImages(prompt, count, options)
       }
-    }
+    }(HuggingFaceClient.blockingEc)
 
   override def editImageAsync(
     imagePath: Path,
@@ -192,7 +204,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       blocking {
         editImage(imagePath, prompt, maskPath, options)
       }
-    }
+    }(HuggingFaceClient.blockingEc)
 
   /**
    * Check the health status of the HuggingFace Inference API.

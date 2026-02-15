@@ -8,6 +8,16 @@ import java.nio.file.Path
 import scala.util.Try
 import scala.concurrent.{ Future, ExecutionContext, blocking }
 
+object OpenAIImageClient {
+
+  /*
+   * Dedicated ExecutionContext for blocking I/O operations.
+   * This ensures we don't block the caller's ExecutionContext (e.g. standard global).
+   */
+  private[imagegeneration] val blockingEc: ExecutionContext =
+    ImageGenerationExecutionContext.bounded("openai-blocking")
+}
+
 /**
  * OpenAI DALL-E API client for image generation.
  *
@@ -51,7 +61,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     prompt: String,
     options: ImageGenerationOptions = ImageGenerationOptions()
   ): Either[ImageGenerationError, GeneratedImage] =
-    generateImages(prompt, 1, options).map(_.head)
+    generateImages(prompt, 1, options).flatMap(_.headOption.toRight(ValidationError("No image returned from OpenAI")))
 
   /**
    * Generate multiple images from a text prompt using OpenAI DALL-E API.
@@ -156,7 +166,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       blocking {
         generateImage(prompt, options)
       }
-    }
+    }(OpenAIImageClient.blockingEc)
 
   /**
    * Generate multiple images asynchronously
@@ -170,7 +180,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       blocking {
         generateImages(prompt, count, options)
       }
-    }
+    }(OpenAIImageClient.blockingEc)
 
   /**
    * Edit an existing image asynchronously
@@ -185,7 +195,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       blocking {
         editImage(imagePath, prompt, maskPath, options)
       }
-    }
+    }(OpenAIImageClient.blockingEc)
 
   /**
    * Check the health/status of the OpenAI API service.
@@ -289,9 +299,9 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     )
 
     // Optional parameters
-    options.quality.foreach(q => requestBody("quality") = q)
-    options.style.foreach(s => requestBody("style") = s)
-    options.user.foreach(u => requestBody("user") = u)
+    options.quality.foreach(v => requestBody("quality") = v)
+    options.style.foreach(v => requestBody("style") = v)
+    options.user.foreach(v => requestBody("user") = v)
 
     // Backward compatibility defaults for DALL-E 3 if not specified
     if (config.model == "dall-e-3" && options.quality.isEmpty) {
