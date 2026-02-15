@@ -71,16 +71,20 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
   }
 
   it should "perform semantic search" in skipIfDisabled {
+    val embedding = embeddingService.embed("apples").fold(e => fail(e.message), identity)
     val relevant = Memory(
       MemoryId("1"),
       "I like apples",
       MemoryType.Task,
-      embedding = Some(embeddingService.embed("apples").toOption.get)
+      embedding = Some(embedding)
     )
     store.store(relevant)
-    val result = store.search("apple", 1, MemoryFilter.All)
-    result.isRight shouldBe true
-    result.toOption.get.head.memory.content shouldBe "I like apples"
+    store
+      .search("apple", 1, MemoryFilter.All)
+      .fold(
+        e => fail(s"Search failed: ${e.message}"),
+        results => results.head.memory.content shouldBe "I like apples"
+      )
   }
 
   it should "fallback gracefully when EmbeddingService is missing" in skipIfDisabled {
@@ -88,19 +92,21 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     val id         = MemoryId("fallback-1")
     storeNoEmb.store(Memory(id, "test fallback", MemoryType.Task, Map.empty))
 
-    val result = storeNoEmb.search("query", 5, MemoryFilter.All)
-
-    result.isRight shouldBe true
-    val memories = result.toOption.get
-    memories.nonEmpty shouldBe true
-    memories.head.score shouldBe 0.0
+    storeNoEmb
+      .search("query", 5, MemoryFilter.All)
+      .fold(
+        e => fail(s"Search failed: ${e.message}"),
+        memories => {
+          memories.nonEmpty shouldBe true
+          memories.head.score shouldBe 0.0
+        }
+      )
     storeNoEmb.close()
   }
 
   it should "clamp similarity scores to [0, 1]" in skipIfDisabled {
-    val result = store.search("anything", 5, MemoryFilter.All)
-    if (result.isRight) {
-      result.toOption.get.foreach { sm =>
+    store.search("anything", 5, MemoryFilter.All).foreach { results =>
+      results.foreach { sm =>
         sm.score should be >= 0.0
         sm.score should be <= 1.0
       }
@@ -118,8 +124,8 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
       .fold(e => fail(e.message), identity)
 
     val result = storeWithEmpty.search("query", 5, MemoryFilter.All)
-    result.isLeft shouldBe true
-    result.left.toOption.get.message should include("vector is empty")
+    result shouldBe a[Left[_, _]]
+    result.left.foreach(_.message should include("vector is empty"))
     storeWithEmpty.close()
   }
 
@@ -134,8 +140,8 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
       .fold(e => fail(e.message), identity)
 
     val result = storeFailing.search("query", 5, MemoryFilter.All)
-    result.isLeft shouldBe true
-    result.left.toOption.get.message should include("boom")
+    result shouldBe a[Left[_, _]]
+    result.left.foreach(_.message should include("boom"))
     storeFailing.close()
   }
 }
