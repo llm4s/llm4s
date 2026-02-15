@@ -210,7 +210,7 @@ class JdkHttpClient extends Llm4sHttpClient {
       .headers()
       .map()
       .asScala
-      .map { case (key, values) => key.toLowerCase -> values.asScala.toSeq }
+      .map { case (key, values) => key.toLowerCase(java.util.Locale.ROOT) -> values.asScala.toSeq }
       .toMap
 
     HttpResponse(
