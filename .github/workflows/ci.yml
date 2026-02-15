@@ -86,9 +86,7 @@ jobs:
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
           files: target/scala-3.7.1/scoverage-report/scoverage.xml,modules/*/target/scala-3.7.1/scoverage-report/scoverage.xml
-          slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
 
