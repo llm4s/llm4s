@@ -5,7 +5,7 @@ import org.slf4j.LoggerFactory
 import java.nio.file.Paths
 
 /**
- * Example demonstrating the Image Generation API for Stable Diffusion.
+ * Example demonstrating the Image Generation API for OpenAI.
  *
  * This shows how to:
  * - Generate single and multiple images
@@ -16,8 +16,16 @@ import java.nio.file.Paths
 object ImageGenerationExample {
   private val logger = LoggerFactory.getLogger(getClass)
 
+  // NOTE: You need to set the OPENAI_API_KEY environment variable to run this example
+  private val apiKey = sys.env.getOrElse("OPENAI_API_KEY", "your-api-key")
+
   def main(args: Array[String]): Unit = {
-    logger.info("=== Image Generation API Demo ===")
+    logger.info("=== Image Generation API Demo (OpenAI) ===")
+
+    if (apiKey == "your-api-key") {
+      logger.warn("Please set OPENAI_API_KEY environment variable to run this example.")
+      return
+    }
 
     // Example 1: Basic image generation
     basicExample()
@@ -37,7 +45,7 @@ object ImageGenerationExample {
 
     val prompt = "A beautiful sunset over mountains, digital art"
 
-    ImageGeneration.generateWithStableDiffusion(prompt) match {
+    ImageGeneration.generateWithOpenAI(prompt, apiKey) match {
       case Right(image) =>
         logger.info(s"Generated image: ${image.size.description}")
 
@@ -55,23 +63,22 @@ object ImageGenerationExample {
 
     val prompt = "A cyberpunk city at night with neon lights"
     val options = ImageGenerationOptions(
-      size = ImageSize.Landscape768x512,
-      seed = Some(42), // Reproducible results
-      guidanceScale = 8.0,
-      inferenceSteps = 30,
-      negativePrompt = Some("blurry, low quality")
+      size = ImageSize.Square1024,
+      quality = Some("hd"),
+      style = Some("vivid"),
+      responseFormat = Some("b64_json")
     )
 
-    val config = StableDiffusionConfig(
-      baseUrl = "http://localhost:7860",
-      timeout = 120000
+    val config = OpenAIConfig(
+      apiKey = apiKey,
+      model = "dall-e-3"
     )
 
     ImageGeneration.generateImage(prompt, config, options) match {
       case Right(image) =>
-        logger.info(s"Generated cyberpunk image with seed: ${image.seed.get}")
+        logger.info(s"Generated cyberpunk image with model: ${config.model}")
 
-        val filename = s"cyberpunk_${image.seed.get}.png"
+        val filename = s"cyberpunk_${System.currentTimeMillis()}.png"
         image.saveToFile(Paths.get(filename)).foreach(_ => logger.info(s"Saved: $filename"))
 
       case Left(error) =>
@@ -83,9 +90,9 @@ object ImageGenerationExample {
     logger.info("\n--- Multiple Images Example ---")
 
     val prompt = "A cute robot, cartoon style"
-    val config = StableDiffusionConfig()
+    val config = OpenAIConfig(apiKey = apiKey, model = "dall-e-2") // dall-e-2 supports multiple images
 
-    ImageGeneration.generateImages(prompt, 3, config) match {
+    ImageGeneration.generateImages(prompt, 2, config) match {
       case Right(images) =>
         logger.info(s"Generated ${images.length} robot images")
 
@@ -102,16 +109,18 @@ object ImageGenerationExample {
   def errorHandlingExample(): Unit = {
     logger.info("\n--- Error Handling Example ---")
 
-    // This will fail because there's no server at this address
-    ImageGeneration.generateWithStableDiffusion(
+    // This will fail because API key is invalid
+    ImageGeneration.generateWithOpenAI(
       "This will fail",
-      baseUrl = "http://localhost:99999"
+      apiKey = "invalid-key"
     ) match {
       case Right(_) =>
         logger.info("Unexpected success!")
 
       case Left(error) =>
         error match {
+          case AuthenticationError(msg) =>
+             logger.info(s"Expected authentication error: $msg")
           case ServiceError(msg, code) =>
             logger.info(s"Expected service error: $msg (code: $code)")
           case UnknownError(throwable) =>
@@ -122,12 +131,12 @@ object ImageGenerationExample {
     }
 
     // Health check example
-    val config = StableDiffusionConfig()
+    val config = OpenAIConfig(apiKey = apiKey)
     ImageGeneration.healthCheck(config) match {
       case Right(status) =>
         logger.info(s"Service status: ${status.status} - ${status.message}")
       case Left(error) =>
-        logger.info(s"Health check failed as expected: ${error.message}")
+        logger.info(s"Health check failed as expected (OpenAI doesn't support generic health check yet): ${error.message}")
     }
   }
 }

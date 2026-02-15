@@ -54,7 +54,7 @@ class ImageGenerationClientsTest
 
     val result = client.generateImage(prompt)
     result.isRight shouldBe true
-    result.value.data shouldBe "base64data"
+    result.value.data shouldBe Some("base64data")
   }
 
   test("OpenAIImageClient should generate multiple images") {
@@ -74,8 +74,8 @@ class ImageGenerationClientsTest
     val result = client.generateImages(prompt, 2)
     result.isRight shouldBe true
     result.value.length shouldBe 2
-    result.value(0).data shouldBe "img1"
-    result.value(1).data shouldBe "img2"
+    result.value(0).data shouldBe Some("img1")
+    result.value(1).data shouldBe Some("img2")
   }
 
   test("OpenAIImageClient should parse URL response format") {
@@ -180,7 +180,7 @@ class ImageGenerationClientsTest
     try {
       val result = client.editImage(tempFile.toPath, "edit prompt")
       result.isRight shouldBe true
-      result.value.head.data shouldBe "edited_image_base64"
+      result.value.head.data shouldBe Some("edited_image_base64")
     } finally
       tempFile.delete()
   }
@@ -219,7 +219,7 @@ class ImageGenerationClientsTest
 
     whenReady(client.generateImageAsync(prompt)) { result =>
       result.isRight shouldBe true
-      result.value.data shouldBe "img1"
+      result.value.data shouldBe Some("img1")
     }
 
     whenReady(client.generateImagesAsync(prompt, 1)) { result =>
@@ -233,7 +233,7 @@ class ImageGenerationClientsTest
       (mockHttpClient.postMultipart _).when(*, *, *, *).returns(Success(createResponse(200, editResponseBody)))
       whenReady(client.editImageAsync(tempFile.toPath, "edit")) { result =>
         result.isRight shouldBe true
-        result.value.head.data shouldBe "edited"
+        result.value.head.data shouldBe Some("edited")
       }
     } finally tempFile.delete()
   }
@@ -337,95 +337,6 @@ class ImageGenerationClientsTest
         result.left.value shouldBe a[UnsupportedOperation]
       }
     finally tempFile.delete()
-  }
-
-  // ==========================================
-  // Stable Diffusion Client Tests
-  // ==========================================
-
-  test("StableDiffusionClient should generate single image") {
-    val mockHttpClient = stub[HttpClient]
-    val config         = StableDiffusionConfig(baseUrl = "http://localhost:7860")
-    val client         = new StableDiffusionClient(config, mockHttpClient)
-
-    val responseBody = """{"images": ["base64data"], "parameters": {}, "info": ""}"""
-    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(200, responseBody)))
-
-    val result = client.generateImage(prompt)
-    result.isRight shouldBe true
-    result.value.data shouldBe "base64data"
-  }
-
-  test("StableDiffusionClient should generate multiple images") {
-    val mockHttpClient = stub[HttpClient]
-    val config         = StableDiffusionConfig(baseUrl = "http://localhost:7860")
-    val client         = new StableDiffusionClient(config, mockHttpClient)
-
-    val responseBody = """{"images": ["img1", "img2"], "parameters": {}, "info": ""}"""
-    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(200, responseBody)))
-
-    val result = client.generateImages(prompt, 2)
-    result.isRight shouldBe true
-    result.value.length shouldBe 2
-  }
-
-  test("StableDiffusionClient should map API error") {
-    val mockHttpClient = stub[HttpClient]
-    val config         = StableDiffusionConfig(baseUrl = "http://localhost:7860")
-    val client         = new StableDiffusionClient(config, mockHttpClient)
-
-    (mockHttpClient.post _).when(*, *, *, *).returns(Success(mockErrorResponse))
-
-    val result = client.generateImage(prompt)
-    result.isLeft shouldBe true
-  }
-
-  test("StableDiffusionClient should handle 401 Unauthorized") {
-    val mockHttpClient = stub[HttpClient]
-    val config         = StableDiffusionConfig(baseUrl = "http://localhost:7860")
-    val client         = new StableDiffusionClient(config, mockHttpClient)
-
-    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(401, "Unauthorized")))
-
-    val result = client.generateImage(prompt)
-    result.isLeft shouldBe true
-    result.left.value shouldBe a[AuthenticationError]
-  }
-
-  test("StableDiffusionClient should handle 429 Rate Limit") {
-    val mockHttpClient = stub[HttpClient]
-    val config         = StableDiffusionConfig(baseUrl = "http://localhost:7860")
-    val client         = new StableDiffusionClient(config, mockHttpClient)
-
-    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(429, "Rate limit")))
-
-    val result = client.generateImage(prompt)
-    result.isLeft shouldBe true
-    result.left.value shouldBe a[RateLimitError]
-  }
-
-  test("StableDiffusionClient should handle malformed JSON response") {
-    val mockHttpClient = stub[HttpClient]
-    val config         = StableDiffusionConfig(baseUrl = "http://localhost:7860")
-    val client         = new StableDiffusionClient(config, mockHttpClient)
-
-    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(200, "{invalid")))
-
-    val result = client.generateImage(prompt)
-    result.isLeft shouldBe true
-    result.left.value shouldBe a[UnknownError]
-  }
-
-  test("StableDiffusionClient health check should return healthy") {
-    val mockHttpClient = stub[HttpClient]
-    val config         = StableDiffusionConfig(baseUrl = "http://localhost:7860")
-    val client         = new StableDiffusionClient(config, mockHttpClient)
-
-    (mockHttpClient.get _).when(*, *, *).returns(Success(createResponse(200, "{}")))
-
-    val result = client.health()
-    result.isRight shouldBe true
-    result.value.status shouldBe HealthStatus.Healthy
   }
 
   // ==========================================

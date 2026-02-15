@@ -354,11 +354,11 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
 
       val images = imagesData.map { imageData =>
         val (data, url) = if (imageData.obj.contains("b64_json")) {
-          (imageData("b64_json").str, None)
+          (Some(imageData("b64_json").str), None)
         } else if (imageData.obj.contains("url")) {
-          ("", Some(imageData("url").str))
+          (None, Some(imageData("url").str))
         } else {
-          ("", None)
+          (None, None)
         }
 
         GeneratedImage(

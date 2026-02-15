@@ -2,7 +2,7 @@ package org.llm4s.imagegeneration
 
 import java.time.Instant
 import java.nio.file.Path
-import org.llm4s.imagegeneration.provider.{ HttpClient, HuggingFaceClient, OpenAIImageClient, StableDiffusionClient }
+import org.llm4s.imagegeneration.provider.{ HttpClient, HuggingFaceClient, OpenAIImageClient }
 
 import scala.annotation.unused
 import scala.util.Try
@@ -125,8 +125,8 @@ case class ServiceStatus(
 
 /** Represents a generated image */
 case class GeneratedImage(
-  /** Base64 encoded image data */
-  data: String,
+  /** Base64 encoded image data (optional if URL is present) */
+  data: Option[String],
   /** Image format */
   format: ImageFormat,
   /** Image dimensions */
@@ -143,19 +143,23 @@ case class GeneratedImage(
   url: Option[String] = None
 ) {
 
-  /** Get the image data as bytes */
-  def asBytes: Array[Byte] = {
+  /** Get the image data as bytes if available */
+  def asBytes: Option[Array[Byte]] = {
     import java.util.Base64
-    Base64.getDecoder.decode(data)
+    data.map(d => Base64.getDecoder.decode(d))
   }
 
   /** Save image to file and return updated GeneratedImage with file path */
-  def saveToFile(path: Path): Either[ImageGenerationError, GeneratedImage] = {
-    import java.nio.file.Files
-    Try(Files.write(path, asBytes)).toEither.left
-      .map(UnknownError.apply)
-      .map(_ => copy(filePath = Some(path)))
-  }
+  def saveToFile(path: Path): Either[ImageGenerationError, GeneratedImage] =
+    asBytes match {
+      case Some(bytes) =>
+        import java.nio.file.Files
+        Try(Files.write(path, bytes)).toEither.left
+          .map(UnknownError.apply)
+          .map(_ => copy(filePath = Some(path)))
+      case None =>
+        Left(ValidationError("No image data available to save"))
+    }
 }
 
 // ===== CONFIGURATION =====
@@ -164,7 +168,6 @@ case class GeneratedImage(
 sealed trait ImageGenerationProvider
 
 object ImageGenerationProvider {
-  case object StableDiffusion extends ImageGenerationProvider
   case object DALLE           extends ImageGenerationProvider
   case object HuggingFace     extends ImageGenerationProvider
 }
@@ -173,22 +176,6 @@ trait ImageGenerationConfig {
   def provider: ImageGenerationProvider
   def model: String
   def timeout: Int = 30000 // 30 seconds default
-}
-
-/** Configuration for Stable Diffusion */
-case class StableDiffusionConfig(
-  /** Base URL of the Stable Diffusion server (e.g., http://localhost:7860) */
-  baseUrl: String = "http://localhost:7860",
-  /** API key if required */
-  apiKey: Option[String] = None,
-  /** Model name (informational for Stable Diffusion web UI) */
-  model: String = "stable-diffusion-v1-5",
-  /** Request timeout in milliseconds */
-  override val timeout: Int = 60000 // 60 seconds for image generation
-) extends ImageGenerationConfig {
-  def provider: ImageGenerationProvider = ImageGenerationProvider.StableDiffusion
-  override def toString: String =
-    s"StableDiffusionConfig(baseUrl=$baseUrl, apiKey=${apiKey.map(_ => "***")}, timeout=$timeout)"
 }
 
 /**
@@ -296,9 +283,6 @@ object ImageGeneration {
   ): Either[ImageGenerationError, ImageGenerationClient] =
     // metrics and tracing are ignored in this PR 1 version as instrumentation is added in a later PR
     config match {
-      case sdConfig: StableDiffusionConfig =>
-        val httpClient = HttpClient.create()
-        Right(new StableDiffusionClient(sdConfig, httpClient))
       case hfConfig: HuggingFaceConfig =>
         val httpClient = HttpClient.create()
         Right(new HuggingFaceClient(hfConfig, httpClient))
@@ -372,15 +356,6 @@ object ImageGeneration {
       case Left(e)  => Future.successful(Left(e))
     }
 
-  /** Get a Stable Diffusion client with default local configuration */
-  def stableDiffusionClient(
-    baseUrl: String = "http://localhost:7860",
-    apiKey: Option[String] = None
-  ): Either[ImageGenerationError, ImageGenerationClient] = {
-    val config = StableDiffusionConfig(baseUrl = baseUrl, apiKey = apiKey)
-    client(config)
-  }
-
   /**
    * Get a HuggingFace client with the required API key.
    *
@@ -415,16 +390,6 @@ object ImageGeneration {
   ): Either[ImageGenerationError, ImageGenerationClient] = {
     val config = OpenAIConfig(apiKey = apiKey, model = model)
     client(config)
-  }
-
-  /** Convenience method for quick Stable Diffusion image generation */
-  def generateWithStableDiffusion(
-    prompt: String,
-    options: ImageGenerationOptions = ImageGenerationOptions(),
-    baseUrl: String = "http://localhost:7860"
-  ): Either[ImageGenerationError, GeneratedImage] = {
-    val config = StableDiffusionConfig(baseUrl = baseUrl)
-    generateImage(prompt, config, options)
   }
 
   /** Convenience method for quick OpenAI image generation */

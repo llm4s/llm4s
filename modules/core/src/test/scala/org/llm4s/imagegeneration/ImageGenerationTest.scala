@@ -33,7 +33,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       }
       Right(
         GeneratedImage(
-          data = mockImageData,
+          data = Some(mockImageData),
           format = options.format,
           size = options.size,
           prompt = prompt,
@@ -105,13 +105,13 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     val base64Data = Base64.getEncoder.encodeToString(testData)
 
     val image = GeneratedImage(
-      data = base64Data,
+      data = Some(base64Data),
       format = ImageFormat.PNG,
       size = ImageSize.Square512,
       prompt = "test prompt"
     )
 
-    image.asBytes shouldBe testData
+    image.asBytes.get shouldBe testData
     image.prompt shouldBe "test prompt"
   }
 
@@ -120,7 +120,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     val base64Data = Base64.getEncoder.encodeToString(testData)
 
     val image = GeneratedImage(
-      data = base64Data,
+      data = Some(base64Data),
       format = ImageFormat.PNG,
       size = ImageSize.Square512,
       prompt = "test prompt"
@@ -143,13 +143,6 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
 
   // ===== FACTORY TESTS =====
 
-  test("ImageGeneration creates correct client for StableDiffusion config") {
-    val config = StableDiffusionConfig()
-    val client = ImageGeneration.client(config)
-
-    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.StableDiffusionClient) => }
-  }
-
   test("ImageGeneration creates correct client for HuggingFace config") {
     val config = HuggingFaceConfig(apiKey = "test-key")
     val client = ImageGeneration.client(config)
@@ -162,15 +155,6 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     val client = ImageGeneration.client(config)
 
     client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.OpenAIImageClient) => }
-  }
-
-  test("stableDiffusionClient creates client with correct config") {
-    val client = ImageGeneration.stableDiffusionClient(
-      baseUrl = "http://test:8080",
-      apiKey = Some("test-key")
-    )
-
-    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.StableDiffusionClient) => }
   }
 
   test("huggingFaceClient creates client with correct config") {
@@ -186,12 +170,6 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
   }
 
   test("Config objects have correct default values") {
-    val sdConfig = StableDiffusionConfig()
-    sdConfig.baseUrl shouldBe "http://localhost:7860"
-    sdConfig.apiKey shouldBe None
-    sdConfig.timeout shouldBe 60000
-    sdConfig.provider shouldBe ImageGenerationProvider.StableDiffusion
-
     val hfConfig = HuggingFaceConfig(apiKey = "test-key")
     hfConfig.model shouldBe "stabilityai/stable-diffusion-xl-base-1.0"
     hfConfig.timeout shouldBe 120000
@@ -199,16 +177,6 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
   }
 
   test("Config objects can be customized") {
-    val customSdConfig = StableDiffusionConfig(
-      baseUrl = "http://custom:9000",
-      apiKey = Some("custom-key"),
-      timeout = 120000
-    )
-
-    customSdConfig.baseUrl shouldBe "http://custom:9000"
-    customSdConfig.apiKey shouldBe Some("custom-key")
-    customSdConfig.timeout shouldBe 120000
-
     val customHfConfig = HuggingFaceConfig(
       apiKey = "custom-key",
       model = "custom-model",
@@ -334,20 +302,5 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     serviceError.code shouldBe 500
     validationError.message shouldBe "Invalid prompt"
     unknownError.message shouldBe "Something went wrong"
-  }
-
-  // ===== INTEGRATION TESTS =====
-
-  test("generateWithStableDiffusion handles connection errors gracefully") {
-    // This will fail because no real SD server is running at this port
-    val result = ImageGeneration.generateWithStableDiffusion(
-      "test prompt",
-      baseUrl = "http://localhost:99999"
-    )
-
-    result match {
-      case Left(_)      => succeed
-      case Right(value) => fail(s"Expected failure but got: $value")
-    }
   }
 }
