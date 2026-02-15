@@ -2,7 +2,7 @@ package org.llm4s.knowledgegraph.storage
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import org.llm4s.knowledgegraph.{Node, Edge}
+import org.llm4s.knowledgegraph.{ Node, Edge }
 import ujson.Str
 
 class InMemoryGraphStoreTest extends AnyFunSuite with Matchers {

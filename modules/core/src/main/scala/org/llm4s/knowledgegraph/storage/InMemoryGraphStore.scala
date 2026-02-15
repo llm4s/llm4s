@@ -1,6 +1,6 @@
 package org.llm4s.knowledgegraph.storage
 
-import org.llm4s.knowledgegraph.{Graph, Node, Edge}
+import org.llm4s.knowledgegraph.{ Graph, Node, Edge }
 import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
 
@@ -15,14 +15,13 @@ class InMemoryGraphStore extends GraphStore {
     Right(())
   }
 
-  override def upsertEdge(edge: Edge): Result[Unit] = {
+  override def upsertEdge(edge: Edge): Result[Unit] =
     if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target))
       Left(ProcessingError("missing_node", "Edge endpoints must exist"))
     else {
       graph = graph.addEdge(edge)
       Right(())
     }
-  }
 
   /* ------------------- Read Operations ------------------- */
 
@@ -30,8 +29,8 @@ class InMemoryGraphStore extends GraphStore {
     Right(graph.nodes.get(id))
 
   override def getNeighbors(
-      nodeId: String,
-      direction: Direction
+    nodeId: String,
+    direction: Direction
   ): Result[Seq[(Edge, Node)]] = {
 
     val edges = direction match {
@@ -59,23 +58,24 @@ class InMemoryGraphStore extends GraphStore {
   /* ------------------- Query ------------------- */
 
   override def query(filter: GraphFilter): Result[Graph] = {
-    val filteredNodes = graph.nodes.values.filter { node =>
-      val labelMatch =
-        filter.label.forall(_ == node.label)
+    val filteredNodes = graph.nodes.values
+      .filter { node =>
+        val labelMatch =
+          filter.label.forall(_ == node.label)
 
-      val propertyMatch =
-        (filter.propertyKey, filter.propertyValue) match {
-          case (Some(k), Some(v)) =>
-            node.properties.get(k).exists(_.toString.replace("\"", "") == v)
-          case _ => true
-        }
+        val propertyMatch =
+          (filter.propertyKey, filter.propertyValue) match {
+            case (Some(k), Some(v)) =>
+              node.properties.get(k).exists(_.toString.replace("\"", "") == v)
+            case _ => true
+          }
 
-      labelMatch && propertyMatch
-    }.map(n => n.id -> n).toMap
+        labelMatch && propertyMatch
+      }
+      .map(n => n.id -> n)
+      .toMap
 
-    val filteredEdges = graph.edges.filter { edge =>
-      filter.relationship.forall(_ == edge.relationship)
-    }
+    val filteredEdges = graph.edges.filter(edge => filter.relationship.forall(_ == edge.relationship))
 
     Right(Graph(filteredNodes, filteredEdges))
   }
@@ -83,20 +83,17 @@ class InMemoryGraphStore extends GraphStore {
   /* ------------------- Traversal ------------------- */
 
   override def traverse(
-      startId: String,
-      config: TraversalConfig
+    startId: String,
+    config: TraversalConfig
   ): Result[Seq[Node]] = {
 
-    def dfs(current: String, depth: Int, visited: Set[String]): Set[String] = {
+    def dfs(current: String, depth: Int, visited: Set[String]): Set[String] =
       if (depth > config.maxDepth || visited.contains(current))
         visited
       else {
         val neighbors = graph.getNeighbors(current).map(_.id)
-        neighbors.foldLeft(visited + current) { (acc, n) =>
-          dfs(n, depth + 1, acc)
-        }
+        neighbors.foldLeft(visited + current)((acc, n) => dfs(n, depth + 1, acc))
       }
-    }
 
     if (!graph.hasNode(startId))
       Left(ProcessingError("missing_node", s"Start node $startId does not exist"))
@@ -108,7 +105,7 @@ class InMemoryGraphStore extends GraphStore {
 
   /* ------------------- Delete ------------------- */
 
-  override def deleteNode(id: String): Result[Unit] = {
+  override def deleteNode(id: String): Result[Unit] =
     if (!graph.hasNode(id))
       Left(ProcessingError("missing_node", s"Node $id does not exist"))
     else {
@@ -117,19 +114,18 @@ class InMemoryGraphStore extends GraphStore {
       graph = Graph(newNodes, newEdges)
       Right(())
     }
-  }
 
   override def deleteEdge(
-      source: String,
-      target: String,
-      relationship: String
+    source: String,
+    target: String,
+    relationship: String
   ): Result[Unit] = {
 
     val newEdges =
       graph.edges.filterNot(e =>
         e.source == source &&
-        e.target == target &&
-        e.relationship == relationship
+          e.target == target &&
+          e.relationship == relationship
       )
 
     graph = graph.copy(edges = newEdges)

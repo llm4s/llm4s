@@ -1,11 +1,11 @@
 package org.llm4s.knowledgegraph.storage
 
-import org.llm4s.knowledgegraph.{Graph, Node, Edge}
+import org.llm4s.knowledgegraph.{ Graph, Node, Edge }
 import org.llm4s.types.Result
-import org.llm4s.error.{ConfigurationError, ProcessingError}
+import org.llm4s.error.{ ConfigurationError, ProcessingError }
 import org.llm4s.types.TryOps
 
-import java.nio.file.{Files, Path}
+import java.nio.file.{ Files, Path }
 import java.nio.charset.StandardCharsets
 import scala.util.Try
 
@@ -29,18 +29,18 @@ class JsonGraphStore(path: Path) extends GraphStore {
     Try {
       val nodesJson = graph.nodes.values.map { node =>
         ujson.Obj(
-          "id" -> node.id,
-          "label" -> node.label,
+          "id"         -> node.id,
+          "label"      -> node.label,
           "properties" -> ujson.Obj.from(node.properties)
         )
       }
 
       val edgesJson = graph.edges.map { edge =>
         ujson.Obj(
-          "source" -> edge.source,
-          "target" -> edge.target,
+          "source"       -> edge.source,
+          "target"       -> edge.target,
           "relationship" -> edge.relationship,
-          "properties" -> ujson.Obj.from(edge.properties)
+          "properties"   -> ujson.Obj.from(edge.properties)
         )
       }
 
@@ -59,11 +59,11 @@ class JsonGraphStore(path: Path) extends GraphStore {
     } else {
       Try {
         val content = new String(Files.readAllBytes(path), StandardCharsets.UTF_8)
-        val json = ujson.read(content)
+        val json    = ujson.read(content)
 
         val nodes = json("nodes").arr
           .map { n =>
-            val id = n("id").str
+            val id    = n("id").str
             val label = n("label").str
             val props =
               if (n.obj.contains("properties"))
@@ -78,7 +78,7 @@ class JsonGraphStore(path: Path) extends GraphStore {
         val edges = json("edges").arr.map { e =>
           val source = e("source").str
           val target = e("target").str
-          val rel = e("relationship").str
+          val rel    = e("relationship").str
           val props =
             if (e.obj.contains("properties"))
               e("properties").obj.toMap
@@ -97,9 +97,7 @@ class JsonGraphStore(path: Path) extends GraphStore {
   // =========================================================
 
   override def upsertNode(node: Node): Result[Unit] =
-    loadFromFile().orElse(Right(Graph.empty)).flatMap { g =>
-      saveToFile(g.addNode(node))
-    }
+    loadFromFile().orElse(Right(Graph.empty)).flatMap(g => saveToFile(g.addNode(node)))
 
   override def upsertEdge(edge: Edge): Result[Unit] =
     loadFromFile().orElse(Right(Graph.empty)).flatMap { g =>
@@ -113,8 +111,8 @@ class JsonGraphStore(path: Path) extends GraphStore {
     loadFromFile().map(_.nodes.get(id))
 
   override def getNeighbors(
-      nodeId: String,
-      direction: Direction
+    nodeId: String,
+    direction: Direction
   ): Result[Seq[(Edge, Node)]] =
     loadFromFile().map { g =>
       g.edges.flatMap { e =>
@@ -152,19 +150,17 @@ class JsonGraphStore(path: Path) extends GraphStore {
     }
 
   override def traverse(
-      startId: String,
-      config: TraversalConfig
+    startId: String,
+    config: TraversalConfig
   ): Result[Seq[Node]] =
     loadFromFile().map { g =>
       if (!g.hasNode(startId)) Seq.empty
       else {
-        var visited = Set(startId)
+        var visited  = Set(startId)
         var frontier = Set(startId)
 
         for (_ <- 1 to config.maxDepth) {
-          val next = frontier.flatMap { id =>
-            g.getNeighbors(id).map(_.id)
-          } -- visited
+          val next = frontier.flatMap(id => g.getNeighbors(id).map(_.id)) -- visited
 
           visited ++= next
           frontier = next
@@ -185,9 +181,9 @@ class JsonGraphStore(path: Path) extends GraphStore {
     }
 
   override def deleteEdge(
-      source: String,
-      target: String,
-      relationship: String
+    source: String,
+    target: String,
+    relationship: String
   ): Result[Unit] =
     loadFromFile().flatMap { g =>
       val newGraph =
@@ -195,8 +191,8 @@ class JsonGraphStore(path: Path) extends GraphStore {
           g.nodes,
           g.edges.filterNot(e =>
             e.source == source &&
-            e.target == target &&
-            e.relationship == relationship
+              e.target == target &&
+              e.relationship == relationship
           )
         )
       saveToFile(newGraph)

@@ -1,6 +1,6 @@
 package org.llm4s.knowledgegraph.storage
 
-import org.llm4s.knowledgegraph.{Graph, Node, Edge}
+import org.llm4s.knowledgegraph.{ Graph, Node, Edge }
 import org.llm4s.types.Result
 
 trait GraphStore {
