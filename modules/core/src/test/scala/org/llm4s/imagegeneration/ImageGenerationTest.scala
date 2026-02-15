@@ -6,6 +6,10 @@ import org.scalatest.matchers.should.Matchers
 import java.nio.file.Files
 import java.util.Base64
 
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Await
+import scala.concurrent.duration._
+
 /**
  * Comprehensive test suite for the Image Generation API.
  *
@@ -395,6 +399,69 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     )
 
     future.map(result => result shouldBe a[Left[_, _]])
+  }
+
+  test("Config toString masks sensitive values properly") {
+    val sd = StableDiffusionConfig(apiKey = Some("secret"))
+    sd.toString should include("StableDiffusionConfig")
+    sd.toString should include("***")
+
+    val hf = HuggingFaceConfig(apiKey = "secret-key")
+    hf.toString should include("HuggingFaceConfig")
+    hf.toString should include("***")
+
+    val open = OpenAIConfig(apiKey = "secret-key")
+    open.toString should include("OpenAIConfig")
+    open.toString should include("***")
+  }
+
+  test("ImageGeneration returns UnsupportedOperation for unknown config type") {
+    val fakeConfig = new ImageGenerationConfig {
+      override def provider      = ImageGenerationProvider.StableDiffusion
+      override def model: String = "fake-model"
+      override val timeout: Int  = 1000
+    }
+
+    val result = ImageGeneration.client(fakeConfig)
+
+    result should matchPattern { case Left(_: UnsupportedOperation) =>
+    }
+  }
+
+  test("Default editImage returns UnsupportedOperation") {
+    val client = new MockImageGenerationClient()
+    val result = client.editImage(
+      imagePath = java.nio.file.Paths.get("fake.png"),
+      prompt = "test"
+    )
+
+    result should matchPattern { case Left(_: UnsupportedOperation) =>
+    }
+  }
+
+  test("Default async methods return UnsupportedOperation") {
+    val client = new MockImageGenerationClient()
+
+    val r1 = Await.result(
+      client.generateImageAsync("test"),
+      2.seconds
+    )
+    r1 should matchPattern { case Left(_: UnsupportedOperation) => }
+
+    val r2 = Await.result(
+      client.generateImagesAsync("test", 1),
+      2.seconds
+    )
+    r2 should matchPattern { case Left(_: UnsupportedOperation) => }
+
+    val r3 = Await.result(
+      client.editImageAsync(
+        java.nio.file.Paths.get("fake.png"),
+        "test"
+      ),
+      2.seconds
+    )
+    r3 should matchPattern { case Left(_: UnsupportedOperation) => }
   }
 
 }
