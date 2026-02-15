@@ -12,23 +12,30 @@ sealed trait MemoryFilter {
 
   /**
    * Test if a memory matches this filter.
+   * @param memory The memory to test
+   * @return True if the memory matches the filter criteria, False otherwise
    */
   def matches(memory: Memory): Boolean
 
   /**
    * Combine this filter with another using AND logic.
+   * @param other The other filter to combine with
+   * @return A new MemoryFilter that matches if both filters match
    */
   def and(other: MemoryFilter): MemoryFilter =
     MemoryFilter.And(this, other)
 
   /**
    * Combine this filter with another using OR logic.
+   * @param other The other filter to combine with
+   * @return A new MemoryFilter that matches if either filter matches
    */
   def or(other: MemoryFilter): MemoryFilter =
     MemoryFilter.Or(this, other)
 
   /**
    * Negate this filter.
+   * @return A new MemoryFilter that matches if this filter does not match
    */
   def not: MemoryFilter =
     MemoryFilter.Not(this)
