@@ -47,8 +47,7 @@ object MathSpecialistHandoffExample extends App {
           |For mathematical questions involving calculus, algebra, or advanced math,
           |you MUST hand off to the math specialist.
           |Do not attempt to solve advanced math problems yourself.""".stripMargin
-      ),
-      debug = false
+      )
     )
   } yield finalState
 

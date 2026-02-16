@@ -1,6 +1,6 @@
 package org.llm4s.samples.agent
 
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentContext }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole.Assistant
@@ -51,14 +51,8 @@ object MCPAgentExample {
           agent.run(
             query = query,
             tools = mcpRegistry,
-            inputGuardrails = Seq.empty,
-            outputGuardrails = Seq.empty,
-            handoffs = Seq.empty,
             maxSteps = Some(5),
-            traceLogPath = Some(".log/mcp-agent-example.md"),
-            systemPromptAddition = None,
-            completionOptions = org.llm4s.llmconnect.model.CompletionOptions(),
-            debug = false
+            context = AgentContext(traceLogPath = Some(".log/mcp-agent-example.md"))
           )
       }
     } yield agentState

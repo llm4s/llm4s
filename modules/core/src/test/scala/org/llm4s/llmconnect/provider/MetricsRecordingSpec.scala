@@ -15,23 +15,34 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
 
   // Test implementation of MetricsRecording - must be in same package to access protected method
   class TestMetricsClient(protected val metrics: org.llm4s.metrics.MetricsCollector) extends MetricsRecording {
-    // Public wrapper to test the protected withMetrics method
+    // Public wrapper to test the new withMetrics method (extractCost-based)
     def testWithMetrics[A](
       provider: String,
-      model: String
-    )(
-      f: => Result[A]
-    )(extractUsage: A => Option[TokenUsage], estimateCost: TokenUsage => Option[Double] = _ => None): Result[A] =
-      withMetrics(provider, model)(f)(extractUsage, estimateCost)
+      model: String,
+      f: => Result[A],
+      extractUsage: A => Option[TokenUsage],
+      extractCost: A => Option[Double]
+    ): Result[A] =
+      withMetrics(
+        provider = provider,
+        model = model,
+        operation = f,
+        extractUsage = extractUsage,
+        extractCost = extractCost
+      )
   }
 
   "MetricsRecording.withMetrics" should "record successful request with duration" in {
     val mockMetrics = new MockMetricsCollector()
     val client      = new TestMetricsClient(mockMetrics)
 
-    val result = client.testWithMetrics("test-provider", "test-model") {
-      Right("success")
-    }(_ => None)
+    val result = client.testWithMetrics(
+      provider = "test-provider",
+      model = "test-model",
+      f = Right("success"),
+      extractUsage = (_: String) => None,
+      extractCost = (_: String) => None
+    )
 
     result shouldBe Right("success")
     mockMetrics.totalRequests shouldBe 1
@@ -42,9 +53,13 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
     val mockMetrics = new MockMetricsCollector()
     val client      = new TestMetricsClient(mockMetrics)
 
-    val result = client.testWithMetrics("test-provider", "test-model") {
-      Left(AuthenticationError("openai", "Invalid API key"))
-    }(_ => None)
+    val result = client.testWithMetrics(
+      provider = "test-provider",
+      model = "test-model",
+      f = Left(AuthenticationError("openai", "Invalid API key")),
+      extractUsage = (_: String) => None,
+      extractCost = (_: String) => None
+    )
 
     result.isLeft shouldBe true
     mockMetrics.totalRequests shouldBe 1
@@ -57,9 +72,13 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
 
     case class TestResult(usage: TokenUsage)
 
-    val result = client.testWithMetrics("test-provider", "test-model") {
-      Right(TestResult(TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150)))
-    }(r => Some(r.usage))
+    val result = client.testWithMetrics(
+      provider = "test-provider",
+      model = "test-model",
+      f = Right(TestResult(TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150))),
+      extractUsage = (r: TestResult) => Some(r.usage),
+      extractCost = (_: TestResult) => None
+    )
 
     result.isRight shouldBe true
     mockMetrics.totalTokenCalls shouldBe 1
@@ -71,17 +90,18 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
     tokenCall._4 shouldBe 50  // output tokens
   }
 
-  it should "record cost when estimateCost function is provided" in {
+  it should "record cost when extractCost function is provided" in {
     val mockMetrics = new MockMetricsCollector()
     val client      = new TestMetricsClient(mockMetrics)
 
-    case class TestResult(usage: TokenUsage)
+    case class TestResult(usage: TokenUsage, cost: Option[Double])
 
-    val result = client.testWithMetrics("test-provider", "test-model") {
-      Right(TestResult(TokenUsage(promptTokens = 1000, completionTokens = 500, totalTokens = 1500)))
-    }(
-      extractUsage = r => Some(r.usage),
-      estimateCost = _ => Some(0.015) // $0.015 for this request
+    val result = client.testWithMetrics(
+      provider = "test-provider",
+      model = "test-model",
+      f = Right(TestResult(TokenUsage(promptTokens = 1000, completionTokens = 500, totalTokens = 1500), Some(0.015))),
+      extractUsage = (r: TestResult) => Some(r.usage),
+      extractCost = (r: TestResult) => r.cost
     )
 
     result.isRight shouldBe true
@@ -97,9 +117,13 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
     val mockMetrics = new MockMetricsCollector()
     val client      = new TestMetricsClient(mockMetrics)
 
-    val result = client.testWithMetrics("test-provider", "test-model") {
-      Right("success without tokens")
-    }(_ => None) // No token extraction
+    val result = client.testWithMetrics(
+      provider = "test-provider",
+      model = "test-model",
+      f = Right("success without tokens"),
+      extractUsage = (_: String) => None,
+      extractCost = (_: String) => None
+    )
 
     result.isRight shouldBe true
     mockMetrics.totalRequests shouldBe 1
@@ -112,14 +136,22 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
     val client      = new TestMetricsClient(mockMetrics)
 
     // Authentication error
-    client.testWithMetrics("provider1", "model1") {
-      Left(AuthenticationError("openai", "Auth failed"))
-    }(_ => None)
+    client.testWithMetrics(
+      provider = "provider1",
+      model = "model1",
+      f = Left(AuthenticationError("openai", "Auth failed")),
+      extractUsage = (_: Nothing) => None,
+      extractCost = (_: Nothing) => None
+    )
 
     // Rate limit error
-    client.testWithMetrics("provider2", "model2") {
-      Left(RateLimitError("anthropic"))
-    }(_ => None)
+    client.testWithMetrics(
+      provider = "provider2",
+      model = "model2",
+      f = Left(RateLimitError("anthropic")),
+      extractUsage = (_: Nothing) => None,
+      extractCost = (_: Nothing) => None
+    )
 
     mockMetrics.totalRequests shouldBe 2
     mockMetrics.hasErrorRequest("provider1", ErrorKind.Authentication) shouldBe true
@@ -132,9 +164,13 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
 
     case class TestResult(usage: TokenUsage)
 
-    val result = client.testWithMetrics("test-provider", "test-model") {
-      Right(TestResult(TokenUsage(promptTokens = 100000, completionTokens = 50000, totalTokens = 150000)))
-    }(r => Some(r.usage))
+    val result = client.testWithMetrics(
+      provider = "test-provider",
+      model = "test-model",
+      f = Right(TestResult(TokenUsage(promptTokens = 100000, completionTokens = 50000, totalTokens = 150000))),
+      extractUsage = (r: TestResult) => Some(r.usage),
+      extractCost = (_: TestResult) => None
+    )
 
     result.isRight shouldBe true
     mockMetrics.totalTokenCalls shouldBe 1
@@ -143,4 +179,5 @@ class MetricsRecordingSpec extends AnyFlatSpec with Matchers {
     tokenCall._3 shouldBe 100000
     tokenCall._4 shouldBe 50000
   }
+
 }

@@ -9,26 +9,28 @@ has_children: true
 
 Technical reference materials for LLM4S development and maintenance.
 
+## Contributing
+
+Start here if you want to contribute to the project.
+
+- **[Contributing Guide](contributing)** - How to submit your first PR (read this first)
+- **[Code Review Guidelines](review-guidelines)** - Coding standards and patterns expected in PRs
+- **[Testing Guide](testing-guide)** - How to write tests (contributor-focused)
+- **[Code of Conduct](https://github.com/llm4s/llm4s/blob/main/CODE_OF_CONDUCT.md)** - Community guidelines
+
 ## Project Documentation
 
-- **[Migration Guide](migration)** - Upgrade between versions
-- **[Scalafix Rules](scalafix)** - Linting rules and code quality
-- **[Test Coverage](test-coverage)** - Coverage tooling and thresholds
-- **[Testing Guide](testing-guide)** - How to write tests (contributor-focused)
-- **[Code Review Guidelines](review-guidelines)** - Best practices from PR feedback
-- **[Release Process](release)** - How releases are created
 - **[Configuration Boundary](configuration-boundary)** - How configuration is isolated from core code
+- **[Scalafix Rules](scalafix)** - Linting rules and code quality
+- **[Migration Guide](migration)** - Upgrade between versions
+- **[Test Coverage](test-coverage)** - Coverage tooling and thresholds
+- **[Release Process](release)** - How releases are created
 - **[Postgres Memory Store](postgres-memory-store)** - PostgreSQL-backed agent memory persistence
 
 ## Roadmap & Planning
 
 - **[Project Roadmap](roadmap)** - Development roadmap, production readiness, and future plans (single source of truth)
 - **[Design Documents](https://github.com/llm4s/llm4s/tree/main/docs/design)** - Detailed architecture docs
-
-## Contributing
-
-- **[Contributing Guide](contributing)** - How to contribute to LLM4S
-- **[Code of Conduct](https://github.com/llm4s/llm4s/blob/main/CODE_OF_CONDUCT.md)** - Community guidelines
 
 ## External Resources
 

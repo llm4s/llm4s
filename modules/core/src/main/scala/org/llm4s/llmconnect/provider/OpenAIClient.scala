@@ -99,8 +99,10 @@ class OpenAIClient private (
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics("openai", model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "openai",
+    model = model,
+    operation = validateNotClosed.flatMap { _ =>
       // Transform options and messages for model-specific constraints
       for {
         transformed <- TransformationResult.transform(
@@ -121,21 +123,19 @@ class OpenAIClient private (
             e.toLLMError
           }
       } yield convertFromOpenAIFormat(completions)
-    }
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics("openai", model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "openai",
+    model = model,
+    operation = validateNotClosed.flatMap { _ =>
       // Transform options and messages for model-specific constraints
       TransformationResult.transform(model, options, conversation.messages, dropUnsupported = true).flatMap {
         transformed =>
@@ -149,13 +149,9 @@ class OpenAIClient private (
             executeNativeStreaming(chatOptions, onChunk)
           }
       }
-    }
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   override def close(): Unit =
@@ -231,7 +227,12 @@ class OpenAIClient private (
       e.toLLMError
     }
 
-    attempt.flatMap(_ => accumulator.toCompletion.map(_.copy(model = model)))
+    attempt.flatMap(_ =>
+      accumulator.toCompletion.map { c =>
+        val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
+        c.copy(model = model, estimatedCost = cost)
+      }
+    )
   }
 
   /**
@@ -443,14 +444,11 @@ class OpenAIClient private (
           ToolCall(
             id = ftc.getId,
             name = function.map(_.getName).getOrElse(""),
-            arguments = parseStreamingArguments(rawArgs)
+            arguments = StreamingToolArgumentParser.parse(rawArgs)
           )
         }
       )
       .getOrElse(Seq.empty)
-
-  private def parseStreamingArguments(raw: String): ujson.Value =
-    if (raw.isEmpty) ujson.Null else Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
 
   /**
    * Converts llm4s Conversation to OpenAI ChatRequestMessage format.
@@ -501,9 +499,10 @@ class OpenAIClient private (
    * Converts OpenAI ChatCompletions response to llm4s Completion format.
    *
    * Extracts the first choice from the response and converts it to llm4s format,
-   * including content, tool calls, and token usage information.
+   * including content, tool calls, token usage information, and estimated cost.
    *
    * @param completions OpenAI API response
+   * @param model Model identifier for cost estimation
    * @return llm4s Completion with all response data
    */
   private def convertFromOpenAIFormat(completions: ChatCompletions): Completion = {
@@ -514,6 +513,17 @@ class OpenAIClient private (
     val assistantMessage =
       AssistantMessage(contentOpt = if (content.isEmpty) None else Some(content), toolCalls = toolCalls)
 
+    val usage = Option(completions.getUsage).map(u =>
+      TokenUsage(
+        promptTokens = u.getPromptTokens,
+        completionTokens = u.getCompletionTokens,
+        totalTokens = u.getTotalTokens
+      )
+    )
+
+    // Estimate cost using CostEstimator
+    val cost = usage.flatMap(u => CostEstimator.estimate(this.model, u))
+
     Completion(
       id = completions.getId,
       created = completions.getCreatedAt.toEpochSecond,
@@ -521,20 +531,16 @@ class OpenAIClient private (
       model = completions.getModel,
       message = assistantMessage,
       toolCalls = toolCalls.toList,
-      usage = Option(completions.getUsage).map(u =>
-        TokenUsage(
-          promptTokens = u.getPromptTokens,
-          completionTokens = u.getCompletionTokens,
-          totalTokens = u.getTotalTokens
-        )
-      )
+      usage = usage,
+      estimatedCost = cost
     )
   }
 
   /**
    * Extracts tool calls from an OpenAI response message.
    *
-   * Parses function tool calls from the message and converts them to llm4s ToolCall format.
+   * Safely parses function tool call arguments as JSON, filtering invalid calls.
+   * Parses arguments only once per tool call to avoid double-evaluation risks.
    * Returns empty sequence if no tool calls are present.
    *
    * @param message OpenAI response message potentially containing tool calls
@@ -542,13 +548,16 @@ class OpenAIClient private (
    */
   private def extractToolCalls(message: ChatResponseMessage): Seq[ToolCall] =
     Option(message.getToolCalls)
-      .map(_.asScala.toSeq.collect {
-        case ftc: ChatCompletionsFunctionToolCall if Try(ujson.read(ftc.getFunction.getArguments)).isSuccess =>
-          ToolCall(
-            id = ftc.getId,
-            name = ftc.getFunction.getName,
-            arguments = Try(ujson.read(ftc.getFunction.getArguments)).getOrElse(ujson.Null)
-          )
+      .map(_.asScala.toSeq.flatMap {
+        case ftc: ChatCompletionsFunctionToolCall =>
+          Try(ujson.read(ftc.getFunction.getArguments)).toOption.map { args =>
+            ToolCall(
+              id = ftc.getId,
+              name = ftc.getFunction.getName,
+              arguments = args
+            )
+          }
+        case _ => None
       })
       .getOrElse(Seq.empty)
 }

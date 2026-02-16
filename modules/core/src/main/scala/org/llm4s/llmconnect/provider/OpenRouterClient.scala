@@ -4,7 +4,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.serialization.OpenRouterToolCallDeserializer
-import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
+import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
 import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ServiceError }
@@ -29,8 +29,10 @@ class OpenRouterClient(
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics("openrouter", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "openrouter",
+    model = config.model,
+    operation = validateNotClosed.flatMap { _ =>
       // Convert conversation to OpenRouter format
       val requestBody = createRequestBody(conversation, options)
 
@@ -62,21 +64,19 @@ class OpenRouterClient(
           case status => Left(ServiceError(status, "openrouter", s"OpenRouter API error: ${response.body()}"))
         }
       }
-    }
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics("openrouter", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "openrouter",
+    model = config.model,
+    operation = validateNotClosed.flatMap { _ =>
       val requestBody = createRequestBody(conversation, options)
       requestBody("stream") = true
 
@@ -111,7 +111,7 @@ class OpenRouterClient(
 
           val sseParser = SSEParser.createStreamingParser()
           val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
-          val loopTry = Try {
+          try {
             var line: String = null
             while ({ line = reader.readLine(); line != null }) {
               sseParser.addChunk(line + "\n")
@@ -129,20 +129,23 @@ class OpenRouterClient(
                   }
                 }
             }
+          } finally {
+            Try(reader.close())
+            Try(response.body().close())
           }
-          Try(reader.close()); Try(response.body().close())
-          loopTry.get
+
         }.toEither.left
           .map(_.toLLMError)
 
-      attempt.flatMap(_ => accumulator.toCompletion)
-    }
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens.toInt, usage.completionTokens.toInt)
-      }
+      attempt.flatMap(_ =>
+        accumulator.toCompletion.map { c =>
+          val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+          c.copy(model = config.model, estimatedCost = cost)
+        }
+      )
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   private def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
@@ -167,7 +170,7 @@ class OpenRouterClient(
           ToolCall(
             id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
             name = function.obj.get("name").flatMap(_.strOpt).getOrElse(""),
-            arguments = parseStreamingArguments(rawArgs)
+            arguments = StreamingToolArgumentParser.parse(rawArgs)
           )
       }
 
@@ -206,10 +209,10 @@ class OpenRouterClient(
     }
   }
 
-  private def parseStreamingArguments(raw: String): ujson.Value =
-    if (raw.isEmpty) ujson.Null else scala.util.Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
-
-  private def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
+  /**
+   * Test-visible seam for request serialization; intentionally scoped to provider package to avoid broader API surface.
+   */
+  protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val messages = conversation.messages.map {
       case UserMessage(content) =>
         ujson.Obj("role" -> "user", "content" -> content)
@@ -230,7 +233,7 @@ class OpenRouterClient(
           })
         }
         base
-      case ToolMessage(toolCallId, content) =>
+      case ToolMessage(content, toolCallId) =>
         ujson.Obj(
           "role"         -> "tool",
           "tool_call_id" -> toolCallId,
@@ -349,18 +352,23 @@ class OpenRouterClient(
       }
     }
 
+    // Estimate cost using CostEstimator
+    val modelId = json("model").str
+    val cost    = usage.flatMap(u => CostEstimator.estimate(config.model, u))
+
     Completion(
       id = json("id").str,
       created = json("created").num.toLong,
       content = message.obj.get("content").flatMap(_.strOpt).getOrElse(""),
-      model = json("model").str,
+      model = modelId,
       message = AssistantMessage(
         contentOpt = message.obj.get("content").flatMap(_.strOpt),
         toolCalls = toolCalls.toList
       ),
       toolCalls = toolCalls.toList,
       usage = usage,
-      thinking = thinking
+      thinking = thinking,
+      estimatedCost = cost
     )
   }
 

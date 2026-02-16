@@ -1,16 +1,21 @@
 package org.llm4s.reranker
 
 import org.llm4s.types.Result
+import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
-import sttp.client4._
 import ujson.{ Arr, Obj, read }
 
+import java.net.URI
+import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
+import java.nio.charset.StandardCharsets
+import java.time.Duration
 import scala.util.Try
+import scala.util.control.NonFatal
 
 /**
  * Cohere Rerank API implementation.
  *
- * Calls POST https://api.cohere.ai/v1/rerank with:
+ * Calls POST https://api.cohere.com/v1/rerank with:
  * - model: reranking model name (e.g., "rerank-english-v3.0")
  * - query: search query
  * - documents: array of document strings
@@ -21,8 +26,8 @@ import scala.util.Try
  */
 class CohereReranker(config: RerankProviderConfig) extends Reranker {
 
-  private val backend = DefaultSyncBackend()
-  private val logger  = LoggerFactory.getLogger(getClass)
+  private val httpClient = HttpClient.newHttpClient()
+  private val logger     = LoggerFactory.getLogger(getClass)
 
   override def rerank(request: RerankRequest): Result[RerankResponse] = {
     val topN = request.topK.getOrElse(request.documents.size)
@@ -35,32 +40,34 @@ class CohereReranker(config: RerankProviderConfig) extends Reranker {
       "return_documents" -> request.returnDocuments
     )
 
-    val url = uri"${config.baseUrl}/v1/rerank"
+    val url = s"${config.baseUrl}/v1/rerank"
 
     logger.debug(s"[CohereReranker] POST $url model=${config.model} docs=${request.documents.size} topN=$topN")
 
-    val respEither: Either[RerankError, Response[Either[String, String]]] =
-      Try(
-        basicRequest
-          .post(url)
-          .header("Authorization", s"Bearer ${config.apiKey}")
-          .header("Content-Type", "application/json")
-          .body(payload.render())
-          .send(backend)
-      ).toEither.left
-        .map(e =>
-          RerankError(
-            code = Some("502"),
-            message = s"HTTP request failed: ${e.getMessage}",
-            provider = "cohere"
-          )
-        )
+    val httpRequest = HttpRequest
+      .newBuilder()
+      .uri(URI.create(url))
+      .header("Authorization", s"Bearer ${config.apiKey}")
+      .header("Content-Type", "application/json")
+      .timeout(Duration.ofMinutes(2))
+      .POST(HttpRequest.BodyPublishers.ofString(payload.render()))
+      .build()
+
+    val respEither: Either[RerankError, HttpResponse[String]] =
+      try Right(httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)))
+      catch {
+        case e: InterruptedException =>
+          Thread.currentThread().interrupt()
+          Left(RerankError(code = None, message = s"HTTP request interrupted: ${e.getMessage}", provider = "cohere"))
+        case NonFatal(e) =>
+          Left(RerankError(code = None, message = s"HTTP request failed: ${e.getMessage}", provider = "cohere"))
+      }
 
     respEither.flatMap { response =>
-      response.body match {
-        case Right(body) =>
+      response.statusCode() match {
+        case 200 =>
           Try {
-            val json = read(body)
+            val json = read(response.body())
             val results = json("results").arr.map { r =>
               val index = r("index").num.toInt
               val score = r("relevance_score").num
@@ -84,18 +91,18 @@ class CohereReranker(config: RerankProviderConfig) extends Reranker {
             .map { ex =>
               logger.error(s"[CohereReranker] Parse error: ${ex.getMessage}")
               RerankError(
-                code = Some("502"),
+                code = None,
                 message = s"Parsing error: ${ex.getMessage}",
                 provider = "cohere"
               )
             }
-
-        case Left(errorMsg) =>
-          logger.error(s"[CohereReranker] HTTP error: $errorMsg")
+        case status =>
+          val body = Redaction.truncateForLog(response.body())
+          logger.error(s"[CohereReranker] HTTP error: $body")
           Left(
             RerankError(
-              code = Some(response.code.code.toString),
-              message = errorMsg,
+              code = Some(status.toString),
+              message = body,
               provider = "cohere"
             )
           )
@@ -107,7 +114,7 @@ class CohereReranker(config: RerankProviderConfig) extends Reranker {
 object CohereReranker {
 
   /** Default Cohere API base URL */
-  val DEFAULT_BASE_URL: String = "https://api.cohere.ai"
+  val DEFAULT_BASE_URL: String = "https://api.cohere.com"
 
   /** Default reranking model */
   val DEFAULT_MODEL: String = "rerank-english-v3.0"
@@ -126,7 +133,7 @@ object CohereReranker {
    *
    * @param apiKey Cohere API key
    * @param model Reranking model (default: rerank-english-v3.0)
-   * @param baseUrl API base URL (default: https://api.cohere.ai)
+   * @param baseUrl API base URL (default: https://api.cohere.com)
    * @return Cohere reranker instance
    */
   def apply(

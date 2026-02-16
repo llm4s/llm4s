@@ -63,8 +63,10 @@ class GeminiClient(
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics("gemini", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "gemini",
+    model = config.model,
+    operation = validateNotClosed.flatMap { _ =>
       TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
         transformed =>
           val transformedConversation = conversation.copy(messages = transformed.messages)
@@ -97,21 +99,19 @@ class GeminiClient(
 
           attempt
       }
-    }
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics("gemini", config.model) {
-    validateNotClosed.flatMap { _ =>
+  ): Result[Completion] = withMetrics(
+    provider = "gemini",
+    model = config.model,
+    operation = validateNotClosed.flatMap { _ =>
       TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
         transformed =>
           val transformedConversation = conversation.copy(messages = transformed.messages)
@@ -140,41 +140,43 @@ class GeminiClient(
             val messageId   = UUID.randomUUID().toString
             val reader      = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
 
-            val processEither = Try {
-              var line: String = null
-              while ({ line = reader.readLine(); line != null }) {
-                val trimmed = line.trim
-                // SSE format: lines starting with "data: " contain JSON
-                if (trimmed.startsWith("data: ")) {
-                  val jsonStr = trimmed.stripPrefix("data: ").trim
-                  if (jsonStr.nonEmpty) {
-                    Try(ujson.read(jsonStr)).foreach { json =>
-                      parseStreamChunk(json, messageId).foreach { chunk =>
-                        accumulator.addChunk(chunk)
-                        onChunk(chunk)
+            Try {
+              try {
+                var line: String = null
+                while ({ line = reader.readLine(); line != null }) {
+                  val trimmed = line.trim
+                  // SSE format: lines starting with "data: " contain JSON
+                  if (trimmed.startsWith("data: ")) {
+                    val jsonStr = trimmed.stripPrefix("data: ").trim
+                    if (jsonStr.nonEmpty) {
+                      Try(ujson.read(jsonStr)).foreach { json =>
+                        parseStreamChunk(json, messageId).foreach { chunk =>
+                          accumulator.addChunk(chunk)
+                          onChunk(chunk)
+                        }
                       }
                     }
                   }
                 }
+
+                // Close resources INSIDE Try block
+              } finally {
+                Try(reader.close())
+                Try(response.body().close())
               }
-            }.toEither
-
-            // Close resources
-            Try(reader.close())
-            Try(response.body().close())
-
-            processEither.left
+            }.toEither.left
               .map(_.toLLMError)
-              .flatMap(_ => accumulator.toCompletion.map(c => c.copy(model = config.model)))
+              .flatMap(_ =>
+                accumulator.toCompletion.map { c =>
+                  val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+                  c.copy(model = config.model, estimatedCost = cost)
+                }
+              )
           }
       }
-    }
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens.toInt, usage.completionTokens.toInt)
-      }
+    },
+    extractUsage = (c: Completion) => c.usage,
+    extractCost = (c: Completion) => c.estimatedCost
   )
 
   override def getContextWindow(): Int = config.contextWindow
@@ -372,6 +374,9 @@ class GeminiClient(
           toolCalls = toolCalls
         )
 
+        // Estimate cost using CostEstimator
+        val cost = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
+
         Right(
           Completion(
             id = UUID.randomUUID().toString,
@@ -380,7 +385,8 @@ class GeminiClient(
             toolCalls = toolCalls.toList,
             created = System.currentTimeMillis() / 1000,
             message = message,
-            usage = usageOpt
+            usage = usageOpt,
+            estimatedCost = cost
           )
         )
       }

@@ -126,8 +126,8 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
   test("should handle partial tool call accumulation") {
     val accumulator = StreamingAccumulator.create()
 
-    // Simulate receiving tool call in parts
-    val partialCall1 = ToolCall("tool-1", "get_weather", ujson.Null)
+    // Simulate receiving tool call in parts — empty sentinel signals "no args yet"
+    val partialCall1 = ToolCall("tool-1", "get_weather", ujson.Obj())
     val partialCall2 = ToolCall("tool-1", "", ujson.Obj("location" -> "SF"))
 
     accumulator.addChunk(StreamedChunk("msg-1", None, Some(partialCall1), None))
@@ -137,6 +137,34 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     (toolCalls should have).length(1)
     toolCalls.head.id shouldBe "tool-1"
     toolCalls.head.name shouldBe "get_weather"
+  }
+
+  test("should filter empty-object sentinel from tool call arguments") {
+    val accumulator = StreamingAccumulator.create()
+
+    // Empty Obj() is the sentinel for "no arguments yet" — should not be appended
+    val sentinelCall = ToolCall("tool-1", "get_weather", ujson.Obj())
+    accumulator.addChunk(StreamedChunk("msg-1", None, Some(sentinelCall), None))
+
+    val toolCalls = accumulator.getCurrentToolCalls
+    (toolCalls should have).length(1)
+    // Arguments should parse back to empty Obj since nothing was appended
+    toolCalls.head.arguments shouldBe ujson.Obj()
+  }
+
+  test("should preserve raw string fragments for later assembly") {
+    val accumulator = StreamingAccumulator.create()
+
+    // Partial JSON arrives as ujson.Str fragments via StreamingToolArgumentParser
+    val partial1 = ToolCall("tool-1", "search", ujson.Str("{\"query\":"))
+    val partial2 = ToolCall("tool-1", "", ujson.Str("\"hello world\"}"))
+
+    accumulator.addChunk(StreamedChunk("msg-1", None, Some(partial1), None))
+    accumulator.addChunk(StreamedChunk("msg-1", None, Some(partial2), None))
+
+    val toolCalls = accumulator.getCurrentToolCalls
+    (toolCalls should have).length(1)
+    toolCalls.head.arguments("query").str shouldBe "hello world"
   }
 
   test("should assemble tool call arguments from raw JSON fragments") {

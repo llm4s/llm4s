@@ -23,13 +23,10 @@ object ContextTestFixtures {
 
   /**
    * Create a ConversationTokenCounter using the simple mock tokenizer.
-   * Uses reflection to bypass private constructor.
+   * Uses a test-only factory instead of reflection.
    */
-  def createSimpleCounter(): ConversationTokenCounter = {
-    val constructor = classOf[ConversationTokenCounter].getDeclaredConstructor(classOf[StringTokenizer])
-    constructor.setAccessible(true)
-    constructor.newInstance(simpleTokenizer)
-  }
+  def createSimpleCounter(): ConversationTokenCounter =
+    ConversationTokenCounter.forTest(simpleTokenizer)
 
   // ============ Sample Messages ============
 

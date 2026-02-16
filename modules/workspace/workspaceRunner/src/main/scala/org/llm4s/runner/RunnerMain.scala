@@ -33,8 +33,38 @@ object RunnerMain extends cask.MainRoutes {
   // Detect host OS once and pass into the workspace interface (edge of configuration)
   private val isWindows: Boolean = System.getProperty("os.name").contains("Windows")
 
+  // Resolve sandbox config:
+  // - If WORKSPACE_SANDBOX_PROFILE is not set or empty -> default to permissive (backwards compatible)
+  // - If set to a known profile name -> use that profile (validated)
+  // - If set to an unknown name -> log error and fail fast (do NOT silently weaken sandbox)
+  // scalafix:off DisableSyntax.NoSystemGetenv
+  private val sandboxConfig: Option[WorkspaceSandboxConfig] = {
+    val rawProfile = Option(System.getenv("WORKSPACE_SANDBOX_PROFILE")).map(_.trim)
+
+    rawProfile match {
+      case None | Some("") =>
+        None // let WorkspaceAgentInterfaceImpl apply default Permissive
+
+      case Some(value) =>
+        WorkspaceSandboxConfig.fromProfileName(value) match {
+          case Right(cfg) =>
+            WorkspaceSandboxConfig.validate(cfg) match {
+              case Right(_) => Some(cfg)
+              case Left(err) =>
+                logger.error(s"Invalid WORKSPACE_SANDBOX_PROFILE config: $err; using permissive")
+                None
+            }
+
+          case Left(msg) =>
+            logger.error(s"Invalid WORKSPACE_SANDBOX_PROFILE value: $msg")
+            throw new IllegalArgumentException(msg)
+        }
+    }
+  }
+  // scalafix:on DisableSyntax.NoSystemGetenv
+
   // Initialize workspace interface
-  private val workspaceInterface = new WorkspaceAgentInterfaceImpl(workspacePath, isWindows)
+  private val workspaceInterface = new WorkspaceAgentInterfaceImpl(workspacePath, isWindows, sandboxConfig)
 
   // Track active connections and their last heartbeat
   private val connections                                 = new ConcurrentHashMap[cask.WsChannelActor, AtomicLong]()
@@ -323,6 +353,7 @@ object RunnerMain extends cask.MainRoutes {
 
     startHeartbeatMonitor()
     logger.info(s"Using workspace path: $workspacePath")
+    logger.info(s"Sandbox profile: ${sandboxConfig.map(_ => "configured").getOrElse("permissive (default)")}")
     logger.info(s"Heartbeat timeout: ${HeartbeatTimeoutMs}ms")
   }
 

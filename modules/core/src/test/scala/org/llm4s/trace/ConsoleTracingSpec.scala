@@ -104,7 +104,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
         Seq(
           UserMessage("Calculate 1+2"),
           AssistantMessage(Some("Let me calculate that."), Seq(toolCall)),
-          ToolMessage("call-123", "3")
+          ToolMessage("3", "call-123")
         )
       ),
       tools = ToolRegistry.empty,

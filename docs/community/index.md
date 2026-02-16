@@ -33,7 +33,7 @@ Show your support and stay updated:
 
 ### Contribute
 
-We welcome contributions! Ways to contribute:
+We welcome contributions! **Please read the [Contributing Guide](/reference/contributing) before opening your first PR.** It covers project conventions, PR requirements, and what we expect from contributors.
 
 - **Report Bugs** - [Open an issue](https://github.com/llm4s/llm4s/issues/new)
 - **Suggest Features** - Share your ideas
@@ -41,7 +41,7 @@ We welcome contributions! Ways to contribute:
 - **Improve Docs** - Help others learn
 - **Share Examples** - Show how you use LLM4S
 
-[Contributing Guide →](/reference/contributing)
+[Contributing Guide →](/reference/contributing){: .btn .btn-primary }
 
 ### Issue Tracker
 
@@ -206,28 +206,23 @@ Get notified of new releases:
 
 ---
 
-## 🎓 Become a Contributor
+## Become a Contributor
 
-### Good First Issues
+### Start Here
 
-New to contributing? Look for issues labeled:
-
-- [`good first issue`](https://github.com/llm4s/llm4s/labels/good%20first%20issue)
-- [`help wanted`](https://github.com/llm4s/llm4s/labels/help%20wanted)
-- [`documentation`](https://github.com/llm4s/llm4s/labels/documentation)
+1. **Read the [Contributing Guide](/reference/contributing)** — covers PR requirements, code standards, and the submission process
+2. **Pick a [`good first issue`](https://github.com/llm4s/llm4s/labels/good%20first%20issue)** — start small, build trust
+3. **Comment on the issue** before starting work — avoids duplicate effort
 
 ### Contribution Areas
 
-Ways to contribute:
+- **Tests** - Increase test coverage (great first contribution)
+- **Documentation** - Fix errors, improve guides
+- **Bug Fixes** - Fix reported issues
+- **Features** - After 1-2 merged PRs, take on features
+- **Examples** - Add sample applications
 
-- 📝 **Documentation** - Improve guides and examples
-- 🐛 **Bug Fixes** - Fix reported issues
-- ✨ **Features** - Implement new capabilities
-- 🧪 **Tests** - Increase test coverage
-- 📊 **Examples** - Add sample applications
-- 🎨 **Website** - Improve this documentation site
-
-[Contributing Guide →](/reference/contributing)
+[Contributing Guide →](/reference/contributing){: .btn .btn-primary }
 
 ---
 

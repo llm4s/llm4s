@@ -1,10 +1,83 @@
 package org.llm4s.toolapi.builtin.search
 
 import org.llm4s.config.DuckDuckGoSearchToolConfig
+import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class DuckDuckGoSearchToolSpec extends AnyFlatSpec with Matchers {
+
+  // --- Mock HTTP clients ---
+
+  class MockHttpClient(response: HttpResponse) extends Llm4sHttpClient {
+    private def _lastUrl: Option[String]                  = None
+    private def _lastHeaders: Option[Map[String, String]] = None
+    private def _lastParams: Option[Map[String, String]]  = None
+    var lastUrl: Option[String]                           = _lastUrl
+    var lastHeaders: Option[Map[String, String]]          = _lastHeaders
+    var lastParams: Option[Map[String, String]]           = _lastParams
+
+    override def get(
+      url: String,
+      headers: Map[String, String],
+      params: Map[String, String],
+      timeout: Int
+    ): HttpResponse = {
+      lastUrl = Some(url)
+      lastHeaders = Some(headers)
+      lastParams = Some(params)
+      response
+    }
+
+    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
+      response
+
+    override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): HttpResponse =
+      response
+
+    override def postMultipart(
+      url: String,
+      headers: Map[String, String],
+      parts: Seq[org.llm4s.http.MultipartPart],
+      timeout: Int
+    ): HttpResponse = response
+
+    override def put(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
+      response
+
+    override def delete(url: String, headers: Map[String, String], timeout: Int): HttpResponse =
+      response
+  }
+
+  class FailingHttpClient(exception: Throwable) extends Llm4sHttpClient {
+    private def fail: Nothing = throw exception
+
+    override def get(
+      url: String,
+      headers: Map[String, String],
+      params: Map[String, String],
+      timeout: Int
+    ): HttpResponse = fail
+
+    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
+      fail
+
+    override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): HttpResponse =
+      fail
+
+    override def postMultipart(
+      url: String,
+      headers: Map[String, String],
+      parts: Seq[org.llm4s.http.MultipartPart],
+      timeout: Int
+    ): HttpResponse = fail
+
+    override def put(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
+      fail
+
+    override def delete(url: String, headers: Map[String, String], timeout: Int): HttpResponse =
+      fail
+  }
 
   "DuckDuckGoSearchConfig" should "have correct default values" in {
     val config = DuckDuckGoSearchConfig()
@@ -134,5 +207,193 @@ class DuckDuckGoSearchToolSpec extends AnyFlatSpec with Matchers {
     result.answer shouldBe ""
     result.answerType shouldBe ""
     result.relatedTopics shouldBe empty
+  }
+
+  // --- Unit tests for DuckDuckGoSearchTool.search() with mocked HTTP ---
+
+  "DuckDuckGoSearchTool.search" should "return parsed results on 200 response" in {
+    val body = ujson
+      .Obj(
+        "Abstract"       -> "Scala is a programming language",
+        "AbstractSource" -> "Wikipedia",
+        "AbstractURL"    -> "https://en.wikipedia.org/wiki/Scala",
+        "Answer"         -> "A JVM language",
+        "AnswerType"     -> "definition",
+        "RelatedTopics" -> ujson.Arr(
+          ujson.Obj("Text" -> "Topic 1", "FirstURL" -> "https://example.com/1")
+        )
+      )
+      .render()
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
+
+    val result = DuckDuckGoSearchTool.search(
+      "https://api.duckduckgo.com",
+      "scala",
+      DuckDuckGoSearchConfig(),
+      mockClient,
+      () => ()
+    )
+
+    result.isRight shouldBe true
+    val searchResult = result.getOrElse(fail("Expected Right"))
+    searchResult.query shouldBe "scala"
+    searchResult.abstract_ shouldBe "Scala is a programming language"
+    searchResult.abstractSource shouldBe "Wikipedia"
+    searchResult.answer shouldBe "A JVM language"
+    searchResult.relatedTopics should have size 1
+    searchResult.relatedTopics.head.text shouldBe "Topic 1"
+  }
+
+  it should "return error on non-200 status code" in {
+    val mockClient = new MockHttpClient(HttpResponse(500, "Internal Server Error"))
+
+    val result = DuckDuckGoSearchTool.search(
+      "https://api.duckduckgo.com",
+      "test",
+      DuckDuckGoSearchConfig(),
+      mockClient,
+      () => ()
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse("")
+    error should include("500")
+  }
+
+  it should "return sanitized error on invalid JSON response" in {
+    val mockClient = new MockHttpClient(HttpResponse(200, "not json {{{"))
+
+    val result = DuckDuckGoSearchTool.search(
+      "https://api.duckduckgo.com",
+      "test",
+      DuckDuckGoSearchConfig(),
+      mockClient,
+      () => ()
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse("")
+    error should (include("parse").or(include("invalid")))
+  }
+
+  it should "send correct headers and query params" in {
+    val body       = ujson.Obj("Abstract" -> "", "RelatedTopics" -> ujson.Arr()).render()
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
+
+    DuckDuckGoSearchTool.search(
+      "https://api.duckduckgo.com",
+      "scala lang",
+      DuckDuckGoSearchConfig(safeSearch = true),
+      mockClient,
+      () => ()
+    )
+
+    mockClient.lastUrl shouldBe Some("https://api.duckduckgo.com")
+    mockClient.lastHeaders.flatMap(_.get("User-Agent")) shouldBe Some("llm4s-duckduckgo-search/1.0")
+    mockClient.lastParams.flatMap(_.get("q")) shouldBe Some("scala lang")
+    mockClient.lastParams.flatMap(_.get("format")) shouldBe Some("json")
+    mockClient.lastParams.flatMap(_.get("safesearch")) shouldBe Some("1")
+  }
+
+  it should "send safesearch=-1 when safeSearch is false" in {
+    val body       = ujson.Obj("Abstract" -> "", "RelatedTopics" -> ujson.Arr()).render()
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
+
+    DuckDuckGoSearchTool.search(
+      "https://api.duckduckgo.com",
+      "test",
+      DuckDuckGoSearchConfig(safeSearch = false),
+      mockClient,
+      () => ()
+    )
+
+    mockClient.lastParams.flatMap(_.get("safesearch")) shouldBe Some("-1")
+  }
+
+  it should "return sanitized error on timeout" in {
+    val failingClient = new FailingHttpClient(new java.net.http.HttpTimeoutException("timed out"))
+
+    val result = DuckDuckGoSearchTool.search(
+      "https://api.duckduckgo.com",
+      "test",
+      DuckDuckGoSearchConfig(timeoutMs = 3000),
+      failingClient,
+      () => ()
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse("")
+    error should include("timed out")
+    error should include("3000ms")
+  }
+
+  it should "return sanitized error on unknown host" in {
+    val failingClient = new FailingHttpClient(new java.net.UnknownHostException("no such host"))
+
+    val result = DuckDuckGoSearchTool.search(
+      "https://api.duckduckgo.com",
+      "test",
+      DuckDuckGoSearchConfig(),
+      failingClient,
+      () => ()
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse("")
+    error should include("Unable to reach")
+    error should include("network connectivity")
+  }
+
+  it should "return sanitized error on connection refused" in {
+    val failingClient = new FailingHttpClient(new java.net.ConnectException("Connection refused"))
+
+    val result = DuckDuckGoSearchTool.search(
+      "https://api.duckduckgo.com",
+      "test",
+      DuckDuckGoSearchConfig(),
+      failingClient,
+      () => ()
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse("")
+    error should include("Failed to connect")
+    error should include("temporarily unavailable")
+  }
+
+  it should "return generic sanitized error on unexpected exception" in {
+    val failingClient = new FailingHttpClient(new RuntimeException("secret internal details"))
+
+    val result = DuckDuckGoSearchTool.search(
+      "https://api.duckduckgo.com",
+      "test",
+      DuckDuckGoSearchConfig(),
+      failingClient,
+      () => ()
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse("")
+    error should include("network error")
+    (error should not).include("secret internal details")
+  }
+
+  it should "call restoreInterrupt and return sanitized error on InterruptedException" in {
+    var interruptRestored = false
+    val mockRestore       = () => interruptRestored = true
+    val failingClient     = new FailingHttpClient(new InterruptedException("interrupted"))
+
+    val result = DuckDuckGoSearchTool.search(
+      "https://api.duckduckgo.com",
+      "test",
+      DuckDuckGoSearchConfig(),
+      failingClient,
+      mockRestore
+    )
+
+    result.isLeft shouldBe true
+    val error = result.swap.getOrElse("")
+    error should (include("cancelled").or(include("interrupted")))
+    interruptRestored shouldBe true
   }
 }

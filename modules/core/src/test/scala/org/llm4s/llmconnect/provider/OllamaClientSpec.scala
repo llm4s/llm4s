@@ -5,6 +5,28 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.metrics.MockMetricsCollector
 
+/**
+ * Test helper for building Ollama request bodies.
+ * Delegates to the real production implementation to ensure tests validate actual behavior.
+ */
+private[provider] object OllamaRequestBodyTestHelper {
+  private val testConfig = OllamaConfig(
+    model = "llama3.1",
+    baseUrl = "http://localhost:11434",
+    contextWindow = 4096,
+    reserveCompletion = 512
+  )
+
+  private val client = new OllamaClient(testConfig)
+
+  def createRequestBody(
+    conversation: Conversation,
+    options: CompletionOptions,
+    stream: Boolean
+  ): ujson.Obj =
+    client.createRequestBody(conversation, options, stream)
+}
+
 class OllamaClientSpec extends AnyFunSuite {
 
   test("ollama chat request sends assistant content as a plain string") {
@@ -18,34 +40,8 @@ class OllamaClientSpec extends AnyFunSuite {
       )
     )
 
-    val config = OllamaConfig(
-      model = "llama3.1",
-      baseUrl = "http://localhost:11434",
-      contextWindow = 4096,
-      reserveCompletion = 512
-    )
-
-    val client = new OllamaClient(config)
-
-    // Access internal method via reflection (test-only)
-    // Use getDeclaredMethod with exact parameter types for cross-platform compatibility
-    val method = client.getClass.getDeclaredMethod(
-      "createRequestBody",
-      classOf[Conversation],
-      classOf[CompletionOptions],
-      java.lang.Boolean.TYPE
-    )
-
-    method.setAccessible(true)
-
-    val body = method
-      .invoke(
-        client,
-        conversation,
-        CompletionOptions(),
-        Boolean.box(false)
-      )
-      .asInstanceOf[ujson.Obj]
+    // Use test helper instead of reflection
+    val body = OllamaRequestBodyTestHelper.createRequestBody(conversation, CompletionOptions(), stream = false)
 
     val messages = body("messages").arr
 

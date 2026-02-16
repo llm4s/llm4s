@@ -154,8 +154,45 @@ CREATE INDEX IF NOT EXISTS idx_agent_memories_conversation
 | Time Range      | `MemoryFilter.ByTimeRange(a, b)`  | `created_at >= ? AND created_at <= ?` |
 | Importance      | `MemoryFilter.MinImportance(x)`   | `importance >= ?`                     |
 | Metadata        | `MemoryFilter.ByMetadata(k, v)`   | `metadata->>'k' = ?`                  |
+| And             | `MemoryFilter.And(left, right)`   | `(left_sql AND right_sql)`            |
+| Or              | `MemoryFilter.Or(left, right)`    | `(left_sql OR right_sql)`             |
+| Not             | `MemoryFilter.Not(filter)`        | `NOT (filter_sql)`                    |
 
 All dynamic values are passed using prepared statements.
+
+### Compound Filter Examples
+
+Compound filters can be nested arbitrarily:
+
+```scala
+// Tasks OR Conversations
+val orFilter = MemoryFilter.Or(
+  MemoryFilter.ByType(MemoryType.Task),
+  MemoryFilter.ByType(MemoryType.Conversation)
+)
+// Generated: (memory_type = ? OR memory_type = ?)
+
+// Important tasks only
+val andFilter = MemoryFilter.And(
+  MemoryFilter.ByType(MemoryType.Task),
+  MemoryFilter.MinImportance(0.8)
+)
+// Generated: (memory_type = ? AND importance >= ?)
+
+// Exclude low-importance items
+val notFilter = MemoryFilter.Not(MemoryFilter.MinImportance(0.5))
+// Generated: NOT (importance >= ?)
+
+// Nested: (A OR B) AND NOT C
+val nested = MemoryFilter.And(
+  MemoryFilter.Or(
+    MemoryFilter.ByType(MemoryType.Task),
+    MemoryFilter.ByType(MemoryType.Conversation)
+  ),
+  MemoryFilter.Not(MemoryFilter.MinImportance(0.9))
+)
+// Generated: ((memory_type = ? OR memory_type = ?) AND NOT (importance >= ?))
+```
 
 ## Error Handling
 
@@ -170,9 +207,5 @@ The store follows a functional error handling model.
 ## Current Limitations
 
 ### Semantic Search
-Although the schema supports vector embeddings, calling ` search(...)` currently returns a ` ProcessingError`. This requires integration with an `EmbeddingService`.
-
-### Compound Filters
-
-Logical composition of filters (AND, OR, NOT) is not yet supported.
+Although the schema supports vector embeddings, calling `search(...)` currently returns a `ProcessingError`. This requires integration with an `EmbeddingService`.
 

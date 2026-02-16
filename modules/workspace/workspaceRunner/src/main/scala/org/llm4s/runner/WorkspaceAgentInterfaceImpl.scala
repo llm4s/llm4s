@@ -1,6 +1,6 @@
 package org.llm4s.runner
 
-import org.llm4s.shared._
+import org.llm4s.shared.{ WorkspaceSandboxConfig, _ }
 
 import java.io.{ BufferedWriter, PrintWriter }
 import java.nio.charset.StandardCharsets
@@ -18,30 +18,21 @@ import scala.util.{ Failure, Success, Try, Using }
  *
  * @param workspaceRoot The root directory of the workspace
  * @param isWindows     True if the host OS is Windows (used for shell command selection)
+ * @param sandboxConfig Optional sandbox config; if None, uses [[WorkspaceSandboxConfig.Permissive]]
  */
-class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) extends WorkspaceAgentInterface {
+class WorkspaceAgentInterfaceImpl(
+  workspaceRoot: String,
+  isWindows: Boolean,
+  sandboxConfig: Option[WorkspaceSandboxConfig] = None
+) extends WorkspaceAgentInterface {
 
   private val rootPath = Paths.get(workspaceRoot).toAbsolutePath.normalize()
 
-  // Default workspace limits
-  private val defaultLimits = WorkspaceLimits(
-    maxFileSize = 1048576, // 1MB
-    maxDirectoryEntries = 500,
-    maxSearchResults = 100,
-    maxOutputSize = 1048576 // 1MB
-  )
-
-  // Default exclusion patterns
-  private val defaultExclusions = List(
-    "**/node_modules/**",
-    "**/.git/**",
-    "**/dist/**",
-    "**/build/**",
-    "**/.venv/**",
-    "**/target/**",
-    "**/__pycache__/**",
-    "**/vendor/**"
-  )
+  private val config        = sandboxConfig.getOrElse(WorkspaceSandboxConfig.Permissive)
+  private val defaultLimits = config.limits
+  private val defaultExclusions =
+    if (config.excludePatterns.nonEmpty) config.excludePatterns
+    else WorkspaceSandboxConfig.DefaultExclusions
 
   /**
    * Resolves a relative path against the workspace root, ensuring it doesn't escape the workspace.
@@ -548,6 +539,7 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
 
   /**
    * Execute a shell command in the workspace.
+   * When sandbox config has shellAllowed=false, throws WorkspaceAgentException.
    */
   override def executeCommand(
     command: String,
@@ -555,6 +547,14 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
     timeoutSeconds: Option[Int] = None,
     environment: Option[Map[String, String]] = None
   ): ExecuteCommandResponse = {
+    if (!config.shellAllowed) {
+      throw new WorkspaceAgentException(
+        "Shell execution is disabled by sandbox config (shellAllowed=false)",
+        "SHELL_DISABLED",
+        None
+      )
+    }
+
     val workDir = workingDirectory
       .map(dir => resolvePath(dir).toFile)
       .getOrElse(rootPath.toFile)
@@ -567,7 +567,7 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
       )
     }
 
-    val timeoutMs = (timeoutSeconds.getOrElse(30 /* Default 30 seconds */ ) * 1000).toLong
+    val timeoutMs = (timeoutSeconds.getOrElse(config.defaultCommandTimeoutSeconds) * 1000).toLong
     val env       = environment.getOrElse(Map.empty)
 
     val cmd = if (isWindows) {

@@ -4,8 +4,8 @@ import org.llm4s.toolapi._
 import upickle.default._
 import org.llm4s.config.BraveSearchToolConfig
 
-import scala.util.Try
-import requests.Response
+import scala.util.control.NonFatal
+import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 
 sealed trait BraveSearchCategory[R] {
   def endpoint: String
@@ -231,7 +231,9 @@ object BraveSearchTool {
   def create[R: ReadWriter](
     toolConfig: BraveSearchToolConfig,
     category: BraveSearchCategory[R] = BraveSearchCategory.Web,
-    config: Option[BraveSearchConfig] = None
+    config: Option[BraveSearchConfig] = None,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
+    restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
   ): ToolFunction[Map[String, Any], R] =
     ToolBuilder[Map[String, Any], R](
       name = category.toolName,
@@ -247,7 +249,7 @@ object BraveSearchTool {
             safeSearch = SafeSearch.fromString(toolConfig.safeSearch)
           )
         )
-        result <- search(query, finalConfig, toolConfig, category)
+        result <- search(query, finalConfig, toolConfig, category, httpClient, restoreInterrupt)
       } yield result
     }.build()
 
@@ -267,7 +269,9 @@ object BraveSearchTool {
     apiKey: String,
     apiUrl: String = "https://api.search.brave.com/res/v1",
     category: BraveSearchCategory[R] = BraveSearchCategory.Web,
-    config: Option[BraveSearchConfig] = None
+    config: Option[BraveSearchConfig] = None,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
+    restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
   ): ToolFunction[Map[String, Any], R] = {
     // Hardcoded defaults when using withApiKey
     val braveTool = BraveSearchToolConfig(
@@ -276,14 +280,16 @@ object BraveSearchTool {
       count = 5,
       safeSearch = "moderate"
     )
-    create(braveTool, category, config)
+    create(braveTool, category, config, httpClient, restoreInterrupt)
   }
 
-  private def search[R](
+  private[search] def search[R](
     query: String,
     config: BraveSearchConfig,
     braveTool: BraveSearchToolConfig,
-    category: BraveSearchCategory[R]
+    category: BraveSearchCategory[R],
+    httpClient: Llm4sHttpClient,
+    restoreInterrupt: () => Unit
   ): Either[String, R] = {
 
     // Build query parameters from config
@@ -295,30 +301,61 @@ object BraveSearchTool {
 
     val url = s"${braveTool.apiUrl}/${category.endpoint}"
 
-    val responseEither: Either[String, Response] =
-      Try {
-        requests.get(
-          url = url,
-          params = params,
-          headers = Map(
-            "Accept"               -> "application/json",
-            "Accept-Encoding"      -> "gzip",
-            "X-Subscription-Token" -> braveTool.apiKey,
-            "User-Agent"           -> "llm4s-brave-search/1.0"
-          ),
-          readTimeout = config.timeoutMs
+    // Catch only non-fatal exceptions. Fatal errors (OOM, StackOverflow, etc.) will crash fast.
+    // InterruptedException is handled explicitly to restore the interrupt flag.
+    val responseEither: Either[String, HttpResponse] =
+      try
+        Right(
+          httpClient.get(
+            url = url,
+            params = params,
+            headers = Map(
+              "Accept"               -> "application/json",
+              "Accept-Encoding"      -> "gzip",
+              "X-Subscription-Token" -> braveTool.apiKey,
+              "User-Agent"           -> "llm4s-brave-search/1.0"
+            ),
+            timeout = config.timeoutMs
+          )
         )
-      }.toEither.left.map(e => s"Brave ${category.toolName} request failed: ${e.getMessage}")
+      catch {
+        case _: InterruptedException =>
+          // Restore interrupt flag for proper thread shutdown and timeout semantics
+          restoreInterrupt()
+          Left("Search request was cancelled or interrupted.")
+        case _: java.net.http.HttpTimeoutException =>
+          Left(s"Search request timed out after ${config.timeoutMs}ms. Please try again with a simpler query.")
+        case _: java.net.UnknownHostException =>
+          Left("Unable to reach search service. Please check network connectivity.")
+        case _: java.net.ConnectException =>
+          Left("Failed to connect to search service. The service may be temporarily unavailable.")
+        case NonFatal(_) =>
+          // Catch all other non-fatal exceptions (IOException, etc.)
+          // Fatal errors (OutOfMemoryError, StackOverflowError, etc.) will propagate
+          Left("Search request failed due to a network error. Please try again.")
+      }
 
     responseEither.flatMap { response =>
       if (response.statusCode == 200) {
-        Try {
-          val json = ujson.read(response.text())
-          category.parseResults(json, query)
-        }.toEither.left.map(e => s"Brave ${category.toolName} JSON parsing failed: ${e.getMessage}")
+        // Parse successful response, catching only non-fatal exceptions
+        try {
+          val json = ujson.read(response.body)
+          Right(category.parseResults(json, query))
+        } catch {
+          case _: InterruptedException =>
+            // Restore interrupt flag for proper thread shutdown and timeout semantics
+            restoreInterrupt()
+            Left("Response parsing was cancelled or interrupted.")
+          case _: ujson.ParseException =>
+            Left("Failed to parse search results. The response format may be invalid.")
+          case NonFatal(_) =>
+            // Catch all other non-fatal exceptions
+            // Fatal errors (OutOfMemoryError, StackOverflowError, etc.) will propagate
+            Left("Failed to process search results. Please try again.")
+        }
       } else {
         Left(
-          s"Brave ${category.toolName} returned status ${response.statusCode}: ${response.text()}"
+          s"Brave ${category.toolName} returned status ${response.statusCode}: ${response.body}"
         )
       }
     }
