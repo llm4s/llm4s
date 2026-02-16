@@ -35,8 +35,8 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
   private def ssePayload(events: Seq[ujson.Value]): String =
     events.map(event => s"data: ${ujson.write(event)}\n\n").mkString + "data: [DONE]\n\n"
 
-  private def withSseServer(payload: String)(test: String => Unit): Unit = {
-    val server = HttpServer.create(new InetSocketAddress("localhost", 0), 0)
+  private class SseServerResource(payload: String) extends AutoCloseable {
+    private val server = HttpServer.create(new InetSocketAddress("localhost", 0), 0)
     server.createContext(
       "/chat/completions",
       exchange => {
@@ -49,10 +49,14 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
       }
     )
     server.start()
-    val baseUrl = s"http://localhost:${server.getAddress.getPort}"
-    try test(baseUrl)
-    finally server.stop(0)
+
+    val baseUrl: String = s"http://localhost:${server.getAddress.getPort}"
+
+    override def close(): Unit = server.stop(0)
   }
+
+  private def withSseServer(payload: String)(test: String => Unit): Unit =
+    scala.util.Using.resource(new SseServerResource(payload))(resource => test(resource.baseUrl))
 
   "OpenRouterClient" should "preserve invalid tool-call arguments as raw string" in {
     val payload = ssePayload(

@@ -72,8 +72,7 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers {
 
     val result = client.complete(Conversation(Seq(UserMessage("test"))), CompletionOptions())
 
-    result.isRight shouldBe true
-    val completion = result.toOption.get
+    val completion = result.getOrElse(fail("Expected successful completion"))
     completion.toolCalls should have size 2
 
     // Validate first tool call
@@ -148,11 +147,10 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers {
 
     val result = client.complete(Conversation(Seq(UserMessage("test"))), CompletionOptions())
 
-    result.isRight shouldBe true
-    val completion = result.toOption.get
+    val completion = result.getOrElse(fail("Expected successful completion"))
     // Only valid tool call should be extracted
     completion.toolCalls should have size 1
-    completion.toolCalls.head.id shouldBe "call-valid"
-    completion.toolCalls.head.name shouldBe "valid_func"
+    completion.toolCalls(0).id shouldBe "call-valid"
+    completion.toolCalls(0).name shouldBe "valid_func"
   }
 }
