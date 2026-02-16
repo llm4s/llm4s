@@ -2,7 +2,6 @@ package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
 import org.llm4s.error.{ ProcessingError, LLMError }
-import org.llm4s.agent.memory.PostgresVectorHelpers
 
 import java.sql.{ Connection, PreparedStatement, ResultSet }
 import scala.collection.mutable.ArrayBuffer
@@ -201,13 +200,13 @@ final class PgVectorStore private (
           stmt.setInt(params.size + 3, topK)
 
           Using.resource(stmt.executeQuery()) { rs =>
-            val results = ArrayBuffer.empty[ScoredRecord]
+            val results                 = ArrayBuffer.empty[ScoredRecord]
             var error: Option[LLMError] = None
 
             while (rs.next() && error.isEmpty)
               rowToRecord(rs) match {
                 case Right(record) =>
-                  val score = rs.getDouble("similarity")
+                  val score           = rs.getDouble("similarity")
                   val normalizedScore = math.max(0.0, math.min(1.0, score))
                   results += ScoredRecord(record, normalizedScore)
                 case Left(e) =>
@@ -222,9 +221,7 @@ final class PgVectorStore private (
         }
       }
     }.toEither.left
-      .map[LLMError](e => 
-        ProcessingError("pgvector-store", s"Search failed: ${e.getMessage}")
-      )
+      .map[LLMError](e => ProcessingError("pgvector-store", s"Search failed: ${e.getMessage}"))
       .flatMap(identity)
 
   override def get(id: String): Result[Option[VectorRecord]] =

@@ -6,6 +6,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.agent.memory.PostgresMemoryStore.SqlParam._
 import org.llm4s.error.NotFoundError
+import org.llm4s.vectorstore.PostgresVectorHelpers
 
 import java.sql.{ Connection, PreparedStatement, ResultSet, SQLException, Timestamp }
 import java.time.Instant

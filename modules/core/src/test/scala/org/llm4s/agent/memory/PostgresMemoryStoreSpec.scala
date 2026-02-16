@@ -31,7 +31,8 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     database = sys.env.getOrElse("POSTGRES_DB", "postgres"),
     user = sys.env.getOrElse("POSTGRES_USER", "postgres"),
     password = sys.env.getOrElse("POSTGRES_PASSWORD", "password"),
-    tableName = tableName
+    tableName = tableName,
+    maxPoolSize = 4
   )
   private val embeddingService = MockEmbeddingService.default
 
@@ -49,11 +50,19 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     else info("Skipping Postgres test (POSTGRES_TEST_ENABLED=true not set)")
 
   it should "store and retrieve a conversation memory" in skipIfDisabled {
-    val id     = MemoryId(UUID.randomUUID().toString)
-    val memory = Memory(id, "test", MemoryType.Conversation, Map.empty)
+    val id = MemoryId(UUID.randomUUID().toString)
+    val memory = Memory(
+      id = id,
+      content = "Hello, I am a test memory",
+      memoryType = MemoryType.Conversation,
+      metadata = Map("conversation_id" -> "conv-1")
+    )
+
     store.store(memory).isRight shouldBe true
     val retrieved = store.get(id).toOption.flatten
     retrieved shouldBe defined
+    retrieved.get.content shouldBe "Hello, I am a test memory"
+    retrieved.get.metadata.get("conversation_id") shouldBe Some("conv-1")
   }
 
   it should "persist data across store instances" in skipIfDisabled {

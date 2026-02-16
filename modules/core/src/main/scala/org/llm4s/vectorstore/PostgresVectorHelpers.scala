@@ -1,4 +1,4 @@
-package org.llm4s.agent.memory
+package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError

@@ -2,6 +2,7 @@ package org.llm4s.agent.memory
 
 import org.llm4s.types.Result
 import org.llm4s.error.{ NotFoundError, ProcessingError, LLMError }
+import org.llm4s.vectorstore.PostgresVectorHelpers
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import ujson.{ Obj, Str, read, write }
 
@@ -463,9 +464,4 @@ object PostgresMemoryStore {
       }
     }
 
-  private[memory] def embeddingToString(embedding: Array[Float]): String =
-    PostgresVectorHelpers.embeddingToString(embedding)
-
-  private[memory] def stringToEmbedding(s: String): Result[Array[Float]] =
-    PostgresVectorHelpers.stringToEmbedding(s)
 }
