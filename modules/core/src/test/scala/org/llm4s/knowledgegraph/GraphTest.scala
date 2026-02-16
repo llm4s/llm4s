@@ -3,6 +3,7 @@ package org.llm4s.knowledgegraph
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.knowledgegraph.engine.GraphEngine
+import org.llm4s.knowledgegraph.storage._
 
 class GraphTest extends AnyFunSuite with Matchers {
 
@@ -160,5 +161,15 @@ class GraphTest extends AnyFunSuite with Matchers {
     result should contain(n1)
     result should contain(n2)
     result should contain(n3)
+  }
+
+  test("TraversalConfig should be instantiated with defaults") {
+    val config = TraversalConfig()
+    assert(config != null)
+  }
+
+  test("GraphStore abstraction should work with InMemoryGraphStore") {
+    val store: GraphStore = new InMemoryGraphStore()
+    assert(store != null)
   }
 }
