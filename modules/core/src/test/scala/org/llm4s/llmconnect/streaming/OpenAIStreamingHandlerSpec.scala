@@ -32,9 +32,14 @@ final class OpenAIStreamingHandlerSpec extends AnyFlatSpec with Matchers {
 
     val result = handler.processChunk(chunk)
 
-    result.isRight shouldBe true
-    val streamed = result.toOption.get
-    streamed.isDefined shouldBe true
-    streamed.get.toolCall.get.arguments shouldBe ujson.Obj()
+    val streamed = result.getOrElse(fail("Expected Right but got Left"))
+    streamed match {
+      case Some(chunk) =>
+        chunk.toolCall match {
+          case Some(tc) => tc.arguments shouldBe ujson.Obj()
+          case None     => fail("Expected toolCall to be defined")
+        }
+      case None => fail("Expected Some(StreamedChunk) but got None")
+    }
   }
 }

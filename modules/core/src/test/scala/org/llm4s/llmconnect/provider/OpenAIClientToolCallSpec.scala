@@ -63,6 +63,6 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers {
 
     val completion = result.getOrElse(fail("Expected successful completion"))
     completion.toolCalls should have size 1
-    completion.toolCalls.head.arguments("x").num shouldBe 1
+    completion.toolCalls(0).arguments("x").num shouldBe 1
   }
 }
