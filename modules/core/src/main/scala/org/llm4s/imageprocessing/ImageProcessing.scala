@@ -5,6 +5,8 @@ import org.llm4s.imageprocessing.provider._
 import org.llm4s.imageprocessing.provider.anthropicclient.AnthropicVisionClient
 import org.llm4s.error.LLMError
 
+import scala.concurrent.{ Future, ExecutionContext, blocking }
+
 /**
  * Factory object for creating image processing clients.
  *
@@ -71,6 +73,27 @@ trait ImageProcessingClient {
     imagePath: String,
     prompt: Option[String] = None
   ): Either[LLMError, ImageAnalysisResult]
+
+  /**
+   * Asynchronously analyzes an image and returns a description.
+   *
+   * Default implementation wraps the synchronous call in a Future
+   * with an explicit blocking boundary to avoid starving compute pools.
+   *
+   * @param imagePath Path to the image file
+   * @param prompt Optional prompt to guide the analysis
+   * @param ec ExecutionContext for async execution
+   * @return Future containing either error or image analysis result
+   */
+  def analyzeImageAsync(
+    imagePath: String,
+    prompt: Option[String] = None
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, ImageAnalysisResult]] =
+    Future {
+      blocking {
+        analyzeImage(imagePath, prompt)
+      }
+    }
 
   /**
    * Preprocesses an image with specified operations.
