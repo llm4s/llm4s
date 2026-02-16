@@ -251,4 +251,63 @@ class JsonGraphStoreTest extends AnyFunSuite with Matchers {
       store.deleteNode("missing").isLeft shouldBe true
     } finally Files.deleteIfExists(tempFile)
   }
+
+  test("JsonGraphStore.upsertEdge should fail if nodes do not exist") {
+    val tempFile = Files.createTempFile("graph", ".json")
+    try {
+      val store = new JsonGraphStore(tempFile)
+
+      val result = store.upsertEdge(Edge("1", "2", "REL"))
+
+      result.isLeft shouldBe true
+    } finally Files.deleteIfExists(tempFile)
+  }
+
+  test("JsonGraphStore.getNeighbors should handle Incoming direction") {
+    val tempFile = Files.createTempFile("graph", ".json")
+    try {
+      val store = new JsonGraphStore(tempFile)
+
+      store.upsertNode(Node("1", "A", Map.empty))
+      store.upsertNode(Node("2", "B", Map.empty))
+      store.upsertEdge(Edge("1", "2", "REL"))
+
+      val result = store.getNeighbors("2", Direction.Incoming)
+
+      result.map(_.head._2.id) shouldBe Right("1")
+    } finally Files.deleteIfExists(tempFile)
+  }
+
+  test("JsonGraphStore.query should filter boolean properties") {
+    val tempFile = Files.createTempFile("graph", ".json")
+    try {
+      val store = new JsonGraphStore(tempFile)
+
+      store.upsertNode(Node("1", "Person", Map("active" -> ujson.Bool(true))))
+      store.upsertNode(Node("2", "Person", Map("active" -> ujson.Bool(false))))
+
+      val result = store.query(
+        GraphFilter(propertyKey = Some("active"), propertyValue = Some("true"))
+      )
+
+      result.map(_.nodes.keySet) shouldBe Right(Set("1"))
+    } finally Files.deleteIfExists(tempFile)
+  }
+
+  test("JsonGraphStore.query should filter by relationship") {
+    val tempFile = Files.createTempFile("graph", ".json")
+    try {
+      val store = new JsonGraphStore(tempFile)
+
+      store.upsertNode(Node("1", "A", Map.empty))
+      store.upsertNode(Node("2", "B", Map.empty))
+
+      store.upsertEdge(Edge("1", "2", "KNOWS"))
+      store.upsertEdge(Edge("1", "2", "LIKES"))
+
+      val result = store.query(GraphFilter(relationship = Some("KNOWS")))
+
+      result.map(_.edges.size) shouldBe Right(1)
+    } finally Files.deleteIfExists(tempFile)
+  }
 }
