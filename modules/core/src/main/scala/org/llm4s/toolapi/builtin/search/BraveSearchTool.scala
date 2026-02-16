@@ -6,6 +6,7 @@ import org.llm4s.config.BraveSearchToolConfig
 
 import scala.util.control.NonFatal
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.util.Redaction
 
 sealed trait BraveSearchCategory[R] {
   def endpoint: String
@@ -354,9 +355,8 @@ object BraveSearchTool {
             Left("Failed to process search results. Please try again.")
         }
       } else {
-        Left(
-          s"Brave ${category.toolName} returned status ${response.statusCode}: ${response.body}"
-        )
+        val body = Redaction.truncateForLog(response.body)
+        Left(s"Brave ${category.toolName} returned status ${response.statusCode}: $body")
       }
     }
   }

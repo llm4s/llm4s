@@ -126,7 +126,7 @@ object Llm4sHttpClient {
  * Never throws on non-2xx responses — the caller is responsible for
  * checking `HttpResponse.statusCode`.
  */
-class JdkHttpClient extends Llm4sHttpClient {
+private[llm4s] class JdkHttpClient extends Llm4sHttpClient {
   private val client = JHttpClient.newHttpClient()
 
   override def get(

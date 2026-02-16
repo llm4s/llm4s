@@ -2,90 +2,12 @@ package org.llm4s.trace
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.http.{ FailingHttpClient, HttpResponse, Llm4sHttpClient, MockHttpClient }
 import org.llm4s.llmconnect.model.TokenUsage
 
 import java.util.Base64
 
 class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
-
-  // --- Mock HTTP clients ---
-
-  class MockHttpClient(response: HttpResponse) extends Llm4sHttpClient {
-    private def _lastUrl: Option[String]                  = None
-    private def _lastHeaders: Option[Map[String, String]] = None
-    private def _lastBody: Option[String]                 = None
-    private def _lastTimeout: Option[Int]                 = None
-    var lastUrl: Option[String]                           = _lastUrl
-    var lastHeaders: Option[Map[String, String]]          = _lastHeaders
-    var lastBody: Option[String]                          = _lastBody
-    var lastTimeout: Option[Int]                          = _lastTimeout
-    var postCallCount: Int                                = 0
-
-    override def get(
-      url: String,
-      headers: Map[String, String],
-      params: Map[String, String],
-      timeout: Int
-    ): HttpResponse = response
-
-    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse = {
-      lastUrl = Some(url)
-      lastHeaders = Some(headers)
-      lastBody = Some(body)
-      lastTimeout = Some(timeout)
-      postCallCount += 1
-      response
-    }
-
-    override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): HttpResponse =
-      response
-
-    override def postMultipart(
-      url: String,
-      headers: Map[String, String],
-      parts: Seq[org.llm4s.http.MultipartPart],
-      timeout: Int
-    ): HttpResponse = response
-
-    override def put(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      response
-
-    override def delete(url: String, headers: Map[String, String], timeout: Int): HttpResponse =
-      response
-    override def postRaw(url: String, headers: Map[String, String], body: String, timeout: Int) = ???
-  }
-
-  class FailingHttpClient(exception: Throwable) extends Llm4sHttpClient {
-    private def fail: Nothing = throw exception
-
-    override def get(
-      url: String,
-      headers: Map[String, String],
-      params: Map[String, String],
-      timeout: Int
-    ): HttpResponse = fail
-
-    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      fail
-
-    override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): HttpResponse =
-      fail
-
-    override def postMultipart(
-      url: String,
-      headers: Map[String, String],
-      parts: Seq[org.llm4s.http.MultipartPart],
-      timeout: Int
-    ): HttpResponse = fail
-
-    override def put(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      fail
-
-    override def delete(url: String, headers: Map[String, String], timeout: Int): HttpResponse =
-      fail
-    override def postRaw(url: String, headers: Map[String, String], body: String, timeout: Int) = ???
-  }
 
   private def simpleEvent = TraceEvent.ToolExecuted("test-tool", """{"q":"hello"}""", "result", 100, true)
 

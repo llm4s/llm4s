@@ -3,7 +3,7 @@ package org.llm4s.toolapi.builtin.search
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.config.ExaSearchToolConfig
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 import upickle.default._
 
 class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
@@ -692,79 +692,6 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     val result = tool.execute(ujson.Obj("query" -> ujson.Str("  valid query  ")))
 
     result.isRight shouldBe true
-  }
-
-  // Test helper: Mock HTTP client for testing
-  class MockHttpClient(response: HttpResponse) extends Llm4sHttpClient {
-    var lastUrl: Option[String]                  = None
-    var lastHeaders: Option[Map[String, String]] = None
-    var lastBody: Option[String]                 = None
-    var lastTimeout: Option[Int]                 = None
-
-    override def get(
-      url: String,
-      headers: Map[String, String],
-      params: Map[String, String],
-      timeout: Int
-    ): HttpResponse =
-      response
-
-    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse = {
-      lastUrl = Some(url)
-      lastHeaders = Some(headers)
-      lastBody = Some(body)
-      lastTimeout = Some(timeout)
-      response
-    }
-
-    override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): HttpResponse =
-      response
-
-    override def postMultipart(
-      url: String,
-      headers: Map[String, String],
-      parts: Seq[org.llm4s.http.MultipartPart],
-      timeout: Int
-    ): HttpResponse = response
-
-    override def put(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      response
-
-    override def delete(url: String, headers: Map[String, String], timeout: Int): HttpResponse =
-      response
-    override def postRaw(url: String, headers: Map[String, String], body: String, timeout: Int) = ???
-  }
-
-  class FailingHttpClient(exception: Throwable) extends Llm4sHttpClient {
-    private def fail: Nothing = throw exception
-
-    override def get(
-      url: String,
-      headers: Map[String, String],
-      params: Map[String, String],
-      timeout: Int
-    ): HttpResponse =
-      fail
-
-    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      fail
-
-    override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): HttpResponse =
-      fail
-
-    override def postMultipart(
-      url: String,
-      headers: Map[String, String],
-      parts: Seq[org.llm4s.http.MultipartPart],
-      timeout: Int
-    ): HttpResponse = fail
-
-    override def put(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      fail
-
-    override def delete(url: String, headers: Map[String, String], timeout: Int): HttpResponse =
-      fail
-    override def postRaw(url: String, headers: Map[String, String], body: String, timeout: Int) = ???
   }
 
   "search method" should "handle successful 200 response and return ExaSearchResult" in {

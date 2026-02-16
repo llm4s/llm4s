@@ -3,83 +3,9 @@ package org.llm4s.toolapi.builtin.search
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.config.{ BraveSearchToolConfig, Llm4sConfig }
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 
 class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
-
-  // --- Mock HTTP clients ---
-
-  class MockHttpClient(response: HttpResponse) extends Llm4sHttpClient {
-    private def _lastUrl: Option[String]                  = None
-    private def _lastHeaders: Option[Map[String, String]] = None
-    private def _lastParams: Option[Map[String, String]]  = None
-    var lastUrl: Option[String]                           = _lastUrl
-    var lastHeaders: Option[Map[String, String]]          = _lastHeaders
-    var lastParams: Option[Map[String, String]]           = _lastParams
-
-    override def get(
-      url: String,
-      headers: Map[String, String],
-      params: Map[String, String],
-      timeout: Int
-    ): HttpResponse = {
-      lastUrl = Some(url)
-      lastHeaders = Some(headers)
-      lastParams = Some(params)
-      response
-    }
-
-    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      response
-
-    override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): HttpResponse =
-      response
-
-    override def postMultipart(
-      url: String,
-      headers: Map[String, String],
-      parts: Seq[org.llm4s.http.MultipartPart],
-      timeout: Int
-    ): HttpResponse = response
-
-    override def put(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      response
-
-    override def delete(url: String, headers: Map[String, String], timeout: Int): HttpResponse =
-      response
-    override def postRaw(url: String, headers: Map[String, String], body: String, timeout: Int) = ???
-  }
-
-  class FailingHttpClient(exception: Throwable) extends Llm4sHttpClient {
-    private def fail: Nothing = throw exception
-
-    override def get(
-      url: String,
-      headers: Map[String, String],
-      params: Map[String, String],
-      timeout: Int
-    ): HttpResponse = fail
-
-    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      fail
-
-    override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): HttpResponse =
-      fail
-
-    override def postMultipart(
-      url: String,
-      headers: Map[String, String],
-      parts: Seq[org.llm4s.http.MultipartPart],
-      timeout: Int
-    ): HttpResponse = fail
-
-    override def put(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      fail
-
-    override def delete(url: String, headers: Map[String, String], timeout: Int): HttpResponse =
-      fail
-    override def postRaw(url: String, headers: Map[String, String], body: String, timeout: Int) = ???
-  }
 
   private def testToolConfig = BraveSearchToolConfig(
     apiKey = "test-api-key",
