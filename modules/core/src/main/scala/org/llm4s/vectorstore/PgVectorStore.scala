@@ -4,6 +4,7 @@ import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
 
 import org.slf4j.LoggerFactory
+import org.llm4s.util.RateLimitedLogger
 
 import java.sql.{ Connection, PreparedStatement, ResultSet }
 import scala.collection.mutable.ArrayBuffer
@@ -46,12 +47,7 @@ final class PgVectorStore private (
 ) extends VectorStore {
 
   private val logger = LoggerFactory.getLogger(getClass)
-
-  // Rate limiting for corrupt embedding logs (prevent log spam)
-  @volatile private var lastCorruptLogTime: Long = 0L
-  @volatile private var corruptRecordsSinceLastLog: Int = 0
-  private val LOG_THROTTLE_SECONDS = 60
-  private val LOG_THROTTLE_COUNT = 100
+  private val rateLimitedLogger = RateLimitedLogger(logger, throttleSeconds = 60, throttleCount = 100)
 
   // Initialize schema on creation
   initializeSchema()
@@ -445,21 +441,7 @@ final class PgVectorStore private (
         ))
       
       case None =>
-        // Rate-limited logging to prevent log spam
-        val now = System.currentTimeMillis() / 1000
-        corruptRecordsSinceLastLog += 1
-        
-        val shouldLog = (now - lastCorruptLogTime >= LOG_THROTTLE_SECONDS) ||
-                       (corruptRecordsSinceLastLog >= LOG_THROTTLE_COUNT)
-        
-        if (shouldLog) {
-          val skippedMsg = if (corruptRecordsSinceLastLog > 1) {
-            s" ($corruptRecordsSinceLastLog corrupt records since last log)"
-          } else ""
-          logger.warn(s"Skipping corrupt vector record: id=$id, embedding_dim=$embeddingDim$skippedMsg")
-          lastCorruptLogTime = now
-          corruptRecordsSinceLastLog = 0
-        }
+        rateLimitedLogger.warn(s"Skipping corrupt vector record: id=$id, embedding_dim=$embeddingDim")
         None
     }
   }
