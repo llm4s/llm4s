@@ -3,7 +3,7 @@ package org.llm4s.imageprocessing.provider
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.imageprocessing._
-import java.nio.file.{Files, Paths}
+import java.nio.file.{ Files, Paths }
 import java.awt.image.BufferedImage
 import java.awt.Color
 import javax.imageio.ImageIO
@@ -30,7 +30,7 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
     ImageIO.write(image, "png", Paths.get(path).toFile)
 
   def withTempImage(width: Int = 100, height: Int = 100)(test: String => Any): Unit = {
-    val tempFile = Files.createTempFile("test", ".png")
+    val tempFile  = Files.createTempFile("test", ".png")
     val testImage = createTestImage(width, height)
     saveTestImage(testImage, tempFile.toString)
     try test(tempFile.toString)
@@ -148,7 +148,7 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
       result.foreach { processedImage =>
         processedImage.width shouldBe 100
         processedImage.height shouldBe 100
-        processedImage.metadata.operations should contain allOf (
+        (processedImage.metadata.operations should contain).allOf(
           ImageOperation.Resize(100, 100),
           ImageOperation.Blur(3.0),
           ImageOperation.Brightness(20)
