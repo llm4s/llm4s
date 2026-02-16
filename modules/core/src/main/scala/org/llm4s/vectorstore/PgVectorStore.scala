@@ -46,7 +46,7 @@ final class PgVectorStore private (
   private val ownsDataSource: Boolean = true
 ) extends VectorStore {
 
-  private val logger = LoggerFactory.getLogger(getClass)
+  private val logger            = LoggerFactory.getLogger(getClass)
   private val rateLimitedLogger = RateLimitedLogger(logger, throttleSeconds = 60, throttleCount = 100)
 
   // Initialize schema on creation
@@ -215,14 +215,13 @@ final class PgVectorStore private (
 
           Using.resource(stmt.executeQuery()) { rs =>
             val results = ArrayBuffer.empty[ScoredRecord]
-            while (rs.next()) {
+            while (rs.next())
               rowToRecord(rs).foreach { record =>
-                val score  = rs.getDouble("similarity")
+                val score = rs.getDouble("similarity")
                 // Clamp score to [0, 1] range
                 val normalizedScore = math.max(0.0, math.min(1.0, score))
                 results += ScoredRecord(record, normalizedScore)
               }
-            }
             results.toSeq
           }
         }
@@ -426,20 +425,22 @@ final class PgVectorStore private (
     val id           = rs.getString("id")
     val embeddingStr = rs.getString("embedding")
     val embeddingDim = rs.getInt("embedding_dim")
-    
+
     stringToEmbedding(embeddingStr) match {
       case Some(embedding) =>
         val content      = Option(rs.getString("content")).filter(_.nonEmpty)
         val metadataJson = rs.getString("metadata")
         val metadata     = jsonToMetadata(metadataJson)
 
-        Some(VectorRecord(
-          id = id,
-          embedding = embedding,
-          content = content,
-          metadata = metadata
-        ))
-      
+        Some(
+          VectorRecord(
+            id = id,
+            embedding = embedding,
+            content = content,
+            metadata = metadata
+          )
+        )
+
       case None =>
         rateLimitedLogger.warn(s"Skipping corrupt vector record: id=$id, embedding_dim=$embeddingDim")
         None
@@ -496,12 +497,7 @@ final class PgVectorStore private (
    * Package-private for unit testing.
    */
   private[vectorstore] def stringToEmbedding(s: String): Option[Array[Float]] =
-    if (s == null || s.isEmpty) None
-    else {
-      val cleaned = s.stripPrefix("[").stripSuffix("]")
-      if (cleaned.isEmpty) None
-      else Try(cleaned.split(",").map(_.trim.toFloat)).toOption
-    }
+    EmbeddingParser.parse(s)
 
   private def metadataToJson(metadata: Map[String, String]): String =
     if (metadata.isEmpty) "{}"

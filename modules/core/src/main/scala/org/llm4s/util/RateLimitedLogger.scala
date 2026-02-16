@@ -21,7 +21,7 @@ final class RateLimitedLogger(
   throttleCount: Int = 100
 ) {
 
-  private val lastLogTime = new AtomicLong(0L)
+  private val lastLogTime        = new AtomicLong(0L)
   private val eventsSinceLastLog = new AtomicInteger(0)
 
   /**
@@ -29,15 +29,15 @@ final class RateLimitedLogger(
    * Returns true if message was logged, false if throttled.
    */
   def warn(message: => String): Boolean = {
-    val events = eventsSinceLastLog.incrementAndGet()
-    val now = System.currentTimeMillis() / 1000
+    val events  = eventsSinceLastLog.incrementAndGet()
+    val now     = System.currentTimeMillis() / 1000
     val lastLog = lastLogTime.get()
 
     val shouldLog = (now - lastLog >= throttleSeconds) || (events >= throttleCount)
 
     if (shouldLog && lastLogTime.compareAndSet(lastLog, now)) {
       // CAS succeeded - we won the race to log
-      val count = eventsSinceLastLog.getAndSet(0)
+      val count        = eventsSinceLastLog.getAndSet(0)
       val aggregateMsg = if (count > 1) s" ($count events since last log)" else ""
       logger.warn(message + aggregateMsg)
       true
@@ -57,6 +57,7 @@ final class RateLimitedLogger(
 }
 
 object RateLimitedLogger {
+
   /** Create rate limiter with default thresholds (60s, 100 events) */
   def apply(logger: Logger): RateLimitedLogger =
     new RateLimitedLogger(logger)

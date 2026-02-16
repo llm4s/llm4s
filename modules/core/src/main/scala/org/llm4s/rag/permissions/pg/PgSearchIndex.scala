@@ -40,7 +40,7 @@ final class PgSearchIndex private (
   private val _pgConfig: SearchIndex.PgConfig
 ) extends SearchIndex {
 
-  private val logger = LoggerFactory.getLogger(getClass)
+  private val logger            = LoggerFactory.getLogger(getClass)
   private val rateLimitedLogger = RateLimitedLogger(logger, throttleSeconds = 60, throttleCount = 100)
 
   /** Expose PostgreSQL configuration for automatic RAG integration */
@@ -151,12 +151,11 @@ final class PgSearchIndex private (
 
         Using.resource(stmt.executeQuery()) { rs =>
           val buffer = ArrayBuffer[ScoredRecord]()
-          while (rs.next()) {
+          while (rs.next())
             rowToRecord(rs).foreach { record =>
-              val score  = math.max(0.0, math.min(1.0, rs.getDouble("similarity")))
+              val score = math.max(0.0, math.min(1.0, rs.getDouble("similarity")))
               buffer += ScoredRecord(record, score)
             }
-          }
           buffer.toSeq
         }
       }
@@ -351,18 +350,20 @@ final class PgSearchIndex private (
     val id           = rs.getString("id")
     val embeddingStr = rs.getString("embedding")
     val embeddingDim = rs.getInt("embedding_dim")
-    
+
     parseEmbedding(embeddingStr) match {
       case Some(embedding) =>
         val metadata = jsonToMap(rs.getString("metadata"))
 
-        Some(VectorRecord(
-          id = id,
-          embedding = embedding,
-          content = Option(rs.getString("content")),
-          metadata = metadata
-        ))
-      
+        Some(
+          VectorRecord(
+            id = id,
+            embedding = embedding,
+            content = Option(rs.getString("content")),
+            metadata = metadata
+          )
+        )
+
       case None =>
         rateLimitedLogger.warn(s"Skipping corrupt vector record: id=$id, embedding_dim=$embeddingDim")
         None
@@ -377,12 +378,8 @@ final class PgSearchIndex private (
    * Returns None if parsing fails (logged by caller with context).
    * Package-private for unit testing.
    */
-  private[pg] def parseEmbedding(str: String): Option[Array[Float]] = {
-    if (str == null || str.isEmpty) return None
-    val cleaned = str.stripPrefix("[").stripSuffix("]")
-    if (cleaned.isEmpty) None
-    else Try(cleaned.split(",").map(_.trim.toFloat)).toOption
-  }
+  private[pg] def parseEmbedding(str: String): Option[Array[Float]] =
+    org.llm4s.vectorstore.EmbeddingParser.parse(str)
 
   private def createIntArray(conn: Connection, values: Seq[Int]): SqlArray =
     conn.createArrayOf("integer", values.map(Int.box).toArray)

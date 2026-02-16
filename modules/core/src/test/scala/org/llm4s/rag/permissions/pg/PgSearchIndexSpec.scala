@@ -610,4 +610,3 @@ class PgSearchIndexSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll
     result.isRight shouldBe true
   }
 }
-
