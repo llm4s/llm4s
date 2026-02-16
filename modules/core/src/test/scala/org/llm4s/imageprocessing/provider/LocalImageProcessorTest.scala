@@ -3,7 +3,7 @@ package org.llm4s.imageprocessing.provider
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.imageprocessing._
-import java.nio.file.{ Files, Paths, Path }
+import java.nio.file.{ Files, Paths }
 import java.awt.image.BufferedImage
 import java.awt.Color
 import javax.imageio.ImageIO
@@ -11,12 +11,6 @@ import javax.imageio.ImageIO
 class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
 
   val processor = new LocalImageProcessor()
-
-  private def withTempImage[T](ext: String = ".png")(test: Path => T): T = {
-    val tempFile = Files.createTempFile("test", ext)
-    try test(tempFile)
-    finally Files.deleteIfExists(tempFile)
-  }
 
   def createTestImage(width: Int, height: Int): BufferedImage = {
     val image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
@@ -32,12 +26,17 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
   def saveTestImage(image: BufferedImage, path: String): Unit =
     ImageIO.write(image, "png", Paths.get(path).toFile)
 
-  "LocalImageProcessor" should "analyze image with basic information" in
-    withTempImage() { tempFile =>
-      val testImage = createTestImage(100, 100)
-      saveTestImage(testImage, tempFile.toString)
+  def withTempImage(width: Int = 100, height: Int = 100)(test: String => Any): Unit = {
+    val tempFile = Files.createTempFile("test", ".png")
+    val img      = createTestImage(width, height)
+    saveTestImage(img, tempFile.toString)
+    try test(tempFile.toString)
+    finally Files.deleteIfExists(tempFile)
+  }
 
-      val result = processor.analyzeImage(tempFile.toString, None)
+  "LocalImageProcessor" should "analyze image with basic information" in
+    withTempImage(100, 100) { path =>
+      val result = processor.analyzeImage(path, None)
       result.isRight shouldBe true
 
       result.foreach { analysis =>
@@ -46,161 +45,159 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
         analysis.confidence should be > 0.0
         analysis.confidence should be <= 1.0
         analysis.tags should not be empty
-        analysis.metadata.originalPath shouldBe Some(tempFile.toString)
+        analysis.metadata.originalPath shouldBe Some(path)
       }
     }
 
-  it should "resize image successfully" in withTempImage() { tempFile =>
-    val testImage = createTestImage(200, 200)
-    saveTestImage(testImage, tempFile.toString)
+  it should "resize image successfully" in
+    withTempImage(200, 200) { path =>
+      val result = processor.resizeImage(path, 100, 100, maintainAspectRatio = false)
+      result.isRight shouldBe true
 
-    val result = processor.resizeImage(tempFile.toString, 100, 100, maintainAspectRatio = false)
-    result.isRight shouldBe true
-
-    result.foreach { processedImage =>
-      processedImage.width shouldBe 100
-      processedImage.height shouldBe 100
-      processedImage.format shouldBe ImageFormat.PNG
-      processedImage.data.length should be > 0
-      processedImage.metadata.operations should contain(ImageOperation.Resize(100, 100, false))
+      result.foreach { processedImage =>
+        processedImage.width shouldBe 100
+        processedImage.height shouldBe 100
+        processedImage.format shouldBe ImageFormat.PNG
+        processedImage.data.length should be > 0
+        processedImage.metadata.operations should contain(ImageOperation.Resize(100, 100, false))
+      }
     }
-  }
 
-  it should "maintain aspect ratio when resizing" in withTempImage() { tempFile =>
-    val testImage = createTestImage(200, 100)
-    saveTestImage(testImage, tempFile.toString)
+  it should "maintain aspect ratio when resizing" in
+    withTempImage(200, 100) { path =>
+      val result = processor.resizeImage(path, 100, 100, maintainAspectRatio = true)
+      result.isRight shouldBe true
 
-    val result = processor.resizeImage(tempFile.toString, 100, 100, maintainAspectRatio = true)
-    result.isRight shouldBe true
-
-    result.foreach { processedImage =>
-      processedImage.width shouldBe 100
-      processedImage.height shouldBe 50
+      result.foreach { processedImage =>
+        processedImage.width shouldBe 100
+        processedImage.height shouldBe 50
+      }
     }
-  }
 
-  it should "crop image successfully" in withTempImage() { tempFile =>
-    val testImage = createTestImage(200, 200)
-    saveTestImage(testImage, tempFile.toString)
+  it should "crop image successfully" in
+    withTempImage(200, 200) { path =>
+      val result = processor.preprocessImage(path, List(ImageOperation.Crop(50, 50, 100, 100)))
+      result.isRight shouldBe true
 
-    val result = processor.preprocessImage(tempFile.toString, List(ImageOperation.Crop(50, 50, 100, 100)))
-    result.isRight shouldBe true
-
-    result.foreach { processedImage =>
-      processedImage.width shouldBe 100
-      processedImage.height shouldBe 100
-      processedImage.metadata.operations should contain(ImageOperation.Crop(50, 50, 100, 100))
+      result.foreach { processedImage =>
+        processedImage.width shouldBe 100
+        processedImage.height shouldBe 100
+        processedImage.metadata.operations should contain(ImageOperation.Crop(50, 50, 100, 100))
+      }
     }
-  }
 
-  it should "rotate image successfully" in withTempImage() { tempFile =>
-    val testImage = createTestImage(100, 200)
-    saveTestImage(testImage, tempFile.toString)
+  it should "rotate image successfully" in
+    withTempImage(100, 200) { path =>
+      val result = processor.preprocessImage(path, List(ImageOperation.Rotate(90.0)))
+      result.isRight shouldBe true
 
-    val result = processor.preprocessImage(tempFile.toString, List(ImageOperation.Rotate(90.0)))
-    result.isRight shouldBe true
-
-    result.foreach { processedImage =>
-      processedImage.width shouldBe 200
-      processedImage.height shouldBe 100
-      processedImage.metadata.operations should contain(ImageOperation.Rotate(90.0))
+      result.foreach { processedImage =>
+        processedImage.width shouldBe 200
+        processedImage.height shouldBe 100
+        processedImage.metadata.operations should contain(ImageOperation.Rotate(90.0))
+      }
     }
-  }
 
-  it should "apply blur successfully" in withTempImage() { tempFile =>
-    val testImage = createTestImage(100, 100)
-    saveTestImage(testImage, tempFile.toString)
+  it should "apply blur successfully" in
+    withTempImage() { path =>
+      val result = processor.preprocessImage(path, List(ImageOperation.Blur(5.0)))
+      result.isRight shouldBe true
 
-    val result = processor.preprocessImage(tempFile.toString, List(ImageOperation.Blur(5.0)))
-    result.isRight shouldBe true
-  }
-
-  it should "adjust brightness successfully" in withTempImage() { tempFile =>
-    val testImage = createTestImage(100, 100)
-    saveTestImage(testImage, tempFile.toString)
-
-    val result = processor.preprocessImage(tempFile.toString, List(ImageOperation.Brightness(50)))
-    result.isRight shouldBe true
-  }
-
-  it should "adjust contrast successfully" in withTempImage() { tempFile =>
-    val testImage = createTestImage(100, 100)
-    saveTestImage(testImage, tempFile.toString)
-
-    val result = processor.preprocessImage(tempFile.toString, List(ImageOperation.Contrast(25)))
-    result.isRight shouldBe true
-  }
-
-  it should "convert to grayscale successfully" in withTempImage() { tempFile =>
-    val testImage = createTestImage(100, 100)
-    saveTestImage(testImage, tempFile.toString)
-
-    val result = processor.preprocessImage(tempFile.toString, List(ImageOperation.Grayscale))
-    result.isRight shouldBe true
-  }
-
-  it should "convert format successfully" in withTempImage() { tempFile =>
-    val testImage = createTestImage(100, 100)
-    saveTestImage(testImage, tempFile.toString)
-
-    val result = processor.convertFormat(tempFile.toString, ImageFormat.JPEG)
-    result.isRight shouldBe true
-
-    result.foreach { processedImage =>
-      processedImage.format shouldBe ImageFormat.JPEG
-      processedImage.width shouldBe 100
-      processedImage.height shouldBe 100
+      result.foreach { processedImage =>
+        processedImage.width shouldBe 100
+        processedImage.height shouldBe 100
+        processedImage.metadata.operations should contain(ImageOperation.Blur(5.0))
+      }
     }
-  }
 
-  it should "handle multiple operations in sequence" in withTempImage() { tempFile =>
-    val testImage = createTestImage(200, 200)
-    saveTestImage(testImage, tempFile.toString)
+  it should "adjust brightness successfully" in
+    withTempImage() { path =>
+      val result = processor.preprocessImage(path, List(ImageOperation.Brightness(50)))
+      result.isRight shouldBe true
 
-    val operations = List(
-      ImageOperation.Resize(100, 100),
-      ImageOperation.Blur(3.0),
-      ImageOperation.Brightness(20)
-    )
+      result.foreach { processedImage =>
+        processedImage.metadata.operations should contain(ImageOperation.Brightness(50))
+      }
+    }
 
-    val result = processor.preprocessImage(tempFile.toString, operations)
-    result.isRight shouldBe true
-  }
+  it should "adjust contrast successfully" in
+    withTempImage() { path =>
+      val result = processor.preprocessImage(path, List(ImageOperation.Contrast(25)))
+      result.isRight shouldBe true
+
+      result.foreach { processedImage =>
+        processedImage.metadata.operations should contain(ImageOperation.Contrast(25))
+      }
+    }
+
+  it should "convert to grayscale successfully" in
+    withTempImage() { path =>
+      val result = processor.preprocessImage(path, List(ImageOperation.Grayscale))
+      result.isRight shouldBe true
+
+      result.foreach(processedImage => processedImage.metadata.operations should contain(ImageOperation.Grayscale))
+    }
+
+  it should "convert format successfully" in
+    withTempImage() { path =>
+      val result = processor.convertFormat(path, ImageFormat.JPEG)
+      result.isRight shouldBe true
+
+      result.foreach { processedImage =>
+        processedImage.format shouldBe ImageFormat.JPEG
+        processedImage.width shouldBe 100
+        processedImage.height shouldBe 100
+      }
+    }
+
+  it should "handle multiple operations in sequence" in
+    withTempImage(200, 200) { path =>
+      val operations = List(
+        ImageOperation.Resize(100, 100),
+        ImageOperation.Blur(3.0),
+        ImageOperation.Brightness(20)
+      )
+
+      val result = processor.preprocessImage(path, operations)
+      result.isRight shouldBe true
+
+      result.foreach { processedImage =>
+        processedImage.width shouldBe 100
+        processedImage.height shouldBe 100
+        (processedImage.metadata.operations should contain).allOf(
+          ImageOperation.Resize(100, 100),
+          ImageOperation.Blur(3.0),
+          ImageOperation.Brightness(20)
+        )
+      }
+    }
 
   it should "fail with invalid file path" in {
-    val result = processor.analyzeImage("/nonexistent/file.png", None)
-    result.isLeft shouldBe true
+    processor.analyzeImage("/nonexistent/file.png", None).isLeft shouldBe true
   }
 
-  it should "fail with invalid image file" in withTempImage(".txt") { tempFile =>
+  it should "fail with invalid image file" in {
+    val tempFile = Files.createTempFile("test", ".txt")
     Files.write(tempFile, "This is not an image".getBytes)
-    val result = processor.analyzeImage(tempFile.toString, None)
-    result.isLeft shouldBe true
+
+    processor.analyzeImage(tempFile.toString, None).isLeft shouldBe true
+
+    Files.deleteIfExists(tempFile)
   }
 
-  it should "fail with invalid resize dimensions" in withTempImage() { tempFile =>
-    val testImage = createTestImage(100, 100)
-    saveTestImage(testImage, tempFile.toString)
+  it should "fail with invalid resize dimensions" in
+    withTempImage()(path => processor.resizeImage(path, -1, 100, maintainAspectRatio = false).isLeft shouldBe true)
 
-    val result = processor.resizeImage(tempFile.toString, -1, 100, maintainAspectRatio = false)
-    result.isLeft shouldBe true
-  }
+  it should "fail with invalid crop dimensions" in
+    withTempImage() { path =>
+      processor.preprocessImage(path, List(ImageOperation.Crop(200, 200, 100, 100))).isLeft shouldBe true
+    }
 
-  it should "fail with invalid crop dimensions" in withTempImage() { tempFile =>
-    val testImage = createTestImage(100, 100)
-    saveTestImage(testImage, tempFile.toString)
+  it should "handle WEBP format with fallback" in
+    withTempImage() { path =>
+      val result = processor.convertFormat(path, ImageFormat.WEBP)
+      result.isRight shouldBe true
 
-    val result = processor.preprocessImage(tempFile.toString, List(ImageOperation.Crop(200, 200, 100, 100)))
-    result.isLeft shouldBe true
-  }
-
-  it should "handle WEBP format with fallback" in withTempImage() { tempFile =>
-    val testImage = createTestImage(100, 100)
-    saveTestImage(testImage, tempFile.toString)
-
-    val result = processor.convertFormat(tempFile.toString, ImageFormat.WEBP)
-    result.isRight shouldBe true
-
-    result.foreach(processedImage => processedImage.format shouldBe ImageFormat.WEBP)
-  }
+      result.foreach(_.format shouldBe ImageFormat.WEBP)
+    }
 }

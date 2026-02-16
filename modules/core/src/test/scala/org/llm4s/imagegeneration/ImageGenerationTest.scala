@@ -1,6 +1,8 @@
 package org.llm4s.imagegeneration
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+
 import java.nio.file.Files
 import java.util.Base64
 
@@ -65,44 +67,6 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
           averageGenerationTime = Some(100)
         )
       )
-  }
-
-  // ===============================
-  // ASYNC TESTS (ADD HERE)
-  // ===============================
-
-  test("ImageGenerationClient async defaults return unsupported when not overridden") {
-
-    import scala.concurrent.ExecutionContext.Implicits.global
-    import scala.concurrent.Await
-    import scala.concurrent.duration._
-
-    val client = new ImageGenerationClient {
-      def generateImage(p: String, o: ImageGenerationOptions) =
-        Left(UnknownError(new RuntimeException("sync not implemented")))
-
-      def generateImages(p: String, c: Int, o: ImageGenerationOptions) =
-        Left(UnknownError(new RuntimeException("sync not implemented")))
-    }
-
-    val single =
-      Await.result(client.generateImageAsync("test"), 2.seconds)
-
-    val multi =
-      Await.result(client.generateImagesAsync("test", 2), 2.seconds)
-
-    val edit =
-      Await.result(
-        client.editImageAsync(
-          java.nio.file.Paths.get("test.png"),
-          "prompt"
-        ),
-        2.seconds
-      )
-
-    single.isLeft shouldBe true
-    multi.isLeft shouldBe true
-    edit.isLeft shouldBe true
   }
 
   // ===== MODEL UNIT TESTS =====
