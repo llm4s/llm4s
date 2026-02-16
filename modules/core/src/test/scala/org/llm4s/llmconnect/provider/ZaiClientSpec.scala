@@ -735,7 +735,7 @@ class ZaiClientTestHelper(config: ZaiConfig) extends ZaiClient(config) {
   }
 
   def testParseStreamingArguments(raw: String): ujson.Value =
-    if (raw.isEmpty) ujson.Obj() else scala.util.Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
+    parseStreamingArguments(raw)
 }
 
 // ============ Metrics Tests ============

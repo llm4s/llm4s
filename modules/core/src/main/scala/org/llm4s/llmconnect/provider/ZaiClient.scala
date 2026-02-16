@@ -229,7 +229,7 @@ class ZaiClient(
    * @param raw Raw JSON string to parse
    * @return Parsed JSON, or raw string if parsing fails
    */
-  private def parseStreamingArguments(raw: String): ujson.Value =
+  private[provider] def parseStreamingArguments(raw: String): ujson.Value =
     if (raw.isEmpty) ujson.Obj() else scala.util.Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
 
   private def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
