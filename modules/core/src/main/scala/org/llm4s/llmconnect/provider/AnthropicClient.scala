@@ -424,15 +424,41 @@ curl https://api.anthropic.com/v1/messages \
 
     // Extract token usage, including thinking tokens if available
     val usage = response.usage()
-    val baseTokenUsage = TokenUsage(
+
+    def reflectiveInt(obj: AnyRef, methodName: String): Option[Int] =
+      Try(obj.getClass.getMethod(methodName).invoke(obj)).toOption
+        .flatMap {
+          case null                => None
+          case i: Integer          => Some(i.intValue())
+          case l: java.lang.Long   => Some(l.longValue().toInt)
+          case n: java.lang.Number => Some(n.intValue())
+          case opt: Optional[_] =>
+            if (opt.isPresent) {
+              opt.get() match {
+                case nn: java.lang.Number => Some(nn.intValue())
+                case _                    => None
+              }
+            } else {
+              None
+            }
+          case _ => None
+        }
+
+    val cachedTokens: Option[Int] =
+      reflectiveInt(usage.asInstanceOf[AnyRef], "cacheReadInputTokens")
+        .orElse(reflectiveInt(usage.asInstanceOf[AnyRef], "getCacheReadInputTokens"))
+
+    val cacheCreationTokens: Option[Int] =
+      reflectiveInt(usage.asInstanceOf[AnyRef], "cacheCreationInputTokens")
+        .orElse(reflectiveInt(usage.asInstanceOf[AnyRef], "getCacheCreationInputTokens"))
+
+    val tokenUsage = TokenUsage(
       promptTokens = usage.inputTokens().toInt,
       completionTokens = usage.outputTokens().toInt,
-      totalTokens = (usage.inputTokens() + usage.outputTokens()).toInt
+      totalTokens = (usage.inputTokens() + usage.outputTokens()).toInt,
+      cachedTokens = cachedTokens,
+      cacheCreationTokens = cacheCreationTokens
     )
-
-    // Check for thinking tokens in cache usage (Anthropic reports cache_read_input_tokens for thinking)
-    // Note: The SDK may expose thinking tokens differently - adjust as needed
-    val tokenUsage = baseTokenUsage
 
     // Estimate cost using CostEstimator
     val cost = CostEstimator.estimate(config.model, tokenUsage)

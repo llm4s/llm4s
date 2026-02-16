@@ -324,6 +324,19 @@ case class ModelPricing(
       outCost   <- outputCostPerToken
       cacheRead <- cacheReadInputTokenCost
     } yield (inputTokens * inCost) + (cachedTokens * cacheRead) + (outputTokens * outCost)
+
+  def estimateCostWithCaching(
+    inputTokens: Int,
+    cachedTokens: Int,
+    cacheCreationTokens: Int,
+    outputTokens: Int
+  ): Option[Double] =
+    for {
+      inCost      <- inputCostPerToken
+      outCost     <- outputCostPerToken
+      cacheRead   <- cacheReadInputTokenCost
+      cacheCreate <- cacheCreationInputTokenCost
+    } yield (inputTokens * inCost) + (cachedTokens * cacheRead) + (cacheCreationTokens * cacheCreate) + (outputTokens * outCost)
 }
 
 object ModelPricing {

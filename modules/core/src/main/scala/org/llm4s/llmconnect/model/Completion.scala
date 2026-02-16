@@ -69,7 +69,11 @@ case class TokenUsage(
   promptTokens: Int,
   completionTokens: Int,
   totalTokens: Int,
-  thinkingTokens: Option[Int] = None
+  thinkingTokens: Option[Int] = None,
+  cachedTokens: Option[Int] = None,
+  cacheCreationTokens: Option[Int] = None,
+  audioInputTokens: Option[Int] = None,
+  audioOutputTokens: Option[Int] = None
 ) {
 
   /**

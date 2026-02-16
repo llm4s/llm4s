@@ -515,13 +515,40 @@ class OpenAIClient private (
     val assistantMessage =
       AssistantMessage(contentOpt = if (content.isEmpty) None else Some(content), toolCalls = toolCalls)
 
-    val usage = Option(completions.getUsage).map(u =>
+    def reflectiveInt(obj: AnyRef, methodName: String): Option[Int] =
+      Try(obj.getClass.getMethod(methodName).invoke(obj)).toOption
+        .flatMap {
+          case null                => None
+          case i: Integer          => Some(i.intValue())
+          case l: java.lang.Long   => Some(l.longValue().toInt)
+          case n: java.lang.Number => Some(n.intValue())
+          case _                   => None
+        }
+
+    def reflectiveChild(obj: AnyRef, methodName: String): Option[AnyRef] =
+      Try(obj.getClass.getMethod(methodName).invoke(obj).asInstanceOf[AnyRef]).toOption.flatMap(Option(_))
+
+    val usage = Option(completions.getUsage).map { u =>
+      val cachedTokens: Option[Int] =
+        for {
+          promptDetails <- reflectiveChild(u, "getPromptTokensDetails")
+          cached        <- reflectiveInt(promptDetails, "getCachedTokens")
+        } yield cached
+
+      val thinkingTokens: Option[Int] =
+        for {
+          completionDetails <- reflectiveChild(u, "getCompletionTokensDetails")
+          reasoning         <- reflectiveInt(completionDetails, "getReasoningTokens")
+        } yield reasoning
+
       TokenUsage(
         promptTokens = u.getPromptTokens,
         completionTokens = u.getCompletionTokens,
-        totalTokens = u.getTotalTokens
+        totalTokens = u.getTotalTokens,
+        thinkingTokens = thinkingTokens,
+        cachedTokens = cachedTokens
       )
-    )
+    }
 
     // Estimate cost using CostEstimator
     val cost = usage.flatMap(u => CostEstimator.estimate(this.model, u))
