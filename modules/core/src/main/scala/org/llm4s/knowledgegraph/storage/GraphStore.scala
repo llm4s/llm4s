@@ -3,6 +3,13 @@ package org.llm4s.knowledgegraph.storage
 import org.llm4s.knowledgegraph.{ Graph, Node, Edge }
 import org.llm4s.types.Result
 
+/**
+ * GraphStore defines the storage abstraction for the Knowledge Graph module.
+ *
+ * Implementations may be in-memory, file-based, embedded, or external engines.
+ * All implementations must maintain consistent traversal, query,
+ * and error semantics across backends.
+ */
 trait GraphStore {
 
   def upsertNode(node: Node): Result[Unit]

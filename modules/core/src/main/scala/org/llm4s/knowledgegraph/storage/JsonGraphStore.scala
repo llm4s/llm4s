@@ -132,18 +132,36 @@ class JsonGraphStore(path: Path) extends GraphStore {
 
   override def query(filter: GraphFilter): Result[Graph] =
     loadFromFile().map { g =>
-      val filteredNodes =
-        filter.label match {
-          case Some(label) =>
-            g.nodes.filter(_._2.label == label)
-          case None => g.nodes
-        }
+
+      val filteredNodes = g.nodes.filter { case (_, node) =>
+        val labelMatch =
+          filter.label.forall(_ == node.label)
+
+        val propertyMatch =
+          (filter.propertyKey, filter.propertyValue) match {
+            case (Some(k), Some(v)) =>
+              node.properties.get(k).exists {
+                case ujson.Str(s)  => s == v
+                case ujson.Num(n)  => n.toString == v
+                case ujson.Bool(b) => b.toString == v
+                case _             => false
+              }
+            case _ => true
+          }
+
+        labelMatch && propertyMatch
+      }
 
       val filteredEdges =
-        filter.relationship match {
-          case Some(rel) =>
-            g.edges.filter(_.relationship == rel)
-          case None => g.edges
+        g.edges.filter { e =>
+          val relationshipMatch =
+            filter.relationship.forall(_ == e.relationship)
+
+          val nodesPresent =
+            filteredNodes.contains(e.source) &&
+              filteredNodes.contains(e.target)
+
+          relationshipMatch && nodesPresent
         }
 
       Graph(filteredNodes, filteredEdges)
@@ -153,31 +171,44 @@ class JsonGraphStore(path: Path) extends GraphStore {
     startId: String,
     config: TraversalConfig
   ): Result[Seq[Node]] =
-    loadFromFile().map { g =>
-      if (!g.hasNode(startId)) Seq.empty
+    loadFromFile().flatMap { g =>
+      if (!g.hasNode(startId))
+        Left(ProcessingError("missing_node", s"Start node $startId does not exist"))
       else {
-        var visited  = Set(startId)
-        var frontier = Set(startId)
 
-        for (_ <- 1 to config.maxDepth) {
-          val next = frontier.flatMap(id => g.getNeighbors(id).map(_.id)) -- visited
+        def bfs(queue: List[(String, Int)], visited: Set[String]): Set[String] =
+          queue match {
+            case Nil => visited
+            case (current, depth) :: rest =>
+              if (visited.contains(current) || depth > config.maxDepth)
+                bfs(rest, visited)
+              else {
+                val neighbors =
+                  g.getNeighbors(current).map(_.id).filterNot(visited.contains)
 
-          visited ++= next
-          frontier = next
-        }
+                bfs(
+                  rest ++ neighbors.map(n => (n, depth + 1)),
+                  visited + current
+                )
+              }
+          }
 
-        visited.flatMap(g.nodes.get).toSeq
+        Right(bfs(List((startId, 0)), Set.empty).flatMap(g.nodes.get).toSeq)
       }
     }
 
   override def deleteNode(id: String): Result[Unit] =
     loadFromFile().flatMap { g =>
-      val newGraph =
-        Graph(
-          g.nodes - id,
-          g.edges.filterNot(e => e.source == id || e.target == id)
-        )
-      saveToFile(newGraph)
+      if (!g.hasNode(id))
+        Left(ProcessingError("missing_node", s"Node $id does not exist"))
+      else {
+        val newGraph =
+          Graph(
+            g.nodes - id,
+            g.edges.filterNot(e => e.source == id || e.target == id)
+          )
+        saveToFile(newGraph)
+      }
     }
 
   override def deleteEdge(

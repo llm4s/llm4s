@@ -11,8 +11,14 @@ class InMemoryGraphStoreTest extends AnyFunSuite with Matchers {
     val store = new InMemoryGraphStore
     val node  = Node("1", "Person", Map("name" -> Str("Alice")))
 
-    store.upsertNode(node).isRight shouldBe true
-    store.getNode("1").toOption.flatten shouldBe Some(node)
+    store.upsertNode(node) shouldBe Right(())
+
+    store.getNode("1") match {
+      case Right(Some(found)) =>
+        found shouldBe node
+      case other =>
+        fail(s"Unexpected result: $other")
+    }
   }
 
   test("upsertEdge should connect existing nodes") {
@@ -21,13 +27,17 @@ class InMemoryGraphStoreTest extends AnyFunSuite with Matchers {
     val n2    = Node("2", "Person")
     val edge  = Edge("1", "2", "KNOWS")
 
-    store.upsertNode(n1)
-    store.upsertNode(n2)
+    store.upsertNode(n1) shouldBe Right(())
+    store.upsertNode(n2) shouldBe Right(())
 
-    store.upsertEdge(edge).isRight shouldBe true
+    store.upsertEdge(edge) shouldBe Right(())
 
-    val neighbors = store.getNeighbors("1", Direction.Outgoing).toOption.get
-    neighbors.map(_._2.id) should contain("2")
+    store.getNeighbors("1", Direction.Outgoing) match {
+      case Right(neighbors) =>
+        neighbors.map(_._2.id) should contain("2")
+      case other =>
+        fail(s"Unexpected result: $other")
+    }
   }
 
   test("upsertEdge should fail if node missing") {
@@ -47,19 +57,30 @@ class InMemoryGraphStoreTest extends AnyFunSuite with Matchers {
     store.upsertNode(n2)
     store.upsertEdge(edge)
 
-    store.deleteNode("1").isRight shouldBe true
-    store.getNode("1").toOption.flatten shouldBe None
+    store.deleteNode("1") shouldBe Right(())
+
+    store.getNode("1") match {
+      case Right(None) =>
+        succeed
+      case other =>
+        fail(s"Expected node to be deleted but got: $other")
+    }
   }
 
   test("stats should reflect node and edge count") {
     val store = new InMemoryGraphStore
+
     store.upsertNode(Node("1", "Person"))
     store.upsertNode(Node("2", "Person"))
     store.upsertEdge(Edge("1", "2", "KNOWS"))
 
-    val stats = store.stats().toOption.get
-    stats.nodeCount shouldBe 2
-    stats.edgeCount shouldBe 1
+    store.stats() match {
+      case Right(stats) =>
+        stats.nodeCount shouldBe 2
+        stats.edgeCount shouldBe 1
+      case other =>
+        fail(s"Unexpected result: $other")
+    }
   }
 
   test("traverse should respect maxDepth") {
@@ -76,11 +97,54 @@ class InMemoryGraphStoreTest extends AnyFunSuite with Matchers {
     store.upsertEdge(Edge("1", "2", "KNOWS"))
     store.upsertEdge(Edge("2", "3", "KNOWS"))
 
-    val depth1 = store.traverse("1", TraversalConfig(maxDepth = 1)).toOption.get
-    depth1.map(_.id) should contain("2")
-    depth1.map(_.id) should not contain "3"
+    store.traverse("1", TraversalConfig(maxDepth = 1)) match {
+      case Right(depth1) =>
+        depth1.map(_.id) should contain("2")
+        depth1.map(_.id) should not contain "3"
+      case other =>
+        fail(s"Unexpected result: $other")
+    }
 
-    val depth2 = store.traverse("1", TraversalConfig(maxDepth = 2)).toOption.get
-    depth2.map(_.id) should contain("3")
+    store.traverse("1", TraversalConfig(maxDepth = 2)) match {
+      case Right(depth2) =>
+        depth2.map(_.id) should contain("3")
+      case other =>
+        fail(s"Unexpected result: $other")
+    }
+  }
+
+  test("traverse should fail if start node does not exist") {
+    val store = new InMemoryGraphStore
+    store.traverse("missing", TraversalConfig(maxDepth = 1)).isLeft shouldBe true
+  }
+
+  test("query should filter by property key and value") {
+    val store = new InMemoryGraphStore
+
+    store.upsertNode(Node("1", "Person", Map("name" -> Str("Alice"))))
+    store.upsertNode(Node("2", "Person", Map("name" -> Str("Bob"))))
+
+    val result = store.query(
+      GraphFilter(propertyKey = Some("name"), propertyValue = Some("Alice"))
+    )
+
+    result.map(_.nodes.keySet) shouldBe Right(Set("1"))
+  }
+
+  test("deleteEdge should remove specific edge") {
+    val store = new InMemoryGraphStore
+
+    store.upsertNode(Node("1", "A"))
+    store.upsertNode(Node("2", "B"))
+    store.upsertEdge(Edge("1", "2", "REL"))
+
+    store.deleteEdge("1", "2", "REL") shouldBe Right(())
+
+    store.getNeighbors("1", Direction.Outgoing) match {
+      case Right(neighbors) =>
+        neighbors shouldBe empty
+      case other =>
+        fail(s"Unexpected result: $other")
+    }
   }
 }

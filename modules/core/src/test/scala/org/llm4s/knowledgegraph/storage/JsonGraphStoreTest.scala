@@ -8,6 +8,10 @@ import java.nio.charset.StandardCharsets
 
 class JsonGraphStoreTest extends AnyFunSuite with Matchers {
 
+  // --------------------------------------------------
+  // Legacy save/load persistence tests
+  // --------------------------------------------------
+
   test("JsonGraphStore should save and load graph correctly") {
     val tempFile = Files.createTempFile("graph", ".json")
     try {
@@ -18,26 +22,22 @@ class JsonGraphStoreTest extends AnyFunSuite with Matchers {
 
       val store = new JsonGraphStore(tempFile)
 
-      store.save(graph) should be(Right(()))
-
-      val loaded = store.load()
-      loaded should be(Right(graph))
-    } finally
-      Files.deleteIfExists(tempFile)
+      store.save(graph) shouldBe Right(())
+      store.load() shouldBe Right(graph)
+    } finally Files.deleteIfExists(tempFile)
   }
 
   test("JsonGraphStore should fail loading non-existent file") {
     val tempFile = Files.createTempFile("graph", ".json")
-    Files.delete(tempFile) // Ensure it doesn't exist
+    Files.delete(tempFile)
 
     val store = new JsonGraphStore(tempFile)
-    store.load() should be(a[Left[_, _]])
+    store.load().isLeft shouldBe true
   }
 
   test("JsonGraphStore should handle missing properties field") {
     val tempFile = Files.createTempFile("graph", ".json")
     try {
-      // Write JSON without properties field
       val jsonWithoutProps =
         """{
           |  "nodes": [
@@ -54,26 +54,26 @@ class JsonGraphStoreTest extends AnyFunSuite with Matchers {
       val store  = new JsonGraphStore(tempFile)
       val loaded = store.load()
 
-      loaded should be(a[Right[_, _]])
-      val graph = loaded.toOption.get
-      graph.nodes("1").properties shouldBe empty
-      graph.edges.head.properties shouldBe empty
-    } finally
-      Files.deleteIfExists(tempFile)
+      loaded match {
+        case Right(graph) =>
+          graph.nodes("1").properties shouldBe empty
+          graph.edges.head.properties shouldBe empty
+        case Left(err) =>
+          fail(s"Expected success but got: $err")
+      }
+    } finally Files.deleteIfExists(tempFile)
   }
 
   test("JsonGraphStore should fail loading malformed JSON") {
     val tempFile = Files.createTempFile("graph", ".json")
     try {
-      val malformedJson = """{"nodes": [{"id": "1", "label": "Person"}""" // Missing closing braces
+      val malformedJson =
+        """{"nodes": [{"id": "1", "label": "Person"}""" // broken JSON
       Files.write(tempFile, malformedJson.getBytes(StandardCharsets.UTF_8))
 
-      val store  = new JsonGraphStore(tempFile)
-      val loaded = store.load()
-
-      loaded should be(a[Left[_, _]])
-    } finally
-      Files.deleteIfExists(tempFile)
+      val store = new JsonGraphStore(tempFile)
+      store.load().isLeft shouldBe true
+    } finally Files.deleteIfExists(tempFile)
   }
 
   test("JsonGraphStore should save and load empty graph") {
@@ -82,12 +82,9 @@ class JsonGraphStoreTest extends AnyFunSuite with Matchers {
       val emptyGraph = Graph(Map.empty, List.empty)
       val store      = new JsonGraphStore(tempFile)
 
-      store.save(emptyGraph) should be(Right(()))
-
-      val loaded = store.load()
-      loaded should be(Right(emptyGraph))
-    } finally
-      Files.deleteIfExists(tempFile)
+      store.save(emptyGraph) shouldBe Right(())
+      store.load() shouldBe Right(emptyGraph)
+    } finally Files.deleteIfExists(tempFile)
   }
 
   test("JsonGraphStore should handle properties with special characters") {
@@ -116,11 +113,142 @@ class JsonGraphStoreTest extends AnyFunSuite with Matchers {
 
       val store = new JsonGraphStore(tempFile)
 
-      store.save(graph) should be(Right(()))
+      store.save(graph) shouldBe Right(())
+      store.load() shouldBe Right(graph)
+    } finally Files.deleteIfExists(tempFile)
+  }
 
-      val loaded = store.load()
-      loaded should be(Right(graph))
-    } finally
-      Files.deleteIfExists(tempFile)
+  // --------------------------------------------------
+  // GraphStore API coverage tests
+  // --------------------------------------------------
+
+  test("upsertNode should persist node and be retrievable") {
+    val tempFile = Files.createTempFile("graph", ".json")
+    try {
+      val store = new JsonGraphStore(tempFile)
+      val node  = Node("1", "Person", Map.empty)
+
+      store.upsertNode(node) shouldBe Right(())
+
+      store.getNode("1").map(_.map(_.id)) shouldBe Right(Some("1"))
+    } finally Files.deleteIfExists(tempFile)
+  }
+
+  test("upsertEdge should connect existing nodes") {
+    val tempFile = Files.createTempFile("graph", ".json")
+    try {
+      val store = new JsonGraphStore(tempFile)
+
+      store.upsertNode(Node("1", "A", Map.empty))
+      store.upsertNode(Node("2", "B", Map.empty))
+
+      store.upsertEdge(Edge("1", "2", "REL")) shouldBe Right(())
+
+      store.getNeighbors("1", Direction.Outgoing).map(_.size) shouldBe Right(1)
+    } finally Files.deleteIfExists(tempFile)
+  }
+
+  test("getNeighbors should return empty for isolated node") {
+    val tempFile = Files.createTempFile("graph", ".json")
+    try {
+      val store = new JsonGraphStore(tempFile)
+      store.upsertNode(Node("1", "A", Map.empty))
+
+      store.getNeighbors("1", Direction.Both) shouldBe Right(Seq.empty)
+    } finally Files.deleteIfExists(tempFile)
+  }
+
+  test("traverse should respect maxDepth") {
+    val tempFile = Files.createTempFile("graph", ".json")
+    try {
+      val store = new JsonGraphStore(tempFile)
+
+      store.upsertNode(Node("1", "A", Map.empty))
+      store.upsertNode(Node("2", "B", Map.empty))
+      store.upsertNode(Node("3", "C", Map.empty))
+
+      store.upsertEdge(Edge("1", "2", "REL"))
+      store.upsertEdge(Edge("2", "3", "REL"))
+
+      val result = store.traverse("1", TraversalConfig(maxDepth = 1))
+
+      result.map(_.map(_.id).toSet) shouldBe Right(Set("1", "2"))
+    } finally Files.deleteIfExists(tempFile)
+  }
+
+  test("query should filter by label") {
+    val tempFile = Files.createTempFile("graph", ".json")
+    try {
+      val store = new JsonGraphStore(tempFile)
+
+      store.upsertNode(Node("1", "Person", Map.empty))
+      store.upsertNode(Node("2", "Company", Map.empty))
+
+      val result = store.query(GraphFilter(label = Some("Person")))
+
+      result.map(_.nodes.size) shouldBe Right(1)
+    } finally Files.deleteIfExists(tempFile)
+  }
+
+  test("stats should reflect node and edge count") {
+    val tempFile = Files.createTempFile("graph", ".json")
+    try {
+      val store = new JsonGraphStore(tempFile)
+
+      store.upsertNode(Node("1", "A", Map.empty))
+      store.upsertNode(Node("2", "B", Map.empty))
+      store.upsertEdge(Edge("1", "2", "REL"))
+
+      val stats = store.stats()
+
+      stats.map(s => (s.nodeCount, s.edgeCount)) shouldBe Right((2, 1))
+    } finally Files.deleteIfExists(tempFile)
+  }
+
+  test("traverse should fail if start node does not exist") {
+    val tempFile = Files.createTempFile("graph", ".json")
+    try {
+      val store = new JsonGraphStore(tempFile)
+      store.traverse("missing", TraversalConfig(maxDepth = 1)).isLeft shouldBe true
+    } finally Files.deleteIfExists(tempFile)
+  }
+
+  test("query should filter by property key and value") {
+    val tempFile = Files.createTempFile("graph", ".json")
+    try {
+      val store = new JsonGraphStore(tempFile)
+
+      store.upsertNode(Node("1", "Person", Map("name" -> ujson.Str("Alice"))))
+      store.upsertNode(Node("2", "Person", Map("name" -> ujson.Str("Bob"))))
+
+      val result = store.query(
+        GraphFilter(propertyKey = Some("name"), propertyValue = Some("Alice"))
+      )
+
+      result.map(_.nodes.keySet) shouldBe Right(Set("1"))
+    } finally Files.deleteIfExists(tempFile)
+  }
+
+  test("deleteEdge should remove specific edge") {
+    val tempFile = Files.createTempFile("graph", ".json")
+    try {
+      val store = new JsonGraphStore(tempFile)
+
+      store.upsertNode(Node("1", "A"))
+      store.upsertNode(Node("2", "B"))
+      store.upsertEdge(Edge("1", "2", "REL"))
+
+      store.deleteEdge("1", "2", "REL") shouldBe Right(())
+
+      store.getNeighbors("1", Direction.Outgoing).map(_.size) shouldBe Right(0)
+    } finally Files.deleteIfExists(tempFile)
+  }
+
+  test("deleteNode should fail if node does not exist") {
+    val tempFile = Files.createTempFile("graph", ".json")
+    try {
+      val store = new JsonGraphStore(tempFile)
+      store.deleteNode("missing").isLeft shouldBe true
+    } finally Files.deleteIfExists(tempFile)
   }
 }
