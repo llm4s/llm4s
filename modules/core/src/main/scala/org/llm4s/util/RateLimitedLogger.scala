@@ -10,6 +10,10 @@ import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong }
  * Aggregates skipped count between log messages.
  *
  * Thread-safety via AtomicLong and AtomicInteger ensures visibility and atomic operations.
+ * Multiple threads may pass shouldLog check, but compareAndSet ensures only one logs.
+ * Minor event count drift is acceptable for best-effort logging.
+ *
+ * SLF4J dependency provided transitively via logback-classic.
  *
  * @param logger SLF4J logger instance
  * @param throttleSeconds Minimum seconds between log messages
@@ -25,8 +29,10 @@ final class RateLimitedLogger(
   private val eventsSinceLastLog = new AtomicInteger(0)
 
   /**
-   * Log a warning message with rate limiting.
-   * Returns true if message was logged, false if throttled.
+   * Log a warning message with rate limiting (thread-safe).
+   *
+   * @param message Warning message (call-by-name, only evaluated if logged)
+   * @return true if message was logged, false if throttled
    */
   def warn(message: => String): Boolean = {
     val events  = eventsSinceLastLog.incrementAndGet()

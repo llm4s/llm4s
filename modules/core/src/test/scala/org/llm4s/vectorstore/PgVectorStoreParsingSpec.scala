@@ -72,5 +72,19 @@ class PgVectorStoreParsingSpec extends AnyWordSpec with Matchers {
     "return None for special characters" in {
       EmbeddingParser.parse("[0.1,@#$,0.3]") shouldBe None
     }
+
+    "return None for oversized embeddings beyond max dimension" in {
+      // Generate embedding string with MAX_EMBEDDING_DIM + 1 elements
+      val oversized = "[" + (1 to (EmbeddingParser.MAX_EMBEDDING_DIM + 1)).map(_ => "0.1").mkString(",") + "]"
+      EmbeddingParser.parse(oversized) shouldBe None
+    }
+
+    "accept embeddings at max dimension limit" in {
+      // Generate embedding string with exactly MAX_EMBEDDING_DIM elements
+      val maxSize = "[" + (1 to EmbeddingParser.MAX_EMBEDDING_DIM).map(_ => "0.1").mkString(",") + "]"
+      val result  = EmbeddingParser.parse(maxSize)
+      result shouldBe defined
+      (result.get should have).length(EmbeddingParser.MAX_EMBEDDING_DIM)
+    }
   }
 }
