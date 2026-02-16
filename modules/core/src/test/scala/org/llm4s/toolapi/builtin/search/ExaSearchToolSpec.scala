@@ -721,8 +721,8 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     searchResult.results.head.url shouldBe "https://example.com"
 
     mockClient.lastUrl shouldBe Some("https://api.exa.ai/search")
-    mockClient.lastHeaders.get("x-api-key") shouldBe "test-key"
-    mockClient.lastHeaders.get("Content-Type") shouldBe "application/json"
+    mockClient.lastHeaders.flatMap(_.get("x-api-key")) shouldBe Some("test-key")
+    mockClient.lastHeaders.flatMap(_.get("Content-Type")) shouldBe Some("application/json")
   }
 
   it should "handle 401 unauthorized error with sanitized message" in {

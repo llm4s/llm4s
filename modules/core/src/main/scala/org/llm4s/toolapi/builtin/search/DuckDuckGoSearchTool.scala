@@ -229,7 +229,7 @@ object DuckDuckGoSearchTool {
             Left("Failed to process search results. Please try again.")
         }
       } else {
-        val body = Redaction.truncateForLog(response.body)
+        val body = Redaction.redactForLogging(response.body)
         Left(s"DuckDuckGo search returned status ${response.statusCode}: $body")
       }
     }
