@@ -144,7 +144,6 @@ lazy val core = (project in file("modules/core"))
       Deps.websocket,
       Deps.scalatest % Test,
       Deps.scalamock % Test,
-      Deps.sttp,
       Deps.ujson,
       Deps.pdfbox,
       Deps.commonsIO,
@@ -187,7 +186,6 @@ lazy val workspaceClient = (project in file("modules/workspace/workspaceClient")
       Deps.websocket,
       Deps.scalatest % Test,
       Deps.scalamock % Test,
-      Deps.sttp,
       Deps.ujson,
       Deps.pdfbox,
       Deps.commonsIO,
@@ -285,7 +283,3 @@ lazy val crossTestScala3 = (project in file("modules/crossTest/scala3"))
       Deps.scalatest % Test
     )
   )
-
-mimaPreviousArtifacts := Set(
-  organization.value %% "llm4s" % "0.1.4"
-)

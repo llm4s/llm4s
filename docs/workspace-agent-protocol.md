@@ -1,3 +1,9 @@
+---
+layout: page
+title: Workspace Agent Protocol
+parent: API Reference
+---
+
 # Workspace Agent Protocol (WAP) Specification
 
 Version: 1.0

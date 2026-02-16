@@ -12,6 +12,10 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
 import java.util.concurrent.{ CompletableFuture, ConcurrentHashMap, Executors, ScheduledExecutorService, TimeUnit }
 import scala.jdk.CollectionConverters._
 import scala.util.{ Failure, Success, Try }
+import scala.util.Using
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.{ Future, Await }
+import scala.concurrent.duration._
 
 /**
  * WebSocket-based implementation of ContainerisedWorkspace that communicates with
@@ -170,17 +174,26 @@ class ContainerisedWorkspace(
         s"$workspaceDir:/workspace",
         imageName
       )
-      val process  = pb.start()
+      val process = pb.start()
+
+      // Capture stdout and stderr while process is running(before waitFor)
+      val stdoutF = Future {
+        Using.resource(new BufferedReader(new InputStreamReader(process.getInputStream))) { reader =>
+          Iterator.continually(reader.readLine()).takeWhile(_ != null).mkString("\n")
+        }
+      }
+
+      val stderrF = Future {
+        Using.resource(new BufferedReader(new InputStreamReader(process.getErrorStream))) { reader =>
+          Iterator.continually(reader.readLine()).takeWhile(_ != null).mkString("\n")
+        }
+      }
+
       val exitCode = process.waitFor()
+      val stdout   = Await.result(stdoutF, 30.seconds)
+      val stderr   = Await.result(stderrF, 30.seconds)
 
-      // Capture and log stdout
-      val stdoutReader = new BufferedReader(new InputStreamReader(process.getInputStream))
-      val stdout       = Iterator.continually(stdoutReader.readLine()).takeWhile(_ != null).mkString("\n")
       if (stdout.nonEmpty) logger.info(s"Docker stdout: $stdout")
-
-      // Capture and log stderr
-      val stderrReader = new BufferedReader(new InputStreamReader(process.getErrorStream))
-      val stderr       = Iterator.continually(stderrReader.readLine()).takeWhile(_ != null).mkString("\n")
       if (stderr.nonEmpty) logger.warn(s"Docker stderr: $stderr")
 
       (exitCode, stdout, stderr)
@@ -301,18 +314,24 @@ class ContainerisedWorkspace(
 
     // Execute stop and remove as separate commands
     val stopResult = Try {
-      val process  = Runtime.getRuntime.exec(Array("docker", "stop", containerName))
+      val process = Runtime.getRuntime.exec(Array("docker", "stop", containerName))
+
+      val stderr =
+        Using(scala.io.Source.fromInputStream(process.getErrorStream))(source => source.mkString.trim).getOrElse("")
+
       val exitCode = process.waitFor()
-      val stderr   = scala.io.Source.fromInputStream(process.getErrorStream).mkString.trim
       (exitCode, stderr)
     }
 
     val rmResult = stopResult match {
       case Success((0, _)) =>
         Try {
-          val process  = Runtime.getRuntime.exec(Array("docker", "rm", containerName))
+          val process = Runtime.getRuntime.exec(Array("docker", "rm", containerName))
+
+          val stderr = Using(scala.io.Source.fromInputStream(process.getErrorStream))(source => source.mkString.trim)
+            .getOrElse("")
+
           val exitCode = process.waitFor()
-          val stderr   = scala.io.Source.fromInputStream(process.getErrorStream).mkString.trim
           (exitCode, stderr)
         }
       case Success((_, stderr)) =>

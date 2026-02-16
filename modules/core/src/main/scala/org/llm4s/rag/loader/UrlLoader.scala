@@ -1,8 +1,10 @@
 package org.llm4s.rag.loader
 
+import org.llm4s.core.safety.NetworkSecurity
 import org.llm4s.error.NetworkError
 
 import java.net.{ HttpURLConnection, URI }
+import scala.annotation.tailrec
 import scala.io.Source
 import scala.util.Using
 
@@ -28,31 +30,20 @@ final case class UrlLoader(
 
   def load(): Iterator[LoadResult] = urls.iterator.map(loadUrl)
 
-  private def loadUrl(urlString: String): LoadResult = {
-    import org.llm4s.types.TryOps
+  private def loadUrl(urlString: String): LoadResult =
+    // SSRF Protection: Validate URL before making request
+    NetworkSecurity.validateUrl(urlString) match {
+      case Left(error) => LoadResult.failure(urlString, error)
+      case Right(_)    => loadUrlUnsafe(urlString)
+    }
 
-    val result = scala.util.Try {
-      val uri  = new URI(urlString)
-      val conn = uri.toURL.openConnection().asInstanceOf[HttpURLConnection]
-      conn.setConnectTimeout(timeoutMs)
-      conn.setReadTimeout(timeoutMs)
-      conn.setRequestProperty("User-Agent", "LLM4S-RAG/1.0")
-      headers.foreach { case (k, v) => conn.setRequestProperty(k, v) }
-      conn
-    }.toResult
-
-    result match {
+  private def loadUrlUnsafe(urlString: String): LoadResult =
+    openConnection(urlString, maxRedirects = 5) match {
       case Left(error) =>
-        LoadResult.failure(urlString, NetworkError(error.message, None, "http"))
+        LoadResult.failure(urlString, error)
 
       case Right(conn) =>
         val docResult = scala.util.Try {
-          val responseCode = conn.getResponseCode
-          if (responseCode != 200) {
-            conn.disconnect()
-            throw new RuntimeException(s"HTTP $responseCode: ${conn.getResponseMessage}")
-          }
-
           val content = Using.resource(Source.fromInputStream(conn.getInputStream, "UTF-8")) {
             _.mkString
           }
@@ -81,17 +72,62 @@ final case class UrlLoader(
             hints = Some(detectHints(urlString, contentType)),
             version = Some(version)
           )
-        }.toResult
+        }
 
         docResult match {
-          case Left(error) =>
+          case scala.util.Failure(error) =>
             conn.disconnect()
-            LoadResult.failure(urlString, NetworkError(error.message, None, "http"))
-          case Right(doc) =>
+            LoadResult.failure(urlString, NetworkError(error.getMessage, None, "http"))
+          case scala.util.Success(doc) =>
             LoadResult.success(doc)
         }
     }
-  }
+
+  @tailrec
+  private def openConnection(
+    url: String,
+    maxRedirects: Int
+  ): Either[NetworkError, HttpURLConnection] =
+    scala.util.Try {
+      val uri  = new URI(url)
+      val conn = uri.toURL.openConnection().asInstanceOf[HttpURLConnection]
+      conn.setConnectTimeout(timeoutMs)
+      conn.setReadTimeout(timeoutMs)
+      conn.setInstanceFollowRedirects(false)
+      conn.setRequestProperty("User-Agent", "LLM4S-RAG/1.0")
+      headers.foreach { case (k, v) => conn.setRequestProperty(k, v) }
+      conn
+    } match {
+      case scala.util.Failure(error) =>
+        Left(NetworkError(error.getMessage, None, "http"))
+
+      case scala.util.Success(conn) =>
+        val code = conn.getResponseCode
+        if (code >= 300 && code < 400) {
+          conn.disconnect()
+          if (maxRedirects <= 0) {
+            Left(NetworkError("Too many redirects", None, "http"))
+          } else {
+            Option(conn.getHeaderField("Location")) match {
+              case None =>
+                Left(NetworkError(s"HTTP $code redirect without Location header", None, "http"))
+              case Some(location) =>
+                val resolved = new URI(url).resolve(location).toString
+                NetworkSecurity.validateUrl(resolved) match {
+                  case Left(err) =>
+                    Left(NetworkError(s"Redirect blocked by SSRF protection: ${err.message}", None, "ssrf-protection"))
+                  case Right(_) =>
+                    openConnection(resolved, maxRedirects - 1)
+                }
+            }
+          }
+        } else if (code != 200) {
+          conn.disconnect()
+          Left(NetworkError(s"HTTP $code: ${conn.getResponseMessage}", None, "http"))
+        } else {
+          Right(conn)
+        }
+    }
 
   private def detectHints(url: String, contentType: String): DocumentHints =
     if (contentType.contains("markdown") || url.endsWith(".md")) {

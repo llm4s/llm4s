@@ -141,10 +141,11 @@ object HTTPTool {
 
       urlResult.flatMap { url =>
         // Extract domain from URL
-        val domain = url.getHost
+        val domain = Option(url.getHost).getOrElse("")
 
-        // Security check
-        if (!config.isDomainAllowed(domain)) {
+        if (domain.isEmpty) {
+          Left("URL has no host")
+        } else if (!config.validateDomainWithSSRF(domain)) {
           Left(s"Domain '$domain' is not allowed")
         } else {
           executeRequest(url, urlStr, method, headers, body, contentType, config)

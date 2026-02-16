@@ -11,7 +11,7 @@ class LLMProviderSpec extends AnyFlatSpec with Matchers {
   // ============ Provider Instances ============
 
   "LLMProvider" should "have all expected provider instances" in {
-    LLMProvider.all should have size 7
+    LLMProvider.all should have size 9
     (LLMProvider.all should contain).allOf(
       LLMProvider.OpenAI,
       LLMProvider.Azure,
@@ -19,12 +19,14 @@ class LLMProviderSpec extends AnyFlatSpec with Matchers {
       LLMProvider.OpenRouter,
       LLMProvider.Ollama,
       LLMProvider.Zai,
-      LLMProvider.Gemini
+      LLMProvider.Gemini,
+      LLMProvider.Cohere,
+      LLMProvider.DeepSeek
     )
   }
 
-  it should "have exactly 7 providers" in {
-    LLMProvider.all should have size 7
+  it should "have exactly 9 providers" in {
+    LLMProvider.all should have size 9
   }
 
   // ============ Provider Names ============
@@ -55,6 +57,14 @@ class LLMProviderSpec extends AnyFlatSpec with Matchers {
 
   it should "return correct name for Gemini" in {
     LLMProvider.Gemini.name shouldBe "gemini"
+  }
+
+  it should "return correct name for DeepSeek" in {
+    LLMProvider.DeepSeek.name shouldBe "deepseek"
+  }
+
+  it should "return correct name for Cohere" in {
+    LLMProvider.Cohere.name shouldBe "cohere"
   }
 
   // ============ fromName Parsing ============
@@ -91,6 +101,14 @@ class LLMProviderSpec extends AnyFlatSpec with Matchers {
     LLMProvider.fromName("google") shouldBe Some(LLMProvider.Gemini)
   }
 
+  it should "parse 'deepseek' correctly" in {
+    LLMProvider.fromName("deepseek") shouldBe Some(LLMProvider.DeepSeek)
+  }
+
+  it should "parse 'cohere' correctly" in {
+    LLMProvider.fromName("cohere") shouldBe Some(LLMProvider.Cohere)
+  }
+
   it should "be case insensitive" in {
     LLMProvider.fromName("OpenAI") shouldBe Some(LLMProvider.OpenAI)
     LLMProvider.fromName("AZURE") shouldBe Some(LLMProvider.Azure)
@@ -100,6 +118,8 @@ class LLMProviderSpec extends AnyFlatSpec with Matchers {
     LLMProvider.fromName("ZAI") shouldBe Some(LLMProvider.Zai)
     LLMProvider.fromName("GEMINI") shouldBe Some(LLMProvider.Gemini)
     LLMProvider.fromName("Google") shouldBe Some(LLMProvider.Gemini)
+    LLMProvider.fromName("DEEPSEEK") shouldBe Some(LLMProvider.DeepSeek)
+    LLMProvider.fromName("COHERE") shouldBe Some(LLMProvider.Cohere)
   }
 
   it should "return None for unknown providers" in {
@@ -136,11 +156,15 @@ class LLMProviderSpec extends AnyFlatSpec with Matchers {
       case LLMProvider.Ollama     => "local"
       case LLMProvider.Zai        => "cloud-zai"
       case LLMProvider.Gemini     => "cloud-gemini"
+      case LLMProvider.DeepSeek   => "cloud-deepseek"
+      case LLMProvider.Cohere     => "cloud-cohere"
     }
 
     describe(LLMProvider.OpenAI) shouldBe "cloud-openai"
     describe(LLMProvider.Ollama) shouldBe "local"
     describe(LLMProvider.Zai) shouldBe "cloud-zai"
     describe(LLMProvider.Gemini) shouldBe "cloud-gemini"
+    describe(LLMProvider.DeepSeek) shouldBe "cloud-deepseek"
+    describe(LLMProvider.Cohere) shouldBe "cloud-cohere"
   }
 }

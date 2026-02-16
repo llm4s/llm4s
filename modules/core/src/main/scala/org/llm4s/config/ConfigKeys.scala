@@ -24,6 +24,10 @@ object ConfigKeys {
   // Ollama
   val OLLAMA_BASE_URL = "OLLAMA_BASE_URL"
 
+  // DeepSeek
+  val DEEPSEEK_API_KEY  = "DEEPSEEK_API_KEY"
+  val DEEPSEEK_BASE_URL = "DEEPSEEK_BASE_URL"
+
   // Langfuse
   val LANGFUSE_URL        = "LANGFUSE_URL"
   val LANGFUSE_PUBLIC_KEY = "LANGFUSE_PUBLIC_KEY"

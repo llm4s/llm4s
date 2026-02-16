@@ -1,6 +1,7 @@
 package org.llm4s.agent.memory
 
 import org.llm4s.error.NotFoundError
+import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
 import java.time.Instant
@@ -120,7 +121,16 @@ final case class InMemoryStore private (
     memories.get(id) match {
       case Some(memory) =>
         val updated = updateFn(memory)
-        Right(copy(memories = memories + (id -> updated)))
+        if (updated.id != id) {
+          Left(
+            ValidationError(
+              "id",
+              s"update function changed Memory ID from $id to ${updated.id}; IDs must remain constant"
+            )
+          )
+        } else {
+          Right(copy(memories = memories + (id -> updated)))
+        }
 
       case None =>
         Left(NotFoundError(s"Memory not found: $id", id.value))
@@ -161,6 +171,18 @@ object InMemoryStore {
    */
   def apply(config: MemoryStoreConfig = MemoryStoreConfig.default): InMemoryStore =
     InMemoryStore(Map.empty, config)
+
+  /**
+   * Create an empty in-memory store with an embedding service.
+   *
+   * When provided, the store can perform embedding-based semantic search.
+   * Returns an EmbeddingMemoryStore that wraps an InMemoryStore.
+   */
+  def withEmbeddingService(
+    service: EmbeddingService,
+    config: MemoryStoreConfig = MemoryStoreConfig.default
+  ): EmbeddingMemoryStore =
+    EmbeddingMemoryStore(InMemoryStore(config), service)
 
   /**
    * Create a store pre-populated with memories.

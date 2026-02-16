@@ -469,4 +469,28 @@ class VectorOpsSpec extends AnyFlatSpec with Matchers {
     results.head._1 shouldBe "identical"
     results(1)._1 shouldBe "very similar"
   }
+
+  it should "return 0.0 for vectors containing NaN" in {
+    val v1 = Array(1.0f, Float.NaN, 0.0f)
+    val v2 = Array(1.0f, 0.0f, 0.0f)
+    VectorOps.cosineSimilarity(v1, v2) shouldBe 0.0
+  }
+
+  it should "return 0.0 for vectors containing positive infinity" in {
+    val v1 = Array(Float.PositiveInfinity, 0.0f, 0.0f)
+    val v2 = Array(1.0f, 0.0f, 0.0f)
+    VectorOps.cosineSimilarity(v1, v2) shouldBe 0.0
+  }
+
+  it should "return 0.0 for vectors containing negative infinity" in {
+    val v1 = Array(Float.NegativeInfinity, 0.0f, 0.0f)
+    val v2 = Array(1.0f, 0.0f, 0.0f)
+    VectorOps.cosineSimilarity(v1, v2) shouldBe 0.0
+  }
+
+  it should "return 0.0 when both vectors contain non-finite values" in {
+    val v1 = Array(Float.NaN, Float.PositiveInfinity)
+    val v2 = Array(Float.NegativeInfinity, Float.NaN)
+    VectorOps.cosineSimilarity(v1, v2) shouldBe 0.0
+  }
 }

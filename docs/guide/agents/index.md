@@ -107,6 +107,13 @@ val result = for {
 
 ---
 
+## Safety Defaults
+
+- **Agent step limit**: `Agent.run(...)` defaults to `maxSteps = Some(50)` to prevent infinite loops. Pass `maxSteps = None` to allow unlimited steps.
+- **HTTPTool methods**: `HttpConfig()` defaults to `GET` and `HEAD` only. Use `HttpConfig.withWriteMethods()` or `HttpConfig().withAllMethods` to allow write methods.
+
+---
+
 ## Core Concepts
 
 ### Agent State

@@ -134,6 +134,17 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
     response.stdout should include("test command")
   }
 
+  it should "reject executeCommand when sandbox has shellAllowed=false" in {
+    val lockedInterface = new WorkspaceAgentInterfaceImpl(
+      workspacePath,
+      isWindowsHost,
+      Some(WorkspaceSandboxConfig.LockedDown)
+    )
+    val ex = the[WorkspaceAgentException] thrownBy lockedInterface.executeCommand("echo hello")
+    ex.code shouldBe "SHELL_DISABLED"
+    ex.error should include("shellAllowed")
+  }
+
   // Clean up after tests
   override def afterAll(): Unit = {
     // Delete temporary directory recursively

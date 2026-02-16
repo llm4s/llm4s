@@ -99,6 +99,51 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     }
   }
 
+  test("Gemini provider with GeminiConfig returns GeminiClient") {
+    val cfg: ProviderConfig = GeminiConfig(
+      apiKey = "key",
+      model = "gemini-2.0-flash",
+      baseUrl = "https://example.invalid/v1beta",
+      contextWindow = 1048576,
+      reserveCompletion = 8192
+    )
+    val res = LLMConnect.getClient(LLMProvider.Gemini, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "GeminiClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
+  test("DeepSeek provider with DeepSeekConfig returns DeepSeekClient") {
+    val cfg: ProviderConfig = DeepSeekConfig(
+      apiKey = "key",
+      model = "deepseek-chat",
+      baseUrl = "https://example.invalid/v1",
+      contextWindow = 128000,
+      reserveCompletion = 8192
+    )
+    val res = LLMConnect.getClient(LLMProvider.DeepSeek, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "DeepSeekClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
+  test("Cohere provider with CohereConfig returns CohereClient") {
+    val cfg: ProviderConfig = CohereConfig(
+      apiKey = "key",
+      model = "command-r",
+      baseUrl = "https://example.invalid",
+      contextWindow = 128000,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(LLMProvider.Cohere, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "CohereClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
   test("OpenAI provider with non-OpenAIConfig should throw IllegalArgumentException") {
     val wrongCfg: ProviderConfig = AnthropicConfig(
       apiKey = "key",

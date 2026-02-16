@@ -139,17 +139,27 @@ object VectorOps {
    * Calculate cosine similarity between two vectors.
    *
    * @return Similarity score between -1.0 and 1.0 (1.0 = identical)
+   *         Returns 0.0 for non-finite vectors (NaN, Inf, -Inf)
    */
   def cosineSimilarity(a: Array[Float], b: Array[Float]): Double = {
     require(a.length == b.length, s"Vector dimensions must match: ${a.length} != ${b.length}")
 
     if (a.isEmpty) return 0.0
 
+    // Check for non-finite values early
+    var i = 0
+    while (i < a.length) {
+      if (!java.lang.Float.isFinite(a(i)) || !java.lang.Float.isFinite(b(i))) {
+        return 0.0
+      }
+      i += 1
+    }
+
     var dotProduct = 0.0
     var normA      = 0.0
     var normB      = 0.0
 
-    var i = 0
+    i = 0
     while (i < a.length) {
       dotProduct += a(i) * b(i)
       normA += a(i) * a(i)
@@ -158,7 +168,10 @@ object VectorOps {
     }
 
     val denominator = math.sqrt(normA) * math.sqrt(normB)
-    if (denominator == 0.0) 0.0 else dotProduct / denominator
+    val result      = if (denominator == 0.0) 0.0 else dotProduct / denominator
+
+    // Guard against NaN in result
+    if (java.lang.Double.isFinite(result)) result else 0.0
   }
 
   /**

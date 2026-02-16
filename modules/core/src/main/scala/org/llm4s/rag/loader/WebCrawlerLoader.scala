@@ -1,9 +1,11 @@
 package org.llm4s.rag.loader
 
+import org.llm4s.core.safety.NetworkSecurity
 import org.llm4s.error.NetworkError
 import org.llm4s.rag.loader.internal._
 
 import java.net.{ HttpURLConnection, URI }
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.io.Source
 import scala.util.{ Try, Using }
@@ -197,49 +199,82 @@ final case class WebCrawlerLoader(
     /**
      * Fetch a page via HTTP.
      */
-    private def fetchPage(url: String): Either[NetworkError, (String, String, Map[String, String])] = {
-      import org.llm4s.types.TryOps
+    private def fetchPage(url: String): Either[NetworkError, (String, String, Map[String, String])] =
+      // SSRF Protection: Validate URL before making request
+      NetworkSecurity.validateUrl(url) match {
+        case Left(error) => Left(NetworkError(error.message, None, "ssrf-protection"))
+        case Right(_)    => fetchPageUnsafe(url)
+      }
 
-      Try {
+    private def fetchPageUnsafe(url: String): Either[NetworkError, (String, String, Map[String, String])] =
+      openConnectionWithRedirects(url, maxRedirects = 5)
+
+    @tailrec
+    private def openConnectionWithRedirects(
+      url: String,
+      maxRedirects: Int
+    ): Either[NetworkError, (String, String, Map[String, String])] = {
+      val connResult = Try {
         val uri  = new URI(url)
         val conn = uri.toURL.openConnection().asInstanceOf[HttpURLConnection]
-
         conn.setConnectTimeout(config.timeoutMs)
         conn.setReadTimeout(config.timeoutMs)
         conn.setRequestProperty("User-Agent", config.userAgent)
         conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
-        conn.setInstanceFollowRedirects(true)
+        conn.setInstanceFollowRedirects(false)
+        conn
+      }
 
-        Using.resource(new AutoCloseable {
-          override def close(): Unit = conn.disconnect()
-        }) { _ =>
+      connResult match {
+        case scala.util.Failure(error) =>
+          Left(NetworkError(error.getMessage, None, "http"))
+
+        case scala.util.Success(conn) =>
           val code = conn.getResponseCode
 
           if (code >= 300 && code < 400) {
-            // Handle redirect manually if needed
-            val location = Option(conn.getHeaderField("Location"))
-            throw new RuntimeException(s"Redirect to: ${location.getOrElse("unknown")}")
+            conn.disconnect()
+            if (maxRedirects <= 0) {
+              Left(NetworkError("Too many redirects", None, "http"))
+            } else {
+              Option(conn.getHeaderField("Location")) match {
+                case None =>
+                  Left(NetworkError(s"HTTP $code redirect without Location header", None, "http"))
+                case Some(location) =>
+                  val resolved = new URI(url).resolve(location).toString
+                  NetworkSecurity.validateUrl(resolved) match {
+                    case Left(err) =>
+                      Left(
+                        NetworkError(s"Redirect blocked by SSRF protection: ${err.message}", None, "ssrf-protection")
+                      )
+                    case Right(_) =>
+                      openConnectionWithRedirects(resolved, maxRedirects - 1)
+                  }
+              }
+            }
+          } else if (code != 200) {
+            conn.disconnect()
+            Left(NetworkError(s"HTTP $code: ${conn.getResponseMessage}", None, "http"))
+          } else {
+            val result = Try {
+              val contentType = Option(conn.getContentType).getOrElse("text/html")
+              val content = Using.resource(Source.fromInputStream(conn.getInputStream, "UTF-8")) {
+                _.mkString
+              }
+
+              val headers = Map(
+                "ETag"          -> Option(conn.getHeaderField("ETag")),
+                "Last-Modified" -> Option(conn.getHeaderField("Last-Modified"))
+              ).collect { case (k, Some(v)) => k -> v }
+
+              (content, contentType, headers)
+            }
+            conn.disconnect()
+            result match {
+              case scala.util.Failure(error) => Left(NetworkError(error.getMessage, None, "http"))
+              case scala.util.Success(value) => Right(value)
+            }
           }
-
-          if (code != 200) {
-            throw new RuntimeException(s"HTTP $code: ${conn.getResponseMessage}")
-          }
-
-          val contentType = Option(conn.getContentType).getOrElse("text/html")
-          val content = Using.resource(Source.fromInputStream(conn.getInputStream, "UTF-8")) {
-            _.mkString
-          }
-
-          val headers = Map(
-            "ETag"          -> Option(conn.getHeaderField("ETag")),
-            "Last-Modified" -> Option(conn.getHeaderField("Last-Modified"))
-          ).collect { case (k, Some(v)) => k -> v }
-
-          (content, contentType, headers)
-        }
-      }.toResult match {
-        case Left(err)    => Left(NetworkError(err.message, None, "http"))
-        case Right(value) => Right(value)
       }
     }
 

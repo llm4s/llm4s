@@ -64,7 +64,7 @@ object StreamingOptions {
    */
   def console: StreamingOptions = StreamingOptions(
     onChunk = chunk => chunk.content.foreach(print),
-    onError = error => System.err.println(s"Streaming error: ${error.message}"),
+    onError = error => Console.err.println(s"Streaming error: ${error.message}"),
     onComplete = _ => println() // New line after streaming
   )
 
