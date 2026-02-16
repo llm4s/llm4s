@@ -2,16 +2,17 @@ package org.llm4s.imageprocessing.provider
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.concurrent.ScalaFutures
 import org.llm4s.imageprocessing._
+
 import java.nio.file.{ Files, Paths }
 import java.awt.image.BufferedImage
 import java.awt.Color
 import javax.imageio.ImageIO
-import scala.concurrent.Await
-import scala.concurrent.duration._
+
 import scala.concurrent.ExecutionContext.Implicits.global
 
-class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
+class LocalImageProcessorTest extends AnyFlatSpec with Matchers with ScalaFutures {
 
   val processor = new LocalImageProcessor()
 
@@ -29,17 +30,23 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
   def saveTestImage(image: BufferedImage, path: String): Unit =
     ImageIO.write(image, "png", Paths.get(path).toFile)
 
-  def withTempImage(width: Int = 100, height: Int = 100)(test: String => Any): Unit = {
-    val tempFile  = Files.createTempFile("test", ".png")
+  def withTempImage(width: Int = 100, height: Int = 100)(
+    test: String => Any
+  ): Unit = {
+    val tempFile = Files.createTempFile("test", ".png")
+    val path     = tempFile.toString
+
     val testImage = createTestImage(width, height)
-    saveTestImage(testImage, tempFile.toString)
-    try test(tempFile.toString)
+    saveTestImage(testImage, path)
+
+    try test(path)
     finally Files.deleteIfExists(tempFile)
   }
 
   "LocalImageProcessor" should "analyze image with basic information" in
     withTempImage(100, 100) { path =>
       val result = processor.analyzeImage(path, None)
+
       result.isRight shouldBe true
 
       result.foreach { analysis =>
@@ -54,20 +61,22 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
 
   it should "analyze image asynchronously" in
     withTempImage(100, 100) { path =>
-      val futureResult = processor.analyzeImageAsync(path)
-      val result       = Await.result(futureResult, 5.seconds)
+      whenReady(processor.analyzeImageAsync(path)) { result =>
+        result.isRight shouldBe true
 
-      result.isRight shouldBe true
-
-      result.foreach { analysis =>
-        analysis.description should include("100x100")
-        analysis.confidence should be > 0.0
+        result.foreach { analysis =>
+          analysis.description should include("100x100")
+          analysis.confidence should be > 0.0
+          analysis.tags should not be empty
+        }
       }
     }
 
   it should "resize image successfully" in
     withTempImage(200, 200) { path =>
-      val result = processor.resizeImage(path, 100, 100, maintainAspectRatio = false)
+      val result =
+        processor.resizeImage(path, 100, 100, maintainAspectRatio = false)
+
       result.isRight shouldBe true
 
       result.foreach { processedImage =>
@@ -75,13 +84,17 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
         processedImage.height shouldBe 100
         processedImage.format shouldBe ImageFormat.PNG
         processedImage.data.length should be > 0
-        processedImage.metadata.operations should contain(ImageOperation.Resize(100, 100, false))
+        processedImage.metadata.operations should contain(
+          ImageOperation.Resize(100, 100, false)
+        )
       }
     }
 
   it should "maintain aspect ratio when resizing" in
     withTempImage(200, 100) { path =>
-      val result = processor.resizeImage(path, 100, 100, maintainAspectRatio = true)
+      val result =
+        processor.resizeImage(path, 100, 100, maintainAspectRatio = true)
+
       result.isRight shouldBe true
 
       result.foreach { processedImage =>
@@ -92,39 +105,60 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
 
   it should "crop image successfully" in
     withTempImage(200, 200) { path =>
-      val result = processor.preprocessImage(path, List(ImageOperation.Crop(50, 50, 100, 100)))
+      val result = processor.preprocessImage(
+        path,
+        List(ImageOperation.Crop(50, 50, 100, 100))
+      )
+
       result.isRight shouldBe true
 
       result.foreach { processedImage =>
         processedImage.width shouldBe 100
         processedImage.height shouldBe 100
-        processedImage.metadata.operations should contain(ImageOperation.Crop(50, 50, 100, 100))
+        processedImage.metadata.operations should contain(
+          ImageOperation.Crop(50, 50, 100, 100)
+        )
       }
     }
 
   it should "rotate image successfully" in
     withTempImage(100, 200) { path =>
-      val result = processor.preprocessImage(path, List(ImageOperation.Rotate(90.0)))
+      val result =
+        processor.preprocessImage(path, List(ImageOperation.Rotate(90.0)))
+
       result.isRight shouldBe true
 
       result.foreach { processedImage =>
         processedImage.width shouldBe 200
         processedImage.height shouldBe 100
-        processedImage.metadata.operations should contain(ImageOperation.Rotate(90.0))
+        processedImage.metadata.operations should contain(
+          ImageOperation.Rotate(90.0)
+        )
       }
     }
 
   it should "apply blur successfully" in
     withTempImage() { path =>
-      val result = processor.preprocessImage(path, List(ImageOperation.Blur(5.0)))
+      val result =
+        processor.preprocessImage(path, List(ImageOperation.Blur(5.0)))
+
       result.isRight shouldBe true
 
-      result.foreach(_.metadata.operations should contain(ImageOperation.Blur(5.0)))
+      result.foreach { processedImage =>
+        processedImage.width shouldBe 100
+        processedImage.height shouldBe 100
+        processedImage.format shouldBe ImageFormat.PNG
+        processedImage.data.length should be > 0
+        processedImage.metadata.operations should contain(
+          ImageOperation.Blur(5.0)
+        )
+      }
     }
 
   it should "convert format successfully" in
     withTempImage() { path =>
       val result = processor.convertFormat(path, ImageFormat.JPEG)
+
       result.isRight shouldBe true
 
       result.foreach { processedImage =>
@@ -143,11 +177,14 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
       )
 
       val result = processor.preprocessImage(path, operations)
+
       result.isRight shouldBe true
 
       result.foreach { processedImage =>
         processedImage.width shouldBe 100
         processedImage.height shouldBe 100
+        processedImage.format shouldBe ImageFormat.PNG
+        processedImage.data.length should be > 0
         (processedImage.metadata.operations should contain).allOf(
           ImageOperation.Resize(100, 100),
           ImageOperation.Blur(3.0),
@@ -163,7 +200,9 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
   it should "handle WEBP format with fallback" in
     withTempImage() { path =>
       val result = processor.convertFormat(path, ImageFormat.WEBP)
+
       result.isRight shouldBe true
+
       result.foreach(_.format shouldBe ImageFormat.WEBP)
     }
 }
