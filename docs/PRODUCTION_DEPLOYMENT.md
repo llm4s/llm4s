@@ -333,11 +333,12 @@ try {
 
 ### Tracing Modes
 
-LLM4S supports three tracing modes:
+LLM4S supports four tracing modes:
 
 | Mode | Use Case | Configuration |
 |------|----------|---------------|
 | `langfuse` | Production monitoring | `TRACING_MODE=langfuse` |
+| `opentelemetry` | OpenTelemetry tracing | `TRACING_MODE=opentelemetry` |
 | `console` | Development/debugging | `TRACING_MODE=console` |
 | `noop` | Disabled | `TRACING_MODE=noop` |
 
@@ -510,7 +511,7 @@ Use `LLMClient.getContextBudget()` to stay within limits:
 ```scala
 import org.llm4s.agent.AgentState
 import org.llm4s.agent.ContextWindowConfig
-import org.llm4s.tool.ToolRegistry
+import org.llm4s.toolapi.ToolRegistry
 
 val budgetTokens = client.getContextBudget(HeadroomPercent.Standard)
 
