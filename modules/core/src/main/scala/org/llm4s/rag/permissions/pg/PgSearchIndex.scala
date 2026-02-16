@@ -393,8 +393,9 @@ final class PgSearchIndex private (
   /**
    * Parse embedding string to float array.
    * Returns None if parsing fails (logged by caller with context).
+   * Package-private for unit testing.
    */
-  private def parseEmbedding(str: String): Option[Array[Float]] = {
+  private[pg] def parseEmbedding(str: String): Option[Array[Float]] = {
     if (str == null || str.isEmpty) return None
     val cleaned = str.stripPrefix("[").stripSuffix("]")
     if (cleaned.isEmpty) None

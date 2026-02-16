@@ -511,8 +511,9 @@ final class PgVectorStore private (
   /**
    * Parse embedding string to float array.
    * Returns None if parsing fails (logged by caller with context).
+   * Package-private for unit testing.
    */
-  private def stringToEmbedding(s: String): Option[Array[Float]] =
+  private[vectorstore] def stringToEmbedding(s: String): Option[Array[Float]] =
     if (s == null || s.isEmpty) None
     else {
       val cleaned = s.stripPrefix("[").stripSuffix("]")
