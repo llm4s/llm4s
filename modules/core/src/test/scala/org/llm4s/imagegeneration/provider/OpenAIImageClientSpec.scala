@@ -77,8 +77,12 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
 
     val result = client.generateImage("space cat")
 
-    result.isRight shouldBe true
-    result.toOption.get.data shouldBe "base64data"
+    result match {
+      case Right(img) =>
+        img.data shouldBe "base64data"
+      case Left(e) =>
+        fail(s"Expected Right but got Left($e)")
+    }
   }
 
   // ==========================================================
@@ -108,18 +112,32 @@ class OpenAIImageClientSpec extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   // ==========================================================
-  // Size conversion
+  // Size conversion (model-aware)
   // ==========================================================
 
-  it should "test all image size conversions" in {
-    val client = new TestClient(config)
+  it should "respect model-specific image size mappings" in {
 
-    client.exposeSizeToApiFormat(ImageSize.Square512) shouldBe "1024x1024"
-    client.exposeSizeToApiFormat(ImageSize.Square1024) shouldBe "1024x1024"
-    client.exposeSizeToApiFormat(
+    val de2Client =
+      new TestClient(config.copy(model = "dall-e-2"))
+
+    de2Client.exposeSizeToApiFormat(ImageSize.Square512) shouldBe "512x512"
+    de2Client.exposeSizeToApiFormat(ImageSize.Square1024) shouldBe "1024x1024"
+
+    val de3Client =
+      new TestClient(config.copy(model = "dall-e-3"))
+
+    de3Client.exposeSizeToApiFormat(ImageSize.Square512) shouldBe "1024x1024"
+    de3Client.exposeSizeToApiFormat(
       ImageSize.Landscape768x512
     ) shouldBe "1536x1024"
-    client.exposeSizeToApiFormat(ImageSize.Portrait512x768) shouldBe "1024x1536"
+    de3Client.exposeSizeToApiFormat(
+      ImageSize.Portrait512x768
+    ) shouldBe "1024x1536"
+
+    val gptClient =
+      new TestClient(config.copy(model = "gpt-image-1"))
+
+    gptClient.exposeSizeToApiFormat(ImageSize.Square512) shouldBe "1024x1024"
   }
 
   // ==========================================================

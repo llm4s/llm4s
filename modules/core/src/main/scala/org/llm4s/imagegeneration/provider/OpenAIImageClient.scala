@@ -156,6 +156,18 @@ class OpenAIImageClient(
     options: ImageEditOptions = ImageEditOptions()
   ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
 
+    // ---- FAIL FAST MODEL VALIDATION FOR EDIT ENDPOINT ----
+    config.model match {
+      case "dall-e-2" | "gpt-image-1" =>
+      // supported
+      case other =>
+        return Left(
+          UnsupportedOperation(
+            s"Model '$other' does not support image edits via /images/edits endpoint."
+          )
+        )
+    }
+
     import requests.MultiItem
 
     val resolvedSize =
@@ -178,11 +190,6 @@ class OpenAIImageClient(
     options.quality.foreach(q => parts += MultiItem("quality", q))
 
     options.user.foreach(u => parts += MultiItem("user", u))
-
-    // DALL-E 3 default quality safety
-    if (config.model == "dall-e-3" && options.quality.isEmpty) {
-      parts += MultiItem("quality", "standard")
-    }
 
     val multipart = requests.MultiPart(parts.toSeq: _*)
 
@@ -280,13 +287,28 @@ class OpenAIImageClient(
   // ==========================================================
 
   protected def sizeToApiFormat(size: ImageSize): String =
-    size match {
-      case ImageSize.Square512          => "1024x1024"
-      case ImageSize.Square1024         => "1024x1024"
-      case ImageSize.Landscape768x512   => "1536x1024"
-      case ImageSize.Portrait512x768    => "1024x1536"
-      case ImageSize.Landscape1536x1024 => "1792x1024"
-      case ImageSize.Portrait1024x1536  => "1024x1792"
+    config.model match {
+      case "dall-e-2" =>
+        size match {
+          case ImageSize.Square512        => "512x512"
+          case ImageSize.Square1024       => "1024x1024"
+          case ImageSize.Landscape768x512 => "1024x1024"
+          case ImageSize.Portrait512x768  => "1024x1024"
+          case _                          => "1024x1024"
+        }
+
+      case "dall-e-3" | "gpt-image-1" =>
+        size match {
+          case ImageSize.Square512          => "1024x1024"
+          case ImageSize.Square1024         => "1024x1024"
+          case ImageSize.Landscape768x512   => "1536x1024"
+          case ImageSize.Portrait512x768    => "1024x1536"
+          case ImageSize.Landscape1536x1024 => "1792x1024"
+          case ImageSize.Portrait1024x1536  => "1024x1792"
+        }
+
+      case _ =>
+        "1024x1024"
     }
 
   // ==========================================================
@@ -313,11 +335,6 @@ class OpenAIImageClient(
     options.quality.foreach(q => requestBody("quality") = q)
     options.style.foreach(s => requestBody("style") = s)
     options.user.foreach(u => requestBody("user") = u)
-
-    // Backward compatibility default for DALL-E-3
-    if (config.model == "dall-e-3" && options.quality.isEmpty) {
-      requestBody("quality") = "standard"
-    }
 
     val url = s"${config.baseUrl}/images/generations"
 
@@ -408,8 +425,14 @@ class OpenAIImageClient(
     options: ImageGenerationOptions
   ): Option[Double] = {
 
-    val pixels =
-      options.size.width * options.size.height * count
+    val apiSize = sizeToApiFormat(options.size)
+
+    val pixels = apiSize.split("x") match {
+      case Array(w, h) =>
+        w.toInt * h.toInt * count
+      case _ =>
+        options.size.width * options.size.height * count
+    }
 
     ModelRegistry
       .lookup(provider, config.model)
