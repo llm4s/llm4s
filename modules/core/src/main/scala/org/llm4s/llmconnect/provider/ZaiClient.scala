@@ -347,8 +347,7 @@ class ZaiClient(
 
   override def close(): Unit =
     if (closed.compareAndSet(false, true)) {
-      // Java HttpClient does not have explicit close()
-      // We track logical closed state for thread-safety
+      HttpClientCloser.tryClose(httpClient)
     }
 
   private def validateNotClosed: Result[Unit] =
