@@ -232,14 +232,29 @@ context {
 ```scala
 import org.llm4s.config.Llm4sConfig
 
-// Load provider-specific config
-val providerConfig = Llm4sConfig.provider()
+object ConfigurationLoader {
+  def load(): Unit = {
+    // 1. Load configuration at the application boundary
+    val configResult = for {
+      providerConfig <- Llm4sConfig.provider()
+      tracingConfig <- Llm4sConfig.tracing()
+      embeddingsConfig <- Llm4sConfig.embeddings()
+    } yield (providerConfig, tracingConfig, embeddingsConfig)
 
-// Load tracing config
-val tracingConfig = Llm4sConfig.tracing()
-
-// Load embeddings config
-val embeddingsConfig = Llm4sConfig.embeddings()
+    // 2. Pass configuration to your application components
+    configResult match {
+      case Right((provider, tracing, embeddings)) =>
+        // Initialize your application with loaded config
+        // val app = new MyApplication(provider, tracing, embeddings)
+        // app.start()
+        println("Configuration loaded successfully")
+      
+      case Left(error) =>
+        println(s"Failed to load configuration: $error")
+        System.exit(1)
+    }
+  }
+}
 ```
 
 ---
@@ -445,17 +460,35 @@ import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.agent.memory.LLMEmbeddingService
 
-// Create embedding client from typed config
-val clientResult = for {
-  (provider, cfg) <- Llm4sConfig.embeddings()
-  client <- EmbeddingClient.from(provider, cfg)
-} yield client
+// Core logic depends on injected service
+class RAGService(embeddingService: LLMEmbeddingService) {
+  def processDocuments(docs: Seq[String]): Unit = {
+    // Use embeddingService...
+  }
+}
 
-// Or use the higher-level service
-val embeddingServiceResult = for {
-  client <- clientResult
-  model <- Llm4sConfig.textEmbeddingModel()
-} yield LLMEmbeddingService(client, EmbeddingModelConfig(model.modelName, model.dimensions))
+// Configuration boundary
+object RAGApplication extends App {
+  val startup = for {
+    // 1. Load config
+    (provider, cfg) <- Llm4sConfig.embeddings()
+    model <- Llm4sConfig.textEmbeddingModel()
+    
+    // 2. Build dependencies
+    client <- EmbeddingClient.from(provider, cfg)
+    
+    // 3. Create service
+    service = LLMEmbeddingService(
+      client, 
+      EmbeddingModelConfig(model.modelName, model.dimensions)
+    )
+  } yield new RAGService(service)
+
+  startup.fold(
+    err => println(s"Startup failed: $err"),
+    service => println("RAG Service started successfully")
+  )
+}
 ```
 
 ### System Properties (Alternative)
@@ -620,14 +653,21 @@ sbt run
 ```scala
 import org.llm4s.config.Llm4sConfig
 
-val config = Llm4sConfig.provider()
-config.fold(
-  error => {
-    println(s"Configuration error: $error")
-    System.exit(1)
-  },
-  _ => println("Configuration loaded successfully")
-)
+object ApplicationBoundary {
+  def validateAndStart(): Unit = {
+    // Fail fast at startup if config is invalid
+    Llm4sConfig.provider().fold(
+      error => {
+        System.err.println(s"FATAL: Configuration error: $error")
+        System.exit(1)
+      },
+      config => {
+        println(s"Configuration loaded for model: ${config.model}")
+        // startApplication(config)
+      }
+    )
+  }
+}
 ```
 
 ### ❌ DON'T
@@ -649,20 +689,21 @@ import org.llm4s.llmconnect.LLMConnect
 object ValidateConfig extends App {
   println("Validating LLM4S configuration...")
 
-  val validation = for {
+  // Perform validation at the application edge
+  val validationResult = for {
     providerConfig <- Llm4sConfig.provider()
     client <- LLMConnect.getClient(providerConfig)
-  } yield {
-    println(s"✅ Model: ${providerConfig.model}")
-    println(s"✅ Provider: ${providerConfig.getClass.getSimpleName}")
-    println(s"✅ Client ready: ${client.getClass.getSimpleName}")
-  }
+  } yield (providerConfig, client)
 
-  validation match {
-    case Right(_) =>
+  validationResult match {
+    case Right((config, client)) =>
+      println(s"✅ Model: ${config.model}")
+      println(s"✅ Provider: ${config.getClass.getSimpleName}")
+      println(s"✅ Client ready: ${client.getClass.getSimpleName}")
       println("✅ Configuration valid!")
+      
     case Left(error) =>
-      println(s"❌ Configuration error: $error")
+      System.err.println(s"❌ Configuration error: $error")
       System.exit(1)
   }
 }
