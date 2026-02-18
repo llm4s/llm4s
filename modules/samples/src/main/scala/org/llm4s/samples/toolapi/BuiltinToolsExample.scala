@@ -257,7 +257,7 @@ object BuiltinToolsExample {
 
     // Safe - core + network
     BuiltinTools
-      .safeResult()
+      .withHttpSafe()
       .fold(
         err => logger.error("Safe tools failed: {}", err.formatted),
         tools => logger.info("Safe tools ({}): {}", tools.size, tools.map(_.name).mkString(", "))

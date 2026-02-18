@@ -77,7 +77,7 @@ object BuiltinTools {
    * - Shell access
    * - Web search (configure separately at application edge)
    */
-  def safeResult(httpConfig: HttpConfig = HttpConfig.readOnly()): Result[Seq[ToolFunction[_, _]]] = for {
+  def withHttpSafe(httpConfig: HttpConfig = HttpConfig.readOnly()): Result[Seq[ToolFunction[_, _]]] = for {
     coreTools <- coreSafe
     httpTool  <- HTTPTool.createSafe(httpConfig)
   } yield coreTools :+ httpTool
@@ -87,9 +87,9 @@ object BuiltinTools {
    *
    * @throws IllegalStateException if any tool initialization fails
    */
-  @deprecated("Use safeResult() which returns Result[Seq[ToolFunction]] for safe error handling", "0.2.9")
+  @deprecated("Use withHttpSafe() which returns Result[Seq[ToolFunction]] for safe error handling", "0.2.9")
   def safe(httpConfig: HttpConfig = HttpConfig.readOnly()): Seq[ToolFunction[_, _]] =
-    safeResult(httpConfig) match {
+    withHttpSafe(httpConfig) match {
       case Right(t) => t
       case Left(e)  => throw new IllegalStateException(s"BuiltinTools.safe failed: ${e.formatted}")
     }
@@ -110,7 +110,7 @@ object BuiltinTools {
     fileConfig: FileConfig = FileConfig(),
     httpConfig: HttpConfig = HttpConfig.readOnly()
   ): Result[Seq[ToolFunction[_, _]]] = for {
-    safeTools <- safeResult(httpConfig)
+    safeTools <- withHttpSafe(httpConfig)
     readFile  <- ReadFileTool.createSafe(fileConfig)
     listDir   <- ListDirectoryTool.createSafe(fileConfig)
     fileInfo  <- FileInfoTool.createSafe(fileConfig)

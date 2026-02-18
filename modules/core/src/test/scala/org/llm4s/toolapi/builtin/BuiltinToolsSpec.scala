@@ -25,7 +25,7 @@ class BuiltinToolsSpec extends AnyFlatSpec with Matchers {
 
   "BuiltinTools.safe" should "include core tools plus safe network tools" in {
     BuiltinTools
-      .safeResult()
+      .withHttpSafe()
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tools => {
@@ -43,7 +43,7 @@ class BuiltinToolsSpec extends AnyFlatSpec with Matchers {
 
   it should "not include shell or file tools" in {
     BuiltinTools
-      .safeResult()
+      .withHttpSafe()
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tools => {
