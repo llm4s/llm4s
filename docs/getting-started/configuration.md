@@ -145,6 +145,9 @@ sbt run
 
 **Option 2: Use sbt-dotenv plugin**
 
+{: .warning }
+**Java 16+ Compatibility Issue:** The sbt-dotenv plugin can cause a `java.lang.reflect.InaccessibleObjectException` at startup on Java 16+ due to module system restrictions. Use **Option 1** or **Option 3** as alternatives, or apply the fix below.
+
 Add to `project/plugins.sbt`:
 
 ```scala
@@ -152,6 +155,15 @@ addSbtPlugin("au.com.onegeek" %% "sbt-dotenv" % "2.1.233")
 ```
 
 Variables automatically load when SBT starts!
+
+**Java 16+ Fix:** If you see `InaccessibleObjectException`, create (or add to) `.jvmopts` in your project root:
+
+```
+--add-opens=java.base/java.lang=ALL-UNNAMED
+--add-opens=java.base/java.lang.reflect=ALL-UNNAMED
+```
+
+Restart sbt after adding this file. This grants the plugin the reflective access it needs and works on all platforms.
 
 **Option 3: IntelliJ IDEA**
 
