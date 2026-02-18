@@ -73,6 +73,16 @@ final class MockHttpClient(response: HttpResponse) extends Llm4sHttpClient {
     timeout: Int
   ): HttpResponse =
     record(url, headers, None, None, timeout, countPost = false)
+
+  override def postRaw(
+    url: String,
+    headers: Map[String, String],
+    body: String,
+    timeout: Int
+  ): HttpRawResponse = {
+    record(url, headers, None, Some(body), timeout, countPost = true)
+    HttpRawResponse(response.statusCode, response.body.getBytes())
+  }
 }
 
 final class FailingHttpClient(exception: Throwable) extends Llm4sHttpClient {
@@ -118,4 +128,11 @@ final class FailingHttpClient(exception: Throwable) extends Llm4sHttpClient {
     headers: Map[String, String],
     timeout: Int
   ): HttpResponse = fail
+
+  override def postRaw(
+    url: String,
+    headers: Map[String, String],
+    body: String,
+    timeout: Int
+  ): HttpRawResponse = fail
 }

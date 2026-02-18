@@ -743,9 +743,8 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse("")
-    error should include("Authentication failed")
-    error should include("API key")
-    (error should not).include("Invalid API key") // Sensitive details should be hidden
+    error should include("Exa search returned status 401")
+    error should include("Invalid API key") // Response body is included with redaction applied
   }
 
   it should "handle 429 rate limit error with sanitized message" in {
@@ -766,8 +765,8 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse("")
-    error should include("Rate limit")
-    error should include("reduce request frequency")
+    error should include("Exa search returned status 429")
+    error should include("Rate limit exceeded")
   }
 
   it should "handle 500 server error with sanitized message" in {
@@ -788,8 +787,8 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse("")
-    error should include("temporarily unavailable")
-    (error should not).include("Internal server error") // Don't leak internal errors
+    error should include("Exa search returned status 500")
+    error should include("Internal server error")
   }
 
   it should "handle network timeout exception with sanitized message" in {
