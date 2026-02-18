@@ -206,8 +206,84 @@ the Java Virtual Machine (JVM).
 ```
 
 ---
+## Step 6: Try Different Models
+You can easily switch models:
 
-## Step 5b: Write Your First LLM4S + Ollama/Phi App
+# Try Llama 2
+export LLM_MODEL=ollama/llama2
+
+# Try Phi (faster, smaller)
+export LLM_MODEL=ollama/phi
+
+# Try CodeLlama (for coding tasks)
+export LLM_MODEL=ollama/codellama
+Then run your program again without code changes!
+
+## Step 6a: Write Your First LLM4S + Ollama/Llama2 App
+
+Llama2 offers an excellent balance of quality and performance for conversational tasks. Create `HelloLlama2.scala`:
+
+```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.model._
+
+object HelloLlama2 extends App {
+  // Create a conversation with system and user messages
+  val conversation = Conversation(Seq(
+    SystemMessage("You are a helpful AI assistant."),
+    UserMessage("Explain what Scala is in one sentence.")
+  ))
+
+  // Load config and make the request
+  val result = for {
+    providerConfig <- Llm4sConfig.provider()
+    client <- LLMConnect.getClient(providerConfig)
+    completion <- client.complete(conversation)
+  } yield completion
+
+  result match {
+    case Right(completion) =>
+      println(s"Response from ${completion.model}:")
+      println(completion.message.content)
+    case Left(error) =>
+      println(s"Error: ${error.formatted}")
+  }
+}
+```
+
+### Configure for Llama2
+
+```bash
+# Linux / macOS
+export LLM_MODEL=ollama/llama2
+export OLLAMA_BASE_URL=http://localhost:11434
+
+# Windows PowerShell
+$env:LLM_MODEL = "ollama/llama2"
+$env:OLLAMA_BASE_URL = "http://localhost:11434"
+```
+
+### Run It!
+
+```bash
+sbt run
+```
+
+### Expected Output
+
+```
+✓ Response from llama2:
+Scala is a modern programming language that combines object-oriented
+and functional programming paradigms on the Java Virtual Machine (JVM),
+offering strong type safety and concise syntax.
+```
+
+{: .tip }
+> **Why Llama2?** Llama2 offers excellent conversational abilities with a balanced 4K context window. Meta's model is production-ready and ideal for general-purpose applications.
+
+---
+## Step 6b: Write Your First LLM4S + Ollama/Phi App
 
 Phi is a lightweight model perfect for quick iterations and resource-constrained environments. Create `HelloPhi.scala`:
 
@@ -272,7 +348,7 @@ Virtual Machine for increased productivity and safety.
 
 ---
 
-## Step 5c: Write Your First LLM4S + Ollama/CodeLlama App
+## Step 6c: Write Your First LLM4S + Ollama/CodeLlama App
 
 CodeLlama is purpose-built for code generation and understanding. Create `HelloCodeLlama.scala`:
 
@@ -345,72 +421,6 @@ def reverseList[T](list: List[T]): List[T] = {
 > **Why CodeLlama?** CodeLlama is specialized for code-related tasks. Use it for code generation, refactoring suggestions, and explaining code. 16K context window perfect for larger code files.
 
 ---
-
-## Step 5d: Write Your First LLM4S + Ollama/Llama2 App
-
-Llama2 offers an excellent balance of quality and performance for conversational tasks. Create `HelloLlama2.scala`:
-
-```scala
-import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model._
-
-object HelloLlama2 extends App {
-  // Create a conversation with system and user messages
-  val conversation = Conversation(Seq(
-    SystemMessage("You are a helpful AI assistant."),
-    UserMessage("Explain what Scala is in one sentence.")
-  ))
-
-  // Load config and make the request
-  val result = for {
-    providerConfig <- Llm4sConfig.provider()
-    client <- LLMConnect.getClient(providerConfig)
-    completion <- client.complete(conversation)
-  } yield completion
-
-  result match {
-    case Right(completion) =>
-      println(s"Response from ${completion.model}:")
-      println(completion.message.content)
-    case Left(error) =>
-      println(s"Error: ${error.formatted}")
-  }
-}
-```
-
-### Configure for Llama2
-
-```bash
-# Linux / macOS
-export LLM_MODEL=ollama/llama2
-export OLLAMA_BASE_URL=http://localhost:11434
-
-# Windows PowerShell
-$env:LLM_MODEL = "ollama/llama2"
-$env:OLLAMA_BASE_URL = "http://localhost:11434"
-```
-
-### Run It!
-
-```bash
-sbt run
-```
-
-### Expected Output
-
-```
-✓ Response from llama2:
-Scala is a modern programming language that combines object-oriented
-and functional programming paradigms on the Java Virtual Machine (JVM),
-offering strong type safety and concise syntax.
-```
-
-{: .tip }
-> **Why Llama2?** Llama2 offers excellent conversational abilities with a balanced 4K context window. Meta's model is production-ready and ideal for general-purpose applications.
-
----
-
 ## Streaming Responses
 
 Get real-time token streaming (like ChatGPT):
