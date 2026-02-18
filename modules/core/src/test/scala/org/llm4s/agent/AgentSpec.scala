@@ -170,9 +170,9 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val result = for {
       tools <- testTools
       state <- agent.initializeSafe("Test query", tools)
-    } yield {
-      state.systemMessage shouldBe defined
-      state.systemMessage.get.content should include("helpful assistant")
+    } yield state.systemMessage match {
+      case Some(msg) => msg.content should include("helpful assistant")
+      case None      => fail("Expected systemMessage to be defined")
     }
     result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
@@ -188,7 +188,10 @@ class AgentSpec extends AnyFlatSpec with Matchers {
         tools,
         systemPromptAddition = Some("Always respond in JSON format.")
       )
-    } yield state.systemMessage.get.content should include("JSON format")
+    } yield state.systemMessage match {
+      case Some(msg) => msg.content should include("JSON format")
+      case None      => fail("Expected systemMessage to be defined")
+    }
     result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 

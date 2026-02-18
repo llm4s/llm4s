@@ -89,9 +89,12 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
 
     result match {
       case Right(newState) =>
-        val msgs = newState.agentState.get.conversation.messages
-        msgs.last shouldBe UserMessage("follow-up")
-        newState.agentState.get.status shouldBe AgentStatus.InProgress
+        newState.agentState match {
+          case Some(as) =>
+            as.conversation.messages.last shouldBe UserMessage("follow-up")
+            as.status shouldBe AgentStatus.InProgress
+          case None => fail("Expected agentState to be defined")
+        }
       case Left(err) => fail(s"Expected Right but got: ${err.message}")
     }
   }
@@ -104,8 +107,10 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
 
     result match {
       case Right(newState) =>
-        newState.agentState shouldBe defined
-        newState.agentState.get.initialQuery shouldBe Some("first query")
+        newState.agentState match {
+          case Some(as) => as.initialQuery shouldBe Some("first query")
+          case None     => fail("Expected agentState to be defined")
+        }
       case Left(err) => fail(s"Expected Right but got: ${err.message}")
     }
   }
@@ -194,7 +199,10 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
         val result = agent.runAgentToCompletion(stateAfterInit)
         result match {
           case Right(finalState) =>
-            finalState.agentState.get.status shouldBe AgentStatus.Complete
+            finalState.agentState match {
+              case Some(as) => as.status shouldBe AgentStatus.Complete
+              case None     => fail("Expected agentState to be defined")
+            }
           case Left(err) => fail(s"Expected Right but got: ${err.message}")
         }
       case Left(err) => fail(s"Init failed: ${err.message}")
@@ -229,8 +237,10 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
     val agent  = assistantAgent() // null client — must not be called
     val result = agent.processInput("/help", state)
 
-    result.isRight shouldBe true
-    result.map(_._2).getOrElse("") should not be empty
+    result match {
+      case Right((_, response)) => response should not be empty
+      case Left(err)            => fail(s"Expected Right but got: ${err.message}")
+    }
   }
 
   it should "route non-command input to the agent query path" in {
@@ -238,7 +248,9 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
     val state  = emptySessionState()
     val result = agent.processInput("what is 6x7?", state)
 
-    result.isRight shouldBe true
-    result.map(_._2).getOrElse("") should include("42")
+    result match {
+      case Right((_, response)) => response should include("42")
+      case Left(err)            => fail(s"Expected Right but got: ${err.message}")
+    }
   }
 }
