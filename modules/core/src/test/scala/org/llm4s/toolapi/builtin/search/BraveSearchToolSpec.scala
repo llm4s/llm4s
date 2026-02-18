@@ -291,6 +291,67 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
     BraveSearchCategory.News.parseResults(emptyJson, "q").results shouldBe empty
   }
 
+  // --- Unit tests for BraveSearchTool.create() and withApiKey() ---
+
+  "BraveSearchTool.create" should "return Right with correct tool name and description for Web category" in {
+    val mockClient = new MockHttpClient(HttpResponse(200, "{}"))
+    val result     = BraveSearchTool.create(testToolConfig, BraveSearchCategory.Web, None, mockClient)
+    result match {
+      case Right(tool) =>
+        tool.name shouldBe "brave_web_search"
+        tool.description shouldBe "Searches the web using Brave Search"
+      case Left(err) => fail(s"Expected Right but got Left: ${err.formatted}")
+    }
+  }
+
+  it should "return Right with correct tool name and description for News category" in {
+    val mockClient = new MockHttpClient(HttpResponse(200, "{}"))
+    val result     = BraveSearchTool.create(testToolConfig, BraveSearchCategory.News, None, mockClient)
+    result match {
+      case Right(tool) => tool.name shouldBe "brave_news_search"
+      case Left(err)   => fail(s"Expected Right but got Left: ${err.formatted}")
+    }
+  }
+
+  it should "apply custom BraveSearchConfig when provided" in {
+    val mockClient =
+      new MockHttpClient(HttpResponse(200, ujson.Obj("web" -> ujson.Obj("results" -> ujson.Arr())).render()))
+    val customConfig = Some(BraveSearchConfig(count = 3, safeSearch = SafeSearch.Off))
+    val result       = BraveSearchTool.create(testToolConfig, BraveSearchCategory.Web, customConfig, mockClient)
+    result match {
+      case Right(tool) => tool.name shouldBe "brave_web_search"
+      case Left(err)   => fail(s"Expected Right but got Left: ${err.formatted}")
+    }
+  }
+
+  "BraveSearchTool.withApiKey" should "return Right with correct tool name using default Web category" in {
+    val mockClient = new MockHttpClient(HttpResponse(200, "{}"))
+    val result     = BraveSearchTool.withApiKey("test-key", httpClient = mockClient)
+    result match {
+      case Right(tool) => tool.name shouldBe "brave_web_search"
+      case Left(err)   => fail(s"Expected Right but got Left: ${err.formatted}")
+    }
+  }
+
+  it should "return Right with correct tool name for explicit category" in {
+    val mockClient = new MockHttpClient(HttpResponse(200, "{}"))
+    val result = BraveSearchTool.withApiKey("test-key", category = BraveSearchCategory.Image, httpClient = mockClient)
+    result match {
+      case Right(tool) => tool.name shouldBe "brave_image_search"
+      case Left(err)   => fail(s"Expected Right but got Left: ${err.formatted}")
+    }
+  }
+
+  it should "use the provided apiUrl" in {
+    val body       = ujson.Obj("web" -> ujson.Obj("results" -> ujson.Arr())).render()
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
+    val result = BraveSearchTool.withApiKey("test-key", apiUrl = "https://custom.brave.com/v1", httpClient = mockClient)
+    result match {
+      case Right(tool) => tool.name shouldBe "brave_web_search"
+      case Left(err)   => fail(s"Expected Right but got Left: ${err.formatted}")
+    }
+  }
+
   // --- Unit tests for BraveSearchTool.search() with mocked HTTP ---
 
   "BraveSearchTool.search" should "return parsed web results on 200 response" in {
