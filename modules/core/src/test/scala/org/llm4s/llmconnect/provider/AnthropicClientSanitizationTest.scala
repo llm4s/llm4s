@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import com.anthropic.core.ObjectMappers
 import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction }
+import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -42,19 +43,22 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
     name: String,
     description: String,
     schema: org.llm4s.toolapi.ObjectSchema[Map[String, Any]]
-  ): ToolFunction[Map[String, Any], String] =
+  ): Result[ToolFunction[Map[String, Any], String]] =
     ToolBuilder[Map[String, Any], String](name, description, schema)
       .withHandler(_ => Right("result"))
-      .build()
+      .buildSafe()
 
   /**
    * Convert via the real client method and return the input-schema as JSON string
    *  using the same Jackson mapper the client uses internally.
    */
-  private def schemaJsonOf(tool: ToolFunction[Map[String, Any], String]): String = {
-    val sdkTool = client.convertToolToAnthropicTool(tool)
-    ObjectMappers.jsonMapper().writeValueAsString(sdkTool.inputSchema())
-  }
+  private def schemaJsonOf(toolResult: Result[ToolFunction[Map[String, Any], String]]): String =
+    toolResult match {
+      case Right(tool) =>
+        val sdkTool = client.convertToolToAnthropicTool(tool)
+        ObjectMappers.jsonMapper().writeValueAsString(sdkTool.inputSchema())
+      case Left(err) => fail(s"makeTool failed: ${err.message}")
+    }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Tests via convertToolToAnthropicTool (full pipeline)
@@ -126,11 +130,13 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
       .`object`[Map[String, Any]]("Input")
       .withProperty(Schema.property("username", Schema.string("Username")))
 
-    val tool    = makeTool("my_tool", "My description", schema)
-    val sdkTool = client.convertToolToAnthropicTool(tool)
-
-    sdkTool.name() shouldBe "my_tool"
-    sdkTool.description() shouldBe java.util.Optional.of("My description")
+    makeTool("my_tool", "My description", schema) match {
+      case Right(tool) =>
+        val sdkTool = client.convertToolToAnthropicTool(tool)
+        sdkTool.name() shouldBe "my_tool"
+        sdkTool.description() shouldBe java.util.Optional.of("My description")
+      case Left(err) => fail(s"makeTool failed: ${err.message}")
+    }
   }
 
   it should "handle optional (non-required) properties without adding additionalProperties" in {

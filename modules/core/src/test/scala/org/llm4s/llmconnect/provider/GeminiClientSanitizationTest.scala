@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction }
+import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -42,10 +43,10 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
     name: String,
     description: String,
     schema: org.llm4s.toolapi.ObjectSchema[Map[String, Any]]
-  ): ToolFunction[Map[String, Any], String] =
+  ): Result[ToolFunction[Map[String, Any], String]] =
     ToolBuilder[Map[String, Any], String](name, description, schema)
       .withHandler(_ => Right("result"))
-      .build()
+      .buildSafe()
 
   // ─────────────────────────────────────────────────────────────────────────
   // Tests via convertToolToGeminiFormat (full pipeline)
@@ -57,19 +58,22 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
       .withProperty(Schema.property("name", Schema.string("Name field")))
       .withProperty(Schema.property("age", Schema.integer("Age field")))
 
-    val tool = makeTool("test_tool", "A test tool", schema)
-    val out  = client.convertToolToGeminiFormat(tool)
+    makeTool("test_tool", "A test tool", schema) match {
+      case Right(tool) =>
+        val out = client.convertToolToGeminiFormat(tool)
 
-    out("name").str shouldBe "test_tool"
-    out("description").str shouldBe "A test tool"
+        out("name").str shouldBe "test_tool"
+        out("description").str shouldBe "A test tool"
 
-    val params = out("parameters")
-    params.obj should not contain key("strict")
-    params.obj should not contain key("additionalProperties")
+        val params = out("parameters")
+        params.obj should not contain key("strict")
+        params.obj should not contain key("additionalProperties")
 
-    val props = params("properties")
-    props("name").obj should not contain key("additionalProperties")
-    props("age").obj should not contain key("additionalProperties")
+        val props = params("properties")
+        props("name").obj should not contain key("additionalProperties")
+        props("age").obj should not contain key("additionalProperties")
+      case Left(err) => fail(s"makeTool failed: ${err.message}")
+    }
   }
 
   it should "strip 'additionalProperties' recursively from nested objects" in {
@@ -83,7 +87,10 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
       .withProperty(Schema.property("name", Schema.string("Name")))
       .withProperty(Schema.property("address", addressSchema))
 
-    val params = client.convertToolToGeminiFormat(makeTool("person_tool", "Person", schema))("parameters")
+    val params = makeTool("person_tool", "Person", schema).fold(
+      err => fail(s"makeTool failed: ${err.message}"),
+      tool => client.convertToolToGeminiFormat(tool)("parameters")
+    )
 
     params.obj should not contain key("additionalProperties")
     params("properties")("address").obj should not contain key("additionalProperties")
@@ -99,7 +106,10 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
       .`object`[Map[String, Any]]("Tagged")
       .withProperty(Schema.property("tags", Schema.array("Tags", tagSchema)))
 
-    val params = client.convertToolToGeminiFormat(makeTool("tagged_tool", "Tagged", schema))("parameters")
+    val params = makeTool("tagged_tool", "Tagged", schema).fold(
+      err => fail(s"makeTool failed: ${err.message}"),
+      tool => client.convertToolToGeminiFormat(tool)("parameters")
+    )
 
     params("properties")("tags")("items").obj should not contain key("additionalProperties")
   }
@@ -117,7 +127,10 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
       .`object`[Map[String, Any]]("Level 1")
       .withProperty(Schema.property("level2", level2))
 
-    val params = client.convertToolToGeminiFormat(makeTool("deep_tool", "Deep", schema))("parameters")
+    val params = makeTool("deep_tool", "Deep", schema).fold(
+      err => fail(s"makeTool failed: ${err.message}"),
+      tool => client.convertToolToGeminiFormat(tool)("parameters")
+    )
 
     params.obj should not contain key("additionalProperties")
     val l2 = params("properties")("level2")
@@ -131,12 +144,14 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
       .withProperty(Schema.property("username", Schema.string("Username")))
       .withProperty(Schema.property("score", Schema.integer("Score")))
 
-    val tool = makeTool("my_tool", "My description", schema)
-    val out  = client.convertToolToGeminiFormat(tool)
-
-    out("name").str shouldBe "my_tool"
-    out("description").str shouldBe "My description"
-    (out("parameters")("properties").obj.keys should contain).allOf("username", "score")
+    makeTool("my_tool", "My description", schema) match {
+      case Right(tool) =>
+        val out = client.convertToolToGeminiFormat(tool)
+        out("name").str shouldBe "my_tool"
+        out("description").str shouldBe "My description"
+        (out("parameters")("properties").obj.keys should contain).allOf("username", "score")
+      case Left(err) => fail(s"makeTool failed: ${err.message}")
+    }
   }
 
   it should "handle optional (non-required) properties cleanly" in {
@@ -145,7 +160,10 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
       .withProperty(Schema.property("req", Schema.string("Required")))
       .withProperty(Schema.property("opt", Schema.nullable(Schema.integer("Optional")), required = false))
 
-    val params = client.convertToolToGeminiFormat(makeTool("opt_tool", "Optional", schema))("parameters")
+    val params = makeTool("opt_tool", "Optional", schema).fold(
+      err => fail(s"makeTool failed: ${err.message}"),
+      tool => client.convertToolToGeminiFormat(tool)("parameters")
+    )
 
     params.obj should not contain key("additionalProperties")
   }
@@ -164,14 +182,20 @@ class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
         )
       )
 
-    val params = client.convertToolToGeminiFormat(makeTool("matrix_tool", "Matrix", schema))("parameters")
+    val params = makeTool("matrix_tool", "Matrix", schema).fold(
+      err => fail(s"makeTool failed: ${err.message}"),
+      tool => client.convertToolToGeminiFormat(tool)("parameters")
+    )
 
     params("properties")("rows")("items")("items").obj should not contain key("additionalProperties")
   }
 
   it should "handle empty object schemas without errors" in {
     val schema = Schema.`object`[Map[String, Any]]("Empty input")
-    val params = client.convertToolToGeminiFormat(makeTool("empty_tool", "Empty", schema))("parameters")
+    val params = makeTool("empty_tool", "Empty", schema).fold(
+      err => fail(s"makeTool failed: ${err.message}"),
+      tool => client.convertToolToGeminiFormat(tool)("parameters")
+    )
     params.obj should not contain key("additionalProperties")
   }
 
