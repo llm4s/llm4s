@@ -135,4 +135,58 @@ class ProviderConfigFallbackSpec extends AnyFlatSpec with Matchers {
     cfg.contextWindow shouldBe 128000
     cfg.reserveCompletion shouldBe 8192
   }
+
+  "OllamaConfig fallback" should "return 4096 for llama2-like model" in {
+    val cfg = OllamaConfig.fromValues("patch-cov-llama2", baseUrl)
+    cfg.contextWindow shouldBe 4096
+    cfg.reserveCompletion shouldBe 4096
+  }
+
+  it should "return 8192 for llama3-like model" in {
+    val cfg = OllamaConfig.fromValues("patch-cov-llama3", baseUrl)
+    cfg.contextWindow shouldBe 8192
+    cfg.reserveCompletion shouldBe 4096
+  }
+
+  it should "return 16384 for codellama-like model" in {
+    val cfg = OllamaConfig.fromValues("patch-cov-codellama", baseUrl)
+    cfg.contextWindow shouldBe 16384
+    cfg.reserveCompletion shouldBe 4096
+  }
+
+  it should "return 32768 for mistral-like model" in {
+    val cfg = OllamaConfig.fromValues("patch-cov-mistral", baseUrl)
+    cfg.contextWindow shouldBe 32768
+    cfg.reserveCompletion shouldBe 4096
+  }
+
+  it should "return 8192 for unknown model" in {
+    val cfg = OllamaConfig.fromValues("patch-cov-unknown", baseUrl)
+    cfg.contextWindow shouldBe 8192
+    cfg.reserveCompletion shouldBe 4096
+  }
+
+  "ZaiConfig fallback" should "return 128000 for GLM-4.7-like model" in {
+    val cfg = ZaiConfig.fromValues("patch-cov-GLM-4.7", apiKey, baseUrl)
+    cfg.contextWindow shouldBe 128000
+    cfg.reserveCompletion shouldBe 4096
+  }
+
+  it should "return 32000 for GLM-4.5-like model" in {
+    val cfg = ZaiConfig.fromValues("patch-cov-GLM-4.5", apiKey, baseUrl)
+    cfg.contextWindow shouldBe 32000
+    cfg.reserveCompletion shouldBe 4096
+  }
+
+  it should "return 128000 for unknown model" in {
+    val cfg = ZaiConfig.fromValues("patch-cov-unknown", apiKey, baseUrl)
+    cfg.contextWindow shouldBe 128000
+    cfg.reserveCompletion shouldBe 4096
+  }
+
+  "CohereConfig fallback" should "return 128000 for any unregistered model" in {
+    val cfg = CohereConfig.fromValues("patch-cov-unknown", apiKey, baseUrl)
+    cfg.contextWindow shouldBe 128000
+    cfg.reserveCompletion shouldBe 4096
+  }
 }
