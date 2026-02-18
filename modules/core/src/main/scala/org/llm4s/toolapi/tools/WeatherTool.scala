@@ -72,6 +72,6 @@ object WeatherTool {
   lazy val tool: ToolFunction[Map[String, Any], WeatherResult] =
     toolSafe match {
       case Right(t) => t
-      case Left(e)  => throw new IllegalStateException(s"WeatherTool initialization failed: ${e.formatted}")
+      case Left(e)  => throw new IllegalStateException(s"WeatherTool.tool lazy initialization failed: ${e.formatted}")
     }
 }

@@ -95,7 +95,7 @@ object JSONTool {
   lazy val tool: ToolFunction[Map[String, Any], JSONResult] =
     toolSafe match {
       case Right(t) => t
-      case Left(e)  => throw new IllegalStateException(s"JSONTool initialization failed: ${e.formatted}")
+      case Left(e)  => throw new IllegalStateException(s"JSONTool.tool lazy initialization failed: ${e.formatted}")
     }
 
   private def processJSON(

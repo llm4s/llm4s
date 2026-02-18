@@ -235,7 +235,7 @@ object BraveSearchTool {
     config: Option[BraveSearchConfig] = None,
     httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
     restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
-  ): ToolFunction[Map[String, Any], R] =
+  ): Result[ToolFunction[Map[String, Any], R]] =
     ToolBuilder[Map[String, Any], R](
       name = category.toolName,
       description = category.description,
@@ -273,7 +273,7 @@ object BraveSearchTool {
     config: Option[BraveSearchConfig] = None,
     httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
     restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
-  ): ToolFunction[Map[String, Any], R] = {
+  ): Result[ToolFunction[Map[String, Any], R]] = {
     // Hardcoded defaults when using withApiKey
     val braveTool = BraveSearchToolConfig(
       apiKey = apiKey,

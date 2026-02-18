@@ -12,6 +12,7 @@ import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
+import cats.implicits._
 import java.time.Instant
 import scala.annotation.tailrec
 import scala.concurrent.{ Await, ExecutionContext }
@@ -552,39 +553,32 @@ class Agent(client: LLMClient) {
     import org.llm4s.toolapi.{ ToolBuilder, Schema }
     import HandoffResult._ // Import implicit ReadWriter
 
-    handoffs
-      .foldLeft[Result[Seq[ToolFunction[_, _]]]](Right(Seq.empty)) { (acc, handoff) =>
-        for {
-          tools <- acc
-          tool <- {
-            val toolName = handoff.handoffId
-            val toolDescription = handoff.transferReason.fold(
-              "Hand off this query to a specialist agent."
-            )(reason => s"Hand off this query to a specialist agent. $reason")
+    handoffs.traverse { handoff =>
+      val toolName = handoff.handoffId
+      val toolDescription = handoff.transferReason.fold(
+        "Hand off this query to a specialist agent."
+      )(reason => s"Hand off this query to a specialist agent. $reason")
 
-            // Create object schema with a reason parameter
-            val schema = Schema
-              .`object`[Map[String, Any]]("Handoff parameters")
-              .withRequiredField("reason", Schema.string("Reason for the handoff"))
+      // Create object schema with a reason parameter
+      val schema = Schema
+        .`object`[Map[String, Any]]("Handoff parameters")
+        .withRequiredField("reason", Schema.string("Reason for the handoff"))
 
-            // Create tool function that marks the handoff in the result
-            ToolBuilder[Map[String, Any], HandoffResult](
-              toolName,
-              toolDescription,
-              schema
-            ).withHandler { extractor =>
-              extractor.getString("reason").map { reason =>
-                HandoffResult(
-                  handoff_requested = true,
-                  handoff_id = handoff.handoffId,
-                  reason = reason
-                )
-              }
-            }.buildSafe()
-          }
-        } yield tool +: tools
-      }
-      .map(_.reverse)
+      // Create tool function that marks the handoff in the result
+      ToolBuilder[Map[String, Any], HandoffResult](
+        toolName,
+        toolDescription,
+        schema
+      ).withHandler { extractor =>
+        extractor.getString("reason").map { reason =>
+          HandoffResult(
+            handoff_requested = true,
+            handoff_id = handoff.handoffId,
+            reason = reason
+          )
+        }
+      }.buildSafe()
+    }
   }
 
   /**

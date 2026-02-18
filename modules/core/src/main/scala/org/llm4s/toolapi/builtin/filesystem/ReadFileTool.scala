@@ -111,7 +111,11 @@ object ReadFileTool {
    * @throws IllegalStateException if tool initialization fails
    */
   @deprecated("Use toolSafe which returns Result[ToolFunction] for safe error handling", "0.2.9")
-  lazy val tool: ToolFunction[Map[String, Any], ReadFileResult] = create()
+  lazy val tool: ToolFunction[Map[String, Any], ReadFileResult] =
+    toolSafe match {
+      case Right(t) => t
+      case Left(e)  => throw new IllegalStateException(s"ReadFileTool.tool lazy initialization failed: ${e.formatted}")
+    }
 
   private def readFile(
     pathStr: String,

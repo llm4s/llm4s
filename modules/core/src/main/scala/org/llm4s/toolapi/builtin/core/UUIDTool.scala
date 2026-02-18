@@ -105,6 +105,6 @@ object UUIDTool {
   lazy val tool: ToolFunction[Map[String, Any], UUIDsResult] =
     toolSafe match {
       case Right(t) => t
-      case Left(e)  => throw new IllegalStateException(s"UUIDTool initialization failed: ${e.formatted}")
+      case Left(e)  => throw new IllegalStateException(s"UUIDTool.tool lazy initialization failed: ${e.formatted}")
     }
 }

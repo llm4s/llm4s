@@ -89,7 +89,7 @@ object CalculatorTool {
   lazy val tool: ToolFunction[Map[String, Any], CalculatorResult] =
     toolSafe match {
       case Right(t) => t
-      case Left(e)  => throw new IllegalStateException(s"CalculatorTool initialization failed: ${e.formatted}")
+      case Left(e) => throw new IllegalStateException(s"CalculatorTool.tool lazy initialization failed: ${e.formatted}")
     }
 
   private def calculate(operation: String, a: Double, bOpt: Option[Double]): Either[String, CalculatorResult] = {
