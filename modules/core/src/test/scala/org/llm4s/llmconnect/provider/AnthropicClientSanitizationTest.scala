@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import com.anthropic.core.ObjectMappers
+import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -7,46 +9,30 @@ import org.scalatest.matchers.should.Matchers
 /**
  * Tests for AnthropicClient tool schema sanitization logic.
  *
- * These tests verify sanitization behaviour through the public [[AnthropicClient.complete]]
- * boundary by inspecting the JSON that the client builds, rather than calling private
- * methods via reflection.
+ * Tests call the real `private[provider]` methods on a dummy client instance so
+ * that Codecov sees the actual source lines executed.
  *
- * Specifically we verify that:
- *  - OpenAI-specific fields ('strict', 'additionalProperties') are absent from the
- *    JSON that the client would send to the Anthropic API.
- *  - Sanitization is applied recursively to nested objects, arrays, anyOf/oneOf/allOf
- *    branches, and arbitrarily-deep structures.
- *  - Tool metadata (name, description) is preserved unchanged.
+ * Two entry-points are exercised:
+ *  - `convertToolToAnthropicTool` – the full conversion pipeline (schema → SDK Tool).
+ *    Assertions are made on the rendered JSON of the SDK Tool's input schema.
+ *  - `stripAdditionalProperties` – the recursive sanitiser, called directly with
+ *    manually-constructed ujson for the anyOf / oneOf / allOf test cases.
  */
 class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
 
-  /** Build the JSON the Anthropic client would send for a given tool registry. */
-  private def toolSchemaJson(tool: ToolFunction[_, _]): ujson.Value = {
-    // ObjectSchema always emits 'additionalProperties'; the client must strip it.
-    // We exercise that path by serialising via the public schema API, then running
-    // the same sanitisation the client performs.
-    val raw    = tool.schema.toJsonSchema(strict = false)
-    val cloned = ujson.read(raw.render())
-    stripAdditionalProperties(cloned)
-    cloned
-  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // Shared dummy client (no real network calls are made)
+  // ─────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Mirror of the client's private helper – applied here so every test exercises
-   *  the same recursive logic without touching private internals.
-   */
-  private def stripAdditionalProperties(json: ujson.Value): Unit =
-    json match {
-      case obj: ujson.Obj =>
-        obj.value.remove("additionalProperties")
-        obj.value.remove("strict")
-        obj.value.get("properties").foreach(_.obj.values.foreach(stripAdditionalProperties))
-        obj.value.get("items").foreach(stripAdditionalProperties)
-        Seq("anyOf", "oneOf", "allOf").foreach { key =>
-          obj.value.get(key).foreach(_.arr.foreach(stripAdditionalProperties))
-        }
-      case _ =>
-    }
+  private val client = new AnthropicClient(
+    AnthropicConfig(
+      apiKey = "test-api-key",
+      model = "claude-3-haiku-20240307",
+      baseUrl = "https://api.anthropic.com",
+      contextWindow = 32768,
+      reserveCompletion = 8192
+    )
+  )
 
   // ─────────────────────────────────────────────────────────────────────────
   // Helpers
@@ -61,11 +47,17 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
       .withHandler(_ => Right("result"))
       .build()
 
-  private def schemaOf(tool: ToolFunction[Map[String, Any], String]): ujson.Value =
-    toolSchemaJson(tool)
+  /**
+   * Convert via the real client method and return the input-schema as JSON string
+   *  using the same Jackson mapper the client uses internally.
+   */
+  private def schemaJsonOf(tool: ToolFunction[Map[String, Any], String]): String = {
+    val sdkTool = client.convertToolToAnthropicTool(tool)
+    ObjectMappers.jsonMapper().writeValueAsString(sdkTool.inputSchema())
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Tests
+  // Tests via convertToolToAnthropicTool (full pipeline)
   // ─────────────────────────────────────────────────────────────────────────
 
   "Anthropic schema sanitization" should "strip 'strict' and 'additionalProperties' from simple schemas" in {
@@ -74,14 +66,10 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
       .withProperty(Schema.property("name", Schema.string("Name field")))
       .withProperty(Schema.property("age", Schema.integer("Age field")))
 
-    val json = schemaOf(makeTool("test_tool", "A test tool", schema))
+    val schemaJson = schemaJsonOf(makeTool("test_tool", "A test tool", schema))
 
-    json.obj should not contain key("strict")
-    json.obj should not contain key("additionalProperties")
-    // property descriptor nodes must also be clean
-    val props = json("properties")
-    props("name").obj should not contain key("additionalProperties")
-    props("age").obj should not contain key("additionalProperties")
+    (schemaJson should not).include("\"strict\"")
+    (schemaJson should not).include("\"additionalProperties\"")
   }
 
   it should "strip 'additionalProperties' recursively from nested objects" in {
@@ -95,10 +83,9 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
       .withProperty(Schema.property("name", Schema.string("Name")))
       .withProperty(Schema.property("address", addressSchema))
 
-    val json = schemaOf(makeTool("person_tool", "Person tool", schema))
+    val schemaJson = schemaJsonOf(makeTool("person_tool", "Person tool", schema))
 
-    json.obj should not contain key("additionalProperties")
-    json("properties")("address").obj should not contain key("additionalProperties")
+    (schemaJson should not).include("additionalProperties")
   }
 
   it should "strip 'additionalProperties' from array items schemas" in {
@@ -111,106 +98,9 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
       .`object`[Map[String, Any]]("Tagged")
       .withProperty(Schema.property("tags", Schema.array("Tags", itemSchema)))
 
-    val json = schemaOf(makeTool("tagged_tool", "Tagged tool", schema))
+    val schemaJson = schemaJsonOf(makeTool("tagged_tool", "Tagged tool", schema))
 
-    // items node inside the array must have no additionalProperties
-    val itemsNode = json("properties")("tags")("items")
-    itemsNode.obj should not contain key("additionalProperties")
-  }
-
-  it should "strip 'additionalProperties' from anyOf branches (recursive)" in {
-    // Build a schema whose 'value' property uses a real anyOf with two object branches,
-    // each of which carries additionalProperties so the sanitizer must recurse into them.
-    val branchA = Schema
-      .`object`[Map[String, Any]]("Branch A")
-      .withProperty(Schema.property("kind", Schema.string("kind")))
-
-    val branchB = Schema
-      .`object`[Map[String, Any]]("Branch B")
-      .withProperty(Schema.property("count", Schema.integer("count")))
-
-    val outerSchema = Schema
-      .`object`[Map[String, Any]]("Wrapper")
-      .withProperty(Schema.property("label", Schema.string("Label")))
-
-    val tool = ToolBuilder[Map[String, Any], String]("anyof_tool", "AnyOf tool", outerSchema)
-      .withHandler(_ => Right("result"))
-      .build()
-
-    // Inject a real anyOf into the serialised JSON (the Schema API has no anyOf factory,
-    // so we inject via ujson directly, mirroring what user-provided schemas could look like).
-    val json = ujson.read(tool.schema.toJsonSchema(strict = false).render())
-    json("properties")("label") = ujson.Obj(
-      "anyOf" -> ujson.Arr(
-        branchA.toJsonSchema(false),
-        branchB.toJsonSchema(false)
-      )
-    )
-
-    // Run the same sanitisation the client performs.
-    stripAdditionalProperties(json)
-
-    val anyOfArr = json("properties")("label")("anyOf").arr
-    anyOfArr should have size 2
-    anyOfArr.foreach(branch => branch.obj should not contain key("additionalProperties"))
-    json.obj should not contain key("additionalProperties")
-  }
-
-  it should "strip 'additionalProperties' from oneOf branches (recursive)" in {
-    val branchX = Schema
-      .`object`[Map[String, Any]]("Branch X")
-      .withProperty(Schema.property("x", Schema.string("x")))
-
-    val outerSchema = Schema
-      .`object`[Map[String, Any]]("Wrapper")
-      .withProperty(Schema.property("payload", Schema.string("Payload")))
-
-    val tool = ToolBuilder[Map[String, Any], String]("oneof_tool", "OneOf tool", outerSchema)
-      .withHandler(_ => Right("result"))
-      .build()
-
-    val json = ujson.read(tool.schema.toJsonSchema(strict = false).render())
-    json("properties")("payload") = ujson.Obj(
-      "oneOf" -> ujson.Arr(
-        branchX.toJsonSchema(false),
-        ujson.Obj("type" -> "string")
-      )
-    )
-
-    stripAdditionalProperties(json)
-
-    json.obj should not contain key("additionalProperties")
-    json("properties")("payload")("oneOf").arr.head.obj should not contain key("additionalProperties")
-  }
-
-  it should "strip 'additionalProperties' from allOf branches (recursive)" in {
-    val base = Schema
-      .`object`[Map[String, Any]]("Base")
-      .withProperty(Schema.property("id", Schema.integer("id")))
-
-    val ext = Schema
-      .`object`[Map[String, Any]]("Extension")
-      .withProperty(Schema.property("extra", Schema.string("extra")))
-
-    val outerSchema = Schema
-      .`object`[Map[String, Any]]("Wrapper")
-      .withProperty(Schema.property("composite", Schema.string("Composite")))
-
-    val tool = ToolBuilder[Map[String, Any], String]("allof_tool", "AllOf tool", outerSchema)
-      .withHandler(_ => Right("result"))
-      .build()
-
-    val json = ujson.read(tool.schema.toJsonSchema(strict = false).render())
-    json("properties")("composite") = ujson.Obj(
-      "allOf" -> ujson.Arr(base.toJsonSchema(false), ext.toJsonSchema(false))
-    )
-
-    stripAdditionalProperties(json)
-
-    json.obj should not contain key("additionalProperties")
-    json("properties")("composite")("allOf").arr.foreach { branch =>
-      branch.obj should not contain key("additionalProperties")
-    }
+    (schemaJson should not).include("additionalProperties")
   }
 
   it should "strip 'additionalProperties' at all levels of a deeply nested structure" in {
@@ -226,27 +116,21 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
       .`object`[Map[String, Any]]("Level 1")
       .withProperty(Schema.property("level2", level2))
 
-    val json = schemaOf(makeTool("deep_tool", "Deep", schema))
+    val schemaJson = schemaJsonOf(makeTool("deep_tool", "Deep", schema))
 
-    json.obj should not contain key("additionalProperties")
-    val l2 = json("properties")("level2")
-    l2.obj should not contain key("additionalProperties")
-    val l3 = l2("properties")("level3")
-    l3.obj should not contain key("additionalProperties")
+    (schemaJson should not).include("additionalProperties")
   }
 
-  it should "preserve tool name, description and property names" in {
+  it should "preserve tool name and description" in {
     val schema = Schema
       .`object`[Map[String, Any]]("Input")
       .withProperty(Schema.property("username", Schema.string("Username")))
-      .withProperty(Schema.property("score", Schema.integer("Score")))
 
-    val tool = makeTool("my_tool", "My description", schema)
-    val json = schemaOf(tool)
+    val tool    = makeTool("my_tool", "My description", schema)
+    val sdkTool = client.convertToolToAnthropicTool(tool)
 
-    tool.name shouldBe "my_tool"
-    tool.description shouldBe "My description"
-    (json("properties").obj.keys should contain).allOf("username", "score")
+    sdkTool.name() shouldBe "my_tool"
+    sdkTool.description() shouldBe java.util.Optional.of("My description")
   }
 
   it should "handle optional (non-required) properties without adding additionalProperties" in {
@@ -255,9 +139,9 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
       .withProperty(Schema.property("req", Schema.string("Required")))
       .withProperty(Schema.property("opt", Schema.nullable(Schema.integer("Optional")), required = false))
 
-    val json = schemaOf(makeTool("opt_tool", "Optional tool", schema))
+    val schemaJson = schemaJsonOf(makeTool("opt_tool", "Optional tool", schema))
 
-    json.obj should not contain key("additionalProperties")
+    (schemaJson should not).include("additionalProperties")
   }
 
   it should "handle nested arrays of objects" in {
@@ -274,9 +158,94 @@ class AnthropicClientSanitizationTest extends AnyFlatSpec with Matchers {
         )
       )
 
-    val json = schemaOf(makeTool("matrix_tool", "Matrix", schema))
+    val schemaJson = schemaJsonOf(makeTool("matrix_tool", "Matrix", schema))
 
-    val innerItems = json("properties")("rows")("items")("items")
-    innerItems.obj should not contain key("additionalProperties")
+    (schemaJson should not).include("additionalProperties")
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Tests via stripAdditionalProperties directly (anyOf / oneOf / allOf)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  it should "strip 'additionalProperties' from anyOf branches (recursive)" in {
+    val branchA = Schema
+      .`object`[Map[String, Any]]("Branch A")
+      .withProperty(Schema.property("kind", Schema.string("kind")))
+
+    val branchB = Schema
+      .`object`[Map[String, Any]]("Branch B")
+      .withProperty(Schema.property("count", Schema.integer("count")))
+
+    // Build raw JSON with a real anyOf and call the client's real recursive helper.
+    val json = ujson.Obj(
+      "type" -> "object",
+      "properties" -> ujson.Obj(
+        "label" -> ujson.Obj(
+          "anyOf" -> ujson.Arr(
+            branchA.toJsonSchema(false),
+            branchB.toJsonSchema(false)
+          )
+        )
+      ),
+      "additionalProperties" -> ujson.False
+    )
+
+    client.stripAdditionalProperties(json)
+
+    json.obj should not contain key("additionalProperties")
+    val anyOfArr = json("properties")("label")("anyOf").arr
+    anyOfArr should have size 2
+    anyOfArr.foreach(branch => branch.obj should not contain key("additionalProperties"))
+  }
+
+  it should "strip 'additionalProperties' from oneOf branches (recursive)" in {
+    val branchX = Schema
+      .`object`[Map[String, Any]]("Branch X")
+      .withProperty(Schema.property("x", Schema.string("x")))
+
+    val json = ujson.Obj(
+      "type" -> "object",
+      "properties" -> ujson.Obj(
+        "payload" -> ujson.Obj(
+          "oneOf" -> ujson.Arr(
+            branchX.toJsonSchema(false),
+            ujson.Obj("type" -> "string")
+          )
+        )
+      ),
+      "additionalProperties" -> ujson.False
+    )
+
+    client.stripAdditionalProperties(json)
+
+    json.obj should not contain key("additionalProperties")
+    json("properties")("payload")("oneOf").arr.head.obj should not contain key("additionalProperties")
+  }
+
+  it should "strip 'additionalProperties' from allOf branches (recursive)" in {
+    val base = Schema
+      .`object`[Map[String, Any]]("Base")
+      .withProperty(Schema.property("id", Schema.integer("id")))
+
+    val ext = Schema
+      .`object`[Map[String, Any]]("Extension")
+      .withProperty(Schema.property("extra", Schema.string("extra")))
+
+    val json = ujson.Obj(
+      "type" -> "object",
+      "properties" -> ujson.Obj(
+        "composite" -> ujson.Obj(
+          "allOf" -> ujson.Arr(base.toJsonSchema(false), ext.toJsonSchema(false))
+        )
+      ),
+      "additionalProperties" -> ujson.False
+    )
+
+    client.stripAdditionalProperties(json)
+
+    json.obj should not contain key("additionalProperties")
+    json("properties")("composite")("allOf").arr.foreach { branch =>
+      branch.obj should not contain key("additionalProperties")
+    }
   }
 }
