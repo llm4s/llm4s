@@ -131,135 +131,6 @@ class ChunkerFactorySpec extends AnyFlatSpec with Matchers {
     chunks should not be empty
   }
 
-  "DocumentChunk" should "have length property" in {
-    val chunk = DocumentChunk("Hello World", 0)
-
-    chunk.length shouldBe 11
-  }
-
-  it should "detect empty chunks" in {
-    val emptyChunk    = DocumentChunk("", 0)
-    val nonEmptyChunk = DocumentChunk("content", 1)
-
-    emptyChunk.isEmpty shouldBe true
-    emptyChunk.nonEmpty shouldBe false
-
-    nonEmptyChunk.isEmpty shouldBe false
-    nonEmptyChunk.nonEmpty shouldBe true
-  }
-
-  it should "preserve metadata" in {
-    val metadata = ChunkMetadata.empty.withSource("test.txt").withHeading("Introduction")
-    val chunk    = DocumentChunk("content", 0, metadata)
-
-    chunk.metadata.sourceFile shouldBe Some("test.txt")
-    chunk.metadata.headings should contain("Introduction")
-  }
-
-  it should "support default metadata" in {
-    val chunk = DocumentChunk("content", 0)
-
-    chunk.metadata shouldBe ChunkMetadata.empty
-  }
-
-  "ChunkMetadata" should "add headings" in {
-    val metadata = ChunkMetadata.empty
-      .withHeading("Chapter 1")
-      .withHeading("Section 1.1")
-
-    metadata.headings shouldBe Seq("Chapter 1", "Section 1.1")
-  }
-
-  it should "set source file" in {
-    val metadata = ChunkMetadata.empty.withSource("document.md")
-
-    metadata.sourceFile shouldBe Some("document.md")
-  }
-
-  it should "set offsets" in {
-    val metadata = ChunkMetadata.empty.withOffsets(0, 100)
-
-    metadata.startOffset shouldBe Some(0)
-    metadata.endOffset shouldBe Some(100)
-  }
-
-  it should "mark as code block" in {
-    val metadata = ChunkMetadata.empty.asCodeBlock(Some("python"))
-
-    metadata.isCodeBlock shouldBe true
-    metadata.language shouldBe Some("python")
-  }
-
-  it should "mark as code block without language" in {
-    val metadata = ChunkMetadata.empty.asCodeBlock()
-
-    metadata.isCodeBlock shouldBe true
-    metadata.language shouldBe None
-  }
-
-  "ChunkingConfig" should "have sensible defaults" in {
-    val config = ChunkingConfig()
-
-    config.targetSize shouldBe 800
-    config.maxSize shouldBe 1200
-    config.overlap shouldBe 150
-    config.minChunkSize shouldBe 100
-    config.preserveCodeBlocks shouldBe true
-    config.preserveHeadings shouldBe true
-  }
-
-  it should "validate targetSize is positive" in {
-    an[IllegalArgumentException] should be thrownBy {
-      ChunkingConfig(targetSize = 0)
-    }
-
-    an[IllegalArgumentException] should be thrownBy {
-      ChunkingConfig(targetSize = -1)
-    }
-  }
-
-  it should "validate maxSize >= targetSize" in {
-    an[IllegalArgumentException] should be thrownBy {
-      ChunkingConfig(targetSize = 100, maxSize = 50)
-    }
-  }
-
-  it should "validate overlap is non-negative and less than targetSize" in {
-    an[IllegalArgumentException] should be thrownBy {
-      ChunkingConfig(targetSize = 100, overlap = -1)
-    }
-
-    an[IllegalArgumentException] should be thrownBy {
-      ChunkingConfig(targetSize = 100, overlap = 150)
-    }
-  }
-
-  it should "accept valid overlap at boundaries" in {
-    val config1 = ChunkingConfig(targetSize = 100, overlap = 0)
-    config1.overlap shouldBe 0
-
-    val config2 = ChunkingConfig(targetSize = 100, overlap = 99)
-    config2.overlap shouldBe 99
-  }
-
-  it should "support custom configuration" in {
-    val config = ChunkingConfig(
-      targetSize = 500,
-      maxSize = 1000,
-      overlap = 100,
-      minChunkSize = 50,
-      preserveCodeBlocks = false,
-      preserveHeadings = false
-    )
-
-    config.targetSize shouldBe 500
-    config.maxSize shouldBe 1000
-    config.overlap shouldBe 100
-    config.minChunkSize shouldBe 50
-    config.preserveCodeBlocks shouldBe false
-    config.preserveHeadings shouldBe false
-  }
-
   "ChunkerFactory.Strategy all variants" should "be enumerable" in {
     val all = ChunkerFactory.Strategy.all
     all should have size 4
@@ -271,5 +142,263 @@ class ChunkerFactorySpec extends AnyFlatSpec with Matchers {
     ChunkerFactory.Strategy.all.foreach { strategy =>
       ChunkerFactory.Strategy.fromString(strategy.name) shouldBe Some(strategy)
     }
+  }
+
+  "ChunkerFactory.create(String)" should "create simple chunker from string" in {
+    val result = ChunkerFactory.create("simple")
+
+    result shouldBe defined
+    result.get shouldBe a[SimpleChunker]
+    result.get shouldBe a[DocumentChunker]
+  }
+
+  it should "create sentence chunker from string" in {
+    val result = ChunkerFactory.create("sentence")
+
+    result shouldBe defined
+    result.get shouldBe a[SentenceChunker]
+    result.get shouldBe a[DocumentChunker]
+  }
+
+  it should "create markdown chunker from string" in {
+    val result = ChunkerFactory.create("markdown")
+
+    result shouldBe defined
+    result.get shouldBe a[MarkdownChunker]
+    result.get shouldBe a[DocumentChunker]
+  }
+
+  it should "return None for unknown strategy string" in {
+    ChunkerFactory.create("unknown") shouldBe None
+  }
+
+  it should "return None for invalid strategy string" in {
+    ChunkerFactory.create("invalid") shouldBe None
+    ChunkerFactory.create("") shouldBe None
+    ChunkerFactory.create("   ") shouldBe None
+  }
+
+  it should "be case-insensitive for strategy string" in {
+    ChunkerFactory.create("SIMPLE") shouldBe defined
+    ChunkerFactory.create("Simple") shouldBe defined
+    ChunkerFactory.create("SiMpLe") shouldBe defined
+  }
+
+  it should "handle strategy string with whitespace" in {
+    ChunkerFactory.create("  simple  ") shouldBe defined
+    ChunkerFactory.create("\tsentence\n") shouldBe defined
+  }
+
+  it should "semantic strategy returns sentence chunker as fallback from string" in {
+    // Semantic chunking requires embeddings which aren't available via the factory create method.
+    // Instead of failing, we gracefully fall back to SentenceChunker for predictable behavior.
+    // This allows applications to request "semantic" strategy without requiring embedding setup
+    // at construction time, while still getting a usable chunker result.
+    val result = ChunkerFactory.create("semantic")
+
+    result shouldBe defined
+    result.get shouldBe a[SentenceChunker]
+  }
+
+  "ChunkerFactory.create(Strategy)" should "create simple chunker from Strategy.Simple" in {
+    val chunker = ChunkerFactory.create(ChunkerFactory.Strategy.Simple)
+
+    chunker shouldBe a[SimpleChunker]
+    chunker shouldBe a[DocumentChunker]
+  }
+
+  it should "create sentence chunker from Strategy.Sentence" in {
+    val chunker = ChunkerFactory.create(ChunkerFactory.Strategy.Sentence)
+
+    chunker shouldBe a[SentenceChunker]
+    chunker shouldBe a[DocumentChunker]
+  }
+
+  it should "create markdown chunker from Strategy.Markdown" in {
+    val chunker = ChunkerFactory.create(ChunkerFactory.Strategy.Markdown)
+
+    chunker shouldBe a[MarkdownChunker]
+    chunker shouldBe a[DocumentChunker]
+  }
+
+  it should "return sentence chunker as fallback from Strategy.Semantic" in {
+    // Strategy.Semantic is designed to always return a usable chunker even without embedding client.
+    // This fallback ensures type safety and predictable behavior: create(Strategy) never fails,
+    // making it suitable for code paths that must always produce a DocumentChunker.
+    // For true semantic chunking, callers should use semantic(embeddingClient, modelConfig) directly.
+    val chunker = ChunkerFactory.create(ChunkerFactory.Strategy.Semantic)
+
+    chunker shouldBe a[SentenceChunker]
+    chunker shouldBe a[DocumentChunker]
+  }
+
+  it should "create independent instances for each call" in {
+    val chunker1 = ChunkerFactory.create(ChunkerFactory.Strategy.Simple)
+    val chunker2 = ChunkerFactory.create(ChunkerFactory.Strategy.Simple)
+
+    chunker1 should not be theSameInstanceAs(chunker2)
+  }
+
+  it should "all strategy enum variants produce DocumentChunker" in {
+    ChunkerFactory.Strategy.all.foreach { strategy =>
+      val chunker = ChunkerFactory.create(strategy)
+      chunker shouldBe a[DocumentChunker]
+    }
+  }
+
+  "ChunkerFactory.auto()" should "return MarkdownChunker for markdown with heading" in {
+    val text    = "# Heading\n\nText"
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[MarkdownChunker]
+    chunker shouldBe a[DocumentChunker]
+  }
+
+  it should "return SentenceChunker for plain text without markdown" in {
+    val text    = "Plain text without markdown."
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[SentenceChunker]
+    chunker shouldBe a[DocumentChunker]
+  }
+
+  it should "detect markdown code blocks" in {
+    val text    = "Some text\n```python\nprint('hello')\n```\nMore text"
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[MarkdownChunker]
+  }
+
+  it should "detect markdown headings at various levels" in {
+    val text1 = "# H1\nText"
+    ChunkerFactory.auto(text1) shouldBe a[MarkdownChunker]
+
+    val text2 = "## H2\nText"
+    ChunkerFactory.auto(text2) shouldBe a[MarkdownChunker]
+
+    val text3 = "### H3\nText"
+    ChunkerFactory.auto(text3) shouldBe a[MarkdownChunker]
+
+    val text6 = "###### H6\nText"
+    ChunkerFactory.auto(text6) shouldBe a[MarkdownChunker]
+  }
+
+  it should "detect markdown bullet lists" in {
+    val text    = "Some text\n- Item 1\n- Item 2\nMore text"
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[MarkdownChunker]
+  }
+
+  it should "detect markdown with asterisk list markers" in {
+    val text    = "Some text\n* Item 1\n* Item 2"
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[MarkdownChunker]
+  }
+
+  it should "detect markdown with plus list markers" in {
+    val text    = "Some text\n+ Item 1\n+ Item 2"
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[MarkdownChunker]
+  }
+
+  it should "detect markdown with numbered lists" in {
+    val text    = "Some text\n1. First\n2. Second\nMore text"
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[MarkdownChunker]
+  }
+
+  it should "detect markdown with links" in {
+    val text    = "Check out [this link](https://example.com) for more info"
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[MarkdownChunker]
+  }
+
+  it should "detect markdown with images" in {
+    val text    = "Here is an image: ![alt text](image.png)"
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[MarkdownChunker]
+  }
+
+  it should "return SentenceChunker for empty string" in {
+    val text    = ""
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[SentenceChunker]
+  }
+
+  it should "return SentenceChunker for whitespace-only string" in {
+    val text    = "   \n\t   "
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[SentenceChunker]
+  }
+
+  it should "return SentenceChunker for simple sentences" in {
+    val text    = "This is the first sentence. This is the second sentence. And a third."
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[SentenceChunker]
+  }
+
+  it should "return SentenceChunker for text with URLs but no markdown syntax" in {
+    val text    = "Visit https://example.com for more information"
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[SentenceChunker]
+  }
+
+  it should "return SentenceChunker for text with hash symbol but not as heading" in {
+    val text    = "Use #hashtag in social media. # is also used in programming."
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[SentenceChunker]
+  }
+
+  it should "handle complex markdown document" in {
+    val text =
+      """# Main Title
+        |
+        |## Section 1
+        |
+        |This is a paragraph with some [link](https://example.com).
+        |
+        |```python
+        |def hello():
+        |    print("world")
+        |```
+        |
+        |- Point 1
+        |- Point 2
+        |
+        |## Section 2
+        |
+        |Final paragraph.
+        |""".stripMargin
+
+    val chunker = ChunkerFactory.auto(text)
+
+    chunker shouldBe a[MarkdownChunker]
+  }
+
+  it should "consistently return same chunker type for same input" in {
+    val text     = "# Heading\n\nMarkdown text"
+    val chunker1 = ChunkerFactory.auto(text)
+    val chunker2 = ChunkerFactory.auto(text)
+
+    chunker1.getClass shouldBe chunker2.getClass
+  }
+
+  it should "return independent instances for each call" in {
+    val text     = "# Heading\n\nText"
+    val chunker1 = ChunkerFactory.auto(text)
+    val chunker2 = ChunkerFactory.auto(text)
+
+    chunker1 should not be theSameInstanceAs(chunker2)
   }
 }

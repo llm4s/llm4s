@@ -275,3 +275,75 @@ class DocumentChunkSpec extends AnyFlatSpec with Matchers {
     newHeadings should have size 2
   }
 }
+
+class ChunkingConfigSpec extends AnyFlatSpec with Matchers {
+
+  "ChunkingConfig" should "have sensible defaults" in {
+    val config = ChunkingConfig()
+
+    config.targetSize shouldBe 800
+    config.maxSize shouldBe 1200
+    config.overlap shouldBe 150
+    config.minChunkSize shouldBe 100
+    config.preserveCodeBlocks shouldBe true
+    config.preserveHeadings shouldBe true
+  }
+
+  it should "validate targetSize is positive" in {
+    an[IllegalArgumentException] should be thrownBy {
+      ChunkingConfig(targetSize = 0)
+    }
+
+    an[IllegalArgumentException] should be thrownBy {
+      ChunkingConfig(targetSize = -1)
+    }
+  }
+
+  it should "validate maxSize >= targetSize" in {
+    an[IllegalArgumentException] should be thrownBy {
+      ChunkingConfig(targetSize = 100, maxSize = 50)
+    }
+  }
+
+  it should "validate overlap is non-negative and less than targetSize" in {
+    an[IllegalArgumentException] should be thrownBy {
+      ChunkingConfig(targetSize = 100, overlap = -1)
+    }
+
+    an[IllegalArgumentException] should be thrownBy {
+      ChunkingConfig(targetSize = 100, overlap = 150)
+    }
+  }
+
+  it should "validate minChunkSize is non-negative" in {
+    an[IllegalArgumentException] should be thrownBy {
+      ChunkingConfig(minChunkSize = -1)
+    }
+  }
+
+  it should "accept valid overlap at boundaries" in {
+    val config1 = ChunkingConfig(targetSize = 100, overlap = 0)
+    config1.overlap shouldBe 0
+
+    val config2 = ChunkingConfig(targetSize = 100, overlap = 99)
+    config2.overlap shouldBe 99
+  }
+
+  it should "support custom configuration" in {
+    val config = ChunkingConfig(
+      targetSize = 500,
+      maxSize = 1000,
+      overlap = 100,
+      minChunkSize = 50,
+      preserveCodeBlocks = false,
+      preserveHeadings = false
+    )
+
+    config.targetSize shouldBe 500
+    config.maxSize shouldBe 1000
+    config.overlap shouldBe 100
+    config.minChunkSize shouldBe 50
+    config.preserveCodeBlocks shouldBe false
+    config.preserveHeadings shouldBe false
+  }
+}
