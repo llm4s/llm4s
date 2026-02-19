@@ -13,34 +13,40 @@ class MetricsMiddlewareSpec extends AnyFlatSpec with Matchers {
 
   class FakeMetricsCollector extends MetricsCollector {
     val requests = new AtomicInteger(0)
-    val tokens = new AtomicInteger(0)
-    val costs = new AtomicInteger(0)
+    val tokens   = new AtomicInteger(0)
+    val costs    = new AtomicInteger(0)
 
-    override def observeRequest(provider: String, model: String, outcome: Outcome, duration: FiniteDuration): Unit = 
+    override def observeRequest(provider: String, model: String, outcome: Outcome, duration: FiniteDuration): Unit =
       requests.incrementAndGet()
-      
-    override def addTokens(provider: String, model: String, input: Long, output: Long): Unit = 
+
+    override def addTokens(provider: String, model: String, input: Long, output: Long): Unit =
       tokens.addAndGet((input + output).toInt)
-      
-    override def recordCost(provider: String, model: String, cost: Double): Unit = 
+
+    override def recordCost(provider: String, model: String, cost: Double): Unit =
       costs.incrementAndGet()
   }
 
   class MockClient(costStub: Option[Double] = None) extends LLMClient {
     override def complete(c: Conversation, o: CompletionOptions): Result[Completion] = {
       val usage = Some(TokenUsage(10, 20, 30))
-      Right(Completion("id", 0L, "content", "model", AssistantMessage("content"), usage = usage, estimatedCost = costStub))
+      Right(
+        Completion("id", 0L, "content", "model", AssistantMessage("content"), usage = usage, estimatedCost = costStub)
+      )
     }
-    
-    override def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = ???
-    override def getContextWindow(): Int = 100
+
+    override def streamComplete(
+      c: Conversation,
+      o: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = ???
+    override def getContextWindow(): Int     = 100
     override def getReserveCompletion(): Int = 10
   }
 
   "MetricsMiddleware" should "record metrics on success" in {
-    val collector = new FakeMetricsCollector()
+    val collector  = new FakeMetricsCollector()
     val middleware = new MetricsMiddleware(collector, "test-provider", "test-model")
-    val client = middleware.wrap(new MockClient(costStub = Some(0.002)))
+    val client     = middleware.wrap(new MockClient(costStub = Some(0.002)))
 
     client.complete(Conversation(Seq.empty))
 

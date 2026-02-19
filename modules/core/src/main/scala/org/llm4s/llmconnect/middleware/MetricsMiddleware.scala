@@ -8,7 +8,7 @@ import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
 
 /**
  * Middleware that collects metrics for LLM operations.
- * 
+ *
  * Replaces the provider-baked MetricsRecording trait with a composable layer.
  * Records request duration, success/failure counts, token usage, and costs.
  */
@@ -25,10 +25,10 @@ class MetricsMiddleware(
       conversation: Conversation,
       options: CompletionOptions
     ): Result[Completion] = {
-      val start = System.nanoTime()
-      val result = next.complete(conversation, options)
+      val start    = System.nanoTime()
+      val result   = next.complete(conversation, options)
       val duration = FiniteDuration(System.nanoTime() - start, NANOSECONDS)
-      
+
       recordMetrics(result, duration)
       result
     }
@@ -38,31 +38,28 @@ class MetricsMiddleware(
       options: CompletionOptions,
       onChunk: org.llm4s.llmconnect.model.StreamedChunk => Unit
     ): Result[Completion] = {
-      val start = System.nanoTime()
-      val result = next.streamComplete(conversation, options, onChunk)
+      val start    = System.nanoTime()
+      val result   = next.streamComplete(conversation, options, onChunk)
       val duration = FiniteDuration(System.nanoTime() - start, NANOSECONDS)
-      
+
       recordMetrics(result, duration)
       result
     }
 
-    private def recordMetrics(result: Result[Completion], duration: FiniteDuration): Unit = {
+    private def recordMetrics(result: Result[Completion], duration: FiniteDuration): Unit =
       result match {
         case Right(completion) =>
           collector.observeRequest(providerName, modelName, Outcome.Success, duration)
-          
+
           completion.usage.foreach { usage =>
-             collector.addTokens(providerName, modelName, usage.promptTokens.toLong, usage.completionTokens.toLong)
+            collector.addTokens(providerName, modelName, usage.promptTokens.toLong, usage.completionTokens.toLong)
           }
 
-          completion.estimatedCost.foreach { cost =>
-            collector.recordCost(providerName, modelName, cost)
-          }
+          completion.estimatedCost.foreach(cost => collector.recordCost(providerName, modelName, cost))
 
         case Left(error) =>
           val kind = ErrorKind.fromLLMError(error)
           collector.observeRequest(providerName, modelName, Outcome.Error(kind), duration)
       }
-    }
   }
 }

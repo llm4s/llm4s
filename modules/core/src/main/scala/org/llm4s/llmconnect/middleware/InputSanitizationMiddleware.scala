@@ -7,7 +7,7 @@ import org.llm4s.types.Result
 
 /**
  * Middleware that sanitizes and validates input prompts.
- * 
+ *
  * Can enforce max length limits and reject inputs containing forbidden patterns.
  */
 class InputSanitizationMiddleware(
@@ -21,36 +21,36 @@ class InputSanitizationMiddleware(
     override def complete(
       conversation: Conversation,
       options: CompletionOptions
-    ): Result[Completion] = {
+    ): Result[Completion] =
       validate(conversation) match {
         case Right(_) => next.complete(conversation, options)
         case Left(e)  => Left(e)
       }
-    }
 
     override def streamComplete(
       conversation: Conversation,
       options: CompletionOptions,
       onChunk: org.llm4s.llmconnect.model.StreamedChunk => Unit
-    ): Result[Completion] = {
+    ): Result[Completion] =
       validate(conversation) match {
         case Right(_) => next.streamComplete(conversation, options, onChunk)
         case Left(e)  => Left(e)
       }
-    }
 
     private def validate(conversation: Conversation): Result[Unit] = {
       val allContent = conversation.messages.map(_.content).mkString
-      
+
       if (allContent.length > maxTotalCharacters) {
-        return Left(InvalidInputError("prompt", s"${allContent.length} chars", s"exceeds maximum allowed $maxTotalCharacters"))
+        return Left(
+          InvalidInputError("prompt", s"${allContent.length} chars", s"exceeds maximum allowed $maxTotalCharacters")
+        )
       }
 
       val forbiddenFound = forbiddenPatterns.find(_.findFirstIn(allContent).isDefined)
       if (forbiddenFound.isDefined) {
-         return Left(InvalidInputError("prompt", "content", "contains forbidden patterns/content."))
+        return Left(InvalidInputError("prompt", "content", "contains forbidden patterns/content."))
       }
-      
+
       Right(())
     }
   }

@@ -8,7 +8,7 @@ import java.time.Clock
 
 /**
  * Middleware adapter for CachingLLMClient.
- * 
+ *
  * Allows using semantic caching as part of the middleware pipeline.
  */
 class CachingMiddleware(
@@ -21,7 +21,7 @@ class CachingMiddleware(
 
   override def name: String = "caching"
 
-  override def wrap(next: LLMClient): LLMClient = 
+  override def wrap(next: LLMClient): LLMClient =
     new CachingLLMClient(
       baseClient = next,
       embeddingClient = embeddingClient,

@@ -8,6 +8,7 @@ trait ContentRedactor {
 }
 
 object ContentRedactor {
+
   /** A default redactor that masks common patterns like API keys, emails, and credit cards. */
   val default: ContentRedactor = new RegexContentRedactor(
     patterns = Seq(

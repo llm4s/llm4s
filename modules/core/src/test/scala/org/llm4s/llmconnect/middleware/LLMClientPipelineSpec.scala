@@ -23,13 +23,15 @@ class LLMClientPipelineSpec extends AnyFlatSpec with Matchers {
   class MockBaseClient(log: ArrayBuffer[String]) extends LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
       log += "base"
-      Right(Completion(
-          id = "test-id", 
+      Right(
+        Completion(
+          id = "test-id",
           created = 1234567890L,
           content = "test-content",
           model = "test-model",
           message = AssistantMessage("test-content")
-      ))
+        )
+      )
     }
 
     override def streamComplete(
@@ -37,13 +39,13 @@ class LLMClientPipelineSpec extends AnyFlatSpec with Matchers {
       options: CompletionOptions,
       onChunk: StreamedChunk => Unit
     ): Result[Completion] = ???
-    
-    override def getContextWindow(): Int = 4096
+
+    override def getContextWindow(): Int     = 4096
     override def getReserveCompletion(): Int = 100
   }
 
   "LLMClientPipeline" should "apply middleware in correct order" in {
-    val log = ArrayBuffer[String]()
+    val log  = ArrayBuffer[String]()
     val base = new MockBaseClient(log)
 
     val client = LLMClientPipeline(base)
@@ -57,7 +59,7 @@ class LLMClientPipelineSpec extends AnyFlatSpec with Matchers {
     // 1. inner is added first, so it wraps base.
     // 2. outer is added second, so it wraps (inner(base)).
     // Execution flow: outer calls inner, inner calls base.
-    
+
     log.toSeq shouldBe Seq(
       "outer enter",
       "inner enter",
@@ -68,13 +70,13 @@ class LLMClientPipelineSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return middleware names in application order" in {
-    val log = ArrayBuffer[String]()
+    val log  = ArrayBuffer[String]()
     val base = new MockBaseClient(log)
-    
+
     val pipeline = LLMClientPipeline(base)
       .use(new MockMiddleware("one", log))
       .use(new MockMiddleware("two", log))
-      
+
     pipeline.middlewareNames shouldBe Seq("one", "two")
   }
 }

@@ -16,21 +16,20 @@ class RequestIdMiddleware(
   headerName: String = "X-Request-Id",
   generator: () => String = () => UUID.randomUUID().toString.take(8)
 ) extends LLMMiddleware {
-  
+
   override def name: String = "request-id"
 
   override def wrap(client: LLMClient): LLMClient = new MiddlewareClient(client) {
     override def complete(
-      conversation: Conversation, 
+      conversation: Conversation,
       options: CompletionOptions
     ): Result[Completion] = {
       val requestId = generator()
       MDC.put(headerName, requestId)
-      try {
+      try
         next.complete(conversation, options)
-      } finally {
+      finally
         MDC.remove(headerName)
-      }
     }
 
     // Note: streamComplete is tricky with MDC because the callback might run on a different thread.
@@ -42,11 +41,10 @@ class RequestIdMiddleware(
     ): Result[Completion] = {
       val requestId = generator()
       MDC.put(headerName, requestId)
-      try {
+      try
         next.streamComplete(conversation, options, onChunk)
-      } finally {
+      finally
         MDC.remove(headerName)
-      }
     }
   }
 }

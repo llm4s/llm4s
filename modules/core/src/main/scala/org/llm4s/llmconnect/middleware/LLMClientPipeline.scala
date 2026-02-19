@@ -28,7 +28,7 @@ final class LLMClientPipeline private (
 
   /** Build the final client by applying all middlewares in order. */
   def build(): LLMClient =
-    middlewares.foldLeft(base) { (client, mw) => mw.wrap(client) }
+    middlewares.foldLeft(base)((client, mw) => mw.wrap(client))
 
   /** Returns the names of all middleware in the pipeline, in application order. */
   def middlewareNames: Seq[String] = middlewares.map(_.name)
