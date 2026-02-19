@@ -100,10 +100,18 @@ class SimpleChunkerSpec extends AnyFlatSpec with Matchers {
 
     val chunks = chunker.chunk(text, config)
 
-    chunks should not be empty
-    // Overlapping chunks should have some content in common with neighbors
-    if (chunks.length > 1) {
-      chunks.length should be >= 2
+    // With 300 chars, targetSize 100, overlap 20:
+    // Chunk positions: [0-99], [80-179], [160-259], [240-299]
+    // Step size = targetSize - overlap = 100 - 20 = 80
+    // Expected chunks: 4
+    chunks should have size 4
+
+    // Verify overlap actually works: adjacent chunks should share content
+    // The last overlap characters of chunk N should match the first overlap characters of chunk N+1
+    for (i <- 0 until (chunks.length - 1)) {
+      val overlapFromEnd   = chunks(i).content.takeRight(config.overlap)
+      val overlapFromStart = chunks(i + 1).content.take(config.overlap)
+      overlapFromEnd shouldBe overlapFromStart
     }
   }
 
@@ -113,20 +121,22 @@ class SimpleChunkerSpec extends AnyFlatSpec with Matchers {
 
     val chunks = chunker.chunk(text, config)
 
-    // May or may not produce chunks depending on implementation
-    chunks.foreach(_.content should not be empty)
+    // SimpleChunker only short-circuits on text.isEmpty; whitespace-only input is non-empty
+    // so it is passed through unchanged as a single chunk.
+    chunks should have size 1
+    chunks.head.content shouldBe text
   }
 
   it should "preserve original text content across chunks" in {
     val text   = "The quick brown fox jumps over the lazy dog. " * 20
-    val config = ChunkingConfig(targetSize = 200, overlap = 20)
+    val config = ChunkingConfig(targetSize = 200, overlap = 0)
 
     val chunks        = chunker.chunk(text, config)
     val reconstructed = chunks.map(_.content).mkString("")
 
-    // Overlaps mean reconstructed won't match exactly, but should contain original
-    reconstructed should include("The quick brown fox")
-    reconstructed should include("lazy dog")
+    // With no overlap each window is disjoint, so concatenating all chunks must
+    // reproduce the input exactly — not just contain a substring of it.
+    reconstructed shouldBe text
   }
 
   it should "maintain consistent chunk structure" in {
@@ -138,9 +148,10 @@ class SimpleChunkerSpec extends AnyFlatSpec with Matchers {
     // All chunks should have positive length
     chunks.foreach(_.length should be > 0)
 
-    // Chunk count should be reasonable for input size
-    chunks.length should be > 1
-    chunks.length should be < (text.length / 50) // Some reasonable upper bound
+    // With no overlap, each window advances by exactly targetSize, so the chunk count
+    // is precisely ceil(text.length / targetSize) = ceil(700 / 150) = 5
+    val expectedChunks = math.ceil(text.length.toDouble / config.targetSize).toInt
+    chunks.length shouldBe expectedChunks
   }
 
   it should "create minimum number of chunks for large overlap" in {
@@ -216,5 +227,26 @@ class SimpleChunkerSpec extends AnyFlatSpec with Matchers {
 
     chunks should not be empty
     chunks.length should be > 1
+  }
+
+  it should "tag every chunk with the source file via chunkWithSource" in {
+    val text   = "Hello world! This is a simple test." * 20
+    val config = ChunkingConfig(targetSize = 100, overlap = 0)
+
+    val chunks = chunker.chunkWithSource(text, "myfile.txt", config)
+
+    chunks should not be empty
+    chunks.foreach(_.metadata.sourceFile shouldBe Some("myfile.txt"))
+  }
+
+  it should "produce identical content chunks from chunkWithSource as from chunk" in {
+    val text   = "Hello world! This is a simple test." * 20
+    val config = ChunkingConfig(targetSize = 100, overlap = 0)
+
+    val plain  = chunker.chunk(text, config)
+    val tagged = chunker.chunkWithSource(text, "myfile.txt", config)
+
+    tagged.map(_.content) shouldBe plain.map(_.content)
+    tagged.map(_.index) shouldBe plain.map(_.index)
   }
 }
