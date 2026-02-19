@@ -196,7 +196,7 @@ object HelloOllama extends App {
 sbt run
 ```
 
-### Expected Output
+### Example Output
 
 ```
 ✓ Response from mistral:
@@ -206,148 +206,75 @@ the Java Virtual Machine (JVM).
 ```
 
 ---
+
 ## Step 6: Try Different Models
+
 You can easily switch models:
 
-# Try Llama 2
-export LLM_MODEL=ollama/llama2
+```bash
+# Try Llama 3.2 (good balance of reasoning and quality)
+export LLM_MODEL=ollama/llama3.2
 
-# Try Phi (faster, smaller)
-export LLM_MODEL=ollama/phi
+# Try Phi3 (lightweight,faster, smaller)
+export LLM_MODEL=ollama/phi3
 
 # Try CodeLlama (for coding tasks)
 export LLM_MODEL=ollama/codellama
+```
+
 Then run your program again without code changes!
 
-## Step 6a: Write Your First LLM4S + Ollama/Llama2 App
+---
 
-Llama2 offers an excellent balance of quality and performance for conversational tasks. Create `HelloLlama2.scala`:
+## Step 6a: Write Your First LLM4S + Ollama/Llama3.2 App
 
-```scala
-import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model._
+Llama 3.2 is Meta's latest with an impressive 128K context window. Perfect for processing large documents and long conversations.
 
-object HelloLlama2 extends App {
-  // Create a conversation with system and user messages
-  val conversation = Conversation(Seq(
-    SystemMessage("You are a helpful AI assistant."),
-    UserMessage("Explain what Scala is in one sentence.")
-  ))
-
-  // Load config and make the request
-  val result = for {
-    providerConfig <- Llm4sConfig.provider()
-    client <- LLMConnect.getClient(providerConfig)
-    completion <- client.complete(conversation)
-  } yield completion
-
-  result match {
-    case Right(completion) =>
-      println(s"Response from ${completion.model}:")
-      println(completion.message.content)
-    case Left(error) =>
-      println(s"Error: ${error.formatted}")
-  }
-}
-```
-
-### Configure for Llama2
+For the code, use the same Scala example from **Step 5** - simply change the configuration:
 
 ```bash
 # Linux / macOS
-export LLM_MODEL=ollama/llama2
-export OLLAMA_BASE_URL=http://localhost:11434
+export LLM_MODEL=ollama/llama3.2
 
 # Windows PowerShell
-$env:LLM_MODEL = "ollama/llama2"
-$env:OLLAMA_BASE_URL = "http://localhost:11434"
+$env:LLM_MODEL = "ollama/llama3.2"
 ```
 
-### Run It!
+Then run:
 
 ```bash
 sbt run
 ```
 
-### Expected Output
-
-```
-✓ Response from llama2:
-Scala is a modern programming language that combines object-oriented
-and functional programming paradigms on the Java Virtual Machine (JVM),
-offering strong type safety and concise syntax.
-```
-
 {: .tip }
-> **Why Llama2?** Llama2 offers excellent conversational abilities with a balanced 4K context window. Meta's model is production-ready and ideal for general-purpose applications.
+> **Why Llama 3.2?** Latest Llama model with 128K context window. Excellent for RAG applications, long-form content generation, and processing large documents. Available in 1B, 3B, 8B, 70B, and 405B sizes.
 
 ---
-## Step 6b: Write Your First LLM4S + Ollama/Phi App
 
-Phi is a lightweight model perfect for quick iterations and resource-constrained environments. Create `HelloPhi.scala`:
+## Step 6b: Write Your First LLM4S + Ollama/Phi3 App
 
-```scala
-import org.llm4s.config.Llm4sConfig
-import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model._
+Phi3 is Microsoft's efficient model, even smaller than Phi. Ideal for ultra-low-latency applications and edge deployment.
 
-object HelloPhi extends App {
-  // Create a conversation with system and user messages
-  val conversation = Conversation(Seq(
-    SystemMessage("You are a helpful AI assistant."),
-    UserMessage("Explain what Scala is in one sentence.")
-  ))
-
-  // Load config and make the request
-  val result = for {
-    providerConfig <- Llm4sConfig.provider()
-    client <- LLMConnect.getClient(providerConfig)
-    completion <- client.complete(conversation)
-  } yield completion
-
-  result match {
-    case Right(completion) =>
-      println(s"Response from ${completion.model}:")
-      println(completion.message.content)
-    case Left(error) =>
-      println(s"Error: ${error.formatted}")
-  }
-}
-```
-
-### Configure for Phi
+For the code, use the same Scala example from **Step 5** - simply change the configuration:
 
 ```bash
 # Linux / macOS
-export LLM_MODEL=ollama/phi
-export OLLAMA_BASE_URL=http://localhost:11434
+export LLM_MODEL=ollama/phi3
 
 # Windows PowerShell
-$env:LLM_MODEL = "ollama/phi"
-$env:OLLAMA_BASE_URL = "http://localhost:11434"
+$env:LLM_MODEL = "ollama/phi3"
 ```
 
-### Run It!
+Then run:
 
 ```bash
 sbt run
 ```
 
-### Expected Output
-
-```
-✓ Response from phi:
-Scala is a modern, statically-typed programming language that combines
-functional and object-oriented programming, designed to run on the Java
-Virtual Machine for increased productivity and safety.
-```
-
 {: .tip }
-> **Why Phi?** Phi is one of the smallest models (1.6GB) with excellent performance. Perfect for development, testing, and running on resource-limited machines.
+> **Why Phi3?** Microsoft's compact model optimized for efficiency. Smaller than Phi (1.4GB) with competitive quality. Perfect for resource-constrained environments and real-time applications requiring minimal latency.
 
 ---
-
 ## Step 6c: Write Your First LLM4S + Ollama/CodeLlama App
 
 CodeLlama is purpose-built for code generation and understanding. Create `HelloCodeLlama.scala`:
@@ -386,11 +313,9 @@ object HelloCodeLlama extends App {
 ```bash
 # Linux / macOS
 export LLM_MODEL=ollama/codellama
-export OLLAMA_BASE_URL=http://localhost:11434
 
 # Windows PowerShell
 $env:LLM_MODEL = "ollama/codellama"
-$env:OLLAMA_BASE_URL = "http://localhost:11434"
 ```
 
 ### Run It!
@@ -399,7 +324,7 @@ $env:OLLAMA_BASE_URL = "http://localhost:11434"
 sbt run
 ```
 
-### Expected Output
+### Example Output
 
 ```
 ✓ Code suggestion from codellama:
