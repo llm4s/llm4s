@@ -9,6 +9,15 @@ echo "Running pre-commit checks..."
 
 # Check if sbt is available
 if ! command -v sbt &> /dev/null; then
+    # Try loading SDKMAN if available
+    if [ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]; then
+        # shellcheck disable=SC1090
+        source "$HOME/.sdkman/bin/sdkman-init.sh"
+    fi
+fi
+
+# Re-check after SDKMAN init
+if ! command -v sbt &> /dev/null; then
     echo "Error: sbt is not installed or not in PATH"
     exit 1
 fi

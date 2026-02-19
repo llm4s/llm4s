@@ -1,4 +1,4 @@
-# CLAUDE.md - AI Assistant Guide for LLM4S
+sbt --version# CLAUDE.md - AI Assistant Guide for LLM4S
 
 ## Project Overview
 
