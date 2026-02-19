@@ -88,7 +88,7 @@ class CohereClient(
 
   override def close(): Unit =
     if (closed.compareAndSet(false, true)) {
-      httpClient match {
+      (httpClient: Any) match {
         case c: AutoCloseable => c.close()
         case _                => ()
       }
