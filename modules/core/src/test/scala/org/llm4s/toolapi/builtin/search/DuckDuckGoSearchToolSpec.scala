@@ -1,7 +1,7 @@
 package org.llm4s.toolapi.builtin.search
 
 import org.llm4s.config.DuckDuckGoSearchToolConfig
-import org.llm4s.http.{ FailingHttpClient, MockHttpClient }
+import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -157,7 +157,7 @@ class DuckDuckGoSearchToolSpec extends AnyFlatSpec with Matchers {
         )
       )
       .render()
-    val mockClient = new MockHttpClient(body, 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
 
     val result = DuckDuckGoSearchTool.search(
       "https://api.duckduckgo.com",
@@ -178,7 +178,7 @@ class DuckDuckGoSearchToolSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return error on non-200 status code" in {
-    val mockClient = new MockHttpClient("Internal Server Error", 500)
+    val mockClient = new MockHttpClient(HttpResponse(500, "Internal Server Error"))
 
     val result = DuckDuckGoSearchTool.search(
       "https://api.duckduckgo.com",
@@ -194,7 +194,7 @@ class DuckDuckGoSearchToolSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return sanitized error on invalid JSON response" in {
-    val mockClient = new MockHttpClient("not json {{{", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, "not json {{{"))
 
     val result = DuckDuckGoSearchTool.search(
       "https://api.duckduckgo.com",
@@ -211,7 +211,7 @@ class DuckDuckGoSearchToolSpec extends AnyFlatSpec with Matchers {
 
   it should "send correct headers and query params" in {
     val body       = ujson.Obj("Abstract" -> "", "RelatedTopics" -> ujson.Arr()).render()
-    val mockClient = new MockHttpClient(body, 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
 
     DuckDuckGoSearchTool.search(
       "https://api.duckduckgo.com",
@@ -230,7 +230,7 @@ class DuckDuckGoSearchToolSpec extends AnyFlatSpec with Matchers {
 
   it should "send safesearch=-1 when safeSearch is false" in {
     val body       = ujson.Obj("Abstract" -> "", "RelatedTopics" -> ujson.Arr()).render()
-    val mockClient = new MockHttpClient(body, 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
 
     DuckDuckGoSearchTool.search(
       "https://api.duckduckgo.com",

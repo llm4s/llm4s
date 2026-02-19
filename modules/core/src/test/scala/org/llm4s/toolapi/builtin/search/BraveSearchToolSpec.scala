@@ -3,10 +3,9 @@ package org.llm4s.toolapi.builtin.search
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.config.{ BraveSearchToolConfig, Llm4sConfig }
-import org.llm4s.http.{ FailingHttpClient, MockHttpClient }
+import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 
 class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
-
 
   private def testToolConfig = BraveSearchToolConfig(
     apiKey = "test-api-key",
@@ -221,7 +220,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
   // --- Unit tests for BraveSearchTool.create() and withApiKey() ---
 
   "BraveSearchTool.create" should "return Right with correct tool name and description for Web category" in {
-    val mockClient = new MockHttpClient("{}", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, "{}"))
     val result     = BraveSearchTool.create(testToolConfig, BraveSearchCategory.Web, None, mockClient)
     result match {
       case Right(tool) =>
@@ -232,7 +231,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return Right with correct tool name and description for News category" in {
-    val mockClient = new MockHttpClient("{}", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, "{}"))
     val result     = BraveSearchTool.create(testToolConfig, BraveSearchCategory.News, None, mockClient)
     result match {
       case Right(tool) => tool.name shouldBe "brave_news_search"
@@ -242,7 +241,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
 
   it should "apply custom BraveSearchConfig when provided" in {
     val mockClient =
-      new MockHttpClient(ujson.Obj("web" -> ujson.Obj("results" -> ujson.Arr())).render(), 200)
+      new MockHttpClient(HttpResponse(200, ujson.Obj("web" -> ujson.Obj("results" -> ujson.Arr())).render()))
     val customConfig = Some(BraveSearchConfig(count = 3, safeSearch = SafeSearch.Off))
     val result       = BraveSearchTool.create(testToolConfig, BraveSearchCategory.Web, customConfig, mockClient)
     result match {
@@ -252,7 +251,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
   }
 
   "BraveSearchTool.withApiKey" should "return Right with correct tool name using default Web category" in {
-    val mockClient = new MockHttpClient("{}", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, "{}"))
     val result     = BraveSearchTool.withApiKey("test-key", httpClient = mockClient)
     result match {
       case Right(tool) => tool.name shouldBe "brave_web_search"
@@ -261,7 +260,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return Right with correct tool name for explicit category" in {
-    val mockClient = new MockHttpClient("{}", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, "{}"))
     val result = BraveSearchTool.withApiKey("test-key", category = BraveSearchCategory.Image, httpClient = mockClient)
     result match {
       case Right(tool) => tool.name shouldBe "brave_image_search"
@@ -271,7 +270,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
 
   it should "use the provided apiUrl" in {
     val body       = ujson.Obj("web" -> ujson.Obj("results" -> ujson.Arr())).render()
-    val mockClient = new MockHttpClient(body, 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
     val result = BraveSearchTool.withApiKey("test-key", apiUrl = "https://custom.brave.com/v1", httpClient = mockClient)
     result match {
       case Right(tool) => tool.name shouldBe "brave_web_search"
@@ -291,7 +290,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
         )
       )
       .render()
-    val mockClient = new MockHttpClient(body, 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
 
     val result = BraveSearchTool.search(
       "scala",
@@ -321,7 +320,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
         )
       )
       .render()
-    val mockClient = new MockHttpClient(body, 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
 
     val result = BraveSearchTool.search(
       "scala logo",
@@ -346,7 +345,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
         )
       )
       .render()
-    val mockClient = new MockHttpClient(body, 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
 
     val result = BraveSearchTool.search(
       "scala tutorial",
@@ -371,7 +370,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
         )
       )
       .render()
-    val mockClient = new MockHttpClient(body, 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
 
     val result = BraveSearchTool.search(
       "scala news",
@@ -389,7 +388,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return error on non-200 status code" in {
-    val mockClient = new MockHttpClient("""{"error":"Forbidden"}""", 403)
+    val mockClient = new MockHttpClient(HttpResponse(403, """{"error":"Forbidden"}"""))
 
     val result = BraveSearchTool.search(
       "test",
@@ -406,7 +405,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return sanitized error on invalid JSON response" in {
-    val mockClient = new MockHttpClient("not valid json {{{", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, "not valid json {{{"))
 
     val result = BraveSearchTool.search(
       "test",
@@ -424,7 +423,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
 
   it should "send correct headers including API key" in {
     val body       = ujson.Obj("web" -> ujson.Obj("results" -> ujson.Arr())).render()
-    val mockClient = new MockHttpClient(body, 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
 
     BraveSearchTool.search(
       "test",
@@ -442,7 +441,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
 
   it should "send correct query params" in {
     val body       = ujson.Obj("web" -> ujson.Obj("results" -> ujson.Arr())).render()
-    val mockClient = new MockHttpClient(body, 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
 
     BraveSearchTool.search(
       "scala lang",
@@ -460,13 +459,13 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
 
   it should "build correct URL for each category" in {
     val body       = ujson.Obj("web" -> ujson.Obj("results" -> ujson.Arr())).render()
-    val mockClient = new MockHttpClient(body, 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
 
     BraveSearchTool.search("q", BraveSearchConfig(), testToolConfig, BraveSearchCategory.Web, mockClient, () => ())
     mockClient.lastUrl shouldBe Some("https://api.search.brave.com/res/v1/web/search")
 
     val imgBody       = ujson.Obj("results" -> ujson.Arr()).render()
-    val imgMockClient = new MockHttpClient(imgBody, 200)
+    val imgMockClient = new MockHttpClient(HttpResponse(200, imgBody))
     BraveSearchTool.search("q", BraveSearchConfig(), testToolConfig, BraveSearchCategory.Image, imgMockClient, () => ())
     imgMockClient.lastUrl shouldBe Some("https://api.search.brave.com/res/v1/images/search")
   }

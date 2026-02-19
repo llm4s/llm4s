@@ -677,7 +677,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       200,
       """{"results":[{"title":"Test","url":"https://example.com"}]}"""
     )
-    val mockClient = new MockHttpClient(successResponse.body, successResponse.statusCode)
+    val mockClient = new MockHttpClient(HttpResponse(successResponse.statusCode, successResponse.body))
     val toolConfig = ExaSearchToolConfig(
       apiKey = "test-key",
       apiUrl = "https://api.exa.ai",
@@ -700,7 +700,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       body =
         """{"requestId":"req-123","searchType":"neural","results":[{"title":"Test Result","url":"https://example.com","text":"Test content"}]}"""
     )
-    val mockClient = new MockHttpClient(successResponse.body, successResponse.statusCode)
+    val mockClient = new MockHttpClient(HttpResponse(successResponse.statusCode, successResponse.body))
     val toolConfig = ExaSearchToolConfig(
       apiKey = "test-key",
       apiUrl = "https://api.exa.ai",
@@ -730,7 +730,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       statusCode = 401,
       body = """{"error":"Invalid API key"}"""
     )
-    val mockClient = new MockHttpClient(errorResponse.body, errorResponse.statusCode)
+    val mockClient = new MockHttpClient(HttpResponse(errorResponse.statusCode, errorResponse.body))
     val toolConfig = ExaSearchToolConfig(
       apiKey = "invalid-key",
       apiUrl = "https://api.exa.ai",
@@ -752,7 +752,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       statusCode = 429,
       body = """{"error":"Rate limit exceeded"}"""
     )
-    val mockClient = new MockHttpClient(errorResponse.body, errorResponse.statusCode)
+    val mockClient = new MockHttpClient(HttpResponse(errorResponse.statusCode, errorResponse.body))
     val toolConfig = ExaSearchToolConfig(
       apiKey = "test-key",
       apiUrl = "https://api.exa.ai",
@@ -774,7 +774,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       statusCode = 500,
       body = """{"error":"Internal server error"}"""
     )
-    val mockClient = new MockHttpClient(errorResponse.body, errorResponse.statusCode)
+    val mockClient = new MockHttpClient(HttpResponse(errorResponse.statusCode, errorResponse.body))
     val toolConfig = ExaSearchToolConfig(
       apiKey = "test-key",
       apiUrl = "https://api.exa.ai",
@@ -832,7 +832,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       statusCode = 200,
       body = """{"invalid json structure}"""
     )
-    val mockClient = new MockHttpClient(invalidJsonResponse.body, invalidJsonResponse.statusCode)
+    val mockClient = new MockHttpClient(HttpResponse(invalidJsonResponse.statusCode, invalidJsonResponse.body))
     val toolConfig = ExaSearchToolConfig(
       apiKey = "test-key",
       apiUrl = "https://api.exa.ai",

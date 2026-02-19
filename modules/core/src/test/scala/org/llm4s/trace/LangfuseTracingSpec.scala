@@ -2,7 +2,7 @@ package org.llm4s.trace
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.llm4s.http.{ FailingHttpClient, Llm4sHttpClient, MockHttpClient }
+import org.llm4s.http.{ FailingHttpClient, HttpResponse, Llm4sHttpClient, MockHttpClient }
 import org.llm4s.llmconnect.model.TokenUsage
 
 import java.util.Base64
@@ -29,7 +29,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
   )
 
   "LangfuseTracing" should "send correct URL, headers, and batch body on 200" in {
-    val mockClient = new MockHttpClient("""{"successes":1}""", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, """{"successes":1}"""))
     val tracing    = makeTracing(mockClient)
 
     val result = tracing.traceEvent(simpleEvent)
@@ -53,7 +53,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "not append /api/public/ingestion if URL already has it" in {
-    val mockClient = new MockHttpClient("", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, ""))
     val tracing    = makeTracing(mockClient, langfuseUrl = "https://langfuse.example.com/api/public/ingestion")
 
     tracing.traceEvent(simpleEvent)
@@ -62,7 +62,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "strip trailing slash before appending ingestion path" in {
-    val mockClient = new MockHttpClient("", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, ""))
     val tracing    = makeTracing(mockClient, langfuseUrl = "https://langfuse.example.com/")
 
     tracing.traceEvent(simpleEvent)
@@ -71,7 +71,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return Right on 207 partial success" in {
-    val mockClient = new MockHttpClient("""{"successes":1,"errors":0}""", 207)
+    val mockClient = new MockHttpClient(HttpResponse(207, """{"successes":1,"errors":0}"""))
     val tracing    = makeTracing(mockClient)
 
     val result = tracing.traceEvent(simpleEvent)
@@ -81,7 +81,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return Left on non-2xx response" in {
-    val mockClient = new MockHttpClient("""{"error":"Internal Server Error"}""", 500)
+    val mockClient = new MockHttpClient(HttpResponse(500, """{"error":"Internal Server Error"}"""))
     val tracing    = makeTracing(mockClient)
 
     val result = tracing.traceEvent(simpleEvent)
@@ -92,7 +92,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return Left on 401 unauthorized" in {
-    val mockClient = new MockHttpClient("""{"error":"Unauthorized"}""", 401)
+    val mockClient = new MockHttpClient(HttpResponse(401, """{"error":"Unauthorized"}"""))
     val tracing    = makeTracing(mockClient)
 
     val result = tracing.traceEvent(simpleEvent)
@@ -103,7 +103,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "skip export and return Right when public key is empty" in {
-    val mockClient = new MockHttpClient("", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, ""))
     val tracing    = makeTracing(mockClient, publicKey = "")
 
     val result = tracing.traceEvent(simpleEvent)
@@ -113,7 +113,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "skip export and return Right when secret key is empty" in {
-    val mockClient = new MockHttpClient("", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, ""))
     val tracing    = makeTracing(mockClient, secretKey = "")
 
     val result = tracing.traceEvent(simpleEvent)
@@ -148,7 +148,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "encode credentials correctly in Base64" in {
-    val mockClient = new MockHttpClient("", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, ""))
     val tracing    = makeTracing(mockClient, publicKey = "pk-test", secretKey = "sk-test")
 
     tracing.traceEvent(simpleEvent)
@@ -160,7 +160,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "handle TokenUsageRecorded event correctly" in {
-    val mockClient = new MockHttpClient("", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, ""))
     val tracing    = makeTracing(mockClient)
     val usage      = TokenUsage(promptTokens = 100, completionTokens = 50, totalTokens = 150)
 
@@ -175,7 +175,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "handle traceToolCall correctly" in {
-    val mockClient = new MockHttpClient("", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, ""))
     val tracing    = makeTracing(mockClient)
 
     val result = tracing.traceToolCall("calculator", """{"expr":"2+2"}""", "4")
@@ -189,7 +189,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "handle traceError correctly" in {
-    val mockClient = new MockHttpClient("", 200)
+    val mockClient = new MockHttpClient(HttpResponse(200, ""))
     val tracing    = makeTracing(mockClient)
 
     val result = tracing.traceError(new RuntimeException("something broke"), "test-context")
