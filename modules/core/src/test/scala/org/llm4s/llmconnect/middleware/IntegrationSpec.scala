@@ -6,7 +6,6 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-
 class IntegrationSpec extends AnyFlatSpec with Matchers {
 
   // FakeLogger is now imported from TestHelpers

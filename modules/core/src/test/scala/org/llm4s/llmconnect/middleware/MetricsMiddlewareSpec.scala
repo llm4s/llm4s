@@ -56,12 +56,16 @@ class MetricsMiddlewareSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "record metrics on failure" in {
-    val collector  = new FakeMetricsCollector()
+    val collector = new FakeMetricsCollector()
     class FailingClient extends LLMClient {
       override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
         Left(org.llm4s.error.RateLimitError("Limit exceeded"))
-      override def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = ???
-      override def getContextWindow(): Int = 100
+      override def streamComplete(
+        c: Conversation,
+        o: CompletionOptions,
+        onChunk: StreamedChunk => Unit
+      ): Result[Completion] = ???
+      override def getContextWindow(): Int     = 100
       override def getReserveCompletion(): Int = 10
     }
 

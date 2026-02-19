@@ -46,8 +46,8 @@ class RateLimitingMiddlewareSpec extends AnyFlatSpec with Matchers {
 
   it should "refill tokens over time" in {
     // 600 RPM = 10 requests per second = 1 token every 100ms
-    val startTime = System.nanoTime()
-    var now       = startTime
+    val startTime  = System.nanoTime()
+    var now        = startTime
     val timeSource = () => now
 
     val middleware = new RateLimitingMiddleware(600, 1, timeSource) // burst 1
