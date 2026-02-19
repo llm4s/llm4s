@@ -52,6 +52,13 @@ final class PgSearchIndex private (
   override def principals: PrincipalStore   = _principals
   override def collections: CollectionStore = _collections
 
+  /**
+   * Query for the most similar vectors matching the user's permissions.
+   *
+   * Note: if the database contains corrupt embeddings, those rows are silently skipped.
+   * Because filtering happens after the SQL `LIMIT topK`, fewer than `topK` results may
+   * be returned when corrupt rows are present.
+   */
   override def query(
     auth: UserAuthorization,
     collectionPattern: CollectionPattern,

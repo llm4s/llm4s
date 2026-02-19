@@ -2,45 +2,45 @@ package org.llm4s.vectorstore
 
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.OptionValues
 
 /**
  * Pure unit tests for EmbeddingParser.
  *
  * Tests all corrupt/unparseable embedding formats without database dependency.
- * Class-specific specs (PgVectorStore, PgSearchIndex) only test delegation.
  *
  * Integration testing note:
  * Corrupt embeddings cannot be inserted into pgvector columns (validation rejects them).
  * Corruption happens at database/migration level, not via normal INSERT operations.
  *
  * Testing strategy:
- * - Unit tests (here): 26 cases verify parse() handles all corrupt formats
+ * - Unit tests (here): 15 cases verify parse() handles all corrupt formats
  * - Integration: Existing PgVectorStoreSpec/PgSearchIndexSpec test end-to-end flow
  * - Production: Rate-limited logging provides observability of corruption events
  */
-class EmbeddingParserSpec extends AnyWordSpec with Matchers {
+class EmbeddingParserSpec extends AnyWordSpec with Matchers with OptionValues {
 
   "EmbeddingParser.parse" should {
     "parse valid embedding strings" in {
       val result = EmbeddingParser.parse("[0.1,0.2,0.3]")
       result shouldBe defined
-      (result.get should have).length(3)
-      result.get(0) shouldBe 0.1f +- 0.001f
-      result.get(1) shouldBe 0.2f +- 0.001f
-      result.get(2) shouldBe 0.3f +- 0.001f
+      (result.value should have).length(3)
+      result.value(0) shouldBe 0.1f +- 0.001f
+      result.value(1) shouldBe 0.2f +- 0.001f
+      result.value(2) shouldBe 0.3f +- 0.001f
     }
 
     "parse embedding with negative values" in {
       val result = EmbeddingParser.parse("[-0.5,0.7,-1.2]")
       result shouldBe defined
-      (result.get should have).length(3)
-      result.get(0) shouldBe -0.5f +- 0.001f
+      (result.value should have).length(3)
+      result.value(0) shouldBe -0.5f +- 0.001f
     }
 
     "parse embedding with spaces" in {
       val result = EmbeddingParser.parse("[ 0.1 , 0.2 , 0.3 ]")
       result shouldBe defined
-      (result.get should have).length(3)
+      (result.value should have).length(3)
     }
 
     "return None for null input" in {
@@ -93,7 +93,7 @@ class EmbeddingParserSpec extends AnyWordSpec with Matchers {
       val atLimit = "[" + (1 to 16384).map(_.toString + ".0").mkString(",") + "]"
       val result  = EmbeddingParser.parse(atLimit)
       result shouldBe defined
-      (result.get should have).length(16384)
+      (result.value should have).length(16384)
     }
   }
 }

@@ -182,6 +182,13 @@ final class PgVectorStore private (
         }
       }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to upsert batch: ${e.getMessage}"))
 
+  /**
+   * Search for the most similar vectors.
+   *
+   * Note: if the database contains corrupt embeddings, those rows are silently skipped.
+   * Because filtering happens after the SQL `LIMIT topK`, fewer than `topK` results may
+   * be returned when corrupt rows are present.
+   */
   override def search(
     queryVector: Array[Float],
     topK: Int,

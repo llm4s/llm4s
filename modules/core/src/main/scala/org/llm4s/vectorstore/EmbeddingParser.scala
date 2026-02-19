@@ -33,9 +33,10 @@ private[llm4s] object EmbeddingParser {
     val cleaned = s.substring(1, s.length - 1)
     if (cleaned.isEmpty) None // Zero dimensions invalid for similarity search
     else {
-      val parts = cleaned.split(",")
-      if (parts.length > MAX_EMBEDDING_DIM) None // Prevent DoS via massive vectors
-      else Try(parts.map(_.trim.toFloat)).toOption
+      // Count separators before splitting to prevent DoS via massive allocation
+      val commaCount = cleaned.count(_ == ',')
+      if (commaCount >= MAX_EMBEDDING_DIM) None // Would produce > MAX_EMBEDDING_DIM elements
+      else Try(cleaned.split(",").map(_.trim.toFloat)).toOption
     }
   }
 }
