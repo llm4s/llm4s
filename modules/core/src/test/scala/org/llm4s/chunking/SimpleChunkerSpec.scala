@@ -95,7 +95,9 @@ class SimpleChunkerSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "handle overlap parameter" in {
-    val text   = "a" * 300
+    // Use non-homogeneous input so the content-equality check can actually
+    // detect a missing or wrong overlap (all-same chars would pass trivially).
+    val text   = ("abcde" * 60).take(300)
     val config = ChunkingConfig(targetSize = 100, overlap = 20)
 
     val chunks = chunker.chunk(text, config)
@@ -209,7 +211,11 @@ class SimpleChunkerSpec extends AnyFlatSpec with Matchers {
     chunks.foreach(_.content should not be empty)
   }
 
-  it should "apply config with minimum chunk size" in {
+  it should "accept config with minimum chunk size without error" in {
+    // NOTE: SimpleChunker currently passes ChunkingConfig to ChunkingUtils.chunkText
+    // but minChunkSize is not enforced there — short trailing chunks are not dropped.
+    // This test only verifies that passing minChunkSize doesn't throw and still produces
+    // non-empty chunks. Enforcement of minChunkSize is not yet implemented in SimpleChunker.
     val text   = "a" * 500
     val config = ChunkingConfig(targetSize = 80, minChunkSize = 50, overlap = 0)
 
