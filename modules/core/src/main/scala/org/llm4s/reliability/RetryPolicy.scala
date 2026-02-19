@@ -95,7 +95,7 @@ object RetryPolicy {
     retryableFn: LLMError => Boolean = {
       case _: RateLimitError => true
       case _: TimeoutError   => true
-      case _: ServiceError   => true
+      case se: ServiceError  => se.httpStatus >= 500 || se.httpStatus == 429 || se.httpStatus == 408
       case _: NetworkError   => true
       case _                 => false
     }

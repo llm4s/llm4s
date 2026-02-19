@@ -39,6 +39,8 @@ final class ReliableClient(
   private val failureCount    = new AtomicInteger(0)
   private val successCount    = new AtomicInteger(0)
   private val lastFailureTime = new AtomicLong(0L)
+  // Probe permit: only one request at a time passes through in HalfOpen state
+  private val probePermit = new java.util.concurrent.atomic.AtomicBoolean(false)
 
   // LLMClient interface methods
   override def complete(
@@ -149,9 +151,9 @@ final class ReliableClient(
           // Record retry attempt
           collector.foreach(_.recordRetryAttempt(providerName, attemptNumber))
 
-          // Calculate delay and check if we have time
+          // Calculate delay and check if we have time (recompute after operation to avoid stale value)
           val delay               = config.retryPolicy.delayFor(attemptNumber, error)
-          val remainingAfterDelay = remainingTime - delay.toMillis
+          val remainingAfterDelay = (deadlineMs - System.currentTimeMillis()) - delay.toMillis
 
           if (remainingAfterDelay <= 0) {
             // Not enough time for retry
@@ -263,6 +265,7 @@ final class ReliableClient(
           // Transition to half-open
           if (circuitState.compareAndSet(CircuitState.Open, CircuitState.HalfOpen)) {
             successCount.set(0)
+            probePermit.set(false)
             collector.foreach(_.recordCircuitBreakerTransition(providerName, "half-open"))
           }
           Right(())
@@ -278,8 +281,17 @@ final class ReliableClient(
         }
 
       case CircuitState.HalfOpen =>
-        // Allow request in half-open state
-        Right(())
+        // Only allow one probe request through at a time to avoid flooding a recovering service
+        if (probePermit.compareAndSet(false, true))
+          Right(())
+        else
+          Left(
+            ServiceError(
+              httpStatus = 503,
+              provider = "circuit-breaker",
+              details = "Circuit breaker is half-open - service probe already in progress"
+            )
+          )
     }
 
   /**
@@ -299,8 +311,12 @@ final class ReliableClient(
           if (circuitState.compareAndSet(CircuitState.HalfOpen, CircuitState.Closed)) {
             failureCount.set(0)
             successCount.set(0)
+            probePermit.set(false)
             collector.foreach(_.recordCircuitBreakerTransition(providerName, "closed"))
           }
+        } else {
+          // Need more successes — release probe permit to allow next probe
+          probePermit.set(false)
         }
 
       case CircuitState.Open =>
@@ -328,6 +344,7 @@ final class ReliableClient(
         // Single failure in half-open → back to open
         if (circuitState.compareAndSet(CircuitState.HalfOpen, CircuitState.Open)) {
           successCount.set(0)
+          probePermit.set(false)
           collector.foreach(_.recordCircuitBreakerTransition(providerName, "open"))
         }
 
@@ -349,6 +366,7 @@ final class ReliableClient(
     failureCount.set(0)
     successCount.set(0)
     lastFailureTime.set(0L)
+    probePermit.set(false)
   }
 }
 

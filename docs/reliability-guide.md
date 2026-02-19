@@ -123,6 +123,7 @@ import org.llm4s.reliability.{ ReliableClient, ReliabilityConfig }
 
 val reliableClient = new ReliableClient(
   underlying = myLLMClient,
+  providerName = "openai",
   config = ReliabilityConfig.default,
   collector = Some(metricsCollector)
 )
@@ -394,6 +395,7 @@ ReliabilityConfig.default.withDeadline(30.seconds)
 // In tests, disable reliability for faster failures
 val testClient = new ReliableClient(
   underlying = mockClient,
+  providerName = "test",
   config = ReliabilityConfig.disabled,
   collector = None
 )
@@ -441,11 +443,11 @@ def configForProvider(provider: String): ReliabilityConfig = provider match {
 ```scala
 // Long-running analysis
 val analysisConfig = ReliabilityConfig.default.withDeadline(10.minutes)
-val analysisClient = new ReliableClient(baseClient, analysisConfig)
+val analysisClient = ReliableClient.withProviderName(baseClient, "openai", analysisConfig)
 
 // Real-time chat
 val chatConfig = ReliabilityConfig.default.withDeadline(30.seconds)
-val chatClient = new ReliableClient(baseClient, chatConfig)
+val chatClient = ReliableClient.withProviderName(baseClient, "openai", chatConfig)
 ```
 
 ### Pattern 4: Graceful Degradation
@@ -615,8 +617,9 @@ class MyServiceTest extends AnyFlatSpec {
   val mockClient: LLMClient = ???
   
   // No retries in tests for fast failures
-  val testClient = new ReliableClient(
+  val testClient = ReliableClient.withProviderName(
     mockClient,
+    "test",
     ReliabilityConfig.disabled
   )
   
@@ -640,7 +643,7 @@ class ReliabilityIntegrationTest extends AnyFlatSpec {
       // ... other methods
     }
     
-    val reliableClient = new ReliableClient(mockClient, ReliabilityConfig.default)
+    val reliableClient = ReliableClient.withProviderName(mockClient, "test", ReliabilityConfig.default)
     val result = reliableClient.complete(conversation)
     
     result shouldBe Right(mockCompletion)
@@ -700,9 +703,10 @@ All reliability features are **thread-safe**:
 
 ```scala
 import org.llm4s.reliability.{ ReliableProviders, ReliabilityConfig, RetryPolicy }
-import org.llm4s.llmconnect.config.OpenAIConfig
+import org.llm4s.llmconnect.{ LLMConnect }
 import org.llm4s.llmconnect.model.{ Conversation, UserMessage, CompletionOptions }
 import org.llm4s.metrics.{ MetricsCollector, Outcome, ErrorKind }
+import org.llm4s.config.Llm4sConfig
 import scala.concurrent.duration._
 
 object ProductionExample {
@@ -725,15 +729,12 @@ object ProductionExample {
       deadline = Some(3.minutes)
     )
 
-    // Create reliable client
-    val clientResult = ReliableProviders.openai(
-      config = OpenAIConfig(
-        apiKey = sys.env("OPENAI_API_KEY"),
-        model = "gpt-4o"
-      ),
-      reliabilityConfig = reliabilityConfig,
-      metrics = metrics
-    )
+    // Create reliable client using Llm4sConfig to load provider configuration
+    // (set LLM_MODEL=openai/gpt-4o and OPENAI_API_KEY in the environment)
+    val clientResult = for {
+      providerConfig <- Llm4sConfig.provider()
+      baseClient     <- LLMConnect.getClient(providerConfig, metrics)
+    } yield ReliableProviders.wrap(baseClient, "openai", reliabilityConfig, Some(metrics))
 
     clientResult match {
       case Right(client) =>
@@ -901,9 +902,10 @@ Factory methods for all providers:
 ```scala
 import org.llm4s.reliability.ReliabilitySyntax._
 
-client.withReliability()                           // Default config
-client.withReliability(config)                     // Custom config
-client.withReliability(config, metrics)            // With metrics
+client.withReliability()                           // Default config, provider name derived from class
+client.withReliability(providerName)               // Explicit provider name (recommended)
+client.withReliability(providerName, config)       // With custom config
+client.withReliability(providerName, config, metrics) // With custom config and metrics
 ```
 
 ## Summary
@@ -918,7 +920,7 @@ client.withReliability(config, metrics)            // With metrics
 ### ✅ Easy Integration
 
 - **One-Line Setup**: `ReliableProviders.openai(config)`
-- **Universal Support**: Works with all 6 LLM providers
+- **Universal Support**: Works with all 7 LLM providers
 - **Drop-In Replacement**: No code changes required
 - **Thread-Safe**: Share clients across threads safely
 

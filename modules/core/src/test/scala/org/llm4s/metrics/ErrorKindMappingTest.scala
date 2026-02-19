@@ -74,7 +74,6 @@ class ErrorKindMappingTest extends AnyFunSuite with Matchers {
     val allKinds = Set(
       ErrorKind.RateLimit,
       ErrorKind.Timeout,
-      ErrorKind.TimeoutError, // Alias
       ErrorKind.Authentication,
       ErrorKind.Network,
       ErrorKind.Validation,
@@ -83,12 +82,6 @@ class ErrorKindMappingTest extends AnyFunSuite with Matchers {
       ErrorKind.Unknown
     )
 
-    allKinds.size shouldBe 9
-  }
-
-  test("TimeoutError alias is equivalent to Timeout") {
-    // Both should exist for compatibility
-    ErrorKind.TimeoutError shouldBe a[ErrorKind]
-    ErrorKind.Timeout shouldBe a[ErrorKind]
+    allKinds.size shouldBe 8
   }
 }

@@ -162,7 +162,6 @@ sealed trait ErrorKind
 object ErrorKind {
   case object RateLimit      extends ErrorKind
   case object Timeout        extends ErrorKind
-  case object TimeoutError   extends ErrorKind // Alias for compatibility
   case object Authentication extends ErrorKind
   case object Network        extends ErrorKind
   case object Validation     extends ErrorKind

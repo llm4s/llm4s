@@ -235,8 +235,8 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     reliableClient.complete(testConversation)
     reliableClient.currentCircuitState shouldBe CircuitState.Open
 
-    // Wait for recovery timeout
-    Thread.sleep(150)
+    // Wait for recovery timeout (generous margin to avoid CI flakiness)
+    Thread.sleep(500)
 
     // State should still be Open before any request
     reliableClient.currentCircuitState shouldBe CircuitState.Open
@@ -271,13 +271,115 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     reliableClient.complete(testConversation)
     reliableClient.currentCircuitState shouldBe CircuitState.Open
 
-    // Wait and make successful request
-    Thread.sleep(150)
+    // Wait and make successful request (generous margin to avoid CI flakiness)
+    Thread.sleep(500)
     val result = reliableClient.complete(testConversation)
 
     result shouldBe Right(testCompletion)
     reliableClient.currentCircuitState shouldBe CircuitState.Closed
     metrics.circuitBreakerTransitions should contain("closed")
+  }
+
+  test("Half-open probe permit is released after each successful probe") {
+    var attemptCount = 0
+    val mockClient = new MockClient(() => {
+      attemptCount += 1
+      if (attemptCount <= 2) Left(TimeoutError("timeout", 1.second, "test"))
+      else Right(testCompletion)
+    })
+
+    val config = ReliabilityConfig(
+      retryPolicy = RetryPolicy.noRetry,
+      circuitBreaker = CircuitBreakerConfig(failureThreshold = 2, recoveryTimeout = 100.millis, successThreshold = 2),
+      deadline = None
+    )
+
+    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+
+    // Open the circuit
+    reliableClient.complete(testConversation) // fail #1
+    reliableClient.complete(testConversation) // fail #2
+    reliableClient.currentCircuitState shouldBe CircuitState.Open
+
+    // Wait for recovery (generous margin to avoid CI flakiness)
+    Thread.sleep(500)
+
+    // First probe in HalfOpen: permit acquired, succeeds, permit released (needs 2 successes total)
+    val probe1 = reliableClient.complete(testConversation)
+    probe1 shouldBe Right(testCompletion)
+    reliableClient.currentCircuitState shouldBe CircuitState.HalfOpen
+
+    // Second probe: permit was released after first success, this probe also passes through and closes circuit
+    val probe2 = reliableClient.complete(testConversation)
+    probe2 shouldBe Right(testCompletion)
+    reliableClient.currentCircuitState shouldBe CircuitState.Closed
+  }
+
+  test("Deadline exceeded before first attempt returns TimeoutError") {
+    val mockClient = new MockClient(() => Right(testCompletion))
+
+    // Use a zero deadline so the deadline is already at the start time, expiring immediately
+    val config = ReliabilityConfig(
+      retryPolicy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 10.millis),
+      circuitBreaker = CircuitBreakerConfig(failureThreshold = 10, recoveryTimeout = 1.minute, successThreshold = 2),
+      deadline = Some(0.millis)
+    )
+
+    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val result         = reliableClient.complete(testConversation)
+
+    result match {
+      case Left(_: TimeoutError) => succeed
+      case _                     => fail("Expected TimeoutError for already-expired deadline")
+    }
+    // Should not have called underlying at all
+    mockClient.callCount.get() shouldBe 0
+  }
+
+  test("Custom retry policy does not retry 4xx ServiceError by default") {
+    val serviceError = ServiceError(400, "test", "Bad request")
+    val mockClient   = new MockClient(() => Left(serviceError))
+
+    val config = ReliabilityConfig(
+      retryPolicy = RetryPolicy.custom(
+        attempts = 3,
+        delayFn = (_, _) => 10.millis
+        // uses default retryableFn which should NOT retry 4xx
+      ),
+      circuitBreaker = CircuitBreakerConfig(failureThreshold = 10, recoveryTimeout = 1.minute, successThreshold = 2),
+      deadline = None
+    )
+
+    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val result         = reliableClient.complete(testConversation)
+
+    result shouldBe Left(serviceError)
+    mockClient.callCount.get() shouldBe 1 // No retries for 4xx
+  }
+
+  test("Custom retry policy retries 5xx ServiceError by default") {
+    var attemptCount = 0
+    val mockClient = new MockClient(() => {
+      attemptCount += 1
+      if (attemptCount < 2) Left(ServiceError(500, "test", "Internal server error"))
+      else Right(testCompletion)
+    })
+
+    val config = ReliabilityConfig(
+      retryPolicy = RetryPolicy.custom(
+        attempts = 3,
+        delayFn = (_, _) => 10.millis
+        // uses default retryableFn which should retry 5xx
+      ),
+      circuitBreaker = CircuitBreakerConfig(failureThreshold = 10, recoveryTimeout = 1.minute, successThreshold = 2),
+      deadline = None
+    )
+
+    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    val result         = reliableClient.complete(testConversation)
+
+    result shouldBe Right(testCompletion)
+    mockClient.callCount.get() shouldBe 2 // Retried once
   }
 
   test("Deadline enforcement stops retries when time limit exceeded") {
