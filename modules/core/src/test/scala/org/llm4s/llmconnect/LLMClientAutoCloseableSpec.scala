@@ -5,7 +5,7 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import scala.util.Using
+import scala.util.{Success, Failure, Using}
 
 /**
  * Tests that [[LLMClient]] is `AutoCloseable` and works idiomatically
@@ -49,22 +49,21 @@ class LLMClientAutoCloseableSpec extends AnyFlatSpec with Matchers {
   it should "work with scala.util.Using for automatic resource management" in {
     val stub   = new StubClient
     val result = Using(stub)(client => client.complete(Conversation(Seq(UserMessage("hello")))))
-    result.isSuccess shouldBe true
-    result.get shouldBe Right(stubCompletion)
+    result shouldBe Success(Right(stubCompletion))
     stub.closeCount shouldBe 1
   }
 
   it should "close even if an exception is thrown inside Using" in {
     val stub   = new StubClient
     val result = Using(stub)(_ => throw new RuntimeException("boom"))
-    result.isFailure shouldBe true
+    result shouldBe a[Failure[_]]
     stub.closeCount shouldBe 1
   }
 
-  it should "support idempotent close (multiple calls)" in {
+  it should "be safe to call close() multiple times" in {
     val stub = new StubClient
     stub.close()
     stub.close()
-    stub.closeCount shouldBe 2
+    stub.closeCount shouldBe 2 // Stub implementations may verify call counts
   }
 }

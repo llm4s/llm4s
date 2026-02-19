@@ -459,7 +459,10 @@ class GeminiClient(
 
   override def close(): Unit =
     if (closed.compareAndSet(false, true)) {
-      HttpClientCloser.tryClose(httpClient)
+      httpClient match {
+        case c: AutoCloseable => c.close()
+        case _                => ()
+      }
     }
 
   private def validateNotClosed: Result[Unit] =
