@@ -2,17 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, legacy-213-track ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main, master, legacy-213-track ]
   workflow_dispatch:
   workflow_call:
 
 # Concurrency settings to prevent conflicts
 concurrency:
-  # For PRs, cancel duplicate runs. For pushes to main/master, queue them.
+  # For PRs, cancel duplicate runs. For pushes to main/master/legacy, queue them.
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
-  # Only cancel in-progress runs for pull requests, not for pushes to main/master
+  # Only cancel in-progress runs for pull requests, not for pushes to protected branches
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -37,8 +37,8 @@ jobs:
       - name: Check formatting
         run: sbt scalafmtCheckAll
       
-      - name: Compile all Scala versions
-        run: sbt +compile
+      - name: Compile
+        run: sbt compile
 
   # Code coverage (runs on one configuration to avoid duplication)
   coverage:
@@ -87,7 +87,7 @@ jobs:
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: target/scala-3.7.1/scoverage-report/scoverage.xml,modules/*/target/scala-3.7.1/scoverage-report/scoverage.xml
+          files: target/scala-2.13/scoverage-report/scoverage.xml,modules/*/target/scala-2.13/scoverage-report/scoverage.xml
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
@@ -97,8 +97,8 @@ jobs:
         with:
           name: coverage-report
           path: |
-            target/scala-3.7.1/scoverage-report/
-            modules/*/target/scala-3.7.1/scoverage-report/
+            target/scala-2.13/scoverage-report/
+            modules/*/target/scala-2.13/scoverage-report/
           retention-days: 14
 
   # Main test matrix
@@ -111,7 +111,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        scala: [2.13.16, 3.7.1]
+        scala: [2.13.16]
         java: [21]
 
     runs-on: ${{ matrix.os }}

@@ -98,7 +98,6 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
 
 - **modules/core**: Core LLM4S framework
 - **modules/workspace**: Workspace runner/client/shared
-- **modules/crossTest**: Cross-version tests
 - **modules/samples**: Usage examples
 - **docs**: Documentation site and references
 - **hooks**: Pre-commit hook installer
@@ -247,45 +246,23 @@ sbt "workspaceSamples/runMain org.llm4s.samples.workspace.ContainerisedWorkspace
 sbt ++2.13.16 "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
-### Cross Compilation
+### Build Commands
 
-LLM4S supports Scala 2.13 and Scala 3.7.1. The build supports version-specific code through source directories when needed:
-
-- `src/main/scala` - Common code for all versions
-- `src/main/scala-2.13` - Scala 2.13 specific code (add when needed)
-- `src/main/scala-3` - Scala 3 specific code (add when needed)
-
-When you need to use version-specific features, place the code in the appropriate directory.
-
-We've added convenient aliases for cross-compilation:
+This branch is configured for Scala 2.13.16:
 
 ```bash
-# Compile for all Scala versions
+# Compile
 sbt compileAll
 
-# Test all Scala versions
+# Test
 sbt testAll
 
 # Both compile and test
 sbt buildAll
 
-# Publish for all versions
+# Publish
 sbt publishAll
 ```
-
-### Cross-Compilation Testing
-
-We use specialized test projects to verify cross-version compatibility against the published artifacts. These tests ensure that the library works correctly across different Scala versions by testing against actual published JARs rather than local target directories.
-
-```bash
-# Run tests for both Scala 2 and 3 against published JARs
-sbt testCross
-
-# Full clean, publish, and test verification
-sbt fullCrossTest
-```
-
-> **Note:** For detailed information about our cross-testing strategy and setup, see [modules/crossTest/README.md](modules/crossTest/README.md)
 
 ## Roadmap
 

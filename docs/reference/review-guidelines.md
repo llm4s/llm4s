@@ -147,7 +147,7 @@ llm4s/
 │       └── trace/          # Langfuse, observability
 ├── modules/samples/        # Examples (relaxed review)
 ├── modules/workspace/      # Docker runner (relaxed review)
-└── modules/crossTest/      # Scala 2.13 + 3.x behavior tests
+└── modules/trace-opentelemetry/ # Optional OpenTelemetry tracing module
 ```
 
 ### 2.2 Key API surfaces
