@@ -1,5 +1,7 @@
 package org.llm4s.toolapi
 
+import org.llm4s.error.ValidationError
+import org.llm4s.types.Result
 import upickle.default._
 
 /**
@@ -107,6 +109,22 @@ class ToolBuilder[T, R: ReadWriter] private (
   def withHandler(handler: SafeParameterExtractor => Either[String, R]): ToolBuilder[T, R] =
     new ToolBuilder(name, description, schema, Some(handler))
 
+  /**
+   * Build the tool function, returning a Result for safe error handling.
+   *
+   * @return Right(ToolFunction) if handler is defined, Left(ValidationError) otherwise
+   */
+  def buildSafe(): Result[ToolFunction[T, R]] = handler match {
+    case Some(h) => Right(ToolFunction(name, description, schema, h))
+    case None    => Left(ValidationError("handler", "must be defined before calling build()"))
+  }
+
+  /**
+   * Build the tool function, throwing on failure.
+   *
+   * @throws IllegalStateException if handler is not defined
+   */
+  @deprecated("Use buildSafe() which returns Result[ToolFunction] for safe error handling", "0.2.9")
   def build(): ToolFunction[T, R] = handler match {
     case Some(h) => ToolFunction(name, description, schema, h)
     case None    => throw new IllegalStateException("Handler not defined")

@@ -1,5 +1,7 @@
 package org.llm4s.toolapi.builtin
 
+import scala.annotation.nowarn
+
 import org.llm4s.toolapi.SafeParameterExtractor
 import org.llm4s.toolapi.builtin.filesystem._
 import org.scalatest.flatspec.AnyFlatSpec
@@ -66,41 +68,63 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
 
     // No blocked paths, only test dir allowed
     val config = FileConfig(allowedPaths = Some(Seq(testDir.toString)), blockedPaths = Seq.empty)
-    val tool   = ReadFileTool.create(config)
+    ReadFileTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("path" -> tempFile.toString)
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              readResult => {
+                readResult.content shouldBe "Hello, World!"
+                readResult.lines shouldBe 1
+                readResult.truncated shouldBe false
 
-    val params = ujson.Obj("path" -> tempFile.toString)
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isRight shouldBe true
-    val readResult = result.toOption.get
-    readResult.content shouldBe "Hello, World!"
-    readResult.lines shouldBe 1
-    readResult.truncated shouldBe false
-
-    Files.deleteIfExists(tempFile)
+                Files.deleteIfExists(tempFile)
+              }
+            )
+        }
+      )
   }
 
   it should "deny access to blocked paths" in {
     assume(!isWindows, "Unix system paths not available on Windows")
     val config = FileConfig()
-    val tool   = ReadFileTool.create(config)
-
-    val params = ujson.Obj("path" -> "/etc/passwd")
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isLeft shouldBe true
-    result.swap.toOption.get should include("Access denied")
+    ReadFileTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("path" -> "/etc/passwd")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => err should include("Access denied"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
   }
 
   it should "return error for non-existent files" in {
     val config = FileConfig(allowedPaths = Some(Seq(testDir.toString)), blockedPaths = Seq.empty)
-    val tool   = ReadFileTool.create(config)
-
-    val params = ujson.Obj("path" -> (testDir.toString + "/nonexistent_file_12345.txt"))
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isLeft shouldBe true
-    result.swap.toOption.get should include("not found")
+    ReadFileTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("path" -> (testDir.toString + "/nonexistent_file_12345.txt"))
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => err should include("not found"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
   }
 
   it should "limit lines when max_lines is specified" in {
@@ -108,17 +132,25 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
     Files.writeString(tempFile, "line1\nline2\nline3\nline4\nline5")
 
     val config = FileConfig(allowedPaths = Some(Seq(testDir.toString)), blockedPaths = Seq.empty)
-    val tool   = ReadFileTool.create(config)
+    ReadFileTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("path" -> tempFile.toString, "max_lines" -> 2)
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              readResult => {
+                readResult.content shouldBe "line1\nline2"
+                readResult.truncated shouldBe true
 
-    val params = ujson.Obj("path" -> tempFile.toString, "max_lines" -> 2)
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isRight shouldBe true
-    val readResult = result.toOption.get
-    readResult.content shouldBe "line1\nline2"
-    readResult.truncated shouldBe true
-
-    Files.deleteIfExists(tempFile)
+                Files.deleteIfExists(tempFile)
+              }
+            )
+        }
+      )
   }
 
   "ListDirectoryTool" should "list directory contents" in {
@@ -129,22 +161,30 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
     Files.createDirectory(subDir.resolve("subdir"))
 
     val config = FileConfig(allowedPaths = Some(Seq(testDir.toString)), blockedPaths = Seq.empty)
-    val tool   = ListDirectoryTool.create(config)
+    ListDirectoryTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("path" -> subDir.toString)
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              listResult => {
+                listResult.entries.size shouldBe 3
+                listResult.totalFiles shouldBe 2
+                listResult.totalDirectories shouldBe 1
 
-    val params = ujson.Obj("path" -> subDir.toString)
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isRight shouldBe true
-    val listResult = result.toOption.get
-    listResult.entries.size shouldBe 3
-    listResult.totalFiles shouldBe 2
-    listResult.totalDirectories shouldBe 1
-
-    // Cleanup
-    Files.deleteIfExists(subDir.resolve("file1.txt"))
-    Files.deleteIfExists(subDir.resolve("file2.txt"))
-    Files.deleteIfExists(subDir.resolve("subdir"))
-    Files.deleteIfExists(subDir)
+                // Cleanup
+                Files.deleteIfExists(subDir.resolve("file1.txt"))
+                Files.deleteIfExists(subDir.resolve("file2.txt"))
+                Files.deleteIfExists(subDir.resolve("subdir"))
+                Files.deleteIfExists(subDir)
+              }
+            )
+        }
+      )
   }
 
   it should "hide hidden files by default" in {
@@ -154,19 +194,27 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
     Files.createFile(subDir.resolve(".hidden"))
 
     val config = FileConfig(allowedPaths = Some(Seq(testDir.toString)), blockedPaths = Seq.empty)
-    val tool   = ListDirectoryTool.create(config)
+    ListDirectoryTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("path" -> subDir.toString)
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              listResult => {
+                listResult.entries.size shouldBe 1
+                listResult.entries.head.name shouldBe "visible.txt"
 
-    val params = ujson.Obj("path" -> subDir.toString)
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isRight shouldBe true
-    val listResult = result.toOption.get
-    listResult.entries.size shouldBe 1
-    listResult.entries.head.name shouldBe "visible.txt"
-
-    Files.deleteIfExists(subDir.resolve("visible.txt"))
-    Files.deleteIfExists(subDir.resolve(".hidden"))
-    Files.deleteIfExists(subDir)
+                Files.deleteIfExists(subDir.resolve("visible.txt"))
+                Files.deleteIfExists(subDir.resolve(".hidden"))
+                Files.deleteIfExists(subDir)
+              }
+            )
+        }
+      )
   }
 
   it should "include hidden files when requested" in {
@@ -176,18 +224,26 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
     Files.createFile(subDir.resolve(".hidden"))
 
     val config = FileConfig(allowedPaths = Some(Seq(testDir.toString)), blockedPaths = Seq.empty)
-    val tool   = ListDirectoryTool.create(config)
+    ListDirectoryTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("path" -> subDir.toString, "include_hidden" -> true)
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              listResult => {
+                listResult.entries.size shouldBe 2
 
-    val params = ujson.Obj("path" -> subDir.toString, "include_hidden" -> true)
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isRight shouldBe true
-    val listResult = result.toOption.get
-    listResult.entries.size shouldBe 2
-
-    Files.deleteIfExists(subDir.resolve("visible.txt"))
-    Files.deleteIfExists(subDir.resolve(".hidden"))
-    Files.deleteIfExists(subDir)
+                Files.deleteIfExists(subDir.resolve("visible.txt"))
+                Files.deleteIfExists(subDir.resolve(".hidden"))
+                Files.deleteIfExists(subDir)
+              }
+            )
+        }
+      )
   }
 
   "FileInfoTool" should "get file information" in {
@@ -195,65 +251,96 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
     Files.writeString(tempFile, "test content")
 
     val config = FileConfig(allowedPaths = Some(Seq(testDir.toString)), blockedPaths = Seq.empty)
-    val tool   = FileInfoTool.create(config)
+    FileInfoTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("path" -> tempFile.toString)
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              infoResult => {
+                infoResult.exists shouldBe true
+                infoResult.isFile shouldBe true
+                infoResult.isDirectory shouldBe false
+                infoResult.size shouldBe 12
+                infoResult.extension shouldBe Some("txt")
 
-    val params = ujson.Obj("path" -> tempFile.toString)
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isRight shouldBe true
-    val infoResult = result.toOption.get
-    infoResult.exists shouldBe true
-    infoResult.isFile shouldBe true
-    infoResult.isDirectory shouldBe false
-    infoResult.size shouldBe 12
-    infoResult.extension shouldBe Some("txt")
-
-    Files.deleteIfExists(tempFile)
+                Files.deleteIfExists(tempFile)
+              }
+            )
+        }
+      )
   }
 
   it should "report non-existent file info" in {
     val config = FileConfig(allowedPaths = Some(Seq(testDir.toString)), blockedPaths = Seq.empty)
-    val tool   = FileInfoTool.create(config)
-
-    val params = ujson.Obj("path" -> (testDir.toString + "/nonexistent_12345.txt"))
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isRight shouldBe true
-    val infoResult = result.toOption.get
-    infoResult.exists shouldBe false
-    infoResult.isFile shouldBe false
-    infoResult.isDirectory shouldBe false
+    FileInfoTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("path" -> (testDir.toString + "/nonexistent_12345.txt"))
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              infoResult => {
+                infoResult.exists shouldBe false
+                infoResult.isFile shouldBe false
+                infoResult.isDirectory shouldBe false
+              }
+            )
+        }
+      )
   }
 
   "WriteFileTool" should "write to allowed paths" in {
     val config = WriteConfig(allowedPaths = Seq(testDir.toString), allowOverwrite = true)
-    val tool   = WriteFileTool.create(config)
+    WriteFileTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val outputPath = testDir.resolve("write-output.txt").toString
+          val params     = ujson.Obj("path" -> outputPath, "content" -> "Hello!")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              writeResult => {
+                writeResult.bytesWritten shouldBe 6
+                writeResult.created shouldBe true
 
-    val outputPath = testDir.resolve("write-output.txt").toString
-    val params     = ujson.Obj("path" -> outputPath, "content" -> "Hello!")
-    val result     = tool.handler(SafeParameterExtractor(params))
+                // Verify content
+                Files.readString(Paths.get(outputPath)) shouldBe "Hello!"
 
-    result.isRight shouldBe true
-    val writeResult = result.toOption.get
-    writeResult.bytesWritten shouldBe 6
-    writeResult.created shouldBe true
-
-    // Verify content
-    Files.readString(Paths.get(outputPath)) shouldBe "Hello!"
-
-    Files.deleteIfExists(Paths.get(outputPath))
+                Files.deleteIfExists(Paths.get(outputPath))
+              }
+            )
+        }
+      )
   }
 
   it should "deny write to non-allowed paths" in {
     assume(!isWindows, "Unix paths not available on Windows")
     val config = WriteConfig(allowedPaths = Seq("/tmp/specific"))
-    val tool   = WriteFileTool.create(config)
-
-    val params = ujson.Obj("path" -> "/tmp/other/file.txt", "content" -> "test")
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isLeft shouldBe true
-    result.swap.toOption.get should include("Access denied")
+    WriteFileTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("path" -> "/tmp/other/file.txt", "content" -> "test")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => err should include("Access denied"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
   }
 
   it should "support append mode" in {
@@ -261,14 +348,59 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
     Files.writeString(tempFile, "Hello")
 
     val config = WriteConfig(allowedPaths = Seq(testDir.toString), allowOverwrite = true)
-    val tool   = WriteFileTool.create(config)
+    WriteFileTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("path" -> tempFile.toString, "content" -> " World!", "append" -> true)
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              _ => {
+                Files.readString(tempFile) shouldBe "Hello World!"
 
-    val params = ujson.Obj("path" -> tempFile.toString, "content" -> " World!", "append" -> true)
-    val result = tool.handler(SafeParameterExtractor(params))
+                Files.deleteIfExists(tempFile)
+              }
+            )
+        }
+      )
+  }
 
-    result.isRight shouldBe true
-    Files.readString(tempFile) shouldBe "Hello World!"
+  // ============ Deprecated API tests ============
 
-    Files.deleteIfExists(tempFile)
+  "ReadFileTool.create() (deprecated)" should "return a valid tool" in {
+    @nowarn("cat=deprecation") val tool = ReadFileTool.create()
+    tool.name shouldBe "read_file"
+  }
+
+  "ReadFileTool.tool (deprecated)" should "return a valid tool" in {
+    @nowarn("cat=deprecation") val tool = ReadFileTool.tool
+    tool.name shouldBe "read_file"
+  }
+
+  "ListDirectoryTool.create() (deprecated)" should "return a valid tool" in {
+    @nowarn("cat=deprecation") val tool = ListDirectoryTool.create()
+    tool.name shouldBe "list_directory"
+  }
+
+  "FileInfoTool.create() (deprecated)" should "return a valid tool" in {
+    @nowarn("cat=deprecation") val tool = FileInfoTool.create()
+    tool.name shouldBe "file_info"
+  }
+
+  "WriteFileTool.create() (deprecated)" should "return a valid tool" in {
+    @nowarn("cat=deprecation") val tool = WriteFileTool.create(WriteConfig(allowedPaths = Seq("/tmp")))
+    tool.name shouldBe "write_file"
+  }
+
+  "filesystem.readOnlyTools (deprecated)" should "return 3 read-only tools" in {
+    @nowarn("cat=deprecation") val tools = readOnlyTools
+    tools.size shouldBe 3
+    val names = tools.map(_.name).toSet
+    names should contain("read_file")
+    names should contain("list_directory")
+    names should contain("file_info")
   }
 }

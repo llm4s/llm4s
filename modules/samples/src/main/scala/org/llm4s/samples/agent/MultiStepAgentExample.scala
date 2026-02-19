@@ -21,7 +21,8 @@ object MultiStepAgentExample {
     val res = for {
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
-      toolRegistry = new ToolRegistry(Seq(WeatherTool.tool))
+      weatherTool <- WeatherTool.toolSafe
+      toolRegistry = new ToolRegistry(Seq(weatherTool))
       agent        = new Agent(client)
       query = "What's the weather like in London, and is it different from New York?"
         .tap(q => logger.info("User Query: {}", q))
@@ -73,9 +74,8 @@ object MultiStepAgentExample {
       _                  = logger.info("=== Manual Step Execution to Demonstrate Two-Phase Flow ===")
       _                  = logger.info("Example 3: Running with manual step execution")
       manualTraceLogPath = ".log/agent-trace-manual.md"
-      initialState = agent
-        .initialize(query, toolRegistry)
-        .tap(s => logger.info("Initial state: {}", s.status))
+      initialState <- agent.initializeSafe(query, toolRegistry)
+      _ = logger.info("Initial state: {}", initialState.status)
 
       _ = agent
         .writeTraceLog(initialState, manualTraceLogPath)

@@ -1,5 +1,7 @@
 package org.llm4s.toolapi.builtin
 
+import scala.annotation.nowarn
+
 import org.llm4s.toolapi.SafeParameterExtractor
 import org.llm4s.toolapi.builtin.http._
 import org.scalatest.flatspec.AnyFlatSpec
@@ -59,50 +61,78 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
 
   "HTTPTool" should "reject blocked domains" in {
     val config = HttpConfig()
-    val tool   = HTTPTool.create(config)
-
-    val params = ujson.Obj("url" -> "http://localhost:8080/test")
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isLeft shouldBe true
-    result.swap.toOption.get should include("not allowed")
+    HTTPTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("url" -> "http://localhost:8080/test")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => err should include("not allowed"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
   }
 
   it should "reject disallowed methods" in {
     val config = HttpConfig.readOnly()
-    val tool   = HTTPTool.create(config)
-
-    val params = ujson.Obj("url" -> "https://example.com/api", "method" -> "POST")
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isLeft shouldBe true
-    result.swap.toOption.get should include("not allowed")
+    HTTPTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("url" -> "https://example.com/api", "method" -> "POST")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => err should include("not allowed"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
   }
 
   it should "reject invalid URLs" in {
     val config = HttpConfig()
-    val tool   = HTTPTool.create(config)
-
-    val params = ujson.Obj("url" -> "not-a-valid-url")
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isLeft shouldBe true
-    result.swap.toOption.get should include("Invalid URL")
+    HTTPTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("url" -> "not-a-valid-url")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => err should include("Invalid URL"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
   }
 
   it should "default to GET method" in {
     // We can't easily test actual HTTP requests without a server,
     // but we can verify the method handling logic
     val config = HttpConfig(allowedDomains = Some(Seq("nonexistent.test")))
-    val tool   = HTTPTool.create(config)
-
-    // This will fail with connection error, but we can verify the method is accepted
-    val params = ujson.Obj("url" -> "https://nonexistent.test/api")
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    // Will fail due to connection, but should not fail due to method
-    result.isLeft shouldBe true
-    (result.swap.toOption.get should not).include("method")
+    HTTPTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          // This will fail with connection error, but we can verify the method is accepted
+          val params = ujson.Obj("url" -> "https://nonexistent.test/api")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              // Will fail due to connection, but should not fail due to method
+              err => (err should not).include("method"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
   }
 
   "HttpConfig.readOnly" should "only allow read methods" in {
@@ -142,5 +172,23 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
 
     config.isDomainAllowed("api.trusted.com") shouldBe true
     config.isDomainAllowed("other.com") shouldBe false
+  }
+
+  // ============ Deprecated API tests ============
+
+  "HTTPTool.create() (deprecated)" should "return a valid tool" in {
+    @nowarn("cat=deprecation") val tool = HTTPTool.create()
+    tool.name shouldBe "http_request"
+  }
+
+  "HTTPTool.tool (deprecated)" should "return a valid tool" in {
+    @nowarn("cat=deprecation") val tool = HTTPTool.tool
+    tool.name shouldBe "http_request"
+  }
+
+  "http.allTools (deprecated)" should "contain http_request" in {
+    @nowarn("cat=deprecation") val tools = http.allTools
+    tools.size shouldBe 1
+    tools.head.name shouldBe "http_request"
   }
 }

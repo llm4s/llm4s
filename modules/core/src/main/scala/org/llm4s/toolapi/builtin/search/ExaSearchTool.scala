@@ -6,6 +6,7 @@ import org.llm4s.config.ExaSearchToolConfig
 import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.types.Result
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.util.Redaction
 import scala.util.control.NonFatal
 
 sealed trait SearchType {
@@ -237,28 +238,6 @@ object ExaSearchTool {
     )
 
   /**
-   * Sanitize error messages to prevent information leakage.
-   * Removes sensitive details while keeping useful debugging info.
-   */
-  private def sanitizeErrorMessage(statusCode: Int, responseBody: String): String =
-    statusCode match {
-      case 401 => "Authentication failed. Please verify your API key is valid."
-      case 403 => "Access forbidden. Your API key may not have permission for this operation."
-      case 429 => "Rate limit exceeded. Please reduce request frequency and try again later."
-      case code if code >= 500 && code < 600 =>
-        "External search service is temporarily unavailable. Please try again later."
-      case 400 =>
-        // For 400 errors, include a sanitized version of the error if it's safe
-        if (responseBody.length < 200 && !responseBody.contains("key") && !responseBody.contains("token")) {
-          s"Invalid request: ${responseBody.take(150)}"
-        } else {
-          "Invalid request. Please check your query parameters."
-        }
-      case _ =>
-        s"Search request failed with status $statusCode. Please try again or contact support."
-    }
-
-  /**
    * Validate runtime ExaSearchConfig values.
    * Validates all externally configurable inputs at the boundary
    */
@@ -318,7 +297,7 @@ object ExaSearchTool {
         case None                 => Right(defaultConfig)
       }
 
-      tool = ToolBuilder[Map[String, Any], ExaSearchResult](
+      tool <- ToolBuilder[Map[String, Any], ExaSearchResult](
         name = "exa_search",
         description =
           "Search the web using Exa's AI-powered search engine. Use this for semantic and intent-based searches that understand natural language queries (e.g., 'companies working on AI safety', 'recent papers about transformers'). Returns high-quality structured results with titles, URLs, text snippets, authors, and publication dates. Best for research, technical documentation, finding specific companies or people, and discovering recent content.",
@@ -329,7 +308,7 @@ object ExaSearchTool {
           query    <- validateQuery(rawQuery).left.map(_.message) // Convert Result to Either[String, String]
           result   <- search(query, finalConfig, validatedConfig, httpClient, restoreInterrupt)
         } yield result
-      }.build()
+      }.buildSafe()
     } yield tool
 
   /**
@@ -431,8 +410,9 @@ object ExaSearchTool {
             Left("Failed to process search results. Please try again.")
         }
       } else {
-        // Use sanitized error messages for non-200 responses
-        Left(sanitizeErrorMessage(response.statusCode, response.body))
+        // Redact sensitive information and truncate for logging
+        val body = Redaction.redactForLogging(response.body)
+        Left(s"Exa search returned status ${response.statusCode}: $body")
       }
     }
   }

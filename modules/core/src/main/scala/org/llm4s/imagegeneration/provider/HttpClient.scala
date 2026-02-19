@@ -1,72 +1,67 @@
 package org.llm4s.imagegeneration.provider
 
+import org.llm4s.http.{ HttpRawResponse, HttpResponse, Llm4sHttpClient, MultipartPart }
+
 import scala.util.Try
-import requests.Response
 
 trait HttpClient {
-  def post(url: String, headers: Map[String, String], data: String, timeout: Int): Try[Response]
-  def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): Try[Response]
-  def postMultipart(url: String, headers: Map[String, String], data: requests.MultiPart, timeout: Int): Try[Response]
-  def get(url: String, headers: Map[String, String], timeout: Int): Try[Response]
+  def post(url: String, headers: Map[String, String], data: String, timeout: Int): Try[HttpResponse]
+  def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): Try[HttpResponse]
+  def postMultipart(
+    url: String,
+    headers: Map[String, String],
+    data: Seq[MultipartPart],
+    timeout: Int
+  ): Try[HttpResponse]
+  def get(url: String, headers: Map[String, String], timeout: Int): Try[HttpResponse]
+
+  /** POST with a string body and return raw bytes, bypassing charset decoding. */
+  def postRaw(url: String, headers: Map[String, String], data: String, timeout: Int): Try[HttpRawResponse]
 }
 
 object HttpClient {
-  def create(): HttpClient = new SimpleHttpClient()
+  def create(): HttpClient = new SimpleHttpClient(Llm4sHttpClient.create())
 
-  // For backward compatibility during refactoring if needed, though we aim to replace usage
-  def apply(): HttpClient = new SimpleHttpClient()
+  def apply(): HttpClient = create()
 }
 
-class SimpleHttpClient extends HttpClient {
-  private val logger                = org.slf4j.LoggerFactory.getLogger(getClass)
-  private val defaultConnectTimeout = 10000
+class SimpleHttpClient(llm4sClient: Llm4sHttpClient) extends HttpClient {
+  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
-  override def post(url: String, headers: Map[String, String], data: String, timeout: Int): Try[Response] = Try {
+  override def post(url: String, headers: Map[String, String], data: String, timeout: Int): Try[HttpResponse] = Try {
     logger.debug(s"POST $url")
-    requests.post(
-      url = url,
-      data = data,
-      headers = headers,
-      readTimeout = timeout,
-      connectTimeout = defaultConnectTimeout
-    )
+    llm4sClient.post(url = url, headers = headers, body = data, timeout = timeout)
   }
 
-  override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): Try[Response] =
+  override def postBytes(
+    url: String,
+    headers: Map[String, String],
+    data: Array[Byte],
+    timeout: Int
+  ): Try[HttpResponse] =
     Try {
       logger.debug(s"POST (bytes) $url")
-      requests.post(
-        url = url,
-        data = data,
-        headers = headers,
-        readTimeout = timeout,
-        connectTimeout = defaultConnectTimeout
-      )
+      llm4sClient.postBytes(url = url, headers = headers, data = data, timeout = timeout)
     }
 
   override def postMultipart(
     url: String,
     headers: Map[String, String],
-    data: requests.MultiPart,
+    data: Seq[MultipartPart],
     timeout: Int
-  ): Try[Response] = Try {
+  ): Try[HttpResponse] = Try {
     logger.debug(s"POST (multipart) $url")
-    requests.post(
-      url = url,
-      data = data,
-      headers = headers,
-      readTimeout = timeout,
-      connectTimeout = defaultConnectTimeout
-    )
+    llm4sClient.postMultipart(url = url, headers = headers, parts = data, timeout = timeout)
   }
 
-  override def get(url: String, headers: Map[String, String], timeout: Int): Try[Response] = Try {
+  override def get(url: String, headers: Map[String, String], timeout: Int): Try[HttpResponse] = Try {
     logger.debug(s"GET $url")
-    requests.get(
-      url = url,
-      headers = headers,
-      readTimeout = timeout,
-      connectTimeout = defaultConnectTimeout
-    )
+    llm4sClient.get(url = url, headers = headers, timeout = timeout)
   }
+
+  override def postRaw(url: String, headers: Map[String, String], data: String, timeout: Int): Try[HttpRawResponse] =
+    Try {
+      logger.debug(s"POST (raw bytes) $url")
+      llm4sClient.postRaw(url = url, headers = headers, body = data, timeout = timeout)
+    }
 }

@@ -341,26 +341,34 @@ curl https://api.anthropic.com/v1/messages \
     }
   }
 
-  // Convert our ToolFunction to Anthropic's Tool
-  private def convertToolToAnthropicTool(toolFunction: ToolFunction[_, _]): Tool = {
-    // note: in case of debug set this environment variable -- `ANTHROPIC_LOG=debug`
-
-    val objectSchema  = toolFunction.schema.asInstanceOf[ObjectSchema[_]]
+  /**
+   * Convert a ToolFunction to Anthropic's Tool format.
+   * Strips OpenAI-specific fields like 'strict' and 'additionalProperties' from the schema
+   * to maintain compatibility with the Anthropic API.
+   */
+  private[provider] def convertToolToAnthropicTool(toolFunction: ToolFunction[_, _]): Tool = {
+    val objectSchema = toolFunction.schema.asInstanceOf[ObjectSchema[_]]
+    // Generate raw schema without 'strict' mode
     val jsonSchemaStr = objectSchema.toJsonSchema(false).render()
 
-    // Parse the JSON schema and extract properties
+    // Parse the JSON and sanitize the schema
+    val jsonNode = ujson.read(jsonSchemaStr)
+
+    // Fix: Remove OpenAI-only top-level fields
+    jsonNode.obj.remove("strict")
+    jsonNode.obj.remove("additionalProperties")
+
+    // Recursively strip additionalProperties from nested parts
+    stripAdditionalProperties(jsonNode)
+
+    val sanitizedSchemaStr = jsonNode.render()
     val jsonSchema: JsonObject =
-      ObjectMappers.jsonMapper().readValue(jsonSchemaStr, classOf[JsonObject])
+      ObjectMappers.jsonMapper().readValue(sanitizedSchemaStr, classOf[JsonObject])
     val jsonSchemaMap = jsonSchema.values()
 
-    // Build the input schema using raw JSON value for properties
-    // The new SDK requires proper Properties type, so we use the putAdditionalProperty approach
     val inputSchemaBuilder = Tool.InputSchema.builder()
-
-    // Convert the properties JsonValue to Properties type
-    val propertiesValue = jsonSchemaMap.get("properties")
+    val propertiesValue    = jsonSchemaMap.get("properties")
     if (propertiesValue != null) {
-      // Use the properties via JsonValue wrapper
       val propertiesObj = ObjectMappers
         .jsonMapper()
         .readValue(
@@ -370,14 +378,29 @@ curl https://api.anthropic.com/v1/messages \
       inputSchemaBuilder.properties(propertiesObj)
     }
 
-    val tool = Tool
+    Tool
       .builder()
       .name(toolFunction.name)
       .description(toolFunction.description)
       .inputSchema(inputSchemaBuilder.build().validate())
       .build()
-    tool
   }
+
+  /**
+   * Recursively strip 'additionalProperties' from all levels of a JSON schema.
+   * This ensures compatibility with providers that don't support OpenAI-specific schema extensions.
+   */
+  private[provider] def stripAdditionalProperties(json: ujson.Value): Unit =
+    json match {
+      case obj: ujson.Obj =>
+        obj.value.remove("additionalProperties")
+        obj.value.get("properties").foreach(props => props.obj.values.foreach(stripAdditionalProperties))
+        obj.value.get("items").foreach(stripAdditionalProperties)
+        Seq("anyOf", "oneOf", "allOf").foreach { key =>
+          obj.value.get(key).foreach(arr => arr.arr.foreach(stripAdditionalProperties))
+        }
+      case _ =>
+    }
 
   // Convert Anthropic response to our model
   private def convertFromAnthropicResponse(response: Message): Completion = {
@@ -449,8 +472,7 @@ curl https://api.anthropic.com/v1/messages \
 
   override def close(): Unit =
     if (closed.compareAndSet(false, true)) {
-      // The Anthropic OkHttpClient does not expose a close() method.
-      // We track logical closed state for thread-safety.
+      client.close()
     }
 
   private def validateNotClosed: Result[Unit] =

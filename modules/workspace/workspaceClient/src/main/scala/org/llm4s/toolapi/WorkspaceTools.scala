@@ -1,6 +1,7 @@
 package org.llm4s.toolapi
 
 import org.llm4s.shared._
+import org.llm4s.types.Result
 import org.llm4s.workspace.ContainerisedWorkspace
 import upickle.default._
 
@@ -30,7 +31,7 @@ object WorkspaceTools {
     includeRecursive: Boolean = true
   )(
     handler: (SafeParameterExtractor, ContainerisedWorkspace) => Either[String, T]
-  ): ToolFunction[Map[String, Any], T] = {
+  ): Result[ToolFunction[Map[String, Any], T]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Explore files parameters")
       .withProperty(Schema.property("path", Schema.string("Path to explore")))
@@ -52,7 +53,7 @@ object WorkspaceTools {
       "explore_files",
       "List files and directories at a given path",
       finalSchema
-    ).withHandler(wrappedHandler).build()
+    ).withHandler(wrappedHandler).buildSafe()
   }
 
   /**
@@ -69,7 +70,7 @@ object WorkspaceTools {
     includeLineParams: Boolean = true
   )(
     handler: (SafeParameterExtractor, ContainerisedWorkspace) => Either[String, T]
-  ): ToolFunction[Map[String, Any], T] = {
+  ): Result[ToolFunction[Map[String, Any], T]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Read file parameters")
       .withProperty(Schema.property("path", Schema.string("Path to the file to read")))
@@ -99,7 +100,7 @@ object WorkspaceTools {
       "read_file",
       "Read the contents of a file",
       finalSchema
-    ).withHandler(wrappedHandler).build()
+    ).withHandler(wrappedHandler).buildSafe()
   }
 
   /**
@@ -116,7 +117,7 @@ object WorkspaceTools {
     includeCreateDirs: Boolean = true
   )(
     handler: (SafeParameterExtractor, ContainerisedWorkspace) => Either[String, T]
-  ): ToolFunction[Map[String, Any], T] = {
+  ): Result[ToolFunction[Map[String, Any], T]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Write file parameters")
       .withProperty(Schema.property("path", Schema.string("Path to write the file to")))
@@ -139,7 +140,7 @@ object WorkspaceTools {
       "write_file",
       "Write content to a file",
       finalSchema
-    ).withHandler(wrappedHandler).build()
+    ).withHandler(wrappedHandler).buildSafe()
   }
 
   /**
@@ -158,7 +159,7 @@ object WorkspaceTools {
     includeRecursive: Boolean = true
   )(
     handler: (SafeParameterExtractor, ContainerisedWorkspace) => Either[String, T]
-  ): ToolFunction[Map[String, Any], T] = {
+  ): Result[ToolFunction[Map[String, Any], T]] = {
     val baseSchema = Schema
       .`object`[Map[String, Any]]("Search files parameters")
       .withProperty(
@@ -196,7 +197,7 @@ object WorkspaceTools {
       "search_files",
       "Search for content in files",
       finalSchema
-    ).withHandler(wrappedHandler).build()
+    ).withHandler(wrappedHandler).buildSafe()
   }
 
   /**
@@ -215,7 +216,7 @@ object WorkspaceTools {
     includeTimeout: Boolean = true
   )(
     handler: (SafeParameterExtractor, ContainerisedWorkspace) => Either[String, T]
-  ): ToolFunction[Map[String, Any], T] = {
+  ): Result[ToolFunction[Map[String, Any], T]] = {
     val baseSchema = Schema
       .`object`[Map[String, Any]]("Execute a command on the shell")
       .withProperty(Schema.property("command", Schema.string("The shell command to execute")))
@@ -247,7 +248,7 @@ object WorkspaceTools {
       "execute_command",
       "Execute a command in the workspace",
       finalSchema
-    ).withHandler(wrappedHandler).build()
+    ).withHandler(wrappedHandler).buildSafe()
   }
 
   /**
@@ -262,7 +263,7 @@ object WorkspaceTools {
     workspace: ContainerisedWorkspace
   )(
     handler: (SafeParameterExtractor, ContainerisedWorkspace) => Either[String, T]
-  ): ToolFunction[Map[String, Any], T] = {
+  ): Result[ToolFunction[Map[String, Any], T]] = {
     val operationSchema = Schema
       .`object`[Map[String, Any]]("File operation")
       .withProperty(
@@ -302,7 +303,7 @@ object WorkspaceTools {
       "modify_file",
       "Modify a file with operations like replace, insert, or delete",
       schema
-    ).withHandler(wrappedHandler).build()
+    ).withHandler(wrappedHandler).buildSafe()
   }
 
   // Predefined handler functions for common use cases
@@ -314,8 +315,8 @@ object WorkspaceTools {
     params: SafeParameterExtractor,
     workspace: ContainerisedWorkspace
   ): Either[String, ujson.Value] = {
-    val path      = params.getString("path").getOrElse("/workspace")
-    val recursive = params.getBoolean("recursive").getOrElse(false)
+    val path      = params.getString("path").fold(_ => "/workspace", identity)
+    val recursive = params.getBoolean("recursive").fold(_ => false, identity)
 
     Try(workspace.exploreFiles(path, recursive = Some(recursive))) match {
       case Success(response) =>
@@ -335,9 +336,9 @@ object WorkspaceTools {
     params: SafeParameterExtractor,
     workspace: ContainerisedWorkspace
   ): Either[String, ujson.Value] = {
-    val path      = params.getString("path").getOrElse("")
-    val startLine = params.getInt("start_line").toOption.flatMap(Some(_))
-    val endLine   = params.getInt("end_line").toOption.flatMap(Some(_))
+    val path      = params.getString("path").fold(_ => "", identity)
+    val startLine = params.getInt("start_line").toOption
+    val endLine   = params.getInt("end_line").toOption
 
     Try(workspace.readFile(path, startLine, endLine)) match {
       case Success(response) =>
@@ -354,9 +355,9 @@ object WorkspaceTools {
     params: SafeParameterExtractor,
     workspace: ContainerisedWorkspace
   ): Either[String, ujson.Value] = {
-    val path       = params.getString("path").getOrElse("")
-    val content    = params.getString("content").getOrElse("")
-    val createDirs = params.getBoolean("create_directories").getOrElse(true)
+    val path       = params.getString("path").fold(_ => "", identity)
+    val content    = params.getString("content").fold(_ => "", identity)
+    val createDirs = params.getBoolean("create_directories").fold(_ => true, identity)
 
     {
       val r = Try(workspace.writeFile(path, content, createDirectories = Some(createDirs))).toResult
@@ -373,10 +374,10 @@ object WorkspaceTools {
     params: SafeParameterExtractor,
     workspace: ContainerisedWorkspace
   ): Either[String, ujson.Value] = {
-    val paths      = params.getArray("paths").toOption.map(_.arr.map(p => p.str).toList).getOrElse(List("/workspace"))
-    val query      = params.getString("query").getOrElse("")
-    val searchType = params.getString("search_type").getOrElse("literal")
-    val recursive  = params.getBoolean("recursive").getOrElse(true)
+    val paths      = params.getArray("paths").fold(_ => List("/workspace"), _.arr.map(p => p.str).toList)
+    val query      = params.getString("query").fold(_ => "", identity)
+    val searchType = params.getString("search_type").fold(_ => "literal", identity)
+    val recursive  = params.getBoolean("recursive").fold(_ => true, identity)
 
     (for {
       response <- Try(workspace.searchFiles(paths, query, searchType, recursive = Some(recursive))).toResult.left
@@ -406,9 +407,9 @@ object WorkspaceTools {
     params: SafeParameterExtractor,
     workspace: ContainerisedWorkspace
   ): Either[String, ujson.Value] = {
-    val command    = params.getString("command").getOrElse("")
-    val workingDir = params.getString("working_directory").getOrElse("/workspace")
-    val timeout    = params.getInt("timeout").toOption.flatMap(Some(_))
+    val command    = params.getString("command").fold(_ => "", identity)
+    val workingDir = params.getString("working_directory").fold(_ => "/workspace", identity)
+    val timeout    = params.getInt("timeout").toOption
 
     {
       logger.info(s"Executing command: $command in directory: $workingDir with timeout: $timeout")
@@ -438,17 +439,17 @@ object WorkspaceTools {
     params: SafeParameterExtractor,
     workspace: ContainerisedWorkspace
   ): Either[String, ujson.Value] = {
-    val path     = params.getString("path").getOrElse("")
+    val path     = params.getString("path").fold(_ => "", identity)
     val opsParam = params.getArray("operations")
 
     opsParam match {
       case Right(arr) =>
         val operations = arr.arr.map { opObj =>
           val extractor  = SafeParameterExtractor(opObj)
-          val op         = extractor.getString("operation").getOrElse("replace")
-          val startLine  = extractor.getInt("start_line").getOrElse(0)
-          val endLine    = extractor.getInt("end_line").getOrElse(0)
-          val newContent = extractor.getString("new_content").getOrElse("")
+          val op         = extractor.getString("operation").fold(_ => "replace", identity)
+          val startLine  = extractor.getInt("start_line").fold(_ => 0, identity)
+          val endLine    = extractor.getInt("end_line").fold(_ => 0, identity)
+          val newContent = extractor.getString("new_content").fold(_ => "", identity)
 
           op match {
             case "replace" => ReplaceOperation(startLine = startLine, endLine = endLine, newContent = newContent)
@@ -471,13 +472,13 @@ object WorkspaceTools {
    * Creates a complete set of workspace tools using default handlers.
    * This is equivalent to the original createWorkspaceTools method but using the factory methods.
    */
-  def createDefaultWorkspaceTools(workspace: ContainerisedWorkspace): Seq[ToolFunction[_, _]] =
-    Seq(
-      createExploreTool(workspace)(defaultExploreHandler),
-      createReadTool(workspace)(defaultReadHandler),
-      createWriteTool(workspace)(defaultWriteHandler),
-      createModifyTool(workspace)(defaultModifyHandler),
-      createSearchTool(workspace)(defaultSearchHandler),
-      createExecuteTool(workspace)(defaultExecuteHandler)
-    )
+  def createDefaultWorkspaceTools(workspace: ContainerisedWorkspace): Result[Seq[ToolFunction[_, _]]] =
+    for {
+      explore <- createExploreTool(workspace)(defaultExploreHandler)
+      read    <- createReadTool(workspace)(defaultReadHandler)
+      write   <- createWriteTool(workspace)(defaultWriteHandler)
+      modify  <- createModifyTool(workspace)(defaultModifyHandler)
+      search  <- createSearchTool(workspace)(defaultSearchHandler)
+      execute <- createExecuteTool(workspace)(defaultExecuteHandler)
+    } yield Seq(explore, read, write, modify, search, execute)
 }

@@ -216,16 +216,8 @@ private[llm4s] object Redaction {
       pattern.replaceAllIn(acc, m => s"${m.group(1)}$placeholder${m.group(3)}")
     }
 
-  private def redactApiKeys(input: String, placeholder: String): String = {
-    // OpenAI keys
-    val step1 = """sk-(?:proj-)?[a-zA-Z0-9]{20,}""".r.replaceAllIn(input, placeholder)
-    // Anthropic keys
-    val step2 = """sk-ant-[a-zA-Z0-9\-]{20,}""".r.replaceAllIn(step1, placeholder)
-    // Google keys
-    val step3 = """AIza[a-zA-Z0-9_\-]{35,}""".r.replaceAllIn(step2, placeholder)
-    // Voyage keys
-    val step4 = """pa-[a-zA-Z0-9]{20,}""".r.replaceAllIn(step3, placeholder)
-    // Langfuse keys
-    """[ps]k-lf-[a-zA-Z0-9\-]{10,}""".r.replaceAllIn(step4, placeholder)
-  }
+  private def redactApiKeys(input: String, placeholder: String): String =
+    // Delegate to the canonical patterns in SecretPatterns so there is a
+    // single source of truth for credential regexes across the codebase.
+    SecretPatterns.redactAllWithPlaceholder(input, placeholder)
 }

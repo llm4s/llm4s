@@ -196,7 +196,7 @@ object HelloOllama extends App {
 sbt run
 ```
 
-### Expected Output
+### Example Output
 
 ```
 ✓ Response from mistral:
@@ -212,11 +212,11 @@ the Java Virtual Machine (JVM).
 You can easily switch models:
 
 ```bash
-# Try Llama 2
-export LLM_MODEL=ollama/llama2
+# Try Llama 3.2 (good balance of reasoning and quality)
+export LLM_MODEL=ollama/llama3.2
 
-# Try Phi (faster, smaller)
-export LLM_MODEL=ollama/phi
+# Try Phi3 (lightweight,faster, smaller)
+export LLM_MODEL=ollama/phi3
 
 # Try CodeLlama (for coding tasks)
 export LLM_MODEL=ollama/codellama
@@ -226,6 +226,126 @@ Then run your program again without code changes!
 
 ---
 
+## Step 6a: Write Your First LLM4S + Ollama/Llama3.2 App
+
+Llama 3.2 is Meta's latest with an impressive 128K context window. Perfect for processing large documents and long conversations.
+
+For the code, use the same Scala example from **Step 5** - simply change the configuration:
+
+```bash
+# Linux / macOS
+export LLM_MODEL=ollama/llama3.2
+
+# Windows PowerShell
+$env:LLM_MODEL = "ollama/llama3.2"
+```
+
+Then run:
+
+```bash
+sbt run
+```
+
+{: .tip }
+> **Why Llama 3.2?** Latest Llama model with 128K context window. Excellent for RAG applications, long-form content generation, and processing large documents. Available in 1B, 3B, 8B, 70B, and 405B sizes.
+
+---
+
+## Step 6b: Write Your First LLM4S + Ollama/Phi3 App
+
+Phi3 is Microsoft's efficient model, even smaller than Phi. Ideal for ultra-low-latency applications and edge deployment.
+
+For the code, use the same Scala example from **Step 5** - simply change the configuration:
+
+```bash
+# Linux / macOS
+export LLM_MODEL=ollama/phi3
+
+# Windows PowerShell
+$env:LLM_MODEL = "ollama/phi3"
+```
+
+Then run:
+
+```bash
+sbt run
+```
+
+{: .tip }
+> **Why Phi3?** Microsoft's compact model optimized for efficiency. Smaller than Phi (1.4GB) with competitive quality. Perfect for resource-constrained environments and real-time applications requiring minimal latency.
+
+---
+## Step 6c: Write Your First LLM4S + Ollama/CodeLlama App
+
+CodeLlama is purpose-built for code generation and understanding. Create `HelloCodeLlama.scala`:
+
+```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.model._
+
+object HelloCodeLlama extends App {
+  // Create a conversation asking for code
+  val conversation = Conversation(Seq(
+    SystemMessage("You are an expert Scala developer. Write clean, idiomatic code."),
+    UserMessage("Write a simple Scala function that reverses a list.")
+  ))
+
+  // Load config and make the request
+  val result = for {
+    providerConfig <- Llm4sConfig.provider()
+    client <- LLMConnect.getClient(providerConfig)
+    completion <- client.complete(conversation)
+  } yield completion
+
+  result match {
+    case Right(completion) =>
+      println(s"Code suggestion from ${completion.model}:")
+      println(completion.message.content)
+    case Left(error) =>
+      println(s"Error: ${error.formatted}")
+  }
+}
+```
+
+### Configure for CodeLlama
+
+```bash
+# Linux / macOS
+export LLM_MODEL=ollama/codellama
+
+# Windows PowerShell
+$env:LLM_MODEL = "ollama/codellama"
+```
+
+### Run It!
+
+```bash
+sbt run
+```
+
+### Example Output
+
+```
+✓ Code suggestion from codellama:
+def reverseList[T](list: List[T]): List[T] = {
+  list.reverse
+}
+
+// Or for manual reversal:
+def reverseList[T](list: List[T]): List[T] = {
+  def helper(acc: List[T], remaining: List[T]): List[T] = {
+    if (remaining.isEmpty) acc
+    else helper(remaining.head :: acc, remaining.tail)
+  }
+  helper(Nil, list)
+}
+```
+
+{: .tip }
+> **Why CodeLlama?** CodeLlama is specialized for code-related tasks. Use it for code generation, refactoring suggestions, and explaining code. 16K context window perfect for larger code files.
+
+---
 ## Streaming Responses
 
 Get real-time token streaming (like ChatGPT):

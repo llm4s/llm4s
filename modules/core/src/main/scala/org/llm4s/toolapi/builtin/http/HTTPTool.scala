@@ -2,6 +2,7 @@ package org.llm4s.toolapi.builtin.http
 
 import org.llm4s.core.safety.UsingOps.using
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 
 import java.net.{ HttpURLConnection, URI }
@@ -92,9 +93,9 @@ object HTTPTool {
     )
 
   /**
-   * Create an HTTP tool with the given configuration.
+   * Create an HTTP tool with the given configuration, returning a Result for safe error handling.
    */
-  def create(config: HttpConfig = HttpConfig()): ToolFunction[Map[String, Any], HTTPResult] =
+  def createSafe(config: HttpConfig = HttpConfig()): Result[ToolFunction[Map[String, Any], HTTPResult]] =
     ToolBuilder[Map[String, Any], HTTPResult](
       name = "http_request",
       description = s"Make HTTP requests to fetch or send data. " +
@@ -108,21 +109,45 @@ object HTTPTool {
     ).withHandler { extractor =>
       for {
         urlStr <- extractor.getString("url")
-        method      = extractor.getString("method").toOption.getOrElse("GET")
+        method      = extractor.getString("method").fold(_ => "GET", identity)
         headersOpt  = extractHeaders(extractor)
         bodyOpt     = extractor.getString("body").toOption
         contentType = extractor.getString("content_type").toOption
         result <- makeRequest(urlStr, method, headersOpt, bodyOpt, contentType, config)
       } yield result
-    }.build()
+    }.buildSafe()
 
   private def extractHeaders(extractor: SafeParameterExtractor): Option[Map[String, String]] =
-    extractor.getObject("headers").toOption.map(obj => obj.value.collect { case (k, v) => k -> v.str }.toMap)
+    extractor.getObject("headers").fold(_ => None, obj => Some(obj.value.collect { case (k, v) => k -> v.str }.toMap))
+
+  /**
+   * Default HTTP tool instance, returning a Result for safe error handling.
+   */
+  val toolSafe: Result[ToolFunction[Map[String, Any], HTTPResult]] = createSafe()
+
+  /**
+   * Create an HTTP tool with the given configuration.
+   *
+   * @throws IllegalStateException if tool creation fails
+   */
+  @deprecated("Use createSafe() which returns Result[ToolFunction] for safe error handling", "0.2.9")
+  def create(config: HttpConfig = HttpConfig()): ToolFunction[Map[String, Any], HTTPResult] =
+    createSafe(config) match {
+      case Right(t) => t
+      case Left(e)  => throw new IllegalStateException(s"HTTPTool.create failed: ${e.formatted}")
+    }
 
   /**
    * Default HTTP tool with standard configuration.
+   *
+   * @throws IllegalStateException if tool initialization fails
    */
-  val tool: ToolFunction[Map[String, Any], HTTPResult] = create()
+  @deprecated("Use toolSafe which returns Result[ToolFunction] for safe error handling", "0.2.9")
+  lazy val tool: ToolFunction[Map[String, Any], HTTPResult] =
+    toolSafe match {
+      case Right(t) => t
+      case Left(e)  => throw new IllegalStateException(s"HTTPTool.tool lazy initialization failed: ${e.formatted}")
+    }
 
   private def makeRequest(
     urlStr: String,

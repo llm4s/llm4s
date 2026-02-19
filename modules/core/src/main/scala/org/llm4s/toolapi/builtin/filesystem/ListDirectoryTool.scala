@@ -1,6 +1,7 @@
 package org.llm4s.toolapi.builtin.filesystem
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 
 import java.nio.file.{ Files, LinkOption, Paths }
@@ -87,9 +88,9 @@ object ListDirectoryTool {
     )
 
   /**
-   * Create a list directory tool with the given configuration.
+   * Create a list directory tool with the given configuration, returning a Result for safe error handling.
    */
-  def create(config: FileConfig = FileConfig()): ToolFunction[Map[String, Any], ListDirectoryResult] =
+  def createSafe(config: FileConfig = FileConfig()): Result[ToolFunction[Map[String, Any], ListDirectoryResult]] =
     ToolBuilder[Map[String, Any], ListDirectoryResult](
       name = "list_directory",
       description = s"List contents of a directory. Returns file names, sizes, and types. " +
@@ -100,16 +101,41 @@ object ListDirectoryTool {
     ).withHandler { extractor =>
       for {
         pathStr <- extractor.getString("path")
-        maxEntries    = extractor.getInt("max_entries").toOption.getOrElse(MaxEntries).min(MaxEntries)
-        includeHidden = extractor.getBoolean("include_hidden").toOption.getOrElse(false)
+        maxEntries    = extractor.getInt("max_entries").fold(_ => MaxEntries, identity).min(MaxEntries)
+        includeHidden = extractor.getBoolean("include_hidden").fold(_ => false, identity)
         result <- listDirectory(pathStr, maxEntries, includeHidden, config)
       } yield result
-    }.build()
+    }.buildSafe()
+
+  /**
+   * Default list directory tool instance, returning a Result for safe error handling.
+   */
+  val toolSafe: Result[ToolFunction[Map[String, Any], ListDirectoryResult]] = createSafe()
+
+  /**
+   * Create a list directory tool with the given configuration.
+   *
+   * @throws IllegalStateException if tool creation fails
+   */
+  @deprecated("Use createSafe() which returns Result[ToolFunction] for safe error handling", "0.2.9")
+  def create(config: FileConfig = FileConfig()): ToolFunction[Map[String, Any], ListDirectoryResult] =
+    createSafe(config) match {
+      case Right(t) => t
+      case Left(e)  => throw new IllegalStateException(s"ListDirectoryTool.create failed: ${e.formatted}")
+    }
 
   /**
    * Default list directory tool with standard configuration.
+   *
+   * @throws IllegalStateException if tool initialization fails
    */
-  val tool: ToolFunction[Map[String, Any], ListDirectoryResult] = create()
+  @deprecated("Use toolSafe which returns Result[ToolFunction] for safe error handling", "0.2.9")
+  lazy val tool: ToolFunction[Map[String, Any], ListDirectoryResult] =
+    toolSafe match {
+      case Right(t) => t
+      case Left(e) =>
+        throw new IllegalStateException(s"ListDirectoryTool.tool lazy initialization failed: ${e.formatted}")
+    }
 
   private def listDirectory(
     pathStr: String,

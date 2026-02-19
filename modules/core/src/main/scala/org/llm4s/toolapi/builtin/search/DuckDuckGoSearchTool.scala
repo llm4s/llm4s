@@ -1,12 +1,14 @@
 package org.llm4s.toolapi.builtin.search
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 
 import scala.util.control.NonFatal
 
 import org.llm4s.config.DuckDuckGoSearchToolConfig
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.util.Redaction
 
 /**
  * A related topic from web search.
@@ -144,7 +146,7 @@ object DuckDuckGoSearchTool {
     config: DuckDuckGoSearchConfig = DuckDuckGoSearchConfig(),
     httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
     restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
-  ): ToolFunction[Map[String, Any], DuckDuckGoSearchResult] =
+  ): Result[ToolFunction[Map[String, Any], DuckDuckGoSearchResult]] =
     ToolBuilder[Map[String, Any], DuckDuckGoSearchResult](
       name = "duckduckgo_search",
       description = "Search the web for definitions, facts, and quick answers using DuckDuckGo. " +
@@ -156,7 +158,7 @@ object DuckDuckGoSearchTool {
         _           <- if (searchQuery.trim.isEmpty) Left("search_query cannot be empty") else Right(())
         result      <- search(toolConfig.apiUrl, searchQuery, config, httpClient, restoreInterrupt)
       } yield result
-    }.build()
+    }.buildSafe()
 
   private val SAFE_SEARCH   = "1"
   private val UNSAFE_SEARCH = "-1"
@@ -228,7 +230,8 @@ object DuckDuckGoSearchTool {
             Left("Failed to process search results. Please try again.")
         }
       } else {
-        Left(s"DuckDuckGo search returned status ${response.statusCode}: ${response.body}")
+        val body = Redaction.redactForLogging(response.body)
+        Left(s"DuckDuckGo search returned status ${response.statusCode}: $body")
       }
     }
   }

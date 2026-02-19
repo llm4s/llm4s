@@ -124,56 +124,59 @@ object GeminiTestExample {
     }
   }
 
-  private def testToolCalling(config: GeminiConfig): Unit = {
-    val toolRegistry = new ToolRegistry(Seq(WeatherTool.tool))
-    val conversation = Conversation(
-      Seq(
-        SystemMessage(
-          "You are a helpful assistant. When asked about weather, always call the get_weather tool immediately."
-        ),
-        UserMessage("What's the weather in Paris, France in celsius? Call the tool now.")
-      )
-    )
-    val options = CompletionOptions(tools = Seq(WeatherTool.tool))
+  private def testToolCalling(config: GeminiConfig): Unit =
+    WeatherTool.toolSafe match {
+      case Left(err) => println(s"Failed to load weather tool: ${err.formatted}")
+      case Right(weatherTool) =>
+        val toolRegistry = new ToolRegistry(Seq(weatherTool))
+        val conversation = Conversation(
+          Seq(
+            SystemMessage(
+              "You are a helpful assistant. When asked about weather, always call the get_weather tool immediately."
+            ),
+            UserMessage("What's the weather in Paris, France in celsius? Call the tool now.")
+          )
+        )
+        val options = CompletionOptions(tools = Seq(weatherTool))
 
-    val result = for {
-      client     <- LLMConnect.getClient(config)
-      completion <- client.complete(conversation, options)
-    } yield (client, completion)
+        val result = for {
+          client     <- LLMConnect.getClient(config)
+          completion <- client.complete(conversation, options)
+        } yield (client, completion)
 
-    result match {
-      case Right((client, completion)) =>
-        if (completion.toolCalls.nonEmpty) {
-          println(s"✅ Tool calling detected")
-          completion.toolCalls.foreach { tc =>
-            println(s"   Tool: ${tc.name}")
-            println(s"   Args: ${tc.arguments}")
-            println(s"   ID: ${tc.id}")
+        result match {
+          case Right((client, completion)) =>
+            if (completion.toolCalls.nonEmpty) {
+              println(s"✅ Tool calling detected")
+              completion.toolCalls.foreach { tc =>
+                println(s"   Tool: ${tc.name}")
+                println(s"   Args: ${tc.arguments}")
+                println(s"   ID: ${tc.id}")
 
-            // Execute the tool
-            val request    = ToolCallRequest(tc.name, tc.arguments)
-            val toolResult = toolRegistry.execute(request)
-            println(s"   Tool result: ${toolResult.map(_.render()).getOrElse("error")}")
+                // Execute the tool
+                val request    = ToolCallRequest(tc.name, tc.arguments)
+                val toolResult = toolRegistry.execute(request)
+                println(s"   Tool result: ${toolResult.map(_.render()).getOrElse("error")}")
 
-            // Send tool result back
-            val updatedConversation = conversation
-              .addMessage(completion.message)
-              .addMessage(ToolMessage(toolResult.map(_.render()).getOrElse("error"), tc.id))
+                // Send tool result back
+                val updatedConversation = conversation
+                  .addMessage(completion.message)
+                  .addMessage(ToolMessage(toolResult.map(_.render()).getOrElse("error"), tc.id))
 
-            println("\n   Sending tool result back to model...")
-            client.complete(updatedConversation, CompletionOptions()) match {
-              case Right(finalCompletion) =>
-                println(s"   ✅ Final response: ${finalCompletion.content.take(200)}...")
-              case Left(error) =>
-                println(s"   ❌ Final response failed: ${error.formatted}")
+                println("\n   Sending tool result back to model...")
+                client.complete(updatedConversation, CompletionOptions()) match {
+                  case Right(finalCompletion) =>
+                    println(s"   ✅ Final response: ${finalCompletion.content.take(200)}...")
+                  case Left(error) =>
+                    println(s"   ❌ Final response failed: ${error.formatted}")
+                }
+              }
+            } else {
+              println(s"⚠️  No tool calls in response (model responded directly)")
+              println(s"   Response: ${completion.content.take(200)}")
             }
-          }
-        } else {
-          println(s"⚠️  No tool calls in response (model responded directly)")
-          println(s"   Response: ${completion.content.take(200)}")
+          case Left(error) =>
+            println(s"❌ Tool calling FAILED: ${error.formatted}")
         }
-      case Left(error) =>
-        println(s"❌ Tool calling FAILED: ${error.formatted}")
     }
-  }
 }

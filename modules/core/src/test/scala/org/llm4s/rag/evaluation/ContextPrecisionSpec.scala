@@ -1,45 +1,14 @@
 package org.llm4s.rag.evaluation
 
-import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model._
 import org.llm4s.rag.evaluation.metrics.ContextPrecision
-import org.llm4s.types.Result
+import org.llm4s.testutil.MockLLMClients
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class ContextPrecisionSpec extends AnyFlatSpec with Matchers {
 
-  private def mockCompletion(content: String): Completion = Completion(
-    id = "test-id",
-    created = System.currentTimeMillis(),
-    content = content,
-    model = "test-model",
-    message = AssistantMessage(content)
-  )
-
-  class MockLLMClient(response: String) extends LLMClient {
-    var lastConversation: Option[Conversation] = None
-
-    override def complete(
-      conversation: Conversation,
-      options: CompletionOptions
-    ): Result[Completion] = {
-      lastConversation = Some(conversation)
-      Right(mockCompletion(response))
-    }
-
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
-      onChunk: StreamedChunk => Unit
-    ): Result[Completion] = complete(conversation, options)
-
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
-  }
-
   "ContextPrecision" should "have correct metadata" in {
-    val mockClient = new MockLLMClient("[]")
+    val mockClient = new MockLLMClients.SimpleMock("[]")
     val metric     = ContextPrecision(mockClient)
 
     metric.name shouldBe "context_precision"
@@ -53,7 +22,7 @@ class ContextPrecisionSpec extends AnyFlatSpec with Matchers {
     // Only one context, and it's relevant
     val relevanceResponse = """[{"index": 0, "relevant": true}]"""
 
-    val mockClient = new MockLLMClient(relevanceResponse)
+    val mockClient = new MockLLMClients.SimpleMock(relevanceResponse)
     val metric     = ContextPrecision(mockClient)
 
     val sample = EvalSample(
@@ -79,7 +48,7 @@ class ContextPrecisionSpec extends AnyFlatSpec with Matchers {
       {"index": 3, "relevant": false}
     ]"""
 
-    val mockClient = new MockLLMClient(relevanceResponse)
+    val mockClient = new MockLLMClients.SimpleMock(relevanceResponse)
     val metric     = ContextPrecision(mockClient)
 
     val sample = EvalSample(
@@ -105,7 +74,7 @@ class ContextPrecisionSpec extends AnyFlatSpec with Matchers {
       {"index": 3, "relevant": true}
     ]"""
 
-    val mockClient = new MockLLMClient(relevanceResponse)
+    val mockClient = new MockLLMClients.SimpleMock(relevanceResponse)
     val metric     = ContextPrecision(mockClient)
 
     val sample = EvalSample(
@@ -130,7 +99,7 @@ class ContextPrecisionSpec extends AnyFlatSpec with Matchers {
       {"index": 1, "relevant": false}
     ]"""
 
-    val mockClient = new MockLLMClient(relevanceResponse)
+    val mockClient = new MockLLMClients.SimpleMock(relevanceResponse)
     val metric     = ContextPrecision(mockClient)
 
     val sample = EvalSample(
@@ -147,7 +116,7 @@ class ContextPrecisionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail when ground truth is missing" in {
-    val mockClient = new MockLLMClient("[]")
+    val mockClient = new MockLLMClients.SimpleMock("[]")
     val metric     = ContextPrecision(mockClient)
 
     val sample = EvalSample(
@@ -164,7 +133,7 @@ class ContextPrecisionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return score 0.0 when ground truth is empty" in {
-    val mockClient = new MockLLMClient("[]")
+    val mockClient = new MockLLMClients.SimpleMock("[]")
     val metric     = ContextPrecision(mockClient)
 
     val sample = EvalSample(
@@ -181,7 +150,7 @@ class ContextPrecisionSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return score 0.0 when no contexts provided" in {
-    val mockClient = new MockLLMClient("[]")
+    val mockClient = new MockLLMClients.SimpleMock("[]")
     val metric     = ContextPrecision(mockClient)
 
     val sample = EvalSample(
@@ -202,7 +171,7 @@ class ContextPrecisionSpec extends AnyFlatSpec with Matchers {
 [{"index": 0, "relevant": true}]
 ```"""
 
-    val mockClient = new MockLLMClient(relevanceResponse)
+    val mockClient = new MockLLMClients.SimpleMock(relevanceResponse)
     val metric     = ContextPrecision(mockClient)
 
     val sample = EvalSample(
@@ -224,7 +193,7 @@ class ContextPrecisionSpec extends AnyFlatSpec with Matchers {
       {"index": 1, "relevant": false}
     ]"""
 
-    val mockClient = new MockLLMClient(relevanceResponse)
+    val mockClient = new MockLLMClients.SimpleMock(relevanceResponse)
     val metric     = ContextPrecision(mockClient)
 
     val sample = EvalSample(
@@ -240,5 +209,56 @@ class ContextPrecisionSpec extends AnyFlatSpec with Matchers {
     val details = result.toOption.get.details
     details.get("relevantCount") shouldBe Some(1)
     details.get("totalContexts") shouldBe Some(2)
+  }
+
+  it should "propagate LLM client errors" in {
+    val mockClient = new MockLLMClients.FailingMock("LLM service unavailable")
+    val metric     = ContextPrecision(mockClient)
+
+    val sample = EvalSample(
+      question = "What is the capital?",
+      answer = "Paris.",
+      contexts = Seq("Some context"),
+      groundTruth = Some("Paris is the capital.")
+    )
+
+    val result = metric.evaluate(sample)
+
+    result.isLeft shouldBe true
+    result.left.toOption.get.message should include("LLM service unavailable")
+  }
+
+  it should "return error on malformed JSON response" in {
+    val mockClient = new MockLLMClients.SimpleMock("not valid json at all")
+    val metric     = ContextPrecision(mockClient)
+
+    val sample = EvalSample(
+      question = "What is the capital?",
+      answer = "Paris.",
+      contexts = Seq("Some context"),
+      groundTruth = Some("Paris is the capital.")
+    )
+
+    val result = metric.evaluate(sample)
+
+    result.isLeft shouldBe true
+  }
+
+  it should "treat whitespace-only contexts as empty" in {
+    val mockClient = new MockLLMClients.SimpleMock("[]")
+    val metric     = ContextPrecision(mockClient)
+
+    val sample = EvalSample(
+      question = "What is the capital?",
+      answer = "Paris.",
+      contexts = Seq("   ", "  \t  "),
+      groundTruth = Some("Paris is the capital.")
+    )
+
+    val result = metric.evaluate(sample)
+
+    result.isRight shouldBe true
+    result.toOption.get.score shouldBe 0.0
+    result.toOption.get.details.get("reason") shouldBe Some("No contexts to evaluate")
   }
 }

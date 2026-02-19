@@ -1,11 +1,13 @@
 package org.llm4s.toolapi.builtin.search
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 import org.llm4s.config.BraveSearchToolConfig
 
 import scala.util.control.NonFatal
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.util.Redaction
 
 sealed trait BraveSearchCategory[R] {
   def endpoint: String
@@ -234,7 +236,7 @@ object BraveSearchTool {
     config: Option[BraveSearchConfig] = None,
     httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
     restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
-  ): ToolFunction[Map[String, Any], R] =
+  ): Result[ToolFunction[Map[String, Any], R]] =
     ToolBuilder[Map[String, Any], R](
       name = category.toolName,
       description = category.description,
@@ -251,7 +253,7 @@ object BraveSearchTool {
         )
         result <- search(query, finalConfig, toolConfig, category, httpClient, restoreInterrupt)
       } yield result
-    }.build()
+    }.buildSafe()
 
   /**
    * Create a Brave search tool with explicit API key and optional overrides.
@@ -272,7 +274,7 @@ object BraveSearchTool {
     config: Option[BraveSearchConfig] = None,
     httpClient: Llm4sHttpClient = Llm4sHttpClient.create(),
     restoreInterrupt: () => Unit = () => Thread.currentThread().interrupt()
-  ): ToolFunction[Map[String, Any], R] = {
+  ): Result[ToolFunction[Map[String, Any], R]] = {
     // Hardcoded defaults when using withApiKey
     val braveTool = BraveSearchToolConfig(
       apiKey = apiKey,
@@ -354,9 +356,8 @@ object BraveSearchTool {
             Left("Failed to process search results. Please try again.")
         }
       } else {
-        Left(
-          s"Brave ${category.toolName} returned status ${response.statusCode}: ${response.body}"
-        )
+        val body = Redaction.redactForLogging(response.body)
+        Left(s"Brave ${category.toolName} returned status ${response.statusCode}: $body")
       }
     }
   }

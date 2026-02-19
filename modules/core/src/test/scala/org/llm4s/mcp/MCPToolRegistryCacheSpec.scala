@@ -1,5 +1,6 @@
 package org.llm4s.mcp
 
+import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.toolapi._
@@ -26,7 +27,7 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
   }
 
   // Create a simple test tool using ToolBuilder
-  private def createTestTool(): ToolFunction[Map[String, Any], TestResult] = {
+  private def createTestTool(): Result[ToolFunction[Map[String, Any], TestResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Test parameters")
       .withProperty(Schema.property("input", Schema.string("Input value")))
@@ -35,7 +36,7 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
       "test_tool",
       "A test tool",
       schema
-    ).withHandler(_ => Right(TestResult("result"))).build()
+    ).withHandler(_ => Right(TestResult("result"))).buildSafe()
   }
 
   private val testTool = createTestTool()
@@ -45,45 +46,64 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "MCPToolRegistry" should "include local tools in tools list" in {
-    val registry = new MCPToolRegistry(
-      mcpServers = Seq.empty,
-      localTools = Seq(testTool),
-      cacheTTL = 1.minute,
-      initializeOnStartup = false
-    )
+    testTool.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val registry = new MCPToolRegistry(
+          mcpServers = Seq.empty,
+          localTools = Seq(tool),
+          cacheTTL = 1.minute,
+          initializeOnStartup = false
+        )
 
-    registry.tools should have size 1
-    registry.tools.head.name shouldBe "test_tool"
+        registry.tools should have size 1
+        registry.tools.head.name shouldBe "test_tool"
+      }
+    )
   }
 
   it should "execute local tools successfully" in {
-    val registry = new MCPToolRegistry(
-      mcpServers = Seq.empty,
-      localTools = Seq(testTool),
-      cacheTTL = 1.minute,
-      initializeOnStartup = false
+    testTool.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val registry = new MCPToolRegistry(
+          mcpServers = Seq.empty,
+          localTools = Seq(tool),
+          cacheTTL = 1.minute,
+          initializeOnStartup = false
+        )
+
+        val request = ToolCallRequest("test_tool", ujson.Obj("input" -> "hello"))
+        registry
+          .execute(request)
+          .fold(
+            err => fail(s"Expected Right but got Left: $err"),
+            json => json("value").str shouldBe "result"
+          )
+      }
     )
-
-    val request = ToolCallRequest("test_tool", ujson.Obj("input" -> "hello"))
-    val result  = registry.execute(request)
-
-    result.isRight shouldBe true
-    result.toOption.get("value").str shouldBe "result"
   }
 
   it should "return error for unknown tool" in {
-    val registry = new MCPToolRegistry(
-      mcpServers = Seq.empty,
-      localTools = Seq(testTool),
-      cacheTTL = 1.minute,
-      initializeOnStartup = false
+    testTool.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val registry = new MCPToolRegistry(
+          mcpServers = Seq.empty,
+          localTools = Seq(tool),
+          cacheTTL = 1.minute,
+          initializeOnStartup = false
+        )
+
+        val request = ToolCallRequest("nonexistent_tool", ujson.Obj())
+        registry
+          .execute(request)
+          .fold(
+            err => err shouldBe a[ToolCallError.UnknownFunction],
+            result => fail(s"Expected Left but got Right: $result")
+          )
+      }
     )
-
-    val request = ToolCallRequest("nonexistent_tool", ujson.Obj())
-    val result  = registry.execute(request)
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[ToolCallError.UnknownFunction]
   }
 
   // ==========================================================================
@@ -119,16 +139,21 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "MCPToolRegistry.getOpenAITools" should "return tools in OpenAI format" in {
-    val registry = new MCPToolRegistry(
-      mcpServers = Seq.empty,
-      localTools = Seq(testTool),
-      cacheTTL = 1.minute,
-      initializeOnStartup = false
+    testTool.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val registry = new MCPToolRegistry(
+          mcpServers = Seq.empty,
+          localTools = Seq(tool),
+          cacheTTL = 1.minute,
+          initializeOnStartup = false
+        )
+
+        val openAITools = registry.getOpenAITools()
+
+        openAITools.value should have size 1
+      }
     )
-
-    val openAITools = registry.getOpenAITools()
-
-    openAITools.value should have size 1
   }
 
   it should "return empty array when no tools" in {
@@ -179,17 +204,22 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "MCPToolRegistry.getAllTools" should "combine local and MCP tools" in {
-    val registry = new MCPToolRegistry(
-      mcpServers = Seq.empty,
-      localTools = Seq(testTool),
-      cacheTTL = 1.minute,
-      initializeOnStartup = false
+    testTool.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val registry = new MCPToolRegistry(
+          mcpServers = Seq.empty,
+          localTools = Seq(tool),
+          cacheTTL = 1.minute,
+          initializeOnStartup = false
+        )
+
+        val allTools = registry.getAllTools
+
+        allTools should have size 1
+        allTools.head.name shouldBe "test_tool"
+      }
     )
-
-    val allTools = registry.getAllTools
-
-    allTools should have size 1
-    allTools.head.name shouldBe "test_tool"
   }
 
   it should "return empty when no tools configured" in {
@@ -239,20 +269,25 @@ class MCPToolRegistryCacheSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "CachedTools" should "detect expiration correctly" in {
-    val tools = Seq(testTool)
+    testTool.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val tools = Seq(tool)
 
-    // Create cached tools instance via reflection or internal access
-    // For now, test the behavior indirectly through MCPToolRegistry
-    val registry = new MCPToolRegistry(
-      mcpServers = Seq.empty,
-      localTools = tools,
-      cacheTTL = 1.millisecond, // Very short TTL
-      initializeOnStartup = false
+        // Create cached tools instance via reflection or internal access
+        // For now, test the behavior indirectly through MCPToolRegistry
+        val registry = new MCPToolRegistry(
+          mcpServers = Seq.empty,
+          localTools = tools,
+          cacheTTL = 1.millisecond, // Very short TTL
+          initializeOnStartup = false
+        )
+
+        // Cache should handle expiry gracefully
+        Thread.sleep(10)
+        registry.tools should have size 1 // Local tools are always available
+        registry.close()
+      }
     )
-
-    // Cache should handle expiry gracefully
-    Thread.sleep(10)
-    registry.tools should have size 1 // Local tools are always available
-    registry.close()
   }
 }
