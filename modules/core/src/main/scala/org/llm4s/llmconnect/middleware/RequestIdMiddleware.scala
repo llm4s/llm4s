@@ -20,16 +20,22 @@ class RequestIdMiddleware(
   override def name: String = "request-id"
 
   override def wrap(client: LLMClient): LLMClient = new MiddlewareClient(client) {
+    private def withMDC[A](key: String, value: String)(f: => Result[A]): Result[A] = {
+      val previous = Option(MDC.get(key))
+      MDC.put(key, value)
+      val result = f
+      previous.fold(MDC.remove(key))(MDC.put(key, _))
+      result
+    }
+
     override def complete(
       conversation: Conversation,
       options: CompletionOptions
     ): Result[Completion] = {
       val requestId = generator()
-      MDC.put(headerName, requestId)
-      try
+      withMDC(headerName, requestId) {
         next.complete(conversation, options)
-      finally
-        MDC.remove(headerName)
+      }
     }
 
     // Note: streamComplete is tricky with MDC because the callback might run on a different thread.
@@ -40,11 +46,9 @@ class RequestIdMiddleware(
       onChunk: org.llm4s.llmconnect.model.StreamedChunk => Unit
     ): Result[Completion] = {
       val requestId = generator()
-      MDC.put(headerName, requestId)
-      try
+      withMDC(headerName, requestId) {
         next.streamComplete(conversation, options, onChunk)
-      finally
-        MDC.remove(headerName)
+      }
     }
   }
 }

@@ -16,47 +16,52 @@ import java.util.concurrent.atomic.AtomicLong
  */
 class RateLimitingMiddleware(
   requestsPerMinute: Int,
-  burstCapacity: Int
+  burstCapacity: Int,
+  timeSource: () => Long = () => System.nanoTime()
 ) extends LLMMiddleware {
 
   def this(requestsPerMinute: Int) = this(requestsPerMinute, requestsPerMinute)
 
   override def name: String = "rate-limiting"
 
-  // Simple thread-safe Token Bucket implementation
-  private val capacity            = burstCapacity.toLong
-  private val tokens              = new AtomicLong(capacity)
-  private val lastRefillTimestamp = new AtomicLong(System.nanoTime())
-  private val refillRatePerNano   = requestsPerMinute.toDouble / 60_000_000_000L
+  private val refillRatePerNano = requestsPerMinute.toDouble / 60_000_000_000L
 
   private def convertError[A](error: LLMError): Result[A] = Left(error)
 
-  private def tryAcquire(): Boolean = {
-    refill()
-    var current = tokens.get()
-    while (current > 0) {
-      if (tokens.compareAndSet(current, current - 1)) return true
-      current = tokens.get()
-    }
-    false
-  }
+  override def wrap(client: LLMClient): LLMClient = new MiddlewareClient(client) {
+    // Simple thread-safe Token Bucket implementation
+    // State is now LOCAL to this wrapper instance
+    private val capacity            = burstCapacity.toLong
+    private val tokens              = new AtomicLong(capacity)
+    private val lastRefillTimestamp = new AtomicLong(timeSource())
 
-  private def refill(): Unit = {
-    val now  = System.nanoTime()
-    val last = lastRefillTimestamp.get()
-    if (now > last) {
-      val deltaNanos  = now - last
-      val tokensToAdd = (deltaNanos * refillRatePerNano).toLong
-      if (tokensToAdd > 0) {
-        // Only update if we can advance the time
-        if (lastRefillTimestamp.compareAndSet(last, now)) {
-          tokens.updateAndGet(t => Math.min(capacity, t + tokensToAdd))
+    @scala.annotation.tailrec
+    private def tryAcquire(): Boolean = {
+      refill()
+      val current = tokens.get()
+      if (current > 0) {
+        if (tokens.compareAndSet(current, current - 1)) true
+        else tryAcquire()
+      } else {
+        false
+      }
+    }
+
+    private def refill(): Unit = {
+      val now  = timeSource()
+      val last = lastRefillTimestamp.get()
+      if (now > last) {
+        val deltaNanos  = now - last
+        val tokensToAdd = (deltaNanos * refillRatePerNano).toLong
+        if (tokensToAdd > 0) {
+          // Only update if we can advance the time
+          if (lastRefillTimestamp.compareAndSet(last, now)) {
+            tokens.updateAndGet(t => Math.min(capacity, t + tokensToAdd))
+          }
         }
       }
     }
-  }
 
-  override def wrap(client: LLMClient): LLMClient = new MiddlewareClient(client) {
     override def complete(
       conversation: Conversation,
       options: CompletionOptions

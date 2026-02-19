@@ -46,7 +46,11 @@ class RateLimitingMiddlewareSpec extends AnyFlatSpec with Matchers {
 
   it should "refill tokens over time" in {
     // 600 RPM = 10 requests per second = 1 token every 100ms
-    val middleware = new RateLimitingMiddleware(600, 1) // burst 1
+    val startTime = System.nanoTime()
+    var now       = startTime
+    val timeSource = () => now
+
+    val middleware = new RateLimitingMiddleware(600, 1, timeSource) // burst 1
     val client     = middleware.wrap(new NoOpClient)
 
     // Consume 1
@@ -55,8 +59,8 @@ class RateLimitingMiddlewareSpec extends AnyFlatSpec with Matchers {
     // Immediate next should fail
     (client.complete(Conversation(Seq.empty)) should be).a(Symbol("isLeft"))
 
-    // Wait > 100ms
-    Thread.sleep(150)
+    // Advance time by 150ms (in nanos)
+    now = startTime + 150_000_000L
 
     // Should succeed now
     (client.complete(Conversation(Seq.empty)) should be).a(Symbol("isRight"))

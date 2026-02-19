@@ -40,18 +40,18 @@ class InputSanitizationMiddleware(
     private def validate(conversation: Conversation): Result[Unit] = {
       val allContent = conversation.messages.map(_.content).mkString
 
-      if (allContent.length > maxTotalCharacters) {
-        return Left(
+      for {
+        _ <- Either.cond(
+          allContent.length <= maxTotalCharacters,
+          (),
           InvalidInputError("prompt", s"${allContent.length} chars", s"exceeds maximum allowed $maxTotalCharacters")
         )
-      }
-
-      val forbiddenFound = forbiddenPatterns.find(_.findFirstIn(allContent).isDefined)
-      if (forbiddenFound.isDefined) {
-        return Left(InvalidInputError("prompt", "content", "contains forbidden patterns/content."))
-      }
-
-      Right(())
+        _ <- Either.cond(
+          !forbiddenPatterns.exists(_.findFirstIn(allContent).isDefined),
+          (),
+          InvalidInputError("prompt", "content", "contains forbidden patterns/content.")
+        )
+      } yield ()
     }
   }
 }

@@ -54,4 +54,25 @@ class MetricsMiddlewareSpec extends AnyFlatSpec with Matchers {
     collector.tokens.get() shouldBe 30 // 10 input + 20 output
     collector.costs.get() shouldBe 1
   }
+
+  it should "record metrics on failure" in {
+    val collector  = new FakeMetricsCollector()
+    class FailingClient extends LLMClient {
+      override def complete(c: Conversation, o: CompletionOptions): Result[Completion] =
+        Left(org.llm4s.error.RateLimitError("Limit exceeded"))
+      override def streamComplete(c: Conversation, o: CompletionOptions, onChunk: StreamedChunk => Unit): Result[Completion] = ???
+      override def getContextWindow(): Int = 100
+      override def getReserveCompletion(): Int = 10
+    }
+
+    val middleware = new MetricsMiddleware(collector, "test-provider", "test-model")
+    val client     = middleware.wrap(new FailingClient())
+
+    client.complete(Conversation(Seq.empty))
+
+    collector.requests.get() shouldBe 1
+    // Tokens and costs are only updated on success in the current implementation of MetricsMiddleware
+    collector.tokens.get() shouldBe 0
+    collector.costs.get() shouldBe 0
+  }
 }
