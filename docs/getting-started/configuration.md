@@ -250,7 +250,7 @@ object ConfigurationLoader {
         println("Configuration loaded successfully")
       
       case Left(error) =>
-        println(s"Failed to load configuration: $error")
+        Console.err.println(s"Failed to load configuration: $error")
         System.exit(1)
     }
   }
@@ -658,7 +658,7 @@ object ApplicationBoundary {
     // Fail fast at startup if config is invalid
     Llm4sConfig.provider().fold(
       error => {
-        System.err.println(s"FATAL: Configuration error: $error")
+        Console.err.println(s"FATAL: Configuration error: $error")
         System.exit(1)
       },
       config => {
@@ -703,7 +703,7 @@ object ValidateConfig extends App {
       println("✅ Configuration valid!")
       
     case Left(error) =>
-      System.err.println(s"❌ Configuration error: $error")
+      Console.err.println(s"❌ Configuration error: $error")
       System.exit(1)
   }
 }
