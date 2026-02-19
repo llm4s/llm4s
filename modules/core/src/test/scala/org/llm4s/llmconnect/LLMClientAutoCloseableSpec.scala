@@ -5,7 +5,7 @@ import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import scala.util.{Success, Failure, Using}
+import scala.util.{ Success, Failure, Using }
 
 /**
  * Tests that [[LLMClient]] is `AutoCloseable` and works idiomatically
