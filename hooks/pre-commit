@@ -5,30 +5,9 @@
 
 set -e
 
-# Ensure SDKMAN sbt is available in non-interactive shells
-if [ -x "$HOME/.sdkman/candidates/sbt/current/bin/sbt" ]; then
-    export PATH="$HOME/.sdkman/candidates/sbt/current/bin:$PATH"
-fi
-
 echo "Running pre-commit checks..."
 
 # Check if sbt is available
-if ! command -v sbt &> /dev/null; then
-    # Try loading SDKMAN if available
-    if [ -s "$HOME/.sdkman/bin/sdkman-init.sh" ]; then
-        # shellcheck disable=SC1090
-        source "$HOME/.sdkman/bin/sdkman-init.sh"
-    fi
-fi
-
-# Re-check after SDKMAN init
-if ! command -v sbt &> /dev/null; then
-    if [ -x "$HOME/.sdkman/candidates/sbt/current/bin/sbt" ]; then
-        export PATH="$HOME/.sdkman/candidates/sbt/current/bin:$PATH"
-    fi
-fi
-
-# Final check
 if ! command -v sbt &> /dev/null; then
     echo "Error: sbt is not installed or not in PATH"
     exit 1
