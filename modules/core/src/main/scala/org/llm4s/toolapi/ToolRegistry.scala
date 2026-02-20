@@ -19,17 +19,12 @@ case class ToolCallRequest(
 /**
  * Registry for tool functions with execution capabilities.
  *
- * Supports both synchronous and asynchronous tool execution:
- * - `execute()` - Synchronous, blocking execution (original API)
- * - `executeAsync()` - Asynchronous, non-blocking execution
- * - `executeAll()` - Batch execution with configurable strategy
- */
-/**
- * Registry for tool functions with execution capabilities.
- *
  * Acts as the single point of truth for tools available to an agent.
  * Supports synchronous, asynchronous, and batched execution with configurable
- * concurrency strategies (see [[ToolExecutionStrategy]]).
+ * concurrency strategies (see [[ToolExecutionStrategy]]):
+ * - `execute()` — synchronous, blocking execution
+ * - `executeAsync()` — asynchronous, non-blocking execution
+ * - `executeAll()` — batch execution with a configurable [[ToolExecutionStrategy]]
  *
  * Create a registry by passing an initial set of [[ToolFunction]] instances:
  * {{{val registry = new ToolRegistry(Seq(myTool, anotherTool))

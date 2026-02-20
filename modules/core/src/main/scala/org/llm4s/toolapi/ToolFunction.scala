@@ -148,9 +148,21 @@ class ToolBuilder[T, R: ReadWriter] private (
    */
   def buildSafe(): Result[ToolFunction[T, R]] = handler match {
     case Some(h) => Right(ToolFunction(name, description, schema, h))
-    case None    => Left(ValidationError("handler", "must be defined before calling build()"))
+    case None    => Left(ValidationError("handler", "must be defined before calling buildSafe()"))
   }
 
+  /**
+   * Build the tool function, throwing on failure.
+   *
+   * Prefer [[buildSafe]] which returns `Result[ToolFunction]` and avoids throwing.
+   *
+   * @throws IllegalStateException if handler is not defined
+   */
+  @deprecated("Use buildSafe() which returns Result[ToolFunction] for safe error handling", "0.2.9")
+  def build(): ToolFunction[T, R] = handler match {
+    case Some(h) => ToolFunction(name, description, schema, h)
+    case None    => throw new IllegalStateException("Handler not defined")
+  }
 }
 
 object ToolBuilder {
