@@ -1,85 +1,72 @@
 package org.llm4s.llmconnect.caching
 
+import org.llm4s.llmconnect.EmbeddingClient
+import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse, EmbeddingError }
+import org.llm4s.types.Result
+
 /**
- * Decorator for EmbeddingClient that adds transparent caching.
+ * A decorator for [[EmbeddingClient]] that provides transparent, deterministic caching.
  *
- * Uses a deterministic cache key (text + model) and stores only successful
- * embedding results.
+ * This client intercepts embedding requests, hashes the input text and model name to
+ * create a unique cache key, and returns cached vectors if available. On a cache miss,
+ * it delegates to the base client and stores the result.
  *
- * @param baseClient The underlying EmbeddingClient
- * @param cache The cache implementation
- * @tparam Request The request type expected by the base client
- * @tparam Response The response type returned by the base client
- * @tparam Embedding The embedding type
+ * @param baseClient The underlying client used to generate embeddings on cache misses.
+ * @param cache The storage backend for the embedding vectors.
+ * @param keyGenerator Function to create a unique hash (defaults to SHA-256).
  */
-class CachedEmbeddingClient[Request, Response, Embedding](
-  val baseClient: EmbeddingClient[Request, Response],
-  val cache: EmbeddingCache[Embedding],
-  val keyGenerator: (String, String) => String = CacheKeyGenerator.sha256,
-  val embeddingExtractor: Response => Option[Embedding]
+class CachedEmbeddingClient(
+  baseClient: EmbeddingClient,
+  cache: EmbeddingCache[Seq[Double]],
+  keyGenerator: (String, String) => String = CacheKeyGenerator.sha256
 ) {
 
-  /** Embeds text with caching support. */
-  def embed(
-    text: String,
-    model: String,
-    request: Option[Request] = None
-  ): Either[EmbeddingError, Embedding] = {
-
-    val cacheKey = keyGenerator(text, model)
-
-    cache.get(cacheKey) match {
-      case Some(cachedEmbedding) =>
-        Right(cachedEmbedding)
-
-      case None =>
-        // Use baseClient and request here to resolve "never used" error
-        baseClient.embed(text, model, request).flatMap { response =>
-          embeddingExtractor(response) match {
-            case Some(embedding) =>
-              cache.put(cacheKey, embedding)
-              Right(embedding)
-
-            case None =>
-              Left(EmbeddingError("Failed to extract embedding from response"))
-          }
-        }
-    }
-  }
-
   /**
-   * Embeds multiple texts with caching support.
-   * Total monadic transformation for explicit error propagation.
+   * Generates embeddings for the provided request, utilizing the cache where possible.
+   * @param request The embedding request containing one or more strings.
+   * @return A Result containing the accumulated EmbeddingResponse.
    */
-  def embedBatch(
-    texts: Seq[String],
-    model: String,
-    request: Option[Request] = None
-  ): Either[EmbeddingError, Seq[Embedding]] =
-    texts
-      .foldLeft(Right(Vector.empty[Embedding]): Either[EmbeddingError, Vector[Embedding]]) { (accEither, text) =>
-        for {
-          acc <- accEither
-          // Calling the local embed method which uses baseClient and request
-          embedding <- embed(text, model, request)
-        } yield acc :+ embedding
+  def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
+    val modelName = request.model.name
+
+    // Map over each input text to resolve it from cache or the base client
+    val results: Seq[Result[Seq[Double]]] = request.input.map { text =>
+      val cacheKey = keyGenerator(text, modelName)
+
+      cache.get(cacheKey) match {
+        case Some(vector) =>
+          // Cache Hit: Return the stored vector directly
+          Right(vector)
+
+        case None =>
+          // Cache Miss: Generate embedding via baseClient for this specific text
+          val singleRequest = request.copy(input = Seq(text))
+          baseClient.embed(singleRequest).flatMap { response =>
+            response.embeddings.headOption match {
+              case Some(vector) =>
+                cache.put(cacheKey, vector)
+                Right(vector)
+              case None =>
+                Left(
+                  EmbeddingError(
+                    code = None,
+                    message = "No embedding returned from base client",
+                    provider = "cached-embedding-client"
+                  )
+                )
+            }
+          }
       }
-      .map(_.toSeq)
-
-  def getCacheStats(): Map[String, Any] = cache.stats()
-  def clearCache(): Unit                = cache.clear()
+    }
+    results
+      .foldLeft(Right(Vector.empty[Seq[Double]]): Result[Vector[Seq[Double]]]) { (acc, res) =>
+        for {
+          vectors <- acc
+          vector  <- res
+        } yield vectors :+ vector
+      }
+      .map(allVectors => EmbeddingResponse(allVectors.toSeq))
+  }
+  def getCacheStats(): CacheStats = cache.stats()
+  def clearCache(): Unit          = cache.clear()
 }
-
-// Re-adding these to resolve "not found: type" errors
-trait EmbeddingClient[Request, Response] {
-  def embed(
-    text: String,
-    model: String,
-    request: Option[Request] = None
-  ): Either[EmbeddingError, Response]
-}
-
-case class EmbeddingError(
-  message: String,
-  cause: Option[Throwable] = None
-) extends Exception(message)
