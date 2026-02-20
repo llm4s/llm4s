@@ -24,8 +24,25 @@ case class ToolCallRequest(
  * - `executeAsync()` - Asynchronous, non-blocking execution
  * - `executeAll()` - Batch execution with configurable strategy
  */
+/**
+ * Registry for tool functions with execution capabilities.
+ *
+ * Acts as the single point of truth for tools available to an agent.
+ * Supports synchronous, asynchronous, and batched execution with configurable
+ * concurrency strategies (see [[ToolExecutionStrategy]]).
+ *
+ * Create a registry by passing an initial set of [[ToolFunction]] instances:
+ * {{{val registry = new ToolRegistry(Seq(myTool, anotherTool))
+ * // or use the convenience factories:
+ * ToolRegistry.empty
+ * BuiltinTools.coreSafe.map(new ToolRegistry(_))
+ * }}}
+ *
+ * @param initialTools The tools available in this registry
+ */
 class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
 
+  /** All tools registered in this registry. */
   def tools: Seq[ToolFunction[_, _]] = initialTools
 
   /**
@@ -144,15 +161,22 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
     }
 
   /**
-   * Generate OpenAI tool definitions for all tools
+   * Generate OpenAI tool definitions for all tools.
+   *
+   * @param strict When `true` (default), all object properties are treated as required.
+   * @return A `ujson.Arr` containing one tool-definition object per registered tool
    */
   def getOpenAITools(strict: Boolean = true): ujson.Arr =
     ujson.Arr.from(tools.map(_.toOpenAITool(strict)))
 
   /**
-   * Generate a specific format of tool definitions for a particular LLM provider.
+   * Generate tool definitions in the format expected by a specific LLM provider.
    *
-   * @return Right(tools) for supported providers, Left(ValidationError) for unsupported ones
+   * Currently all supported providers (`openai`, `anthropic`, `gemini`) use the
+   * same OpenAI-compatible format.
+   *
+   * @param provider Provider name (case-insensitive): `"openai"`, `"anthropic"`, `"gemini"`
+   * @return `Right(tools)` for supported providers, `Left(ValidationError)` for unsupported ones
    */
   def getToolDefinitionsSafe(provider: String): Result[ujson.Value] = provider.toLowerCase match {
     case "openai"    => Right(getOpenAITools())
@@ -162,7 +186,10 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
   }
 
   /**
-   * Generate a specific format of tool definitions for a particular LLM provider
+   * Generate a specific format of tool definitions for a particular LLM provider.
+   *
+   * @param provider Provider name (case-insensitive): `"openai"`, `"anthropic"`, `"gemini"`
+   * @throws IllegalArgumentException for unsupported provider names
    */
   @deprecated("Use getToolDefinitionsSafe() which returns Result[ujson.Value] for safe error handling", "0.2.9")
   def getToolDefinitions(provider: String): ujson.Value = getToolDefinitionsSafe(provider) match {
