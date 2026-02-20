@@ -533,7 +533,7 @@ For long-running conversations, use built-in pruning strategies:
 import org.llm4s.agent.AgentState
 import org.llm4s.agent.ContextWindowConfig
 import org.llm4s.agent.PruningStrategy
-import org.llm4s.tool.ToolRegistry
+import org.llm4s.toolapi.ToolRegistry
 
 // Prune when context exceeds configured limits
 val state = AgentState(conversation, ToolRegistry.empty)
