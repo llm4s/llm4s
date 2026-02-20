@@ -63,18 +63,23 @@ class HandoffIntegrationSpec extends AnyFlatSpec with Matchers {
     val agent2     = new Agent(mockClient)
     val handoff    = Handoff.to(agent2, "Specialist")
 
-    val state = agent1.initialize(
-      "Test query",
-      ToolRegistry.empty,
-      handoffs = Seq(handoff)
-    )
+    agent1
+      .initializeSafe(
+        "Test query",
+        ToolRegistry.empty,
+        handoffs = Seq(handoff)
+      )
+      .fold(
+        e => fail(s"initializeSafe failed: ${e.formatted}"),
+        state => {
+          // Should have at least one handoff tool
+          state.tools.tools.exists(_.name.startsWith("handoff_to_agent_")) shouldBe true
 
-    // Should have at least one handoff tool
-    state.tools.tools.exists(_.name.startsWith("handoff_to_agent_")) shouldBe true
-
-    // Should preserve handoffs in state
-    (state.availableHandoffs should have).length(1)
-    state.availableHandoffs.head shouldBe handoff
+          // Should preserve handoffs in state
+          (state.availableHandoffs should have).length(1)
+          state.availableHandoffs.head shouldBe handoff
+        }
+      )
   }
 
   it should "detect handoff from tool call" in {
@@ -111,11 +116,12 @@ class HandoffIntegrationSpec extends AnyFlatSpec with Matchers {
       maxSteps = Some(10)
     )
 
-    result.isRight shouldBe true
-    val finalState = result.toOption.get
-
-    // Should have executed handoff
-    finalState.logs.exists(_.contains("handoff")) shouldBe true
+    result.fold(
+      e => fail(s"Agent run failed: ${e.formatted}"),
+      finalState =>
+        // Should have executed handoff
+        finalState.logs.exists(_.contains("handoff")) shouldBe true
+    )
   }
 
   it should "preserve context when preserveContext = true" in {

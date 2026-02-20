@@ -209,6 +209,55 @@ class VectorStoreSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach 
       results.toOption.get.size shouldBe 2
       results.toOption.get.map(_.record.id).toSet shouldBe Set("f1", "f3")
     }
+
+    "fail-fast on dimension mismatch during search" in {
+      // Upsert a record with 2 dimensions
+      val record = VectorRecord("dim-test", Array(1.0f, 1.0f))
+      store.upsert(record) shouldBe Right(())
+
+      // Attempt search with a different dimension (3 dimensions)
+      val queryVector = Array(1.0f, 2.0f, 3.0f)
+      val result      = store.search(queryVector, topK = 5)
+
+      // Should return Left with error
+      result.isLeft shouldBe true
+      val error = result.left.toOption.get
+      error.formatted should include("Dimension mismatch")
+      error.formatted should include("query vector has 3 dimensions")
+      error.formatted should include("stored vectors have 2 dimensions")
+    }
+
+    "return empty sequence when searching an empty store" in {
+      // Verify the store is empty
+      store.count() shouldBe Right(0L)
+
+      // Search on empty store should succeed and return empty sequence
+      val queryVector = Array(1.0f, 2.0f, 3.0f)
+      val result      = store.search(queryVector, topK = 5)
+
+      result shouldBe Right(Seq.empty)
+    }
+
+    "successfully search with matching dimensions" in {
+      // Upsert records with 2 dimensions
+      val records = Seq(
+        VectorRecord("match-1", Array(1.0f, 0.0f), Some("First")),
+        VectorRecord("match-2", Array(0.9f, 0.1f), Some("Second")),
+        VectorRecord("match-3", Array(0.0f, 1.0f), Some("Third"))
+      )
+      store.upsertBatch(records) shouldBe Right(())
+
+      // Search with matching 2-dimension query vector
+      val queryVector = Array(1.0f, 0.0f)
+      val result      = store.search(queryVector, topK = 2)
+
+      // Should succeed and return results
+      result.isRight shouldBe true
+      val scored = result.toOption.get
+      scored.size shouldBe 2
+      scored.head.record.id shouldBe "match-1" // Exact match should be first
+      scored.head.score should be > 0.9
+    }
   }
 
   "VectorStoreFactory" should {

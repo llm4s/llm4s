@@ -99,31 +99,39 @@ object AgentLLMCallingExample {
           providerCfg <- org.llm4s.config.Llm4sConfig.provider()
           llmClient   <- LLMConnect.getClient(providerCfg)
           agent = new Agent(llmClient)
-          agentExecutionResult = {
-            val tools        = Seq(CalculatorTool.tool)
-            val toolRegistry = new ToolRegistry(tools)
+          agentExecutionResult <- {
+            val calcToolResult = CalculatorTool.toolSafe
+            calcToolResult.map { calcTool =>
+              val tools        = Seq(calcTool)
+              val toolRegistry = new ToolRegistry(tools)
 
-            logger.info("🔧 Available Tools:")
-            tools.foreach(tool => logger.info("• {}: {}", tool.name, tool.description))
-            // Initialize agent state with tools and query
-            val query = "Calculate 15 to the power of 3, and then calculate the square root of that result."
+              logger.info("🔧 Available Tools:")
+              tools.foreach(tool => logger.info("• {}: {}", tool.name, tool.description))
+              // Initialize agent state with tools and query
+              val query = "Calculate 15 to the power of 3, and then calculate the square root of that result."
 
-            val agentState = agent.initialize(
-              query = query,
-              tools = toolRegistry,
-              systemPromptAddition = Some(
-                "You have access to a calculator tool. Use it to perform mathematical calculations. IMPORTANT: Make only ONE tool call at a time, wait for the result, then make the next tool call if needed."
+              val agentState = agent.initializeSafe(
+                query = query,
+                tools = toolRegistry,
+                systemPromptAddition = Some(
+                  "You have access to a calculator tool. Use it to perform mathematical calculations. IMPORTANT: Make only ONE tool call at a time, wait for the result, then make the next tool call if needed."
+                )
               )
-            )
 
-            // Trace agent initialization
-            TracingUtil.traceAgentInitialization(tracing, query, tools)
+              // Trace agent initialization
+              TracingUtil.traceAgentInitialization(tracing, query, tools)
 
-            logger.info("🔄 Running calculator agent...")
-            logger.info("Query: {}", query)
+              logger.info("🔄 Running calculator agent...")
+              logger.info("Query: {}", query)
 
-            // Execute agent with real step-by-step execution
-            executeAgentWithRealTracing(agent, agentState, tracing, timer)
+              // Execute agent with real step-by-step execution
+              agentState match {
+                case Right(state) => executeAgentWithRealTracing(agent, state, tracing, timer)
+                case Left(err) =>
+                  logger.error("Failed to initialize agent: {}", err.formatted)
+                  AgentExecutionResult(Vector.empty, Vector.empty, s"Failed: ${err.formatted}")
+              }
+            }
           }
 
         } yield agentExecutionResult

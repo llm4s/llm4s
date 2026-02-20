@@ -140,30 +140,31 @@ class GeminiClient(
             val messageId   = UUID.randomUUID().toString
             val reader      = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
 
-            val processEither = Try {
-              var line: String = null
-              while ({ line = reader.readLine(); line != null }) {
-                val trimmed = line.trim
-                // SSE format: lines starting with "data: " contain JSON
-                if (trimmed.startsWith("data: ")) {
-                  val jsonStr = trimmed.stripPrefix("data: ").trim
-                  if (jsonStr.nonEmpty) {
-                    Try(ujson.read(jsonStr)).foreach { json =>
-                      parseStreamChunk(json, messageId).foreach { chunk =>
-                        accumulator.addChunk(chunk)
-                        onChunk(chunk)
+            Try {
+              try {
+                var line: String = null
+                while ({ line = reader.readLine(); line != null }) {
+                  val trimmed = line.trim
+                  // SSE format: lines starting with "data: " contain JSON
+                  if (trimmed.startsWith("data: ")) {
+                    val jsonStr = trimmed.stripPrefix("data: ").trim
+                    if (jsonStr.nonEmpty) {
+                      Try(ujson.read(jsonStr)).foreach { json =>
+                        parseStreamChunk(json, messageId).foreach { chunk =>
+                          accumulator.addChunk(chunk)
+                          onChunk(chunk)
+                        }
                       }
                     }
                   }
                 }
+
+                // Close resources INSIDE Try block
+              } finally {
+                Try(reader.close())
+                Try(response.body().close())
               }
-            }.toEither
-
-            // Close resources
-            Try(reader.close())
-            Try(response.body().close())
-
-            processEither.left
+            }.toEither.left
               .map(_.toLLMError)
               .flatMap(_ =>
                 accumulator.toCompletion.map { c =>
@@ -286,12 +287,18 @@ class GeminiClient(
 
   /**
    * Convert a tool to Gemini's function declaration format.
-   * Gemini doesn't accept additionalProperties in schemas, so we strip it out.
+   * Strips OpenAI-specific fields like 'strict' and 'additionalProperties' from the schema
+   * to maintain compatibility with the Gemini API.
    */
-  private def convertToolToGeminiFormat(tool: ToolFunction[_, _]): ujson.Value = {
+  private[provider] def convertToolToGeminiFormat(tool: ToolFunction[_, _]): ujson.Value = {
+    // Generate base JSON schema without strict mode
     val schema = ujson.read(tool.schema.toJsonSchema(false).render())
 
-    // Recursively remove additionalProperties from all objects in the schema
+    // Fix: Explicitly remove OpenAI-only fields to meet Gemini's contract
+    schema.obj.remove("strict")
+    schema.obj.remove("additionalProperties")
+
+    // Recursively remove additionalProperties from all nested objects
     stripAdditionalProperties(schema)
 
     ujson.Obj(
@@ -305,7 +312,7 @@ class GeminiClient(
    * Recursively strip additionalProperties from a JSON schema.
    * Gemini's API doesn't accept this field.
    */
-  private def stripAdditionalProperties(json: ujson.Value): Unit =
+  private[provider] def stripAdditionalProperties(json: ujson.Value): Unit =
     json match {
       case obj: ujson.Obj =>
         // Remove additionalProperties at this level

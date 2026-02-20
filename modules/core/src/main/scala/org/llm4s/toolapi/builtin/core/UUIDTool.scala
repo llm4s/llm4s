@@ -1,6 +1,7 @@
 package org.llm4s.toolapi.builtin.core
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 
 import java.util.UUID
@@ -60,17 +61,17 @@ object UUIDTool {
   }
 
   /**
-   * The UUID generator tool instance.
+   * The UUID generator tool instance, returning a Result for safe error handling.
    */
-  val tool: ToolFunction[Map[String, Any], UUIDsResult] =
+  val toolSafe: Result[ToolFunction[Map[String, Any], UUIDsResult]] =
     ToolBuilder[Map[String, Any], UUIDsResult](
       name = "generate_uuid",
       description = "Generate one or more universally unique identifiers (UUIDs). " +
         "Useful for creating unique IDs for transactions, records, or entities.",
       schema = schema
     ).withHandler { extractor =>
-      val count  = extractor.getInt("count").toOption.getOrElse(1).min(10).max(1)
-      val format = extractor.getString("format").toOption.getOrElse("standard")
+      val count  = extractor.getInt("count").fold(_ => 1, identity).min(10).max(1)
+      val format = extractor.getString("format").fold(_ => "standard", identity)
 
       val uuids = (1 to count).map { _ =>
         val uuid = UUID.randomUUID()
@@ -93,5 +94,17 @@ object UUIDTool {
       }
 
       Right(UUIDsResult(uuids))
-    }.build()
+    }.buildSafe()
+
+  /**
+   * The UUID generator tool instance.
+   *
+   * @throws IllegalStateException if tool initialization fails
+   */
+  @deprecated("Use toolSafe which returns Result[ToolFunction] for safe error handling", "0.2.9")
+  lazy val tool: ToolFunction[Map[String, Any], UUIDsResult] =
+    toolSafe match {
+      case Right(t) => t
+      case Left(e)  => throw new IllegalStateException(s"UUIDTool.tool lazy initialization failed: ${e.formatted}")
+    }
 }

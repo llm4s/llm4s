@@ -4,7 +4,7 @@ import org.llm4s.util.Redaction
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
+import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
 import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ServiceError }
@@ -183,7 +183,7 @@ class ZaiClient(
           ToolCall(
             id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
             name = function.obj.get("name").flatMap(_.strOpt).getOrElse(""),
-            arguments = parseStreamingArguments(rawArgs)
+            arguments = StreamingToolArgumentParser.parse(rawArgs)
           )
       }
 
@@ -222,10 +222,10 @@ class ZaiClient(
     }
   }
 
-  private def parseStreamingArguments(raw: String): ujson.Value =
-    if (raw.isEmpty) ujson.Null else scala.util.Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
-
-  private def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
+  /**
+   * Test-visible seam for request serialization; intentionally scoped to provider package to avoid broader API surface.
+   */
+  protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val messages = conversation.messages.map {
       case UserMessage(content) =>
         ujson.Obj("role" -> "user", "content" -> ujson.Arr(ujson.Obj("type" -> "text", "text" -> ujson.Str(content))))
@@ -250,7 +250,7 @@ class ZaiClient(
           })
         }
         base
-      case ToolMessage(toolCallId, content) =>
+      case ToolMessage(content, toolCallId) =>
         ujson.Obj(
           "role"         -> "tool",
           "tool_call_id" -> toolCallId,

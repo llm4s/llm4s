@@ -52,8 +52,7 @@ class HybridSearcherSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
         strategy = FusionStrategy.VectorOnly
       )
 
-      results.isRight shouldBe true
-      val matches = results.toOption.get
+      val matches = results.fold(e => fail(s"Failed: ${e.formatted}"), identity)
       matches.size shouldBe 3
 
       // Scala docs should rank highest (similar embedding)
@@ -72,8 +71,7 @@ class HybridSearcherSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
         strategy = FusionStrategy.KeywordOnly
       )
 
-      results.isRight shouldBe true
-      val matches = results.toOption.get
+      val matches = results.fold(e => fail(s"Failed: ${e.formatted}"), identity)
       matches.nonEmpty shouldBe true
 
       // Results should have keyword scores
@@ -93,8 +91,7 @@ class HybridSearcherSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
         strategy = FusionStrategy.RRF(k = 60)
       )
 
-      results.isRight shouldBe true
-      val matches = results.toOption.get
+      val matches = results.fold(e => fail(s"Failed: ${e.formatted}"), identity)
       matches.size shouldBe 3
 
       // Scala guide should rank high (matches both vector and keyword)
@@ -118,8 +115,7 @@ class HybridSearcherSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
         strategy = FusionStrategy.WeightedScore(vectorWeight = 0.7, keywordWeight = 0.3)
       )
 
-      results.isRight shouldBe true
-      val matches = results.toOption.get
+      val matches = results.fold(e => fail(s"Failed: ${e.formatted}"), identity)
       matches.nonEmpty shouldBe true
 
       // Weighted scores should be in [0, 1] range
@@ -141,8 +137,7 @@ class HybridSearcherSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
         strategy = FusionStrategy.RRF()
       )
 
-      results.isRight shouldBe true
-      val matches = results.toOption.get
+      val matches = results.fold(e => fail(s"Failed: ${e.formatted}"), identity)
 
       // scala-guide should rank first (high in both)
       matches.head.id shouldBe "scala-guide"
@@ -163,8 +158,7 @@ class HybridSearcherSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
         strategy = FusionStrategy.RRF()
       )
 
-      results.isRight shouldBe true
-      val matches = results.toOption.get
+      val matches = results.fold(e => fail(s"Failed: ${e.formatted}"), identity)
 
       // At least some results should have highlights
       val withHighlights = matches.filter(_.highlights.nonEmpty)
@@ -190,8 +184,7 @@ class HybridSearcherSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
         filter = filter
       )
 
-      results.isRight shouldBe true
-      val matches = results.toOption.get.filter(_.id.startsWith("filtered"))
+      val matches = results.fold(e => fail(s"Failed: ${e.formatted}"), identity).filter(_.id.startsWith("filtered"))
       matches.size shouldBe 1
       matches.head.id shouldBe "filtered-1"
     }
@@ -207,7 +200,7 @@ class HybridSearcherSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
       )
 
       // Should return empty or very low scoring results
-      results.isRight shouldBe true
+      results.fold(e => fail(s"Failed: ${e.formatted}"), _ => ())
     }
 
     "use default strategy when none specified" in {
@@ -227,8 +220,7 @@ class HybridSearcherSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
 
     "create from in-memory stores" in {
       val result = HybridSearcher.inMemory()
-      result.isRight shouldBe true
-      result.toOption.get.close()
+      result.fold(e => fail(s"Failed: ${e.formatted}"), _.close())
     }
 
     "create from configuration" in {
@@ -236,8 +228,7 @@ class HybridSearcherSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
         .withRRF(k = 30)
 
       val result = HybridSearcher(config)
-      result.isRight shouldBe true
-      result.toOption.get.close()
+      result.fold(e => fail(s"Failed: ${e.formatted}"), _.close())
     }
 
     "support weighted score configuration" in {
@@ -245,8 +236,7 @@ class HybridSearcherSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
         .withWeightedScore(vectorWeight = 0.8, keywordWeight = 0.2)
 
       val result = HybridSearcher(config)
-      result.isRight shouldBe true
-      result.toOption.get.close()
+      result.fold(e => fail(s"Failed: ${e.formatted}"), _.close())
     }
   }
 

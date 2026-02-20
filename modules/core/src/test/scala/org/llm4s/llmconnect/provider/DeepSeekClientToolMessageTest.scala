@@ -11,7 +11,25 @@ import org.llm4s.llmconnect.model.{
   AssistantMessage,
   ToolCall
 }
-import org.llm4s.metrics.MetricsCollector
+
+/**
+ * Test helper for building DeepSeek request bodies.
+ * Delegates to the real production implementation to ensure tests validate actual behavior.
+ */
+private[provider] object DeepSeekRequestBodyTestHelper {
+  private val testConfig = DeepSeekConfig(
+    apiKey = "test-key",
+    model = "deepseek-chat",
+    baseUrl = "https://api.deepseek.com/beta",
+    contextWindow = 4000,
+    reserveCompletion = 512
+  )
+
+  private val client = new DeepSeekClient(testConfig)
+
+  def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj =
+    client.createRequestBody(conversation, options)
+}
 
 /**
  * Tests for DeepSeekClient ToolMessage encoding.
@@ -22,16 +40,8 @@ import org.llm4s.metrics.MetricsCollector
  */
 class DeepSeekClientToolMessageTest extends AnyFlatSpec with Matchers {
 
-  private def createTestConfig: DeepSeekConfig = DeepSeekConfig.fromValues(
-    modelName = "deepseek-chat",
-    apiKey = "test-api-key-for-tool-message-testing",
-    baseUrl = "https://example.invalid"
-  )
-
   "DeepSeekClient" should "encode ToolMessage with correct field order" in {
-    val client = DeepSeekClient(createTestConfig, MetricsCollector.noop).toOption.get
-
-    // Create a conversation with a ToolMessage
+    // Use test helper instead of reflection
     val conversation = Conversation(
       Seq(
         UserMessage("What's the weather?"),
@@ -52,17 +62,7 @@ class DeepSeekClientToolMessageTest extends AnyFlatSpec with Matchers {
       )
     )
 
-    // Access the private createRequestBody method via reflection to test encoding
-    val method = client.getClass.getDeclaredMethod(
-      "createRequestBody",
-      classOf[Conversation],
-      classOf[CompletionOptions]
-    )
-    method.setAccessible(true)
-
-    val requestBody = method
-      .invoke(client, conversation, CompletionOptions())
-      .asInstanceOf[ujson.Obj]
+    val requestBody = DeepSeekRequestBodyTestHelper.createRequestBody(conversation, CompletionOptions())
 
     // Verify the messages array
     val messages = requestBody("messages").arr
@@ -82,8 +82,6 @@ class DeepSeekClientToolMessageTest extends AnyFlatSpec with Matchers {
   }
 
   it should "handle multiple ToolMessages correctly" in {
-    val client = DeepSeekClient(createTestConfig, MetricsCollector.noop).toOption.get
-
     val conversation = Conversation(
       Seq(
         UserMessage("Get weather for multiple cities"),
@@ -113,16 +111,7 @@ class DeepSeekClientToolMessageTest extends AnyFlatSpec with Matchers {
       )
     )
 
-    val method = client.getClass.getDeclaredMethod(
-      "createRequestBody",
-      classOf[Conversation],
-      classOf[CompletionOptions]
-    )
-    method.setAccessible(true)
-
-    val requestBody = method
-      .invoke(client, conversation, CompletionOptions())
-      .asInstanceOf[ujson.Obj]
+    val requestBody = DeepSeekRequestBodyTestHelper.createRequestBody(conversation, CompletionOptions())
 
     val messages = requestBody("messages").arr
 

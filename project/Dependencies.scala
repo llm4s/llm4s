@@ -22,7 +22,6 @@ object Versions {
   val azureOpenAI = "1.0.0-beta.16"
   val anthropic   = "2.11.1"
   val jtokkit     = "1.1.0"
-  val requests    = "0.9.0"
   val websocket   = "1.6.0"
   val ujson       = "4.2.1"
   val pdfbox      = "3.0.5"
@@ -33,7 +32,6 @@ object Versions {
   val jna         = "5.13.0"
   val vosk        = "0.3.45"
 
-  val sttp       = "4.0.9"
   val cask       = "0.10.2"
 
   // AWS SDK
@@ -64,7 +62,6 @@ object Deps {
   val azureOpenAI = "com.azure"     % "azure-ai-openai" % Versions.azureOpenAI
   val anthropic   = "com.anthropic" % "anthropic-java"  % Versions.anthropic
   val jtokkit     = "com.knuddels"  % "jtokkit"         % Versions.jtokkit
-  val requests    = "com.lihaoyi"  %% "requests"        % Versions.requests
   val websocket   = "org.java-websocket" % "Java-WebSocket" % Versions.websocket
   val ujson       = "com.lihaoyi"  %% "ujson"           % Versions.ujson
   val pdfbox      = "org.apache.pdfbox" % "pdfbox"      % Versions.pdfbox
@@ -75,7 +72,6 @@ object Deps {
   val jna         = "net.java.dev.jna" % "jna"          % Versions.jna
   val vosk        = "com.alphacephei"  % "vosk"         % Versions.vosk
 
-  val sttp       = "com.softwaremill.sttp.client4" %% "core" % Versions.sttp
   val cask       = "com.lihaoyi" %% "cask" % Versions.cask
 
   // AWS SDK

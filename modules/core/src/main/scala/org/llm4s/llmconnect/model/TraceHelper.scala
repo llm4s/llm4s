@@ -130,7 +130,7 @@ object TraceHelper {
         )
       )
 
-    case tm @ ToolMessage(toolCallId, content) =>
+    case tm @ ToolMessage(content, toolCallId) =>
       val toolCallName = tm.findToolCallName(contextMessages)
       wrapper(
         uuid,

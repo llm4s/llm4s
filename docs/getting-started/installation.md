@@ -189,6 +189,10 @@ AZURE_DEPLOYMENT_NAME=gpt-4o
 
 # Ollama (local)
 OLLAMA_BASE_URL=http://localhost:11434
+
+# Cohere
+COHERE_API_KEY=your-cohere-api-key
+COHERE_BASE_URL=https://api.cohere.com  # Optional
 ```
 
 Load the `.env` file before running:

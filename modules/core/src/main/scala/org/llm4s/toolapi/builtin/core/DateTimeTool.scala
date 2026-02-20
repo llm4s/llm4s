@@ -1,6 +1,7 @@
 package org.llm4s.toolapi.builtin.core
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 
 import java.time._
@@ -73,17 +74,17 @@ object DateTimeTool {
     )
 
   /**
-   * The date/time tool instance.
+   * The date/time tool instance, returning a Result for safe error handling.
    */
-  val tool: ToolFunction[Map[String, Any], DateTimeResult] =
+  val toolSafe: Result[ToolFunction[Map[String, Any], DateTimeResult]] =
     ToolBuilder[Map[String, Any], DateTimeResult](
       name = "get_current_datetime",
       description = "Get the current date and time, optionally in a specific timezone. " +
         "Returns the datetime in ISO-8601 format, Unix timestamp, and broken down components.",
       schema = schema
     ).withHandler { extractor =>
-      val timezone = extractor.getString("timezone").toOption.getOrElse("UTC")
-      val format   = extractor.getString("format").toOption.getOrElse("iso")
+      val timezone = extractor.getString("timezone").fold(_ => "UTC", identity)
+      val format   = extractor.getString("format").fold(_ => "iso", identity)
 
       Try {
         val zoneId = ZoneId.of(timezone)
@@ -113,7 +114,19 @@ object DateTimeTool {
           )
         )
       }.toEither.left.map(e => s"Invalid timezone '$timezone': ${e.getMessage}")
-    }.build()
+    }.buildSafe()
+
+  /**
+   * The date/time tool instance.
+   *
+   * @throws IllegalStateException if tool initialization fails
+   */
+  @deprecated("Use toolSafe which returns Result[ToolFunction] for safe error handling", "0.2.9")
+  lazy val tool: ToolFunction[Map[String, Any], DateTimeResult] =
+    toolSafe match {
+      case Right(t) => t
+      case Left(e)  => throw new IllegalStateException(s"DateTimeTool.tool lazy initialization failed: ${e.formatted}")
+    }
 
   /**
    * Get list of common timezone identifiers.

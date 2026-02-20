@@ -211,6 +211,13 @@ sbt buildAll              # Verify everything compiles
 sbt +test                 # Verify tests pass
 ```
 
+### IDE Setup
+
+Minimal setup of your IDE of choice to enable syntax highlighting and IntelliSense.
+
+- **VS Code**: [Scala (Metals) extension](https://marketplace.visualstudio.com/items?itemName=scalameta.metals)
+- **IntelliJ**: [Scala plugin](https://plugins.jetbrains.com/plugin/1347-scala/)
+
 ### Making Changes
 
 ```bash

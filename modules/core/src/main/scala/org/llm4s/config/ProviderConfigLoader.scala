@@ -45,6 +45,11 @@ private[config] object ProviderConfigLoader {
     apiKey: Option[String]
   )
 
+  final private case class CohereSection(
+    baseUrl: Option[String],
+    apiKey: Option[String]
+  )
+
   final private case class ProviderRoot(
     llm: LlmSection,
     openai: Option[OpenAISection],
@@ -53,7 +58,8 @@ private[config] object ProviderConfigLoader {
     ollama: Option[OllamaSection],
     zai: Option[ZaiSection],
     gemini: Option[GeminiSection],
-    deepseek: Option[DeepSeekSection]
+    deepseek: Option[DeepSeekSection],
+    cohere: Option[CohereSection]
   )
 
   implicit private val llmSectionReader: PureConfigReader[LlmSection] =
@@ -80,8 +86,21 @@ private[config] object ProviderConfigLoader {
   implicit private val deepseekSectionReader: PureConfigReader[DeepSeekSection] =
     PureConfigReader.forProduct2("baseUrl", "apiKey")(DeepSeekSection.apply)
 
+  implicit private val cohereSectionReader: PureConfigReader[CohereSection] =
+    PureConfigReader.forProduct2("baseUrl", "apiKey")(CohereSection.apply)
+
   implicit private val providerRootReader: PureConfigReader[ProviderRoot] =
-    PureConfigReader.forProduct8("llm", "openai", "azure", "anthropic", "ollama", "zai", "gemini", "deepseek")(
+    PureConfigReader.forProduct9(
+      "llm",
+      "openai",
+      "azure",
+      "anthropic",
+      "ollama",
+      "zai",
+      "gemini",
+      "deepseek",
+      "cohere"
+    )(
       ProviderRoot.apply
     )
 
@@ -132,6 +151,7 @@ private[config] object ProviderConfigLoader {
         case "zai"               => buildZaiConfig(modelName, root.zai)
         case "gemini" | "google" => buildGeminiConfig(modelName, root.gemini)
         case "deepseek"          => buildDeepSeekConfig(modelName, root.deepseek)
+        case "cohere"            => buildCohereConfig(modelName, root.cohere)
         case other if other.nonEmpty =>
           Left(ConfigurationError(s"Unknown provider prefix: $other in '$modelSpec'"))
         case _ =>
@@ -315,6 +335,30 @@ private[config] object ProviderConfigLoader {
         Left(
           ConfigurationError(
             "DeepSeek provider selected but llm4s.deepseek section is missing"
+          )
+        )
+    }
+
+  private def buildCohereConfig(modelName: String, section: Option[CohereSection]): Result[ProviderConfig] =
+    section match {
+      case Some(cohere) =>
+        val apiKeyOpt = cohere.apiKey.map(_.trim).filter(_.nonEmpty)
+        val apiKeyResult: Result[String] =
+          apiKeyOpt.toRight(
+            ConfigurationError("Missing Cohere API key (llm4s.cohere.apiKey / COHERE_API_KEY)")
+          )
+
+        apiKeyResult.map { apiKey =>
+          val baseUrl =
+            cohere.baseUrl.map(_.trim).filter(_.nonEmpty).getOrElse(CohereConfig.DEFAULT_BASE_URL)
+
+          CohereConfig.fromValues(modelName, apiKey, baseUrl)
+        }
+
+      case None =>
+        Left(
+          ConfigurationError(
+            "Cohere provider selected but llm4s.cohere section is missing"
           )
         )
     }

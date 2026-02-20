@@ -28,11 +28,14 @@ package org.llm4s.toolapi.builtin
  * import org.llm4s.toolapi.ToolRegistry
  *
  * // Read-only tools with default config (blocked: /etc, /var, /sys, /proc, /dev)
- * val readOnlyTools = new ToolRegistry(Seq(
- *   ReadFileTool.tool,
- *   ListDirectoryTool.tool,
- *   FileInfoTool.tool
- * ))
+ * for {
+ *   readFile <- ReadFileTool.toolSafe
+ *   listDir  <- ListDirectoryTool.toolSafe
+ *   fileInfo <- FileInfoTool.toolSafe
+ * } yield new ToolRegistry(Seq(readFile, listDir, fileInfo))
+ *
+ * // Or use the convenience val
+ * readOnlyToolsSafe.map(tools => new ToolRegistry(tools))
  *
  * // Tools with custom restrictions
  * val config = FileConfig(
@@ -40,10 +43,10 @@ package org.llm4s.toolapi.builtin
  *   allowedPaths = Some(Seq("/tmp", "/home/user/workspace"))
  * )
  *
- * val restrictedTools = new ToolRegistry(Seq(
- *   ReadFileTool.create(config),
- *   ListDirectoryTool.create(config)
- * ))
+ * for {
+ *   readFile <- ReadFileTool.createSafe(config)
+ *   listDir  <- ListDirectoryTool.createSafe(config)
+ * } yield new ToolRegistry(Seq(readFile, listDir))
  *
  * // Write tool with explicit allowlist
  * val writeConfig = WriteConfig(
@@ -51,19 +54,29 @@ package org.llm4s.toolapi.builtin
  *   allowOverwrite = true
  * )
  *
- * val writeTools = new ToolRegistry(Seq(
- *   WriteFileTool.create(writeConfig)
- * ))
+ * for {
+ *   writeTool <- WriteFileTool.createSafe(writeConfig)
+ * } yield new ToolRegistry(Seq(writeTool))
  * }}}
  */
 package object filesystem {
 
   /**
-   * All file system tools with default configuration (read-only, excludes write).
+   * All file system tools with default configuration (read-only, excludes write),
+   * returning a Result for safe error handling.
    */
-  val readOnlyTools: Seq[org.llm4s.toolapi.ToolFunction[_, _]] = Seq(
-    ReadFileTool.tool,
-    ListDirectoryTool.tool,
-    FileInfoTool.tool
-  )
+  val readOnlyToolsSafe: org.llm4s.types.Result[Seq[org.llm4s.toolapi.ToolFunction[_, _]]] = for {
+    readFile <- ReadFileTool.toolSafe
+    listDir  <- ListDirectoryTool.toolSafe
+    fileInfo <- FileInfoTool.toolSafe
+  } yield Seq(readFile, listDir, fileInfo)
+
+  /**
+   * All file system tools with default configuration (read-only, excludes write).
+   *
+   * @throws IllegalStateException if any tool initialization fails
+   */
+  @deprecated("Use readOnlyToolsSafe which returns Result[Seq[ToolFunction]] for safe error handling", "0.2.9")
+  lazy val readOnlyTools: Seq[org.llm4s.toolapi.ToolFunction[_, _]] =
+    Seq(ReadFileTool.tool, ListDirectoryTool.tool, FileInfoTool.tool)
 }

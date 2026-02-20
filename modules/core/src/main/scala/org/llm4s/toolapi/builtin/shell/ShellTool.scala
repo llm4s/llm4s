@@ -1,6 +1,7 @@
 package org.llm4s.toolapi.builtin.shell
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 
 import java.io.File
@@ -64,11 +65,11 @@ object ShellTool {
     )
 
   /**
-   * Create a shell tool with the given configuration.
+   * Create a shell tool with the given configuration, returning a Result for safe error handling.
    *
    * @param config Shell configuration with required allowedCommands
    */
-  def create(config: ShellConfig): ToolFunction[Map[String, Any], ShellResult] =
+  def createSafe(config: ShellConfig): Result[ToolFunction[Map[String, Any], ShellResult]] =
     ToolBuilder[Map[String, Any], ShellResult](
       name = "shell_command",
       description = s"Execute shell commands. " +
@@ -81,7 +82,20 @@ object ShellTool {
         command <- extractor.getString("command")
         result  <- executeCommand(command, config)
       } yield result
-    }.build()
+    }.buildSafe()
+
+  /**
+   * Create a shell tool with the given configuration.
+   *
+   * @param config Shell configuration with required allowedCommands
+   * @throws IllegalStateException if tool creation fails
+   */
+  @deprecated("Use createSafe() which returns Result[ToolFunction] for safe error handling", "0.2.9")
+  def create(config: ShellConfig): ToolFunction[Map[String, Any], ShellResult] =
+    createSafe(config) match {
+      case Right(t) => t
+      case Left(e)  => throw new IllegalStateException(s"ShellTool.create failed: ${e.formatted}")
+    }
 
   private def executeCommand(
     command: String,

@@ -26,8 +26,7 @@ class TypesSpec extends AnyFlatSpec with Matchers {
 
   "ModelName" should "create valid model names" in {
     val result = ModelName("gpt-4")
-    result.isRight shouldBe true
-    result.toOption.get.value shouldBe "gpt-4"
+    result.map(_.value).getOrElse(fail("Expected success")) shouldBe "gpt-4"
   }
 
   it should "reject invalid model names" in {
@@ -66,8 +65,7 @@ class TypesSpec extends AnyFlatSpec with Matchers {
 
   "ProviderName" should "create valid provider names" in {
     val result = ProviderName.create("OpenAI")
-    result.isRight shouldBe true
-    result.toOption.get.value shouldBe "openai"
+    result.map(_.value).getOrElse(fail("Expected success")) shouldBe "openai"
   }
 
   it should "reject empty provider names" in {
@@ -128,19 +126,18 @@ class TypesSpec extends AnyFlatSpec with Matchers {
 
   it should "create valid IDs" in {
     val result = ConversationId.create("conv-123")
-    result.isRight shouldBe true
-    result.toOption.get.value shouldBe "conv-123"
+    result.map(_.value).getOrElse(fail("Expected success")) shouldBe "conv-123"
   }
 
   it should "reject empty IDs" in {
     val result = ConversationId.create("   ")
     result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[ValidationError]
+    result.left.getOrElse(fail("Expected failure")) shouldBe a[ValidationError]
   }
 
   it should "trim whitespace" in {
     val result = ConversationId.create("  conv-123  ")
-    result.toOption.get.value shouldBe "conv-123"
+    result.map(_.value).getOrElse(fail("Expected success")) shouldBe "conv-123"
   }
 
   // ==========================================================================
@@ -170,8 +167,7 @@ class TypesSpec extends AnyFlatSpec with Matchers {
 
   "ToolName" should "create valid tool names" in {
     val result = ToolName.create("get_weather")
-    result.isRight shouldBe true
-    result.toOption.get.value shouldBe "get_weather"
+    result.map(_.value).getOrElse(fail("Expected success")) shouldBe "get_weather"
   }
 
   it should "reject invalid tool names with special characters" in {
@@ -269,8 +265,7 @@ class TypesSpec extends AnyFlatSpec with Matchers {
 
   "CompressionTarget" should "create valid targets" in {
     val result = CompressionTarget.create(0.5)
-    result.isRight shouldBe true
-    result.toOption.get.value shouldBe 0.5
+    result.map(_.value).getOrElse(fail("Expected success")) shouldBe 0.5
   }
 
   it should "reject invalid ratios" in {
@@ -299,8 +294,7 @@ class TypesSpec extends AnyFlatSpec with Matchers {
 
   "HeadroomPercent" should "create valid headroom" in {
     val result = HeadroomPercent.create(0.1)
-    result.isRight shouldBe true
-    result.toOption.get.value shouldBe 0.1
+    result.map(_.value).getOrElse(fail("Expected success")) shouldBe 0.1
   }
 
   it should "reject invalid headroom" in {
@@ -510,8 +504,7 @@ class TypesSpec extends AnyFlatSpec with Matchers {
 
   "Result.safely" should "wrap successful computation" in {
     val result = Result.safely(42)
-    result.isRight shouldBe true
-    result.toOption.get shouldBe 42
+    result.getOrElse(fail("Expected success")) shouldBe 42
   }
 
   it should "wrap failed computation" in {
@@ -552,7 +545,7 @@ class TypesSpec extends AnyFlatSpec with Matchers {
 
     val result = Result.validateAll(items)(validator)
     result.isLeft shouldBe true
-    result.left.toOption.get should have size 2
+    result.left.getOrElse(fail("Expected failure")) should have size 2
   }
 
   // ==========================================================================

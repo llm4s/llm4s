@@ -1,6 +1,7 @@
 package org.llm4s.toolapi.tools
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 
 /**
@@ -53,9 +54,24 @@ object WeatherTool {
       )
     }
 
-  val tool = ToolBuilder[Map[String, Any], WeatherResult](
+  /**
+   * The weather tool instance, returning a Result for safe error handling.
+   */
+  val toolSafe: Result[ToolFunction[Map[String, Any], WeatherResult]] = ToolBuilder[Map[String, Any], WeatherResult](
     "get_weather",
     "Retrieves current weather for the given location.",
     weatherParamsSchema
-  ).withHandler(weatherHandler).build()
+  ).withHandler(weatherHandler).buildSafe()
+
+  /**
+   * The weather tool instance.
+   *
+   * @throws IllegalStateException if tool initialization fails
+   */
+  @deprecated("Use toolSafe which returns Result[ToolFunction] for safe error handling", "0.2.9")
+  lazy val tool: ToolFunction[Map[String, Any], WeatherResult] =
+    toolSafe match {
+      case Right(t) => t
+      case Left(e)  => throw new IllegalStateException(s"WeatherTool.tool lazy initialization failed: ${e.formatted}")
+    }
 }

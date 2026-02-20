@@ -157,7 +157,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     implicit val rw: ReadWriter[CalculatorResult] = macroRW
   }
 
-  private def createCalculatorTool(): ToolFunction[Map[String, Any], CalculatorResult] = {
+  private def createCalculatorTool(): Result[ToolFunction[Map[String, Any], CalculatorResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Calculator parameters")
       .withRequiredField("a", Schema.number("First number"))
@@ -172,7 +172,7 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
         a <- extractor.getDouble("a")
         b <- extractor.getDouble("b")
       } yield CalculatorResult(a + b)
-    }.build()
+    }.buildSafe()
   }
 
   private def createCompletion(
@@ -218,12 +218,18 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
 
     val client  = new StubLLMClient(Right(completionWithTool))
     val agent   = new Agent(client)
-    val tools   = new ToolRegistry(Seq(createCalculatorTool()))
     val tracing = new RecordingTracing()
-    val result  = agent.run("use calculator", tools, context = AgentContext(tracing = Some(tracing), debug = true))
 
-    result.isRight shouldBe true
-    tracing.toolCalls.nonEmpty shouldBe true
+    val result = for {
+      tool <- createCalculatorTool()
+      tools = new ToolRegistry(Seq(tool))
+      state <- agent.run("use calculator", tools, context = AgentContext(tracing = Some(tracing), debug = true))
+    } yield state
+
+    result.fold(
+      e => fail(s"Test failed: ${e.formatted}"),
+      _ => tracing.toolCalls.nonEmpty shouldBe true
+    )
   }
 
   it should "trace error when LLM completion fails" in {
@@ -308,48 +314,60 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "trace tool call when tool returns error" in {
-    val failingTool = ToolBuilder[Map[String, Any], Unit](
+    val failingToolResult = ToolBuilder[Map[String, Any], Unit](
       "failing_tool",
       "Tool that returns error",
       Schema.`object`[Map[String, Any]]("args")
     ).withHandler(_ => Left("intentional"))
-      .build()
+      .buildSafe()
 
     val toolCall           = createToolCall("failing_tool", "{}")
     val completionWithTool = createCompletion(content = "", toolCalls = Seq(toolCall))
     val completionText     = createCompletion("Done")
     val client             = new MultiResponseStubLLMClient(Seq(Right(completionWithTool), Right(completionText)))
     val agent              = new Agent(client)
-    val tools              = new ToolRegistry(Seq(failingTool))
     val tracing            = new RecordingTracing()
 
-    val result = agent.run("use failing tool", tools, context = AgentContext(tracing = Some(tracing), debug = true))
+    val result = for {
+      failingTool <- failingToolResult
+      tools = new ToolRegistry(Seq(failingTool))
+      state <- agent.run("use failing tool", tools, context = AgentContext(tracing = Some(tracing), debug = true))
+    } yield state
 
-    result.isRight shouldBe true
-    tracing.toolCalls should have size 1
-    tracing.toolCalls.head._3 should include("intentional")
+    result.fold(
+      e => fail(s"Test failed: ${e.formatted}"),
+      _ => {
+        tracing.toolCalls should have size 1
+        tracing.toolCalls.head._3 should include("intentional")
+      }
+    )
   }
 
   it should "trace error when tool throws" in {
-    val throwingTool = ToolBuilder[Map[String, Any], Unit](
+    val throwingToolResult = ToolBuilder[Map[String, Any], Unit](
       "throwing_tool",
       "Tool that throws",
       Schema.`object`[Map[String, Any]]("args")
     ).withHandler(_ => throw new RuntimeException("intentional throw"))
-      .build()
+      .buildSafe()
 
     val toolCall           = createToolCall("throwing_tool", "{}")
     val completionWithTool = createCompletion(content = "", toolCalls = Seq(toolCall))
     val completionText     = createCompletion("Done")
     val client             = new MultiResponseStubLLMClient(Seq(Right(completionWithTool), Right(completionText)))
     val agent              = new Agent(client)
-    val tools              = new ToolRegistry(Seq(throwingTool))
     val tracing            = new RecordingTracing()
 
-    val result = agent.run("use throwing tool", tools, context = AgentContext(tracing = Some(tracing), debug = true))
+    val result = for {
+      throwingTool <- throwingToolResult
+      tools = new ToolRegistry(Seq(throwingTool))
+      state <- agent.run("use throwing tool", tools, context = AgentContext(tracing = Some(tracing), debug = true))
+    } yield state
 
-    result.isRight shouldBe true
-    tracing.toolCalls.nonEmpty shouldBe true
+    result.fold(
+      e => fail(s"Test failed: ${e.formatted}"),
+      _ => tracing.toolCalls.nonEmpty shouldBe true
+    )
   }
 
   it should "trace unexpected tool processing failures when processToolCalls throws" in {

@@ -2,7 +2,9 @@ package org.llm4s.toolapi
 
 import org.llm4s.core.safety.Safety
 
-import scala.concurrent.{ ExecutionContext, Future }
+import scala.concurrent.{ ExecutionContext, Future, blocking }
+import java.util.concurrent.atomic.AtomicInteger
+import scala.util.control.NonFatal
 
 /**
  * Request model for tool calls
@@ -24,10 +26,14 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
 
   def tools: Seq[ToolFunction[_, _]] = initialTools
 
-  // Get a specific tool by name
+  /**
+   * Get a specific tool by name
+   */
   def getTool(name: String): Option[ToolFunction[_, _]] = tools.find(_.name == name)
 
-  // Execute a tool call synchronously
+  /**
+   * Execute a tool call synchronously
+   */
   def execute(request: ToolCallRequest): Either[ToolCallError, ujson.Value] =
     tools.find(_.name == request.functionName) match {
       case Some(tool) =>
@@ -43,6 +49,8 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
    * Execute a tool call asynchronously.
    *
    * Wraps synchronous execution in a Future for non-blocking operation.
+   * NOTE: Tool execution typically involves blocking I/O.
+   * We use `blocking` to hint the ExecutionContext to expand its pool if necessary.
    *
    * @param request The tool call request
    * @param ec ExecutionContext for async execution
@@ -51,7 +59,7 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
   def executeAsync(request: ToolCallRequest)(implicit
     ec: ExecutionContext
   ): Future[Either[ToolCallError, ujson.Value]] =
-    Future(execute(request))
+    Future(blocking(execute(request)))
 
   /**
    * Execute multiple tool calls with a configurable strategy.
@@ -95,31 +103,57 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
     Future.traverse(requests)(executeAsync)
 
   /**
-   * Execute requests in parallel with a concurrency limit.
-   *
-   * Groups requests into batches of maxConcurrency size,
-   * executes each batch in parallel, then combines results.
+   * Execute requests in parallel with a concurrency limit using a sliding window.
+   * This implementation avoids Head-of-Line (HoL) blocking.
    */
   private def executeWithLimit(
     requests: Seq[ToolCallRequest],
     maxConcurrency: Int
-  )(implicit ec: ExecutionContext): Future[Seq[Either[ToolCallError, ujson.Value]]] = {
-    val batches = requests.grouped(maxConcurrency).toSeq
+  )(implicit ec: ExecutionContext): Future[Seq[Either[ToolCallError, ujson.Value]]] =
+    if (requests.isEmpty) {
+      Future.successful(Seq.empty)
+    } else {
+      val tasks        = requests.toVector
+      val totalTasks   = tasks.length
+      val currentIndex = new AtomicInteger(0)
+      val results      = new Array[Either[ToolCallError, ujson.Value]](totalTasks)
 
-    batches.foldLeft(Future.successful(Seq.empty[Either[ToolCallError, ujson.Value]])) { (accFuture, batch) =>
-      accFuture.flatMap(acc => executeParallel(batch).map(batchResults => acc ++ batchResults))
+      def worker(): Future[Unit] = {
+        val idx = currentIndex.getAndIncrement()
+        if (idx >= totalTasks) {
+          Future.successful(())
+        } else {
+          val request = tasks(idx)
+          executeAsync(request)
+            .recover { case NonFatal(ex) =>
+              Left(ToolCallError.ExecutionError(request.functionName, new Exception(ex.getMessage)))
+            }
+            .flatMap { result =>
+              results(idx) = result
+              worker()
+            }
+        }
+      }
+
+      val workerCount = math.min(maxConcurrency, totalTasks)
+      val workers     = (1 to workerCount).map(_ => worker())
+
+      Future.sequence(workers).map(_ => results.toSeq)
     }
-  }
 
-  // Generate OpenAI tool definitions for all tools
+  /**
+   * Generate OpenAI tool definitions for all tools
+   */
   def getOpenAITools(strict: Boolean = true): ujson.Arr =
     ujson.Arr.from(tools.map(_.toOpenAITool(strict)))
 
-  // Generate a specific format of tool definitions for a particular LLM provider
+  /**
+   * Generate a specific format of tool definitions for a particular LLM provider
+   */
   def getToolDefinitions(provider: String): ujson.Value = provider.toLowerCase match {
     case "openai"    => getOpenAITools()
-    case "anthropic" => getOpenAITools() // Currently using the same format
-    case "gemini"    => getOpenAITools() // May need adjustment for Google's format
+    case "anthropic" => getOpenAITools()
+    case "gemini"    => getOpenAITools()
     case _           => throw new IllegalArgumentException(s"Unsupported LLM provider: $provider")
   }
 

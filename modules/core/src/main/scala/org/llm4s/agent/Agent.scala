@@ -12,6 +12,7 @@ import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
+import cats.implicits._
 import java.time.Instant
 import scala.annotation.tailrec
 import scala.concurrent.{ Await, ExecutionContext }
@@ -135,16 +136,16 @@ class Agent(client: LLMClient) {
    * @param handoffs Available handoffs (default: none)
    * @param systemPromptAddition Optional additional text to append to the default system prompt
    * @param completionOptions Optional completion options for LLM calls (temperature, maxTokens, etc.)
-   * @return A new AgentState initialized with the query and tools
+   * @return A Result containing a new AgentState initialized with the query and tools
    */
-  def initialize(
+  def initializeSafe(
     query: String,
     tools: ToolRegistry,
     handoffs: Seq[Handoff] = Seq.empty,
     systemPromptAddition: Option[String] = None,
     completionOptions: CompletionOptions = CompletionOptions()
-  ): AgentState = {
-    val baseSystemPrompt = """You are a helpful assistant with access to tools. 
+  ): Result[AgentState] = {
+    val baseSystemPrompt = """You are a helpful assistant with access to tools.
         |Follow these steps:
         |1. Analyze the user's question and determine which tools you need to use
         |2. Use tools ONE AT A TIME - make one tool call, wait for the result, then decide if you need more tools
@@ -164,18 +165,45 @@ class Agent(client: LLMClient) {
     )
 
     // Convert handoffs to tools and combine with regular tools
-    val handoffTools = createHandoffTools(handoffs)
-    val allTools     = new ToolRegistry(tools.tools ++ handoffTools)
+    for {
+      handoffTools <- createHandoffTools(handoffs)
+    } yield {
+      val allTools = new ToolRegistry(tools.tools ++ handoffTools)
 
-    AgentState(
-      conversation = Conversation(initialMessages),
-      tools = allTools,
-      initialQuery = Some(query),
-      systemMessage = Some(systemMsg),
-      completionOptions = completionOptions,
-      availableHandoffs = handoffs
-    )
+      AgentState(
+        conversation = Conversation(initialMessages),
+        tools = allTools,
+        initialQuery = Some(query),
+        systemMessage = Some(systemMsg),
+        completionOptions = completionOptions,
+        availableHandoffs = handoffs
+      )
+    }
   }
+
+  /**
+   * Initializes a new agent state with the given query.
+   *
+   * @param query The user query to process
+   * @param tools The registry of available tools
+   * @param handoffs Available handoffs (default: none)
+   * @param systemPromptAddition Optional additional text to append to the default system prompt
+   * @param completionOptions Optional completion options for LLM calls (temperature, maxTokens, etc.)
+   * @return A new AgentState initialized with the query and tools
+   * @throws IllegalStateException if initialization fails
+   */
+  @deprecated("Use initializeSafe() which returns Result[AgentState] for safe error handling", "0.2.9")
+  def initialize(
+    query: String,
+    tools: ToolRegistry,
+    handoffs: Seq[Handoff] = Seq.empty,
+    systemPromptAddition: Option[String] = None,
+    completionOptions: CompletionOptions = CompletionOptions()
+  ): AgentState =
+    initializeSafe(query, tools, handoffs, systemPromptAddition, completionOptions) match {
+      case Right(state) => state
+      case Left(e)      => throw new IllegalStateException(s"Agent.initialize failed: ${e.formatted}")
+    }
 
   /**
    * Runs a single step of the agent's reasoning process
@@ -521,13 +549,15 @@ class Agent(client: LLMClient) {
    * Create tool functions for handoffs.
    * Each handoff becomes a tool that the LLM can invoke.
    */
-  private def createHandoffTools(handoffs: Seq[Handoff]): Seq[ToolFunction[_, _]] = {
+  private def createHandoffTools(handoffs: Seq[Handoff]): Result[Seq[ToolFunction[_, _]]] = {
     import org.llm4s.toolapi.{ ToolBuilder, Schema }
     import HandoffResult._ // Import implicit ReadWriter
 
-    handoffs.map { handoff =>
-      val toolName        = handoff.handoffId
-      val toolDescription = s"Hand off this query to a specialist agent. ${handoff.transferReason.getOrElse("")}"
+    handoffs.traverse { handoff =>
+      val toolName = handoff.handoffId
+      val toolDescription = handoff.transferReason.fold(
+        "Hand off this query to a specialist agent."
+      )(reason => s"Hand off this query to a specialist agent. $reason")
 
       // Create object schema with a reason parameter
       val schema = Schema
@@ -547,7 +577,7 @@ class Agent(client: LLMClient) {
             reason = reason
           )
         }
-      }.build()
+      }.buildSafe()
     }
   }
 
@@ -1043,8 +1073,8 @@ class Agent(client: LLMClient) {
         logger.info("[DEBUG] Handoffs: {}", handoffs.length)
         logger.info("[DEBUG] ========================================")
       }
-      initialState = initialize(validatedQuery, tools, handoffs, systemPromptAddition, completionOptions)
-      finalState <- run(initialState, maxSteps, context)
+      initialState <- initializeSafe(validatedQuery, tools, handoffs, systemPromptAddition, completionOptions)
+      finalState   <- run(initialState, maxSteps, context)
 
       // 3. Validate output
       validatedState <- validateOutput(finalState, outputGuardrails)
@@ -1345,34 +1375,34 @@ class Agent(client: LLMClient) {
       onEvent(AgentEvent.agentStarted(validatedQuery, tools.tools.size))
 
       // Initialize and run with streaming
-      val initialState = initialize(validatedQuery, tools, handoffs, systemPromptAddition, completionOptions)
+      initializeSafe(validatedQuery, tools, handoffs, systemPromptAddition, completionOptions).flatMap { initialState =>
+        runWithEventsInternal(
+          initialState,
+          onEvent,
+          maxSteps,
+          0,
+          startTime,
+          context
+        ).flatMap { finalState =>
+          // Emit output guardrail events
+          outputGuardrails.foreach(g => onEvent(AgentEvent.OutputGuardrailStarted(g.name, Instant.now())))
 
-      runWithEventsInternal(
-        initialState,
-        onEvent,
-        maxSteps,
-        0,
-        startTime,
-        context
-      ).flatMap { finalState =>
-        // Emit output guardrail events
-        outputGuardrails.foreach(g => onEvent(AgentEvent.OutputGuardrailStarted(g.name, Instant.now())))
+          val outputValidationResult = validateOutput(finalState, outputGuardrails)
 
-        val outputValidationResult = validateOutput(finalState, outputGuardrails)
+          // Emit output guardrail completion events based on validation result
+          outputValidationResult match {
+            case Right(_) =>
+              outputGuardrails.foreach { g =>
+                onEvent(AgentEvent.OutputGuardrailCompleted(g.name, passed = true, Instant.now()))
+              }
+            case Left(_) =>
+              outputGuardrails.foreach { g =>
+                onEvent(AgentEvent.OutputGuardrailCompleted(g.name, passed = false, Instant.now()))
+              }
+          }
 
-        // Emit output guardrail completion events based on validation result
-        outputValidationResult match {
-          case Right(_) =>
-            outputGuardrails.foreach { g =>
-              onEvent(AgentEvent.OutputGuardrailCompleted(g.name, passed = true, Instant.now()))
-            }
-          case Left(_) =>
-            outputGuardrails.foreach { g =>
-              onEvent(AgentEvent.OutputGuardrailCompleted(g.name, passed = false, Instant.now()))
-            }
+          outputValidationResult
         }
-
-        outputValidationResult
       }
     }
   }
@@ -1871,7 +1901,7 @@ class Agent(client: LLMClient) {
         logger.info("[DEBUG] Tools: {}", tools.tools.map(_.name).mkString(", "))
         logger.info("[DEBUG] ========================================")
       }
-      initialState = initialize(validatedQuery, tools, handoffs, systemPromptAddition, completionOptions)
+      initialState <- initializeSafe(validatedQuery, tools, handoffs, systemPromptAddition, completionOptions)
       finalState <- runWithStrategyInternal(
         initialState,
         strategy = toolExecutionStrategy,

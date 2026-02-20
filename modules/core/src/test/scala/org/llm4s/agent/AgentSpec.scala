@@ -110,7 +110,7 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     implicit val rw: ReadWriter[CalculatorResult] = macroRW
   }
 
-  private def createCalculatorTool(): ToolFunction[Map[String, Any], CalculatorResult] = {
+  private def createCalculatorTool(): Result[ToolFunction[Map[String, Any], CalculatorResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Calculator parameters")
       .withRequiredField("a", Schema.number("First number"))
@@ -136,11 +136,11 @@ class AgentSpec extends AnyFlatSpec with Matchers {
         }
         CalculatorResult(result)
       }
-    }.build()
+    }.buildSafe()
   }
 
   private val calculatorTool = createCalculatorTool()
-  private val testTools      = new ToolRegistry(Seq(calculatorTool))
+  private val testTools      = calculatorTool.map(tool => new ToolRegistry(Seq(tool)))
 
   // ==========================================================================
   // Initialize Tests
@@ -150,46 +150,63 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient()
     val agent      = new Agent(mockClient)
 
-    val state = agent.initialize("What is 2+2?", testTools)
-
-    state.initialQuery shouldBe Some("What is 2+2?")
-    state.status shouldBe AgentStatus.InProgress
-    state.conversation.messages should have size 1
-    state.conversation.messages.head shouldBe a[UserMessage]
-    state.conversation.messages.head.content shouldBe "What is 2+2?"
+    val result = for {
+      tools <- testTools
+      state <- agent.initializeSafe("What is 2+2?", tools)
+    } yield {
+      state.initialQuery shouldBe Some("What is 2+2?")
+      state.status shouldBe AgentStatus.InProgress
+      state.conversation.messages should have size 1
+      state.conversation.messages.head shouldBe a[UserMessage]
+      state.conversation.messages.head.content shouldBe "What is 2+2?"
+    }
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   it should "include system message" in {
     val mockClient = new MockLLMClient()
     val agent      = new Agent(mockClient)
 
-    val state = agent.initialize("Test query", testTools)
-
-    state.systemMessage shouldBe defined
-    state.systemMessage.get.content should include("helpful assistant")
+    val result = for {
+      tools <- testTools
+      state <- agent.initializeSafe("Test query", tools)
+    } yield state.systemMessage match {
+      case Some(msg) => msg.content should include("helpful assistant")
+      case None      => fail("Expected systemMessage to be defined")
+    }
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   it should "append system prompt addition" in {
     val mockClient = new MockLLMClient()
     val agent      = new Agent(mockClient)
 
-    val state = agent.initialize(
-      "Test query",
-      testTools,
-      systemPromptAddition = Some("Always respond in JSON format.")
-    )
-
-    state.systemMessage.get.content should include("JSON format")
+    val result = for {
+      tools <- testTools
+      state <- agent.initializeSafe(
+        "Test query",
+        tools,
+        systemPromptAddition = Some("Always respond in JSON format.")
+      )
+    } yield state.systemMessage match {
+      case Some(msg) => msg.content should include("JSON format")
+      case None      => fail("Expected systemMessage to be defined")
+    }
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   it should "include tools in state" in {
     val mockClient = new MockLLMClient()
     val agent      = new Agent(mockClient)
 
-    val state = agent.initialize("Test", testTools)
-
-    state.tools.tools should have size 1
-    state.tools.tools.head.name shouldBe "calculator"
+    val result = for {
+      tools <- testTools
+      state <- agent.initializeSafe("Test", tools)
+    } yield {
+      state.tools.tools should have size 1
+      state.tools.tools.head.name shouldBe "calculator"
+    }
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   it should "include handoff tools when handoffs are provided" in {
@@ -200,11 +217,15 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient()
     val agent      = new Agent(mockClient)
 
-    val state = agent.initialize("Test", testTools, handoffs = Seq(handoff))
-
-    // Should have original tool + handoff tool
-    state.tools.tools.size shouldBe 2
-    state.tools.tools.exists(_.name.startsWith("handoff_to_agent_")) shouldBe true
+    val result = for {
+      tools <- testTools
+      state <- agent.initializeSafe("Test", tools, handoffs = Seq(handoff))
+    } yield {
+      // Should have original tool + handoff tool
+      state.tools.tools.size shouldBe 2
+      state.tools.tools.exists(_.name.startsWith("handoff_to_agent_")) shouldBe true
+    }
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   it should "store completion options" in {
@@ -212,10 +233,14 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val agent      = new Agent(mockClient)
 
     val options = CompletionOptions(temperature = 0.5, maxTokens = Some(100))
-    val state   = agent.initialize("Test", testTools, completionOptions = options)
-
-    state.completionOptions.temperature shouldBe 0.5
-    state.completionOptions.maxTokens shouldBe Some(100)
+    val result = for {
+      tools <- testTools
+      state <- agent.initializeSafe("Test", tools, completionOptions = options)
+    } yield {
+      state.completionOptions.temperature shouldBe 0.5
+      state.completionOptions.maxTokens shouldBe Some(100)
+    }
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   // ==========================================================================
@@ -227,12 +252,15 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(completion)))
     val agent      = new Agent(mockClient)
 
-    val initialState = agent.initialize("What is 2+2?", testTools)
-    val result       = agent.runStep(initialState)
-
-    result.isRight shouldBe true
-    result.toOption.get.status shouldBe AgentStatus.Complete
-    result.toOption.get.conversation.messages.last.content shouldBe "The answer is 4."
+    val result = for {
+      tools  <- testTools
+      state1 <- agent.initializeSafe("What is 2+2?", tools)
+      state2 <- agent.runStep(state1)
+    } yield {
+      state2.status shouldBe AgentStatus.Complete
+      state2.conversation.messages.last.content shouldBe "The answer is 4."
+    }
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   it should "transition InProgress to WaitingForTools when tool calls present" in {
@@ -241,11 +269,12 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(completion)))
     val agent      = new Agent(mockClient)
 
-    val initialState = agent.initialize("What is 2+2?", testTools)
-    val result       = agent.runStep(initialState)
-
-    result.isRight shouldBe true
-    result.toOption.get.status shouldBe AgentStatus.WaitingForTools
+    val result = for {
+      tools  <- testTools
+      state1 <- agent.initializeSafe("What is 2+2?", tools)
+      state2 <- agent.runStep(state1)
+    } yield state2.status shouldBe AgentStatus.WaitingForTools
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   it should "return error on LLM failure" in {
@@ -253,11 +282,16 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Left(error)))
     val agent      = new Agent(mockClient)
 
-    val initialState = agent.initialize("Test", testTools)
-    val result       = agent.runStep(initialState)
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[APIError]
+    val result = for {
+      tools  <- testTools
+      state1 <- agent.initializeSafe("Test", tools)
+    } yield agent
+      .runStep(state1)
+      .fold(
+        error => error shouldBe a[APIError],
+        _ => fail("Expected error but got success")
+      )
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   it should "pass tools to LLM via completion options" in {
@@ -265,13 +299,17 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(completion)))
     val agent      = new Agent(mockClient)
 
-    val initialState = agent.initialize("Test", testTools)
-    agent.runStep(initialState)
-
-    mockClient.callCount shouldBe 1
-    val (_, options) = mockClient.calls.head
-    options.tools should have size 1
-    options.tools.head.name shouldBe "calculator"
+    val result = for {
+      tools  <- testTools
+      state1 <- agent.initializeSafe("Test", tools)
+      _      <- agent.runStep(state1)
+    } yield {
+      mockClient.callCount shouldBe 1
+      val (_, options) = mockClient.calls.head
+      options.tools should have size 1
+      options.tools.head.name shouldBe "calculator"
+    }
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   // ==========================================================================
@@ -284,21 +322,21 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(completion)))
     val agent      = new Agent(mockClient)
 
-    // First step: InProgress -> WaitingForTools
-    val state1 = agent.initialize("What is 2+2?", testTools)
-    val state2 = agent.runStep(state1).toOption.get
-    state2.status shouldBe AgentStatus.WaitingForTools
+    val result = for {
+      tools  <- testTools
+      state1 <- agent.initializeSafe("What is 2+2?", tools)
+      state2 <- agent.runStep(state1)
+      _ = state2.status shouldBe AgentStatus.WaitingForTools
+      state3 <- agent.runStep(state2)
+    } yield {
+      state3.status shouldBe AgentStatus.InProgress
 
-    // Second step: WaitingForTools -> InProgress (tools executed)
-    val state3 = agent.runStep(state2)
-
-    state3.isRight shouldBe true
-    state3.toOption.get.status shouldBe AgentStatus.InProgress
-
-    // Should have tool message in conversation
-    val toolMessages = state3.toOption.get.conversation.messages.collect { case m: ToolMessage => m }
-    toolMessages should have size 1
-    toolMessages.head.content should include("4") // Result of 2+2
+      // Should have tool message in conversation
+      val toolMessages = state3.conversation.messages.collect { case m: ToolMessage => m }
+      toolMessages should have size 1
+      toolMessages.head.content should include("4") // Result of 2+2
+    }
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   it should "handle tool execution errors gracefully" in {
@@ -308,15 +346,18 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(completion)))
     val agent      = new Agent(mockClient)
 
-    val state1 = agent.initialize("Test", testTools)
-    val state2 = agent.runStep(state1).toOption.get
-    val state3 = agent.runStep(state2)
-
-    state3.isRight shouldBe true
-    // Tool error should be in the tool message
-    val toolMessages = state3.toOption.get.conversation.messages.collect { case m: ToolMessage => m }
-    toolMessages should have size 1
-    toolMessages.head.content should include("isError")
+    val result = for {
+      tools  <- testTools
+      state1 <- agent.initializeSafe("Test", tools)
+      state2 <- agent.runStep(state1)
+      state3 <- agent.runStep(state2)
+    } yield {
+      // Tool error should be in the tool message
+      val toolMessages = state3.conversation.messages.collect { case m: ToolMessage => m }
+      toolMessages should have size 1
+      toolMessages.head.content should include("isError")
+    }
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   // ==========================================================================
@@ -328,25 +369,28 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(completion)))
     val agent      = new Agent(mockClient)
 
-    val state1 = agent.initialize("Test", testTools)
-    val state2 = agent.runStep(state1).toOption.get
-    state2.status shouldBe AgentStatus.Complete
-
-    // Running step again should not change state
-    val state3 = agent.runStep(state2)
-    state3.isRight shouldBe true
-    state3.toOption.get.status shouldBe AgentStatus.Complete
+    val result = for {
+      tools  <- testTools
+      state1 <- agent.initializeSafe("Test", tools)
+      state2 <- agent.runStep(state1)
+      _ = state2.status shouldBe AgentStatus.Complete
+      // Running step again should not change state
+      state3 <- agent.runStep(state2)
+    } yield state3.status shouldBe AgentStatus.Complete
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   "Agent.runStep (Failed)" should "remain in Failed state" in {
     val mockClient = new MockLLMClient()
     val agent      = new Agent(mockClient)
 
-    val failedState = agent.initialize("Test", testTools).withStatus(AgentStatus.Failed("Test error"))
-    val result      = agent.runStep(failedState)
-
-    result.isRight shouldBe true
-    result.toOption.get.status shouldBe AgentStatus.Failed("Test error")
+    val result = for {
+      tools <- testTools
+      state <- agent.initializeSafe("Test", tools)
+      failedState = state.withStatus(AgentStatus.Failed("Test error"))
+      result <- agent.runStep(failedState)
+    } yield result.status shouldBe AgentStatus.Failed("Test error")
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   // ==========================================================================
@@ -358,11 +402,19 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(completion)))
     val agent      = new Agent(mockClient)
 
-    val result = agent.run("What is 2+2?", testTools)
-
-    result.isRight shouldBe true
-    result.toOption.get.status shouldBe AgentStatus.Complete
-    result.toOption.get.conversation.messages.last.content shouldBe "The answer is 4."
+    testTools.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tools =>
+        agent
+          .run("What is 2+2?", tools)
+          .fold(
+            e => fail(s"Agent run failed: ${e.formatted}"),
+            state => {
+              state.status shouldBe AgentStatus.Complete
+              state.conversation.messages.last.content shouldBe "The answer is 4."
+            }
+          )
+    )
   }
 
   it should "execute tools and continue to completion" in {
@@ -373,11 +425,19 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(firstResponse), Right(finalResponse)))
     val agent      = new Agent(mockClient)
 
-    val result = agent.run("What is 2+2?", testTools)
-
-    result.isRight shouldBe true
-    result.toOption.get.status shouldBe AgentStatus.Complete
-    mockClient.callCount shouldBe 2
+    testTools.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tools =>
+        agent
+          .run("What is 2+2?", tools)
+          .fold(
+            e => fail(s"Agent run failed: ${e.formatted}"),
+            state => {
+              state.status shouldBe AgentStatus.Complete
+              mockClient.callCount shouldBe 2
+            }
+          )
+    )
   }
 
   it should "respect maxSteps limit" in {
@@ -387,12 +447,19 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(response)))
     val agent      = new Agent(mockClient)
 
-    val result = agent.run("Loop forever", testTools, maxSteps = Some(2))
-
-    result.isRight shouldBe true
-    val finalState = result.toOption.get
-    finalState.status shouldBe a[AgentStatus.Failed]
-    finalState.status.asInstanceOf[AgentStatus.Failed].error should include("step limit")
+    testTools.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tools =>
+        agent
+          .run("Loop forever", tools, maxSteps = Some(2))
+          .fold(
+            e => fail(s"Agent run failed: ${e.formatted}"),
+            finalState => {
+              finalState.status shouldBe a[AgentStatus.Failed]
+              finalState.status.asInstanceOf[AgentStatus.Failed].error should include("step limit")
+            }
+          )
+    )
   }
 
   it should "validate input with guardrails" in {
@@ -407,10 +474,16 @@ class AgentSpec extends AnyFlatSpec with Matchers {
         else Right(input)
     }
 
-    val result = agent.run("Hi", testTools, inputGuardrails = Seq(lengthGuardrail))
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[ValidationError]
+    testTools.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tools =>
+        agent
+          .run("Hi", tools, inputGuardrails = Seq(lengthGuardrail))
+          .fold(
+            error => error shouldBe a[ValidationError],
+            _ => fail("Expected error but got success")
+          )
+    )
   }
 
   it should "validate output with guardrails" in {
@@ -426,10 +499,16 @@ class AgentSpec extends AnyFlatSpec with Matchers {
         else Right(output)
     }
 
-    val result = agent.run("Test", testTools, outputGuardrails = Seq(badWordGuardrail))
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[ValidationError]
+    testTools.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tools =>
+        agent
+          .run("Test", tools, outputGuardrails = Seq(badWordGuardrail))
+          .fold(
+            error => error shouldBe a[ValidationError],
+            _ => fail("Expected error but got success")
+          )
+    )
   }
 
   // ==========================================================================
@@ -442,30 +521,39 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(response1), Right(response2)))
     val agent      = new Agent(mockClient)
 
-    val state1 = agent.run("First query", testTools).toOption.get
-    state1.status shouldBe AgentStatus.Complete
+    val result = for {
+      tools  <- testTools
+      state1 <- agent.run("First query", tools)
+      _ = state1.status shouldBe AgentStatus.Complete
+      state2 <- agent.continueConversation(state1, "Follow-up query")
+    } yield {
+      state2.status shouldBe AgentStatus.Complete
 
-    val state2 = agent.continueConversation(state1, "Follow-up query")
-
-    state2.isRight shouldBe true
-    state2.toOption.get.status shouldBe AgentStatus.Complete
-
-    // Should have both conversations
-    val messages = state2.toOption.get.conversation.messages
-    messages.count(_.isInstanceOf[UserMessage]) shouldBe 2
+      // Should have both conversations
+      val messages = state2.conversation.messages
+      messages.count(_.isInstanceOf[UserMessage]) shouldBe 2
+    }
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   it should "reject continuation from incomplete state" in {
     val mockClient = new MockLLMClient()
     val agent      = new Agent(mockClient)
 
-    val inProgressState = agent.initialize("Test", testTools)
-    inProgressState.status shouldBe AgentStatus.InProgress
+    val result = for {
+      tools           <- testTools
+      inProgressState <- agent.initializeSafe("Test", tools)
+    } yield {
+      inProgressState.status shouldBe AgentStatus.InProgress
 
-    val result = agent.continueConversation(inProgressState, "Follow-up")
-
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[ValidationError]
+      agent
+        .continueConversation(inProgressState, "Follow-up")
+        .fold(
+          error => error shouldBe a[ValidationError],
+          _ => fail("Expected error but got success")
+        )
+    }
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   it should "allow continuation from failed state" in {
@@ -473,12 +561,13 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(response)))
     val agent      = new Agent(mockClient)
 
-    val failedState = agent.initialize("Test", testTools).withStatus(AgentStatus.Failed("Previous error"))
-
-    val result = agent.continueConversation(failedState, "Let's try again")
-
-    result.isRight shouldBe true
-    result.toOption.get.status shouldBe AgentStatus.Complete
+    val result = for {
+      tools <- testTools
+      state <- agent.initializeSafe("Test", tools)
+      failedState = state.withStatus(AgentStatus.Failed("Previous error"))
+      state2 <- agent.continueConversation(failedState, "Let's try again")
+    } yield state2.status shouldBe AgentStatus.Complete
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   // ==========================================================================
@@ -494,18 +583,26 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(responses)
     val agent      = new Agent(mockClient)
 
-    val result = agent.runMultiTurn(
-      initialQuery = "Query 1",
-      followUpQueries = Seq("Query 2", "Query 3"),
-      tools = testTools
+    testTools.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tools =>
+        agent
+          .runMultiTurn(
+            initialQuery = "Query 1",
+            followUpQueries = Seq("Query 2", "Query 3"),
+            tools = tools
+          )
+          .fold(
+            e => fail(s"runMultiTurn failed: ${e.formatted}"),
+            state => {
+              mockClient.callCount shouldBe 3
+
+              // Final state should have all user messages
+              val userMessages = state.conversation.messages.collect { case m: UserMessage => m }
+              userMessages.map(_.content) shouldBe Seq("Query 1", "Query 2", "Query 3")
+            }
+          )
     )
-
-    result.isRight shouldBe true
-    mockClient.callCount shouldBe 3
-
-    // Final state should have all user messages
-    val userMessages = result.toOption.get.conversation.messages.collect { case m: UserMessage => m }
-    userMessages.map(_.content) shouldBe Seq("Query 1", "Query 2", "Query 3")
   }
 
   it should "stop on first error" in {
@@ -517,14 +614,19 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(responses)
     val agent      = new Agent(mockClient)
 
-    val result = agent.runMultiTurn(
-      initialQuery = "Query 1",
-      followUpQueries = Seq("Query 2", "Query 3"),
-      tools = testTools
-    )
+    testTools.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tools => {
+        val result = agent.runMultiTurn(
+          initialQuery = "Query 1",
+          followUpQueries = Seq("Query 2", "Query 3"),
+          tools = tools
+        )
 
-    result.isLeft shouldBe true
-    mockClient.callCount shouldBe 2 // Stopped after error
+        result.isLeft shouldBe true
+        mockClient.callCount shouldBe 2 // Stopped after error
+      }
+    )
   }
 
   // ==========================================================================
@@ -538,18 +640,23 @@ class AgentSpec extends AnyFlatSpec with Matchers {
 
     val events = ArrayBuffer[AgentEvent]()
 
-    val result = agent.runWithEvents(
-      query = "Test query",
-      tools = testTools,
-      onEvent = events += _
+    testTools.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tools => {
+        val result = agent.runWithEvents(
+          query = "Test query",
+          tools = tools,
+          onEvent = events += _
+        )
+
+        result.isRight shouldBe true
+
+        // Should have start, step, text, and complete events
+        events.exists(_.isInstanceOf[AgentEvent.AgentStarted]) shouldBe true
+        events.exists(_.isInstanceOf[AgentEvent.StepStarted]) shouldBe true
+        events.exists(_.isInstanceOf[AgentEvent.AgentCompleted]) shouldBe true
+      }
     )
-
-    result.isRight shouldBe true
-
-    // Should have start, step, text, and complete events
-    events.exists(_.isInstanceOf[AgentEvent.AgentStarted]) shouldBe true
-    events.exists(_.isInstanceOf[AgentEvent.StepStarted]) shouldBe true
-    events.exists(_.isInstanceOf[AgentEvent.AgentCompleted]) shouldBe true
   }
 
   it should "emit tool events when tools are called" in {
@@ -562,17 +669,22 @@ class AgentSpec extends AnyFlatSpec with Matchers {
 
     val events = ArrayBuffer[AgentEvent]()
 
-    val result = agent.runWithEvents(
-      query = "What is 5 times 3?",
-      tools = testTools,
-      onEvent = events += _
+    testTools.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tools => {
+        val result = agent.runWithEvents(
+          query = "What is 5 times 3?",
+          tools = tools,
+          onEvent = events += _
+        )
+
+        result.isRight shouldBe true
+
+        // Should have tool start and complete events
+        events.exists(_.isInstanceOf[AgentEvent.ToolCallStarted]) shouldBe true
+        events.exists(_.isInstanceOf[AgentEvent.ToolCallCompleted]) shouldBe true
+      }
     )
-
-    result.isRight shouldBe true
-
-    // Should have tool start and complete events
-    events.exists(_.isInstanceOf[AgentEvent.ToolCallStarted]) shouldBe true
-    events.exists(_.isInstanceOf[AgentEvent.ToolCallCompleted]) shouldBe true
   }
 
   // ==========================================================================
@@ -584,13 +696,19 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(completion)))
     val agent      = new Agent(mockClient)
 
-    val result = agent.runCollectingEvents("Test", testTools)
-
-    result.isRight shouldBe true
-    val (state, events) = result.toOption.get
-
-    state.status shouldBe AgentStatus.Complete
-    events should not be empty
+    testTools.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tools =>
+        agent
+          .runCollectingEvents("Test", tools)
+          .fold(
+            e => fail(s"runCollectingEvents failed: ${e.formatted}"),
+            { case (state, events) =>
+              state.status shouldBe AgentStatus.Complete
+              events should not be empty
+            }
+          )
+    )
   }
 
   // ==========================================================================
@@ -602,14 +720,24 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(completion)))
     val agent      = new Agent(mockClient)
 
-    val state    = agent.run("What is the meaning of life?", testTools).toOption.get
-    val markdown = agent.formatStateAsMarkdown(state)
+    testTools.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tools =>
+        agent
+          .run("What is the meaning of life?", tools)
+          .fold(
+            e => fail(s"Agent run failed: ${e.formatted}"),
+            state => {
+              val markdown = agent.formatStateAsMarkdown(state)
 
-    markdown should include("# Agent Execution Trace")
-    markdown should include("Initial Query")
-    markdown should include("What is the meaning of life?")
-    markdown should include("The answer is 42.")
-    markdown should include("Complete")
+              markdown should include("# Agent Execution Trace")
+              markdown should include("Initial Query")
+              markdown should include("What is the meaning of life?")
+              markdown should include("The answer is 42.")
+              markdown should include("Complete")
+            }
+          )
+    )
   }
 
   it should "include tool calls in markdown" in {
@@ -620,12 +748,22 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(firstResponse), Right(finalResponse)))
     val agent      = new Agent(mockClient)
 
-    val state    = agent.run("What is 10/5?", testTools).toOption.get
-    val markdown = agent.formatStateAsMarkdown(state)
+    testTools.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tools =>
+        agent
+          .run("What is 10/5?", tools)
+          .fold(
+            e => fail(s"Agent run failed: ${e.formatted}"),
+            state => {
+              val markdown = agent.formatStateAsMarkdown(state)
 
-    markdown should include("Tool Calls")
-    markdown should include("calculator")
-    markdown should include("Tool Response")
+              markdown should include("Tool Calls")
+              markdown should include("calculator")
+              markdown should include("Tool Response")
+            }
+          )
+    )
   }
 
   // ==========================================================================
@@ -637,10 +775,15 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(completion)))
     val agent      = new Agent(mockClient)
 
-    val result = agent.run("Test debug mode", testTools, context = AgentContext(debug = true))
+    val result = for {
+      tools <- testTools
+      state <- agent.run("Test debug mode", tools, context = AgentContext(debug = true))
+    } yield state
 
-    result.isRight shouldBe true
-    result.toOption.get.status shouldBe AgentStatus.Complete
+    result.fold(
+      e => fail(s"Test failed: ${e.formatted}"),
+      state => state.status shouldBe AgentStatus.Complete
+    )
   }
 
   // ==========================================================================
@@ -666,15 +809,14 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockLLMClient(Seq(Right(completion)))
     val agent      = new Agent(mockClient)
 
-    val initialState = agent.initialize("Complex query", testTools, handoffs = Seq(handoff))
-
-    // First step triggers tool call
-    val state1 = agent.runStep(initialState).toOption.get
-    state1.status shouldBe AgentStatus.WaitingForTools
-
-    // Second step processes handoff tool
-    val state2 = agent.runStep(state1).toOption.get
-    state2.status shouldBe a[AgentStatus.HandoffRequested]
+    val result = for {
+      tools        <- testTools
+      initialState <- agent.initializeSafe("Complex query", tools, handoffs = Seq(handoff))
+      state1       <- agent.runStep(initialState)
+      _ = state1.status shouldBe AgentStatus.WaitingForTools
+      state2 <- agent.runStep(state1)
+    } yield state2.status shouldBe a[AgentStatus.HandoffRequested]
+    result.left.foreach(e => fail(s"Failed: ${e.formatted}"))
   }
 
   // ==========================================================================
@@ -695,5 +837,32 @@ class AgentSpec extends AnyFlatSpec with Matchers {
 
     // Budget = (10000 - 2000) * 0.92 = 7360 (with 8% headroom - HeadroomPercent.Standard is 0.08)
     mockClient.getContextBudget(HeadroomPercent.Standard) shouldBe 7360
+  }
+
+  // ============ Deprecated API tests ============
+
+  "Agent.initialize (deprecated)" should "initialize agent state successfully" in {
+    val completion = createCompletion("Test response")
+    val mockClient = new MockLLMClient(Seq(Right(completion)))
+    val agent      = new Agent(mockClient)
+
+    testTools.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tools => {
+        @scala.annotation.nowarn("cat=deprecation")
+        val state = agent.initialize(
+          query = "Test query",
+          tools = tools,
+          handoffs = Seq.empty,
+          systemPromptAddition = None,
+          completionOptions = CompletionOptions()
+        )
+
+        state.initialQuery shouldBe Some("Test query")
+        state.status shouldBe AgentStatus.InProgress
+        state.conversation.messages.size shouldBe 1
+        state.tools.tools.map(_.name) shouldBe tools.tools.map(_.name)
+      }
+    )
   }
 }

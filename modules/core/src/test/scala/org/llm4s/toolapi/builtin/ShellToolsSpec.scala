@@ -1,5 +1,7 @@
 package org.llm4s.toolapi.builtin
 
+import scala.annotation.nowarn
+
 import org.llm4s.toolapi.SafeParameterExtractor
 import org.llm4s.toolapi.builtin.shell._
 import org.scalatest.flatspec.AnyFlatSpec
@@ -76,70 +78,114 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
   "ShellTool" should "execute allowed commands" in {
     assume(!isWindows, "Unix shell commands not available on Windows")
     val config = ShellConfig(allowedCommands = Seq("echo", "pwd"))
-    val tool   = ShellTool.create(config)
 
-    val params = ujson.Obj("command" -> "echo hello world")
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isRight shouldBe true
-    val shellResult = result.toOption.get
-    shellResult.exitCode shouldBe 0
-    shellResult.stdout.trim shouldBe "hello world"
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> "echo hello world")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              shellResult => {
+                shellResult.exitCode shouldBe 0
+                shellResult.stdout.trim shouldBe "hello world"
+              }
+            )
+        }
+      )
   }
 
   it should "reject non-allowed commands" in {
     assume(!isWindows, "Unix shell commands not available on Windows")
     val config = ShellConfig(allowedCommands = Seq("ls"))
-    val tool   = ShellTool.create(config)
 
-    val params = ujson.Obj("command" -> "rm -rf /tmp/test")
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isLeft shouldBe true
-    result.swap.toOption.get should include("not allowed")
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> "rm -rf /tmp/test")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => err should include("not allowed"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
   }
 
   it should "capture stderr" in {
     assume(!isWindows, "Unix shell commands not available on Windows")
     val config = ShellConfig(allowedCommands = Seq("ls"))
-    val tool   = ShellTool.create(config)
 
-    val params = ujson.Obj("command" -> "ls /nonexistent/path/12345")
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isRight shouldBe true
-    val shellResult = result.toOption.get
-    shellResult.exitCode should not be 0
-    shellResult.stderr.nonEmpty shouldBe true
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> "ls /nonexistent/path/12345")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              shellResult => {
+                shellResult.exitCode should not be 0
+                shellResult.stderr.nonEmpty shouldBe true
+              }
+            )
+        }
+      )
   }
 
   it should "respect timeout" in {
     assume(!isWindows, "Unix shell commands not available on Windows")
     val config = ShellConfig(allowedCommands = Seq("sleep"), timeoutMs = 100)
-    val tool   = ShellTool.create(config)
 
-    val params = ujson.Obj("command" -> "sleep 10")
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isRight shouldBe true
-    val shellResult = result.toOption.get
-    shellResult.timedOut shouldBe true
-    shellResult.exitCode shouldBe -1
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> "sleep 10")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              shellResult => {
+                shellResult.timedOut shouldBe true
+                shellResult.exitCode shouldBe -1
+              }
+            )
+        }
+      )
   }
 
   it should "use configured working directory" in {
     assume(!isWindows, "Unix shell commands not available on Windows")
     val config = ShellConfig(allowedCommands = Seq("pwd"), workingDirectory = Some("/tmp"))
-    val tool   = ShellTool.create(config)
 
-    val params = ujson.Obj("command" -> "pwd")
-    val result = tool.handler(SafeParameterExtractor(params))
-
-    result.isRight shouldBe true
-    val shellResult = result.toOption.get
-    // On macOS, /tmp is a symlink to /private/tmp
-    val output = shellResult.stdout.trim
-    (output == "/tmp" || output == "/private/tmp") shouldBe true
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> "pwd")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              shellResult => {
+                // On macOS, /tmp is a symlink to /private/tmp
+                val output = shellResult.stdout.trim
+                (output == "/tmp" || output == "/private/tmp") shouldBe true
+              }
+            )
+        }
+      )
   }
 
   it should "truncate large output" in {
@@ -147,16 +193,32 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
     // Use seq which generates output immediately, and a longer timeout to ensure
     // truncation happens before timeout (avoiding race condition on slow CI)
     val config = ShellConfig(allowedCommands = Seq("seq"), maxOutputSize = 100, timeoutMs = 5000)
-    val tool   = ShellTool.create(config)
 
-    // seq 1 10000 generates ~50KB of output immediately
-    val params = ujson.Obj("command" -> "seq 1 10000")
-    val result = tool.handler(SafeParameterExtractor(params))
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          // seq 1 10000 generates ~50KB of output immediately
+          val params = ujson.Obj("command" -> "seq 1 10000")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              shellResult => {
+                shellResult.truncated shouldBe true
+                // 100 bytes of content + "\n... (truncated)" suffix
+                shellResult.stdout.length should be <= 120
+              }
+            )
+        }
+      )
+  }
 
-    result.isRight shouldBe true
-    val shellResult = result.toOption.get
-    shellResult.truncated shouldBe true
-    // 100 bytes of content + "\n... (truncated)" suffix
-    shellResult.stdout.length should be <= 120
+  // ============ Deprecated API tests ============
+
+  "ShellTool.create() (deprecated)" should "return a valid tool" in {
+    @nowarn("cat=deprecation") val tool = ShellTool.create(ShellConfig.readOnly())
+    tool.name shouldBe "shell_command"
   }
 }

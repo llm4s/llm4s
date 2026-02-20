@@ -5,6 +5,7 @@ import org.llm4s.toolapi.builtin.core._
 import org.llm4s.toolapi.builtin.filesystem._
 import org.llm4s.toolapi.builtin.http._
 import org.llm4s.toolapi.builtin.shell._
+import org.llm4s.types.Result
 
 /**
  * Aggregator for built-in tools with convenient factory methods.
@@ -21,18 +22,23 @@ import org.llm4s.toolapi.builtin.shell._
  * import org.llm4s.toolapi.builtin.BuiltinTools
  *
  * // Safe tools for production use
- * val safeRegistry = new ToolRegistry(BuiltinTools.safe())
+ * for {
+ *   tools <- BuiltinTools.safe()
+ * } yield new ToolRegistry(tools)
  *
  * // Development tools with file and shell access
- * val devRegistry = new ToolRegistry(BuiltinTools.development(
- *   workingDirectory = Some("/home/user/project")
- * ))
+ * for {
+ *   tools <- BuiltinTools.development(
+ *     workingDirectory = Some("/home/user/project")
+ *   )
+ * } yield new ToolRegistry(tools)
  * }}}
  */
 object BuiltinTools {
 
   /**
-   * Core utility tools (always safe, no external dependencies).
+   * Core utility tools (always safe, no external dependencies),
+   * returning a Result for safe error handling.
    *
    * Includes:
    * - DateTimeTool: Get current date/time
@@ -40,15 +46,27 @@ object BuiltinTools {
    * - UUIDTool: Generate UUIDs
    * - JSONTool: Parse/format/query JSON
    */
-  def core: Seq[ToolFunction[_, _]] = Seq(
-    DateTimeTool.tool,
-    CalculatorTool.tool,
-    UUIDTool.tool,
-    JSONTool.tool
-  )
+  def coreSafe: Result[Seq[ToolFunction[_, _]]] = for {
+    dateTime   <- DateTimeTool.toolSafe
+    calculator <- CalculatorTool.toolSafe
+    uuid       <- UUIDTool.toolSafe
+    json       <- JSONTool.toolSafe
+  } yield Seq(dateTime, calculator, uuid, json)
 
   /**
-   * Safe tools for production use.
+   * Core utility tools (always safe, no external dependencies).
+   *
+   * @throws IllegalStateException if any tool initialization fails
+   */
+  @deprecated("Use coreSafe which returns Result[Seq[ToolFunction]] for safe error handling", "0.2.9")
+  def core: Seq[ToolFunction[_, _]] =
+    coreSafe match {
+      case Right(t) => t
+      case Left(e)  => throw new IllegalStateException(s"BuiltinTools.core failed: ${e.formatted}")
+    }
+
+  /**
+   * Safe tools for production use, returning a Result for safe error handling.
    *
    * Includes:
    * - All core utilities
@@ -59,13 +77,26 @@ object BuiltinTools {
    * - Shell access
    * - Web search (configure separately at application edge)
    */
-  def safe(httpConfig: HttpConfig = HttpConfig.readOnly()): Seq[ToolFunction[_, _]] =
-    core ++ Seq(
-      HTTPTool.create(httpConfig)
-    )
+  def withHttpSafe(httpConfig: HttpConfig = HttpConfig.readOnly()): Result[Seq[ToolFunction[_, _]]] = for {
+    coreTools <- coreSafe
+    httpTool  <- HTTPTool.createSafe(httpConfig)
+  } yield coreTools :+ httpTool
 
   /**
-   * Safe tools plus read-only file system access.
+   * Safe tools for production use.
+   *
+   * @throws IllegalStateException if any tool initialization fails
+   */
+  @deprecated("Use withHttpSafe() which returns Result[Seq[ToolFunction]] for safe error handling", "0.2.9")
+  def safe(httpConfig: HttpConfig = HttpConfig.readOnly()): Seq[ToolFunction[_, _]] =
+    withHttpSafe(httpConfig) match {
+      case Right(t) => t
+      case Left(e)  => throw new IllegalStateException(s"BuiltinTools.safe failed: ${e.formatted}")
+    }
+
+  /**
+   * Safe tools plus read-only file system access,
+   * returning a Result for safe error handling.
    *
    * Includes:
    * - All safe tools
@@ -75,18 +106,34 @@ object BuiltinTools {
    * - File writing
    * - Shell access
    */
+  def withFilesSafe(
+    fileConfig: FileConfig = FileConfig(),
+    httpConfig: HttpConfig = HttpConfig.readOnly()
+  ): Result[Seq[ToolFunction[_, _]]] = for {
+    safeTools <- withHttpSafe(httpConfig)
+    readFile  <- ReadFileTool.createSafe(fileConfig)
+    listDir   <- ListDirectoryTool.createSafe(fileConfig)
+    fileInfo  <- FileInfoTool.createSafe(fileConfig)
+  } yield safeTools ++ Seq(readFile, listDir, fileInfo)
+
+  /**
+   * Safe tools plus read-only file system access.
+   *
+   * @throws IllegalStateException if any tool initialization fails
+   */
+  @deprecated("Use withFilesSafe() which returns Result[Seq[ToolFunction]] for safe error handling", "0.2.9")
   def withFiles(
     fileConfig: FileConfig = FileConfig(),
     httpConfig: HttpConfig = HttpConfig.readOnly()
   ): Seq[ToolFunction[_, _]] =
-    safe(httpConfig) ++ Seq(
-      ReadFileTool.create(fileConfig),
-      ListDirectoryTool.create(fileConfig),
-      FileInfoTool.create(fileConfig)
-    )
+    withFilesSafe(fileConfig, httpConfig) match {
+      case Right(t) => t
+      case Left(e)  => throw new IllegalStateException(s"BuiltinTools.withFiles failed: ${e.formatted}")
+    }
 
   /**
-   * Development tools with full read/write and shell access.
+   * Development tools with full read/write and shell access,
+   * returning a Result for safe error handling.
    *
    * Includes:
    * - All core utilities
@@ -100,10 +147,10 @@ object BuiltinTools {
    * @param workingDirectory Optional working directory for file/shell operations
    * @param fileAllowedPaths Allowed paths for file write operations
    */
-  def development(
+  def developmentSafe(
     workingDirectory: Option[String] = None,
     fileAllowedPaths: Seq[String] = Seq("/tmp")
-  ): Seq[ToolFunction[_, _]] = {
+  ): Result[Seq[ToolFunction[_, _]]] = {
     val fileConfig = FileConfig(
       allowedPaths = workingDirectory.map(Seq(_))
     )
@@ -113,14 +160,81 @@ object BuiltinTools {
     )
     val shellConfig = ShellConfig.development(workingDirectory)
 
-    core ++ Seq(
-      HTTPTool.tool,
-      ReadFileTool.create(fileConfig),
-      ListDirectoryTool.create(fileConfig),
-      FileInfoTool.create(fileConfig),
-      WriteFileTool.create(writeConfig),
-      ShellTool.create(shellConfig)
-    )
+    for {
+      coreTools <- coreSafe
+      httpTool  <- HTTPTool.toolSafe
+      readFile  <- ReadFileTool.createSafe(fileConfig)
+      listDir   <- ListDirectoryTool.createSafe(fileConfig)
+      fileInfo  <- FileInfoTool.createSafe(fileConfig)
+      writeFile <- WriteFileTool.createSafe(writeConfig)
+      shell     <- ShellTool.createSafe(shellConfig)
+    } yield coreTools ++ Seq(httpTool, readFile, listDir, fileInfo, writeFile, shell)
+  }
+
+  /**
+   * Development tools with full read/write and shell access.
+   *
+   * WARNING: These tools have significant access to the system.
+   * Use only in trusted development environments.
+   *
+   * @param workingDirectory Optional working directory for file/shell operations
+   * @param fileAllowedPaths Allowed paths for file write operations
+   * @throws IllegalStateException if any tool initialization fails
+   */
+  @deprecated("Use developmentSafe() which returns Result[Seq[ToolFunction]] for safe error handling", "0.2.9")
+  def development(
+    workingDirectory: Option[String] = None,
+    fileAllowedPaths: Seq[String] = Seq("/tmp")
+  ): Seq[ToolFunction[_, _]] =
+    developmentSafe(workingDirectory, fileAllowedPaths) match {
+      case Right(t) => t
+      case Left(e)  => throw new IllegalStateException(s"BuiltinTools.development failed: ${e.formatted}")
+    }
+
+  /**
+   * Custom tool set with full configuration control,
+   * returning a Result for safe error handling.
+   *
+   * @param fileConfig Configuration for read operations
+   * @param writeConfig Optional write configuration (if None, write tool is not included)
+   * @param httpConfig HTTP configuration
+   * @param shellConfig Optional shell configuration (if None, shell tool is not included)
+   */
+  def customSafe(
+    fileConfig: Option[FileConfig] = None,
+    writeConfig: Option[WriteConfig] = None,
+    httpConfig: Option[HttpConfig] = None,
+    shellConfig: Option[ShellConfig] = None
+  ): Result[Seq[ToolFunction[_, _]]] = {
+    def optionalTool[T](
+      config: Option[T]
+    )(build: T => Result[ToolFunction[_, _]]): Result[Seq[ToolFunction[_, _]]] =
+      config match {
+        case Some(cfg) => build(cfg).map(Seq(_))
+        case None      => Right(Seq.empty)
+      }
+
+    def optionalTools[T](
+      config: Option[T]
+    )(build: T => Result[Seq[ToolFunction[_, _]]]): Result[Seq[ToolFunction[_, _]]] =
+      config match {
+        case Some(cfg) => build(cfg)
+        case None      => Right(Seq.empty)
+      }
+
+    for {
+      coreTools <- coreSafe
+      httpTools <- optionalTool(httpConfig)(cfg => HTTPTool.createSafe(cfg))
+      fileTools <- optionalTools(fileConfig) { cfg =>
+        for {
+          readFile <- ReadFileTool.createSafe(cfg)
+          listDir  <- ListDirectoryTool.createSafe(cfg)
+          fileInfo <- FileInfoTool.createSafe(cfg)
+        } yield Seq(readFile, listDir, fileInfo)
+      }
+      writeTools <- optionalTool(writeConfig)(cfg => WriteFileTool.createSafe(cfg))
+      shellTools <- optionalTool(shellConfig)(cfg => ShellTool.createSafe(cfg))
+    } yield coreTools ++ httpTools ++ fileTools ++ writeTools ++ shellTools
   }
 
   /**
@@ -130,29 +244,17 @@ object BuiltinTools {
    * @param writeConfig Optional write configuration (if None, write tool is not included)
    * @param httpConfig HTTP configuration
    * @param shellConfig Optional shell configuration (if None, shell tool is not included)
+   * @throws IllegalStateException if any tool initialization fails
    */
+  @deprecated("Use customSafe() which returns Result[Seq[ToolFunction]] for safe error handling", "0.2.9")
   def custom(
     fileConfig: Option[FileConfig] = None,
     writeConfig: Option[WriteConfig] = None,
     httpConfig: Option[HttpConfig] = None,
     shellConfig: Option[ShellConfig] = None
-  ): Seq[ToolFunction[_, _]] = {
-    var tools: Seq[ToolFunction[_, _]] = core
-
-    httpConfig.foreach(cfg => tools = tools :+ HTTPTool.create(cfg))
-
-    fileConfig.foreach { cfg =>
-      tools = tools ++ Seq(
-        ReadFileTool.create(cfg),
-        ListDirectoryTool.create(cfg),
-        FileInfoTool.create(cfg)
-      )
+  ): Seq[ToolFunction[_, _]] =
+    customSafe(fileConfig, writeConfig, httpConfig, shellConfig) match {
+      case Right(t) => t
+      case Left(e)  => throw new IllegalStateException(s"BuiltinTools.custom failed: ${e.formatted}")
     }
-
-    writeConfig.foreach(cfg => tools = tools :+ WriteFileTool.create(cfg))
-
-    shellConfig.foreach(cfg => tools = tools :+ ShellTool.create(cfg))
-
-    tools
-  }
 }

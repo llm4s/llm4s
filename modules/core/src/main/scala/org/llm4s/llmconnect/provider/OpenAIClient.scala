@@ -444,14 +444,11 @@ class OpenAIClient private (
           ToolCall(
             id = ftc.getId,
             name = function.map(_.getName).getOrElse(""),
-            arguments = parseStreamingArguments(rawArgs)
+            arguments = StreamingToolArgumentParser.parse(rawArgs)
           )
         }
       )
       .getOrElse(Seq.empty)
-
-  private def parseStreamingArguments(raw: String): ujson.Value =
-    if (raw.isEmpty) ujson.Null else Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
 
   /**
    * Converts llm4s Conversation to OpenAI ChatRequestMessage format.
@@ -542,7 +539,8 @@ class OpenAIClient private (
   /**
    * Extracts tool calls from an OpenAI response message.
    *
-   * Parses function tool calls from the message and converts them to llm4s ToolCall format.
+   * Safely parses function tool call arguments as JSON, filtering invalid calls.
+   * Parses arguments only once per tool call to avoid double-evaluation risks.
    * Returns empty sequence if no tool calls are present.
    *
    * @param message OpenAI response message potentially containing tool calls
@@ -550,13 +548,16 @@ class OpenAIClient private (
    */
   private def extractToolCalls(message: ChatResponseMessage): Seq[ToolCall] =
     Option(message.getToolCalls)
-      .map(_.asScala.toSeq.collect {
-        case ftc: ChatCompletionsFunctionToolCall if Try(ujson.read(ftc.getFunction.getArguments)).isSuccess =>
-          ToolCall(
-            id = ftc.getId,
-            name = ftc.getFunction.getName,
-            arguments = Try(ujson.read(ftc.getFunction.getArguments)).getOrElse(ujson.Null)
-          )
+      .map(_.asScala.toSeq.flatMap {
+        case ftc: ChatCompletionsFunctionToolCall =>
+          Try(ujson.read(ftc.getFunction.getArguments)).toOption.map { args =>
+            ToolCall(
+              id = ftc.getId,
+              name = ftc.getFunction.getName,
+              arguments = args
+            )
+          }
+        case _ => None
       })
       .getOrElse(Seq.empty)
 }

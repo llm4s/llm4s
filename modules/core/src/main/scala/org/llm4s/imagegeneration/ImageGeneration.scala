@@ -35,6 +35,11 @@ sealed trait ImageSize {
 }
 
 object ImageSize {
+  case object Auto extends ImageSize {
+    val width                        = 0
+    val height                       = 0
+    override def description: String = "auto"
+  }
   case object Square512 extends ImageSize {
     val width  = 512
     val height = 512
@@ -60,6 +65,7 @@ object ImageSize {
     val width  = 1024
     val height = 1536
   }
+  final case class Custom(width: Int, height: Int) extends ImageSize
 }
 
 /** Image format enumeration */
@@ -77,6 +83,10 @@ object ImageFormat {
     val extension = "jpg"
     val mimeType  = "image/jpeg"
   }
+  case object WEBP extends ImageFormat {
+    val extension = "webp"
+    val mimeType  = "image/webp"
+  }
 }
 
 /** Options for image generation */
@@ -92,17 +102,31 @@ case class ImageGenerationOptions(
   quality: Option[String] = None,        // "standard" or "hd"
   style: Option[String] = None,          // "vivid" or "natural"
   responseFormat: Option[String] = None, // "url" or "b64_json"
+  outputFormat: Option[String] = None,   // "png", "jpeg", "webp"
+  background: Option[String] = None,     // "transparent", "opaque", "auto"
+  outputCompression: Option[Int] = None, // 0-100
   user: Option[String] = None            // End-user identifier for abuse monitoring
 )
+
+/** Provider-specific edit options; keeps shared API provider-agnostic. */
+sealed trait ProviderImageEditOptions
+object ProviderImageEditOptions {
+  case class OpenAI(
+    responseFormat: Option[String] = None,
+    quality: Option[String] = None,
+    style: Option[String] = None,
+    user: Option[String] = None
+  ) extends ProviderImageEditOptions
+  case class StableDiffusion(
+    denoisingStrength: Option[Double] = None
+  ) extends ProviderImageEditOptions
+}
 
 /** Options for image editing */
 case class ImageEditOptions(
   size: Option[ImageSize] = None,
   n: Int = 1,
-  responseFormat: Option[String] = None,
-  quality: Option[String] = None,  // "standard" or "hd" (OpenAI)
-  strength: Option[Double] = None, // 0.0 to 1.0 (Stable Diffusion)
-  user: Option[String] = None
+  providerOptions: Option[ProviderImageEditOptions] = None
 )
 
 /** Service health status */
@@ -231,7 +255,7 @@ case class OpenAIConfig(
   /** OpenAI API key */
   apiKey: String,
   /** Model to use (dall-e-2, dall-e-3, or gpt-image-1) */
-  model: String = "gpt-image-1",
+  model: String = "dall-e-2",
   /** Base URL for OpenAI API */
   baseUrl: String = "https://api.openai.com/v1",
   /** Request timeout in milliseconds */
@@ -477,7 +501,7 @@ object ImageGeneration {
    */
   def openAIClient(
     apiKey: String,
-    model: String = "gpt-image-1"
+    model: String = "dall-e-2"
   ): Either[ImageGenerationError, ImageGenerationClient] = {
     val config = OpenAIConfig(apiKey = apiKey, model = model)
     client(config)
@@ -498,7 +522,7 @@ object ImageGeneration {
     prompt: String,
     apiKey: String,
     options: ImageGenerationOptions = ImageGenerationOptions(),
-    model: String = "gpt-image-1"
+    model: String = "dall-e-2"
   ): Either[ImageGenerationError, GeneratedImage] = {
     val config = OpenAIConfig(apiKey = apiKey, model = model)
     generateImage(prompt, config, options)

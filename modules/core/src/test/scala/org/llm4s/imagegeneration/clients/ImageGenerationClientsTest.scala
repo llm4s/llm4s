@@ -2,15 +2,17 @@ package org.llm4s.imagegeneration.clients
 
 import org.llm4s.imagegeneration._
 import org.llm4s.imagegeneration.provider._
+import org.llm4s.http.{ HttpRawResponse, HttpResponse }
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import requests.Response
 
 import org.scalatest.concurrent.ScalaFutures
 import scala.util.Success
 import java.io.File
+import java.awt.image.BufferedImage
+import javax.imageio.ImageIO
 import scala.concurrent.ExecutionContext.Implicits.global
 
 class ImageGenerationClientsTest
@@ -26,14 +28,8 @@ class ImageGenerationClientsTest
     """{"data":[{"b64_json":"base64data","url":null}],"created":1234567890}""".getBytes
 
   // Response helpers
-  def createResponse(statusCode: Int, body: String): Response = Response(
-    url = "http://test",
-    statusCode = statusCode,
-    statusMessage = if (statusCode == 200) "OK" else "Error",
-    data = new geny.Bytes(body.getBytes),
-    headers = Map.empty,
-    history = None
-  )
+  def createResponse(statusCode: Int, body: String): HttpResponse =
+    HttpResponse(statusCode = statusCode, body = body)
 
   val mockSuccessResponse = createResponse(
     200,
@@ -225,7 +221,7 @@ class ImageGenerationClientsTest
       .when(*, *, *, *)
       .returns(Success(createResponse(200, responseBody)))
 
-    val tempFile = File.createTempFile("test", ".png")
+    val tempFile = createTempPngFile("test")
     try {
       val result = client.editImage(tempFile.toPath, "edit prompt")
       result.isRight shouldBe true
@@ -291,7 +287,7 @@ class ImageGenerationClientsTest
       result.value.length shouldBe 1
     }
 
-    val tempFile = File.createTempFile("test", ".png")
+    val tempFile = createTempPngFile("test")
     try {
       val editResponseBody =
         """{"created": 1234567890, "data": [{"b64_json": "edited"}]}"""
@@ -314,9 +310,8 @@ class ImageGenerationClientsTest
     val config         = HuggingFaceConfig(apiKey = "test-key")
     val client         = new HuggingFaceClient(config, mockHttpClient)
 
-    (mockHttpClient.post _)
-      .when(*, *, *, *)
-      .returns(Success(createResponse(200, "imagebytes")))
+    val fakeBytes = Array[Byte](0xff.toByte, 0xd8.toByte, 0xff.toByte, 0xe0.toByte)
+    (mockHttpClient.postRaw _).when(*, *, *, *).returns(Success(HttpRawResponse(200, fakeBytes)))
 
     val result = client.generateImage(prompt)
     result.isRight shouldBe true
@@ -328,9 +323,8 @@ class ImageGenerationClientsTest
     val config         = HuggingFaceConfig(apiKey = "test-key")
     val client         = new HuggingFaceClient(config, mockHttpClient)
 
-    (mockHttpClient.post _)
-      .when(*, *, *, *)
-      .returns(Success(createResponse(200, "imagebytes")))
+    val fakeBytes = Array[Byte](0xff.toByte, 0xd8.toByte, 0xff.toByte, 0xe0.toByte)
+    (mockHttpClient.postRaw _).when(*, *, *, *).returns(Success(HttpRawResponse(200, fakeBytes)))
 
     val result = client.generateImages(prompt, 2)
     result.isRight shouldBe true
@@ -342,7 +336,9 @@ class ImageGenerationClientsTest
     val config         = HuggingFaceConfig(apiKey = "test-key")
     val client         = new HuggingFaceClient(config, mockHttpClient)
 
-    (mockHttpClient.post _).when(*, *, *, *).returns(Success(mockErrorResponse))
+    (mockHttpClient.postRaw _)
+      .when(*, *, *, *)
+      .returns(Success(HttpRawResponse(400, "Invalid request".getBytes)))
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
@@ -353,9 +349,9 @@ class ImageGenerationClientsTest
     val config         = HuggingFaceConfig(apiKey = "test-key")
     val client         = new HuggingFaceClient(config, mockHttpClient)
 
-    (mockHttpClient.post _)
+    (mockHttpClient.postRaw _)
       .when(*, *, *, *)
-      .returns(Success(createResponse(401, "Unauthorized")))
+      .returns(Success(HttpRawResponse(401, "Unauthorized".getBytes)))
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
@@ -367,9 +363,9 @@ class ImageGenerationClientsTest
     val config         = HuggingFaceConfig(apiKey = "test-key")
     val client         = new HuggingFaceClient(config, mockHttpClient)
 
-    (mockHttpClient.post _)
+    (mockHttpClient.postRaw _)
       .when(*, *, *, *)
-      .returns(Success(createResponse(429, "Rate limit")))
+      .returns(Success(HttpRawResponse(429, "Rate limit".getBytes)))
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
@@ -395,9 +391,8 @@ class ImageGenerationClientsTest
     val config         = HuggingFaceConfig(apiKey = "test-key")
     val client         = new HuggingFaceClient(config, mockHttpClient)
 
-    (mockHttpClient.post _)
-      .when(*, *, *, *)
-      .returns(Success(createResponse(200, "imagebytes")))
+    val fakeBytes = Array[Byte](0xff.toByte, 0xd8.toByte, 0xff.toByte, 0xe0.toByte)
+    (mockHttpClient.postRaw _).when(*, *, *, *).returns(Success(HttpRawResponse(200, fakeBytes)))
 
     whenReady(client.generateImageAsync(prompt)) { result =>
       result.isRight shouldBe true
@@ -526,8 +521,15 @@ class ImageGenerationClientsTest
   // ==========================================
 
   test("HttpClient should return failure on exception") {
-    val client = new SimpleHttpClient()
+    val client = HttpClient.create()
     val result = client.post("http://0.0.0.0:0/invalid", Map.empty, "", 100)
     result.isFailure shouldBe true
+  }
+
+  private def createTempPngFile(prefix: String): File = {
+    val file  = File.createTempFile(prefix, ".png")
+    val image = new BufferedImage(512, 512, BufferedImage.TYPE_INT_ARGB)
+    ImageIO.write(image, "png", file)
+    file
   }
 }
