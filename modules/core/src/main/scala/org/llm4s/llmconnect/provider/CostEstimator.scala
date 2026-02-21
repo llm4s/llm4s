@@ -59,35 +59,29 @@ object CostEstimator {
       val cacheCreationTokens = usage.cacheCreationTokens.getOrElse(0)
       val hasCacheBreakdown   = usage.cachedTokens.isDefined || usage.cacheCreationTokens.isDefined
 
-      val effectivePromptTokens = math.max(0, usage.promptTokens)
       val normalInputTokens =
-        if (hasCacheBreakdown) {
-          math.max(0, effectivePromptTokens - cachedTokens - cacheCreationTokens)
-        } else {
-          effectivePromptTokens
-        }
+        math.max(
+          0,
+          usage.promptTokens -
+            cachedTokens -
+            cacheCreationTokens
+        )
 
       def estimateInputCostWithCaching(outputCost: Double): Option[Double] =
         if (hasCacheBreakdown) {
           (usage.cachedTokens, usage.cacheCreationTokens) match {
             case (Some(_), Some(_)) =>
-              pricing
-                .estimateCostWithCaching(
-                  inputTokens = normalInputTokens,
-                  cachedTokens = cachedTokens,
-                  cacheCreationTokens = cacheCreationTokens,
-                  outputTokens = 0
-                )
-                .map(_ + outputCost)
+              for {
+                inCost      <- pricing.inputCostPerToken
+                cacheRead   <- pricing.cacheReadInputTokenCost
+                cacheCreate <- pricing.cacheCreationInputTokenCost
+              } yield (normalInputTokens * inCost) + (cachedTokens * cacheRead) + (cacheCreationTokens * cacheCreate) + outputCost
 
             case (Some(_), None) =>
-              pricing
-                .estimateCostWithCaching(
-                  inputTokens = normalInputTokens,
-                  cachedTokens = cachedTokens,
-                  outputTokens = 0
-                )
-                .map(_ + outputCost)
+              for {
+                inCost    <- pricing.inputCostPerToken
+                cacheRead <- pricing.cacheReadInputTokenCost
+              } yield (normalInputTokens * inCost) + (cachedTokens * cacheRead) + outputCost
 
             case (None, Some(_)) =>
               for {

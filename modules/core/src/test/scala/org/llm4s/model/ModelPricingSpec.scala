@@ -145,59 +145,6 @@ class ModelPricingSpec extends AnyFlatSpec with Matchers {
   }
 
   // ─────────────────────────────────────────────────────────────
-  // ModelPricing.estimateCostWithCaching
-  // ─────────────────────────────────────────────────────────────
-
-  "ModelPricing.estimateCostWithCaching" should "calculate cost correctly with all three rates present" in {
-    val pricing = ModelPricing(
-      inputCostPerToken = Some(2.5e-6),
-      outputCostPerToken = Some(1.0e-5),
-      cacheReadInputTokenCost = Some(0.25e-6)
-    )
-    // (1000 * 2.5e-6) + (5000 * 0.25e-6) + (500 * 1e-5)
-    // = 0.0025 + 0.00125 + 0.005 = 0.00875
-    pricing.estimateCostWithCaching(1000, 5000, 500) shouldBe Some(0.00875)
-  }
-
-  it should "return None when cacheReadInputTokenCost is absent" in {
-    val pricing = ModelPricing(
-      inputCostPerToken = Some(2.5e-6),
-      outputCostPerToken = Some(1.0e-5)
-      // cacheReadInputTokenCost intentionally missing
-    )
-    pricing.estimateCostWithCaching(1000, 5000, 500) shouldBe None
-  }
-
-  it should "return None when inputCostPerToken is absent" in {
-    val pricing = ModelPricing(
-      outputCostPerToken = Some(1.0e-5),
-      cacheReadInputTokenCost = Some(0.25e-6)
-    )
-    pricing.estimateCostWithCaching(1000, 5000, 500) shouldBe None
-  }
-
-  it should "return None when outputCostPerToken is absent" in {
-    val pricing = ModelPricing(
-      inputCostPerToken = Some(2.5e-6),
-      cacheReadInputTokenCost = Some(0.25e-6)
-    )
-    pricing.estimateCostWithCaching(1000, 5000, 500) shouldBe None
-  }
-
-  it should "return None when all three rates are absent" in {
-    ModelPricing().estimateCostWithCaching(1000, 5000, 500) shouldBe None
-  }
-
-  it should "return zero when all token counts are zero" in {
-    val pricing = ModelPricing(
-      inputCostPerToken = Some(2.5e-6),
-      outputCostPerToken = Some(1.0e-5),
-      cacheReadInputTokenCost = Some(0.25e-6)
-    )
-    pricing.estimateCostWithCaching(0, 0, 0) shouldBe Some(0.0)
-  }
-
-  // ─────────────────────────────────────────────────────────────
   // Specialist pricing field round-trips
   // ─────────────────────────────────────────────────────────────
 

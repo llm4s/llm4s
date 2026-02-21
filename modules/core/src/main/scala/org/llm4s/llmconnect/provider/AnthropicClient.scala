@@ -18,7 +18,6 @@ import org.llm4s.types.Result
 import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ValidationError }
 import org.llm4s.error.ThrowableOps._
 
-import java.util.Optional
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.jdk.CollectionConverters._
 import scala.util.Try
@@ -174,7 +173,6 @@ curl https://api.anthropic.com/v1/messages \
               val streamResponse = messageService.createStreaming(messageParams)
 
               import scala.jdk.StreamConverters._
-              import scala.jdk.OptionConverters._
               val stream: Iterator[RawMessageStreamEvent] = streamResponse.stream().toScala(Iterator)
               val loopTry = Try {
                 stream.foreach { event =>
@@ -265,8 +263,16 @@ curl https://api.anthropic.com/v1/messages \
                     Try(msgDelta.usage()).foreach { usage =>
                       if (usage != null) {
                         val inputTokens = Option(usage.inputTokens()) match {
-                          case Some(opt: Optional[_]) => opt.toScala.map(_.toInt).getOrElse(0)
-                          case _                      => 0
+                          case Some(opt: java.util.Optional[_]) =>
+                            if (opt.isPresent) {
+                              val v = opt.get()
+                              if (v == null) 0
+                              else v.asInstanceOf[java.lang.Number].intValue()
+                            } else {
+                              0
+                            }
+                          case _ =>
+                            0
                         }
                         val outputTokens = Option(usage.outputTokens()).map(_.toInt).getOrElse(0)
                         if (inputTokens > 0 || outputTokens > 0) accumulator.updateTokens(inputTokens, outputTokens)
@@ -425,32 +431,13 @@ curl https://api.anthropic.com/v1/messages \
     // Extract token usage, including thinking tokens if available
     val usage = response.usage()
 
-    def reflectiveInt(obj: AnyRef, methodName: String): Option[Int] =
-      Try(obj.getClass.getMethod(methodName).invoke(obj)).toOption
-        .flatMap {
-          case null                => None
-          case i: Integer          => Some(i.intValue())
-          case l: java.lang.Long   => Some(l.longValue().toInt)
-          case n: java.lang.Number => Some(n.intValue())
-          case opt: Optional[_] =>
-            if (opt.isPresent) {
-              opt.get() match {
-                case nn: java.lang.Number => Some(nn.intValue())
-                case _                    => None
-              }
-            } else {
-              None
-            }
-          case _ => None
-        }
-
     val cachedTokens: Option[Int] =
-      reflectiveInt(usage.asInstanceOf[AnyRef], "cacheReadInputTokens")
-        .orElse(reflectiveInt(usage.asInstanceOf[AnyRef], "getCacheReadInputTokens"))
+      Option(usage.cacheReadInputTokens())
+        .flatMap(opt => if (opt.isPresent) Some(opt.get().toInt) else None)
 
     val cacheCreationTokens: Option[Int] =
-      reflectiveInt(usage.asInstanceOf[AnyRef], "cacheCreationInputTokens")
-        .orElse(reflectiveInt(usage.asInstanceOf[AnyRef], "getCacheCreationInputTokens"))
+      Option(usage.cacheCreationInputTokens())
+        .flatMap(opt => if (opt.isPresent) Some(opt.get().toInt) else None)
 
     val tokenUsage = TokenUsage(
       promptTokens = usage.inputTokens().toInt,

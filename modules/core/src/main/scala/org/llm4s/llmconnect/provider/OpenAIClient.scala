@@ -515,31 +515,16 @@ class OpenAIClient private (
     val assistantMessage =
       AssistantMessage(contentOpt = if (content.isEmpty) None else Some(content), toolCalls = toolCalls)
 
-    def reflectiveInt(obj: AnyRef, methodName: String): Option[Int] =
-      Try(obj.getClass.getMethod(methodName).invoke(obj)).toOption
-        .flatMap {
-          case null                => None
-          case i: Integer          => Some(i.intValue())
-          case l: java.lang.Long   => Some(l.longValue().toInt)
-          case n: java.lang.Number => Some(n.intValue())
-          case _                   => None
-        }
-
-    def reflectiveChild(obj: AnyRef, methodName: String): Option[AnyRef] =
-      Try(obj.getClass.getMethod(methodName).invoke(obj).asInstanceOf[AnyRef]).toOption.flatMap(Option(_))
-
     val usage = Option(completions.getUsage).map { u =>
       val cachedTokens: Option[Int] =
-        for {
-          promptDetails <- reflectiveChild(u, "getPromptTokensDetails")
-          cached        <- reflectiveInt(promptDetails, "getCachedTokens")
-        } yield cached
+        Option(u.getPromptTokensDetails)
+          .flatMap(details => Option(details.getCachedTokens))
+          .map(_.intValue())
 
       val thinkingTokens: Option[Int] =
-        for {
-          completionDetails <- reflectiveChild(u, "getCompletionTokensDetails")
-          reasoning         <- reflectiveInt(completionDetails, "getReasoningTokens")
-        } yield reasoning
+        Option(u.getCompletionTokensDetails)
+          .flatMap(details => Option(details.getReasoningTokens))
+          .map(_.intValue())
 
       TokenUsage(
         promptTokens = u.getPromptTokens,
