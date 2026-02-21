@@ -83,6 +83,16 @@ final class MockHttpClient(response: HttpResponse) extends Llm4sHttpClient {
     record(url, headers, None, Some(body), timeout, countPost = true)
     HttpRawResponse(response.statusCode, response.body.getBytes())
   }
+
+  override def postStream(
+    url: String,
+    headers: Map[String, String],
+    body: String,
+    timeout: Int
+  ): StreamingHttpResponse = {
+    record(url, headers, None, Some(body), timeout, countPost = true)
+    StreamingHttpResponse(response.statusCode, new java.io.ByteArrayInputStream(response.body.getBytes()))
+  }
 }
 
 final class FailingHttpClient(exception: Throwable) extends Llm4sHttpClient {
@@ -135,4 +145,11 @@ final class FailingHttpClient(exception: Throwable) extends Llm4sHttpClient {
     body: String,
     timeout: Int
   ): HttpRawResponse = fail
+
+  override def postStream(
+    url: String,
+    headers: Map[String, String],
+    body: String,
+    timeout: Int
+  ): StreamingHttpResponse = fail
 }

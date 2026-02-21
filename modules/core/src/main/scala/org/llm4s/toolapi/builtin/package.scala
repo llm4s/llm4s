@@ -78,7 +78,7 @@ package org.llm4s.toolapi
  * import org.llm4s.toolapi.builtin.BuiltinTools
  *
  * // Get all safe tools (no shell, restricted filesystem)
- * val tools = BuiltinTools.safe()
+ * val tools = BuiltinTools.withHttpSafe()
  *
  * // Get all tools with custom config
  * val allTools = BuiltinTools.all(

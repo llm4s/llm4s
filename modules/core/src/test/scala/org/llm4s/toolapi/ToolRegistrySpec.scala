@@ -343,12 +343,12 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  "ToolRegistry.getToolDefinitions" should "return OpenAI format for openai provider" in {
+  "ToolRegistry.getToolDefinitionsSafe" should "return OpenAI format for openai provider" in {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
         val registry = new ToolRegistry(Seq(addTool))
-        val tools    = registry.getToolDefinitions("openai")
+        val tools    = registry.getToolDefinitionsSafe("openai").getOrElse(fail("getToolDefinitionsSafe failed"))
         tools shouldBe a[ujson.Arr]
         tools.arr should have size 1
       }
@@ -360,7 +360,7 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
         val registry = new ToolRegistry(Seq(addTool))
-        val tools    = registry.getToolDefinitions("anthropic")
+        val tools    = registry.getToolDefinitionsSafe("anthropic").getOrElse(fail("getToolDefinitionsSafe failed"))
         tools shouldBe a[ujson.Arr]
       }
     )
@@ -371,20 +371,18 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
         val registry = new ToolRegistry(Seq(addTool))
-        val tools    = registry.getToolDefinitions("gemini")
+        val tools    = registry.getToolDefinitionsSafe("gemini").getOrElse(fail("getToolDefinitionsSafe failed"))
         tools shouldBe a[ujson.Arr]
       }
     )
   }
 
-  it should "throw exception for unsupported provider" in {
+  it should "return Left for unsupported provider" in {
     createAddTool().fold(
       e => fail(s"Tool creation failed: ${e.formatted}"),
       addTool => {
         val registry = new ToolRegistry(Seq(addTool))
-        an[IllegalArgumentException] should be thrownBy {
-          registry.getToolDefinitions("unsupported_provider")
-        }
+        registry.getToolDefinitionsSafe("unsupported_provider") shouldBe a[Left[_, _]]
       }
     )
   }

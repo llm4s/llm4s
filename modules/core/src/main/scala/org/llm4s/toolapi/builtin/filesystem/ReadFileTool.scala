@@ -93,30 +93,6 @@ object ReadFileTool {
    */
   val toolSafe: Result[ToolFunction[Map[String, Any], ReadFileResult]] = createSafe()
 
-  /**
-   * Create a read file tool with the given configuration.
-   *
-   * @throws IllegalStateException if tool creation fails
-   */
-  @deprecated("Use createSafe() which returns Result[ToolFunction] for safe error handling", "0.2.9")
-  def create(config: FileConfig = FileConfig()): ToolFunction[Map[String, Any], ReadFileResult] =
-    createSafe(config) match {
-      case Right(t) => t
-      case Left(e)  => throw new IllegalStateException(s"ReadFileTool.create failed: ${e.formatted}")
-    }
-
-  /**
-   * Default read file tool with standard configuration.
-   *
-   * @throws IllegalStateException if tool initialization fails
-   */
-  @deprecated("Use toolSafe which returns Result[ToolFunction] for safe error handling", "0.2.9")
-  lazy val tool: ToolFunction[Map[String, Any], ReadFileResult] =
-    toolSafe match {
-      case Right(t) => t
-      case Left(e)  => throw new IllegalStateException(s"ReadFileTool.tool lazy initialization failed: ${e.formatted}")
-    }
-
   private def readFile(
     pathStr: String,
     maxLines: Option[Int],

@@ -1,7 +1,5 @@
 package org.llm4s.toolapi.builtin
 
-import scala.annotation.nowarn
-
 import org.llm4s.toolapi.SafeParameterExtractor
 import org.llm4s.toolapi.builtin.core._
 import org.scalatest.flatspec.AnyFlatSpec
@@ -383,35 +381,4 @@ class CoreToolsSpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  // ============ Deprecated API tests ============
-
-  "DateTimeTool.tool (deprecated)" should "return a valid tool" in {
-    @nowarn("cat=deprecation") val tool = DateTimeTool.tool
-    tool.name shouldBe "get_current_datetime"
-  }
-
-  "CalculatorTool.tool (deprecated)" should "return a valid tool" in {
-    @nowarn("cat=deprecation") val tool = CalculatorTool.tool
-    tool.name shouldBe "calculator"
-  }
-
-  "UUIDTool.tool (deprecated)" should "return a valid tool" in {
-    @nowarn("cat=deprecation") val tool = UUIDTool.tool
-    tool.name shouldBe "generate_uuid"
-  }
-
-  "JSONTool.tool (deprecated)" should "return a valid tool" in {
-    @nowarn("cat=deprecation") val tool = JSONTool.tool
-    tool.name shouldBe "json_tool"
-  }
-
-  "core.allTools (deprecated)" should "return all 4 core tools" in {
-    @nowarn("cat=deprecation") val tools = core.allTools
-    tools.size shouldBe 4
-    val names = tools.map(_.name).toSet
-    names should contain("get_current_datetime")
-    names should contain("calculator")
-    names should contain("generate_uuid")
-    names should contain("json_tool")
-  }
 }

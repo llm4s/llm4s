@@ -7,6 +7,8 @@ import org.scalatest.matchers.should.Matchers
 import java.util.concurrent.{ CyclicBarrier, CountDownLatch, Executors, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration._
+import java.util.concurrent.{ CountDownLatch, CyclicBarrier, Executors, TimeUnit }
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Tests for ErrorRecovery utilities: backoff retry logic and CircuitBreaker pattern
@@ -180,17 +182,19 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "transition from Open to HalfOpen after recovery timeout" in {
+    var fakeTime = 0L
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
-      recoveryTimeout = 50.millis
+      recoveryTimeout = 50.millis,
+      clock = () => fakeTime
     )
 
     // Open the circuit
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
 
-    // Wait for recovery timeout
-    Thread.sleep(100)
+    // Advance the clock past the recovery timeout — no Thread.sleep needed
+    fakeTime += 100
 
     // Next call should be allowed (HalfOpen state)
     val result = cb.execute(() => Result.success("recovered"))
@@ -198,17 +202,19 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "close circuit on success in HalfOpen state" in {
+    var fakeTime = 0L
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
-      recoveryTimeout = 50.millis
+      recoveryTimeout = 50.millis,
+      clock = () => fakeTime
     )
 
     // Open the circuit
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
 
-    // Wait for recovery timeout
-    Thread.sleep(100)
+    // Advance the clock past the recovery timeout — no Thread.sleep needed
+    fakeTime += 100
 
     // Successful call in HalfOpen closes circuit
     cb.execute(() => Result.success("success"))
@@ -221,17 +227,19 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "reopen circuit on failure in HalfOpen state" in {
+    var fakeTime = 0L
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
-      recoveryTimeout = 50.millis
+      recoveryTimeout = 50.millis,
+      clock = () => fakeTime
     )
 
     // Open the circuit
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
 
-    // Wait for recovery timeout
-    Thread.sleep(100)
+    // Advance the clock past the recovery timeout — no Thread.sleep needed
+    fakeTime += 100
 
     // Failure in HalfOpen reopens circuit
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
@@ -425,7 +433,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     operationRan.get() shouldBe 0
   }
 
-  it should "allow at least one probe thread through when transitioning from Open to HalfOpen" in {
+  it should "allow exactly one probe thread through when transitioning from Open to HalfOpen" in {
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
       recoveryTimeout = 60.millis
@@ -449,13 +457,13 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
         def run(): Unit =
           try {
             barrier.await() // all threads race to be the HalfOpen probe
-            val result = cb.execute { () =>
+            // The probe deliberately fails: this pushes the circuit back to Open with a
+            // fresh lastFailureTime, so any thread that didn't win the slot (and therefore
+            // sees either HalfOpen or a just-reopened Open with elapsed-time ≈ 0) is
+            // correctly fast-rejected regardless of scheduling order.
+            cb.execute { () =>
               probesAllowed.incrementAndGet()
-              Result.success("probe")
-            }
-            result match {
-              case Right(_) => () // the winning probe
-              case Left(_)  => () // subsequent threads see Open rejection
+              Result.failure(ServiceError(500, "p", "probe-failed"))
             }
           } finally
             latch.countDown()
@@ -467,11 +475,11 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     finally
       executor.shutdown()
 
-    // At least one probe should have executed (the first thread to win the HalfOpen race).
-    // Due to the non-atomic state transition in the implementation more than one may slip
-    // through — the key invariant is at least one probe was allowed and the circuit
-    // subsequently moves toward Closed.
-    probesAllowed.get() should be >= 1
+    // Exactly one probe must execute: the first thread to win the synchronized
+    // Open→HalfOpen transition claims the slot; all other threads are fast-rejected
+    // (either they see state == HalfOpen, or they see state == Open with a brand-new
+    // lastFailureTime that hasn't elapsed yet).
+    probesAllowed.get() shouldBe 1
   }
 
   // ============ HalfOpen Re-open Edge Cases ============

@@ -96,15 +96,4 @@ object UUIDTool {
       Right(UUIDsResult(uuids))
     }.buildSafe()
 
-  /**
-   * The UUID generator tool instance.
-   *
-   * @throws IllegalStateException if tool initialization fails
-   */
-  @deprecated("Use toolSafe which returns Result[ToolFunction] for safe error handling", "0.2.9")
-  lazy val tool: ToolFunction[Map[String, Any], UUIDsResult] =
-    toolSafe match {
-      case Right(t) => t
-      case Left(e)  => throw new IllegalStateException(s"UUIDTool.tool lazy initialization failed: ${e.formatted}")
-    }
 }

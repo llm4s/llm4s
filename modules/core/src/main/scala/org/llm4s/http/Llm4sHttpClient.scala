@@ -34,6 +34,17 @@ case class HttpResponse(
 case class HttpRawResponse(statusCode: Int, body: Array[Byte])
 
 /**
+ * HTTP response wrapper for streaming (InputStream-based) response bodies.
+ *
+ * Use this instead of [[HttpResponse]] when the response body must be consumed
+ * incrementally (e.g. server-sent events, JSON lines).
+ *
+ * @param statusCode HTTP status code
+ * @param body       Response body as an InputStream — caller is responsible for closing it
+ */
+case class StreamingHttpResponse(statusCode: Int, body: java.io.InputStream)
+
+/**
  * Represents a single part in a multipart/form-data request.
  */
 sealed trait MultipartPart {
@@ -111,6 +122,21 @@ trait Llm4sHttpClient {
     body: String = "",
     timeout: Int = 10000
   ): HttpRawResponse
+
+  /**
+   * POST with a string body and return the response as a streaming InputStream.
+   *
+   * Use this for server-sent events or JSON-lines endpoints where the body must be
+   * consumed incrementally.  The caller is responsible for closing the InputStream.
+   *
+   * Default timeout is 10 minutes to accommodate long-running streams.
+   */
+  def postStream(
+    url: String,
+    headers: Map[String, String] = Map.empty,
+    body: String = "",
+    timeout: Int = 600000
+  ): StreamingHttpResponse
 }
 
 object Llm4sHttpClient {
@@ -217,6 +243,19 @@ private[llm4s] class JdkHttpClient extends Llm4sHttpClient {
       .build()
     val response = client.send(request, JHttpResponse.BodyHandlers.ofByteArray())
     HttpRawResponse(statusCode = response.statusCode(), body = response.body())
+  }
+
+  override def postStream(
+    url: String,
+    headers: Map[String, String],
+    body: String,
+    timeout: Int
+  ): StreamingHttpResponse = {
+    val request = buildRequest(url, headers, timeout)
+      .POST(HttpRequest.BodyPublishers.ofString(body))
+      .build()
+    val response = client.send(request, JHttpResponse.BodyHandlers.ofInputStream())
+    StreamingHttpResponse(statusCode = response.statusCode(), body = response.body())
   }
 
   // ============================================================

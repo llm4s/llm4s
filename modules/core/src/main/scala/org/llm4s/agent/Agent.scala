@@ -198,30 +198,6 @@ class Agent(client: LLMClient) {
   }
 
   /**
-   * Initializes a new agent state with the given query.
-   *
-   * @param query The user query to process
-   * @param tools The registry of available tools
-   * @param handoffs Available handoffs (default: none)
-   * @param systemPromptAddition Optional additional text to append to the default system prompt
-   * @param completionOptions Optional completion options for LLM calls (temperature, maxTokens, etc.)
-   * @return A new AgentState initialized with the query and tools
-   * @throws IllegalStateException if initialization fails
-   */
-  @deprecated("Use initializeSafe() which returns Result[AgentState] for safe error handling", "0.2.9")
-  def initialize(
-    query: String,
-    tools: ToolRegistry,
-    handoffs: Seq[Handoff] = Seq.empty,
-    systemPromptAddition: Option[String] = None,
-    completionOptions: CompletionOptions = CompletionOptions()
-  ): AgentState =
-    initializeSafe(query, tools, handoffs, systemPromptAddition, completionOptions) match {
-      case Right(state) => state
-      case Left(e)      => throw new IllegalStateException(s"Agent.initialize failed: ${e.formatted}")
-    }
-
-  /**
    * Runs a single step of the agent's reasoning process
    */
   def runStep(state: AgentState, context: AgentContext = AgentContext.Default): Result[AgentState] =
@@ -1150,7 +1126,8 @@ class Agent(client: LLMClient) {
    * val result = for {
    *   providerCfg <- /* load provider config */
    *   client      <- org.llm4s.llmconnect.LLMConnect.getClient(providerCfg)
-   *   tools       = new ToolRegistry(Seq(WeatherTool.tool))
+   *   tool        <- WeatherTool.toolSafe
+   *   tools       = new ToolRegistry(Seq(tool))
    *   agent       = new Agent(client)
    *   state1     <- agent.run("What's the weather in Paris?", tools)
    *   state2     <- agent.continueConversation(state1, "And in London?")

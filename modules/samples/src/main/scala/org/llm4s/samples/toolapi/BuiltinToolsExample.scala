@@ -18,10 +18,10 @@ import org.slf4j.LoggerFactory
  * - Search: Web search via DuckDuckGo
  *
  * Tools come in pre-configured bundles:
- * - `BuiltinTools.core` - Just the core utilities (always safe)
- * - `BuiltinTools.safe()` - Core + network (web search, HTTP)
- * - `BuiltinTools.withFiles()` - Safe + read-only file access
- * - `BuiltinTools.development()` - All tools for development environments
+ * - `BuiltinTools.coreSafe` - Just the core utilities (always safe)
+ * - `BuiltinTools.withHttpSafe()` - Core + network (web search, HTTP)
+ * - `BuiltinTools.withFilesSafe()` - Safe + read-only file access
+ * - `BuiltinTools.developmentSafe()` - All tools for development environments
  *
  * @example
  * {{{
