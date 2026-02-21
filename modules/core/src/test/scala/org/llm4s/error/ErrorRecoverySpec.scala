@@ -4,11 +4,9 @@ import org.llm4s.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.util.concurrent.{ CyclicBarrier, CountDownLatch, Executors, TimeUnit }
-import java.util.concurrent.atomic.AtomicInteger
-import scala.concurrent.duration._
 import java.util.concurrent.{ CountDownLatch, CyclicBarrier, Executors, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
+import scala.concurrent.duration._
 
 /**
  * Tests for ErrorRecovery utilities: backoff retry logic and CircuitBreaker pattern
