@@ -8,6 +8,7 @@ import org.llm4s.error.{
   RateLimitError,
   ServiceError
 }
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
@@ -15,19 +16,16 @@ import org.llm4s.llmconnect.streaming.StreamingAccumulator
 import org.llm4s.types.{ Result, TryOps }
 
 import java.io.{ BufferedReader, IOException, InputStreamReader }
-import java.net.URI
-import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
-import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 class OllamaClient(
   config: OllamaConfig,
-  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
+  private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
 ) extends LLMClient
     with MetricsRecording {
-  private val httpClient            = HttpClient.newHttpClient()
   private val closed: AtomicBoolean = new AtomicBoolean(false)
 
   override def complete(
@@ -43,42 +41,34 @@ class OllamaClient(
 
   private def connect(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
     val requestBody = createRequestBody(conversation, options, stream = false)
-    Try {
-      HttpRequest
-        .newBuilder()
-        .uri(URI.create(s"${config.baseUrl}/api/chat"))
-        .header("Content-Type", "application/json")
-        .timeout(Duration.ofMinutes(2))
-        .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
-        .build()
-    }.toResult.flatMap { request =>
-      try {
-        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
-        response.statusCode() match {
-          case 200 =>
-            Try(ujson.read(response.body())).toResult
-              .flatMap(json => Try(parseCompletion(json)).toResult)
-          case 401 => Left(AuthenticationError("ollama", "Unauthorized"))
-          case 429 => Left(RateLimitError("ollama"))
-          case s   => Left(ServiceError(s, "ollama", s"Ollama error: ${response.body()}"))
-        }
-      } catch {
-        case e: InterruptedException =>
-          Thread.currentThread().interrupt()
-          Left(
-            ExecutionError(
-              s"Ollama request interrupted: ${e.getMessage}",
-              operation = "ollama.chat",
-              exitCode = None,
-              cause = Some(e),
-              context = Map.empty
-            )
-          )
-        case e: IOException =>
-          Left(NetworkError("Failed to connect to Ollama", Some(e), config.baseUrl))
-        case scala.util.control.NonFatal(e) =>
-          Left(ServiceError(500, "ollama", s"Unexpected error: ${e.getMessage}"))
+    val url         = s"${config.baseUrl}/api/chat"
+    val headers     = Map("Content-Type" -> "application/json")
+    try {
+      val response = httpClient.post(url, headers, requestBody.render(), timeout = 120000)
+      response.statusCode match {
+        case 200 =>
+          Try(ujson.read(response.body)).toResult
+            .flatMap(json => Try(parseCompletion(json)).toResult)
+        case 401 => Left(AuthenticationError("ollama", "Unauthorized"))
+        case 429 => Left(RateLimitError("ollama"))
+        case s   => Left(ServiceError(s, "ollama", s"Ollama error: ${response.body}"))
       }
+    } catch {
+      case e: InterruptedException =>
+        Thread.currentThread().interrupt()
+        Left(
+          ExecutionError(
+            s"Ollama request interrupted: ${e.getMessage}",
+            operation = "ollama.chat",
+            exitCode = None,
+            cause = Some(e),
+            context = Map.empty
+          )
+        )
+      case e: IOException =>
+        Left(NetworkError("Failed to connect to Ollama", Some(e), config.baseUrl))
+      case scala.util.control.NonFatal(e) =>
+        Left(ServiceError(500, "ollama", s"Unexpected error: ${e.getMessage}"))
     }
   }
 
@@ -91,27 +81,22 @@ class OllamaClient(
     model = config.model,
     operation = validateNotClosed.flatMap { _ =>
       val requestBody = createRequestBody(conversation, options, stream = true)
-      val request = HttpRequest
-        .newBuilder()
-        .uri(URI.create(s"${config.baseUrl}/api/chat"))
-        .header("Content-Type", "application/json")
-        .timeout(Duration.ofMinutes(10))
-        .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
-        .build()
+      val url         = s"${config.baseUrl}/api/chat"
+      val headers     = Map("Content-Type" -> "application/json")
 
       try {
-        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
-        if (response.statusCode() != 200) {
-          val err = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
-          response.body().close()
-          response.statusCode() match {
+        val response = httpClient.postStream(url, headers, requestBody.render(), timeout = 600000)
+        if (response.statusCode != 200) {
+          val err = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)
+          response.body.close()
+          response.statusCode match {
             case 401 => Left(AuthenticationError("ollama", "Unauthorized"))
             case 429 => Left(RateLimitError("ollama"))
             case s   => Left(ServiceError(s, "ollama", s"Ollama error: $err"))
           }
         } else {
           val accumulator = StreamingAccumulator.create()
-          val reader      = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
+          val reader      = new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))
           val processEither = Try {
             try {
               var line: String = null
@@ -147,7 +132,7 @@ class OllamaClient(
               }
             } finally {
               Try(reader.close())
-              Try(response.body().close())
+              Try(response.body.close())
             }
           }.toEither
           processEither.left.foreach(_ => ())
