@@ -66,47 +66,60 @@ object ErrorRecovery {
     clock: () => Long = () => System.currentTimeMillis()
   ) {
 
-    @volatile private var state: CircuitState           = Closed
-    @volatile private var failures                      = 0
-    @volatile private var lastFailureTime: Option[Long] = None
+    // All fields are accessed only inside `synchronized` blocks.
+    private var state: CircuitState           = Closed
+    private var failures: Int                 = 0
+    private var lastFailureTime: Option[Long] = None
 
-    def execute(operation: () => Result[A]): Result[A] =
+    // Atomically decide what to do and, when transitioning Open→HalfOpen, claim
+    // the exclusive probe slot.  Returns the state we committed to running as,
+    // or None if the call should be fast-rejected.
+    private def acquireSlot(): Option[CircuitState] = synchronized {
       state match {
+        case Closed => Some(Closed)
+        // A probe is already in flight; reject to avoid multiple concurrent probes.
+        case HalfOpen => None
+        case Open =>
+          val now = clock()
+          lastFailureTime match {
+            case Some(t) if (now - t) > recoveryTimeout.toMillis =>
+              state = HalfOpen // exactly one thread wins this assignment
+              Some(HalfOpen)
+            case _ => None
+          }
+      }
+    }
+
+    // Atomically record the outcome of an operation that ran under `entryState`.
+    private def recordResult(entryState: CircuitState, result: Result[A]): Unit = synchronized {
+      entryState match {
+        case HalfOpen =>
+          result match {
+            case Right(_) => state = Closed; failures = 0
+            case Left(_)  => state = Open; lastFailureTime = Some(clock())
+          }
         case Closed =>
-          operation() match {
-            case success @ Right(_) =>
-              failures = 0
-              success
-            case failure @ Left(_) =>
+          result match {
+            case Right(_) => failures = 0
+            case Left(_) =>
               failures += 1
               if (failures >= failureThreshold) {
                 state = Open
                 lastFailureTime = Some(clock())
               }
-              failure
           }
+        case Open => // shouldn't occur; leave state unchanged
+      }
+    }
 
-        case Open =>
-          val now = clock()
-          lastFailureTime match {
-            case Some(lastFailure) if (now - lastFailure) > recoveryTimeout.toMillis =>
-              state = HalfOpen
-              execute(operation)
-            case _ =>
-              Result.failure(ServiceError(503, "circuit-breaker", "Circuit breaker is open - service unavailable"))
-          }
-
-        case HalfOpen =>
-          operation() match {
-            case success @ Right(_) =>
-              state = Closed
-              failures = 0
-              success
-            case failure =>
-              state = Open
-              lastFailureTime = Some(clock())
-              failure
-          }
+    def execute(operation: () => Result[A]): Result[A] =
+      acquireSlot() match {
+        case None =>
+          Result.failure(ServiceError(503, "circuit-breaker", "Circuit breaker is open - service unavailable"))
+        case Some(entryState) =>
+          val result = operation()
+          recordResult(entryState, result)
+          result
       }
   }
 

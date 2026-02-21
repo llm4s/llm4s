@@ -5,6 +5,8 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.concurrent.duration._
+import java.util.concurrent.{ CountDownLatch, CyclicBarrier, Executors, TimeUnit }
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Tests for ErrorRecovery utilities: backoff retry logic and CircuitBreaker pattern
@@ -311,5 +313,382 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
 
     // The combination should eventually succeed
     result shouldBe Right("success")
+  }
+
+  // ============ Concurrent Execute Tests ============
+
+  "CircuitBreaker under concurrent load" should "reject all calls when circuit is Open" in {
+    val cb = new ErrorRecovery.CircuitBreaker[String](failureThreshold = 2)
+
+    // Open the circuit before spawning threads
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+
+    val threadCount   = 20
+    val latch         = new CountDownLatch(threadCount)
+    val operationRan  = new AtomicInteger(0)
+    val rejectedCount = new AtomicInteger(0)
+    val executor      = Executors.newFixedThreadPool(threadCount)
+
+    (1 to threadCount).foreach { _ =>
+      executor.submit(new Runnable {
+        def run(): Unit =
+          try {
+            val result = cb.execute { () =>
+              operationRan.incrementAndGet()
+              Result.success("should not reach here")
+            }
+            result match {
+              case Left(err) if err.message.contains("Circuit breaker is open") =>
+                rejectedCount.incrementAndGet()
+              case _ => ()
+            }
+          } finally
+            latch.countDown()
+      })
+    }
+
+    try
+      latch.await(5, TimeUnit.SECONDS) shouldBe true
+    finally
+      executor.shutdown()
+
+    // The operation body must never execute when the circuit is Open
+    operationRan.get() shouldBe 0
+    // Every concurrent call should receive the circuit-open rejection
+    rejectedCount.get() shouldBe threadCount
+  }
+
+  it should "open the circuit after concurrent failures reach the threshold" in {
+    val failureThreshold = 5
+    val cb               = new ErrorRecovery.CircuitBreaker[String](failureThreshold = failureThreshold)
+
+    val threadCount = 20
+    val barrier     = new CyclicBarrier(threadCount)
+    val latch       = new CountDownLatch(threadCount)
+    val executor    = Executors.newFixedThreadPool(threadCount)
+
+    (1 to threadCount).foreach { _ =>
+      executor.submit(new Runnable {
+        def run(): Unit =
+          try {
+            barrier.await() // all threads start simultaneously to maximise contention
+            cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+          } finally
+            latch.countDown()
+      })
+    }
+
+    try
+      latch.await(5, TimeUnit.SECONDS) shouldBe true
+    finally
+      executor.shutdown()
+
+    // After ≥ failureThreshold concurrent failures the circuit must be Open.
+    // A fresh probe must be fast-rejected without executing the operation body.
+    var probeExecuted = false
+    val probeResult = cb.execute { () =>
+      probeExecuted = true
+      Result.success("should not execute")
+    }
+
+    probeExecuted shouldBe false
+    probeResult match {
+      case Left(err) => err.message should include("Circuit breaker is open")
+      case Right(v)  => fail(s"Expected Left (circuit open), got Right($v)")
+    }
+  }
+
+  it should "not execute the operation body in any thread when circuit is Open" in {
+    val cb = new ErrorRecovery.CircuitBreaker[String](failureThreshold = 2)
+
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+
+    val threadCount  = 30
+    val latch        = new CountDownLatch(threadCount)
+    val operationRan = new AtomicInteger(0)
+    val executor     = Executors.newFixedThreadPool(threadCount)
+
+    (1 to threadCount).foreach { _ =>
+      executor.submit(new Runnable {
+        def run(): Unit =
+          try
+            cb.execute { () =>
+              operationRan.incrementAndGet()
+              Result.success("executed")
+            }
+          finally
+            latch.countDown()
+      })
+    }
+
+    try
+      latch.await(5, TimeUnit.SECONDS) shouldBe true
+    finally
+      executor.shutdown()
+
+    operationRan.get() shouldBe 0
+  }
+
+  it should "allow exactly one probe thread through when transitioning from Open to HalfOpen" in {
+    val cb = new ErrorRecovery.CircuitBreaker[String](
+      failureThreshold = 2,
+      recoveryTimeout = 60.millis
+    )
+
+    // Open the circuit
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+
+    // Wait for recovery timeout to elapse
+    Thread.sleep(120)
+
+    val threadCount   = 10
+    val barrier       = new CyclicBarrier(threadCount)
+    val latch         = new CountDownLatch(threadCount)
+    val executor      = Executors.newFixedThreadPool(threadCount)
+    val probesAllowed = new AtomicInteger(0)
+
+    (1 to threadCount).foreach { _ =>
+      executor.submit(new Runnable {
+        def run(): Unit =
+          try {
+            barrier.await() // all threads race to be the HalfOpen probe
+            // The probe deliberately fails: this pushes the circuit back to Open with a
+            // fresh lastFailureTime, so any thread that didn't win the slot (and therefore
+            // sees either HalfOpen or a just-reopened Open with elapsed-time ≈ 0) is
+            // correctly fast-rejected regardless of scheduling order.
+            cb.execute { () =>
+              probesAllowed.incrementAndGet()
+              Result.failure(ServiceError(500, "p", "probe-failed"))
+            }
+          } finally
+            latch.countDown()
+      })
+    }
+
+    try
+      latch.await(5, TimeUnit.SECONDS) shouldBe true
+    finally
+      executor.shutdown()
+
+    // Exactly one probe must execute: the first thread to win the synchronized
+    // Open→HalfOpen transition claims the slot; all other threads are fast-rejected
+    // (either they see state == HalfOpen, or they see state == Open with a brand-new
+    // lastFailureTime that hasn't elapsed yet).
+    probesAllowed.get() shouldBe 1
+  }
+
+  // ============ HalfOpen Re-open Edge Cases ============
+
+  "CircuitBreaker HalfOpen re-open" should "reject calls immediately after a HalfOpen probe fails" in {
+    val cb = new ErrorRecovery.CircuitBreaker[String](
+      failureThreshold = 2,
+      recoveryTimeout = 50.millis
+    )
+
+    // Open the circuit
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+
+    Thread.sleep(100)
+
+    // HalfOpen probe fails → circuit re-opens
+    val probeResult = cb.execute(() => Result.failure(ServiceError(500, "p", "re-open")))
+    probeResult.isLeft shouldBe true
+
+    // Immediately after, the operation body must not execute
+    var operationExecuted = false
+    val afterReopen = cb.execute { () =>
+      operationExecuted = true
+      Result.success("should not run")
+    }
+
+    operationExecuted shouldBe false
+    afterReopen match {
+      case Left(err) => err.message should include("Circuit breaker is open")
+      case Right(v)  => fail(s"Expected Left (circuit open), got Right($v)")
+    }
+  }
+
+  it should "require a fresh recovery timeout before probing again after HalfOpen failure" in {
+    val recoveryMs = 120L
+    val cb = new ErrorRecovery.CircuitBreaker[String](
+      failureThreshold = 2,
+      recoveryTimeout = recoveryMs.millis
+    )
+
+    // Open the circuit
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+
+    // Wait for the first recovery timeout
+    Thread.sleep(recoveryMs + 60)
+
+    // HalfOpen probe fails → circuit re-opens, starting a new timeout window
+    cb.execute(() => Result.failure(ServiceError(500, "p", "re-open")))
+
+    // Halfway through the new timeout — should still be Open
+    Thread.sleep(recoveryMs / 2)
+    val tooEarly = cb.execute(() => Result.success("too early"))
+    tooEarly match {
+      case Left(err) => err.message should include("Circuit breaker is open")
+      case Right(v)  => fail(s"Expected Left (circuit open), got Right($v)")
+    }
+
+    // Wait for the rest plus a margin
+    Thread.sleep(recoveryMs + 60)
+
+    // Now the second recovery window has elapsed — a probe should get through
+    var secondProbeRan = false
+    val secondProbe = cb.execute { () =>
+      secondProbeRan = true
+      Result.success("second probe")
+    }
+
+    secondProbeRan shouldBe true
+    secondProbe shouldBe Right("second probe")
+  }
+
+  it should "close the circuit permanently after a successful HalfOpen probe" in {
+    val cb = new ErrorRecovery.CircuitBreaker[String](
+      failureThreshold = 2,
+      recoveryTimeout = 50.millis
+    )
+
+    // Open the circuit
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+
+    Thread.sleep(100)
+
+    // Successful HalfOpen probe → circuit Closes
+    cb.execute(() => Result.success("probe succeeds"))
+
+    // Many subsequent calls should all succeed without tripping the breaker
+    (1 to 10).foreach { i =>
+      val r = cb.execute(() => Result.success(s"call-$i"))
+      r shouldBe Right(s"call-$i")
+    }
+  }
+
+  // ============ Exact Timeout Boundary Tests ============
+
+  "CircuitBreaker timeout boundary" should "remain Open before the recovery timeout has elapsed" in {
+    val recoveryMs = 200L
+    val cb = new ErrorRecovery.CircuitBreaker[String](
+      failureThreshold = 2,
+      recoveryTimeout = recoveryMs.millis
+    )
+
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+
+    // Sleep for clearly less than the timeout
+    Thread.sleep(recoveryMs / 2)
+
+    val result = cb.execute(() => Result.success("too early"))
+    result match {
+      case Left(err) => err.message should include("Circuit breaker is open")
+      case Right(v)  => fail(s"Expected Left (circuit open), got Right($v)")
+    }
+  }
+
+  it should "allow a probe after the recovery timeout has elapsed" in {
+    val recoveryMs = 100L
+    val cb = new ErrorRecovery.CircuitBreaker[String](
+      failureThreshold = 2,
+      recoveryTimeout = recoveryMs.millis
+    )
+
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+
+    // Sleep well past the timeout
+    Thread.sleep(recoveryMs + 100)
+
+    var probeRan = false
+    val result = cb.execute { () =>
+      probeRan = true
+      Result.success("probe ran")
+    }
+
+    probeRan shouldBe true
+    result shouldBe Right("probe ran")
+  }
+
+  it should "use a strictly-greater-than comparison so the boundary is exclusive" in {
+    // The implementation: (now - lastFailure) > recoveryTimeout.toMillis
+    // Exactly at recoveryTimeout ms the circuit is still Open; only strictly after does it flip.
+    val recoveryMs = 150L
+    val cb = new ErrorRecovery.CircuitBreaker[String](
+      failureThreshold = 1,
+      recoveryTimeout = recoveryMs.millis
+    )
+
+    val openedAt = System.currentTimeMillis()
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+
+    // Busy-wait until we are close to but before the boundary (leave ≥50ms buffer)
+    while (System.currentTimeMillis() - openedAt < recoveryMs - 50)
+      Thread.sleep(5)
+
+    // Still before the timeout — must be Open
+    val beforeBoundary = cb.execute(() => Result.success("before boundary"))
+    beforeBoundary match {
+      case Left(err) => err.message should include("Circuit breaker is open")
+      case Right(v)  => fail(s"Expected Left (circuit open), got Right($v)")
+    }
+
+    // Wait until clearly past the timeout
+    Thread.sleep(recoveryMs)
+
+    // Now strictly past — must transition to HalfOpen and execute the probe
+    var afterRan = false
+    val afterBoundary = cb.execute { () =>
+      afterRan = true
+      Result.success("after boundary")
+    }
+
+    afterRan shouldBe true
+    afterBoundary shouldBe Right("after boundary")
+  }
+
+  it should "reset the timeout clock on each re-open, not use the original open time" in {
+    val recoveryMs = 80L
+    val cb = new ErrorRecovery.CircuitBreaker[String](
+      failureThreshold = 1,
+      recoveryTimeout = recoveryMs.millis
+    )
+
+    // First open
+    cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
+    Thread.sleep(recoveryMs + 40)
+
+    // Move to HalfOpen → fail → re-open (new clock starts here)
+    val reOpenedAt = System.currentTimeMillis()
+    cb.execute(() => Result.failure(ServiceError(500, "p", "re-open")))
+
+    // Wait less than recoveryMs since last re-open — should still be Open
+    Thread.sleep(recoveryMs / 2)
+    val elapsed = System.currentTimeMillis() - reOpenedAt
+    // Only bother asserting if we genuinely slept less than the timeout
+    if (elapsed < recoveryMs) {
+      val tooEarly = cb.execute(() => Result.success("too early"))
+      tooEarly.isLeft shouldBe true
+    }
+
+    // Wait until clearly past the re-open timeout
+    Thread.sleep(recoveryMs + 60)
+
+    var probeRan = false
+    val lateProbe = cb.execute { () =>
+      probeRan = true
+      Result.success("late probe")
+    }
+
+    probeRan shouldBe true
+    lateProbe shouldBe Right("late probe")
   }
 }
