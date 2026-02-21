@@ -89,7 +89,7 @@ final case class InMemoryStore private (
       return Right(Seq.empty)
     }
 
-    val filtered = memories.values.filter(filter.matches).toSeq
+    val filtered         = memories.values.filter(filter.matches).toSeq
     val embeddedMemories = filtered.filter(_.isEmbedded)
 
     if (embeddedMemories.nonEmpty) {
@@ -100,9 +100,9 @@ final case class InMemoryStore private (
           } else if (containsNonFinite(vector) || containsNonFinite(queryEmbedding)) {
             None
           } else {
-            val similarity = org.llm4s.agent.memory.VectorOps.cosineSimilarity(queryEmbedding, vector)
+            val similarity           = org.llm4s.agent.memory.VectorOps.cosineSimilarity(queryEmbedding, vector)
             val normalizedSimilarity = (similarity + 1.0) / 2.0
-            val score = math.max(0.0, math.min(1.0, normalizedSimilarity))
+            val score                = math.max(0.0, math.min(1.0, normalizedSimilarity))
             Some(ScoredMemory(memory, score))
           }
         }
