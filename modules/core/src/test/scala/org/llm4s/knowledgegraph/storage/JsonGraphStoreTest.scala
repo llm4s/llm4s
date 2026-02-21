@@ -31,7 +31,11 @@ class JsonGraphStoreTest extends AnyFunSuite with Matchers {
     Files.delete(tempFile) // Ensure it doesn't exist
 
     val store = new JsonGraphStore(tempFile)
-    store.load() should be(a[Left[_, _]])
+    // JsonGraphStore initializes with empty graph if file doesn't exist
+    val loaded = store.load()
+    loaded should be(Right(Graph(Map.empty, List.empty)))
+    Files.exists(tempFile) shouldBe true // File should be created
+    Files.deleteIfExists(tempFile)
   }
 
   test("JsonGraphStore should handle missing properties field") {

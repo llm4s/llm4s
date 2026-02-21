@@ -1,7 +1,5 @@
 package org.llm4s.toolapi.builtin
 
-import scala.annotation.nowarn
-
 import org.llm4s.toolapi.SafeParameterExtractor
 import org.llm4s.toolapi.builtin.filesystem._
 import org.scalatest.flatspec.AnyFlatSpec
@@ -368,39 +366,4 @@ class FileSystemToolsSpec extends AnyFlatSpec with Matchers {
       )
   }
 
-  // ============ Deprecated API tests ============
-
-  "ReadFileTool.create() (deprecated)" should "return a valid tool" in {
-    @nowarn("cat=deprecation") val tool = ReadFileTool.create()
-    tool.name shouldBe "read_file"
-  }
-
-  "ReadFileTool.tool (deprecated)" should "return a valid tool" in {
-    @nowarn("cat=deprecation") val tool = ReadFileTool.tool
-    tool.name shouldBe "read_file"
-  }
-
-  "ListDirectoryTool.create() (deprecated)" should "return a valid tool" in {
-    @nowarn("cat=deprecation") val tool = ListDirectoryTool.create()
-    tool.name shouldBe "list_directory"
-  }
-
-  "FileInfoTool.create() (deprecated)" should "return a valid tool" in {
-    @nowarn("cat=deprecation") val tool = FileInfoTool.create()
-    tool.name shouldBe "file_info"
-  }
-
-  "WriteFileTool.create() (deprecated)" should "return a valid tool" in {
-    @nowarn("cat=deprecation") val tool = WriteFileTool.create(WriteConfig(allowedPaths = Seq("/tmp")))
-    tool.name shouldBe "write_file"
-  }
-
-  "filesystem.readOnlyTools (deprecated)" should "return 3 read-only tools" in {
-    @nowarn("cat=deprecation") val tools = readOnlyTools
-    tools.size shouldBe 3
-    val names = tools.map(_.name).toSet
-    names should contain("read_file")
-    names should contain("list_directory")
-    names should contain("file_info")
-  }
 }

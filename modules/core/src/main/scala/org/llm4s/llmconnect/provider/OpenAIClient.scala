@@ -158,6 +158,8 @@ class OpenAIClient private (
     // Mark client as closed to prevent further operations.
     // Note: AzureOpenAIClient does not implement AutoCloseable,
     // so we only track the logical closed state for thread-safety.
+    // The Azure SDK's HttpClient is managed externally or by the builder,
+    // and the client itself has no close() method to call.
     if (closed.compareAndSet(false, true)) {
       logger.debug(s"OpenAI client for model $model closed")
     }

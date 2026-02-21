@@ -1,7 +1,5 @@
 package org.llm4s.toolapi.builtin
 
-import scala.annotation.nowarn
-
 import org.llm4s.toolapi.SafeParameterExtractor
 import org.llm4s.toolapi.builtin.http._
 import org.scalatest.flatspec.AnyFlatSpec
@@ -174,21 +172,4 @@ class HttpToolsSpec extends AnyFlatSpec with Matchers {
     config.isDomainAllowed("other.com") shouldBe false
   }
 
-  // ============ Deprecated API tests ============
-
-  "HTTPTool.create() (deprecated)" should "return a valid tool" in {
-    @nowarn("cat=deprecation") val tool = HTTPTool.create()
-    tool.name shouldBe "http_request"
-  }
-
-  "HTTPTool.tool (deprecated)" should "return a valid tool" in {
-    @nowarn("cat=deprecation") val tool = HTTPTool.tool
-    tool.name shouldBe "http_request"
-  }
-
-  "http.allTools (deprecated)" should "contain http_request" in {
-    @nowarn("cat=deprecation") val tools = http.allTools
-    tools.size shouldBe 1
-    tools.head.name shouldBe "http_request"
-  }
 }

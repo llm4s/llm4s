@@ -107,6 +107,22 @@ class Agent(client: LLMClient) {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
+  private def accumulateUsage(
+    state: AgentState,
+    completion: Completion
+  ): AgentState =
+    completion.usage match {
+      case Some(usage) =>
+        state.copy(
+          usageSummary = state.usageSummary.add(
+            completion.model,
+            usage,
+            completion.estimatedCost
+          )
+        )
+      case None => state
+    }
+
   /**
    * Best-effort tracing helper.
    *
@@ -182,30 +198,6 @@ class Agent(client: LLMClient) {
   }
 
   /**
-   * Initializes a new agent state with the given query.
-   *
-   * @param query The user query to process
-   * @param tools The registry of available tools
-   * @param handoffs Available handoffs (default: none)
-   * @param systemPromptAddition Optional additional text to append to the default system prompt
-   * @param completionOptions Optional completion options for LLM calls (temperature, maxTokens, etc.)
-   * @return A new AgentState initialized with the query and tools
-   * @throws IllegalStateException if initialization fails
-   */
-  @deprecated("Use initializeSafe() which returns Result[AgentState] for safe error handling", "0.2.9")
-  def initialize(
-    query: String,
-    tools: ToolRegistry,
-    handoffs: Seq[Handoff] = Seq.empty,
-    systemPromptAddition: Option[String] = None,
-    completionOptions: CompletionOptions = CompletionOptions()
-  ): AgentState =
-    initializeSafe(query, tools, handoffs, systemPromptAddition, completionOptions) match {
-      case Right(state) => state
-      case Left(e)      => throw new IllegalStateException(s"Agent.initialize failed: ${e.formatted}")
-    }
-
-  /**
    * Runs a single step of the agent's reasoning process
    */
   def runStep(state: AgentState, context: AgentContext = AgentContext.Default): Result[AgentState] =
@@ -226,6 +218,8 @@ class Agent(client: LLMClient) {
         // Request next step from LLM using system message injection
         client.complete(state.toApiConversation, options) match {
           case Right(completion) =>
+            val stateWithUsage = accumulateUsage(state, completion)
+
             val logMessage = completion.message.toolCalls match {
               case Seq() => s"[assistant] text: ${completion.message.content}"
               case toolCalls =>
@@ -259,7 +253,7 @@ class Agent(client: LLMClient) {
               }
             }
 
-            val updatedState = state
+            val updatedState = stateWithUsage
               .log(logMessage)
               .addMessage(completion.message)
 
@@ -702,7 +696,11 @@ class Agent(client: LLMClient) {
     }
 
     // Run target agent from the prepared state; propagate context
-    handoff.targetAgent.run(targetState, maxSteps, context)
+    handoff.targetAgent.run(targetState, maxSteps, context).map { targetFinalState =>
+      targetFinalState.copy(
+        usageSummary = sourceState.usageSummary.merge(targetFinalState.usageSummary)
+      )
+    }
   }
 
   /**
@@ -1128,7 +1126,8 @@ class Agent(client: LLMClient) {
    * val result = for {
    *   providerCfg <- /* load provider config */
    *   client      <- org.llm4s.llmconnect.LLMConnect.getClient(providerCfg)
-   *   tools       = new ToolRegistry(Seq(WeatherTool.tool))
+   *   tool        <- WeatherTool.toolSafe
+   *   tools       = new ToolRegistry(Seq(tool))
    *   agent       = new Agent(client)
    *   state1     <- agent.run("What's the weather in Paris?", tools)
    *   state2     <- agent.continueConversation(state1, "And in London?")
@@ -1455,12 +1454,14 @@ class Agent(client: LLMClient) {
 
         streamResult match {
           case Right(completion) =>
+            val stateWithUsage = accumulateUsage(state, completion)
+
             // Emit text complete
             if (completion.content.nonEmpty) {
               onEvent(AgentEvent.textComplete(completion.content))
             }
 
-            val updatedState = state
+            val updatedState = stateWithUsage
               .log(s"[assistant] text: ${completion.content}")
               .addMessage(completion.message)
 

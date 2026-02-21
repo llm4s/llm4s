@@ -3,7 +3,14 @@ import org.llm4s.metrics.MetricsCollector
 import org.llm4s.trace.Tracing
 import java.time.Instant
 import java.nio.file.Path
-import org.llm4s.imagegeneration.provider.{ HttpClient, HuggingFaceClient, OpenAIImageClient, StableDiffusionClient }
+import org.llm4s.imagegeneration.provider.{
+  HttpClient,
+  HuggingFaceClient,
+  OpenAIImageClient,
+  StableDiffusionClient,
+  StabilityAIClient
+}
+
 import scala.annotation.unused
 import scala.util.Try
 import scala.concurrent.{ Future, ExecutionContext }
@@ -191,6 +198,7 @@ object ImageGenerationProvider {
   case object StableDiffusion extends ImageGenerationProvider
   case object DALLE           extends ImageGenerationProvider
   case object HuggingFace     extends ImageGenerationProvider
+  case object StabilityAI     extends ImageGenerationProvider
 }
 
 trait ImageGenerationConfig {
@@ -264,6 +272,25 @@ case class OpenAIConfig(
   def provider: ImageGenerationProvider = ImageGenerationProvider.DALLE
   override def toString: String =
     s"OpenAIConfig(apiKey=***, model=$model, baseUrl=$baseUrl, timeout=$timeout)"
+}
+
+/**
+ * Configuration for Stability AI API.
+ *
+ * @param apiKey Your Stability AI API key. This is required for authentication.
+ * @param model The engine/model ID to use (e.g., "stable-diffusion-xl-1024-v1-0", "stable-diffusion-v1-6").
+ * @param baseUrl Base URL for Stability AI API (default: https://api.stability.ai).
+ * @param timeout Request timeout in milliseconds.
+ */
+case class StabilityAIConfig(
+  apiKey: String,
+  model: String = "stable-diffusion-xl-1024-v1-0",
+  baseUrl: String = "https://api.stability.ai",
+  /** Request timeout in milliseconds */
+  override val timeout: Int = 120000 // 2 minutes for cloud generation
+) extends ImageGenerationConfig {
+  def provider: ImageGenerationProvider = ImageGenerationProvider.StabilityAI
+  override def toString: String = s"StabilityAIConfig(apiKey=***, model=$model, baseUrl=$baseUrl, timeout=$timeout)"
 }
 
 // ===== CLIENT INTERFACE =====
@@ -367,15 +394,10 @@ object ImageGeneration {
 
       case openAIConfig: OpenAIConfig =>
         val httpClient = HttpClient.create()
-        Right(
-          new OpenAIImageClient(
-            config = openAIConfig,
-            httpClient = httpClient,
-            metrics = metrics,
-            tracer = tracer
-          )
-        )
-
+        Right(new OpenAIImageClient(openAIConfig, httpClient))
+      case stabilityAIConfig: StabilityAIConfig =>
+        val httpClient = HttpClient.create()
+        Right(new StabilityAIClient(stabilityAIConfig, httpClient))
       case _ =>
         Left(
           UnsupportedOperation(
@@ -525,6 +547,35 @@ object ImageGeneration {
     model: String = "dall-e-2"
   ): Either[ImageGenerationError, GeneratedImage] = {
     val config = OpenAIConfig(apiKey = apiKey, model = model)
+    generateImage(prompt, config, options)
+  }
+
+  /**
+   * Get a Stability AI client with the required API key.
+   *
+   * This is a convenience method for creating a client that connects to the
+   * Stability AI API for image generation.
+   *
+   * @param apiKey Your Stability AI API key (required).
+   * @param model The specific engine/model to use for generation. Defaults to stable-diffusion-xl-1024-v1-0.
+   * @return Either an error or an `ImageGenerationClient` instance configured for Stability AI.
+   */
+  def stabilityAIClient(
+    apiKey: String,
+    model: String = "stable-diffusion-xl-1024-v1-0"
+  ): Either[ImageGenerationError, ImageGenerationClient] = {
+    val config = StabilityAIConfig(apiKey = apiKey, model = model)
+    client(config)
+  }
+
+  /** Convenience method for quick Stability AI image generation */
+  def generateWithStabilityAI(
+    prompt: String,
+    apiKey: String,
+    options: ImageGenerationOptions = ImageGenerationOptions(),
+    model: String = "stable-diffusion-xl-1024-v1-0"
+  ): Either[ImageGenerationError, GeneratedImage] = {
+    val config = StabilityAIConfig(apiKey = apiKey, model = model)
     generateImage(prompt, config, options)
   }
 

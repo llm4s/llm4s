@@ -53,12 +53,4 @@ package object http {
   val allToolsSafe: org.llm4s.types.Result[Seq[org.llm4s.toolapi.ToolFunction[_, _]]] =
     HTTPTool.toolSafe.map(Seq(_))
 
-  /**
-   * All HTTP tools with default configuration.
-   *
-   * @throws IllegalStateException if any tool initialization fails
-   */
-  @deprecated("Use allToolsSafe which returns Result[Seq[ToolFunction]] for safe error handling", "0.2.9")
-  lazy val allTools: Seq[org.llm4s.toolapi.ToolFunction[_, _]] =
-    Seq(HTTPTool.tool)
 }

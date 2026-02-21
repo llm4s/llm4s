@@ -15,6 +15,7 @@ import upickle.default.{ ReadWriter => RW, readwriter }
  * @param systemMessage The system message (injected at API call time, not stored in conversation)
  * @param completionOptions LLM completion options (temperature, maxTokens, etc.)
  * @param availableHandoffs Available handoffs for this agent (used for detecting handoff tool calls)
+ * @param usageSummary Usage summary for this agent run
  */
 case class AgentState(
   conversation: Conversation,
@@ -24,7 +25,8 @@ case class AgentState(
   logs: Seq[String] = Seq.empty,
   systemMessage: Option[SystemMessage] = None,
   completionOptions: CompletionOptions = CompletionOptions(),
-  availableHandoffs: Seq[Handoff] = Seq.empty
+  availableHandoffs: Seq[Handoff] = Seq.empty,
+  usageSummary: UsageSummary = UsageSummary()
 ) {
 
   /**
@@ -286,7 +288,8 @@ object AgentState {
       "status"            -> writeJs(state.status),
       "logs"              -> ujson.Arr(state.logs.map(ujson.Str.apply): _*),
       "systemMessage"     -> state.systemMessage.map(msg => ujson.Str(msg.content)).getOrElse(ujson.Null),
-      "completionOptions" -> serializeCompletionOptions(state.completionOptions)
+      "completionOptions" -> serializeCompletionOptions(state.completionOptions),
+      "usageSummary"      -> writeJs(state.usageSummary)
       // Note: tools are NOT serialized
     )
 
@@ -356,7 +359,11 @@ object AgentState {
           case ujson.Str(content) => Some(SystemMessage(content))
           case _                  => None
         },
-        completionOptions = deserializeCompletionOptions(json("completionOptions"))
+        completionOptions = deserializeCompletionOptions(json("completionOptions")),
+        usageSummary = json.obj.get("usageSummary") match {
+          case Some(v) => read[UsageSummary](v)
+          case None    => UsageSummary()
+        }
       )
     }.toResult
 

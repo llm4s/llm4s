@@ -81,7 +81,7 @@ class SchemaCrossTest extends AnyFlatSpec with Matchers {
   }
 
   "Builtin tool toOpenAITool" should "produce function object with name, description, parameters" in {
-    val reg  = new ToolRegistry(org.llm4s.toolapi.builtin.BuiltinTools.core)
+    val reg  = new ToolRegistry(org.llm4s.toolapi.builtin.BuiltinTools.coreSafe.getOrElse(fail("coreSafe failed")))
     val arr  = reg.getOpenAITools(strict = true)
     val first = arr.arr.head
     first.obj("type") shouldBe ujson.Str("function")
@@ -94,7 +94,7 @@ class SchemaCrossTest extends AnyFlatSpec with Matchers {
   }
 
   it should "preserve tool name in serialized schema" in {
-    val reg = new ToolRegistry(org.llm4s.toolapi.builtin.BuiltinTools.core)
+    val reg = new ToolRegistry(org.llm4s.toolapi.builtin.BuiltinTools.coreSafe.getOrElse(fail("coreSafe failed")))
     val arr = reg.getOpenAITools(strict = true)
     val names = arr.arr.map(_.obj("function").obj("name").str)
     names should contain("get_current_datetime")

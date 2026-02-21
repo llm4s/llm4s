@@ -89,30 +89,6 @@ object FileInfoTool {
    */
   val toolSafe: Result[ToolFunction[Map[String, Any], FileInfoResult]] = createSafe()
 
-  /**
-   * Create a file info tool with the given configuration.
-   *
-   * @throws IllegalStateException if tool creation fails
-   */
-  @deprecated("Use createSafe() which returns Result[ToolFunction] for safe error handling", "0.2.9")
-  def create(config: FileConfig = FileConfig()): ToolFunction[Map[String, Any], FileInfoResult] =
-    createSafe(config) match {
-      case Right(t) => t
-      case Left(e)  => throw new IllegalStateException(s"FileInfoTool.create failed: ${e.formatted}")
-    }
-
-  /**
-   * Default file info tool with standard configuration.
-   *
-   * @throws IllegalStateException if tool initialization fails
-   */
-  @deprecated("Use toolSafe which returns Result[ToolFunction] for safe error handling", "0.2.9")
-  lazy val tool: ToolFunction[Map[String, Any], FileInfoResult] =
-    toolSafe match {
-      case Right(t) => t
-      case Left(e)  => throw new IllegalStateException(s"FileInfoTool.tool lazy initialization failed: ${e.formatted}")
-    }
-
   private def getFileInfo(
     pathStr: String,
     config: FileConfig

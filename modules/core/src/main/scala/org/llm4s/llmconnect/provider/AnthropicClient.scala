@@ -472,8 +472,7 @@ curl https://api.anthropic.com/v1/messages \
 
   override def close(): Unit =
     if (closed.compareAndSet(false, true)) {
-      // The Anthropic OkHttpClient does not expose a close() method.
-      // We track logical closed state for thread-safety.
+      client.close()
     }
 
   private def validateNotClosed: Result[Unit] =

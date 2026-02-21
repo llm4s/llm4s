@@ -1,24 +1,32 @@
 package org.llm4s.knowledgegraph.extraction
 
 import org.llm4s.knowledgegraph.Graph
+import org.llm4s.knowledgegraph.storage.{ GraphStore, InMemoryGraphStore }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
 import org.llm4s.types.Result
 
 /**
- * Generates a Knowledge Graph from unstructured text using an LLM.
+ * Generates a Knowledge Graph from unstructured text using an LLM and writes it to a GraphStore.
  *
  * @param llmClient The LLM client to use for extraction
+ * @param graphStore The graph store to write extracted entities and relationships to
  */
-class KnowledgeGraphGenerator(llmClient: LLMClient) {
+class KnowledgeGraphGenerator(llmClient: LLMClient, graphStore: GraphStore) {
 
   /**
-   * Extracts entities and relationships from the given text.
+   * Backward-compatible constructor that uses in-memory graph storage.
+   */
+  def this(llmClient: LLMClient) =
+    this(llmClient, new InMemoryGraphStore())
+
+  /**
+   * Extracts entities and relationships from the given text and writes them to the configured GraphStore.
    *
    * @param text The text to analyze
    * @param entityTypes Optional list of entity types to focus on (e.g., "Person", "Organization")
    * @param relationTypes Optional list of relationship types to look for
-   * @return A Graph containing the extracted nodes and edges
+   * @return Right(extractedGraph) on success, Left(ProcessingError) on failure
    */
   def extract(
     text: String,
@@ -35,7 +43,8 @@ class KnowledgeGraphGenerator(llmClient: LLMClient) {
 
     llmClient
       .complete(conversation, CompletionOptions(temperature = 0.0))
-      .flatMap(completion => GraphJsonParser.parse(completion.content, "knowledge_graph_extraction"))
+      .flatMap(completion => parseGraph(completion.content))
+      .flatMap(graph => writeGraphToStore(graph).map(_ => graph))
   }
 
   private def buildPrompt(text: String, entityTypes: List[String], relationTypes: List[String]): String = {
@@ -71,4 +80,21 @@ class KnowledgeGraphGenerator(llmClient: LLMClient) {
        |""".stripMargin
   }
 
+  private def parseGraph(jsonStr: String): Result[Graph] =
+    // Delegate parsing (and extraction validation) to the central parser which
+    // guarantees it will return a ProcessingError instead of throwing.
+    GraphJsonParser.parse(jsonStr, "knowledge_graph_extraction")
+
+  private def writeGraphToStore(graph: Graph): Result[Unit] = {
+    val nodeResult = graph.nodes.values.toSeq
+      .foldLeft(Right(()): Result[Unit])((acc, node) => acc.flatMap(_ => graphStore.upsertNode(node)))
+
+    val edgeResult = graph.edges
+      .foldLeft(Right(()): Result[Unit])((acc, edge) => acc.flatMap(_ => graphStore.upsertEdge(edge)))
+
+    for {
+      _ <- nodeResult
+      _ <- edgeResult
+    } yield ()
+  }
 }

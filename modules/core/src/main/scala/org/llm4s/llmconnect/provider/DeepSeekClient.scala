@@ -322,8 +322,10 @@ class DeepSeekClient(
 
   override def close(): Unit =
     if (closed.compareAndSet(false, true)) {
-      // Java HttpClient does not have explicit close()
-      // We track logical closed state for thread-safety
+      (httpClient: Any) match {
+        case c: AutoCloseable => c.close()
+        case _                => ()
+      }
     }
 
   private def validateNotClosed: Result[Unit] =

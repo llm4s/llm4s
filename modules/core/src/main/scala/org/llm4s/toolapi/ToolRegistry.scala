@@ -1,6 +1,8 @@
 package org.llm4s.toolapi
 
 import org.llm4s.core.safety.Safety
+import org.llm4s.error.ValidationError
+import org.llm4s.types.Result
 
 import scala.concurrent.{ ExecutionContext, Future, blocking }
 import java.util.concurrent.atomic.AtomicInteger
@@ -148,13 +150,24 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
     ujson.Arr.from(tools.map(_.toOpenAITool(strict)))
 
   /**
+   * Generate a specific format of tool definitions for a particular LLM provider.
+   *
+   * @return Right(tools) for supported providers, Left(ValidationError) for unsupported ones
+   */
+  def getToolDefinitionsSafe(provider: String): Result[ujson.Value] = provider.toLowerCase match {
+    case "openai"    => Right(getOpenAITools())
+    case "anthropic" => Right(getOpenAITools())
+    case "gemini"    => Right(getOpenAITools())
+    case _           => Left(ValidationError("provider", s"Unsupported LLM provider: $provider"))
+  }
+
+  /**
    * Generate a specific format of tool definitions for a particular LLM provider
    */
-  def getToolDefinitions(provider: String): ujson.Value = provider.toLowerCase match {
-    case "openai"    => getOpenAITools()
-    case "anthropic" => getOpenAITools()
-    case "gemini"    => getOpenAITools()
-    case _           => throw new IllegalArgumentException(s"Unsupported LLM provider: $provider")
+  @deprecated("Use getToolDefinitionsSafe() which returns Result[ujson.Value] for safe error handling", "0.2.9")
+  def getToolDefinitions(provider: String): ujson.Value = getToolDefinitionsSafe(provider) match {
+    case Right(tools) => tools
+    case Left(e)      => throw new IllegalArgumentException(e.formatted)
   }
 
   /**

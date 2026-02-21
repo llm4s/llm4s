@@ -84,19 +84,6 @@ object ShellTool {
       } yield result
     }.buildSafe()
 
-  /**
-   * Create a shell tool with the given configuration.
-   *
-   * @param config Shell configuration with required allowedCommands
-   * @throws IllegalStateException if tool creation fails
-   */
-  @deprecated("Use createSafe() which returns Result[ToolFunction] for safe error handling", "0.2.9")
-  def create(config: ShellConfig): ToolFunction[Map[String, Any], ShellResult] =
-    createSafe(config) match {
-      case Right(t) => t
-      case Left(e)  => throw new IllegalStateException(s"ShellTool.create failed: ${e.formatted}")
-    }
-
   private def executeCommand(
     command: String,
     config: ShellConfig
