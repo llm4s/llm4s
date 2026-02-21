@@ -178,17 +178,19 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "transition from Open to HalfOpen after recovery timeout" in {
+    var fakeTime = 0L
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
-      recoveryTimeout = 50.millis
+      recoveryTimeout = 50.millis,
+      clock = () => fakeTime
     )
 
     // Open the circuit
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
 
-    // Wait for recovery timeout
-    Thread.sleep(100)
+    // Advance the clock past the recovery timeout — no Thread.sleep needed
+    fakeTime += 100
 
     // Next call should be allowed (HalfOpen state)
     val result = cb.execute(() => Result.success("recovered"))
@@ -196,17 +198,19 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "close circuit on success in HalfOpen state" in {
+    var fakeTime = 0L
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
-      recoveryTimeout = 50.millis
+      recoveryTimeout = 50.millis,
+      clock = () => fakeTime
     )
 
     // Open the circuit
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
 
-    // Wait for recovery timeout
-    Thread.sleep(100)
+    // Advance the clock past the recovery timeout — no Thread.sleep needed
+    fakeTime += 100
 
     // Successful call in HalfOpen closes circuit
     cb.execute(() => Result.success("success"))
@@ -219,17 +223,19 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "reopen circuit on failure in HalfOpen state" in {
+    var fakeTime = 0L
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
-      recoveryTimeout = 50.millis
+      recoveryTimeout = 50.millis,
+      clock = () => fakeTime
     )
 
     // Open the circuit
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
 
-    // Wait for recovery timeout
-    Thread.sleep(100)
+    // Advance the clock past the recovery timeout — no Thread.sleep needed
+    fakeTime += 100
 
     // Failure in HalfOpen reopens circuit
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))

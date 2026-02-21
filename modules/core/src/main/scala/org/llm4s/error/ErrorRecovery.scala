@@ -62,7 +62,8 @@ object ErrorRecovery {
   /** Circuit breaker pattern for service resilience */
   class CircuitBreaker[A](
     failureThreshold: Int = 5,
-    recoveryTimeout: Duration = 30.seconds
+    recoveryTimeout: Duration = 30.seconds,
+    clock: () => Long = () => System.currentTimeMillis()
   ) {
 
     @volatile private var state: CircuitState           = Closed
@@ -80,13 +81,13 @@ object ErrorRecovery {
               failures += 1
               if (failures >= failureThreshold) {
                 state = Open
-                lastFailureTime = Some(System.currentTimeMillis())
+                lastFailureTime = Some(clock())
               }
               failure
           }
 
         case Open =>
-          val now = System.currentTimeMillis()
+          val now = clock()
           lastFailureTime match {
             case Some(lastFailure) if (now - lastFailure) > recoveryTimeout.toMillis =>
               state = HalfOpen
@@ -103,7 +104,7 @@ object ErrorRecovery {
               success
             case failure =>
               state = Open
-              lastFailureTime = Some(System.currentTimeMillis())
+              lastFailureTime = Some(clock())
               failure
           }
       }
