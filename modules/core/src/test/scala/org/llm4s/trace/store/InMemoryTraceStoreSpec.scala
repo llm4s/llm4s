@@ -229,14 +229,14 @@ class InMemoryTraceStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAft
   }
 
   it should "support concurrent span writes" in {
-    val ec      = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(10))
+    implicit val ec: scala.concurrent.ExecutionContextExecutorService =
+      ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(10))
     val traceId = TraceId("concurrent-trace")
-    val futures = (1 to 100).map(i => Future(store.saveSpan(makeSpan(s"span-$i", traceId)))(ec))
-    Await.result(Future.sequence(futures)(implicitly, ec), 10.seconds)
+    val futures = (1 to 100).map(i => Future(store.saveSpan(makeSpan(s"span-$i", traceId))))
+    Await.result(Future.sequence(futures), 10.seconds)
     ec.shutdown()
 
-    val spans = store.getSpans(traceId)
-    spans should have size 100
+    store.getSpans(traceId) should have size 100
   }
 
   private def makeTrace(
