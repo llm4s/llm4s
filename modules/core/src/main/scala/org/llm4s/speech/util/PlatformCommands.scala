@@ -50,8 +50,10 @@ object PlatformCommands {
 
   /**
    * Get a command that writes a minimal valid WAV file to the path given by the --out argument.
-   * Requires Python3 to be available (standard on macOS and most Linux distributions).
-   * Useful for smoke-testing TTS adapters that write output to a file path.
+   * Requires Python3 to be available.
+   *
+   * NOTE: Python3 is not guaranteed on Windows; this mock is intended for macOS/Linux CI only.
+   * If running on Windows with Python3 available, this will work; otherwise skip tests using it.
    */
   def mockWavWriter: Seq[String] = {
     val script =
