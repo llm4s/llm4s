@@ -342,11 +342,10 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       })
     }
 
-    try {
+    try
       latch.await(5, TimeUnit.SECONDS) shouldBe true
-    } finally {
+    finally
       executor.shutdown()
-    }
 
     // The operation body must never execute when the circuit is Open
     operationRan.get() shouldBe 0
@@ -374,11 +373,10 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       })
     }
 
-    try {
+    try
       latch.await(5, TimeUnit.SECONDS) shouldBe true
-    } finally {
+    finally
       executor.shutdown()
-    }
 
     // After ≥ failureThreshold concurrent failures the circuit must be Open.
     // A fresh probe must be fast-rejected without executing the operation body.
@@ -419,11 +417,10 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       })
     }
 
-    try {
+    try
       latch.await(5, TimeUnit.SECONDS) shouldBe true
-    } finally {
+    finally
       executor.shutdown()
-    }
 
     operationRan.get() shouldBe 0
   }
@@ -465,11 +462,10 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       })
     }
 
-    try {
+    try
       latch.await(5, TimeUnit.SECONDS) shouldBe true
-    } finally {
+    finally
       executor.shutdown()
-    }
 
     // At least one probe should have executed (the first thread to win the HalfOpen race).
     // Due to the non-atomic state transition in the implementation more than one may slip
