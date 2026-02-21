@@ -49,6 +49,25 @@ object PlatformCommands {
     if (isWindows) Seq("cmd", "/c", "type") else Seq("cat")
 
   /**
+   * Get a command that writes a minimal valid WAV file to the path given by the --out argument.
+   * Requires Python3 to be available (standard on macOS and most Linux distributions).
+   * Useful for smoke-testing TTS adapters that write output to a file path.
+   */
+  def mockWavWriter: Seq[String] = {
+    val script =
+      """import sys, struct
+        |args = sys.argv[1:]
+        |path = next((args[i+1] for i, a in enumerate(args) if a == '--out'), None)
+        |if path:
+        |    with open(path, 'wb') as f:
+        |        f.write(b'RIFF' + struct.pack('<I', 36) + b'WAVEfmt ' +
+        |                struct.pack('<IHHIIHH', 16, 1, 1, 22050, 44100, 2, 16) +
+        |                b'data' + struct.pack('<I', 0))
+        """.stripMargin.trim
+    Seq("python3", "-c", script)
+  }
+
+  /**
    * Check if a command is available on the current platform.
    */
   def isCommandAvailable(command: String): Boolean = {
