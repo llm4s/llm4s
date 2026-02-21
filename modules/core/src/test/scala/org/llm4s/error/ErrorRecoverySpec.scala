@@ -342,8 +342,11 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       })
     }
 
-    latch.await(5, TimeUnit.SECONDS)
-    executor.shutdown()
+    try {
+      latch.await(5, TimeUnit.SECONDS) shouldBe true
+    } finally {
+      executor.shutdown()
+    }
 
     // The operation body must never execute when the circuit is Open
     operationRan.get() shouldBe 0
@@ -371,8 +374,11 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       })
     }
 
-    latch.await(5, TimeUnit.SECONDS)
-    executor.shutdown()
+    try {
+      latch.await(5, TimeUnit.SECONDS) shouldBe true
+    } finally {
+      executor.shutdown()
+    }
 
     // After ≥ failureThreshold concurrent failures the circuit must be Open.
     // A fresh probe must be fast-rejected without executing the operation body.
@@ -383,8 +389,10 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     }
 
     probeExecuted shouldBe false
-    probeResult.isLeft shouldBe true
-    probeResult.left.toOption.get.message should include("Circuit breaker is open")
+    probeResult match {
+      case Left(err) => err.message should include("Circuit breaker is open")
+      case Right(v)  => fail(s"Expected Left (circuit open), got Right($v)")
+    }
   }
 
   it should "not execute the operation body in any thread when circuit is Open" in {
@@ -411,13 +419,16 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       })
     }
 
-    latch.await(5, TimeUnit.SECONDS)
-    executor.shutdown()
+    try {
+      latch.await(5, TimeUnit.SECONDS) shouldBe true
+    } finally {
+      executor.shutdown()
+    }
 
     operationRan.get() shouldBe 0
   }
 
-  it should "allow exactly one probe thread through when transitioning from Open to HalfOpen" in {
+  it should "allow at least one probe thread through when transitioning from Open to HalfOpen" in {
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
       recoveryTimeout = 60.millis
@@ -454,10 +465,13 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       })
     }
 
-    latch.await(5, TimeUnit.SECONDS)
-    executor.shutdown()
+    try {
+      latch.await(5, TimeUnit.SECONDS) shouldBe true
+    } finally {
+      executor.shutdown()
+    }
 
-    // At most one probe should have executed (the first thread to win the HalfOpen race).
+    // At least one probe should have executed (the first thread to win the HalfOpen race).
     // Due to the non-atomic state transition in the implementation more than one may slip
     // through — the key invariant is at least one probe was allowed and the circuit
     // subsequently moves toward Closed.
@@ -490,8 +504,10 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     }
 
     operationExecuted shouldBe false
-    afterReopen.isLeft shouldBe true
-    afterReopen.left.toOption.get.message should include("Circuit breaker is open")
+    afterReopen match {
+      case Left(err) => err.message should include("Circuit breaker is open")
+      case Right(v)  => fail(s"Expected Left (circuit open), got Right($v)")
+    }
   }
 
   it should "require a fresh recovery timeout before probing again after HalfOpen failure" in {
@@ -514,8 +530,10 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     // Halfway through the new timeout — should still be Open
     Thread.sleep(recoveryMs / 2)
     val tooEarly = cb.execute(() => Result.success("too early"))
-    tooEarly.isLeft shouldBe true
-    tooEarly.left.toOption.get.message should include("Circuit breaker is open")
+    tooEarly match {
+      case Left(err) => err.message should include("Circuit breaker is open")
+      case Right(v)  => fail(s"Expected Left (circuit open), got Right($v)")
+    }
 
     // Wait for the rest plus a margin
     Thread.sleep(recoveryMs + 60)
@@ -569,8 +587,10 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     Thread.sleep(recoveryMs / 2)
 
     val result = cb.execute(() => Result.success("too early"))
-    result.isLeft shouldBe true
-    result.left.toOption.get.message should include("Circuit breaker is open")
+    result match {
+      case Left(err) => err.message should include("Circuit breaker is open")
+      case Right(v)  => fail(s"Expected Left (circuit open), got Right($v)")
+    }
   }
 
   it should "allow a probe after the recovery timeout has elapsed" in {
@@ -614,8 +634,10 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
 
     // Still before the timeout — must be Open
     val beforeBoundary = cb.execute(() => Result.success("before boundary"))
-    beforeBoundary.isLeft shouldBe true
-    beforeBoundary.left.toOption.get.message should include("Circuit breaker is open")
+    beforeBoundary match {
+      case Left(err) => err.message should include("Circuit breaker is open")
+      case Right(v)  => fail(s"Expected Left (circuit open), got Right($v)")
+    }
 
     // Wait until clearly past the timeout
     Thread.sleep(recoveryMs)
