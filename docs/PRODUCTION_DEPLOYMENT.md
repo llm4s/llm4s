@@ -160,7 +160,7 @@ def callWithBackoff(
   def attempt(remaining: Int, delay: Long): Result[Completion] = {
     client.complete(conversation) match {
       case Left(RateLimitError(_, retryAfter, _)) if remaining > 0 =>
-        val waitMs = retryAfter.map(_ * 1000L).getOrElse(delay)
+        val waitMs = retryAfter.fold(delay)(_ * 1000L)
         Thread.sleep(waitMs)
         attempt(remaining - 1, delay * 2)
       case other => other
@@ -316,14 +316,16 @@ val clientLayer: ZLayer[Scope, LLMError, LLMClient] =
 For workspace-based execution (containerized command execution), the `ContainerisedWorkspace` manages its own lifecycle:
 
 ```scala
+import scala.util.Using
 import org.llm4s.workspace.ContainerisedWorkspace
 
-val workspace = new ContainerisedWorkspace(config)
-try {
+// ContainerisedWorkspace does not extend AutoCloseable — define a Releasable
+implicit val workspaceReleasable: Using.Releasable[ContainerisedWorkspace] =
+  (ws: ContainerisedWorkspace) => ws.stopContainer()
+
+Using.resource(new ContainerisedWorkspace("/app/workspace", "llm4s-runner:latest", 8090)) { workspace =>
   // Execute a shell command inside the isolated container
   workspace.executeCommand("python main.py")
-} finally {
-  workspace.stopContainer()  // Stops container and cleans up
 }
 ```
 
