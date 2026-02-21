@@ -7,6 +7,8 @@ nav_order: 3
 
 # Production Monitoring
 
+> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](../../../modules/samples/).
+
 Comprehensive strategies for observing, debugging, and optimizing LLM applications in production. This guide covers metrics collection, alerting, cost tracking, and debugging techniques.
 
 ## Overview
@@ -24,7 +26,7 @@ Production monitoring for LLM applications requires tracking multiple dimensions
 
 ### Performance Metrics
 
-```scala
+```text
 object PerformanceMetrics {
   
   case class PerformanceSnapshot(
@@ -75,7 +77,7 @@ object PerformanceMetrics {
 
 ### Quality Metrics
 
-```scala
+```text
 object QualityMetrics {
   
   case class QualityScore(
@@ -111,7 +113,7 @@ object QualityMetrics {
 
 ### Cost Metrics
 
-```scala
+```text
 object CostMetrics {
   
   case class CostSnapshot(
@@ -160,7 +162,7 @@ object CostMetrics {
 
 ### Alert Rules
 
-```scala
+```text
 object AlertRules {
   
   sealed trait AlertSeverity
@@ -241,7 +243,7 @@ object AlertRules {
 
 ### Request Tracing
 
-```scala
+```text
 object RequestTracing {
   
   case class TraceSpan(
@@ -318,7 +320,7 @@ object RequestTracing {
 
 ### Debug Logging
 
-```scala
+```text
 object DebugLogging {
   
   import org.slf4j.LoggerFactory
@@ -358,7 +360,7 @@ object DebugLogging {
 
 ### Per-Feature Cost Breakdown
 
-```scala
+```text
 object FeatureCostTracking {
   
   case class FeatureCost(

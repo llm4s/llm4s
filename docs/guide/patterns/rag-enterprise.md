@@ -7,6 +7,8 @@ nav_order: 2
 
 # RAG for Enterprise
 
+> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](../../../modules/samples/).
+
 Learn production-ready strategies for building Retrieval-Augmented Generation (RAG) systems at scale. This guide covers document ingestion, hybrid search, cost optimization, and quality assurance.
 
 ## Overview
@@ -27,7 +29,7 @@ Enterprise RAG requires careful attention to several challenges:
 
 #### 1. Fixed-Size Chunks with Overlap
 
-```scala
+```text
 object ChunkingStrategies {
   
   case class Chunk(
@@ -76,7 +78,7 @@ object ChunkingStrategies {
 
 #### 2. Semantic Chunking
 
-```scala
+```text
 object SemanticChunking {
   
   case class SemanticChunk(
@@ -131,7 +133,7 @@ object SemanticChunking {
 
 #### 3. Document-Aware Chunking
 
-```scala
+```text
 object DocumentAwareChunking {
   
   sealed trait DocumentType
@@ -166,7 +168,7 @@ object DocumentAwareChunking {
 
 ### Batch Processing Large Document Sets
 
-```scala
+```text
 object BatchIngestion {
   
   import scala.concurrent.{Future, ExecutionContext}
@@ -250,7 +252,7 @@ object BatchIngestion {
 
 ### Vector + Keyword Search
 
-```scala
+```text
 object HybridSearch {
   
   case class SearchResult(
@@ -325,7 +327,7 @@ object HybridSearch {
 
 ### Multi-Stage Retrieval
 
-```scala
+```text
 object MultiStageRetrieval {
   
   def multiStageRetrieval(
@@ -366,7 +368,7 @@ object MultiStageRetrieval {
 
 ### Embedding Caching
 
-```scala
+```text
 object EmbeddingCache {
   
   import scala.collection.mutable
@@ -408,7 +410,7 @@ object EmbeddingCache {
 
 ### Token Cost Tracking
 
-```scala
+```text
 object CostTracking {
   
   case class CostBreakdown(
@@ -472,7 +474,7 @@ object CostTracking {
 
 ### Query Optimization
 
-```scala
+```text
 object QueryOptimization {
   
   def optimizeQuery(
@@ -523,7 +525,7 @@ object QueryOptimization {
 
 ### Grounding System
 
-```scala
+```text
 object Grounding {
   
   case class GroundingScore(
@@ -576,7 +578,7 @@ object Grounding {
 
 ### Relevance Metrics
 
-```scala
+```text
 object RelevanceMetrics {
   
   case class RelevanceMetrics(
@@ -654,7 +656,7 @@ object RelevanceMetrics {
 
 ## Production RAG Pipeline
 
-```scala
+```text
 object ProductionRAG {
   
   case class RAGConfig(

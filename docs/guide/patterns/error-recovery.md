@@ -7,13 +7,15 @@ nav_order: 5
 
 # Error Recovery Patterns
 
+> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](../../../modules/samples/).
+
 Resilience strategies for handling failures, recovering from errors, and gracefully degrading functionality. This guide covers retries, circuit breakers, fallbacks, and failure scenarios.
 
 ## Retry Strategies
 
 ### Exponential Backoff with Jitter
 
-```scala
+```text
 object RetryStrategies {
   
   import scala.concurrent.{Future, ExecutionContext}
@@ -66,7 +68,7 @@ object RetryStrategies {
 
 ### Retry with Timeout
 
-```scala
+```text
 object TimeoutRetry {
   
   def retryWithTimeout[T](
@@ -113,7 +115,7 @@ object TimeoutRetry {
 
 ### Implementation
 
-```scala
+```text
 object CircuitBreaker {
   
   import scala.concurrent.duration._
@@ -206,7 +208,7 @@ object CircuitBreaker {
 
 ### Usage with Agents
 
-```scala
+```text
 object CircuitBreakerAgent {
   
   def safeAgentCall(
@@ -227,7 +229,7 @@ object CircuitBreakerAgent {
 
 ### Model Fallback
 
-```scala
+```text
 object ModelFallback {
   
   case class ModelFallbackConfig(
@@ -283,7 +285,7 @@ object ModelFallback {
 
 ### Cached Fallback
 
-```scala
+```text
 object CachedFallback {
   
   def runWithCacheFallback(
@@ -321,7 +323,7 @@ object CachedFallback {
 
 ### Feature Degradation
 
-```scala
+```text
 object GracefulDegradation {
   
   case class RAGResult(
@@ -396,7 +398,7 @@ object GracefulDegradation {
 
 ### Timeout Handling
 
-```scala
+```text
 object TimeoutHandling {
   
   def handleTimeout[T](
@@ -414,7 +416,7 @@ object TimeoutHandling {
 
 ### Rate Limit Handling
 
-```scala
+```text
 object RateLimitHandling {
   
   def handleRateLimit(
@@ -430,7 +432,7 @@ object RateLimitHandling {
 
 ### Provider Outage Handling
 
-```scala
+```text
 object OutageHandling {
   
   def handleProviderOutage(

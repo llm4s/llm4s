@@ -7,23 +7,27 @@ nav_order: 6
 
 # Security Best Practices
 
+> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](../../../modules/samples/).
+
 Comprehensive security patterns for protecting sensitive data, managing credentials, and maintaining audit trails in production LLM systems.
 
 ## API Key Management
 
-### Environment Variables
+> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](../../../modules/samples/).
 
-```scala
+### Configuration-Based Access
+
+```text
 object SecureKeyManagement {
   
-  import sys.env
+  import org.llm4s.config.Llm4sConfig
   
-  def loadApiKey(keyName: String): Result[String] = {
-    env.get(keyName) match {
+  def loadApiKey(provider: String): Result[String] = {
+    Llm4sConfig.provider(provider).apiKey match {
       case Some(key) if key.nonEmpty => Result.success(key)
       case _ => Result.failure(
-        s"API key '$keyName' not found in environment variables. " +
-        s"Set it with: export $keyName='your-key-here'"
+        s"API key for provider '$provider' not configured. " +
+        s"Set it in your configuration file or environment."
       )
     }
   }
@@ -38,7 +42,7 @@ object SecureKeyManagement {
 
 ### Key Vault Integration
 
-```scala
+```text
 object KeyVault {
   
   import com.azure.security.keyvault.secrets._
@@ -69,7 +73,7 @@ object KeyVault {
 
 ### Key Rotation
 
-```scala
+```text
 object KeyRotation {
   
   case class KeyMetadata(
@@ -130,7 +134,7 @@ object KeyRotation {
 
 ### Query Validation
 
-```scala
+```text
 object InputValidation {
   
   case class ValidationRule(
@@ -198,7 +202,7 @@ object InputValidation {
 
 ### Prompt Injection Protection
 
-```scala
+```text
 object PromptInjectionProtection {
   
   def detectPromptInjection(userInput: String): Boolean = {
@@ -250,7 +254,7 @@ Please answer based only on the user's question above."""
 
 ### PII Redaction
 
-```scala
+```text
 object PIIRedaction {
   
   import scala.util.matching.Regex
@@ -324,7 +328,7 @@ object PIIRedaction {
 
 ### Comprehensive Audit Trail
 
-```scala
+```text
 object AuditLogging {
   
   import org.slf4j.LoggerFactory
@@ -395,7 +399,7 @@ object AuditLogging {
 
 ### Compliance Logging
 
-```scala
+```text
 object ComplianceLogging {
   
   case class DataProcessingLog(
@@ -448,7 +452,7 @@ object ComplianceLogging {
 
 ### Automatic Data Expiration
 
-```scala
+```text
 object DataRetention {
   
   case class DataRecord(

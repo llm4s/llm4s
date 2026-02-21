@@ -7,6 +7,8 @@ nav_order: 1
 
 # Multi-Agent Orchestration Patterns
 
+> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](../../../modules/samples/).
+
 Learn how to design systems where multiple agents collaborate, delegate tasks, and handle complex workflows. This guide covers agent communication patterns, handoff mechanisms, and failure recovery strategies.
 
 ## Overview
@@ -27,7 +29,7 @@ Simple workflows where tasks need to execute in order, each building on previous
 
 ### Implementation
 
-```scala
+```text
 import org.llm4s.agents._
 import org.llm4s.Result
 
@@ -93,7 +95,7 @@ When multiple independent tasks can run in parallel, then results are combined.
 
 ### Implementation
 
-```scala
+```text
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
 
@@ -177,7 +179,7 @@ Transferring control from one agent to another when current agent reaches its li
 
 ### Implementation
 
-```scala
+```text
 import org.llm4s.agents.handoff._
 
 object HandoffPattern {
@@ -270,7 +272,7 @@ Complex systems with multiple management levels (team leads, managers, executive
 
 ### Implementation
 
-```scala
+```text
 object HierarchicalTeams {
   
   // Team leads (specialists)
@@ -342,7 +344,7 @@ Ensuring context is preserved and relevant when transferring between agents.
 
 ### Implementation
 
-```scala
+```text
 import org.llm4s.agents.memory._
 
 object ContextPreservation {
@@ -423,7 +425,7 @@ object ContextPreservation {
 
 ### Circuit Breaker for Agents
 
-```scala
+```text
 object AgentCircuitBreaker {
   
   case class CircuitBreakerState(
@@ -466,7 +468,7 @@ object AgentCircuitBreaker {
 
 ### Fallback Agents
 
-```scala
+```text
 object FallbackAgents {
   
   def runWithFallback(
@@ -536,7 +538,7 @@ object FallbackAgents {
 
 ## Example: Complete Support System
 
-```scala
+```text
 object CompleteSupportSystem {
   
   // Routing agent determines issue type

@@ -7,13 +7,15 @@ nav_order: 4
 
 # Scaling Strategies
 
+> **Note:** Code examples in this guide are illustrative pseudocode showing recommended patterns. For working examples using the actual LLM4S API, see [modules/samples](../../../modules/samples/).
+
 Production patterns for handling high throughput, reducing latency, and distributing load. This guide covers caching, rate limiting, batch processing, and distributed execution.
 
 ## Caching Strategies
 
 ### Request-Level Caching
 
-```scala
+```text
 object RequestCaching {
   
   import scala.collection.mutable
@@ -63,7 +65,7 @@ object RequestCaching {
 
 ### Distributed Cache (Redis)
 
-```scala
+```text
 object DistributedCache {
   
   import redis.clients.jedis.Jedis
@@ -114,7 +116,7 @@ object DistributedCache {
 
 ### Token Bucket Algorithm
 
-```scala
+```text
 object RateLimiting {
   
   import scala.concurrent.duration._
@@ -169,7 +171,7 @@ object RateLimiting {
 
 ### Per-User Rate Limiting
 
-```scala
+```text
 object PerUserRateLimiting {
   
   import scala.collection.mutable
@@ -199,7 +201,7 @@ object PerUserRateLimiting {
 
 ### Embedding Batching
 
-```scala
+```text
 object EmbeddingBatching {
   
   import scala.concurrent.Future
@@ -261,7 +263,7 @@ object EmbeddingBatching {
 
 ### Worker Pool Pattern
 
-```scala
+```text
 object WorkerPool {
   
   import scala.concurrent.{ExecutionContext, Future}
@@ -301,7 +303,7 @@ object WorkerPool {
 
 ### Load Balancing Across Models
 
-```scala
+```text
 object LoadBalancing {
   
   case class ModelLoad(
@@ -347,7 +349,7 @@ object LoadBalancing {
 
 ### Task Queue
 
-```scala
+```text
 object TaskQueue {
   
   import scala.concurrent.{Future, Promise}
@@ -425,7 +427,7 @@ object TaskQueue {
 
 ### Inference Optimization
 
-```scala
+```text
 object InferenceOptimization {
   
   // Use smaller models for simple tasks
