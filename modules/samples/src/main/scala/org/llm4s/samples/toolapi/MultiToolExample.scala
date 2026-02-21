@@ -145,7 +145,12 @@ object MultiToolExample {
 
       // Generate OpenAI tool definitions
       logger.info("Tool definitions for OpenAI:")
-      logger.info(toolRegistry.getToolDefinitions("openai").render(indent = 2))
+      toolRegistry
+        .getToolDefinitionsSafe("openai")
+        .fold(
+          err => logger.error("Failed to get tool definitions: {}", err.formatted),
+          defs => logger.info(defs.render(indent = 2))
+        )
     }
 
     result.left.foreach(err => logger.error("Failed to build tools: {}", err.formatted))

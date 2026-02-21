@@ -125,30 +125,6 @@ object HTTPTool {
    */
   val toolSafe: Result[ToolFunction[Map[String, Any], HTTPResult]] = createSafe()
 
-  /**
-   * Create an HTTP tool with the given configuration.
-   *
-   * @throws IllegalStateException if tool creation fails
-   */
-  @deprecated("Use createSafe() which returns Result[ToolFunction] for safe error handling", "0.2.9")
-  def create(config: HttpConfig = HttpConfig()): ToolFunction[Map[String, Any], HTTPResult] =
-    createSafe(config) match {
-      case Right(t) => t
-      case Left(e)  => throw new IllegalStateException(s"HTTPTool.create failed: ${e.formatted}")
-    }
-
-  /**
-   * Default HTTP tool with standard configuration.
-   *
-   * @throws IllegalStateException if tool initialization fails
-   */
-  @deprecated("Use toolSafe which returns Result[ToolFunction] for safe error handling", "0.2.9")
-  lazy val tool: ToolFunction[Map[String, Any], HTTPResult] =
-    toolSafe match {
-      case Right(t) => t
-      case Left(e)  => throw new IllegalStateException(s"HTTPTool.tool lazy initialization failed: ${e.formatted}")
-    }
-
   private def makeRequest(
     urlStr: String,
     method: String,

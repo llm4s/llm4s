@@ -1,5 +1,6 @@
 package org.llm4s.trace
 
+import cats.Id
 import org.llm4s.trace.model.{ SpanKind, SpanStatus }
 import org.llm4s.trace.store.InMemoryTraceStore
 import org.scalatest.BeforeAndAfterEach
@@ -8,12 +9,12 @@ import org.scalatest.matchers.should.Matchers
 
 class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
-  private var store: InMemoryTraceStore        = _
-  private var collector: TraceCollectorTracing = _
+  private var store: InMemoryTraceStore            = _
+  private var collector: TraceCollectorTracing[Id] = _
 
   override def beforeEach(): Unit = {
     store = InMemoryTraceStore()
-    collector = TraceCollectorTracing(store)
+    collector = TraceCollectorTracing(store).getOrElse(fail("could not create TraceCollectorTracing"))
   }
 
   "TraceCollectorTracing" should "convert ToolExecuted event to ToolCall span" in {
@@ -141,6 +142,16 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     spans.foreach(_.kind shouldBe SpanKind.Internal)
   }
 
+  it should "not throw when a CustomEvent array contains non-string elements" in {
+    val event = TraceEvent.CustomEvent(
+      "mixed-array",
+      ujson.Obj("values" -> ujson.Arr(ujson.Str("ok"), ujson.Num(1.0), ujson.Bool(true)))
+    )
+    collector.traceEvent(event) shouldBe Right(())
+    val span = store.getSpans(collector.traceId).head
+    span.attributes("values").asStringList shouldBe Some(List("ok"))
+  }
+
   it should "be composable with ConsoleTracing via TracingComposer.combine()" in {
     val console  = new ConsoleTracing()
     val combined = TracingComposer.combine(collector, console)
@@ -168,8 +179,9 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
   }
 
   it should "use custom traceId when provided" in {
-    val customTraceId   = org.llm4s.types.TraceId("custom-trace-123")
-    val customCollector = TraceCollectorTracing(store, customTraceId)
+    val customTraceId = org.llm4s.types.TraceId("custom-trace-123")
+    val customCollector =
+      TraceCollectorTracing(store, customTraceId).getOrElse(fail("could not create custom collector"))
 
     val event = TraceEvent.ToolExecuted("tool", "in", "out", 10L, true)
     customCollector.traceEvent(event) shouldBe Right(())

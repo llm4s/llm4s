@@ -229,7 +229,10 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     val event = TraceEvent.CustomEvent("original", ujson.Obj())
     transformed.traceEvent(event) shouldBe Right(())
 
-    events.head.asInstanceOf[TraceEvent.CustomEvent].name shouldBe "transformed_original"
+    events.head match {
+      case e: TraceEvent.CustomEvent => e.name shouldBe "transformed_original"
+      case other                     => fail(s"Expected CustomEvent, got: $other")
+    }
   }
 
   // ============ Convenience Methods ============
@@ -242,12 +245,14 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     tracer.traceEmbeddingUsage(usage, "text-embedding-3-small", "indexing", 10) shouldBe Right(())
 
     events should have size 1
-    events.head shouldBe a[TraceEvent.EmbeddingUsageRecorded]
-    val recorded = events.head.asInstanceOf[TraceEvent.EmbeddingUsageRecorded]
-    recorded.usage shouldBe usage
-    recorded.model shouldBe "text-embedding-3-small"
-    recorded.operation shouldBe "indexing"
-    recorded.inputCount shouldBe 10
+    events.head match {
+      case recorded: TraceEvent.EmbeddingUsageRecorded =>
+        recorded.usage shouldBe usage
+        recorded.model shouldBe "text-embedding-3-small"
+        recorded.operation shouldBe "indexing"
+        recorded.inputCount shouldBe 10
+      case other => fail(s"Expected EmbeddingUsageRecorded, got: $other")
+    }
   }
 
   it should "create correct events for traceCost" in {
@@ -257,11 +262,13 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     tracer.traceCost(0.005, "gpt-4", "completion", 1000, "total") shouldBe Right(())
 
     events should have size 1
-    events.head shouldBe a[TraceEvent.CostRecorded]
-    val recorded = events.head.asInstanceOf[TraceEvent.CostRecorded]
-    recorded.costUsd shouldBe 0.005
-    recorded.model shouldBe "gpt-4"
-    recorded.tokenCount shouldBe 1000
+    events.head match {
+      case recorded: TraceEvent.CostRecorded =>
+        recorded.costUsd shouldBe 0.005
+        recorded.model shouldBe "gpt-4"
+        recorded.tokenCount shouldBe 1000
+      case other => fail(s"Expected CostRecorded, got: $other")
+    }
   }
 
   it should "create correct events for traceRAGOperation" in {
@@ -271,14 +278,16 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     tracer.traceRAGOperation("search", 150L, Some(100), Some(200), Some(50), Some(0.003)) shouldBe Right(())
 
     events should have size 1
-    events.head shouldBe a[TraceEvent.RAGOperationCompleted]
-    val recorded = events.head.asInstanceOf[TraceEvent.RAGOperationCompleted]
-    recorded.operation shouldBe "search"
-    recorded.durationMs shouldBe 150L
-    recorded.embeddingTokens shouldBe Some(100)
-    recorded.llmPromptTokens shouldBe Some(200)
-    recorded.llmCompletionTokens shouldBe Some(50)
-    recorded.totalCostUsd shouldBe Some(0.003)
+    events.head match {
+      case recorded: TraceEvent.RAGOperationCompleted =>
+        recorded.operation shouldBe "search"
+        recorded.durationMs shouldBe 150L
+        recorded.embeddingTokens shouldBe Some(100)
+        recorded.llmPromptTokens shouldBe Some(200)
+        recorded.llmCompletionTokens shouldBe Some(50)
+        recorded.totalCostUsd shouldBe Some(0.003)
+      case other => fail(s"Expected RAGOperationCompleted, got: $other")
+    }
   }
 
   // ============ Helper Methods and Classes ============

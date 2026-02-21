@@ -145,7 +145,8 @@ import org.llm4s.trace.store._
 import org.llm4s.trace.model._
 
 val store  = InMemoryTraceStore()
-val tracer = TraceCollectorTracing(store)
+// apply returns Result[TraceCollectorTracing]; InMemoryTraceStore never fails
+val tracer = TraceCollectorTracing(store).getOrElse(sys.error("tracing init failed"))
 
 // pass tracer to any agent run
 agent.run("query", tools, tracing = tracer)
@@ -227,7 +228,7 @@ import org.scalatest.BeforeAndAfterEach
 class AgentBehaviourSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   val store  = InMemoryTraceStore()
-  val tracer = TraceCollectorTracing(store)
+  val tracer = TraceCollectorTracing(store).getOrElse(fail("tracing init failed"))
 
   override def afterEach(): Unit = store.clear()
 
@@ -257,7 +258,7 @@ Use this to keep a local in-process snapshot while also forwarding to Langfuse o
 
 ```scala
 val store     = InMemoryTraceStore()
-val collector = TraceCollectorTracing(store)
+val collector = TraceCollectorTracing(store).getOrElse(sys.error("tracing init failed"))
 val langfuse  = LangfuseTracing(langfuseConfig)
 
 val tracer = TracingComposer.combine(collector, langfuse)

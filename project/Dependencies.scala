@@ -10,8 +10,9 @@ object Versions {
   val upickle  = "4.2.1"
   val logback  = "1.5.18"
   val monocle  = "3.3.0"
-  val scalatest = "3.2.19"
-  val scalamock = "7.4.2"
+  val scalatest               = "3.2.19"
+  val scalamock               = "7.4.2"
+  val scalatestplusScalacheck = "3.2.19.0"
   val fansi    = "0.5.0"
   val postgres = "42.7.3"
   val sqlite   = "3.45.3.0"
@@ -51,7 +52,7 @@ object Deps {
   val monocleMacro = "dev.optics" %% "monocle-macro" % Versions.monocle
   val scalatest               = "org.scalatest"    %% "scalatest"          % Versions.scalatest
   val scalamock               = "org.scalamock"    %% "scalamock"          % Versions.scalamock
-  val scalatestplusScalacheck = "org.scalatestplus" %% "scalacheck-1-18"   % "3.2.19.0"
+  val scalatestplusScalacheck = "org.scalatestplus" %% "scalacheck-1-18"   % Versions.scalatestplusScalacheck
   val fansi     = "com.lihaoyi"   %% "fansi"     % Versions.fansi
   val postgres  = "org.postgresql" % "postgresql" % Versions.postgres
   val sqlite    = "org.xerial"     % "sqlite-jdbc" % Versions.sqlite

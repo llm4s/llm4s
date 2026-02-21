@@ -24,45 +24,45 @@ import scala.util.chaining._
  * - AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (or use IAM roles)
  * - OPENAI_API_KEY (for RAG embeddings)
  */
-object S3LoaderExample extends App {
-
+object S3LoaderExample {
   private val logger = LoggerFactory.getLogger(getClass)
+  private def env(key: String): Option[String] =
+    sys.props.get(key).orElse(sys.env.get(key))
+  def main(args: Array[String]): Unit = {
+    logger.info("=" * 60)
+    logger.info("S3 Document Loader Example")
+    logger.info("=" * 60)
 
-  logger.info("=" * 60)
-  logger.info("S3 Document Loader Example")
-  logger.info("=" * 60)
+    // Configuration - adjust these for your environment
+    val bucket        = env("S3_BUCKET").getOrElse("my-documents")
+    val prefix        = env("S3_PREFIX").getOrElse("docs/")
+    val region        = env("AWS_REGION").getOrElse("us-east-1")
+    val useLocalStack = env("USE_LOCALSTACK").getOrElse("false").toBoolean
 
-  // Configuration - adjust these for your environment
-  val bucket        = sys.env.getOrElse("S3_BUCKET", "my-documents")
-  val prefix        = sys.env.getOrElse("S3_PREFIX", "docs/")
-  val region        = sys.env.getOrElse("AWS_REGION", "us-east-1")
-  val useLocalStack = sys.env.getOrElse("USE_LOCALSTACK", "false").toBoolean
+    logger.info("Configuration:")
+    logger.info("  Bucket: {}", bucket)
+    logger.info("  Prefix: {}", prefix)
+    logger.info("  Region: {}", region)
+    logger.info("  LocalStack: {}", useLocalStack)
 
-  logger.info("Configuration:")
-  logger.info("  Bucket: {}", bucket)
-  logger.info("  Prefix: {}", prefix)
-  logger.info("  Region: {}", region)
-  logger.info("  LocalStack: {}", useLocalStack)
+    // Create RAG pipeline using the builder API
+    val ragResult = RAG
+      .builder()
+      .withEmbeddings(EmbeddingProvider.OpenAI)
+      .build()
 
-  // Create RAG pipeline using the builder API
-  val ragResult = RAG
-    .builder()
-    .withEmbeddings(EmbeddingProvider.OpenAI)
-    .build()
+    ragResult match {
+      case Left(err) =>
+        logger.error("Failed to create RAG pipeline: {}", err.message)
+        logger.error("Error: {}", err.message)
+        logger.error("Make sure you have set:")
+        logger.error("  - OPENAI_API_KEY")
+        ()
 
-  ragResult match {
-    case Left(err) =>
-      logger.error("Failed to create RAG pipeline: {}", err.message)
-      logger.error("Error: {}", err.message)
-      logger.error("Make sure you have set:")
-      logger.error("  - OPENAI_API_KEY")
-      sys.exit(1)
-
-    case Right(rag) =>
-      try
-        runExample(rag, bucket, prefix, region, useLocalStack)
-      finally
-        rag.close()
+      case Right(rag) =>
+        try runExample(rag, bucket, prefix, region, useLocalStack)
+        finally rag.close()
+    }
   }
 
   def runExample(
@@ -137,50 +137,61 @@ object S3LoaderExample extends App {
 /**
  * Advanced example showing custom S3 configuration.
  */
-object S3LoaderAdvancedExample extends App {
+object S3LoaderAdvancedExample {
   private val logger = LoggerFactory.getLogger(getClass)
+  private def env(key: String): Option[String] =
+    sys.props.get(key).orElse(sys.env.get(key))
+  def main(args: Array[String]): Unit = {
+    logger.info("=" * 60)
+    logger.info("S3 Document Loader - Advanced Configuration")
+    logger.info("=" * 60)
 
-  logger.info("=" * 60)
-  logger.info("S3 Document Loader - Advanced Configuration")
-  logger.info("=" * 60)
+    // Example 1: Custom file extensions
+    logger.info("--- Example 1: Custom Extensions ---")
+    Option(
+      S3Loader(
+        bucket = "my-bucket",
+        prefix = "reports/",
+        extensions = Set("pdf")
+      ).tap(l => logger.info("PDF-only loader: {}", l.description))
+    ).foreach(_ => ())
 
-  // Example 1: Custom file extensions
-  logger.info("--- Example 1: Custom Extensions ---")
-  val pdfOnlyLoader = S3Loader(
-    bucket = "my-bucket",
-    prefix = "reports/",
-    extensions = Set("pdf") // Only PDF files
-  ).tap(l => logger.info("PDF-only loader: {}", l.description))
+    // Example 2: Explicit credentials
+    logger.info("--- Example 2: Explicit Credentials ---")
+    Option(
+      S3Loader
+        .withCredentials(
+          bucket = "private-bucket",
+          accessKeyId = env("AWS_ACCESS_KEY_ID").getOrElse("test"),
+          secretAccessKey = env("AWS_SECRET_ACCESS_KEY").getOrElse("test"),
+          region = "eu-west-1"
+        )
+        .tap(l => logger.info("Credentials loader: {}", l.description))
+    ).foreach(_ => ())
 
-  // Example 2: Explicit credentials
-  logger.info("--- Example 2: Explicit Credentials ---")
-  val withCredsLoader = S3Loader
-    .withCredentials(
-      bucket = "private-bucket",
-      accessKeyId = sys.env.getOrElse("AWS_ACCESS_KEY_ID", "test"),
-      secretAccessKey = sys.env.getOrElse("AWS_SECRET_ACCESS_KEY", "test"),
-      region = "eu-west-1"
-    )
-    .tap(l => logger.info("Credentials loader: {}", l.description))
+    // Example 3: Using the source directly for advanced configuration
+    logger.info("--- Example 3: Advanced Source Configuration ---")
+    Option(
+      S3DocumentSource(
+        bucket = "my-bucket",
+        prefix = "docs/",
+        extensions = Set("txt", "md", "pdf", "docx"),
+        metadata = Map("environment" -> "production")
+      ).withEndpoint("http://localhost:4566")
+        .tap(s => logger.info("Advanced source: {}", s.description))
+    ).foreach(_ => ())
 
-  // Example 3: Using the source directly for advanced configuration
-  logger.info("--- Example 3: Advanced Source Configuration ---")
-  val source = S3DocumentSource(
-    bucket = "my-bucket",
-    prefix = "docs/",
-    extensions = Set("txt", "md", "pdf", "docx"),
-    metadata = Map("environment" -> "production")
-  ).withEndpoint("http://localhost:4566") // For MinIO or LocalStack
-    .tap(s => logger.info("Advanced source: {}", s.description))
+    // Example 4: Combining loaders
+    logger.info("--- Example 4: Multi-Source Loading ---")
+    val docsLoader    = S3Loader("company-docs", prefix = "public/")
+    val reportsLoader = S3Loader("company-docs", prefix = "reports/2024/")
+    Option(
+      (docsLoader ++ reportsLoader)
+        .tap(l => logger.info("Combined loader: {}", l.description))
+    ).foreach(_ => ())
 
-  // Example 4: Combining loaders
-  logger.info("--- Example 4: Multi-Source Loading ---")
-  val docsLoader    = S3Loader("company-docs", prefix = "public/")
-  val reportsLoader = S3Loader("company-docs", prefix = "reports/2024/")
-  val combinedLoader = (docsLoader ++ reportsLoader)
-    .tap(l => logger.info("Combined loader: {}", l.description))
-
-  logger.info("=" * 60)
-  logger.info("Advanced examples complete")
-  logger.info("=" * 60)
+    logger.info("=" * 60)
+    logger.info("Advanced examples complete")
+    logger.info("=" * 60)
+  }
 }

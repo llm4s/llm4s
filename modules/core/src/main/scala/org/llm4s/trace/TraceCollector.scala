@@ -5,12 +5,13 @@ import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.trace.model._
 import org.llm4s.trace.store.TraceStore
 import org.llm4s.types.{ Result, TraceId }
+import org.llm4s.util.LiftToResult
 
 import java.util.UUID
 
 /**
  * A `Tracing` implementation that converts every `TraceEvent` into a `Span`
- *  and persists it in the given `TraceStore`.
+ *  and persists it in the given `TraceStore[F]`.
  *
  *  Composable with other backends via `TracingComposer.combine()`. The
  *  `traceId` field exposes the identifier assigned to this run so callers can
@@ -18,82 +19,89 @@ import java.util.UUID
  *
  *  @param store          destination for all recorded spans
  *  @param initialTraceId optional fixed trace ID; a random UUID is used when absent
+ *  @tparam F             effect type of the backing store; an implicit [[LiftToResult]]
+ *                        instance must be available to bridge `F[A]` into `Result[A]`
  */
-class TraceCollectorTracing(
-  store: TraceStore,
+class TraceCollectorTracing[F[_]](
+  store: TraceStore[F],
   initialTraceId: Option[TraceId] = None
-) extends Tracing {
+)(implicit lift: LiftToResult[F])
+    extends Tracing {
 
   val traceId: TraceId = initialTraceId.getOrElse(TraceId(UUID.randomUUID().toString))
 
-  override def traceEvent(event: TraceEvent): Result[Unit] = {
-    val span = eventToSpan(event)
-    store.saveSpan(span)
-    Right(())
-  }
+  override def traceEvent(event: TraceEvent): Result[Unit] =
+    lift(store.saveSpan(eventToSpan(event)))
 
-  override def traceAgentState(state: AgentState): Result[Unit] = {
-    val span = Span
-      .start(traceId, "agent-state-update", SpanKind.AgentCall)
-      .withAttribute("status", SpanValue.StringValue(state.status.toString))
-      .withAttribute("message_count", SpanValue.LongValue(state.conversation.messages.length.toLong))
-      .withAttribute("log_count", SpanValue.LongValue(state.logs.length.toLong))
-      .end()
-      .withStatus(SpanStatus.Ok)
-    store.saveSpan(span)
-    Right(())
-  }
+  override def traceAgentState(state: AgentState): Result[Unit] =
+    lift(
+      store.saveSpan(
+        Span
+          .start(traceId, "agent-state-update", SpanKind.AgentCall)
+          .withAttribute("status", SpanValue.StringValue(state.status.toString))
+          .withAttribute("message_count", SpanValue.LongValue(state.conversation.messages.length.toLong))
+          .withAttribute("log_count", SpanValue.LongValue(state.logs.length.toLong))
+          .end()
+          .withStatus(SpanStatus.Ok)
+      )
+    )
 
-  override def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
-    val span = Span
-      .start(traceId, s"tool:$toolName", SpanKind.ToolCall)
-      .withAttribute("tool_name", SpanValue.StringValue(toolName))
-      .withAttribute("input", SpanValue.StringValue(input))
-      .withAttribute("output", SpanValue.StringValue(output))
-      .end()
-      .withStatus(SpanStatus.Ok)
-    store.saveSpan(span)
-    Right(())
-  }
+  override def traceToolCall(toolName: String, input: String, output: String): Result[Unit] =
+    lift(
+      store.saveSpan(
+        Span
+          .start(traceId, s"tool:$toolName", SpanKind.ToolCall)
+          .withAttribute("tool_name", SpanValue.StringValue(toolName))
+          .withAttribute("input", SpanValue.StringValue(input))
+          .withAttribute("output", SpanValue.StringValue(output))
+          .end()
+          .withStatus(SpanStatus.Ok)
+      )
+    )
 
   override def traceError(error: Throwable, context: String): Result[Unit] = {
-    val span = Span
-      .start(traceId, "error", SpanKind.Internal)
-      .withAttribute("error_type", SpanValue.StringValue(error.getClass.getSimpleName))
-      .withAttribute("error_message", SpanValue.StringValue(error.getMessage))
-      .withAttribute("context", SpanValue.StringValue(context))
-      .end()
-      .withStatus(SpanStatus.Error(s"${error.getClass.getSimpleName}: ${error.getMessage}"))
-    store.saveSpan(span)
-    Right(())
+    val errorMessage = Option(error.getMessage).getOrElse("")
+    lift(
+      store.saveSpan(
+        Span
+          .start(traceId, "error", SpanKind.Internal)
+          .withAttribute("error_type", SpanValue.StringValue(error.getClass.getSimpleName))
+          .withAttribute("error_message", SpanValue.StringValue(errorMessage))
+          .withAttribute("context", SpanValue.StringValue(context))
+          .end()
+          .withStatus(SpanStatus.Error(s"${error.getClass.getSimpleName}: $errorMessage"))
+      )
+    )
   }
 
-  override def traceCompletion(completion: Completion, model: String): Result[Unit] = {
-    val span = Span
-      .start(traceId, s"llm:$model", SpanKind.LlmCall)
-      .withAttribute("model", SpanValue.StringValue(model))
-      .withAttribute("completion_id", SpanValue.StringValue(completion.id))
-      .withAttribute("tool_calls_count", SpanValue.LongValue(completion.message.toolCalls.length.toLong))
-      .withAttribute("content_length", SpanValue.LongValue(completion.message.content.length.toLong))
-      .end()
-      .withStatus(SpanStatus.Ok)
-    store.saveSpan(span)
-    Right(())
-  }
+  override def traceCompletion(completion: Completion, model: String): Result[Unit] =
+    lift(
+      store.saveSpan(
+        Span
+          .start(traceId, s"llm:$model", SpanKind.LlmCall)
+          .withAttribute("model", SpanValue.StringValue(model))
+          .withAttribute("completion_id", SpanValue.StringValue(completion.id))
+          .withAttribute("tool_calls_count", SpanValue.LongValue(completion.message.toolCalls.length.toLong))
+          .withAttribute("content_length", SpanValue.LongValue(completion.message.content.length.toLong))
+          .end()
+          .withStatus(SpanStatus.Ok)
+      )
+    )
 
-  override def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] = {
-    val span = Span
-      .start(traceId, s"tokens:$operation", SpanKind.Internal)
-      .withAttribute("model", SpanValue.StringValue(model))
-      .withAttribute("operation", SpanValue.StringValue(operation))
-      .withAttribute("prompt_tokens", SpanValue.LongValue(usage.promptTokens.toLong))
-      .withAttribute("completion_tokens", SpanValue.LongValue(usage.completionTokens.toLong))
-      .withAttribute("total_tokens", SpanValue.LongValue(usage.totalTokens.toLong))
-      .end()
-      .withStatus(SpanStatus.Ok)
-    store.saveSpan(span)
-    Right(())
-  }
+  override def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
+    lift(
+      store.saveSpan(
+        Span
+          .start(traceId, s"tokens:$operation", SpanKind.Internal)
+          .withAttribute("model", SpanValue.StringValue(model))
+          .withAttribute("operation", SpanValue.StringValue(operation))
+          .withAttribute("prompt_tokens", SpanValue.LongValue(usage.promptTokens.toLong))
+          .withAttribute("completion_tokens", SpanValue.LongValue(usage.completionTokens.toLong))
+          .withAttribute("total_tokens", SpanValue.LongValue(usage.totalTokens.toLong))
+          .end()
+          .withStatus(SpanStatus.Ok)
+      )
+    )
 
   private def eventToSpan(event: TraceEvent): Span = {
     val spanName = event.eventType
@@ -153,6 +161,7 @@ class TraceCollectorTracing(
         )
 
       case TraceEvent.ErrorOccurred(error, context, ts) =>
+        val errorMessage = Option(error.getMessage).getOrElse("")
         Span(
           spanId = SpanId.generate(),
           traceId = traceId,
@@ -161,10 +170,10 @@ class TraceCollectorTracing(
           kind = SpanKind.Internal,
           startTime = ts,
           endTime = Some(ts),
-          status = SpanStatus.Error(s"${error.getClass.getSimpleName}: ${error.getMessage}"),
+          status = SpanStatus.Error(s"${error.getClass.getSimpleName}: $errorMessage"),
           attributes = Map(
             "error_type"    -> SpanValue.StringValue(error.getClass.getSimpleName),
-            "error_message" -> SpanValue.StringValue(error.getMessage),
+            "error_message" -> SpanValue.StringValue(errorMessage),
             "context"       -> SpanValue.StringValue(context)
           )
         )
@@ -211,7 +220,7 @@ class TraceCollectorTracing(
             case ujson.Str(s)   => SpanValue.StringValue(s)
             case ujson.Num(n)   => SpanValue.DoubleValue(n)
             case ujson.Bool(b)  => SpanValue.BooleanValue(b)
-            case ujson.Arr(arr) => SpanValue.StringListValue(arr.map(_.str).toList)
+            case ujson.Arr(arr) => SpanValue.StringListValue(arr.collect { case ujson.Str(s) => s }.toList)
             case _              => SpanValue.StringValue(v.toString)
           })
         }.toMap
@@ -332,7 +341,16 @@ class TraceCollectorTracing(
 }
 
 object TraceCollectorTracing {
-  def apply(store: TraceStore): TraceCollectorTracing = new TraceCollectorTracing(store)
-  def apply(store: TraceStore, traceId: TraceId): TraceCollectorTracing =
-    new TraceCollectorTracing(store, Some(traceId))
+
+  def apply[F[_]](store: TraceStore[F])(implicit lift: LiftToResult[F]): Result[TraceCollectorTracing[F]] = {
+    val tracer = new TraceCollectorTracing[F](store)
+    lift(store.saveTrace(Trace.start(tracer.traceId))).map(_ => tracer)
+  }
+
+  def apply[F[_]](store: TraceStore[F], traceId: TraceId)(implicit
+    lift: LiftToResult[F]
+  ): Result[TraceCollectorTracing[F]] = {
+    val tracer = new TraceCollectorTracing[F](store, Some(traceId))
+    lift(store.saveTrace(Trace.start(tracer.traceId))).map(_ => tracer)
+  }
 }

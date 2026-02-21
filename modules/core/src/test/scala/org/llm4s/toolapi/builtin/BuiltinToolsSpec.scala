@@ -1,7 +1,5 @@
 package org.llm4s.toolapi.builtin
 
-import scala.annotation.nowarn
-
 import org.llm4s.toolapi.tools.WeatherTool
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -174,58 +172,10 @@ class BuiltinToolsSpec extends AnyFlatSpec with Matchers {
       )
   }
 
-  // ============ Deprecated API tests ============
-
-  "BuiltinTools.core (deprecated)" should "return 4 core tools" in {
-    @nowarn("cat=deprecation") val tools = BuiltinTools.core
-    tools.size shouldBe 4
-    val names = tools.map(_.name).toSet
-    names should contain("get_current_datetime")
-    names should contain("calculator")
-    names should contain("generate_uuid")
-    names should contain("json_tool")
-  }
-
-  "BuiltinTools.safe() (deprecated)" should "return 5 tools" in {
-    @nowarn("cat=deprecation") val tools = BuiltinTools.safe()
-    tools.size shouldBe 5
-    val names = tools.map(_.name).toSet
-    names should contain("http_request")
-    names should contain("get_current_datetime")
-  }
-
-  "BuiltinTools.withFiles() (deprecated)" should "return 8 tools" in {
-    @nowarn("cat=deprecation") val tools = BuiltinTools.withFiles()
-    tools.size shouldBe 8
-    val names = tools.map(_.name).toSet
-    names should contain("read_file")
-    names should contain("list_directory")
-    names should contain("file_info")
-    names should contain("http_request")
-  }
-
-  "BuiltinTools.development() (deprecated)" should "return 10 tools" in {
-    @nowarn("cat=deprecation") val tools = BuiltinTools.development()
-    tools.size shouldBe 10
-    val names = tools.map(_.name).toSet
-    names should contain("shell_command")
-    names should contain("write_file")
-    names should contain("read_file")
-    names should contain("http_request")
-  }
-
-  "BuiltinTools.custom() (deprecated)" should "return tools matching configuration" in {
-    @nowarn("cat=deprecation") val tools = BuiltinTools.custom(shellConfig = Some(shell.ShellConfig.readOnly()))
-    val names                            = tools.map(_.name).toSet
-    names should contain("shell_command")
-    names should contain("get_current_datetime")
-    names should contain("calculator")
-    (names should not).contain("read_file")
-    (names should not).contain("http_request")
-  }
-
-  "WeatherTool.tool (deprecated)" should "return a valid tool" in {
-    @nowarn("cat=deprecation") val tool = WeatherTool.tool
-    tool.name shouldBe "get_weather"
+  "WeatherTool.toolSafe" should "return a valid tool" in {
+    WeatherTool.toolSafe.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => tool.name shouldBe "get_weather"
+    )
   }
 }

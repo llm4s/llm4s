@@ -1,8 +1,9 @@
 package org.llm4s.trace
 
+import cats.Id
 import org.llm4s.llmconnect.model.{ EmbeddingUsage, TokenUsage }
 import org.llm4s.trace.model._
-import org.llm4s.trace.store.InMemoryTraceStore
+import org.llm4s.trace.store.{ InMemoryTraceStore, TraceQuery }
 import org.llm4s.types.TraceId
 import org.scalacheck.Gen
 import org.scalatest.BeforeAndAfterEach
@@ -169,7 +170,8 @@ class TraceCollectorPropertySpec
 
   // ---- helpers ----
 
-  private def collector(): TraceCollectorTracing = TraceCollectorTracing(store)
+  private def collector(): TraceCollectorTracing[Id] =
+    TraceCollectorTracing(store).getOrElse(fail("could not create TraceCollectorTracing"))
 
   // ---- one span per traceEvent call ----
 
@@ -287,8 +289,10 @@ class TraceCollectorPropertySpec
       val tc = collector()
       tc.traceEvent(TraceEvent.ErrorOccurred(new RuntimeException(msg), context, ts))
       val span = store.getSpans(tc.traceId).head
-      span.status shouldBe a[SpanStatus.Error]
-      span.status.asInstanceOf[SpanStatus.Error].message should include(msg)
+      span.status match {
+        case SpanStatus.Error(errorMsg) => errorMsg should include(msg)
+        case other                      => fail(s"Expected SpanStatus.Error, got: $other")
+      }
     }
   }
 
@@ -301,8 +305,10 @@ class TraceCollectorPropertySpec
       tc.traceError(new RuntimeException(msg), context)
       val spans = store.getSpans(tc.traceId)
       spans should have size 1L
-      spans.head.status shouldBe a[SpanStatus.Error]
-      spans.head.status.asInstanceOf[SpanStatus.Error].message should include(msg)
+      spans.head.status match {
+        case SpanStatus.Error(errorMsg) => errorMsg should include(msg)
+        case other                      => fail(s"Expected SpanStatus.Error, got: $other")
+      }
     }
   }
 
@@ -368,7 +374,7 @@ class TraceCollectorPropertySpec
   "TraceCollectorTracing with explicit traceId" should "use the provided traceId for all spans" in {
     forAll(genTraceId, genAnyTraceEvent) { (traceId, event) =>
       store.clear()
-      val tc = TraceCollectorTracing(store, traceId)
+      val tc = TraceCollectorTracing(store, traceId).getOrElse(fail("could not create TraceCollectorTracing"))
       tc.traceId shouldBe traceId
       tc.traceEvent(event)
       store.getSpans(traceId) should not be empty
@@ -396,5 +402,32 @@ class TraceCollectorPropertySpec
       val span = store.getSpans(tc.traceId).head
       span.attributes.get("hit").flatMap(_.asBoolean) shouldBe Some(false)
     }
+  }
+
+  // ---- Trace record is persisted (regression for missing saveTrace bug) ----
+
+  "TraceCollectorTracing" should "persist a Trace record visible via getTrace" in {
+    forAll(genAnyTraceEvent) { event =>
+      store.clear()
+      val tc = collector()
+      tc.traceEvent(event)
+      store.getTrace(tc.traceId) shouldBe defined
+      store.getTrace(tc.traceId).map(_.traceId) shouldBe Some(tc.traceId)
+    }
+  }
+
+  it should "make the trace visible via queryTraces" in {
+    forAll(genAnyTraceEvent) { event =>
+      store.clear()
+      val tc = collector()
+      tc.traceEvent(event)
+      store.queryTraces(TraceQuery.empty).traces should not be empty
+    }
+  }
+
+  it should "persist the Trace record before any spans are recorded" in {
+    store.clear()
+    val tc = collector()
+    store.getTrace(tc.traceId) shouldBe defined
   }
 }

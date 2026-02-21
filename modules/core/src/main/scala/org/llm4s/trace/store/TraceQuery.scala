@@ -1,6 +1,6 @@
 package org.llm4s.trace.store
 
-import org.llm4s.trace.model.SpanStatus
+import org.llm4s.trace.model.{ SpanStatus, Trace }
 
 import java.time.Instant
 
@@ -55,7 +55,7 @@ object TraceQuery {
  *                    `None` if this is the last page
  */
 final case class TracePage(
-  traces: List[org.llm4s.trace.model.Trace],
+  traces: List[Trace],
   nextCursor: Option[String]
 ) {
 

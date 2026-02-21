@@ -1,7 +1,5 @@
 package org.llm4s.toolapi.builtin
 
-import scala.annotation.nowarn
-
 import org.llm4s.toolapi.SafeParameterExtractor
 import org.llm4s.toolapi.builtin.shell._
 import org.scalatest.flatspec.AnyFlatSpec
@@ -215,10 +213,4 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
       )
   }
 
-  // ============ Deprecated API tests ============
-
-  "ShellTool.create() (deprecated)" should "return a valid tool" in {
-    @nowarn("cat=deprecation") val tool = ShellTool.create(ShellConfig.readOnly())
-    tool.name shouldBe "shell_command"
-  }
 }

@@ -25,10 +25,11 @@ trace storage as a standard `Tracing` implementation — composable with any exi
 agent execution completes.
 
 ```scala
-val store   = InMemoryTraceStore()
-val tracer  = TraceCollectorTracing(store)
-agent.run("query", tools, tracing = tracer)
-val spans   = store.getSpans(tracer.traceId)
+val store = InMemoryTraceStore()
+val spans: Result[List[Span]] = for {
+  tracer <- TraceCollectorTracing(store)
+  _      <- agent.run("query", tools, tracing = tracer)
+} yield store.getSpans(tracer.traceId)
 ```
 
 ### 2. Deterministic Agent Testing
@@ -38,7 +39,7 @@ spans — no mocking of external systems, no console output parsing.
 
 ```scala
 val store  = InMemoryTraceStore()
-val tracer = TraceCollectorTracing(store)
+val tracer = TraceCollectorTracing(store).getOrElse(fail("tracing init failed"))
 agent.run("query", tools, tracing = tracer)
 
 val toolSpans = store.getSpans(tracer.traceId).filter(_.kind == SpanKind.ToolCall)

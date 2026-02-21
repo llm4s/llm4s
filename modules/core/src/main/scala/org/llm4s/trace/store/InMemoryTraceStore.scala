@@ -1,18 +1,20 @@
 package org.llm4s.trace.store
 
+import cats.Id
 import org.llm4s.trace.model.{ Span, Trace }
 import org.llm4s.types.TraceId
 
 /**
- * Thread-safe, in-process `TraceStore` backed by immutable maps.
+ * Thread-safe, in-process `TraceStore[Id]` backed by immutable maps.
  *
+ *  All operations are synchronous and never fail (`F = cats.Id`).
  *  Intended for testing and single-process observability. All state is lost
  *  when the JVM exits. Use `InMemoryTraceStore()` to construct.
  */
-class InMemoryTraceStore extends TraceStore {
+class InMemoryTraceStore extends TraceStore[Id] {
 
-  @volatile private var traces: Map[TraceId, Trace]     = Map.empty
-  @volatile private var spans: Map[TraceId, List[Span]] = Map.empty
+  private var traces: Map[TraceId, Trace]     = Map.empty
+  private var spans: Map[TraceId, List[Span]] = Map.empty
 
   override def saveTrace(trace: Trace): Unit = synchronized {
     traces = traces + (trace.traceId -> trace)
@@ -32,14 +34,11 @@ class InMemoryTraceStore extends TraceStore {
   }
 
   override def queryTraces(query: TraceQuery): TracePage = synchronized {
-    var filtered = traces.values.toList
-
-    query.startTimeFrom.foreach(from => filtered = filtered.filter(t => !t.startTime.isBefore(from)))
-    query.startTimeTo.foreach(to => filtered = filtered.filter(t => !t.startTime.isAfter(to)))
-    query.status.foreach(s => filtered = filtered.filter(_.status == s))
-    if (query.metadata.nonEmpty) {
-      filtered = filtered.filter(trace => query.metadata.forall { case (k, v) => trace.metadata.get(k).contains(v) })
-    }
+    val filtered = traces.values.toList
+      .filter(t => query.startTimeFrom.forall(from => !t.startTime.isBefore(from)))
+      .filter(t => query.startTimeTo.forall(to => !t.startTime.isAfter(to)))
+      .filter(t => query.status.forall(_ == t.status))
+      .filter(t => query.metadata.forall { case (k, v) => t.metadata.get(k).contains(v) })
 
     val sorted = filtered.sortBy(_.startTime.toEpochMilli)
 

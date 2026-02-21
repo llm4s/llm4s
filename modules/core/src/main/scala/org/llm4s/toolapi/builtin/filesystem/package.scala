@@ -71,12 +71,4 @@ package object filesystem {
     fileInfo <- FileInfoTool.toolSafe
   } yield Seq(readFile, listDir, fileInfo)
 
-  /**
-   * All file system tools with default configuration (read-only, excludes write).
-   *
-   * @throws IllegalStateException if any tool initialization fails
-   */
-  @deprecated("Use readOnlyToolsSafe which returns Result[Seq[ToolFunction]] for safe error handling", "0.2.9")
-  lazy val readOnlyTools: Seq[org.llm4s.toolapi.ToolFunction[_, _]] =
-    Seq(ReadFileTool.tool, ListDirectoryTool.tool, FileInfoTool.tool)
 }

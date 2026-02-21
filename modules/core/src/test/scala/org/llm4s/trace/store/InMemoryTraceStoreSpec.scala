@@ -7,8 +7,9 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.time.Instant
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
+import java.util.concurrent.Executors
+import scala.concurrent.{ Await, ExecutionContext, Future }
+import scala.concurrent.duration.DurationInt
 
 class InMemoryTraceStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
@@ -178,14 +179,61 @@ class InMemoryTraceStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAft
     page.traces shouldBe empty
   }
 
+  it should "return all traces when no filters are set" in {
+    store.saveTrace(makeTrace("trace-1", t1, SpanStatus.Ok))
+    store.saveTrace(makeTrace("trace-2", t2, SpanStatus.Ok))
+    store.saveTrace(makeTrace("trace-3", t3, SpanStatus.Ok))
+
+    val page = store.queryTraces(TraceQuery.empty)
+    page.traces should have size 3
+  }
+
+  it should "return traces sorted by start time ascending" in {
+    // Save in reverse chronological order to verify sorting
+    store.saveTrace(makeTrace("trace-3", t3, SpanStatus.Ok))
+    store.saveTrace(makeTrace("trace-1", t1, SpanStatus.Ok))
+    store.saveTrace(makeTrace("trace-2", t2, SpanStatus.Ok))
+
+    val page = store.queryTraces(TraceQuery.empty)
+    page.traces.map(_.traceId) shouldBe List(TraceId("trace-1"), TraceId("trace-2"), TraceId("trace-3"))
+  }
+
+  it should "query traces by metadata filter" in {
+    val trace1 = makeTrace("trace-1", t1, SpanStatus.Ok, Map("env" -> "production"))
+    val trace2 = makeTrace("trace-2", t2, SpanStatus.Ok, Map("env" -> "staging"))
+    val trace3 = makeTrace("trace-3", t3, SpanStatus.Ok, Map("env" -> "production"))
+
+    store.saveTrace(trace1)
+    store.saveTrace(trace2)
+    store.saveTrace(trace3)
+
+    val page = store.queryTraces(TraceQuery.withMetadata("env", "production"))
+    page.traces should have size 2
+    (page.traces.map(_.traceId) should contain).allOf(TraceId("trace-1"), TraceId("trace-3"))
+    page.traces.map(_.traceId) should not contain TraceId("trace-2")
+  }
+
+  it should "apply time range and status filters with AND semantics" in {
+    // trace-1: t1, Ok  — matches both time range [t1,t2] and status Ok
+    // trace-2: t2, Error — matches time range but not status
+    // trace-3: t3, Ok  — outside time range
+    store.saveTrace(makeTrace("trace-1", t1, SpanStatus.Ok))
+    store.saveTrace(makeTrace("trace-2", t2, SpanStatus.Error("failed")))
+    store.saveTrace(makeTrace("trace-3", t3, SpanStatus.Ok))
+
+    val query = TraceQuery(startTimeFrom = Some(t1), startTimeTo = Some(t2), status = Some(SpanStatus.Ok))
+    val page  = store.queryTraces(query)
+
+    page.traces should have size 1
+    page.traces.head.traceId shouldBe TraceId("trace-1")
+  }
+
   it should "support concurrent span writes" in {
+    val ec      = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(10))
     val traceId = TraceId("concurrent-trace")
-    val futures = (1 to 100).map { i =>
-      Future {
-        store.saveSpan(makeSpan(s"span-$i", traceId))
-      }
-    }
-    scala.concurrent.Await.result(Future.sequence(futures), scala.concurrent.duration.Duration(10, "seconds"))
+    val futures = (1 to 100).map(i => Future(store.saveSpan(makeSpan(s"span-$i", traceId)))(ec))
+    Await.result(Future.sequence(futures)(implicitly, ec), 10.seconds)
+    ec.shutdown()
 
     val spans = store.getSpans(traceId)
     spans should have size 100
