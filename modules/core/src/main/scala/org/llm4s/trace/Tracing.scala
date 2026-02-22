@@ -53,7 +53,15 @@ trait Tracing {
   def traceCompletion(completion: Completion, model: String): Result[Unit]
   def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit]
 
-  // Convenience methods that delegate to traceEvent
+  /**
+   * Emits a named `CustomEvent` with no additional data payload.
+   *
+   * Wraps the string in a `TraceEvent.CustomEvent` with an empty JSON object
+   * as its data field before delegating to `traceEvent(TraceEvent)`.
+   * Use the typed overload for events that carry structured data.
+   *
+   * @param event Human-readable event name forwarded as `CustomEvent.name`
+   */
   final def traceEvent(event: String): Result[Unit] = {
     val customEvent = TraceEvent.CustomEvent(event, ujson.Obj())
     this.traceEvent(customEvent)
@@ -183,7 +191,14 @@ trait TracingComposer {
 
 object TracingComposer extends TracingComposer
 
-/** Internal composite tracing implementation. */
+/**
+ * Fans a single event out to multiple [[Tracing]] backends.
+ *
+ * `traceEvent` returns `Right(())` as long as at least one backend succeeds.
+ * Only when every backend returns a `Left` does this implementation propagate
+ * a failure (the first error in the list).  Use this soft-failure behaviour to
+ * prevent a single broken backend from silencing all observability.
+ */
 private class CompositeTracing(tracers: Vector[Tracing]) extends Tracing {
   def traceEvent(event: TraceEvent): Result[Unit] = {
     val results = tracers.map(_.traceEvent(event))
@@ -261,7 +276,11 @@ private class TransformedTracing(underlying: Tracing, transform: TraceEvent => T
 }
 
 /**
- * Type-safe tracing modes
+ * Enumerates the available tracing backends.
+ *
+ * Instances are created by [[Tracing.create]] based on the `TracingSettings`
+ * provided at startup.  The `TRACING_MODE` environment variable is the
+ * standard way to select a mode; see `Llm4sConfig` for loading details.
  */
 sealed trait TracingMode extends Product with Serializable
 
@@ -273,6 +292,16 @@ object TracingMode {
   case object OpenTelemetry extends TracingMode
   case object NoOp          extends TracingMode
 
+  /**
+   * Parses a mode string into a `TracingMode`, case-insensitively.
+   *
+   * Accepts `"langfuse"`, `"console"`, `"print"`, `"opentelemetry"`, `"otel"`,
+   * `"noop"`, and `"none"`.  Any other value logs a warning and returns `NoOp`
+   * rather than throwing.
+   *
+   * @param mode mode string, typically the value of the `TRACING_MODE` environment variable
+   * @return the matching `TracingMode`, or `NoOp` for unrecognised values
+   */
   def fromString(mode: String): TracingMode = mode.toLowerCase match {
     case "langfuse"               => Langfuse
     case "console" | "print"      => Console

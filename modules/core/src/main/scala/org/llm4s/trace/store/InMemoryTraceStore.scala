@@ -33,6 +33,19 @@ class InMemoryTraceStore extends TraceStore[Id] {
     spans.getOrElse(traceId, List.empty)
   }
 
+  /**
+   * Returns a page of traces matching the query, ordered by start time ascending.
+   *
+   * == Cursor semantics ==
+   * The `nextCursor` in the returned `TracePage` is the `traceId` string of the
+   * last trace on the current page.  Pass it back as `query.cursor` to fetch the
+   * next page.  An unrecognised cursor (e.g. from a deleted trace or a stale
+   * reference) is treated as absent — the query starts from the beginning of the
+   * result set rather than returning an error.
+   *
+   * == Filter combination ==
+   * All non-empty filter fields in `TraceQuery` are combined with AND semantics.
+   */
   override def queryTraces(query: TraceQuery): TracePage = synchronized {
     val filtered = traces.values.toList
       .filter(t => query.startTimeFrom.forall(from => !t.startTime.isBefore(from)))
@@ -71,6 +84,15 @@ class InMemoryTraceStore extends TraceStore[Id] {
       .toList
   }
 
+  /**
+   * Removes the trace and all associated spans from the store.
+   *
+   * Both the trace record and every span with the same `traceId` are deleted in
+   * a single synchronised operation.  Returns `false` when no trace with the
+   * given `traceId` exists; span cleanup is still attempted in that case.
+   *
+   * @return `true` when the trace existed and was removed; `false` otherwise
+   */
   override def deleteTrace(traceId: TraceId): Boolean = synchronized {
     if (traces.contains(traceId)) {
       traces = traces - traceId
