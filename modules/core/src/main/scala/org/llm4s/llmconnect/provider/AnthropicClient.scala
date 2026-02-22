@@ -112,7 +112,7 @@ class AnthropicClient(
           // Add extended thinking configuration if requested
           // Minimum budget is 1024 tokens, must be less than max_tokens
           transformed.options.effectiveBudgetTokens.foreach { budgetTokens =>
-            val effectiveBudget = math.max(1024, math.min(budgetTokens, maxTokens - 1))
+            val effectiveBudget = clampBudgetTokens(budgetTokens, maxTokens)
             paramsBuilder.thinking(
               ThinkingConfigEnabled.builder().budgetTokens(effectiveBudget.toLong).build()
             )
@@ -195,7 +195,7 @@ curl https://api.anthropic.com/v1/messages \
 
             // Add extended thinking configuration if requested
             transformed.options.effectiveBudgetTokens.foreach { budgetTokens =>
-              val effectiveBudget = math.max(1024, math.min(budgetTokens, maxTokens - 1))
+              val effectiveBudget = clampBudgetTokens(budgetTokens, maxTokens)
               paramsBuilder.thinking(
                 ThinkingConfigEnabled.builder().budgetTokens(effectiveBudget.toLong).build()
               )
@@ -348,8 +348,22 @@ curl https://api.anthropic.com/v1/messages \
 
   override def getReserveCompletion(): Int = providerConfig.reserveCompletion
 
+  /**
+   * Clamps an extended-thinking budget to the range `[1024, maxTokens - 1]`.
+   *
+   * The Anthropic API requires `budgetTokens >= 1024` and `budgetTokens < maxTokens`.
+   * Values outside this range are silently adjusted; callers should prefer
+   * supplying valid budgets rather than relying on clamping.
+   *
+   * @param budgetTokens requested thinking-token budget; may be any non-negative value
+   * @param maxTokens    effective `max_tokens` for the request; determines the upper bound
+   * @return the clamped budget in `[1024, maxTokens - 1]`
+   */
+  private[provider] def clampBudgetTokens(budgetTokens: Int, maxTokens: Int): Int =
+    math.max(1024, math.min(budgetTokens, maxTokens - 1))
+
   // Add messages from conversation to the parameters builder
-  private def addMessagesToParams(
+  private[provider] def addMessagesToParams(
     conversation: Conversation,
     paramsBuilder: MessageCreateParams.Builder
   ): Unit = {
