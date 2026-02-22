@@ -1,0 +1,16 @@
+[info] welcome to sbt 1.11.0 (Oracle Corporation Java 20.0.2)
+[info] loading settings for project llm4s-build-build-build from metals.sbt...
+[info] loading project definition from /Users/krrishbiswas/Desktop/GSoC/llm4s/project/project/project
+[info] loading settings for project llm4s-build-build from metals.sbt...
+[info] loading project definition from /Users/krrishbiswas/Desktop/GSoC/llm4s/project/project
+[success] Generated .bloop/llm4s-build-build.json
+[success] Total time: 1 s, completed Feb 22, 2026, 9:44:15 PM
+[info] loading settings for project llm4s-build from metals.sbt, plugins.sbt...
+[info] loading project definition from /Users/krrishbiswas/Desktop/GSoC/llm4s/project
+[success] Generated .bloop/llm4s-build.json
+[success] Total time: 0 s, completed Feb 22, 2026, 9:44:16 PM
+[info] loading settings for project llm4s from build.sbt...
+[info] resolving key references (12165 settings) ...
+[info] set current project to llm4s (in build file:/Users/krrishbiswas/Desktop/GSoC/llm4s/)
+[warn] sbt 0.13 shell syntax is deprecated; use slash syntax instead: core / Test / compile
+[success] Total time: 1 s, completed Feb 22, 2026, 9:44:17 PM

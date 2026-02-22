@@ -36,11 +36,10 @@ object UniversalEncoder {
     val mime = Try(tika.detect(f)).getOrElse("application/octet-stream")
     logger.debug(s"[UniversalEncoder] MIME detected: $mime")
 
-    // Reuse canonical MIME logic from UniversalExtractor (no duplication).
     if (UniversalExtractor.isTextLike(mime)) encodeTextFile(f, mime, client, textModel, chunking)
-    else if (mime.startsWith("image/")) encodeImageFile(f, mime, experimentalStubsEnabled, localModels)
-    else if (mime.startsWith("audio/")) encodeAudioFile(f, mime, experimentalStubsEnabled, localModels)
-    else if (mime.startsWith("video/")) encodeVideoFile(f, mime, experimentalStubsEnabled, localModels)
+    else if (mime.startsWith("image/")) encodeImageFile(f, mime, experimentalStubsEnabled, localModels, client)
+    else if (mime.startsWith("audio/")) encodeAudioFile(f, mime, experimentalStubsEnabled, localModels, client)
+    else if (mime.startsWith("video/")) encodeVideoFile(f, mime, experimentalStubsEnabled, localModels, client)
     else Left(EmbeddingError(None, s"Unsupported MIME for encoding: $mime", "encoder"))
   }
 
@@ -82,24 +81,44 @@ object UniversalEncoder {
         }
     }
 
-  private def notImpl(mod: String) =
-    Left(
-      EmbeddingError(
-        code = Some("501"),
-        message = s"$mod embeddings not implemented. Set ENABLE_EXPERIMENTAL_STUBS=true to enable demo stubs.",
-        provider = "encoder"
-      )
-    )
-
-  // ---------------- IMAGE (stub gated behind demo flag) ----------------
+  // ---------------- IMAGE ----------------
   private def encodeImageFile(
     file: File,
     mime: String,
     experimentalStubsEnabled: Boolean,
-    localModels: LocalEmbeddingModels
+    localModels: LocalEmbeddingModels,
+    client: EmbeddingClient
   ): Result[Seq[EmbeddingVector]] = {
-    if (!experimentalStubsEnabled) return notImpl("Image")
     val modelResult = ModelSelector.selectModel(Image, localModels)
+    
+    if (!experimentalStubsEnabled) {
+      return modelResult.flatMap { model =>
+        Try(java.nio.file.Files.readAllBytes(file.toPath)).toEither
+          .left.map(e => EmbeddingError(None, s"Failed to read image file: ${e.getMessage}", "encoder"))
+          .flatMap { bytes =>
+            val req = MultimediaEmbeddingRequest(
+              inputs = Seq(RawMediaInput(bytes, mime)),
+              model = model,
+              modality = Image,
+              meta = Map("mime" -> mime, "file" -> file.getName)
+            )
+            client.embedMultimodal(req).map { resp =>
+              val dim = model.dimensions
+              resp.embeddings.zipWithIndex.map { case (vec, i) =>
+                EmbeddingVector(
+                  id = s"${file.getName}#image_$i",
+                  modality = Image,
+                  model = model.name,
+                  dim = dim,
+                  values = l2(vec.map(_.toFloat).toArray),
+                  meta = resp.metadata ++ Map("mime" -> mime)
+                )
+              }
+            }
+          }
+      }
+    }
+
     modelResult.map { model =>
       val dim = model.dimensions
       // Limit dimension to prevent OOM in tests (max 8K dimensions)
@@ -119,15 +138,44 @@ object UniversalEncoder {
     }
   }
 
-  // ---------------- AUDIO (stub gated behind demo flag) ----------------
+  // ---------------- AUDIO ----------------
   private def encodeAudioFile(
     file: File,
     mime: String,
     experimentalStubsEnabled: Boolean,
-    localModels: LocalEmbeddingModels
+    localModels: LocalEmbeddingModels,
+    client: EmbeddingClient
   ): Result[Seq[EmbeddingVector]] = {
-    if (!experimentalStubsEnabled) return notImpl("Audio")
     val modelResult = ModelSelector.selectModel(Audio, localModels)
+    
+    if (!experimentalStubsEnabled) {
+      return modelResult.flatMap { model =>
+        Try(java.nio.file.Files.readAllBytes(file.toPath)).toEither
+          .left.map(e => EmbeddingError(None, s"Failed to read audio file: ${e.getMessage}", "encoder"))
+          .flatMap { bytes =>
+            val req = MultimediaEmbeddingRequest(
+              inputs = Seq(RawMediaInput(bytes, mime)),
+              model = model,
+              modality = Audio,
+              meta = Map("mime" -> mime, "file" -> file.getName)
+            )
+            client.embedMultimodal(req).map { resp =>
+              val dim = model.dimensions
+              resp.embeddings.zipWithIndex.map { case (vec, i) =>
+                EmbeddingVector(
+                  id = s"${file.getName}#audio_$i",
+                  modality = Audio,
+                  model = model.name,
+                  dim = dim,
+                  values = l2(vec.map(_.toFloat).toArray),
+                  meta = resp.metadata ++ Map("mime" -> mime)
+                )
+              }
+            }
+          }
+      }
+    }
+
     modelResult.map { model =>
       val dim = model.dimensions
       // Limit dimension to prevent OOM in tests (max 8K dimensions)
@@ -147,15 +195,44 @@ object UniversalEncoder {
     }
   }
 
-  // ---------------- VIDEO (stub gated behind demo flag) ----------------
+  // ---------------- VIDEO ----------------
   private def encodeVideoFile(
     file: File,
     mime: String,
     experimentalStubsEnabled: Boolean,
-    localModels: LocalEmbeddingModels
+    localModels: LocalEmbeddingModels,
+    client: EmbeddingClient
   ): Result[Seq[EmbeddingVector]] = {
-    if (!experimentalStubsEnabled) return notImpl("Video")
     val modelResult = ModelSelector.selectModel(Video, localModels)
+    
+    if (!experimentalStubsEnabled) {
+      return modelResult.flatMap { model =>
+        Try(java.nio.file.Files.readAllBytes(file.toPath)).toEither
+          .left.map(e => EmbeddingError(None, s"Failed to read video file: ${e.getMessage}", "encoder"))
+          .flatMap { bytes =>
+            val req = MultimediaEmbeddingRequest(
+              inputs = Seq(RawMediaInput(bytes, mime)),
+              model = model,
+              modality = Video,
+              meta = Map("mime" -> mime, "file" -> file.getName)
+            )
+            client.embedMultimodal(req).map { resp =>
+              val dim = model.dimensions
+              resp.embeddings.zipWithIndex.map { case (vec, i) =>
+                EmbeddingVector(
+                  id = s"${file.getName}#video_$i",
+                  modality = Video,
+                  model = model.name,
+                  dim = dim,
+                  values = l2(vec.map(_.toFloat).toArray),
+                  meta = resp.metadata ++ Map("mime" -> mime)
+                )
+              }
+            }
+          }
+      }
+    }
+
     modelResult.map { model =>
       val dim = model.dimensions
       // Limit dimension to prevent OOM in tests (max 8K dimensions)

@@ -1,0 +1,28 @@
+[info] welcome to sbt 1.11.0 (Oracle Corporation Java 20.0.2)
+[info] loading settings for project llm4s-build-build-build from metals.sbt...
+[info] loading project definition from /Users/krrishbiswas/Desktop/GSoC/llm4s/project/project/project
+[info] loading settings for project llm4s-build-build from metals.sbt...
+[info] loading project definition from /Users/krrishbiswas/Desktop/GSoC/llm4s/project/project
+[success] Generated .bloop/llm4s-build-build.json
+[success] Total time: 1 s, completed Feb 22, 2026, 9:42:02 PM
+[info] loading settings for project llm4s-build from metals.sbt, plugins.sbt...
+[info] loading project definition from /Users/krrishbiswas/Desktop/GSoC/llm4s/project
+[success] Generated .bloop/llm4s-build.json
+[success] Total time: 0 s, completed Feb 22, 2026, 9:42:03 PM
+[info] loading settings for project llm4s from build.sbt...
+[info] resolving key references (12165 settings) ...
+[info] set current project to llm4s (in build file:/Users/krrishbiswas/Desktop/GSoC/llm4s/)
+[info] compiling 6 Scala sources to /Users/krrishbiswas/Desktop/GSoC/llm4s/modules/core/target/scala-3.7.1/classes ...
+[warn] -- [E198] Unused Symbol Warning: /Users/krrishbiswas/Desktop/GSoC/llm4s/modules/core/src/main/scala/org/llm4s/llmconnect/encoding/UniversalEncoder.scala:84:14 
+[warn] 84 |  private def notImpl(mod: String) =
+[warn]    |              ^^^^^^^
+[warn]    |              unused private member
+[warn] -- [E198] Unused Symbol Warning: /Users/krrishbiswas/Desktop/GSoC/llm4s/modules/core/src/main/scala/org/llm4s/llmconnect/provider/EmbeddingProvider.scala:48:22 
+[warn] 48 |  def embedMultimodal(request: org.llm4s.llmconnect.model.MultimediaEmbeddingRequest): Result[EmbeddingResponse] =
+[warn]    |                      ^^^^^^^
+[warn]    |                      unused explicit parameter
+[error] No warnings can be incurred under -Werror (or -Xfatal-warnings)
+[warn] two warnings found
+[error] one error found
+[error] (core / Compile / compileIncremental) Compilation failed
+[error] Total time: 3 s, completed Feb 22, 2026, 9:42:07 PM
