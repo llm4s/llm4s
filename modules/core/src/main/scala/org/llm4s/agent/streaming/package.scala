@@ -82,7 +82,7 @@ package org.llm4s.agent
  * val totalTextLength = events.collect { case TextDelta(d, _) => d.length }.sum
  * }}}
  *
- * @see [[Agent.runWithEvents]] for the streaming API
+ * @see [[org.llm4s.agent.Agent]] for the streaming API (`runWithEvents`)
  * @see [[AgentEvent]] for the event type hierarchy
  */
 package object streaming

@@ -90,7 +90,7 @@ case class DuckDuckGoSearchConfig(
  *     agent.run("What is Scala programming language?", tools)
  *
  *   case Left(error) =>
- *     println(s"Failed to load DuckDuckGo config: $error")
+ *     println(s"Failed to load DuckDuckGo config: $$error")
  * }
  * }}}
  *

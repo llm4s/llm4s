@@ -156,7 +156,7 @@ class ToolBuilder[T, R: ReadWriter] private (
    *
    * Prefer [[buildSafe]] which returns `Result[ToolFunction]` and avoids throwing.
    *
-   * @throws IllegalStateException if handler is not defined
+   * @throws java.lang.IllegalStateException if handler is not defined
    */
   @deprecated("Use buildSafe() which returns Result[ToolFunction] for safe error handling", "0.2.9")
   def build(): ToolFunction[T, R] = handler match {

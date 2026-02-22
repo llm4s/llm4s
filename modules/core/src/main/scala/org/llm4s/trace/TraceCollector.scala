@@ -19,7 +19,7 @@ import java.util.UUID
  *
  *  @param store          destination for all recorded spans
  *  @param initialTraceId optional fixed trace ID; a random UUID is used when absent
- *  @tparam F             effect type of the backing store; an implicit [[LiftToResult]]
+ *  @tparam F             effect type of the backing store; an implicit [[org.llm4s.util.LiftToResult]]
  *                        instance must be available to bridge `F[A]` into `Result[A]`
  */
 class TraceCollectorTracing[F[_]](

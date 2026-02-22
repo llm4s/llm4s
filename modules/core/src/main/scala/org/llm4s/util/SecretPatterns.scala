@@ -4,7 +4,7 @@ import scala.util.matching.Regex
 
 /**
  * Library of credential-detection patterns used by [[org.llm4s.agent.guardrails.builtin.SecretLeakGuardrail]]
- * and [[Redaction]].
+ * and `Redaction`.
  *
  * All regex matching is performed via [[SecretType]] instances.  Each type
  * knows its own pattern, human-readable name, and the placeholder text to use
@@ -40,7 +40,7 @@ object SecretPatterns {
    *
    * Each instance carries:
    *  - `name`        – human-readable label used in error messages
-   *  - `pattern`     – the [[Regex]] that recognises this credential
+   *  - `pattern`     – the [[scala.util.matching.Regex]] that recognises this credential
    *  - `placeholder` – what to write in place of the secret when masking
    */
   sealed abstract class SecretType(

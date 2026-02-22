@@ -184,7 +184,7 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
    * Generate a specific format of tool definitions for a particular LLM provider.
    *
    * @param provider Provider name (case-insensitive): `"openai"`, `"anthropic"`, `"gemini"`
-   * @throws IllegalArgumentException for unsupported provider names
+   * @throws java.lang.IllegalArgumentException for unsupported provider names
    */
   @deprecated("Use getToolDefinitionsSafe() which returns Result[ujson.Value] for safe error handling", "0.2.9")
   def getToolDefinitions(provider: String): ujson.Value = getToolDefinitionsSafe(provider) match {

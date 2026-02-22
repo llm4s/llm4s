@@ -60,7 +60,7 @@ object LiftToResult {
   }
 
   /**
-   * Creates a [[LiftToResult]] instance for [[Option]]:
+   * Creates a [[LiftToResult]] instance for [[scala.Option]]:
    * `Some(a)` lifts to `Right(a)`; `None` lifts to `Left(onNone)`.
    *
    *  There is no implicit instance for `Option` because there is no canonical error
