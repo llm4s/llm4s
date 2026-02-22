@@ -9,7 +9,16 @@ import java.util.concurrent.atomic.AtomicInteger
 import scala.util.control.NonFatal
 
 /**
- * Request model for tool calls
+ * Carries the name and parsed JSON arguments for a single tool invocation.
+ *
+ * Produced by the agent framework from [[org.llm4s.llmconnect.model.ToolCall]]
+ * values in the LLM response. `arguments` is a pre-parsed `ujson.Value` (not a
+ * raw JSON string), so tool implementations receive structured data directly.
+ *
+ * @param functionName Name of the tool to invoke; matched against [[ToolFunction.name]]
+ *                     in [[ToolRegistry.execute]].
+ * @param arguments    Parsed JSON arguments; typically a JSON object whose fields
+ *                     correspond to the tool's declared [[Schema]].
  */
 case class ToolCallRequest(
   functionName: String,
@@ -46,7 +55,19 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
   def getTool(name: String): Option[ToolFunction[_, _]] = tools.find(_.name == name)
 
   /**
-   * Execute a tool call synchronously
+   * Executes a tool call synchronously, wrapping any thrown exception.
+   *
+   * Delegates to [[org.llm4s.core.safety.Safety.safely]] so that exceptions
+   * thrown inside the tool implementation are caught and converted to
+   * `ToolCallError.ExecutionError` rather than propagating to the caller.
+   * This means callers always receive a typed `Either` and never need to
+   * guard against unexpected exceptions from tool code.
+   *
+   * @param request The tool name and pre-parsed JSON arguments.
+   * @return `Right(result)` on success; `Left(ToolCallError.UnknownFunction)`
+   *         when no tool with the given name is registered;
+   *         `Left(ToolCallError.ExecutionError)` when the tool throws or
+   *         returns a `Left` itself.
    */
   def execute(request: ToolCallRequest): Either[ToolCallError, ujson.Value] =
     tools.find(_.name == request.functionName) match {
