@@ -839,30 +839,4 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     mockClient.getContextBudget(HeadroomPercent.Standard) shouldBe 7360
   }
 
-  // ============ Deprecated API tests ============
-
-  "Agent.initialize (deprecated)" should "initialize agent state successfully" in {
-    val completion = createCompletion("Test response")
-    val mockClient = new MockLLMClient(Seq(Right(completion)))
-    val agent      = new Agent(mockClient)
-
-    testTools.fold(
-      e => fail(s"Tool creation failed: ${e.formatted}"),
-      tools => {
-        @scala.annotation.nowarn("cat=deprecation")
-        val state = agent.initialize(
-          query = "Test query",
-          tools = tools,
-          handoffs = Seq.empty,
-          systemPromptAddition = None,
-          completionOptions = CompletionOptions()
-        )
-
-        state.initialQuery shouldBe Some("Test query")
-        state.status shouldBe AgentStatus.InProgress
-        state.conversation.messages.size shouldBe 1
-        state.tools.tools.map(_.name) shouldBe tools.tools.map(_.name)
-      }
-    )
-  }
 }

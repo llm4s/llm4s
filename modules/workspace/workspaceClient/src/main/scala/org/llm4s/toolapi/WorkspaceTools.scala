@@ -421,8 +421,7 @@ object WorkspaceTools {
           "Command execution complete - exitCode: " + execResult.exitCode +
             " stdout: " + execResult.stdout.length + " stderr: " + execResult.stderr.length + "b"
         )
-        println(execResult.stdout)
-        println(execResult.stderr)
+
         ujson.Obj(
           "exit_code" -> execResult.exitCode,
           "stdout"    -> execResult.stdout,

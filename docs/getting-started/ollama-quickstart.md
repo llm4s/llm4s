@@ -185,7 +185,7 @@ object HelloOllama extends App {
       println(s"Response from ${completion.model}:")
       println(completion.message.content)
     case Left(error) =>
-      println(s"Error: ${error.formatted}")
+      Console.err.println(s"Error: ${error.formatted}")
   }
 }
 ```
@@ -376,7 +376,7 @@ object StreamingOllama extends App {
       println("\n--- Streaming complete! ---")
       println(s"Total content: ${completion.message.content}")
     case Left(error) =>
-      println(s"Error: ${error.formatted}")
+      Console.err.println(s"Error: ${error.formatted}")
   }
 }
 ```
@@ -431,7 +431,7 @@ object OllamaTools extends App {
       println("Final response:")
       println(state.conversation.messages.last.content)
     case Left(error) =>
-      println(s"Error: ${error.formatted}")
+      Console.err.println(s"Error: ${error.formatted}")
   }
 }
 ```

@@ -112,31 +112,6 @@ object ListDirectoryTool {
    */
   val toolSafe: Result[ToolFunction[Map[String, Any], ListDirectoryResult]] = createSafe()
 
-  /**
-   * Create a list directory tool with the given configuration.
-   *
-   * @throws IllegalStateException if tool creation fails
-   */
-  @deprecated("Use createSafe() which returns Result[ToolFunction] for safe error handling", "0.2.9")
-  def create(config: FileConfig = FileConfig()): ToolFunction[Map[String, Any], ListDirectoryResult] =
-    createSafe(config) match {
-      case Right(t) => t
-      case Left(e)  => throw new IllegalStateException(s"ListDirectoryTool.create failed: ${e.formatted}")
-    }
-
-  /**
-   * Default list directory tool with standard configuration.
-   *
-   * @throws IllegalStateException if tool initialization fails
-   */
-  @deprecated("Use toolSafe which returns Result[ToolFunction] for safe error handling", "0.2.9")
-  lazy val tool: ToolFunction[Map[String, Any], ListDirectoryResult] =
-    toolSafe match {
-      case Right(t) => t
-      case Left(e) =>
-        throw new IllegalStateException(s"ListDirectoryTool.tool lazy initialization failed: ${e.formatted}")
-    }
-
   private def listDirectory(
     pathStr: String,
     maxEntries: Int,

@@ -9,11 +9,41 @@ import scala.util.control.NonFatal
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.llm4s.util.Redaction
 
+/**
+ * Type-class describing a Brave Search category (Web, Image, Video, News).
+ *
+ * Each case object encodes the API endpoint, the tool name exposed to the LLM,
+ * a human-readable description, result parsing logic, and how to map a
+ * [[SafeSearch]] level to the string the Brave API expects.
+ *
+ * @tparam R The Scala type that represents a search result for this category
+ */
 sealed trait BraveSearchCategory[R] {
+
+  /** API path segment appended to the Brave Search base URL. */
   def endpoint: String
+
+  /** Name used to register this tool with a [[org.llm4s.toolapi.ToolRegistry]]. */
   def toolName: String
+
+  /** Natural-language description shown to the LLM. */
   def description: String
+
+  /**
+   * Parse the raw Brave API response JSON into a typed result.
+   *
+   * @param json  The parsed API response body
+   * @param query The original search query (included in the result for traceability)
+   */
   def parseResults(json: ujson.Value, query: String): R
+
+  /**
+   * Map a [[SafeSearch]] level to the string expected by this category's API endpoint.
+   *
+   * Some categories (e.g. Image) do not support all levels and remap them.
+   *
+   * @param safeSearch The requested safe-search level
+   */
   def mapSafeSearch(safeSearch: SafeSearch): String
 }
 object BraveSearchCategory {
@@ -114,14 +144,28 @@ object BraveSearchCategory {
     }
   }
 }
+
+/**
+ * Safe-search filtering level for Brave Search API requests.
+ *
+ * Controls whether adult or otherwise sensitive content is filtered from results.
+ */
 sealed trait SafeSearch {
+
+  /** The raw string value sent to the Brave Search API. */
   def value: String
 }
 
 object SafeSearch {
-  case object Off      extends SafeSearch { val value = "off"      }
+
+  /** No content filtering — all results are returned. */
+  case object Off extends SafeSearch { val value = "off" }
+
+  /** Moderate filtering — explicit imagery is suppressed but text results are not filtered. */
   case object Moderate extends SafeSearch { val value = "moderate" }
-  case object Strict   extends SafeSearch { val value = "strict"   }
+
+  /** Strict filtering — explicit content is fully suppressed. */
+  case object Strict extends SafeSearch { val value = "strict" }
 
   /**
    * Parse a string value from configuration into a SafeSearch enum.
@@ -136,43 +180,67 @@ object SafeSearch {
   }
 }
 
+/**
+ * Runtime configuration for Brave Search API requests.
+ *
+ * @param timeoutMs   HTTP request timeout in milliseconds
+ * @param count       Number of results to return per request
+ * @param safeSearch  Safe-search filtering level (default: [[SafeSearch.Strict]])
+ * @param extraParams Additional key-value parameters merged into every request
+ */
 case class BraveSearchConfig(
   timeoutMs: Int = 10000,
   count: Int = 5,
   safeSearch: SafeSearch = SafeSearch.Strict,
   extraParams: Map[String, ujson.Value] = Map.empty
 )
+
+/** News search result container returned by [[BraveSearchCategory.News]]. */
 case class BraveNewsSearchResult(
   query: String,
   results: List[BraveNewsResult]
 )
+
+/** A single news article result from the Brave News Search API. */
 case class BraveNewsResult(
   title: String,
   url: String,
   description: String
 )
+
+/** Video search result container returned by [[BraveSearchCategory.Video]]. */
 case class BraveVideoSearchResult(
   query: String,
   results: List[BraveVideoResult]
 )
+
+/** A single video result from the Brave Video Search API. */
 case class BraveVideoResult(
   title: String,
   url: String,
   description: String
 )
+
+/** Image search result container returned by [[BraveSearchCategory.Image]]. */
 case class BraveImageSearchResult(
   query: String,
   results: List[BraveImageResult]
 )
+
+/** A single image result from the Brave Image Search API. */
 case class BraveImageResult(
   title: String,
   url: String,
   thumbnail: String
 )
+
+/** Web search result container returned by [[BraveSearchCategory.Web]]. */
 case class BraveWebSearchResult(
   query: String,
   results: List[BraveWebResult]
 )
+
+/** A single organic web result from the Brave Web Search API. */
 case class BraveWebResult(
   title: String,
   url: String,

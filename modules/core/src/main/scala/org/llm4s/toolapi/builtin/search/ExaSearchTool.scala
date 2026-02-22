@@ -9,16 +9,37 @@ import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.llm4s.util.Redaction
 import scala.util.control.NonFatal
 
+/**
+ * Search algorithm type used by the Exa Search API.
+ *
+ * Controls the ranking and crawling strategy applied to a query.
+ */
 sealed trait SearchType {
+
+  /** The raw string value sent to the Exa API. */
   def value: String
 }
 
 object SearchType {
-  case object Auto   extends SearchType { val value = "auto"   }
-  case object Neural extends SearchType { val value = "neural" }
-  case object Fast   extends SearchType { val value = "fast"   }
-  case object Deep   extends SearchType { val value = "deep"   }
 
+  /** Exa selects the best strategy automatically (recommended for most queries). */
+  case object Auto extends SearchType { val value = "auto" }
+
+  /** Neural semantic search — best for natural-language, meaning-based queries. */
+  case object Neural extends SearchType { val value = "neural" }
+
+  /** Keyword-style fast search — best for exact-match or identifier lookups. */
+  case object Fast extends SearchType { val value = "fast" }
+
+  /** Deep crawl search — most thorough but slowest; use when quality matters most. */
+  case object Deep extends SearchType { val value = "deep" }
+
+  /**
+   * Parse a raw string from configuration or user input into a [[SearchType]].
+   *
+   * @param value Case-insensitive string (e.g. `"auto"`, `"neural"`)
+   * @return `Some(SearchType)` if recognised, `None` otherwise
+   */
   def fromString(value: String): Option[SearchType] = value.trim.toLowerCase match {
     case "auto"   => Some(Auto)
     case "neural" => Some(Neural)
@@ -28,7 +49,15 @@ object SearchType {
   }
 }
 
+/**
+ * Content category filter for the Exa Search API.
+ *
+ * Restricts search results to pages belonging to a specific vertical.
+ * Use with [[ExaSearchConfig.category]] to narrow the result set.
+ */
 sealed trait Category {
+
+  /** The raw string value sent to the Exa API. */
   def value: String
 }
 
@@ -43,6 +72,12 @@ object Category {
   case object LinkedinProfile extends Category { val value = "linkedin profile" }
   case object FinancialReport extends Category { val value = "financial report" }
 
+  /**
+   * Parse a raw string from configuration or user input into a [[Category]].
+   *
+   * @param value Case-insensitive string matching one of the category values
+   * @return `Some(Category)` if recognised, `None` otherwise
+   */
   def fromString(value: String): Option[Category] = value.trim.toLowerCase match {
     case "company"          => Some(Company)
     case "research paper"   => Some(ResearchPaper)
@@ -85,6 +120,22 @@ case class ExaSearchConfig(
   extraParams: Map[String, ujson.Value] = Map.empty
 )
 
+/**
+ * A single result returned by the Exa Search API.
+ *
+ * @param title            Page title
+ * @param url              Page URL
+ * @param id               Exa's internal document identifier
+ * @param publishedDate    ISO-8601 date string of the page's publication date
+ * @param author           Author name, if available
+ * @param text             Extracted page text (truncated to `maxCharacters`)
+ * @param highlights       Relevant text snippets highlighted by Exa
+ * @param highlightScores  Relevance scores for each highlight
+ * @param summary          AI-generated summary of the page, if requested
+ * @param favicon          URL of the site's favicon
+ * @param image            URL of the page's representative image
+ * @param subPages         Nested sub-page results for deep crawl searches
+ */
 case class ExaResult(
   title: String,
   url: String,
@@ -104,6 +155,14 @@ object ExaResult {
   implicit val exaResultRW: ReadWriter[ExaResult] = macroRW[ExaResult]
 }
 
+/**
+ * Container for search results returned by the Exa Search API.
+ *
+ * @param query      The original search query
+ * @param results    Ordered list of matching results
+ * @param requestId  Exa's unique identifier for this request (useful for debugging)
+ * @param searchType The search type that was actually applied by Exa
+ */
 case class ExaSearchResult(
   query: String,
   results: List[ExaResult],

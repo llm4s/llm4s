@@ -1145,7 +1145,7 @@ All examples are in the [samples directory](https://github.com/llm4s/llm4s/tree/
 
 ## Next Steps
 
-- **[User Guide](/guide/basic-usage)** - Learn concepts in depth
+- **[User Guide](../guide/basic-usage)** - Learn concepts in depth
 - **[API Reference](/api/llm-client)** - Detailed API documentation
 - **[Discord Community](https://discord.gg/4uvTPn6qww)** - Get help and share projects
 

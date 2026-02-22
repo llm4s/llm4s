@@ -945,12 +945,40 @@ final class RAG private (
 
   private def embedQuery(query: String): Result[Array[Float]] = {
     val request = EmbeddingRequest(Seq(query), embeddingModelConfig)
-    tracedEmbeddingClient.embed(request).map(_.embeddings.head.map(_.toFloat).toArray)
+    tracedEmbeddingClient
+      .embed(request)
+      .flatMap(
+        _.embeddings.headOption
+          .toRight(EmbeddingError(None, "Embedding provider returned empty embeddings list", embeddingModelConfig.name))
+          .map(_.map(_.toFloat).toArray)
+      )
   }
 
   private def embedBatch(texts: Seq[String]): Result[Seq[Array[Float]]] = {
     val request = EmbeddingRequest(texts, embeddingModelConfig)
-    tracedEmbeddingClient.embed(request).map(_.embeddings.map(_.map(_.toFloat).toArray))
+    tracedEmbeddingClient.embed(request).flatMap { response =>
+      if (response.embeddings.isEmpty) {
+        Left(
+          EmbeddingError(
+            None,
+            "Embedding provider returned empty embeddings list",
+            embeddingModelConfig.name
+          )
+        )
+      } else if (response.embeddings.length != texts.length) {
+        Left(
+          EmbeddingError(
+            None,
+            s"Embedding provider returned ${response.embeddings.length} ${
+                if (response.embeddings.length == 1) "embedding" else "embeddings"
+              } for batch of ${texts.length} texts",
+            embeddingModelConfig.name
+          )
+        )
+      } else {
+        Right(response.embeddings.map(_.map(_.toFloat).toArray))
+      }
+    }
   }
 
   private def searchWithStrategy(

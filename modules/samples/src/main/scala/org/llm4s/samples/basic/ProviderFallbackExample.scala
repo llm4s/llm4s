@@ -82,6 +82,7 @@ object ProviderFallbackExample extends App {
       )
     )
   )
+
   val providers: Seq[(String, LLMClient)] =
     providerConfigs.flatMap { case (name, config) =>
       LLMConnect.getClient(config) match {
@@ -94,6 +95,7 @@ object ProviderFallbackExample extends App {
           None
       }
     }
+
   def completeWithFallback(prompt: String): Either[String, String] = {
     val conversation = Conversation(Seq(UserMessage(prompt)))
     val options      = CompletionOptions()
@@ -111,6 +113,7 @@ object ProviderFallbackExample extends App {
         }
     }
   }
+
   val result =
     completeWithFallback("Hello, world! Which provider am I talking to?")
   result match {

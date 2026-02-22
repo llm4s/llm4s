@@ -3,7 +3,8 @@ package org.llm4s.speech.processing
 import org.llm4s.error.ProcessingError
 import org.llm4s.types.Result
 import org.llm4s.speech.{ AudioFormat, AudioMeta, GeneratedAudio }
-import org.llm4s.speech.io.BinaryReader._
+import org.llm4s.speech.io.BinaryReader
+import BinaryReader._
 
 import java.io.{ ByteArrayInputStream, ByteArrayOutputStream, IOException }
 import javax.sound.sampled.{
@@ -68,13 +69,9 @@ object AudioPreprocessing {
         val avg: Short   = (sum / meta.numChannels).toShort
         val outByteIndex = frameIndex * 2
 
-        // Use implicit binary writer for cleaner little-endian writing
-        val tempOut = new ByteArrayOutputStream(2)
-        val dos     = new java.io.DataOutputStream(tempOut)
-        dos.write(avg)
-        val avgBytes = tempOut.toByteArray
-        out(outByteIndex) = avgBytes(0)
-        out(outByteIndex + 1) = avgBytes(1)
+        // Write avg as little-endian short (low byte first)
+        out(outByteIndex) = (avg & 0xff).toByte
+        out(outByteIndex + 1) = ((avg >> 8) & 0xff).toByte
       }
 
       Right(out -> meta.copy(numChannels = 1))

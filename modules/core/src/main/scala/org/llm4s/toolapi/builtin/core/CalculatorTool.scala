@@ -80,18 +80,6 @@ object CalculatorTool {
       } yield result
     }.buildSafe()
 
-  /**
-   * The calculator tool instance.
-   *
-   * @throws IllegalStateException if tool initialization fails
-   */
-  @deprecated("Use toolSafe which returns Result[ToolFunction] for safe error handling", "0.2.9")
-  lazy val tool: ToolFunction[Map[String, Any], CalculatorResult] =
-    toolSafe match {
-      case Right(t) => t
-      case Left(e) => throw new IllegalStateException(s"CalculatorTool.tool lazy initialization failed: ${e.formatted}")
-    }
-
   private def calculate(operation: String, a: Double, bOpt: Option[Double]): Either[String, CalculatorResult] = {
     def requireB: Either[String, Double] =
       bOpt.toRight(s"Operation '$operation' requires two operands (a and b)")

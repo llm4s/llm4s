@@ -1,10 +1,10 @@
 package org.llm4s.samples.basic
 
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi._
 import org.llm4s.toolapi.tools.WeatherTool
+import org.slf4j.LoggerFactory
 
 /**
  * Test example for Google Gemini provider.
@@ -15,51 +15,38 @@ import org.llm4s.toolapi.tools.WeatherTool
  * sbt "samples/runMain org.llm4s.samples.basic.GeminiTestExample"
  * }}}
  */
+
 object GeminiTestExample {
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def main(args: Array[String]): Unit = {
-    // Get API key from environment
-    val apiKey = sys.env.getOrElse(
-      "GOOGLE_API_KEY", {
-        println("Error: GOOGLE_API_KEY environment variable not set")
-        sys.exit(1)
-        ""
+
+    val result = for {
+      providerCfg <- org.llm4s.config.Llm4sConfig.provider()
+      client      <- LLMConnect.getClient(providerCfg)
+      _ = {
+        logger.info("=" * 60)
+        logger.info("Gemini Provider Test Suite")
+        logger.info("=" * 60)
+
+        testSimpleCompletion(client)
+        testStreaming(client)
+        testToolCalling(client)
+
+        logger.info("=" * 60)
+        logger.info("All tests complete!")
+        logger.info("=" * 60)
       }
+    } yield ()
+
+    result.fold(
+      err => logger.error(s"Configuration error: ${err.formatted}"),
+      identity
     )
-
-    val config = GeminiConfig.fromValues(
-      modelName = "gemini-2.5-flash",
-      apiKey = apiKey,
-      baseUrl = "https://generativelanguage.googleapis.com/v1beta"
-    )
-
-    println("=" * 60)
-    println("Gemini Provider Test Suite")
-    println("=" * 60)
-
-    // Test 1: Simple completion
-    println("\n" + "=" * 60)
-    println("TEST 1: Simple Completion")
-    println("=" * 60)
-    testSimpleCompletion(config)
-
-    // Test 2: Streaming
-    println("\n" + "=" * 60)
-    println("TEST 2: Streaming")
-    println("=" * 60)
-    testStreaming(config)
-
-    // Test 3: Tool calling
-    println("\n" + "=" * 60)
-    println("TEST 3: Tool Calling")
-    println("=" * 60)
-    testToolCalling(config)
-
-    println("\n" + "=" * 60)
-    println("All tests complete!")
-    println("=" * 60)
   }
 
-  private def testSimpleCompletion(config: GeminiConfig): Unit = {
+  private def testSimpleCompletion(client: org.llm4s.llmconnect.LLMClient): Unit = {
+
     val conversation = Conversation(
       Seq(
         SystemMessage("You are a helpful assistant. Be concise."),
@@ -67,64 +54,59 @@ object GeminiTestExample {
       )
     )
 
-    val result = for {
-      client     <- LLMConnect.getClient(config)
-      completion <- client.complete(conversation)
-    } yield completion
-
-    result match {
+    client.complete(conversation) match {
       case Right(completion) =>
-        println(s"✅ Simple completion SUCCESS")
-        println(s"   Model: ${completion.model}")
-        println(s"   Response: ${completion.content.take(100)}")
+        logger.info(" Simple completion SUCCESS")
+        logger.info(s"   Model: ${completion.model}")
+        logger.info(s"   Response: ${completion.message.content.take(100)}")
         completion.usage.foreach { u =>
-          println(s"   Tokens: ${u.totalTokens} (${u.promptTokens} prompt + ${u.completionTokens} completion)")
+          logger.info(s"   Tokens: ${u.totalTokens} (${u.promptTokens} prompt + ${u.completionTokens} completion)")
         }
+
       case Left(error) =>
-        println(s"❌ Simple completion FAILED: ${error.formatted}")
+        logger.error(s" Simple completion FAILED: ${error.formatted}")
     }
   }
 
-  private def testStreaming(config: GeminiConfig): Unit = {
+  private def testStreaming(client: org.llm4s.llmconnect.LLMClient): Unit = {
+
     val conversation = Conversation(
       Seq(
         SystemMessage("You are a helpful assistant."),
-        UserMessage("Count from 1 to 5, with each number on a new line.")
+        UserMessage("Count from 1 to 5, each on new line.")
       )
     )
 
     var chunkCount  = 0
     val fullContent = new StringBuilder()
 
-    val result = for {
-      client <- LLMConnect.getClient(config)
-      completion <- client.streamComplete(
-        conversation,
-        CompletionOptions(),
-        onChunk = { chunk =>
-          chunkCount += 1
-          chunk.content.foreach { c =>
-            fullContent.append(c)
-            print(c) // Show streaming in real-time
-          }
+    val result = client.streamComplete(
+      conversation,
+      CompletionOptions(),
+      onChunk = { chunk =>
+        chunkCount += 1
+        chunk.content.foreach { c =>
+          fullContent.append(c)
+          print(c)
         }
-      )
-    } yield completion
+      }
+    )
 
-    println() // New line after streaming output
+    println()
 
     result match {
       case Right(completion) =>
-        println(s"✅ Streaming SUCCESS")
-        println(s"   Chunks received: $chunkCount")
-        println(s"   Total content length: ${fullContent.length}")
-        println(s"   Content matches completion: ${completion.content == fullContent.toString()}")
+        logger.info("\n Streaming SUCCESS")
+        logger.info(s"   Chunks received: $chunkCount")
+        logger.info(s"   Total content length: ${fullContent.length}")
+        logger.info(s"   Content matches completion: ${completion.message.content == fullContent.toString()}")
+
       case Left(error) =>
-        println(s"❌ Streaming FAILED: ${error.formatted}")
+        logger.error(s" Streaming FAILED: ${error.formatted}")
     }
   }
 
-  private def testToolCalling(config: GeminiConfig): Unit =
+  private def testToolCalling(client: org.llm4s.llmconnect.LLMClient): Unit =
     WeatherTool.toolSafe match {
       case Left(err) => println(s"Failed to load weather tool: ${err.formatted}")
       case Right(weatherTool) =>
@@ -139,13 +121,8 @@ object GeminiTestExample {
         )
         val options = CompletionOptions(tools = Seq(weatherTool))
 
-        val result = for {
-          client     <- LLMConnect.getClient(config)
-          completion <- client.complete(conversation, options)
-        } yield (client, completion)
-
-        result match {
-          case Right((client, completion)) =>
+        client.complete(conversation, options) match {
+          case Right(completion) =>
             if (completion.toolCalls.nonEmpty) {
               println(s"✅ Tool calling detected")
               completion.toolCalls.foreach { tc =>

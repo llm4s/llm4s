@@ -112,6 +112,7 @@ lazy val commonSettings = Seq(
     Deps.monocleMacro,
     Deps.scalatest % Test,
     Deps.scalamock % Test,
+    Deps.scalatestplusScalacheck % Test,
     Deps.fansi,
     Deps.postgres,
     Deps.sqlite,

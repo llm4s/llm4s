@@ -11,6 +11,11 @@ Comprehensive guides for LLM4S features.
 
 ## Available Guides
 
+### Fundamentals
+
+- **[Basic Usage](basic-usage)** - Get started with LLM calls, client creation, and error handling
+- **[Providers](providers)** - Overview of supported providers and how to configure them
+
 ### Agent Framework
 
 - **[Agents Overview](agents/)** - Build LLM-powered agents with tools, guardrails, and multi-turn conversations

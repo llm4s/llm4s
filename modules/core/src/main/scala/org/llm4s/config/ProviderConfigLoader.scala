@@ -104,6 +104,26 @@ private[config] object ProviderConfigLoader {
       ProviderRoot.apply
     )
 
+  /**
+   * Loads a [[ProviderConfig]] from `source`.
+   *
+   * Reads the `llm4s` config tree from `source`, parses `llm4s.llm.model`
+   * to determine the provider prefix (format: `provider/model`, e.g.
+   * `"openai/gpt-4o"`), then reads the matching provider section for
+   * credentials and endpoint.
+   *
+   * When the model spec lacks a provider prefix (e.g. `"gpt-4o"` alone),
+   * the loader infers the provider from `llm4s.openai.baseUrl`: a URL
+   * containing `"openrouter.ai"` selects OpenRouter; anything else selects
+   * OpenAI.
+   *
+   * @param source PureConfig source to read from; use `ConfigSource.default`
+   *               in production to read environment variables and
+   *               `application.conf`.
+   * @return the typed provider config, or a [[org.llm4s.error.ConfigurationError]]
+   *         when `LLM_MODEL` is absent, the provider prefix is unrecognised,
+   *         or a required credential variable is missing.
+   */
   def load(source: ConfigSource): Result[ProviderConfig] = {
     val rootEither = source.at("llm4s").load[ProviderRoot]
 
@@ -115,6 +135,16 @@ private[config] object ProviderConfigLoader {
       .flatMap(buildProviderConfig)
   }
 
+  /**
+   * Reads the OpenAI API key from `source` without constructing a full provider config.
+   *
+   * Used by the embeddings subsystem, which shares the OpenAI API key for
+   * embedding requests even when a different provider is selected for the LLM.
+   *
+   * @param source PureConfig source to read from.
+   * @return the API key string, or a [[org.llm4s.error.ConfigurationError]]
+   *         when `OPENAI_API_KEY` / `llm4s.openai.apiKey` is absent or blank.
+   */
   def loadOpenAISharedApiKey(source: ConfigSource): Result[String] = {
     val rootEither = source.at("llm4s").load[ProviderRoot]
 

@@ -1,7 +1,5 @@
 package org.llm4s.toolapi
 
-import scala.annotation.nowarn
-
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -284,36 +282,6 @@ class ToolFunctionSpec extends AnyFlatSpec with Matchers {
 
     val result = builder.buildSafe()
     result.isLeft shouldBe true
-  }
-
-  it should "build a tool via deprecated build() when handler is defined" in {
-    val schema = Schema.`object`[Map[String, Any]]("Params")
-
-    @nowarn("cat=deprecation")
-    val tool = ToolBuilder[Map[String, Any], EmptyResult](
-      "test",
-      "Test",
-      schema
-    ).withHandler(_ => Right(EmptyResult(success = true)))
-      .build()
-
-    tool.name shouldBe "test"
-  }
-
-  it should "throw IllegalStateException via deprecated build() when handler is not defined" in {
-    val schema = Schema.`object`[Map[String, Any]]("Params")
-
-    @nowarn("cat=deprecation")
-    val result = scala.util.Try {
-      ToolBuilder[Map[String, Any], EmptyResult](
-        "no_handler",
-        "No handler defined",
-        schema
-      ).build()
-    }
-
-    result.isFailure shouldBe true
-    result.failed.get shouldBe a[IllegalStateException]
   }
 
   it should "allow replacing handler with withHandler" in {

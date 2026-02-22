@@ -77,7 +77,7 @@ At `DEBUG` level (not recommended for production):
 
 ## Tracing for Observability
 
-LLM4S supports four tracing modes:
+LLM4S supports five tracing backends:
 
 | Mode | Use Case | Configuration |
 |------|----------|---------------|
@@ -85,6 +85,9 @@ LLM4S supports four tracing modes:
 | `opentelemetry` | Integration with existing APM | `TRACING_MODE=opentelemetry` |
 | `console` | Local development/debugging | `TRACING_MODE=console` |
 | `noop` | Disabled | `TRACING_MODE=noop` |
+| `collector` | In-process queryable store | Programmatic (see below) |
+
+All backends implement the `Tracing` trait and can be composed with `TracingComposer.combine()`.
 
 ### Configuration
 
@@ -121,6 +124,166 @@ This requires the `llm4s-trace-opentelemetry` module:
 
 ```scala
 libraryDependencies += "org.llm4s" %% "llm4s-trace-opentelemetry" % llm4sVersion
+```
+
+---
+
+## In-Process Trace Collection
+
+`TraceCollectorTracing` + `InMemoryTraceStore` provide a fully queryable trace store
+that runs entirely within the JVM — no external service required. Recorded spans can be
+filtered, paginated, and serialized to JSON.
+
+This is the primary backend for **unit testing** and for **in-process analytics** (latency
+breakdowns, cache hit rates, token cost per span kind).
+
+### Quick Start
+
+```scala
+import org.llm4s.trace._
+import org.llm4s.trace.store._
+import org.llm4s.trace.model._
+
+val store  = InMemoryTraceStore()
+// apply returns Result[TraceCollectorTracing]; InMemoryTraceStore never fails
+val tracer = TraceCollectorTracing(store).getOrElse(sys.error("tracing init failed"))
+
+// pass tracer to any agent run
+agent.run("query", tools, tracing = tracer)
+
+// retrieve all spans for this run
+val spans = store.getSpans(tracer.traceId)
+```
+
+### Querying Traces
+
+`TraceStore.queryTraces` accepts a `TraceQuery` with optional filters and cursor-based
+pagination. All filters combine with AND semantics.
+
+```scala
+import java.time.Instant
+
+// recent traces
+val page = store.queryTraces(
+  TraceQuery.withTimeRange(Instant.now.minusSeconds(3600), Instant.now)
+)
+
+// failed traces only
+val errors = store.queryTraces(TraceQuery.withStatus(SpanStatus.Error(""))).traces
+
+// by metadata tag (e.g. experiment grouping)
+val traceIds = store.searchByMetadata("experiment", "v2")
+
+// combined filter with pagination
+val q = TraceQuery(
+  startTimeFrom = Some(Instant.now.minusSeconds(3600)),
+  status        = Some(SpanStatus.Error("")),
+  limit         = 10
+)
+val first = store.queryTraces(q)
+if (first.hasNext) {
+  val second = store.queryTraces(q.copy(cursor = first.nextCursor))
+}
+```
+
+### Span Analytics
+
+Every `Span` carries `startTime`, `endTime`, `kind`, `status`, and typed `attributes`,
+making it straightforward to compute aggregates without an external system.
+
+```scala
+val allSpans = store.getSpans(tracer.traceId)
+
+// total milliseconds spent in LLM calls
+val llmMs = allSpans
+  .filter(_.kind == SpanKind.LlmCall)
+  .flatMap(s => s.endTime.map(e => e.toEpochMilli - s.startTime.toEpochMilli))
+  .sum
+
+// prompt tokens across the run
+val promptTokens = allSpans
+  .filter(_.kind == SpanKind.LlmCall)
+  .flatMap(_.attributes.get("prompt_tokens").flatMap(_.asLong))
+  .sum
+
+// semantic cache hit rate
+val cacheSpans = allSpans.filter(_.kind == SpanKind.Cache)
+val hitRate = if (cacheSpans.isEmpty) 0.0
+  else cacheSpans.count(
+    _.attributes.get("hit").flatMap(_.asBoolean).contains(true)
+  ).toDouble / cacheSpans.size
+```
+
+### Deterministic Agent Testing
+
+Wire `TraceCollectorTracing` in ScalaTest specs to assert on recorded spans without
+mocking external services or parsing console output.
+
+```scala
+import org.llm4s.trace.model.SpanKind
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterEach
+
+class AgentBehaviourSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+
+  val store  = InMemoryTraceStore()
+  val tracer = TraceCollectorTracing(store).getOrElse(fail("tracing init failed"))
+
+  override def afterEach(): Unit = store.clear()
+
+  "agent" should "call the calculator tool exactly once" in {
+    agent.run("what is 6 * 7?", tools, tracing = tracer)
+
+    val toolSpans = store.getSpans(tracer.traceId)
+      .filter(_.kind == SpanKind.ToolCall)
+
+    toolSpans should have size 1
+    toolSpans.head.attributes("tool_name").asString shouldBe Some("calculator")
+  }
+
+  "agent" should "record no errors on a valid query" in {
+    agent.run("hello", tools, tracing = tracer)
+
+    store.getSpans(tracer.traceId)
+      .filter(_.status.isInstanceOf[SpanStatus.Error]) shouldBe empty
+  }
+}
+```
+
+### Composing with External Backends
+
+`TracingComposer.combine()` fans events out to multiple backends simultaneously.
+Use this to keep a local in-process snapshot while also forwarding to Langfuse or OpenTelemetry.
+
+```scala
+val store     = InMemoryTraceStore()
+val collector = TraceCollectorTracing(store).getOrElse(sys.error("tracing init failed"))
+val langfuse  = LangfuseTracing(langfuseConfig)
+
+val tracer = TracingComposer.combine(collector, langfuse)
+agent.run("query", tools, tracing = tracer)
+
+// local span queries still work
+val cacheSpans = store.getSpans(collector.traceId).filter(_.kind == SpanKind.Cache)
+```
+
+### Span JSON Round-Trip
+
+`TraceModelJson` serialises and deserialises every span type losslessly via `ujson`.
+Use this to write spans to disk, ship them to a custom HTTP endpoint, or reload them
+for offline analysis.
+
+```scala
+import org.llm4s.trace.model.TraceModelJson._
+
+val json   = span.toJson                      // ujson.Value
+val parsed = TraceModelJson.parseSpan(json)   // Result[Span]
+
+parsed match {
+  case Right(s)    => println(s.name)
+  case Left(error) => println(s"Parse error: ${error.field} — ${error.reason}")
+}
 ```
 
 ---
@@ -393,10 +556,10 @@ Before deploying, verify monitoring coverage:
 
 Current monitoring limitations in LLM4S:
 
-- **No built-in Prometheus metrics** - Use tracing data or implement custom exporters
-- **No automatic cost aggregation** - Langfuse provides this; otherwise implement in your pipeline
-- **No real-time streaming metrics** - Streaming completions traced on completion, not in-flight
-- **Guardrail metrics require custom tracing** - Add `traceEvent` calls in guardrail implementations
+- **No built-in Prometheus metrics** - Use `InMemoryTraceStore` to read span data and push counters/histograms to your Prometheus client, or implement a custom `TraceStore` that writes directly to a metrics registry
+- **No automatic cost aggregation** - Langfuse provides this via its dashboard; for in-process aggregation, sum `cost_usd` attributes from `SpanKind.Rag` and `SpanKind.LlmCall` spans in `InMemoryTraceStore`
+- **No real-time streaming metrics** - Streaming completions are traced on completion, not in-flight
+- **Guardrail metrics require custom tracing** - Add `traceEvent` calls in guardrail implementations; the resulting spans are then queryable via `InMemoryTraceStore`
 
 These are tracked in the [Production Readiness Roadmap](../../reference/roadmap.md).
 
@@ -404,6 +567,7 @@ These are tracked in the [Production Readiness Roadmap](../../reference/roadmap.
 
 ## Related Documentation
 
+- [In-Process Tracing Use Cases](enhanced-tracing-use-cases.md) - Full catalogue of `TraceCollectorTracing` + `InMemoryTraceStore` scenarios
 - [Langfuse Workflow Patterns](../../langfuse-workflow-patterns.md) - Detailed trace event sequences
 - [Configuration Guide](../../getting-started/configuration.md) - Complete configuration reference
 - [Roadmap](../../reference/roadmap.md) - Planned observability improvements

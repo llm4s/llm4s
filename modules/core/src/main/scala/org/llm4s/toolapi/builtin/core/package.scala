@@ -39,12 +39,4 @@ package object core {
     json       <- JSONTool.toolSafe
   } yield Seq(dateTime, calculator, uuid, json)
 
-  /**
-   * All core utility tools combined into a sequence.
-   *
-   * @throws IllegalStateException if any tool initialization fails
-   */
-  @deprecated("Use allToolsSafe which returns Result[Seq[ToolFunction]] for safe error handling", "0.2.9")
-  lazy val allTools: Seq[org.llm4s.toolapi.ToolFunction[_, _]] =
-    Seq(DateTimeTool.tool, CalculatorTool.tool, UUIDTool.tool, JSONTool.tool)
 }

@@ -5,7 +5,7 @@ import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.agent.memory.PostgresMemoryStore.SqlParam._
-import org.llm4s.error.NotFoundError
+import org.llm4s.error.{ NotFoundError, OptimisticLockFailure }
 
 import java.sql.{ Connection, PreparedStatement, ResultSet, SQLException, Timestamp }
 import java.time.Instant
@@ -374,5 +374,91 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe a[NotFoundError]
     result.left.toOption.get.message should include("Memory not found")
+  }
+
+  it should "perform a versioned update successfully when no concurrent modification occurred" in {
+    val ts = Timestamp.from(Instant.now())
+
+    // Connection 1: getVersioned() SELECT
+    (() => mockDataSource.getConnection()).expects().returning(mockConn)
+    (mockConn.prepareStatement(_: String)).expects(*).returning(mockStmt)
+    (mockStmt.setString(_: Int, _: String)).expects(*, *).anyNumberOfTimes()
+    (() => mockStmt.executeQuery()).expects().returning(mockRs)
+    (() => mockRs.next()).expects().returning(true)
+    (mockRs.getString(_: String)).expects("embedding").returning(null)
+    (mockRs.getString(_: String)).expects("id").returning("mem-cas-1")
+    (mockRs.getString(_: String)).expects("content").returning("original content")
+    (mockRs.getString(_: String)).expects("memory_type").returning("task")
+    (mockRs.getString(_: String)).expects("metadata").returning("{}")
+    (mockRs.getTimestamp(_: String)).expects("created_at").returning(ts)
+    (mockRs.getDouble(_: String)).expects("importance").returning(0.0)
+    (() => mockRs.wasNull()).expects().returning(true)
+    (mockRs.getLong(_: String)).expects("version").returning(0L)
+    (() => mockRs.close()).expects()
+    (() => mockStmt.close()).expects()
+    (() => mockConn.close()).expects()
+
+    // Connection 2: CAS UPDATE (1 row affected = success)
+    (() => mockDataSource.getConnection()).expects().returning(mockConn)
+    (mockConn.prepareStatement(_: String)).expects(*).returning(mockStmt)
+    (mockStmt.setString(_: Int, _: String)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setTimestamp(_: Int, _: Timestamp)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setDouble(_: Int, _: Double)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setLong(_: Int, _: Long)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setNull(_: Int, _: Int)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setNull(_: Int, _: Int, _: String)).expects(*, *, *).anyNumberOfTimes()
+    (() => mockStmt.executeUpdate()).expects().returning(1)
+    (() => mockStmt.close()).expects()
+    (() => mockConn.close()).expects()
+
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val result = store.update(MemoryId("mem-cas-1"), _.copy(content = "updated content"))
+
+    result.isRight shouldBe true
+  }
+
+  it should "return OptimisticLockFailure when a concurrent modification is detected" in {
+    val ts = Timestamp.from(Instant.now())
+
+    // Connection 1: getVersioned() SELECT
+    (() => mockDataSource.getConnection()).expects().returning(mockConn)
+    (mockConn.prepareStatement(_: String)).expects(*).returning(mockStmt)
+    (mockStmt.setString(_: Int, _: String)).expects(*, *).anyNumberOfTimes()
+    (() => mockStmt.executeQuery()).expects().returning(mockRs)
+    (() => mockRs.next()).expects().returning(true)
+    (mockRs.getString(_: String)).expects("embedding").returning(null)
+    (mockRs.getString(_: String)).expects("id").returning("mem-cas-2")
+    (mockRs.getString(_: String)).expects("content").returning("original content")
+    (mockRs.getString(_: String)).expects("memory_type").returning("task")
+    (mockRs.getString(_: String)).expects("metadata").returning("{}")
+    (mockRs.getTimestamp(_: String)).expects("created_at").returning(ts)
+    (mockRs.getDouble(_: String)).expects("importance").returning(0.0)
+    (() => mockRs.wasNull()).expects().returning(true)
+    (mockRs.getLong(_: String)).expects("version").returning(5L)
+    (() => mockRs.close()).expects()
+    (() => mockStmt.close()).expects()
+    (() => mockConn.close()).expects()
+
+    // Connection 2: CAS UPDATE (0 rows affected = concurrent modification)
+    (() => mockDataSource.getConnection()).expects().returning(mockConn)
+    (mockConn.prepareStatement(_: String)).expects(*).returning(mockStmt)
+    (mockStmt.setString(_: Int, _: String)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setTimestamp(_: Int, _: Timestamp)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setDouble(_: Int, _: Double)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setLong(_: Int, _: Long)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setNull(_: Int, _: Int)).expects(*, *).anyNumberOfTimes()
+    (mockStmt.setNull(_: Int, _: Int, _: String)).expects(*, *, *).anyNumberOfTimes()
+    (() => mockStmt.executeUpdate()).expects().returning(0)
+    (() => mockStmt.close()).expects()
+    (() => mockConn.close()).expects()
+
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val result = store.update(MemoryId("mem-cas-2"), _.copy(content = "updated content"))
+
+    result.isLeft shouldBe true
+    val error = result.left.toOption.get
+    error shouldBe an[OptimisticLockFailure]
+    error.asInstanceOf[OptimisticLockFailure].memoryId shouldBe "mem-cas-2"
+    error.asInstanceOf[OptimisticLockFailure].attemptedVersion shouldBe 5L
   }
 }

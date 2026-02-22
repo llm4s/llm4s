@@ -42,6 +42,28 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
       Left(EvaluationError("embedding provider unavailable"))
   }
 
+  /** Returns an empty embeddings list — used to exercise the EmbeddingError path. */
+  private class EmptyEmbeddingProvider extends EmbeddingProvider {
+    override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
+      Right(EmbeddingResponse(embeddings = Seq.empty, usage = None))
+  }
+
+  /** Returns real (non-empty) embeddings without needing a network call. */
+  private class DummyEmbeddingProvider(dimensions: Int = 4) extends EmbeddingProvider {
+    override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
+      val embeddings = request.input.map { text =>
+        val hash = text.hashCode.abs
+        (0 until dimensions).map(i => ((hash + i) % 100) / 100.0).toSeq
+      }
+      Right(
+        EmbeddingResponse(
+          embeddings = embeddings,
+          usage = Some(EmbeddingUsage(totalTokens = 10, promptTokens = 10))
+        )
+      )
+    }
+  }
+
   class MockLLMClient extends LLMClient {
     override def complete(
       conversation: Conversation,
@@ -155,6 +177,9 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
   // Fixtures
   // =========================================================================
 
+  /** Tracks pipelines created by buildPipeline for cleanup in afterEach. */
+  private var _pipeline: RAGPipeline = _
+
   private var vectorStore: MockVectorStore             = _
   private var keywordIndex: MockKeywordIndex           = _
   private var embeddingProvider: MockEmbeddingProvider = _
@@ -164,6 +189,7 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
 
   override def beforeEach(): Unit = {
     super.beforeEach()
+    _pipeline = null
     vectorStore = new MockVectorStore()
     keywordIndex = new MockKeywordIndex()
     embeddingProvider = new MockEmbeddingProvider()
@@ -171,11 +197,39 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
     embeddingClient = new EmbeddingClient(embeddingProvider)
   }
 
+  override def afterEach(): Unit = {
+    if (_pipeline != null) _pipeline.close()
+    super.afterEach()
+  }
+
+  /** Creates a pipeline backed by lightweight in-memory mock stores. */
   private def mkPipeline(
     cfg: RAGExperimentConfig = defaultConfig,
     ec: EmbeddingClient = embeddingClient
   ): RAGPipeline =
     RAGPipeline.withStores(cfg, llmClient, ec, vectorStore, keywordIndex)
+
+  /**
+   * Creates a pipeline backed by the real in-memory store implementations.
+   * Used by EmbeddingError tests where exact error types matter.
+   * Stores the result in _pipeline so afterEach can close it.
+   */
+  private def buildPipeline(provider: EmbeddingProvider = new EmptyEmbeddingProvider): RAGPipeline = {
+    val vs =
+      VectorStoreFactory
+        .inMemory()
+        .fold(e => fail(s"Could not create in-memory vector store: ${e.formatted}"), identity)
+    val ki =
+      KeywordIndex.inMemory().fold(e => fail(s"Could not create in-memory keyword index: ${e.formatted}"), identity)
+    _pipeline = RAGPipeline.withStores(
+      config = RAGExperimentConfig.default,
+      llmClient = new MockLLMClient,
+      embeddingClient = new EmbeddingClient(provider),
+      vectorStore = vs,
+      keywordIndex = ki
+    )
+    _pipeline
+  }
 
   private val contentWithText = "Scala is a statically typed language for the JVM."
 
@@ -299,7 +353,7 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
   }
 
   // =========================================================================
-  // search
+  // search — mock-store tests
   // =========================================================================
 
   "RAGPipeline.search" should "return Right after documents are indexed" in {
@@ -324,6 +378,41 @@ class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach 
     val badClient = new EmbeddingClient(new FailingEmbeddingProvider())
     val p         = mkPipeline(ec = badClient)
     p.search("any query").isLeft shouldBe true
+  }
+
+  // =========================================================================
+  // search — EmbeddingError path (uses real in-memory stores)
+  // =========================================================================
+
+  it should "return EmbeddingError when the provider returns an empty embeddings list" in {
+    val pipeline = buildPipeline()
+    val result   = pipeline.search("what is Scala?")
+
+    result.fold(
+      {
+        case embErr: EmbeddingError =>
+          embErr.message should include("empty embeddings")
+          embErr.provider should not be "unknown"
+          embErr.provider shouldBe "text-embedding-3-small"
+        case other =>
+          fail(s"Expected EmbeddingError but got: ${other.getClass.getSimpleName}: ${other.message}")
+      },
+      _ => fail("Expected Left(EmbeddingError) but got Right")
+    )
+  }
+
+  it should "propagate the EmbeddingError regardless of the topK parameter" in {
+    val pipeline = buildPipeline()
+    val result   = pipeline.search("any query", topK = Some(10))
+
+    result shouldBe a[Left[_, _]]
+  }
+
+  it should "return Right with empty results when embeddings are non-empty but the index is empty" in {
+    val pipeline = buildPipeline(provider = new DummyEmbeddingProvider)
+    val result   = pipeline.search("what is Scala?")
+
+    result.fold(e => fail(s"Expected Right but got Left: ${e.formatted}"), results => results shouldBe empty)
   }
 
   // =========================================================================

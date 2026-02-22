@@ -99,19 +99,6 @@ object WriteFileTool {
       } yield result
     }.buildSafe()
 
-  /**
-   * Create a write file tool with the given configuration.
-   *
-   * @param config Write configuration with required allowedPaths
-   * @throws IllegalStateException if tool creation fails
-   */
-  @deprecated("Use createSafe() which returns Result[ToolFunction] for safe error handling", "0.2.9")
-  def create(config: WriteConfig): ToolFunction[Map[String, Any], WriteFileResult] =
-    createSafe(config) match {
-      case Right(t) => t
-      case Left(e)  => throw new IllegalStateException(s"WriteFileTool.create failed: ${e.formatted}")
-    }
-
   private def writeFile(
     pathStr: String,
     content: String,
