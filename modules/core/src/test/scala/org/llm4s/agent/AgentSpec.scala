@@ -839,4 +839,127 @@ class AgentSpec extends AnyFlatSpec with Matchers {
     mockClient.getContextBudget(HeadroomPercent.Standard) shouldBe 7360
   }
 
+  // ==========================================================================
+  // Step limit tests
+  // ==========================================================================
+
+  "Agent step limit" should "fail with AgentStatus.Failed when maxSteps is exhausted" in {
+    // A client that always returns a tool call forces the agent to keep looping
+    val infiniteToolClient = new MockLLMClient(
+      Seq.fill(10)(
+        Right(createCompletion("", Seq(createToolCall("calculator", """{"a":1,"b":2,"operation":"add"}"""))))
+      )
+    )
+    val agent = new Agent(infiniteToolClient)
+    val result = for {
+      tools <- testTools
+      state <- agent.run("test", tools, maxSteps = Some(2))
+    } yield state
+
+    result match {
+      case Right(state) =>
+        state.status shouldBe a[AgentStatus.Failed]
+        state.status.asInstanceOf[AgentStatus.Failed].error should include("Maximum step limit reached")
+      case Left(err) => fail(s"Expected Right but got Left: ${err.formatted}")
+    }
+  }
+
+  it should "complete successfully when exactly maxSteps are used" in {
+    // Two-turn run: first call returns a tool call, second returns text
+    val twoTurnClient = new MockLLMClient(
+      Seq(
+        Right(createCompletion("", Seq(createToolCall("calculator", """{"a":1,"b":2,"operation":"add"}""")))),
+        Right(createCompletion("The answer is 3"))
+      )
+    )
+    val agent = new Agent(twoTurnClient)
+    val result = for {
+      tools <- testTools
+      state <- agent.run("test", tools, maxSteps = Some(5))
+    } yield state
+
+    result match {
+      case Right(state) => state.status shouldBe AgentStatus.Complete
+      case Left(err)    => fail(s"Expected Right but got Left: ${err.formatted}")
+    }
+  }
+
+  // ==========================================================================
+  // LLM error handling tests
+  // ==========================================================================
+
+  "Agent LLM error handling" should "return Left when LLM call fails on first step" in {
+    val error      = org.llm4s.error.APIError("provider-x", "Internal server error")
+    val failClient = new FailingLLMClient(error)
+    val agent      = new Agent(failClient)
+    val result = for {
+      tools <- testTools
+      state <- agent.run("test", tools, maxSteps = Some(5))
+    } yield state
+
+    result shouldBe a[Left[_, _]]
+  }
+
+  it should "return Left when LLM call fails mid-run after successful steps" in {
+    // First call succeeds with a tool call; second call fails
+    val mixedClient = new MockLLMClient(
+      Seq(
+        Right(createCompletion("", Seq(createToolCall("calculator", """{"a":1,"b":2,"operation":"add"}""")))),
+        Left(org.llm4s.error.APIError("provider-x", "Service unavailable"))
+      )
+    )
+    val agent = new Agent(mixedClient)
+    val result = for {
+      tools <- testTools
+      state <- agent.run("test", tools, maxSteps = Some(5))
+    } yield state
+
+    result shouldBe a[Left[_, _]]
+  }
+
+  // ==========================================================================
+  // Streaming error event tests
+  // ==========================================================================
+
+  "Agent streaming error events" should "emit AgentFailed event when LLM returns Left" in {
+    val error      = org.llm4s.error.APIError("provider-x", "LLM unavailable")
+    val failClient = new FailingLLMClient(error)
+    val agent      = new Agent(failClient)
+    val events     = scala.collection.mutable.ArrayBuffer[AgentEvent]()
+
+    val result = for {
+      tools <- testTools
+      _     <- agent.runWithEvents("test", tools, onEvent = events += _, maxSteps = Some(3))
+    } yield ()
+
+    result shouldBe a[Left[_, _]]
+    events.exists(_.isInstanceOf[AgentEvent.AgentFailed]) shouldBe true
+  }
+
+  it should "emit ToolCallFailed event when tool execution errors" in {
+    // Return a tool call for a tool that will fail
+    val toolCallResponse = createCompletion(
+      "",
+      Seq(createToolCall("calculator", """{"a":"not-a-number","b":2,"operation":"add"}"""))
+    )
+    val client = new MockLLMClient(
+      Seq(
+        Right(toolCallResponse),
+        Right(createCompletion("The tool failed but I handled it"))
+      )
+    )
+    val agent  = new Agent(client)
+    val events = scala.collection.mutable.ArrayBuffer[AgentEvent]()
+
+    val result = for {
+      tools <- testTools
+      state <- agent.runWithEvents("test", tools, onEvent = events += _, maxSteps = Some(5))
+    } yield state
+
+    // Agent should complete (tool errors are captured as JSON in tool messages)
+    result.isRight shouldBe true
+    // ToolCallFailed event should have been emitted for the bad arguments
+    events.exists(_.isInstanceOf[AgentEvent.ToolCallFailed]) shouldBe true
+  }
+
 }
