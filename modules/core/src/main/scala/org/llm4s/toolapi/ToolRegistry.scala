@@ -63,11 +63,16 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
    * This means callers always receive a typed `Either` and never need to
    * guard against unexpected exceptions from tool code.
    *
+   * Tool-returned `Left` values are propagated unchanged via `.flatten`, so
+   * callers may receive any `ToolCallError` subtype that the tool itself
+   * produces (not only `ExecutionError`).
+   *
    * @param request The tool name and pre-parsed JSON arguments.
    * @return `Right(result)` on success; `Left(ToolCallError.UnknownFunction)`
    *         when no tool with the given name is registered;
-   *         `Left(ToolCallError.ExecutionError)` when the tool throws or
-   *         returns a `Left` itself.
+   *         `Left(ToolCallError.ExecutionError)` when the tool throws an
+   *         exception (caught by `Safety.safely`); or `Left(error)` with the
+   *         tool's own `ToolCallError` when the tool returns a `Left` directly.
    */
   def execute(request: ToolCallRequest): Either[ToolCallError, ujson.Value] =
     tools.find(_.name == request.functionName) match {
