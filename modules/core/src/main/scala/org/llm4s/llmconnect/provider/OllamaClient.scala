@@ -20,6 +20,37 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
+/**
+ * [[LLMClient]] implementation for locally-hosted Ollama models.
+ *
+ * Connects to an Ollama server via its HTTP chat API (`/api/chat`).
+ * All Ollama-specific protocol details (JSON-lines streaming, token-count
+ * field names) are handled internally.
+ *
+ * == Tool calling limitation ==
+ *
+ * The Ollama chat API does not support tool results in multi-turn
+ * conversations in the same way as cloud providers. As a result,
+ * `ToolMessage` values are silently dropped when building the request —
+ * only `SystemMessage`, `UserMessage`, and `AssistantMessage` entries
+ * are forwarded to the model. Conversations that rely on tool call
+ * round-trips should use a different provider.
+ *
+ * == Streaming ==
+ *
+ * Token counts (`prompt_eval_count`, `eval_count`) are only present in the
+ * final JSON-lines chunk (`done: true`). The accumulator updates its count
+ * at that point; chunks before the final one report zero tokens.
+ *
+ * == Timeouts ==
+ *
+ * Non-streaming requests time out after 120 seconds; streaming requests
+ * after 600 seconds.
+ *
+ * @param config  Ollama configuration containing the model name and base URL.
+ * @param metrics Receives per-call latency and token-usage events.
+ *                Defaults to `MetricsCollector.noop`.
+ */
 class OllamaClient(
   config: OllamaConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
@@ -242,6 +273,16 @@ class OllamaClient(
 object OllamaClient {
   import org.llm4s.types.TryOps
 
+  /**
+   * Constructs an [[OllamaClient]], wrapping any construction-time exception
+   * in a `Left`.
+   *
+   * @param config  Ollama configuration with model name and server base URL.
+   * @param metrics Receives per-call latency and token-usage events.
+   *                Defaults to `MetricsCollector.noop`.
+   * @return `Right(client)` on success; `Left(LLMError)` if construction fails
+   *         (e.g. invalid base URL).
+   */
   def apply(
     config: OllamaConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop

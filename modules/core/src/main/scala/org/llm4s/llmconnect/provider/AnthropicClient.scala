@@ -23,6 +23,51 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
+/**
+ * [[LLMClient]] implementation for Anthropic Claude models.
+ *
+ * Uses the official Anthropic Java SDK (`AnthropicOkHttpClient`) for all
+ * API calls. SDK exceptions are mapped to the appropriate [[org.llm4s.error.LLMError]]
+ * subtypes before being returned.
+ *
+ * == Message format adaptations ==
+ *
+ * The Anthropic Messages API differs from the OpenAI convention in several
+ * ways that this client handles transparently:
+ *
+ *  - **Default system prompt**: if the conversation contains no
+ *    `SystemMessage`, the client injects `"You are Claude, a helpful AI
+ *    assistant."` automatically. Supply an explicit `SystemMessage` to
+ *    override this.
+ *
+ *  - **Tool results as user messages**: the Anthropic API does not accept
+ *    native tool-result messages in the same turn structure as OpenAI.
+ *    `ToolMessage` values are therefore forwarded as user messages with
+ *    the prefix `"[Tool result for <toolCallId>]: "`.
+ *
+ *  - **Assistant messages with tool calls are skipped**: when an
+ *    `AssistantMessage` carries pending tool calls, it is not forwarded —
+ *    Anthropic infers the assistant turn from the subsequent tool-result
+ *    user messages.
+ *
+ *  - **Schema sanitisation**: OpenAI-specific fields (`strict`,
+ *    `additionalProperties`) are stripped from tool schemas before sending,
+ *    because Anthropic's API rejects them.
+ *
+ * == Extended thinking ==
+ *
+ * When `CompletionOptions.reasoning` is set, a `thinking` block is added
+ * to the request. The token budget is clamped to `[1024, maxTokens - 1]`
+ * to satisfy the Anthropic API constraint; the effective budget may
+ * therefore differ from what was requested.
+ *
+ * `maxTokens` defaults to 2048 when not set in `CompletionOptions` because
+ * the Anthropic API requires the field.
+ *
+ * @param config  `AnthropicConfig` carrying the API key, model name, and base URL.
+ * @param metrics Receives per-call latency and token-usage events.
+ *                Defaults to `MetricsCollector.noop`.
+ */
 class AnthropicClient(
   config: AnthropicConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
@@ -486,6 +531,16 @@ curl https://api.anthropic.com/v1/messages \
 object AnthropicClient {
   import org.llm4s.types.TryOps
 
+  /**
+   * Constructs an [[AnthropicClient]], wrapping any construction-time
+   * exception in a `Left`.
+   *
+   * @param config  `AnthropicConfig` with API key, model, and base URL.
+   * @param metrics Receives per-call latency and token-usage events.
+   *                Defaults to `MetricsCollector.noop`.
+   * @return `Right(client)` on success; `Left(LLMError)` if the underlying
+   *         SDK client cannot be initialised.
+   */
   def apply(
     config: AnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop

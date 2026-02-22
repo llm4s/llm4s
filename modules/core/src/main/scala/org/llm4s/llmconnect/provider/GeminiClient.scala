@@ -20,34 +20,43 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 /**
- * LLMClient implementation for Google Gemini models.
+ * [[LLMClient]] implementation for Google Gemini models.
  *
- * Provides access to Gemini 2.0, 1.5 Pro, 1.5 Flash and other Gemini models
- * via Google's Generative AI API.
+ * Calls the Google Generative AI REST API directly using
+ * [[org.llm4s.http.Llm4sHttpClient]].
  *
- * == Supported Features ==
- *  - Chat completions
- *  - Streaming responses
- *  - Tool/function calling
- *  - Large context windows (up to 1M+ tokens)
+ * == Message format ==
  *
- * == Configuration ==
- * {{{
- * export LLM_MODEL=gemini/gemini-2.0-flash
- * export GOOGLE_API_KEY=your-api-key
- * }}}
+ * Gemini uses a different conversation structure from OpenAI:
+ *  - Roles are `"user"` and `"model"` (not `"user"` and `"assistant"`).
+ *  - `SystemMessage` values are sent as a separate `systemInstruction`
+ *    field, not inside the `contents` array.
+ *  - Tool results (`ToolMessage`) are sent as `functionResponse` parts
+ *    inside a `"user"` turn, keyed by function name (not tool-call ID).
+ *    The function name is resolved from an in-request map built while
+ *    processing the preceding `AssistantMessage`.
  *
- * == API Format ==
+ * == Tool call IDs ==
  *
- * Gemini uses a different message format than OpenAI:
- * - Messages have `role` (user/model) and `parts` (array of content)
- * - System instructions are sent separately
- * - Tool calls use `functionDeclarations` format
+ * The Gemini API does not return an ID with function-call responses.
+ * This client generates a random UUID for each tool call so that the
+ * llm4s `ToolCall` / `ToolMessage` pairing convention is preserved.
+ * These IDs are synthetic and are not round-tripped to Gemini.
  *
- * @param config Gemini configuration with API key, model, and base URL
- * @param metrics metrics collector for observability (default: noop)
+ * == Authentication ==
  *
- * @see [[org.llm4s.llmconnect.config.GeminiConfig]] for configuration options
+ * The API key is appended as a `?key=` query parameter on every request
+ * (Google's API requires this; it is not sent as a header). The full URL
+ * is not logged; only the base URL and model are emitted at DEBUG level.
+ *
+ * == Schema sanitisation ==
+ *
+ * OpenAI-specific fields (`strict`, `additionalProperties`) are stripped
+ * from tool schemas before sending, because Gemini's API rejects them.
+ *
+ * @param config  `GeminiConfig` with API key, model, and base URL.
+ * @param metrics Receives per-call latency and token-usage events.
+ *                Defaults to `MetricsCollector.noop`.
  */
 class GeminiClient(
   config: GeminiConfig,
@@ -175,10 +184,12 @@ class GeminiClient(
   override def getReserveCompletion(): Int = config.reserveCompletion
 
   /**
-   * Build the request body for Gemini API.
+   * Builds the Gemini API request body from a conversation and options.
    *
-   * @param conversation The conversation to convert
-   * @param options Completion options
+   * [[SystemMessage]] is extracted into `systemInstruction`; all other
+   * messages are placed in `contents`. Tool-call IDs are tracked in a local
+   * map so that subsequent [[ToolMessage]] entries can be keyed by function
+   * name rather than ID (Gemini's requirement).
    */
   private def buildRequestBody(
     conversation: Conversation,

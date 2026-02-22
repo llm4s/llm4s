@@ -18,6 +18,44 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
+/**
+ * [[LLMClient]] implementation for the OpenRouter unified model gateway.
+ *
+ * Sends requests to the OpenRouter REST API using the OpenAI-compatible
+ * `/chat/completions` endpoint. Accepts `OpenAIConfig` — there is no
+ * separate `OpenRouterConfig`; `LLMConnect` detects OpenRouter by checking
+ * whether `baseUrl` contains `"openrouter.ai"` and routes accordingly.
+ *
+ * == Required headers ==
+ *
+ * OpenRouter's usage policy requires two additional headers on every
+ * request. This client sends them automatically:
+ *  - `HTTP-Referer: https://github.com/llm4s/llm4s`
+ *  - `X-Title: LLM4S`
+ *
+ * == Reasoning / extended thinking ==
+ *
+ * Model type is detected by substring matching on the lower-cased model name:
+ *  - Names containing `"claude"` or `"anthropic"` → Anthropic-style
+ *    `thinking` object (`type: "enabled"`, `budget_tokens`).
+ *  - Names containing `"o1"`, `"o3"`, or `"o4"` → OpenAI-style
+ *    `reasoning_effort` string parameter.
+ *  - All other models → reasoning configuration is silently omitted.
+ *
+ * The thinking budget is clamped to `[1024, maxTokens - 1]` for Anthropic
+ * models, matching the Anthropic API constraint.
+ *
+ * == Thinking content ==
+ *
+ * Extended thinking text is extracted from whichever field the model
+ * populates: `message.thinking`, `message.reasoning`, or
+ * `choice.thinking` (checked in that order).
+ *
+ * @param config  `OpenAIConfig` whose `baseUrl` must contain `"openrouter.ai"`;
+ *                carries the API key and model name.
+ * @param metrics Receives per-call latency and token-usage events.
+ *                Defaults to `MetricsCollector.noop`.
+ */
 class OpenRouterClient(
   config: OpenAIConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
@@ -264,11 +302,11 @@ class OpenRouterClient(
   }
 
   /**
-   * Add reasoning configuration to the request based on model type.
+   * Appends provider-specific reasoning fields to `base` when reasoning is enabled.
    *
-   * OpenRouter supports different reasoning modes:
-   * - For Anthropic Claude models: Uses `thinking` object with `type` and `budget_tokens`
-   * - For OpenAI o1/o3 models: Uses `reasoning_effort` parameter
+   * Model type is detected by substring matching on the lower-cased model name.
+   * Anthropic models receive a `thinking` object; OpenAI o1/o3/o4 models receive
+   * `reasoning_effort`; all others are left unchanged (reasoning silently ignored).
    */
   private def addReasoningConfig(base: ujson.Obj, options: CompletionOptions): Unit = {
     val modelLower = config.model.toLowerCase
@@ -395,6 +433,16 @@ class OpenRouterClient(
 object OpenRouterClient {
   import org.llm4s.types.TryOps
 
+  /**
+   * Constructs an [[OpenRouterClient]], wrapping any construction-time
+   * exception in a `Left`.
+   *
+   * @param config  `OpenAIConfig` with the OpenRouter API key, model, and
+   *                a `baseUrl` that contains `"openrouter.ai"`.
+   * @param metrics Receives per-call latency and token-usage events.
+   *                Defaults to `MetricsCollector.noop`.
+   * @return `Right(client)` on success; `Left(LLMError)` if construction fails.
+   */
   def apply(
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
