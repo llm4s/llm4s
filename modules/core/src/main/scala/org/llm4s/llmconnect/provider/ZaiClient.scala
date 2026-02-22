@@ -18,6 +18,22 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
+/**
+ * LLM client for the Z.ai API.
+ *
+ * Z.ai uses an OpenAI-compatible `/chat/completions` endpoint with one important
+ * difference: message content is always an array of typed objects
+ * (`[{"type":"text","text":"..."}]`) rather than a plain string.  This applies
+ * to user, system, assistant, and tool messages alike.  Sending a plain string
+ * causes a rejection from the Z.ai API.
+ *
+ * Both non-streaming (`complete`) and streaming (`streamComplete`) are supported.
+ * Tool calling follows the standard OpenAI function-calling format.
+ *
+ * @param config  Z.ai connection configuration (API key, model, base URL, context window)
+ * @param metrics records per-call latency and token-usage events;
+ *                use [[org.llm4s.metrics.MetricsCollector.noop]] when metrics are not needed
+ */
 class ZaiClient(
   config: ZaiConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
