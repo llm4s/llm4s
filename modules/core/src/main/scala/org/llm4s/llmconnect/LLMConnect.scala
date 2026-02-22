@@ -51,14 +51,15 @@ object LLMConnect {
         CohereClient(cfg, metrics)
     }
 
-  // ---- Config-driven construction (always succeeds) ----------------------
+  // ---- Config-driven construction -----------------------------------------
 
   /**
    * Constructs an [[LLMClient]], routing to the correct provider based on the
    * runtime type of `config` and recording call statistics to `metrics`.
    *
-   * This overload always succeeds — the dispatch covers every [[ProviderConfig]]
-   * subtype. Only the `(provider, config)` overloads can return a `Left`.
+   * The dispatch is exhaustive — every [[ProviderConfig]] subtype is handled.
+   * Returns `Left` only if the underlying client constructor fails (for example,
+   * if the HTTP client library throws during initialisation).
    *
    * @param config  Provider configuration; the concrete subtype determines which
    *                client is built. For OpenRouter, supply an [[OpenAIConfig]]
@@ -90,18 +91,19 @@ object LLMConnect {
    * Constructs an [[LLMClient]], verifying at runtime that `provider` and
    * `config` are consistent with each other.
    *
-   * Unlike the config-only overloads, this form can return a `Left` — it fails
-   * when `provider` and `config` describe different providers (e.g. pairing
-   * `LLMProvider.Anthropic` with an `OpenAIConfig`). Use this overload when
-   * the provider is resolved dynamically from user input or external config
-   * and you want an explicit error on mismatch rather than silent wrong routing.
+   * Returns `Left` in two situations: the provider/config pair is mismatched
+   * (yields a [[org.llm4s.error.ConfigurationError]]), or the underlying client
+   * constructor fails during initialisation. Use this overload when the provider
+   * is resolved dynamically from user input or external config and you want an
+   * explicit error on mismatch rather than silent wrong routing.
    *
    * @param provider The expected provider; must match the runtime type of `config`.
    * @param config   Provider configuration corresponding to `provider`.
    * @param metrics  Receives per-call latency and token-usage events.
    *                 Use [[org.llm4s.metrics.MetricsCollector.noop]] when no metrics backend is needed.
    * @return the constructed client, or a [[org.llm4s.error.ConfigurationError]] when
-   *         `provider` and `config` describe different providers.
+   *         `provider` and `config` describe different providers, or an
+   *         [[org.llm4s.error.UnknownError]] if client initialisation throws.
    */
   def getClient(
     provider: LLMProvider,
@@ -131,7 +133,8 @@ object LLMConnect {
    * @param provider The expected provider; must match the runtime type of `config`.
    * @param config   Provider configuration corresponding to `provider`.
    * @return the constructed client, or a [[org.llm4s.error.ConfigurationError]] when
-   *         `provider` and `config` describe different providers.
+   *         `provider` and `config` describe different providers, or an
+   *         [[org.llm4s.error.UnknownError]] if client initialisation throws.
    */
   def getClient(
     provider: LLMProvider,
