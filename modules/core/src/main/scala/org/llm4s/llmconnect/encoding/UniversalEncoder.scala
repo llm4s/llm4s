@@ -81,7 +81,6 @@ object UniversalEncoder {
         }
     }
 
-  // ---------------- IMAGE ----------------
   private def encodeImageFile(
     file: File,
     mime: String,
@@ -121,7 +120,6 @@ object UniversalEncoder {
 
     modelResult.map { model =>
       val dim = model.dimensions
-      // Limit dimension to prevent OOM in tests (max 8K dimensions)
       val safeDim = math.min(dim, MAX_STUB_DIMENSION)
       val seed    = stableSeed(file)
       val raw     = fillDeterministic(safeDim, seed)
@@ -138,7 +136,6 @@ object UniversalEncoder {
     }
   }
 
-  // ---------------- AUDIO ----------------
   private def encodeAudioFile(
     file: File,
     mime: String,
@@ -178,7 +175,6 @@ object UniversalEncoder {
 
     modelResult.map { model =>
       val dim = model.dimensions
-      // Limit dimension to prevent OOM in tests (max 8K dimensions)
       val safeDim = math.min(dim, MAX_STUB_DIMENSION)
       val seed    = stableSeed(file) ^ 0x9e3779b97f4a7c15L
       val raw     = fillDeterministic(safeDim, seed)
@@ -195,7 +191,6 @@ object UniversalEncoder {
     }
   }
 
-  // ---------------- VIDEO ----------------
   private def encodeVideoFile(
     file: File,
     mime: String,
@@ -235,7 +230,6 @@ object UniversalEncoder {
 
     modelResult.map { model =>
       val dim = model.dimensions
-      // Limit dimension to prevent OOM in tests (max 8K dimensions)
       val safeDim = math.min(dim, MAX_STUB_DIMENSION)
       val seed    = stableSeed(file) ^ 0xc2b2ae3d27d4eb4fL
       val raw     = fillDeterministic(safeDim, seed)
