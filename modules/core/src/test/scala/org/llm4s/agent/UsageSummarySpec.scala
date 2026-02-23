@@ -3,7 +3,7 @@ package org.llm4s.agent
 import org.llm4s.llmconnect.model.TokenUsage
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import upickle.default.{read, write}
+import upickle.default.{ read, write }
 
 class UsageSummarySpec extends AnyFlatSpec with Matchers {
 
@@ -12,8 +12,7 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
 
     val s1 = s0.add(
       model = "openai/gpt-4o",
-      usage =
-        TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15),
+      usage = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15),
       cost = Some(0.01)
     )
 
@@ -35,8 +34,7 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
   it should "not add cost when cost is None" in {
     val s1 = UsageSummary().add(
       model = "openai/gpt-4o",
-      usage =
-        TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15),
+      usage = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15),
       cost = None
     )
 
@@ -63,22 +61,19 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
   "UsageSummary.merge" should "sum totals and merge byModel" in {
     val left = UsageSummary().add(
       model = "openai/gpt-4o",
-      usage =
-        TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15),
+      usage = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15),
       cost = Some(0.01)
     )
 
     val right = UsageSummary()
       .add(
         model = "openai/gpt-4o",
-        usage =
-          TokenUsage(promptTokens = 3, completionTokens = 7, totalTokens = 10),
+        usage = TokenUsage(promptTokens = 3, completionTokens = 7, totalTokens = 10),
         cost = None
       )
       .add(
         model = "gemini/gemini-2.0-flash",
-        usage =
-          TokenUsage(promptTokens = 1, completionTokens = 2, totalTokens = 3),
+        usage = TokenUsage(promptTokens = 1, completionTokens = 2, totalTokens = 3),
         cost = Some(0.005)
       )
 
@@ -115,7 +110,7 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
         )
       )
 
-    val json = write(original)
+    val json    = write(original)
     val decoded = read[UsageSummary](json)
 
     decoded shouldBe original
