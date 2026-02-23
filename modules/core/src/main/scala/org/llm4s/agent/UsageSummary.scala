@@ -4,17 +4,26 @@ import org.llm4s.llmconnect.model.TokenUsage
 import upickle.default.{ ReadWriter => RW, macroRW, readwriter }
 
 /**
- * Accumulates token and cost statistics for a single model across one or more requests.
+ * Accumulates token and cost statistics for a single model across one or more
+ * requests.
  *
- * `totalCost` is stored as [[BigDecimal]] to avoid floating-point accumulation drift
- * that would occur when summing many `Double` values; incoming `Option[Double]` costs
- * are converted once via [[BigDecimal.decimal]] on first contact.
+ * `totalCost` is stored as [[BigDecimal]] to avoid floating-point accumulation
+ * drift that would occur when summing many `Double` values; incoming
+ * `Option[Double]` costs are converted once via [[BigDecimal.decimal]] on
+ * first contact.
  *
- * @param requestCount   number of API calls attributed to this model
- * @param inputTokens    cumulative prompt tokens sent to the model
- * @param outputTokens   cumulative completion tokens received from the model
- * @param thinkingTokens cumulative extended-thinking tokens (Anthropic only; zero for other providers)
- * @param totalCost      cumulative estimated cost in USD; `BigDecimal(0)` when cost data is unavailable
+ * @param requestCount
+ *   number of API calls attributed to this model
+ * @param inputTokens
+ *   cumulative prompt tokens sent to the model
+ * @param outputTokens
+ *   cumulative completion tokens received from the model
+ * @param thinkingTokens
+ *   cumulative extended-thinking tokens (Anthropic only; zero for other
+ *   providers)
+ * @param totalCost
+ *   cumulative estimated cost in USD; `BigDecimal(0)` when cost data is
+ *   unavailable
  */
 case class ModelUsage(
   requestCount: Long = 0L,
@@ -27,8 +36,10 @@ case class ModelUsage(
   /**
    * Returns a new [[ModelUsage]] with `usage` and `cost` folded in.
    *
-   * @param usage token-usage record from a [[org.llm4s.llmconnect.model.Completion]]
-   * @param cost  optional estimated cost in USD; treated as zero when absent
+   * @param usage
+   *   token-usage record from a [[org.llm4s.llmconnect.model.Completion]]
+   * @param cost
+   *   optional estimated cost in USD; treated as zero when absent
    */
   def add(usage: TokenUsage, cost: Option[Double]): ModelUsage = {
     val thinking  = usage.thinkingTokens.getOrElse(0)
@@ -56,6 +67,10 @@ case class ModelUsage(
       thinkingTokens = thinkingTokens + other.thinkingTokens,
       totalCost = totalCost + other.totalCost
     )
+
+  def averageCostPerRequest: BigDecimal =
+    if (requestCount == 0) BigDecimal(0)
+    else totalCost / BigDecimal(requestCount)
 }
 
 object ModelUsage {
@@ -65,23 +80,32 @@ object ModelUsage {
 /**
  * Aggregates token and cost statistics across all models used in an agent run.
  *
- * The top-level fields (`requestCount`, `inputTokens`, etc.) are roll-ups across
- * every model.  The `byModel` map breaks the same figures down per model name
- * (e.g. `"claude-sonnet-4-5-latest"`, `"gpt-4o"`), allowing cost attribution
- * per provider in multi-model pipelines.
+ * The top-level fields (`requestCount`, `inputTokens`, etc.) are roll-ups
+ * across every model. The `byModel` map breaks the same figures down per model
+ * name (e.g. `"claude-sonnet-4-5-latest"`, `"gpt-4o"`), allowing cost
+ * attribution per provider in multi-model pipelines.
  *
  * `totalCost` uses [[BigDecimal]] rather than `Double` to keep cumulative sums
  * deterministic regardless of the number of requests.
  *
- * @param requestCount   total API calls across all models
- * @param inputTokens    total prompt tokens sent across all models
- * @param outputTokens   total completion tokens received across all models
- * @param thinkingTokens total extended-thinking tokens (non-zero only for Anthropic models)
- * @param totalCost      total estimated cost in USD; `BigDecimal(0)` when unavailable
- * @param byModel        per-model breakdown; keyed by the model identifier string
+ * @param requestCount
+ *   total API calls across all models
+ * @param inputTokens
+ *   total prompt tokens sent across all models
+ * @param outputTokens
+ *   total completion tokens received across all models
+ * @param thinkingTokens
+ *   total extended-thinking tokens (non-zero only for Anthropic models)
+ * @param totalCost
+ *   total estimated cost in USD; `BigDecimal(0)` when unavailable
+ * @param byModel
+ *   per-model breakdown; keyed by the model identifier string
  *
- * @see [[ModelUsage]] for the per-model record type
- * @see [[org.llm4s.agent.AgentState]] which carries a [[UsageSummary]] for the whole run
+ * @see
+ *   [[ModelUsage]] for the per-model record type
+ * @see
+ *   [[org.llm4s.agent.AgentState]] which carries a [[UsageSummary]] for the
+ *   whole run
  */
 case class UsageSummary(
   requestCount: Long = 0L,
@@ -97,11 +121,18 @@ case class UsageSummary(
    *
    * Creates a new [[ModelUsage]] entry for `model` if one does not yet exist.
    *
-   * @param model model identifier string (e.g. `"gpt-4o"`)
-   * @param usage token-usage record from a [[org.llm4s.llmconnect.model.Completion]]
-   * @param cost  optional estimated cost in USD; treated as zero when absent
+   * @param model
+   *   model identifier string (e.g. `"gpt-4o"`)
+   * @param usage
+   *   token-usage record from a [[org.llm4s.llmconnect.model.Completion]]
+   * @param cost
+   *   optional estimated cost in USD; treated as zero when absent
    */
-  def add(model: String, usage: TokenUsage, cost: Option[Double]): UsageSummary = {
+  def add(
+    model: String,
+    usage: TokenUsage,
+    cost: Option[Double]
+  ): UsageSummary = {
     val thinking = usage.thinkingTokens.getOrElse(0)
 
     // NOTE:
@@ -146,17 +177,58 @@ case class UsageSummary(
       byModel = mergedByModel
     )
   }
+
+  /** Average cost per request (USD). */
+  def averageCostPerRequest: BigDecimal =
+    if (requestCount == 0) BigDecimal(0)
+    else totalCost / BigDecimal(requestCount)
+
+  /** Average input tokens per request. */
+  def averageInputTokensPerRequest: BigDecimal =
+    if (requestCount == 0) BigDecimal(0)
+    else BigDecimal(inputTokens) / BigDecimal(requestCount)
+
+  /** Average output tokens per request. */
+  def averageOutputTokensPerRequest: BigDecimal =
+    if (requestCount == 0) BigDecimal(0)
+    else BigDecimal(outputTokens) / BigDecimal(requestCount)
+
+  /** Cost per 1K total tokens (input + output). */
+  def costPer1KTokens: BigDecimal = {
+    val totalTokens = inputTokens + outputTokens
+    if (totalTokens == 0) BigDecimal(0)
+    else (totalCost / BigDecimal(totalTokens)) * BigDecimal(1000)
+  }
+
+  /** Human-readable summary string for logging/CLI usage. */
+  def formattedSummary: String = {
+    val avgCost =
+      averageCostPerRequest.setScale(6, BigDecimal.RoundingMode.HALF_UP)
+    val cost1k       = costPer1KTokens.setScale(6, BigDecimal.RoundingMode.HALF_UP)
+    val totalCostFmt = totalCost.setScale(6, BigDecimal.RoundingMode.HALF_UP)
+
+    s"""
+       |Requests: $requestCount
+       |Input tokens: $inputTokens
+       |Output tokens: $outputTokens
+       |Thinking tokens: $thinkingTokens
+       |Total cost (USD): $$${totalCostFmt}
+       |Average cost/request: $$${avgCost}
+       |Cost per 1K tokens: $$${cost1k}
+       |""".stripMargin
+  }
 }
 
 object UsageSummary {
-  implicit val bigDecimalRw: RW[BigDecimal] = readwriter[ujson.Value].bimap[BigDecimal](
-    bd => ujson.Str(bd.toString),
-    {
-      case ujson.Num(n) => BigDecimal.decimal(n)
-      case ujson.Str(s) => BigDecimal(s)
-      case _            => BigDecimal(0)
-    }
-  )
+  implicit val bigDecimalRw: RW[BigDecimal] =
+    readwriter[ujson.Value].bimap[BigDecimal](
+      bd => ujson.Str(bd.toString),
+      {
+        case ujson.Num(n) => BigDecimal.decimal(n)
+        case ujson.Str(s) => BigDecimal(s)
+        case _            => BigDecimal(0)
+      }
+    )
 
   implicit val rw: RW[UsageSummary] = macroRW
 }

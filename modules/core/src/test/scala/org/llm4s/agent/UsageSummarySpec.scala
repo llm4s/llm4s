@@ -49,7 +49,12 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
 
     val s1 = s0.add(
       model = "anthropic/claude",
-      usage = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 23, thinkingTokens = Some(8)),
+      usage = TokenUsage(
+        promptTokens = 10,
+        completionTokens = 5,
+        totalTokens = 23,
+        thinkingTokens = Some(8)
+      ),
       cost = Some(0.02)
     )
 
@@ -84,7 +89,10 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
     merged.outputTokens shouldBe 14L
     merged.totalCost shouldBe BigDecimal("0.015")
 
-    merged.byModel.keySet shouldBe Set("openai/gpt-4o", "gemini/gemini-2.0-flash")
+    merged.byModel.keySet shouldBe Set(
+      "openai/gpt-4o",
+      "gemini/gemini-2.0-flash"
+    )
 
     val openAi = merged.byModel("openai/gpt-4o")
     openAi.requestCount shouldBe 2L
@@ -123,5 +131,45 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
     val decoded = read[UsageSummary](json)
 
     decoded shouldBe original
+  }
+
+  "UsageSummary derived metrics" should "compute averages correctly" in {
+    val summary = UsageSummary(
+      requestCount = 2,
+      inputTokens = 100,
+      outputTokens = 100,
+      totalCost = BigDecimal("0.20")
+    )
+
+    summary.averageCostPerRequest shouldBe BigDecimal("0.10")
+    summary.averageInputTokensPerRequest shouldBe BigDecimal("50")
+    summary.averageOutputTokensPerRequest shouldBe BigDecimal("50")
+  }
+
+  it should "compute cost per 1K tokens correctly" in {
+    val summary = UsageSummary(
+      requestCount = 1,
+      inputTokens = 500,
+      outputTokens = 500,
+      totalCost = BigDecimal("0.10")
+    )
+
+    summary.costPer1KTokens shouldBe BigDecimal("0.10")
+  }
+
+  it should "produce formatted summary string" in {
+    val summary = UsageSummary(
+      requestCount = 1,
+      inputTokens = 100,
+      outputTokens = 50,
+      totalCost = BigDecimal("0.01")
+    )
+
+    val formatted = summary.formattedSummary
+
+    formatted should include("Requests: 1")
+    formatted should include("Input tokens: 100")
+    formatted should include("Output tokens: 50")
+    formatted should include("Total cost")
   }
 }
