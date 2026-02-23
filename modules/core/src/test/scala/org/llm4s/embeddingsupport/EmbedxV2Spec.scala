@@ -146,9 +146,9 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
     audRes.fold(_.code shouldBe (Some("501")), _ => fail("Expected LaudRes eft(501)"))
     vidRes.fold(_.code shouldBe (Some("501")), _ => fail("Expected vidRes Left(501)"))
 
-    imgRes.fold(_.context.get("provider") shouldBe Some("encoder"), _ => fail("Expected imgRes Left(encoder)"))
-    audRes.fold(_.context.get("provider") shouldBe Some("encoder"), _ => fail("Expected audRes Left(encoder)"))
-    vidRes.fold(_.context.get("provider") shouldBe Some("encoder"), _ => fail("Expected vidRes Left(encoder)"))
+    imgRes.fold(_.context.get("provider") shouldBe Some("provider"), _ => fail("Expected imgRes Left(provider)"))
+    audRes.fold(_.context.get("provider") shouldBe Some("provider"), _ => fail("Expected audRes Left(provider)"))
+    vidRes.fold(_.context.get("provider") shouldBe Some("provider"), _ => fail("Expected vidRes Left(provider)"))
 
   }
 
