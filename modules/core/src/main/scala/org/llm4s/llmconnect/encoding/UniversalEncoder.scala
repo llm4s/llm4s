@@ -89,11 +89,11 @@ object UniversalEncoder {
     client: EmbeddingClient
   ): Result[Seq[EmbeddingVector]] = {
     val modelResult = ModelSelector.selectModel(Image, localModels)
-    
+
     if (!experimentalStubsEnabled) {
       return modelResult.flatMap { model =>
-        Try(java.nio.file.Files.readAllBytes(file.toPath)).toEither
-          .left.map(e => EmbeddingError(None, s"Failed to read image file: ${e.getMessage}", "encoder"))
+        Try(java.nio.file.Files.readAllBytes(file.toPath)).toEither.left
+          .map(e => EmbeddingError(None, s"Failed to read image file: ${e.getMessage}", "encoder"))
           .flatMap { bytes =>
             val req = MultimediaEmbeddingRequest(
               inputs = Seq(RawMediaInput(bytes, mime)),
@@ -119,7 +119,7 @@ object UniversalEncoder {
     }
 
     modelResult.map { model =>
-      val dim = model.dimensions
+      val dim     = model.dimensions
       val safeDim = math.min(dim, MAX_STUB_DIMENSION)
       val seed    = stableSeed(file)
       val raw     = fillDeterministic(safeDim, seed)
@@ -144,11 +144,11 @@ object UniversalEncoder {
     client: EmbeddingClient
   ): Result[Seq[EmbeddingVector]] = {
     val modelResult = ModelSelector.selectModel(Audio, localModels)
-    
+
     if (!experimentalStubsEnabled) {
       return modelResult.flatMap { model =>
-        Try(java.nio.file.Files.readAllBytes(file.toPath)).toEither
-          .left.map(e => EmbeddingError(None, s"Failed to read audio file: ${e.getMessage}", "encoder"))
+        Try(java.nio.file.Files.readAllBytes(file.toPath)).toEither.left
+          .map(e => EmbeddingError(None, s"Failed to read audio file: ${e.getMessage}", "encoder"))
           .flatMap { bytes =>
             val req = MultimediaEmbeddingRequest(
               inputs = Seq(RawMediaInput(bytes, mime)),
@@ -174,7 +174,7 @@ object UniversalEncoder {
     }
 
     modelResult.map { model =>
-      val dim = model.dimensions
+      val dim     = model.dimensions
       val safeDim = math.min(dim, MAX_STUB_DIMENSION)
       val seed    = stableSeed(file) ^ 0x9e3779b97f4a7c15L
       val raw     = fillDeterministic(safeDim, seed)
@@ -199,11 +199,11 @@ object UniversalEncoder {
     client: EmbeddingClient
   ): Result[Seq[EmbeddingVector]] = {
     val modelResult = ModelSelector.selectModel(Video, localModels)
-    
+
     if (!experimentalStubsEnabled) {
       return modelResult.flatMap { model =>
-        Try(java.nio.file.Files.readAllBytes(file.toPath)).toEither
-          .left.map(e => EmbeddingError(None, s"Failed to read video file: ${e.getMessage}", "encoder"))
+        Try(java.nio.file.Files.readAllBytes(file.toPath)).toEither.left
+          .map(e => EmbeddingError(None, s"Failed to read video file: ${e.getMessage}", "encoder"))
           .flatMap { bytes =>
             val req = MultimediaEmbeddingRequest(
               inputs = Seq(RawMediaInput(bytes, mime)),
@@ -229,7 +229,7 @@ object UniversalEncoder {
     }
 
     modelResult.map { model =>
-      val dim = model.dimensions
+      val dim     = model.dimensions
       val safeDim = math.min(dim, MAX_STUB_DIMENSION)
       val seed    = stableSeed(file) ^ 0xc2b2ae3d27d4eb4fL
       val raw     = fillDeterministic(safeDim, seed)
