@@ -1,83 +1,11 @@
 package org.llm4s.toolapi.builtin.search
 
 import org.llm4s.config.DuckDuckGoSearchToolConfig
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class DuckDuckGoSearchToolSpec extends AnyFlatSpec with Matchers {
-
-  // --- Mock HTTP clients ---
-
-  class MockHttpClient(response: HttpResponse) extends Llm4sHttpClient {
-    private def _lastUrl: Option[String]                  = None
-    private def _lastHeaders: Option[Map[String, String]] = None
-    private def _lastParams: Option[Map[String, String]]  = None
-    var lastUrl: Option[String]                           = _lastUrl
-    var lastHeaders: Option[Map[String, String]]          = _lastHeaders
-    var lastParams: Option[Map[String, String]]           = _lastParams
-
-    override def get(
-      url: String,
-      headers: Map[String, String],
-      params: Map[String, String],
-      timeout: Int
-    ): HttpResponse = {
-      lastUrl = Some(url)
-      lastHeaders = Some(headers)
-      lastParams = Some(params)
-      response
-    }
-
-    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      response
-
-    override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): HttpResponse =
-      response
-
-    override def postMultipart(
-      url: String,
-      headers: Map[String, String],
-      parts: Seq[org.llm4s.http.MultipartPart],
-      timeout: Int
-    ): HttpResponse = response
-
-    override def put(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      response
-
-    override def delete(url: String, headers: Map[String, String], timeout: Int): HttpResponse =
-      response
-  }
-
-  class FailingHttpClient(exception: Throwable) extends Llm4sHttpClient {
-    private def fail: Nothing = throw exception
-
-    override def get(
-      url: String,
-      headers: Map[String, String],
-      params: Map[String, String],
-      timeout: Int
-    ): HttpResponse = fail
-
-    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      fail
-
-    override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): HttpResponse =
-      fail
-
-    override def postMultipart(
-      url: String,
-      headers: Map[String, String],
-      parts: Seq[org.llm4s.http.MultipartPart],
-      timeout: Int
-    ): HttpResponse = fail
-
-    override def put(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      fail
-
-    override def delete(url: String, headers: Map[String, String], timeout: Int): HttpResponse =
-      fail
-  }
 
   "DuckDuckGoSearchConfig" should "have correct default values" in {
     val config = DuckDuckGoSearchConfig()
@@ -100,11 +28,16 @@ class DuckDuckGoSearchToolSpec extends AnyFlatSpec with Matchers {
 
   "DuckDuckGoSearchTool" should "have the correct metadata" in {
     val toolConfig = DuckDuckGoSearchToolConfig(apiUrl = "https://api.duckduckgo.com")
-    val tool       = DuckDuckGoSearchTool.create(toolConfig)
-    tool.name shouldBe "duckduckgo_search"
-    tool.description shouldBe
-      "Search the web for definitions, facts, and quick answers using DuckDuckGo. Best for factual queries and definitions. Does not provide full web search results."
-
+    DuckDuckGoSearchTool
+      .create(toolConfig)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          tool.name shouldBe "duckduckgo_search"
+          tool.description shouldBe
+            "Search the web for definitions, facts, and quick answers using DuckDuckGo. Best for factual queries and definitions. Does not provide full web search results."
+        }
+      )
   }
 
   "RelatedTopic" should "serialize and deserialize correctly" in {

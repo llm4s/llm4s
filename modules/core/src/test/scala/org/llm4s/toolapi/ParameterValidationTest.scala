@@ -1,5 +1,6 @@
 package org.llm4s.toolapi
 
+import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default._
@@ -10,7 +11,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
   case class TestResult(message: String)
   implicit val testResultRW: ReadWriter[TestResult] = macroRW[TestResult]
 
-  def createTestTool(name: String = "test_tool"): ToolFunction[Map[String, Any], TestResult] = {
+  def createTestTool(name: String = "test_tool"): Result[ToolFunction[Map[String, Any], TestResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Test parameters")
       .withProperty(Schema.property("requiredString", Schema.string("A required string parameter")))
@@ -27,75 +28,83 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
         num <- extractor.getDouble("requiredNumber")
         bool = extractor.getBoolean("optionalBool").toOption
       } yield TestResult(s"Got string: $str, number: $num, bool: $bool")
-    }.build()
+    }.buildSafe()
   }
 
   "ToolFunction" should "provide clear error message for null arguments" in {
-    val tool   = createTestTool("inventory_tool")
-    val result = tool.execute(ujson.Null)
-
-    (result should be).a(Symbol("left"))
-    val error   = result.left.getOrElse(fail("Expected error"))
-    val message = error.getFormattedMessage
-
-    message should include("inventory_tool")
-    message should include("null arguments")
-    message should include("expected an object")
+    createTestTool("inventory_tool").fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val result = tool.execute(ujson.Null)
+        (result should be).a(Symbol("left"))
+        val error   = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
+        val message = error.getFormattedMessage
+        message should include("inventory_tool")
+        message should include("null arguments")
+        message should include("expected an object")
+      }
+    )
   }
 
   "ToolFunction" should "provide clear error message for missing required parameters" in {
-    val tool = createTestTool()
-    val result = tool.execute(
-      ujson.Obj(
-        "requiredString" -> "test"
-        // Missing requiredNumber
-      )
+    createTestTool().fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val result = tool.execute(
+          ujson.Obj(
+            "requiredString" -> "test"
+            // Missing requiredNumber
+          )
+        )
+        (result should be).a(Symbol("left"))
+        val error   = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
+        val message = error.getMessage
+        message should include("requiredNumber")
+        message should include("missing")
+        message should include("available:")
+        message should include("requiredString")
+      }
     )
-
-    (result should be).a(Symbol("left"))
-    val error   = result.left.getOrElse(fail("Expected error"))
-    val message = error.getMessage
-
-    message should include("requiredNumber")
-    message should include("missing")
-    message should include("available:")
-    message should include("requiredString")
   }
 
   "ToolFunction" should "provide clear error message for type mismatches" in {
-    val tool = createTestTool()
-    val result = tool.execute(
-      ujson.Obj(
-        "requiredString" -> 123,           // Wrong type: number instead of string
-        "requiredNumber" -> "not a number" // Wrong type: string instead of number
-      )
+    createTestTool().fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val result = tool.execute(
+          ujson.Obj(
+            "requiredString" -> 123,           // Wrong type: number instead of string
+            "requiredNumber" -> "not a number" // Wrong type: string instead of number
+          )
+        )
+        (result should be).a(Symbol("left"))
+        val error   = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
+        val message = error.getMessage
+        // Should report the first error encountered
+        message should include("has wrong type")
+        message should (include("expected string").or(include("expected number")))
+      }
     )
-
-    (result should be).a(Symbol("left"))
-    val error   = result.left.getOrElse(fail("Expected error"))
-    val message = error.getMessage
-
-    // Should report the first error encountered
-    message should include("has wrong type")
-    message should (include("expected string").or(include("expected number")))
   }
 
   "ToolFunction" should "provide clear error message for null values in required fields" in {
-    val tool = createTestTool()
-    val result = tool.execute(
-      ujson.Obj(
-        "requiredString" -> ujson.Null,
-        "requiredNumber" -> 42
-      )
+    createTestTool().fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val result = tool.execute(
+          ujson.Obj(
+            "requiredString" -> ujson.Null,
+            "requiredNumber" -> 42
+          )
+        )
+        (result should be).a(Symbol("left"))
+        val error   = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
+        val message = error.getMessage
+        message should include("requiredString")
+        message should include("null")
+        message should include("required but value was null")
+      }
     )
-
-    (result should be).a(Symbol("left"))
-    val error   = result.left.getOrElse(fail("Expected error"))
-    val message = error.getMessage
-
-    message should include("requiredString")
-    message should include("null")
-    message should include("required but value was null")
   }
 
   "SafeParameterExtractor" should "provide helpful error for accessing properties on non-objects" in {
@@ -109,7 +118,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
     val result = extractor.getString("user.name") // Trying to access .name on a string
 
     (result should be).a(Symbol("left"))
-    val error = result.left.getOrElse(fail("Expected error"))
+    val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
 
     error should include("cannot access parameter")
     error should include("name")
@@ -131,7 +140,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
     val result = extractor.getString("user.username") // username doesn't exist
 
     (result should be).a(Symbol("left"))
-    val error = result.left.getOrElse(fail("Expected error"))
+    val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
 
     error should include("username")
     error should include("missing")
@@ -157,7 +166,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
     val result = extractor.getString("country") // country doesn't exist at root
 
     (result should be).a(Symbol("left"))
-    val error = result.left.getOrElse(fail("Expected error"))
+    val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
 
     error should include("country")
     error should include("missing")
@@ -179,7 +188,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
     val result = extractor.getString("user.name")
 
     (result should be).a(Symbol("left"))
-    val error = result.left.getOrElse(fail("Expected error"))
+    val error = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
 
     error should include("cannot access parameter")
     error should include("name")
@@ -205,7 +214,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
     // Test missing parameter at different nesting levels
     val result1 = extractor.getString("user.profile.settings.language")
     (result1 should be).a(Symbol("left"))
-    val error1 = result1.left.getOrElse(fail("Expected error"))
+    val error1 = result1.fold(identity, v => fail(s"Expected Left but got Right: $v"))
     error1 should include("available:")
     error1 should include("theme")
     error1 should include("notifications")
@@ -213,7 +222,7 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
 
     val result2 = extractor.getString("user.profile.email")
     (result2 should be).a(Symbol("left"))
-    val error2 = result2.left.getOrElse(fail("Expected error"))
+    val error2 = result2.fold(identity, v => fail(s"Expected Left but got Right: $v"))
     error2 should include("available:")
     error2 should include("firstName")
     error2 should include("lastName")
@@ -247,32 +256,34 @@ class ParameterValidationTest extends AnyFlatSpec with Matchers {
         )
       )
 
-    val tool = ToolBuilder[Map[String, Any], TestResult](
+    ToolBuilder[Map[String, Any], TestResult](
       "complex_tool",
       "Tool with nested parameters",
       schema
     ).withHandler { extractor =>
       extractor.getString("user.profile.settings.theme").map(theme => TestResult(s"Theme: $theme"))
-    }.build()
-
-    // Test with missing nested property
-    val result = tool.execute(
-      ujson.Obj(
-        "user" -> ujson.Obj(
-          "profile" -> ujson.Obj(
-            // Missing settings object
+    }.buildSafe()
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          // Test with missing nested property
+          val result = tool.execute(
+            ujson.Obj(
+              "user" -> ujson.Obj(
+                "profile" -> ujson.Obj(
+                  // Missing settings object
+                )
+              )
+            )
           )
-        )
+          (result should be).a(Symbol("left"))
+          val error   = result.fold(identity, v => fail(s"Expected Left but got Right: $v"))
+          val message = error.getMessage
+          message should include("settings")
+          message should include("missing")
+          message should include("user.profile.settings")
+        }
       )
-    )
-
-    (result should be).a(Symbol("left"))
-    val error   = result.left.getOrElse(fail("Expected error"))
-    val message = error.getMessage
-
-    message should include("settings")
-    message should include("missing")
-    message should include("user.profile.settings")
   }
 
   "ToolCallError" should "format multiple errors nicely" in {

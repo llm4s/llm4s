@@ -84,20 +84,31 @@ object ResearcherAgentExample {
    * @param braveConfig The loaded Brave Search configuration containing API key and defaults
    * @return Sequence of configured Brave Search tools for Web, News, Image, and Video
    */
-  private def createResearchTools(braveConfig: org.llm4s.config.BraveSearchToolConfig) = Seq(
-    BraveSearchTool.create(braveConfig, BraveSearchCategory.Web, Some(BraveSearchConfig(count = 10))),
-    BraveSearchTool.create(braveConfig, BraveSearchCategory.News, Some(BraveSearchConfig(count = 10))),
-    BraveSearchTool.create(
-      braveConfig,
-      BraveSearchCategory.Image,
-      Some(BraveSearchConfig(count = 2, safeSearch = SafeSearch.Strict))
-    ),
-    BraveSearchTool.create(
-      braveConfig,
-      BraveSearchCategory.Video,
-      Some(BraveSearchConfig(count = 2, safeSearch = SafeSearch.Strict))
-    )
-  )
+  private def createResearchTools(
+    braveConfig: org.llm4s.config.BraveSearchToolConfig
+  ): Seq[org.llm4s.toolapi.ToolFunction[_, _]] = {
+    val tools = for {
+      web  <- BraveSearchTool.create(braveConfig, BraveSearchCategory.Web, Some(BraveSearchConfig(count = 10)))
+      news <- BraveSearchTool.create(braveConfig, BraveSearchCategory.News, Some(BraveSearchConfig(count = 10)))
+      image <- BraveSearchTool.create(
+        braveConfig,
+        BraveSearchCategory.Image,
+        Some(BraveSearchConfig(count = 2, safeSearch = SafeSearch.Strict))
+      )
+      video <- BraveSearchTool.create(
+        braveConfig,
+        BraveSearchCategory.Video,
+        Some(BraveSearchConfig(count = 2, safeSearch = SafeSearch.Strict))
+      )
+    } yield Seq(web, news, image, video)
+
+    tools match {
+      case Right(t) => t
+      case Left(err) =>
+        logger.error("Failed to create research tools: {}", err.formatted)
+        Seq.empty
+    }
+  }
 
   /**
    * Executes the multi-phase research workflow with the agent.

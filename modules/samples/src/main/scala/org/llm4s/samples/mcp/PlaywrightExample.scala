@@ -82,18 +82,22 @@ object PlaywrightExample {
     )
   }
 
-  // Validate that prerequisites are installed
   private def checkCommand(cmd: String, toolName: String): Either[String, Unit] =
-    Try {
-      val process = new ProcessBuilder(cmd, "--version").start()
-      val exited  = process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
-      if (!exited) {
-        throw new RuntimeException(s"$toolName process did not complete in time")
+    Try(new ProcessBuilder(cmd, "--version").start()).toEither
+      .leftMap(ex => s"Failed to start $toolName check: ${ex.getMessage}")
+      .flatMap { process =>
+        val exited = process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS)
+        if (!exited) {
+          Left(s"$toolName process did not complete in time")
+        } else {
+          val exitCode = process.exitValue()
+          if (exitCode != 0) {
+            Left(s"$toolName is not installed or not accessible")
+          } else {
+            Right(())
+          }
+        }
       }
-      if (process.exitValue() != 0) {
-        throw new RuntimeException(s"$toolName is not installed or not accessible")
-      }
-    }.toEither.leftMap(ex => ex.getMessage)
 
   private def validatePrerequisites(): Either[String, LLMClient] =
     for {

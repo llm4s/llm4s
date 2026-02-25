@@ -34,7 +34,7 @@ object AzureToolHelper {
   def convertToolRegistryToAzureTools(
     toolRegistry: ToolRegistry
   ): java.util.List[ChatCompletionsToolDefinition] = {
-    val toolsJson = toolRegistry.getToolDefinitions("openai")
+    val toolsJson = toolRegistry.getToolDefinitionsSafe("openai").getOrElse(ujson.Arr())
 
     val tools = new java.util.ArrayList[ChatCompletionsToolDefinition]()
     for (toolObj <- toolsJson.arr) {

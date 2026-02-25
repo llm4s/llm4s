@@ -3,81 +3,9 @@ package org.llm4s.toolapi.builtin.search
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.config.{ BraveSearchToolConfig, Llm4sConfig }
-import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
+import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 
 class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
-
-  // --- Mock HTTP clients ---
-
-  class MockHttpClient(response: HttpResponse) extends Llm4sHttpClient {
-    private def _lastUrl: Option[String]                  = None
-    private def _lastHeaders: Option[Map[String, String]] = None
-    private def _lastParams: Option[Map[String, String]]  = None
-    var lastUrl: Option[String]                           = _lastUrl
-    var lastHeaders: Option[Map[String, String]]          = _lastHeaders
-    var lastParams: Option[Map[String, String]]           = _lastParams
-
-    override def get(
-      url: String,
-      headers: Map[String, String],
-      params: Map[String, String],
-      timeout: Int
-    ): HttpResponse = {
-      lastUrl = Some(url)
-      lastHeaders = Some(headers)
-      lastParams = Some(params)
-      response
-    }
-
-    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      response
-
-    override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): HttpResponse =
-      response
-
-    override def postMultipart(
-      url: String,
-      headers: Map[String, String],
-      parts: Seq[org.llm4s.http.MultipartPart],
-      timeout: Int
-    ): HttpResponse = response
-
-    override def put(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      response
-
-    override def delete(url: String, headers: Map[String, String], timeout: Int): HttpResponse =
-      response
-  }
-
-  class FailingHttpClient(exception: Throwable) extends Llm4sHttpClient {
-    private def fail: Nothing = throw exception
-
-    override def get(
-      url: String,
-      headers: Map[String, String],
-      params: Map[String, String],
-      timeout: Int
-    ): HttpResponse = fail
-
-    override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      fail
-
-    override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): HttpResponse =
-      fail
-
-    override def postMultipart(
-      url: String,
-      headers: Map[String, String],
-      parts: Seq[org.llm4s.http.MultipartPart],
-      timeout: Int
-    ): HttpResponse = fail
-
-    override def put(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse =
-      fail
-
-    override def delete(url: String, headers: Map[String, String], timeout: Int): HttpResponse =
-      fail
-  }
 
   private def testToolConfig = BraveSearchToolConfig(
     apiKey = "test-api-key",
@@ -127,11 +55,16 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
           category: BraveSearchCategory[R],
           expectedName: String,
           expectedDescription: String
-        ): Unit = {
-          val tool = BraveSearchTool.create(config, category)
-          tool.name shouldBe expectedName
-          tool.description shouldBe expectedDescription
-        }
+        ): Unit =
+          BraveSearchTool
+            .create(config, category)
+            .fold(
+              e => fail(s"Tool creation failed: ${e.formatted}"),
+              tool => {
+                tool.name shouldBe expectedName
+                tool.description shouldBe expectedDescription
+              }
+            )
 
         testCategory(BraveSearchCategory.Web, "brave_web_search", "Searches the web using Brave Search")
         testCategory(BraveSearchCategory.Image, "brave_image_search", "Searches for images using Brave Search")
@@ -282,6 +215,67 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
     BraveSearchCategory.Image.parseResults(emptyJson, "q").results shouldBe empty
     BraveSearchCategory.Video.parseResults(emptyJson, "q").results shouldBe empty
     BraveSearchCategory.News.parseResults(emptyJson, "q").results shouldBe empty
+  }
+
+  // --- Unit tests for BraveSearchTool.create() and withApiKey() ---
+
+  "BraveSearchTool.create" should "return Right with correct tool name and description for Web category" in {
+    val mockClient = new MockHttpClient(HttpResponse(200, "{}"))
+    val result     = BraveSearchTool.create(testToolConfig, BraveSearchCategory.Web, None, mockClient)
+    result match {
+      case Right(tool) =>
+        tool.name shouldBe "brave_web_search"
+        tool.description shouldBe "Searches the web using Brave Search"
+      case Left(err) => fail(s"Expected Right but got Left: ${err.formatted}")
+    }
+  }
+
+  it should "return Right with correct tool name and description for News category" in {
+    val mockClient = new MockHttpClient(HttpResponse(200, "{}"))
+    val result     = BraveSearchTool.create(testToolConfig, BraveSearchCategory.News, None, mockClient)
+    result match {
+      case Right(tool) => tool.name shouldBe "brave_news_search"
+      case Left(err)   => fail(s"Expected Right but got Left: ${err.formatted}")
+    }
+  }
+
+  it should "apply custom BraveSearchConfig when provided" in {
+    val mockClient =
+      new MockHttpClient(HttpResponse(200, ujson.Obj("web" -> ujson.Obj("results" -> ujson.Arr())).render()))
+    val customConfig = Some(BraveSearchConfig(count = 3, safeSearch = SafeSearch.Off))
+    val result       = BraveSearchTool.create(testToolConfig, BraveSearchCategory.Web, customConfig, mockClient)
+    result match {
+      case Right(tool) => tool.name shouldBe "brave_web_search"
+      case Left(err)   => fail(s"Expected Right but got Left: ${err.formatted}")
+    }
+  }
+
+  "BraveSearchTool.withApiKey" should "return Right with correct tool name using default Web category" in {
+    val mockClient = new MockHttpClient(HttpResponse(200, "{}"))
+    val result     = BraveSearchTool.withApiKey("test-key", httpClient = mockClient)
+    result match {
+      case Right(tool) => tool.name shouldBe "brave_web_search"
+      case Left(err)   => fail(s"Expected Right but got Left: ${err.formatted}")
+    }
+  }
+
+  it should "return Right with correct tool name for explicit category" in {
+    val mockClient = new MockHttpClient(HttpResponse(200, "{}"))
+    val result = BraveSearchTool.withApiKey("test-key", category = BraveSearchCategory.Image, httpClient = mockClient)
+    result match {
+      case Right(tool) => tool.name shouldBe "brave_image_search"
+      case Left(err)   => fail(s"Expected Right but got Left: ${err.formatted}")
+    }
+  }
+
+  it should "use the provided apiUrl" in {
+    val body       = ujson.Obj("web" -> ujson.Obj("results" -> ujson.Arr())).render()
+    val mockClient = new MockHttpClient(HttpResponse(200, body))
+    val result = BraveSearchTool.withApiKey("test-key", apiUrl = "https://custom.brave.com/v1", httpClient = mockClient)
+    result match {
+      case Right(tool) => tool.name shouldBe "brave_web_search"
+      case Left(err)   => fail(s"Expected Right but got Left: ${err.formatted}")
+    }
   }
 
   // --- Unit tests for BraveSearchTool.search() with mocked HTTP ---

@@ -23,6 +23,51 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
+/**
+ * [[LLMClient]] implementation for Anthropic Claude models.
+ *
+ * Uses the official Anthropic Java SDK (`AnthropicOkHttpClient`) for all
+ * API calls. SDK exceptions are mapped to the appropriate [[org.llm4s.error.LLMError]]
+ * subtypes before being returned.
+ *
+ * == Message format adaptations ==
+ *
+ * The Anthropic Messages API differs from the OpenAI convention in several
+ * ways that this client handles transparently:
+ *
+ *  - **Default system prompt**: if the conversation contains no
+ *    `SystemMessage`, the client injects `"You are Claude, a helpful AI
+ *    assistant."` automatically. Supply an explicit `SystemMessage` to
+ *    override this.
+ *
+ *  - **Tool results as user messages**: the Anthropic API does not accept
+ *    native tool-result messages in the same turn structure as OpenAI.
+ *    `ToolMessage` values are therefore forwarded as user messages with
+ *    the prefix `"[Tool result for <toolCallId>]: "`.
+ *
+ *  - **Assistant messages with tool calls are skipped**: when an
+ *    `AssistantMessage` carries pending tool calls, it is not forwarded —
+ *    Anthropic infers the assistant turn from the subsequent tool-result
+ *    user messages.
+ *
+ *  - **Schema sanitisation**: OpenAI-specific fields (`strict`,
+ *    `additionalProperties`) are stripped from tool schemas before sending,
+ *    because Anthropic's API rejects them.
+ *
+ * == Extended thinking ==
+ *
+ * When `CompletionOptions.reasoning` is set, a `thinking` block is added
+ * to the request. The token budget is clamped to `[1024, maxTokens - 1]`
+ * to satisfy the Anthropic API constraint; the effective budget may
+ * therefore differ from what was requested.
+ *
+ * `maxTokens` defaults to 2048 when not set in `CompletionOptions` because
+ * the Anthropic API requires the field.
+ *
+ * @param config  `AnthropicConfig` carrying the API key, model name, and base URL.
+ * @param metrics Receives per-call latency and token-usage events.
+ *                Defaults to `MetricsCollector.noop`.
+ */
 class AnthropicClient(
   config: AnthropicConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
@@ -67,7 +112,7 @@ class AnthropicClient(
           // Add extended thinking configuration if requested
           // Minimum budget is 1024 tokens, must be less than max_tokens
           transformed.options.effectiveBudgetTokens.foreach { budgetTokens =>
-            val effectiveBudget = math.max(1024, math.min(budgetTokens, maxTokens - 1))
+            val effectiveBudget = clampBudgetTokens(budgetTokens, maxTokens)
             paramsBuilder.thinking(
               ThinkingConfigEnabled.builder().budgetTokens(effectiveBudget.toLong).build()
             )
@@ -150,7 +195,7 @@ curl https://api.anthropic.com/v1/messages \
 
             // Add extended thinking configuration if requested
             transformed.options.effectiveBudgetTokens.foreach { budgetTokens =>
-              val effectiveBudget = math.max(1024, math.min(budgetTokens, maxTokens - 1))
+              val effectiveBudget = clampBudgetTokens(budgetTokens, maxTokens)
               paramsBuilder.thinking(
                 ThinkingConfigEnabled.builder().budgetTokens(effectiveBudget.toLong).build()
               )
@@ -303,8 +348,22 @@ curl https://api.anthropic.com/v1/messages \
 
   override def getReserveCompletion(): Int = providerConfig.reserveCompletion
 
+  /**
+   * Clamps an extended-thinking budget to the range `[1024, maxTokens - 1]`.
+   *
+   * The Anthropic API requires `budgetTokens >= 1024` and `budgetTokens < maxTokens`.
+   * Values outside this range are silently adjusted; callers should prefer
+   * supplying valid budgets rather than relying on clamping.
+   *
+   * @param budgetTokens requested thinking-token budget; may be any non-negative value
+   * @param maxTokens    effective `max_tokens` for the request; determines the upper bound
+   * @return the clamped budget in `[1024, maxTokens - 1]`
+   */
+  private[provider] def clampBudgetTokens(budgetTokens: Int, maxTokens: Int): Int =
+    math.max(1024, math.min(budgetTokens, maxTokens - 1))
+
   // Add messages from conversation to the parameters builder
-  private def addMessagesToParams(
+  private[provider] def addMessagesToParams(
     conversation: Conversation,
     paramsBuilder: MessageCreateParams.Builder
   ): Unit = {
@@ -341,26 +400,34 @@ curl https://api.anthropic.com/v1/messages \
     }
   }
 
-  // Convert our ToolFunction to Anthropic's Tool
-  private def convertToolToAnthropicTool(toolFunction: ToolFunction[_, _]): Tool = {
-    // note: in case of debug set this environment variable -- `ANTHROPIC_LOG=debug`
-
-    val objectSchema  = toolFunction.schema.asInstanceOf[ObjectSchema[_]]
+  /**
+   * Convert a ToolFunction to Anthropic's Tool format.
+   * Strips OpenAI-specific fields like 'strict' and 'additionalProperties' from the schema
+   * to maintain compatibility with the Anthropic API.
+   */
+  private[provider] def convertToolToAnthropicTool(toolFunction: ToolFunction[_, _]): Tool = {
+    val objectSchema = toolFunction.schema.asInstanceOf[ObjectSchema[_]]
+    // Generate raw schema without 'strict' mode
     val jsonSchemaStr = objectSchema.toJsonSchema(false).render()
 
-    // Parse the JSON schema and extract properties
+    // Parse the JSON and sanitize the schema
+    val jsonNode = ujson.read(jsonSchemaStr)
+
+    // Fix: Remove OpenAI-only top-level fields
+    jsonNode.obj.remove("strict")
+    jsonNode.obj.remove("additionalProperties")
+
+    // Recursively strip additionalProperties from nested parts
+    stripAdditionalProperties(jsonNode)
+
+    val sanitizedSchemaStr = jsonNode.render()
     val jsonSchema: JsonObject =
-      ObjectMappers.jsonMapper().readValue(jsonSchemaStr, classOf[JsonObject])
+      ObjectMappers.jsonMapper().readValue(sanitizedSchemaStr, classOf[JsonObject])
     val jsonSchemaMap = jsonSchema.values()
 
-    // Build the input schema using raw JSON value for properties
-    // The new SDK requires proper Properties type, so we use the putAdditionalProperty approach
     val inputSchemaBuilder = Tool.InputSchema.builder()
-
-    // Convert the properties JsonValue to Properties type
-    val propertiesValue = jsonSchemaMap.get("properties")
+    val propertiesValue    = jsonSchemaMap.get("properties")
     if (propertiesValue != null) {
-      // Use the properties via JsonValue wrapper
       val propertiesObj = ObjectMappers
         .jsonMapper()
         .readValue(
@@ -370,14 +437,29 @@ curl https://api.anthropic.com/v1/messages \
       inputSchemaBuilder.properties(propertiesObj)
     }
 
-    val tool = Tool
+    Tool
       .builder()
       .name(toolFunction.name)
       .description(toolFunction.description)
       .inputSchema(inputSchemaBuilder.build().validate())
       .build()
-    tool
   }
+
+  /**
+   * Recursively strip 'additionalProperties' from all levels of a JSON schema.
+   * This ensures compatibility with providers that don't support OpenAI-specific schema extensions.
+   */
+  private[provider] def stripAdditionalProperties(json: ujson.Value): Unit =
+    json match {
+      case obj: ujson.Obj =>
+        obj.value.remove("additionalProperties")
+        obj.value.get("properties").foreach(props => props.obj.values.foreach(stripAdditionalProperties))
+        obj.value.get("items").foreach(stripAdditionalProperties)
+        Seq("anyOf", "oneOf", "allOf").foreach { key =>
+          obj.value.get(key).foreach(arr => arr.arr.foreach(stripAdditionalProperties))
+        }
+      case _ =>
+    }
 
   // Convert Anthropic response to our model
   private def convertFromAnthropicResponse(response: Message): Completion = {
@@ -449,8 +531,7 @@ curl https://api.anthropic.com/v1/messages \
 
   override def close(): Unit =
     if (closed.compareAndSet(false, true)) {
-      // The Anthropic OkHttpClient does not expose a close() method.
-      // We track logical closed state for thread-safety.
+      client.close()
     }
 
   private def validateNotClosed: Result[Unit] =
@@ -464,6 +545,16 @@ curl https://api.anthropic.com/v1/messages \
 object AnthropicClient {
   import org.llm4s.types.TryOps
 
+  /**
+   * Constructs an [[AnthropicClient]], wrapping any construction-time
+   * exception in a `Left`.
+   *
+   * @param config  `AnthropicConfig` with API key, model, and base URL.
+   * @param metrics Receives per-call latency and token-usage events.
+   *                Defaults to `MetricsCollector.noop`.
+   * @return `Right(client)` on success; `Left(LLMError)` if the underlying
+   *         SDK client cannot be initialised.
+   */
   def apply(
     config: AnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop

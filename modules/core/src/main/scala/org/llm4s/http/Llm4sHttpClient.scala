@@ -23,6 +23,28 @@ case class HttpResponse(
 )
 
 /**
+ * HTTP response wrapper for binary (non-text) response bodies.
+ *
+ * Use this instead of [[HttpResponse]] when the response body is binary data
+ * (e.g. image bytes) to avoid lossy charset decoding.
+ *
+ * @param statusCode HTTP status code
+ * @param body       Raw response bytes — exact wire representation, no charset conversion
+ */
+case class HttpRawResponse(statusCode: Int, body: Array[Byte])
+
+/**
+ * HTTP response wrapper for streaming (InputStream-based) response bodies.
+ *
+ * Use this instead of [[HttpResponse]] when the response body must be consumed
+ * incrementally (e.g. server-sent events, JSON lines).
+ *
+ * @param statusCode HTTP status code
+ * @param body       Response body as an InputStream — caller is responsible for closing it
+ */
+case class StreamingHttpResponse(statusCode: Int, body: java.io.InputStream)
+
+/**
  * Represents a single part in a multipart/form-data request.
  */
 sealed trait MultipartPart {
@@ -87,6 +109,34 @@ trait Llm4sHttpClient {
     headers: Map[String, String] = Map.empty,
     timeout: Int = 10000
   ): HttpResponse
+
+  /**
+   * POST with a string body and return the response as raw bytes, bypassing charset decoding.
+   *
+   * Use this when the response body is binary (e.g. image data) where decoding to a String
+   * and back would corrupt bytes that are not valid in the chosen charset.
+   */
+  def postRaw(
+    url: String,
+    headers: Map[String, String] = Map.empty,
+    body: String = "",
+    timeout: Int = 10000
+  ): HttpRawResponse
+
+  /**
+   * POST with a string body and return the response as a streaming InputStream.
+   *
+   * Use this for server-sent events or JSON-lines endpoints where the body must be
+   * consumed incrementally.  The caller is responsible for closing the InputStream.
+   *
+   * Default timeout is 10 minutes to accommodate long-running streams.
+   */
+  def postStream(
+    url: String,
+    headers: Map[String, String] = Map.empty,
+    body: String = "",
+    timeout: Int = 600000
+  ): StreamingHttpResponse
 }
 
 object Llm4sHttpClient {
@@ -102,7 +152,7 @@ object Llm4sHttpClient {
  * Never throws on non-2xx responses — the caller is responsible for
  * checking `HttpResponse.statusCode`.
  */
-class JdkHttpClient extends Llm4sHttpClient {
+private[llm4s] class JdkHttpClient extends Llm4sHttpClient {
   private val client = JHttpClient.newHttpClient()
 
   override def get(
@@ -180,6 +230,32 @@ class JdkHttpClient extends Llm4sHttpClient {
       .DELETE()
       .build()
     execute(request)
+  }
+
+  override def postRaw(
+    url: String,
+    headers: Map[String, String],
+    body: String,
+    timeout: Int
+  ): HttpRawResponse = {
+    val request = buildRequest(url, headers, timeout)
+      .POST(HttpRequest.BodyPublishers.ofString(body))
+      .build()
+    val response = client.send(request, JHttpResponse.BodyHandlers.ofByteArray())
+    HttpRawResponse(statusCode = response.statusCode(), body = response.body())
+  }
+
+  override def postStream(
+    url: String,
+    headers: Map[String, String],
+    body: String,
+    timeout: Int
+  ): StreamingHttpResponse = {
+    val request = buildRequest(url, headers, timeout)
+      .POST(HttpRequest.BodyPublishers.ofString(body))
+      .build()
+    val response = client.send(request, JHttpResponse.BodyHandlers.ofInputStream())
+    StreamingHttpResponse(statusCode = response.statusCode(), body = response.body())
   }
 
   // ============================================================

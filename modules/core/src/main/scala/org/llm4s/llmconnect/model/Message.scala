@@ -5,7 +5,16 @@ import org.llm4s.types.Result
 import upickle.default.{ macroRW, read, readwriter, write, ReadWriter => RW }
 
 /**
- * Represents a message in a conversation with an LLM (Large Language Model).
+ * A single turn in an LLM conversation.
+ *
+ * Conversations are sequences of `Message` values passed to [[org.llm4s.llmconnect.LLMClient]].
+ * Each concrete subtype corresponds to one participant role:
+ * [[UserMessage]], [[SystemMessage]], [[AssistantMessage]], [[ToolMessage]].
+ *
+ * `content` is always a non-null, non-empty string for well-formed messages —
+ * use [[validate]] or the smart constructors on the [[Message]] companion to
+ * ensure this invariant. `AssistantMessage.content` returns `""` rather than
+ * `null` when the LLM response contains only tool calls and no text.
  */
 sealed trait Message {
   def role: MessageRole
@@ -14,7 +23,10 @@ sealed trait Message {
   override def toString: String = s"$role: $content"
 
   /**
-   * Validates individual message
+   * Validates that this message satisfies its role-specific content constraints.
+   *
+   * Returns `Left(ValidationError)` when `content` is blank; `AssistantMessage`
+   * additionally requires at least one of `content` or `toolCalls` to be present.
    */
   def validate: Result[Message] =
     if (content.trim.isEmpty) {
@@ -25,7 +37,13 @@ sealed trait Message {
 }
 
 /**
- * Message validation with comprehensive conversation flow rules
+ * Companion object providing smart constructors and conversation-level validation.
+ *
+ * The smart constructors (`system`, `user`, `assistant`, `tool`) return
+ * `Left(ValidationError)` on blank content so callers get typed errors instead
+ * of runtime exceptions. Prefer these over the case-class constructors in
+ * application code; use case-class constructors directly only in tests or when
+ * content is guaranteed non-blank.
  */
 object Message {
 
@@ -53,9 +71,22 @@ object Message {
   )
 
   /**
-   * Validates a list of messages for conversation consistency
+   * Validates structural consistency of a full conversation.
    *
-   * CRITICAL MISSING METHOD - NOW IMPLEMENTED
+   * Three checks are applied in order and all failures are collected before
+   * returning, so callers see every problem in a single pass:
+   *  1. Each message satisfies its individual [[Message.validate]] constraint.
+   *  2. Conversation-flow rules: system messages only at the start; tool messages
+   *     must be preceded by an assistant message that requested the matching tool call.
+   *  3. Tool-call/response pairing: every tool call in an assistant message must
+   *     have exactly one [[ToolMessage]] response with a matching `toolCallId`, and
+   *     vice-versa.
+   *
+   * An empty `messages` list is considered valid.
+   *
+   * @param messages Messages in conversation order (oldest first).
+   * @return `Right(())` when all checks pass; `Left(ValidationError)` with all
+   *         violations listed in `error.violations` when any check fails.
    */
   def validateConversation(messages: List[Message]): Result[Unit] = {
     if (messages.isEmpty) {
@@ -214,6 +245,13 @@ object Message {
     }
 }
 
+/**
+ * Identifies the participant that authored a [[Message]].
+ *
+ * Maps directly to the `role` field in provider API payloads.
+ * The string representation returned by `toString` is the lowercase name
+ * forwarded verbatim to the provider (e.g. `"user"`, `"assistant"`).
+ */
 sealed trait MessageRole {
   def name: String
   override def toString: String = name
@@ -258,10 +296,21 @@ object SystemMessage {
 }
 
 /**
- * Represents a message from the LLM assistant, which may include text, tool calls or both.
+ * A response from the LLM, optionally containing text, tool-call requests, or both.
  *
- * @param contentOpt Optional content of the message.
- * @param toolCalls  Sequence of tool calls made by the assistant.
+ * `content` always returns a non-null `String`; it returns `""` when the LLM
+ * response contains only tool calls and no accompanying text (`contentOpt` is
+ * `None`). Code that displays assistant output should check for an empty string
+ * rather than null-guarding.
+ *
+ * A well-formed `AssistantMessage` must satisfy at least one of:
+ *  - `contentOpt.exists(_.trim.nonEmpty)` — the LLM produced text.
+ *  - `toolCalls.nonEmpty` — the LLM requested one or more tool invocations.
+ *
+ * @param contentOpt Text portion of the response; `None` when the model produced
+ *                   only tool calls.
+ * @param toolCalls  Tool invocations requested by the model; each carries an `id`
+ *                   that must be matched by a subsequent [[ToolMessage]].
  */
 case class AssistantMessage(
   contentOpt: Option[String] = None,
@@ -338,6 +387,17 @@ final case class ToolMessage(
 ) extends Message {
   val role: MessageRole = MessageRole.Tool
 
+  /**
+   * Resolves the tool name for this response by scanning `contextMessages` for
+   * the [[ToolCall]] whose `id` matches [[toolCallId]].
+   *
+   * Returns `"unknown-tool"` when no matching tool call is found, which can
+   * happen if `contextMessages` does not include the assistant message that
+   * issued the request (e.g. after context pruning).
+   *
+   * @param contextMessages The conversation history to search; all
+   *                        [[AssistantMessage]] entries are scanned.
+   */
   def findToolCallName(contextMessages: Seq[Message]): String =
     contextMessages
       .collect { case am: AssistantMessage => am.toolCalls }
@@ -370,11 +430,19 @@ object ToolMessage {
 }
 
 /**
- * Represents a tool call request from the LLM.
+ * A single tool invocation requested by the LLM.
  *
- * @param id Unique identifier for the tool call (generated byt the LLM).
- * @param name Name of the tool being called. (from the list of tools provided to the LLM).
- * @param arguments Arguments passed to the tool in JSON format.
+ * The LLM generates `id` to correlate this request with its [[ToolMessage]] response;
+ * the agent framework forwards `id` unchanged when constructing [[ToolMessage]] values,
+ * so do not modify it.
+ *
+ * `arguments` is a parsed `ujson.Value` (typically a JSON object), not a raw string.
+ * Use `arguments.obj` to access fields or pass it directly to
+ * [[org.llm4s.toolapi.ToolRegistry.execute]] via a [[org.llm4s.toolapi.ToolCallRequest]].
+ *
+ * @param id        Provider-generated identifier; matched by the corresponding [[ToolMessage.toolCallId]].
+ * @param name      Name of the tool to invoke; must match a registered [[org.llm4s.toolapi.ToolFunction]].
+ * @param arguments Parsed JSON arguments; the schema is defined by the tool's [[org.llm4s.toolapi.Schema]].
  */
 case class ToolCall(
   id: String,

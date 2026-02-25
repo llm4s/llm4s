@@ -69,17 +69,19 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     Either.cond(count > 0 && count <= 4, count, ValidationError("Count must be between 1 and 4 for HuggingFace"))
 
   /**
-   * Converts the byte content of an HTTP response into a Base64-encoded string.
-   * If an error occurs during the conversion process, it wraps the exception
-   * into an `ImageGenerationError`.
+   * Base64-encodes raw image bytes received directly from the HTTP layer.
    *
-   * @param response The HTTP response containing the byte data to convert.
+   * Takes the exact wire bytes so no charset round-trip occurs. The previous
+   * approach (`response.body.getBytes(ISO_8859_1)`) was lossy: `BodyHandlers.ofString`
+   * decoded bytes as UTF-8, replacing invalid sequences with U+FFFD, which
+   * ISO_8859_1 then mapped to `?` (0x3F), corrupting binary image data.
+   *
+   * @param imageBytes Raw bytes from the HTTP response body.
    * @return Either an `ImageGenerationError` in case of a failure or
    *         the resulting Base64-encoded string on success.
    */
-  def convertToBase64(response: requests.Response): Either[ImageGenerationError, String] = Try {
-    val imageData = response.bytes
-    Base64.getEncoder.encodeToString(imageData)
+  def convertToBase64(imageBytes: Array[Byte]): Either[ImageGenerationError, String] = Try {
+    Base64.getEncoder.encodeToString(imageBytes)
   }.toEither.left.map(exception => ServiceError(exception.getMessage, 500))
 
   /**
@@ -138,8 +140,8 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       prompt     <- validatePrompt(prompt)
       count      <- validateCount(count)
       payload    <- buildPayload(prompt, options)
-      response   <- makeHttpRequest(payload)
-      base64Data <- convertToBase64(response)
+      rawBytes   <- makeHttpRequest(payload)
+      base64Data <- convertToBase64(rawBytes)
       images     <- generateAllImages(prompt, count, options, base64Data)
     } yield images
 
@@ -245,12 +247,16 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
   }.toEither.left.map(exception => ServiceError(exception.getMessage, 500))
 
   /**
-   * Makes an HTTP POST request to the HuggingFace Inference API to send a payload and retrieve a response.
+   * Makes an HTTP POST request to the HuggingFace Inference API and returns the raw response bytes.
+   *
+   * Uses `postRaw` so the binary image payload is never decoded through a charset,
+   * preventing the corruption that occurred when `BodyHandlers.ofString` decoded bytes
+   * as UTF-8 and they were then re-encoded with ISO_8859_1.
    *
    * @param payload The JSON payload to send with the HTTP request.
-   * @return Either an ImageGenerationError if the request fails or a successful `requests.Response` object.
+   * @return Either an ImageGenerationError if the request fails, or the raw image bytes on success.
    */
-  def makeHttpRequest(payload: String): Either[ImageGenerationError, requests.Response] = {
+  def makeHttpRequest(payload: String): Either[ImageGenerationError, Array[Byte]] = {
     val url = s"https://api-inference.huggingface.co/models/${config.model}"
     val headers = Map(
       "Authorization" -> s"Bearer ${config.apiKey}",
@@ -258,16 +264,16 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     )
 
     httpClient
-      .post(url, headers, payload, config.timeout)
+      .postRaw(url, headers, payload, config.timeout)
       .toEither
       .left
       .map(exception => ServiceError(exception.getMessage, 500))
       .flatMap { response =>
         response.statusCode match {
-          case 200 => Right(response)
+          case 200 => Right(response.body)
           case 401 => Left(AuthenticationError("Unauthorized"))
           case 429 => Left(RateLimitError("Rate limit"))
-          case _   => Left(ServiceError(response.text(), 500))
+          case _   => Left(ServiceError(new String(response.body, java.nio.charset.StandardCharsets.UTF_8), 500))
         }
       }
   }

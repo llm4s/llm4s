@@ -114,8 +114,22 @@ object VectorStoreFactory {
      * @param connectionString JDBC connection string (jdbc:postgresql://...)
      * @param tableName Optional table name (default: "vectors")
      */
-    def pgvector(connectionString: String, tableName: String = "vectors"): Config =
-      Config(Backend.PgVector, connectionString = Some(connectionString), options = Map("tableName" -> tableName))
+    def pgvector(
+      connectionString: String,
+      tableName: String = "vectors",
+      user: Option[String] = None,
+      password: Option[String] = None
+    ): Config = {
+      val baseOptions = Map("tableName" -> tableName)
+
+      // ++ appends to the map.
+      // .map transforms the Option into a key-value pair IF it exists.
+      val finalOptions = baseOptions ++
+        user.map("user" -> _) ++
+        password.map("password" -> _)
+
+      Config(Backend.PgVector, Some(connectionString), options = finalOptions)
+    }
 
     /**
      * Configuration for local Qdrant.

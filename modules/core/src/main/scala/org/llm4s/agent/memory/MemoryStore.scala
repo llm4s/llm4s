@@ -26,7 +26,8 @@ trait MemoryStore {
    * Store multiple memories in a batch.
    *
    * @param memories The memories to store
-   * @return Updated store or error
+   * @return A new MemoryStore containing the added memories,
+   * or an error describing why the operation failed.
    */
   def storeAll(memories: Seq[Memory]): Result[MemoryStore] =
     memories.foldLeft[Result[MemoryStore]](Right(this)) { (storeResult, memory) =>
@@ -49,7 +50,7 @@ trait MemoryStore {
    *
    * @param filter Criteria for filtering memories
    * @param limit Maximum number of memories to return
-   * @return Matching memories or error
+   * @return Matching memories sorted by relevance (most relevant first), or error
    */
   def recall(
     filter: MemoryFilter = MemoryFilter.All,
@@ -65,7 +66,7 @@ trait MemoryStore {
    * @param query The search query
    * @param topK Number of results to return
    * @param filter Additional filter criteria
-   * @return Most similar memories or error
+   * @return A list of ScoredMemory objects, sorted by relevance score (highest first), or error
    */
   def search(
     query: String,

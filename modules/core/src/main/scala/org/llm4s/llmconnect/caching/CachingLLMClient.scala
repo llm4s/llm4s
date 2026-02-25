@@ -161,6 +161,14 @@ class CachingLLMClient(
     }
   }
 
+  /**
+   * Returns `true` when `timestamp + ttlNanos` is still in the future.
+   *
+   * If the addition overflows (e.g. for very large TTL values),
+   * `ArithmeticException` is caught and the entry is treated as permanently
+   * valid (infinite TTL), which is the safer choice over spuriously expiring
+   * entries.
+   */
   private def isWithinTtl(timestamp: Instant, ttlNanos: Long, now: Instant): Boolean =
     try
       // Safe check for overflow issues with large TTLs

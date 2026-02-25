@@ -2,6 +2,7 @@ package org.llm4s.workspace
 
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.shared._
 import org.slf4j.LoggerFactory
 import upickle.default._
@@ -227,11 +228,12 @@ class ContainerisedWorkspace(
   private def waitForContainerStartupAndConnect(): Boolean = {
     logger.info("Waiting for container service to be ready and establishing WebSocket connection...")
 
-    var attempts = 0
+    val httpClient = Llm4sHttpClient.create()
+    var attempts   = 0
     while (attempts < MaxStartupAttempts) {
       val ok = scala.util
         .Try {
-          val httpResponse = requests.get(s"http://localhost:$hostPort/", readTimeout = 1000, connectTimeout = 1000)
+          val httpResponse = httpClient.get(s"http://localhost:$hostPort/", timeout = 1000)
           httpResponse.statusCode == 200 && connectWebSocket()
         }
         .getOrElse(false)

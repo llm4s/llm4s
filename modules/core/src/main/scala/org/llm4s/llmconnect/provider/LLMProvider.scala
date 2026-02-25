@@ -107,10 +107,14 @@ object LLMProvider {
   val all: Seq[LLMProvider] = Seq(OpenAI, Azure, Anthropic, OpenRouter, Ollama, Zai, Gemini, DeepSeek, Cohere)
 
   /**
-   * Parses a provider name string to LLMProvider.
+   * Parses a provider name string to an [[LLMProvider]].
    *
-   * @param name provider name (case-insensitive)
-   * @return Some(provider) if valid, None otherwise
+   * Matching is case-insensitive. `"google"` is accepted as an alias for
+   * `Gemini` for compatibility with the `LLM_MODEL=google/...` environment
+   * variable format.
+   *
+   * @param name Provider name; see [[all]] for the canonical set of names.
+   * @return `Some(provider)` for recognised names; `None` for unrecognised input.
    */
   def fromName(name: String): Option[LLMProvider] = name.toLowerCase match {
     case "openai"            => Some(OpenAI)
