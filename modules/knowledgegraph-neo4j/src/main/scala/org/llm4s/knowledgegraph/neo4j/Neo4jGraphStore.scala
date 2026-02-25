@@ -65,9 +65,11 @@ final class Neo4jGraphStore private (
       val srcExists = nodeExistsInSession(session, edge.source)
       val tgtExists = nodeExistsInSession(session, edge.target)
       if (!srcExists || !tgtExists) {
-        Left(ProcessingError("neo4j-store", s"Edge(${edge.source}->${edge.target}): source or target node does not exist"))
+        Left(
+          ProcessingError("neo4j-store", s"Edge(${edge.source}->${edge.target}): source or target node does not exist")
+        )
       } else {
-        val params  = new java.util.HashMap[String, AnyRef]()
+        val params = new java.util.HashMap[String, AnyRef]()
         params.put("src", edge.source)
         params.put("tgt", edge.target)
         params.put("props", toNeo4jMap(edge.properties))
@@ -148,9 +150,7 @@ final class Neo4jGraphStore private (
       val edges: List[Edge] = if (nodes.isEmpty) {
         List.empty
       } else {
-        val relTypeFilter = filter.relationshipType.fold("") { rt =>
-          s" AND type(r) = '${rt.replace("'", "\\'")}'"
-        }
+        val relTypeFilter = filter.relationshipType.fold("")(rt => s" AND type(r) = '${rt.replace("'", "\\'")}'")
         session.executeRead { tx =>
           val edgeParams = new java.util.HashMap[String, AnyRef]()
           edgeParams.put("nodeIds", nodes.keys.toList.asJava)
@@ -163,10 +163,10 @@ final class Neo4jGraphStore private (
             val rec      = rs.next()
             val relProps = fromNeo4jRelProps(rec.get("r").asRelationship())
             buf += Edge(
-              source       = rec.get("src").asString(),
-              target       = rec.get("tgt").asString(),
+              source = rec.get("src").asString(),
+              target = rec.get("tgt").asString(),
               relationship = rec.get("relType").asString(),
-              properties   = relProps
+              properties = relProps
             )
           }
           buf.toList
@@ -197,8 +197,8 @@ final class Neo4jGraphStore private (
               loop(rest, visited, acc)
             else
               getNode(currentId) match {
-                case Left(err)        => Left(err)
-                case Right(None)      => loop(rest, visited, acc)
+                case Left(err)   => Left(err)
+                case Right(None) => loop(rest, visited, acc)
                 case Right(Some(node)) =>
                   val newVisited = visited + currentId
                   val newAcc     = acc :+ node
@@ -233,7 +233,7 @@ final class Neo4jGraphStore private (
 
   override def deleteEdge(source: String, target: String, relationship: String): Result[Unit] =
     withSession { session =>
-      val params  = new java.util.HashMap[String, AnyRef]()
+      val params = new java.util.HashMap[String, AnyRef]()
       params.put("src", source)
       params.put("tgt", target)
       val relType = sanitizeRelType(relationship)
@@ -260,16 +260,17 @@ final class Neo4jGraphStore private (
       }
 
       val edges: List[Edge] = session.executeRead { tx =>
-        val rs  = tx.run("MATCH (a:LLM4S)-[r]->(b:LLM4S) RETURN a.llm4s_id AS src, b.llm4s_id AS tgt, type(r) AS relType, r")
+        val rs =
+          tx.run("MATCH (a:LLM4S)-[r]->(b:LLM4S) RETURN a.llm4s_id AS src, b.llm4s_id AS tgt, type(r) AS relType, r")
         val buf = scala.collection.mutable.ArrayBuffer.empty[Edge]
         while (rs.hasNext) {
           val rec      = rs.next()
           val relProps = fromNeo4jRelProps(rec.get("r").asRelationship())
           buf += Edge(
-            source       = rec.get("src").asString(),
-            target       = rec.get("tgt").asString(),
+            source = rec.get("src").asString(),
+            target = rec.get("tgt").asString(),
             relationship = rec.get("relType").asString(),
-            properties   = relProps
+            properties = relProps
           )
         }
         buf.toList
@@ -387,14 +388,19 @@ final class Neo4jGraphStore private (
     params.put("id", id)
     session.executeRead { tx =>
       tx.run("MATCH (n:LLM4S {llm4s_id: $id}) RETURN count(n) AS c", params)
-        .single().get("c").asLong() > 0
+        .single()
+        .get("c")
+        .asLong() > 0
     }
   }
 
   private def recordToNode(n: org.neo4j.driver.types.Node): Node = {
     val id    = n.get("llm4s_id").asString()
     val label = n.get("llm4s_label").asString()
-    val props = n.asMap().asScala.toMap
+    val props = n
+      .asMap()
+      .asScala
+      .toMap
       .removed("llm4s_id")
       .removed("llm4s_label")
       .map { case (k, v) => k -> fromNeo4jValue(v) }
@@ -478,7 +484,8 @@ object Neo4jGraphStore {
   /** Creates a Neo4jGraphStore from a [[Config]]. */
   def apply(config: Config): Result[Neo4jGraphStore] =
     Try {
-      val driverConfig = org.neo4j.driver.Config.builder()
+      val driverConfig = org.neo4j.driver.Config
+        .builder()
         .withMaxConnectionPoolSize(config.maxPoolSize)
         .build()
       val driver = GraphDatabase.driver(config.uri, AuthTokens.basic(config.user, config.password), driverConfig)
@@ -505,6 +512,7 @@ object Neo4jGraphStore {
    * @param database Target database
    */
   def apply(driver: Driver, database: String): Result[Neo4jGraphStore] =
-    Try(new Neo4jGraphStore(driver, database, ownsDriver = false))
-      .toEither.left.map(e => ProcessingError("neo4j-store", s"Failed to create store: ${e.getMessage}"))
+    Try(new Neo4jGraphStore(driver, database, ownsDriver = false)).toEither.left.map(e =>
+      ProcessingError("neo4j-store", s"Failed to create store: ${e.getMessage}")
+    )
 }

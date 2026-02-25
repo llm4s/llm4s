@@ -18,28 +18,28 @@ class Neo4jGraphStoreUnitSpec extends AnyFunSuite with Matchers {
 
   test("Config: default values are correct") {
     val config = Neo4jGraphStore.Config()
-    config.uri         shouldBe "bolt://localhost:7687"
-    config.user        shouldBe "neo4j"
-    config.password    shouldBe ""
-    config.database    shouldBe "neo4j"
+    config.uri shouldBe "bolt://localhost:7687"
+    config.user shouldBe "neo4j"
+    config.password shouldBe ""
+    config.database shouldBe "neo4j"
     config.maxPoolSize shouldBe 10
   }
 
   test("Config: custom values are preserved") {
     val config = Neo4jGraphStore.Config("bolt://myhost:7687", "admin", "secret", "mydb", 20)
-    config.uri         shouldBe "bolt://myhost:7687"
-    config.user        shouldBe "admin"
-    config.password    shouldBe "secret"
-    config.database    shouldBe "mydb"
+    config.uri shouldBe "bolt://myhost:7687"
+    config.user shouldBe "admin"
+    config.password shouldBe "secret"
+    config.database shouldBe "mydb"
     config.maxPoolSize shouldBe 20
   }
 
   test("Config: copy preserves unchanged fields") {
     val base    = Neo4jGraphStore.Config()
     val updated = base.copy(user = "alice", password = "pw")
-    updated.uri      shouldBe base.uri
+    updated.uri shouldBe base.uri
     updated.database shouldBe base.database
-    updated.user     shouldBe "alice"
+    updated.user shouldBe "alice"
     updated.password shouldBe "pw"
   }
 

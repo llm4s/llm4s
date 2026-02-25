@@ -23,20 +23,16 @@ import org.scalatest.matchers.should.Matchers
  * Netty 4.1.115.Final's NioIoHandler in a way that does not support
  * LocalServerChannel, causing it to crash on startup regardless of the JVM version.
  */
-class Neo4jGraphStoreSpec
-    extends AnyFunSuite
-    with Matchers
-    with BeforeAndAfterAll
-    with BeforeAndAfterEach {
+class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
 
   private var store: Neo4jGraphStore = _
   private var neo4jAvailable         = false
 
-  private val neo4jUri  = sys.env.getOrElse("NEO4J_URI",      "bolt://localhost:7687")
-  private val neo4jUser = sys.env.getOrElse("NEO4J_USER",     "neo4j")
+  private val neo4jUri  = sys.env.getOrElse("NEO4J_URI", "bolt://localhost:7687")
+  private val neo4jUser = sys.env.getOrElse("NEO4J_USER", "neo4j")
   private val neo4jPass = sys.env.getOrElse("NEO4J_PASSWORD", "neo4j")
 
-  override def beforeAll(): Unit = {
+  override def beforeAll(): Unit =
     Neo4jGraphStore(neo4jUri, neo4jUser, neo4jPass) match {
       case Right(s) =>
         store = s
@@ -45,7 +41,6 @@ class Neo4jGraphStoreSpec
       case Left(_) =>
         neo4jAvailable = false
     }
-  }
 
   override def afterAll(): Unit =
     if (neo4jAvailable && store != null) store.close()
@@ -53,10 +48,12 @@ class Neo4jGraphStoreSpec
   /** Clear all LLM4S nodes before each test for isolation. */
   override def beforeEach(): Unit =
     if (neo4jAvailable)
-      store.executeWrite("MATCH (n:LLM4S) DETACH DELETE n").fold(
-        e => throw new RuntimeException(s"Failed to clear graph: $e"),
-        identity
-      )
+      store
+        .executeWrite("MATCH (n:LLM4S) DETACH DELETE n")
+        .fold(
+          e => throw new RuntimeException(s"Failed to clear graph: $e"),
+          identity
+        )
 
   /** Skip the current test if Neo4j is not reachable. */
   private def requireNeo4j(): Unit =
@@ -142,7 +139,11 @@ class Neo4jGraphStoreSpec
     store.upsertNode(Node("2", "Person", Map("city" -> ujson.Str("LA"))))
     store
       .query(GraphFilter(propertyKey = Some("city"), propertyValue = Some("NYC")))
-      .toOption.get.nodes.keys.toSet shouldBe Set("1")
+      .toOption
+      .get
+      .nodes
+      .keys
+      .toSet shouldBe Set("1")
   }
 
   test("query: filters edges by relationship type") {
@@ -165,7 +166,11 @@ class Neo4jGraphStoreSpec
     requireNeo4j()
     store.upsertNode(Node("1", "A")); store.upsertNode(Node("2", "B")); store.upsertNode(Node("3", "C"))
     store.upsertEdge(Edge("1", "2", "E")); store.upsertEdge(Edge("2", "3", "E"))
-    store.traverse("1", TraversalConfig(direction = Direction.Outgoing)).toOption.get.map(_.id) shouldBe Seq("1", "2", "3")
+    store.traverse("1", TraversalConfig(direction = Direction.Outgoing)).toOption.get.map(_.id) shouldBe Seq(
+      "1",
+      "2",
+      "3"
+    )
   }
 
   test("traverse: respects maxDepth") {
@@ -175,7 +180,10 @@ class Neo4jGraphStoreSpec
     store.upsertEdge(Edge("1", "2", "E")); store.upsertEdge(Edge("2", "3", "E")); store.upsertEdge(Edge("3", "4", "E"))
     store
       .traverse("1", TraversalConfig(maxDepth = 2, direction = Direction.Outgoing))
-      .toOption.get.map(_.id).toSet shouldBe Set("1", "2", "3")
+      .toOption
+      .get
+      .map(_.id)
+      .toSet shouldBe Set("1", "2", "3")
   }
 
   test("traverse: handles cycles without infinite loop") {
@@ -242,7 +250,9 @@ class Neo4jGraphStoreSpec
     requireNeo4j()
     store.upsertNode(Node("1", "A"))
     store.executeWrite("MATCH (n:LLM4S {llm4s_id: '1'}) SET n.custom = 'hello'") shouldBe Right(())
-    store.executeRead("MATCH (n:LLM4S {llm4s_id: '1'}) RETURN n.custom AS v").toOption.get.head("v") should include("hello")
+    store.executeRead("MATCH (n:LLM4S {llm4s_id: '1'}) RETURN n.custom AS v").toOption.get.head("v") should include(
+      "hello"
+    )
   }
 
   // ─── Property type round-trips ────────────────────────────────────────────
