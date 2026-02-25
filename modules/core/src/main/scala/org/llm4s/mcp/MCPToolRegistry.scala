@@ -12,7 +12,41 @@ import scala.util.Try
 
 import scala.util.chaining.scalaUtilChainingOps
 
-// MCP-aware tool registry that integrates with the existing tool API
+/**
+ * `ToolRegistry` that transparently integrates local tools with tools
+ * discovered from one or more MCP servers.
+ *
+ * == Tool lookup order ==
+ * `execute` tries local tools first.  Only when a local tool with the
+ * requested name is not found does it query MCP servers.  A tool defined
+ * locally shadows any MCP tool with the same name.
+ *
+ * == Caching ==
+ * Tool lists fetched from each MCP server are cached for `cacheTTL`
+ * (default 10 minutes).  A stale cache entry is refreshed lazily on the
+ * next call that requires that server's tools.  Call `clearCache()` or
+ * `refreshCache()` to invalidate proactively.
+ *
+ * == Startup initialisation ==
+ * When `initializeOnStartup` is `true` (the default), the registry fetches
+ * and caches tools from all configured MCP servers during construction.
+ * Set it to `false` in tests to defer or skip network calls.
+ *
+ * == Error handling ==
+ * If an MCP server cannot be reached or returns an error, the failure is
+ * logged and that server's tools are omitted from the response — the registry
+ * never throws during tool lookup.  A failed client is evicted from the
+ * internal client map so the next call attempts a fresh connection.
+ *
+ * == Lifecycle ==
+ * Implements `AutoCloseable`; call `close()` (or use `Using.resource`) to
+ * shut down all active MCP transport connections.
+ *
+ * @param mcpServers         MCP server configurations to query for remote tools
+ * @param localTools         Tools provided directly without a remote server call
+ * @param cacheTTL           How long a server's tool list is considered fresh; defaults to 10 minutes
+ * @param initializeOnStartup When `false`, MCP connections are deferred until first use
+ */
 class MCPToolRegistry(
   mcpServers: Seq[MCPServerConfig],
   localTools: Seq[ToolFunction[_, _]] = Seq.empty,
@@ -143,13 +177,21 @@ class MCPToolRegistry(
       mcpClients.computeIfAbsent(server.name, _ => createMCPClient(server))
     )
 
-  // Utility methods for cache management
+  /**
+   * Discards all cached tool lists, forcing a fresh fetch from each MCP server
+   * on the next tool lookup.
+   */
   def clearCache(): Unit = {
     logger.info("Clearing all tool caches")
     toolCache.clear()
   }
 
-  // Refresh cache for all servers
+  /**
+   * Eagerly re-fetches tool lists from all configured MCP servers and updates
+   * the cache.  Useful after deploying changes to MCP server tool definitions.
+   * Errors for individual servers are logged but do not prevent other servers
+   * from being refreshed.
+   */
   def refreshCache(): Unit = {
     logger.info(s"Refreshing cache for all ${mcpServers.size} MCP servers")
     val now = System.currentTimeMillis()
@@ -157,7 +199,12 @@ class MCPToolRegistry(
     logger.info("Cache refresh completed for all servers")
   }
 
-  // Close all MCP clients
+  /**
+   * Closes all active MCP transport connections and removes them from the
+   * internal client map.  After this call the registry still holds its local
+   * tools; MCP tools will be re-fetched (creating new connections) on the
+   * next lookup.
+   */
   def closeMCPClients(): Unit = {
     logger.info(s"Closing ${mcpClients.size} MCP clients")
     mcpClients.values.asScala.foreach(_.close())
@@ -179,7 +226,18 @@ class MCPToolRegistry(
     status.toValidatedNel
   }
 
-  // Health check for MCP servers
+  /**
+   * Attempts to initialise a connection to each configured MCP server and
+   * reports whether the handshake succeeded.
+   *
+   * Each server is tested by creating (or reusing) its client and calling
+   * `initialize()`. The returned map contains one entry per server, keyed by
+   * `MCPServerConfig.name`, with `true` meaning the server responded
+   * successfully and `false` meaning initialisation failed (connection refused,
+   * timeout, protocol mismatch, etc.).
+   *
+   * @return map from server name to health status; keys match `mcpServers.map(_.name)`
+   */
   def healthCheck(): Map[String, Boolean] = {
     logger.info("Performing health check on all MCP servers")
     val results = mcpServers.map(server => server.name -> createAndInitializeClient(server).isValid).toMap

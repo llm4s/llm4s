@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
+import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
@@ -176,7 +176,7 @@ class DeepSeekClient(
           ToolCall(
             id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
             name = function.obj.get("name").flatMap(_.strOpt).getOrElse(""),
-            arguments = parseStreamingArguments(rawArgs)
+            arguments = StreamingToolArgumentParser.parse(rawArgs)
           )
       }
 
@@ -215,10 +215,7 @@ class DeepSeekClient(
     }
   }
 
-  private def parseStreamingArguments(raw: String): ujson.Value =
-    if (raw.isEmpty) ujson.Null else scala.util.Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
-
-  private def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
+  private[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val messages = conversation.messages.map {
       case UserMessage(content) =>
         ujson.Obj("role" -> "user", "content" -> content)
@@ -325,8 +322,10 @@ class DeepSeekClient(
 
   override def close(): Unit =
     if (closed.compareAndSet(false, true)) {
-      // Java HttpClient does not have explicit close()
-      // We track logical closed state for thread-safety
+      (httpClient: Any) match {
+        case c: AutoCloseable => c.close()
+        case _                => ()
+      }
     }
 
   private def validateNotClosed: Result[Unit] =

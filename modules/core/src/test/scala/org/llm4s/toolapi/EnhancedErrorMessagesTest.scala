@@ -1,5 +1,6 @@
 package org.llm4s.toolapi
 
+import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default._
@@ -10,7 +11,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
   case class TestResult(message: String)
   implicit val testResultRW: ReadWriter[TestResult] = macroRW[TestResult]
 
-  def createEnhancedTool(name: String = "test_tool"): ToolFunction[Map[String, Any], TestResult] = {
+  def createEnhancedTool(name: String = "test_tool"): Result[ToolFunction[Map[String, Any], TestResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Test parameters")
       .withProperty(Schema.property("item", Schema.string("Item name")))
@@ -31,73 +32,89 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
       } yield TestResult(s"Success: $item, $qty, $loc")
 
       result.left.map(_.getMessage)
-    }.build()
+    }.buildSafe()
   }
 
   "Enhanced error messages" should "clearly indicate null arguments" in {
-    val tool   = createEnhancedTool("add_inventory_item")
-    val result = tool.execute(ujson.Null)
+    createEnhancedTool("add_inventory_item").fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val result = tool.execute(ujson.Null)
 
-    (result should be).a(Symbol("left"))
-    val error   = result.left.getOrElse(fail("Expected error"))
-    val message = error.getFormattedMessage
+        (result should be).a(Symbol("left"))
+        val error   = result.fold(identity, v => fail(s"Expected error but got: $v"))
+        val message = error.getFormattedMessage
 
-    message shouldBe "Tool call 'add_inventory_item' received null arguments - expected an object with required parameters"
+        message shouldBe "Tool call 'add_inventory_item' received null arguments - expected an object with required parameters"
+      }
+    )
   }
 
   "Enhanced error messages" should "clearly indicate missing required parameters" in {
-    val tool = createEnhancedTool("add_inventory_item")
-    val result = tool.execute(
-      ujson.Obj(
-        "item" -> "Apple"
-        // Missing: quantity and location
-      )
+    createEnhancedTool("add_inventory_item").fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val result = tool.execute(
+          ujson.Obj(
+            "item" -> "Apple"
+            // Missing: quantity and location
+          )
+        )
+
+        (result should be).a(Symbol("left"))
+        val error   = result.fold(identity, v => fail(s"Expected error but got: $v"))
+        val message = error.getFormattedMessage
+
+        // Should get the first missing parameter
+        message should include("Tool call 'add_inventory_item'")
+        message should include("required parameter")
+        message should include("'quantity'")
+        message should include("(type: number)")
+        message should include("is missing")
+      }
     )
-
-    (result should be).a(Symbol("left"))
-    val error   = result.left.getOrElse(fail("Expected error"))
-    val message = error.getFormattedMessage
-
-    // Should get the first missing parameter
-    message should include("Tool call 'add_inventory_item'")
-    message should include("required parameter")
-    message should include("'quantity'")
-    message should include("(type: number)")
-    message should include("is missing")
   }
 
   "Enhanced error messages" should "clearly indicate null values for required parameters" in {
-    val tool = createEnhancedTool("add_inventory_item")
-    val result = tool.execute(
-      ujson.Obj(
-        "item"     -> "Apple",
-        "quantity" -> ujson.Null,
-        "location" -> "Warehouse A"
-      )
+    createEnhancedTool("add_inventory_item").fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val result = tool.execute(
+          ujson.Obj(
+            "item"     -> "Apple",
+            "quantity" -> ujson.Null,
+            "location" -> "Warehouse A"
+          )
+        )
+
+        (result should be).a(Symbol("left"))
+        val error   = result.fold(identity, v => fail(s"Expected error but got: $v"))
+        val message = error.getFormattedMessage
+
+        message shouldBe "Tool call 'add_inventory_item' failed with error: parameter 'quantity' (type: number) is required but value was null"
+      }
     )
-
-    (result should be).a(Symbol("left"))
-    val error   = result.left.getOrElse(fail("Expected error"))
-    val message = error.getFormattedMessage
-
-    message shouldBe "Tool call 'add_inventory_item' failed with error: parameter 'quantity' (type: number) is required but value was null"
   }
 
   "Enhanced error messages" should "clearly indicate type mismatches" in {
-    val tool = createEnhancedTool("add_inventory_item")
-    val result = tool.execute(
-      ujson.Obj(
-        "item"     -> "Apple",
-        "quantity" -> "five", // Wrong type: string instead of number
-        "location" -> "Warehouse A"
-      )
+    createEnhancedTool("add_inventory_item").fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val result = tool.execute(
+          ujson.Obj(
+            "item"     -> "Apple",
+            "quantity" -> "five", // Wrong type: string instead of number
+            "location" -> "Warehouse A"
+          )
+        )
+
+        (result should be).a(Symbol("left"))
+        val error   = result.fold(identity, v => fail(s"Expected error but got: $v"))
+        val message = error.getFormattedMessage
+
+        message shouldBe "Tool call 'add_inventory_item' failed with error: parameter 'quantity' has wrong type - expected number but got string"
+      }
     )
-
-    (result should be).a(Symbol("left"))
-    val error   = result.left.getOrElse(fail("Expected error"))
-    val message = error.getFormattedMessage
-
-    message shouldBe "Tool call 'add_inventory_item' failed with error: parameter 'quantity' has wrong type - expected number but got string"
   }
 
   "Enhanced error messages" should "handle execution errors consistently" in {
@@ -105,7 +122,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
       .`object`[Map[String, Any]]("Test parameters")
       .withProperty(Schema.property("value", Schema.number("A value")))
 
-    val tool = ToolBuilder[Map[String, Any], TestResult](
+    ToolBuilder[Map[String, Any], TestResult](
       "divide_by_value",
       "Divides 10 by the provided value",
       schema
@@ -115,15 +132,19 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
         case Right(v)  => Right(TestResult(s"Result: ${10.0 / v}"))
         case Left(err) => Left(err.getMessage)
       }
-    }.build()
+    }.buildSafe()
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val result = tool.execute(ujson.Obj("value" -> 0))
 
-    val result = tool.execute(ujson.Obj("value" -> 0))
+          (result should be).a(Symbol("left"))
+          val error   = result.fold(identity, v => fail(s"Expected error but got: $v"))
+          val message = error.getFormattedMessage
 
-    (result should be).a(Symbol("left"))
-    val error   = result.left.getOrElse(fail("Expected error"))
-    val message = error.getFormattedMessage
-
-    message shouldBe "Tool call 'divide_by_value' failed with error: cannot divide by zero"
+          message shouldBe "Tool call 'divide_by_value' failed with error: cannot divide by zero"
+        }
+      )
   }
 
   "ToolParameterError messages" should "be clear and consistent" in {
@@ -203,7 +224,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
     val result = extractor.getStringEnhanced("username")
 
     (result should be).a(Symbol("left"))
-    val error = result.left.getOrElse(fail("Expected error"))
+    val error = result.fold(identity, v => fail(s"Expected error but got: $v"))
     error.getMessage should include("required parameter 'username' (type: string) is missing")
     error.getMessage should include("available: email, firstName, lastName")
   }
@@ -226,7 +247,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
     // Test missing nested property
     val ageResult = extractor.getIntEnhanced("user.profile.age")
     (ageResult should be).a(Symbol("left"))
-    val error = ageResult.left.getOrElse(fail("Expected error"))
+    val error = ageResult.fold(identity, v => fail(s"Expected error but got: $v"))
     error.getMessage should include("required parameter 'user.profile.age' (type: integer) is missing")
   }
 
@@ -249,7 +270,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
     // Optional parameter with wrong type should return error
     val wrongType = extractor.getOptionalInt("required")
     (wrongType should be).a(Symbol("left"))
-    val error = wrongType.left.getOrElse(fail("Expected error"))
+    val error = wrongType.fold(identity, v => fail(s"Expected error but got: $v"))
     error.getMessage should include("has wrong type - expected integer but got string")
   }
 }

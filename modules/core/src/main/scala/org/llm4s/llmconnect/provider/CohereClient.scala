@@ -88,7 +88,10 @@ class CohereClient(
 
   override def close(): Unit =
     if (closed.compareAndSet(false, true)) {
-      ()
+      (httpClient: Any) match {
+        case c: AutoCloseable => c.close()
+        case _                => ()
+      }
     }
 
   private def validateNotClosed: Result[Unit] =

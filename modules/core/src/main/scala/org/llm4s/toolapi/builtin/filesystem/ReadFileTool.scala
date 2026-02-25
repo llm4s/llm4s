@@ -1,6 +1,7 @@
 package org.llm4s.toolapi.builtin.filesystem
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 
 import java.nio.file.{ Files, LinkOption, Paths }
@@ -69,9 +70,9 @@ object ReadFileTool {
     )
 
   /**
-   * Create a read file tool with the given configuration.
+   * Create a read file tool with the given configuration, returning a Result for safe error handling.
    */
-  def create(config: FileConfig = FileConfig()): ToolFunction[Map[String, Any], ReadFileResult] =
+  def createSafe(config: FileConfig = FileConfig()): Result[ToolFunction[Map[String, Any], ReadFileResult]] =
     ToolBuilder[Map[String, Any], ReadFileResult](
       name = "read_file",
       description = s"Read the contents of a file. Maximum file size: ${config.maxFileSize / 1024}KB. " +
@@ -82,15 +83,15 @@ object ReadFileTool {
       for {
         pathStr <- extractor.getString("path")
         maxLines = extractor.getInt("max_lines").toOption
-        encoding = extractor.getString("encoding").toOption.getOrElse("UTF-8")
+        encoding = extractor.getString("encoding").fold(_ => "UTF-8", identity)
         result <- readFile(pathStr, maxLines, encoding, config)
       } yield result
-    }.build()
+    }.buildSafe()
 
   /**
-   * Default read file tool with standard configuration.
+   * Default read file tool instance, returning a Result for safe error handling.
    */
-  val tool: ToolFunction[Map[String, Any], ReadFileResult] = create()
+  val toolSafe: Result[ToolFunction[Map[String, Any], ReadFileResult]] = createSafe()
 
   private def readFile(
     pathStr: String,

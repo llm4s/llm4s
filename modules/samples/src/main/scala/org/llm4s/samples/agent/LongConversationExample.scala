@@ -32,7 +32,8 @@ object LongConversationExample {
     val result = for {
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
-      tools = new ToolRegistry(Seq(WeatherTool.tool))
+      weatherTool <- WeatherTool.toolSafe
+      tools = new ToolRegistry(Seq(weatherTool))
       agent = new Agent(client)
 
       // Use runMultiTurn for convenience - automatically chains all turns

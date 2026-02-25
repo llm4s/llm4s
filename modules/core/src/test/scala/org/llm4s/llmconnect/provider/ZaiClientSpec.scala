@@ -308,9 +308,10 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val completion = helper.testParseCompletion(json)
 
     completion.toolCalls should have size 1
-    completion.toolCalls.head.id shouldBe "call-abc"
-    completion.toolCalls.head.name shouldBe "get_weather"
-    completion.toolCalls.head.arguments("city").str shouldBe "London"
+    val toolCall = completion.toolCalls(0)
+    toolCall.id shouldBe "call-abc"
+    toolCall.name shouldBe "get_weather"
+    toolCall.arguments("city").str shouldBe "London"
   }
 
   it should "handle missing usage data" in {
@@ -444,9 +445,10 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val chunks = helper.testParseStreamingChunks(json)
 
     chunks should have size 1
-    chunks.head.id shouldBe "chunk-1"
-    chunks.head.content shouldBe Some("Hello")
-    chunks.head.toolCall shouldBe None
+    val chunk = chunks(0)
+    chunk.id shouldBe "chunk-1"
+    chunk.content shouldBe Some("Hello")
+    chunk.toolCall shouldBe None
   }
 
   it should "parse text content in array format" in {
@@ -467,7 +469,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val chunks = helper.testParseStreamingChunks(json)
 
     chunks should have size 1
-    chunks.head.content shouldBe Some("Array text")
+    chunks(0).content shouldBe Some("Array text")
   }
 
   it should "parse finish reason" in {
@@ -485,7 +487,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val chunks = helper.testParseStreamingChunks(json)
 
     chunks should have size 1
-    chunks.head.finishReason shouldBe Some("stop")
+    chunks(0).finishReason shouldBe Some("stop")
   }
 
   it should "ignore null finish reason" in {
@@ -503,7 +505,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val chunks = helper.testParseStreamingChunks(json)
 
     chunks should have size 1
-    chunks.head.finishReason shouldBe None
+    chunks(0).finishReason shouldBe None
   }
 
   it should "parse tool call chunks" in {
@@ -530,9 +532,9 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     val chunks = helper.testParseStreamingChunks(json)
 
     chunks should have size 1
-    chunks.head.toolCall shouldBe defined
-    chunks.head.toolCall.get.id shouldBe "tool-call-1"
-    chunks.head.toolCall.get.name shouldBe "test_func"
+    chunks(0).toolCall shouldBe defined
+    chunks(0).toolCall.map(_.id) shouldBe Some("tool-call-1")
+    chunks(0).toolCall.map(_.name) shouldBe Some("test_func")
   }
 
   it should "return empty sequence for empty choices" in {
@@ -557,20 +559,20 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     result("key").str shouldBe "value"
   }
 
-  it should "return Null for empty string" in {
+  it should "return empty object for empty string" in {
     val helper = new ZaiClientTestHelper(testConfig)
 
     val result = helper.testParseStreamingArguments("")
 
-    result shouldBe ujson.Null
+    result shouldBe ujson.Obj()
   }
 
-  it should "return string value for invalid JSON" in {
+  it should "return raw string for invalid JSON" in {
     val helper = new ZaiClientTestHelper(testConfig)
 
     val result = helper.testParseStreamingArguments("not json {")
 
-    result.str shouldBe "not json {"
+    result shouldBe ujson.Str("not json {")
   }
 }
 
@@ -683,7 +685,7 @@ class ZaiClientTestHelper(config: ZaiConfig) extends ZaiClient(config) {
         val first = StreamedChunk(
           id = chunkId,
           content = content,
-          toolCall = Some(toolCalls.head),
+          toolCall = toolCalls.headOption,
           finishReason = finishReason,
           thinkingDelta = None
         )
@@ -704,7 +706,7 @@ class ZaiClientTestHelper(config: ZaiConfig) extends ZaiClient(config) {
   }
 
   def testParseStreamingArguments(raw: String): ujson.Value =
-    if (raw.isEmpty) ujson.Null else scala.util.Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
+    org.llm4s.llmconnect.streaming.StreamingToolArgumentParser.parse(raw)
 }
 
 // ============ Metrics Tests ============

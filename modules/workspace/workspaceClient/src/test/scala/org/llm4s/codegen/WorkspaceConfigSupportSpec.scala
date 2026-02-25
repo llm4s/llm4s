@@ -12,7 +12,7 @@ class WorkspaceConfigSupportSpec extends AnyWordSpec with Matchers {
       val defaultDir                     = s"$home/code-workspace"
       val res: Result[WorkspaceSettings] = WorkspaceConfigSupport.load()
 
-      val ws = res.toOption.get
+      val ws = res.fold(e => fail(s"Failed: ${e.formatted}"), identity)
       ws.workspaceDir shouldBe defaultDir
       ws.imageName shouldBe WorkspaceSettings.DefaultImage
       ws.hostPort shouldBe WorkspaceSettings.DefaultPort

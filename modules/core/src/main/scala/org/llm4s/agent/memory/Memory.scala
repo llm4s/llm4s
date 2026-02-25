@@ -131,7 +131,9 @@ object MemoryType {
  * @param memoryType Classification of the memory
  * @param metadata Key-value pairs for filtering and context
  * @param timestamp When this memory was created
- * @param importance Optional importance score (0.0 to 1.0) for prioritization
+ * @param importance Optional importance score (0.0 to 1.0) for prioritization.
+ * 1.0 represents critical facts, while 0 represents trivial details.
+ * If None, system treats it as neutral importance.
  * @param embedding Optional pre-computed embedding vector for semantic search
  */
 final case class Memory(
@@ -198,6 +200,10 @@ object Memory {
 
   /**
    * Create a conversation memory from a message.
+   * @param content The message content
+   * @param role The role of the message sender (e.g., "user", "assistant")
+   * @param conversationId Optional conversation ID of the conversation session
+   * @return A new Memory instance representing this conversation message
    */
   def fromConversation(
     content: String,

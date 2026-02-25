@@ -1,48 +1,14 @@
 package org.llm4s.rag.evaluation
 
-import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.model._
 import org.llm4s.rag.evaluation.metrics.ContextRecall
-import org.llm4s.types.Result
+import org.llm4s.testutil.MockLLMClients
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class ContextRecallSpec extends AnyFlatSpec with Matchers {
 
-  private def mockCompletion(content: String): Completion = Completion(
-    id = "test-id",
-    created = System.currentTimeMillis(),
-    content = content,
-    model = "test-model",
-    message = AssistantMessage(content)
-  )
-
-  class MockLLMClient(responses: Seq[String]) extends LLMClient {
-    private var responseIndex                  = 0
-    var conversationHistory: Seq[Conversation] = Seq.empty
-
-    override def complete(
-      conversation: Conversation,
-      options: CompletionOptions
-    ): Result[Completion] = {
-      conversationHistory = conversationHistory :+ conversation
-      val response = responses(responseIndex % responses.size)
-      responseIndex += 1
-      Right(mockCompletion(response))
-    }
-
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
-      onChunk: StreamedChunk => Unit
-    ): Result[Completion] = complete(conversation, options)
-
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
-  }
-
   "ContextRecall" should "have correct metadata" in {
-    val mockClient = new MockLLMClient(Seq("[]"))
+    val mockClient = new MockLLMClients.MultiResponseMock(Seq("[]"))
     val metric     = ContextRecall(mockClient)
 
     metric.name shouldBe "context_recall"
@@ -59,7 +25,7 @@ class ContextRecallSpec extends AnyFlatSpec with Matchers {
       {"fact": "Paris is in France", "covered": true, "source": 1}
     ]"""
 
-    val mockClient = new MockLLMClient(Seq(factsResponse, attributionResponse))
+    val mockClient = new MockLLMClients.MultiResponseMock(Seq(factsResponse, attributionResponse))
     val metric     = ContextRecall(mockClient)
 
     val sample = EvalSample(
@@ -82,7 +48,7 @@ class ContextRecallSpec extends AnyFlatSpec with Matchers {
       {"fact": "Paris has 2 million people", "covered": false, "source": null}
     ]"""
 
-    val mockClient = new MockLLMClient(Seq(factsResponse, attributionResponse))
+    val mockClient = new MockLLMClients.MultiResponseMock(Seq(factsResponse, attributionResponse))
     val metric     = ContextRecall(mockClient)
 
     val sample = EvalSample(
@@ -104,7 +70,7 @@ class ContextRecallSpec extends AnyFlatSpec with Matchers {
       {"fact": "Tokyo is the capital of Japan", "covered": false, "source": null}
     ]"""
 
-    val mockClient = new MockLLMClient(Seq(factsResponse, attributionResponse))
+    val mockClient = new MockLLMClients.MultiResponseMock(Seq(factsResponse, attributionResponse))
     val metric     = ContextRecall(mockClient)
 
     val sample = EvalSample(
@@ -123,7 +89,7 @@ class ContextRecallSpec extends AnyFlatSpec with Matchers {
   it should "return score 1.0 when no facts in ground truth" in {
     val factsResponse = """[]"""
 
-    val mockClient = new MockLLMClient(Seq(factsResponse))
+    val mockClient = new MockLLMClients.MultiResponseMock(Seq(factsResponse))
     val metric     = ContextRecall(mockClient)
 
     val sample = EvalSample(
@@ -140,7 +106,7 @@ class ContextRecallSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fail when ground truth is missing" in {
-    val mockClient = new MockLLMClient(Seq("[]"))
+    val mockClient = new MockLLMClients.MultiResponseMock(Seq("[]"))
     val metric     = ContextRecall(mockClient)
 
     val sample = EvalSample(
@@ -157,7 +123,7 @@ class ContextRecallSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return score 1.0 when ground truth is empty" in {
-    val mockClient = new MockLLMClient(Seq("[]"))
+    val mockClient = new MockLLMClients.MultiResponseMock(Seq("[]"))
     val metric     = ContextRecall(mockClient)
 
     val sample = EvalSample(
@@ -174,7 +140,7 @@ class ContextRecallSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return score 0.0 when no contexts provided" in {
-    val mockClient = new MockLLMClient(Seq("[]"))
+    val mockClient = new MockLLMClients.MultiResponseMock(Seq("[]"))
     val metric     = ContextRecall(mockClient)
 
     val sample = EvalSample(
@@ -198,7 +164,7 @@ class ContextRecallSpec extends AnyFlatSpec with Matchers {
 [{"fact": "Fact 1", "covered": true, "source": 1}]
 ```"""
 
-    val mockClient = new MockLLMClient(Seq(factsResponse, attributionResponse))
+    val mockClient = new MockLLMClients.MultiResponseMock(Seq(factsResponse, attributionResponse))
     val metric     = ContextRecall(mockClient)
 
     val sample = EvalSample(
@@ -222,7 +188,7 @@ class ContextRecallSpec extends AnyFlatSpec with Matchers {
       {"fact": "Fact 3", "covered": false, "source": null}
     ]"""
 
-    val mockClient = new MockLLMClient(Seq(factsResponse, attributionResponse))
+    val mockClient = new MockLLMClients.MultiResponseMock(Seq(factsResponse, attributionResponse))
     val metric     = ContextRecall(mockClient)
 
     val sample = EvalSample(
@@ -239,5 +205,56 @@ class ContextRecallSpec extends AnyFlatSpec with Matchers {
     details.get("totalFacts") shouldBe Some(3)
     details.get("coveredFacts") shouldBe Some(2)
     details.get("missingFacts").map(_.asInstanceOf[Seq[String]]) shouldBe Some(Seq("Fact 3"))
+  }
+
+  it should "propagate LLM client errors" in {
+    val mockClient = new MockLLMClients.FailingMock("LLM service unavailable")
+    val metric     = ContextRecall(mockClient)
+
+    val sample = EvalSample(
+      question = "What is the capital?",
+      answer = "Paris.",
+      contexts = Seq("Some context"),
+      groundTruth = Some("Paris is the capital.")
+    )
+
+    val result = metric.evaluate(sample)
+
+    result.isLeft shouldBe true
+    result.left.toOption.get.message should include("LLM service unavailable")
+  }
+
+  it should "return error on malformed JSON response" in {
+    val mockClient = new MockLLMClients.MultiResponseMock(Seq("not valid json at all"))
+    val metric     = ContextRecall(mockClient)
+
+    val sample = EvalSample(
+      question = "What is the capital?",
+      answer = "Paris.",
+      contexts = Seq("Some context"),
+      groundTruth = Some("Paris is the capital.")
+    )
+
+    val result = metric.evaluate(sample)
+
+    result.isLeft shouldBe true
+  }
+
+  it should "treat whitespace-only contexts as empty" in {
+    val mockClient = new MockLLMClients.MultiResponseMock(Seq("[]"))
+    val metric     = ContextRecall(mockClient)
+
+    val sample = EvalSample(
+      question = "What is the capital?",
+      answer = "Paris.",
+      contexts = Seq("   ", "  \t  "),
+      groundTruth = Some("Paris is the capital.")
+    )
+
+    val result = metric.evaluate(sample)
+
+    result.isRight shouldBe true
+    result.toOption.get.score shouldBe 0.0
+    result.toOption.get.details.get("reason") shouldBe Some("No contexts provided to check coverage against")
   }
 }

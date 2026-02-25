@@ -132,7 +132,7 @@ class OpenAIStreamingHandler extends BaseStreamingResponseHandler {
             ToolCall(
               id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
               name = function.obj.get("name").flatMap(_.strOpt).getOrElse(""),
-              arguments = parseStreamingArguments(rawArgs)
+              arguments = StreamingToolArgumentParser.parse(rawArgs)
             )
         }
 
@@ -173,8 +173,6 @@ class OpenAIStreamingHandler extends BaseStreamingResponseHandler {
       }
     }.getOrElse(Seq.empty)
 
-  private def parseStreamingArguments(raw: String): ujson.Value =
-    if (raw.isEmpty) ujson.Null else Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
 }
 
 /**

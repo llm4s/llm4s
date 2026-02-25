@@ -6,8 +6,9 @@ import org.llm4s.speech.util.PlatformCommands
 
 class Tacotron2AdapterTest extends AnyFunSuite {
   test("options assemble CLI flags") {
-    // This is a smoke test; we can't run the CLI here. We just ensure method compiles and returns error/success type.
-    val adapter = new Tacotron2TextToSpeech(PlatformCommands.echo) // Cross-platform echo
+    // Smoke test: uses a mock that writes a minimal valid WAV to --out, verifying the
+    // full pipeline (argument assembly -> CLI -> WAV parse) compiles and returns Right.
+    val adapter = new Tacotron2TextToSpeech(PlatformCommands.mockWavWriter)
     val res = adapter.synthesize(
       "hi",
       TTSOptions(

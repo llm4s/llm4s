@@ -1,7 +1,7 @@
 package org.llm4s.agent.memory
 
 import org.llm4s.types.Result
-import org.llm4s.error.{ NotFoundError, ProcessingError }
+import org.llm4s.error.{ NotFoundError, OptimisticLockFailure, ProcessingError }
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import ujson.{ read, write, Obj, Str }
 
@@ -38,7 +38,8 @@ final class PostgresMemoryStore private[memory] (
             metadata JSONB DEFAULT '{}',
             created_at TIMESTAMPTZ NOT NULL,
             importance DOUBLE PRECISION,
-            embedding vector
+            embedding vector,
+            version BIGINT NOT NULL DEFAULT 0
           )
         """)
 
@@ -181,9 +182,61 @@ final class PostgresMemoryStore private[memory] (
     }
 
   override def update(id: MemoryId, updateFn: Memory => Memory): Result[MemoryStore] =
-    get(id).flatMap {
-      case Some(existing) => store(updateFn(existing))
-      case None           => Left(NotFoundError(s"Memory not found: ${id.value}", id.value))
+    getVersioned(id).flatMap {
+      case Some(VersionedMemory(existing, version)) =>
+        val updated = updateFn(existing)
+        Try {
+          withConnection { conn =>
+            val sql = s"""
+              UPDATE $tableName SET
+                content = ?,
+                memory_type = ?,
+                metadata = ?::jsonb,
+                created_at = ?,
+                importance = ?,
+                embedding = ?::vector,
+                version = ?
+              WHERE id = ? AND version = ?
+            """
+            Using.resource(conn.prepareStatement(sql)) { stmt =>
+              stmt.setString(1, updated.content)
+              stmt.setString(2, updated.memoryType.name)
+              stmt.setString(3, PostgresMemoryStore.metadataToJson(updated.metadata))
+              stmt.setTimestamp(4, Timestamp.from(updated.timestamp))
+
+              updated.importance match {
+                case Some(v) => stmt.setDouble(5, v)
+                case None    => stmt.setNull(5, java.sql.Types.DOUBLE)
+              }
+
+              updated.embedding match {
+                case Some(vec) => stmt.setString(6, PostgresMemoryStore.embeddingToString(vec))
+                case None      => stmt.setNull(6, java.sql.Types.OTHER, "vector")
+              }
+
+              stmt.setLong(7, version + 1)
+              stmt.setString(8, id.value)
+              stmt.setLong(9, version)
+              stmt.executeUpdate()
+            }
+          }
+        }.toEither.left
+          .map(e =>
+            ProcessingError("postgres-memory-store", s"Failed to update memory: ${e.getMessage}", cause = Some(e))
+          )
+          .flatMap { rowsAffected =>
+            if (rowsAffected == 0)
+              Left(
+                OptimisticLockFailure(
+                  s"Concurrent modification detected for memory: ${id.value}",
+                  id.value,
+                  version
+                )
+              )
+            else
+              Right(this)
+          }
+      case None => Left(NotFoundError(s"Memory not found: ${id.value}", id.value))
     }
 
   override def count(filter: MemoryFilter): Result[Long] =
@@ -222,6 +275,23 @@ final class PostgresMemoryStore private[memory] (
 
   override def close(): Unit =
     if (!dataSource.isClosed) dataSource.close()
+
+  private case class VersionedMemory(memory: Memory, version: Long)
+
+  private def getVersioned(id: MemoryId): Result[Option[VersionedMemory]] =
+    Try {
+      withConnection { conn =>
+        Using.resource(conn.prepareStatement(s"SELECT * FROM $tableName WHERE id = ?")) { stmt =>
+          stmt.setString(1, id.value)
+          Using.resource(stmt.executeQuery()) { rs =>
+            if (rs.next()) Some(VersionedMemory(rowToMemory(rs), rs.getLong("version")))
+            else None
+          }
+        }
+      }
+    }.toEither.left.map(e =>
+      ProcessingError("postgres-memory-store", s"Failed to get memory: ${e.getMessage}", cause = Some(e))
+    )
 
   private def withConnection[A](f: Connection => A): A =
     Using.resource(dataSource.getConnection)(f)

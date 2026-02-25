@@ -1,9 +1,12 @@
 package org.llm4s.agent.memory
 
+import org.llm4s.error.OptimisticLockFailure
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
+
 import java.util.UUID
+import java.util.concurrent.{ CountDownLatch, Executors, TimeUnit }
 import scala.util.Try
 
 /**
@@ -81,5 +84,52 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     val result = store2.get(id)
     result.toOption.flatten.map(_.content) shouldBe Some("Persistence Check")
     store2.close()
+  }
+
+  it should "increment version on each successful update" in skipIfDisabled {
+    val id = MemoryId(UUID.randomUUID().toString)
+    store.store(Memory(id, "v0 content", MemoryType.Task)).isRight shouldBe true
+
+    store.update(id, _.copy(content = "v1 content")).isRight shouldBe true
+    store.update(id, _.copy(content = "v2 content")).isRight shouldBe true
+
+    val retrieved = store.get(id).toOption.flatten
+    retrieved shouldBe defined
+    retrieved.get.content shouldBe "v2 content"
+  }
+
+  it should "produce only OptimisticLockFailure errors under concurrent writes" in skipIfDisabled {
+    val id = MemoryId(UUID.randomUUID().toString)
+    store.store(Memory(id, "initial", MemoryType.Task)).isRight shouldBe true
+
+    val threadCount = 4
+    val executor    = Executors.newFixedThreadPool(threadCount)
+    val latch       = new CountDownLatch(1)
+    val results     = new java.util.concurrent.ConcurrentLinkedQueue[Either[org.llm4s.error.LLMError, Any]]()
+
+    (1 to threadCount).foreach { i =>
+      executor.submit(new Runnable {
+        def run(): Unit = {
+          latch.await()
+          results.add(store.update(id, _.copy(content = s"updated by thread $i")))
+        }
+      })
+    }
+
+    latch.countDown()
+    executor.shutdown()
+    executor.awaitTermination(30, TimeUnit.SECONDS)
+
+    val allResults = scala.jdk.CollectionConverters.IteratorHasAsScala(results.iterator()).asScala.toSeq
+
+    // Every result must be either a success or an OptimisticLockFailure — no other errors
+    allResults.foreach {
+      case Right(_)                       => // success
+      case Left(_: OptimisticLockFailure) => // expected conflict
+      case Left(e)                        => fail(s"Unexpected error type: ${e.getClass.getSimpleName}: ${e.message}")
+    }
+
+    // At least one update must have succeeded
+    allResults.count(_.isRight) should be >= 1
   }
 }

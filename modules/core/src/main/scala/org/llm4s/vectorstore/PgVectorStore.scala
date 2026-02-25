@@ -3,6 +3,9 @@ package org.llm4s.vectorstore
 import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
 
+import org.slf4j.LoggerFactory
+import org.llm4s.util.RateLimitedLogger
+
 import java.sql.{ Connection, PreparedStatement, ResultSet }
 import scala.collection.mutable.ArrayBuffer
 import scala.util.{ Try, Using }
@@ -20,6 +23,14 @@ import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
  * - Connection pooling via HikariCP
  * - ACID transactions
  * - Scalable to millions of vectors
+ * - Graceful handling of corrupt embeddings
+ *
+ * Corrupt Embedding Handling:
+ * - Records with unparseable embeddings are skipped during search/query/list operations
+ * - get() returns None for records with corrupt embeddings
+ * - Corrupt records are logged with id and embedding_dim for debugging
+ * - Operations continue successfully with remaining valid records
+ * - No silent data corruption - failures are observable via logs
  *
  * Requirements:
  * - PostgreSQL 16+ with pgvector extension (18+ recommended)
@@ -34,6 +45,9 @@ final class PgVectorStore private (
   val tableName: String,
   private val ownsDataSource: Boolean = true
 ) extends VectorStore {
+
+  private val logger            = LoggerFactory.getLogger(getClass)
+  private val rateLimitedLogger = RateLimitedLogger(logger, throttleSeconds = 60, throttleCount = 100)
 
   // Initialize schema on creation
   initializeSchema()
@@ -168,6 +182,13 @@ final class PgVectorStore private (
         }
       }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to upsert batch: ${e.getMessage}"))
 
+  /**
+   * Search for the most similar vectors.
+   *
+   * Note: if the database contains corrupt embeddings, those rows are silently skipped.
+   * Because filtering happens after the SQL `LIMIT topK`, fewer than `topK` results may
+   * be returned when corrupt rows are present.
+   */
   override def search(
     queryVector: Array[Float],
     topK: Int,
@@ -201,13 +222,13 @@ final class PgVectorStore private (
 
           Using.resource(stmt.executeQuery()) { rs =>
             val results = ArrayBuffer.empty[ScoredRecord]
-            while (rs.next()) {
-              val record = rowToRecord(rs)
-              val score  = rs.getDouble("similarity")
-              // Clamp score to [0, 1] range
-              val normalizedScore = math.max(0.0, math.min(1.0, score))
-              results += ScoredRecord(record, normalizedScore)
-            }
+            while (rs.next())
+              rowToRecord(rs).foreach { record =>
+                val score = rs.getDouble("similarity")
+                // Clamp score to [0, 1] range
+                val normalizedScore = math.max(0.0, math.min(1.0, score))
+                results += ScoredRecord(record, normalizedScore)
+              }
             results.toSeq
           }
         }
@@ -220,7 +241,7 @@ final class PgVectorStore private (
         Using.resource(conn.prepareStatement(s"SELECT * FROM $tableName WHERE id = ?")) { stmt =>
           stmt.setString(1, id)
           Using.resource(stmt.executeQuery()) { rs =>
-            if (rs.next()) Some(rowToRecord(rs))
+            if (rs.next()) rowToRecord(rs)
             else None
           }
         }
@@ -242,7 +263,7 @@ final class PgVectorStore private (
             Using.resource(stmt.executeQuery()) { rs =>
               val records = ArrayBuffer.empty[VectorRecord]
               while (rs.next())
-                records += rowToRecord(rs)
+                rowToRecord(rs).foreach(records += _)
               records.toSeq
             }
           }
@@ -335,7 +356,7 @@ final class PgVectorStore private (
           Using.resource(stmt.executeQuery()) { rs =>
             val records = ArrayBuffer.empty[VectorRecord]
             while (rs.next())
-              records += rowToRecord(rs)
+              rowToRecord(rs).foreach(records += _)
             records.toSeq
           }
         }
@@ -407,19 +428,30 @@ final class PgVectorStore private (
     }
   }
 
-  private def rowToRecord(rs: ResultSet): VectorRecord = {
+  private def rowToRecord(rs: ResultSet): Option[VectorRecord] = {
+    val id           = rs.getString("id")
     val embeddingStr = rs.getString("embedding")
-    val embedding    = stringToEmbedding(embeddingStr)
-    val content      = Option(rs.getString("content")).filter(_.nonEmpty)
-    val metadataJson = rs.getString("metadata")
-    val metadata     = jsonToMetadata(metadataJson)
+    val embeddingDim = rs.getInt("embedding_dim")
 
-    VectorRecord(
-      id = rs.getString("id"),
-      embedding = embedding,
-      content = content,
-      metadata = metadata
-    )
+    stringToEmbedding(embeddingStr) match {
+      case Some(embedding) =>
+        val content      = Option(rs.getString("content")).filter(_.nonEmpty)
+        val metadataJson = rs.getString("metadata")
+        val metadata     = jsonToMetadata(metadataJson)
+
+        Some(
+          VectorRecord(
+            id = id,
+            embedding = embedding,
+            content = content,
+            metadata = metadata
+          )
+        )
+
+      case None =>
+        rateLimitedLogger.warn(s"Skipping corrupt vector record: id=$id, embedding_dim=$embeddingDim")
+        None
+    }
   }
 
   private def filterToSql(filter: MetadataFilter): (String, Seq[Any]) = filter match {
@@ -466,13 +498,13 @@ final class PgVectorStore private (
   private def embeddingToString(embedding: Array[Float]): String =
     embedding.mkString("[", ",", "]")
 
-  private def stringToEmbedding(s: String): Array[Float] =
-    if (s == null || s.isEmpty) Array.empty
-    else {
-      val cleaned = s.stripPrefix("[").stripSuffix("]")
-      if (cleaned.isEmpty) Array.empty
-      else cleaned.split(",").map(_.trim.toFloat)
-    }
+  /**
+   * Parse embedding string to float array.
+   * Returns None if parsing fails (logged by caller with context).
+   * Package-private for unit testing.
+   */
+  private[vectorstore] def stringToEmbedding(s: String): Option[Array[Float]] =
+    EmbeddingParser.parse(s)
 
   private def metadataToJson(metadata: Map[String, String]): String =
     if (metadata.isEmpty) "{}"

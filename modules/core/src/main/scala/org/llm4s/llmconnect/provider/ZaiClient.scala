@@ -4,7 +4,7 @@ import org.llm4s.util.Redaction
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
+import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
 import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ServiceError }
@@ -18,6 +18,22 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
+/**
+ * LLM client for the Z.ai API.
+ *
+ * Z.ai uses an OpenAI-compatible `/chat/completions` endpoint with one important
+ * difference: message content is always an array of typed objects
+ * (`[{"type":"text","text":"..."}]`) rather than a plain string.  This applies
+ * to user, system, assistant, and tool messages alike.  Sending a plain string
+ * causes a rejection from the Z.ai API.
+ *
+ * Both non-streaming (`complete`) and streaming (`streamComplete`) are supported.
+ * Tool calling follows the standard OpenAI function-calling format.
+ *
+ * @param config  Z.ai connection configuration (API key, model, base URL, context window)
+ * @param metrics records per-call latency and token-usage events;
+ *                use [[org.llm4s.metrics.MetricsCollector.noop]] when metrics are not needed
+ */
 class ZaiClient(
   config: ZaiConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
@@ -183,7 +199,7 @@ class ZaiClient(
           ToolCall(
             id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
             name = function.obj.get("name").flatMap(_.strOpt).getOrElse(""),
-            arguments = parseStreamingArguments(rawArgs)
+            arguments = StreamingToolArgumentParser.parse(rawArgs)
           )
       }
 
@@ -221,9 +237,6 @@ class ZaiClient(
       Seq.empty
     }
   }
-
-  private def parseStreamingArguments(raw: String): ujson.Value =
-    if (raw.isEmpty) ujson.Null else scala.util.Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
 
   /**
    * Test-visible seam for request serialization; intentionally scoped to provider package to avoid broader API surface.
@@ -350,8 +363,10 @@ class ZaiClient(
 
   override def close(): Unit =
     if (closed.compareAndSet(false, true)) {
-      // Java HttpClient does not have explicit close()
-      // We track logical closed state for thread-safety
+      (httpClient: Any) match {
+        case c: AutoCloseable => c.close()
+        case _                => ()
+      }
     }
 
   private def validateNotClosed: Result[Unit] =

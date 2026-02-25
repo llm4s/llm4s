@@ -41,7 +41,7 @@ object StreamingAgentExample extends App {
     implicit val rw: ReadWriter[WeatherOutput] = macroRW
   }
 
-  val weatherTool = ToolBuilder[WeatherInput, WeatherOutput](
+  val weatherToolResult = ToolBuilder[WeatherInput, WeatherOutput](
     name = "get_weather",
     description = "Get current weather for a city",
     schema = Schema.`object`[WeatherInput]("Weather query").withRequiredField("city", Schema.string("City name"))
@@ -53,9 +53,7 @@ object StreamingAgentExample extends App {
       val temp  = temps.getOrElse(city, 20)
       WeatherOutput(city, temp, "Partly cloudy")
     }
-  }.build()
-
-  val tools = new ToolRegistry(Seq(weatherTool))
+  }.buildSafe()
 
   // Event handler that provides real-time feedback
   def handleEvent(event: AgentEvent): Unit = event match {
@@ -105,9 +103,11 @@ object StreamingAgentExample extends App {
 
   // Run the example
   val result = for {
+    weatherTool <- weatherToolResult
     providerCfg <- Llm4sConfig.provider()
     client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
+    tools = new ToolRegistry(Seq(weatherTool))
 
     // Run with streaming events
     finalState <- agent.runWithEvents(

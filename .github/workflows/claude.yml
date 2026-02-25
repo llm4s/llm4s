@@ -160,6 +160,7 @@ jobs:
           prompt: ${{ steps.prepare_prompt.outputs.prompt }}
           claude_args: |
             --max-turns 30
+            --allowedTools "Bash"
             --json-schema '{"type":"object","properties":{"review_status":{"type":"string","enum":["request_changes","comment"]},"blocking_findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"line":{"type":"integer","minimum":1},"title":{"type":"string"},"details":{"type":"string"}},"required":["file","line","title","details"]}},"non_blocking_findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"line":{"type":"integer","minimum":1},"title":{"type":"string"},"details":{"type":"string"}},"required":["file","line","title","details"]}},"holistic_assessment":{"type":"string"},"review_summary_markdown":{"type":"string"}},"required":["review_status","blocking_findings","non_blocking_findings","holistic_assessment","review_summary_markdown"]}'
 
       - name: Publish workflow summary

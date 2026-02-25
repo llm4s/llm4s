@@ -1,3 +1,9 @@
+---
+layout: page
+title: LLM4S API Specification
+parent: API Reference
+---
+
 # LLM4S API Specification
 
 ## Overview

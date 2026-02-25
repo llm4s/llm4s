@@ -1,6 +1,7 @@
 package org.llm4s.toolapi.builtin.filesystem
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 
 import java.nio.file.{ Files, LinkOption, Paths }
@@ -66,9 +67,9 @@ object FileInfoTool {
     )
 
   /**
-   * Create a file info tool with the given configuration.
+   * Create a file info tool with the given configuration, returning a Result for safe error handling.
    */
-  def create(config: FileConfig = FileConfig()): ToolFunction[Map[String, Any], FileInfoResult] =
+  def createSafe(config: FileConfig = FileConfig()): Result[ToolFunction[Map[String, Any], FileInfoResult]] =
     ToolBuilder[Map[String, Any], FileInfoResult](
       name = "file_info",
       description = "Get detailed information about a file or directory including size, " +
@@ -81,12 +82,12 @@ object FileInfoTool {
         pathStr <- extractor.getString("path")
         result  <- getFileInfo(pathStr, config)
       } yield result
-    }.build()
+    }.buildSafe()
 
   /**
-   * Default file info tool with standard configuration.
+   * Default file info tool instance, returning a Result for safe error handling.
    */
-  val tool: ToolFunction[Map[String, Any], FileInfoResult] = create()
+  val toolSafe: Result[ToolFunction[Map[String, Any], FileInfoResult]] = createSafe()
 
   private def getFileInfo(
     pathStr: String,

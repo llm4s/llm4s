@@ -3,10 +3,10 @@ package org.llm4s.core.safety
 import org.llm4s.util.Redaction
 
 /**
- * Delegate to [[org.llm4s.util.Redaction]] for all redaction functionality.
+ * Delegates to `org.llm4s.util.Redaction` for all redaction functionality.
  *
  * This object is preserved for backward compatibility. New code should use
- * [[org.llm4s.util.Redaction]] directly.
+ * `org.llm4s.util.Redaction` directly.
  */
 @deprecated("Use org.llm4s.util.Redaction instead", "0.2.0")
 object LogRedaction {
