@@ -75,7 +75,7 @@ class OllamaClient(
     val url         = s"${config.baseUrl}/api/chat"
     val headers     = Map("Content-Type" -> "application/json")
     try {
-      val response = httpClient.post(url, headers, requestBody.render(), timeout = 120000)
+      val response = httpClient.post(url, headers, requestBody.render(), timeout = config.requestTimeout.toMillis.toInt)
       response.statusCode match {
         case 200 =>
           Try(ujson.read(response.body)).toResult
@@ -116,7 +116,8 @@ class OllamaClient(
       val headers     = Map("Content-Type" -> "application/json")
 
       try {
-        val response = httpClient.postStream(url, headers, requestBody.render(), timeout = 600000)
+        val response =
+          httpClient.postStream(url, headers, requestBody.render(), timeout = config.streamTimeout.toMillis.toInt)
         if (response.statusCode != 200) {
           val err = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)
           response.body.close()

@@ -9,7 +9,6 @@ import ujson.{ Obj, read }
 import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
-import java.time.Duration
 import scala.util.Try
 import scala.util.control.NonFatal
 
@@ -58,7 +57,7 @@ object OllamaEmbeddingProvider {
         .newBuilder()
         .uri(URI.create(url))
         .header("Content-Type", "application/json")
-        .timeout(Duration.ofMinutes(2))
+        .timeout(java.time.Duration.ofMillis(cfg.requestTimeout.toMillis))
         .POST(HttpRequest.BodyPublishers.ofString(payload.render()))
 
       if (cfg.apiKey.nonEmpty && cfg.apiKey != "not-required") {

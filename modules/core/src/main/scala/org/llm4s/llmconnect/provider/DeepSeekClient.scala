@@ -12,7 +12,6 @@ import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
-import java.time.Duration
 import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
@@ -58,6 +57,7 @@ class DeepSeekClient(
             .header("Content-Type", "application/json")
             .header("Authorization", s"Bearer ${config.apiKey}")
             .header("User-Agent", "llm4s/1.0")
+            .timeout(java.time.Duration.ofMillis(config.requestTimeout.toMillis))
             .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
             .build()
 
@@ -106,7 +106,7 @@ class DeepSeekClient(
           .header("Content-Type", "application/json")
           .header("Authorization", s"Bearer ${config.apiKey}")
           .header("User-Agent", "llm4s/1.0")
-          .timeout(Duration.ofMinutes(5))
+          .timeout(java.time.Duration.ofMillis(config.streamTimeout.toMillis))
           .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
           .build()
 

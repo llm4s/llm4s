@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.config
 
 import org.slf4j.LoggerFactory
 import org.llm4s.util.Redaction
+import scala.concurrent.duration._
 
 /**
  * Identifies a specific LLM provider, model, and connection details.
@@ -32,6 +33,22 @@ sealed trait ProviderConfig {
    * least this many tokens available to generate a reply.
    */
   def reserveCompletion: Int
+
+  /**
+   * Timeout for regular (non-streaming) HTTP requests.
+   *
+   * Override in each provider config or pass a custom value when constructing
+   * the config directly. Defaults vary by provider to match historical behaviour.
+   */
+  def requestTimeout: FiniteDuration
+
+  /**
+   * Timeout for streaming HTTP requests.
+   *
+   * Streaming responses can take significantly longer than regular responses,
+   * so this is typically set to a higher value than [[requestTimeout]].
+   */
+  def streamTimeout: FiniteDuration
 }
 
 /**
@@ -60,7 +77,9 @@ case class OpenAIConfig(
   organization: Option[String],
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 2.minutes,
+  streamTimeout: FiniteDuration = 10.minutes
 ) extends ProviderConfig {
   override def toString: String =
     s"OpenAIConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, organization=$organization, baseUrl=$baseUrl, " +
@@ -148,7 +167,9 @@ case class AzureConfig(
   model: String,
   apiVersion: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 2.minutes,
+  streamTimeout: FiniteDuration = 10.minutes
 ) extends ProviderConfig {
   override def toString: String =
     s"AzureConfig(endpoint=$endpoint, apiKey=${Redaction.secret(apiKey)}, model=$model, apiVersion=$apiVersion, " +
@@ -225,7 +246,9 @@ case class AnthropicConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 2.minutes,
+  streamTimeout: FiniteDuration = 10.minutes
 ) extends ProviderConfig {
   override def toString: String =
     s"AnthropicConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
@@ -291,7 +314,9 @@ case class OllamaConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 2.minutes,
+  streamTimeout: FiniteDuration = 10.minutes
 ) extends ProviderConfig
 
 object OllamaConfig {
@@ -351,7 +376,9 @@ case class ZaiConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 5.minutes,
+  streamTimeout: FiniteDuration = 10.minutes
 ) extends ProviderConfig {
   override def toString: String =
     s"ZaiConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
@@ -421,7 +448,9 @@ case class GeminiConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 2.minutes,
+  streamTimeout: FiniteDuration = 10.minutes
 ) extends ProviderConfig {
   override def toString: String =
     s"GeminiConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
@@ -491,7 +520,9 @@ case class DeepSeekConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 5.minutes,
+  streamTimeout: FiniteDuration = 10.minutes
 ) extends ProviderConfig {
   override def toString: String =
     s"DeepSeekConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
@@ -574,7 +605,9 @@ case class CohereConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 2.minutes,
+  streamTimeout: FiniteDuration = 10.minutes
 ) extends ProviderConfig {
   override def toString: String =
     s"CohereConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +

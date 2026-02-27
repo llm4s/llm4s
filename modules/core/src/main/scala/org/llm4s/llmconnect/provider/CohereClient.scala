@@ -10,7 +10,6 @@ import org.llm4s.types.Result
 import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
-import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
@@ -49,7 +48,7 @@ class CohereClient(
             .uri(URI.create(s"${config.baseUrl}/v2/chat"))
             .header("Content-Type", "application/json")
             .header("Authorization", s"Bearer ${config.apiKey}")
-            .timeout(Duration.ofMinutes(2))
+            .timeout(java.time.Duration.ofMillis(config.requestTimeout.toMillis))
             .POST(HttpRequest.BodyPublishers.ofString(requestBody.render(), StandardCharsets.UTF_8))
             .build()
 

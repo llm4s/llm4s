@@ -12,7 +12,6 @@ import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
-import java.time.Duration
 import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
@@ -84,6 +83,7 @@ class OpenRouterClient(
             .header("Authorization", s"Bearer ${config.apiKey}")
             .header("HTTP-Referer", "https://github.com/llm4s/llm4s") // Required by OpenRouter
             .header("X-Title", "LLM4S")                               // Required by OpenRouter
+            .timeout(java.time.Duration.ofMillis(config.requestTimeout.toMillis))
             .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
             .build()
 
@@ -129,7 +129,7 @@ class OpenRouterClient(
             .header("Authorization", s"Bearer ${config.apiKey}")
             .header("HTTP-Referer", "https://github.com/llm4s/llm4s")
             .header("X-Title", "LLM4S")
-            .timeout(Duration.ofMinutes(5))
+            .timeout(java.time.Duration.ofMillis(config.streamTimeout.toMillis))
             .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
             .build()
 
