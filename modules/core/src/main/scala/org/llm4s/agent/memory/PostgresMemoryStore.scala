@@ -1,9 +1,8 @@
 package org.llm4s.agent.memory
 
 import org.llm4s.types.Result
-import org.llm4s.error.{ NotFoundError, ProcessingError, LLMError }
+import org.llm4s.error.{ LLMError, NotFoundError, OptimisticLockFailure, ProcessingError }
 import org.llm4s.vectorstore.PostgresVectorHelpers
-import org.llm4s.error.{ NotFoundError, OptimisticLockFailure, ProcessingError }
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import ujson.{ Obj, Str, read, write }
 
@@ -17,7 +16,7 @@ import scala.util.{ Try, Using }
 final class PostgresMemoryStore private[memory] (
   private val dataSource: HikariDataSource,
   val tableName: String,
-  val embeddingService: Option[EmbeddingService]
+  private val embeddingService: Option[EmbeddingService]
 ) extends MemoryStore
     with AutoCloseable {
 
@@ -294,7 +293,7 @@ final class PostgresMemoryStore private[memory] (
               }
 
               updated.embedding match {
-                case Some(vec) => stmt.setString(6, PostgresMemoryStore.embeddingToString(vec))
+                case Some(vec) => stmt.setString(6, PostgresVectorHelpers.embeddingToString(vec))
                 case None      => stmt.setNull(6, java.sql.Types.OTHER, "vector")
               }
 
@@ -368,14 +367,16 @@ final class PostgresMemoryStore private[memory] (
         Using.resource(conn.prepareStatement(s"SELECT * FROM $tableName WHERE id = ?")) { stmt =>
           stmt.setString(1, id.value)
           Using.resource(stmt.executeQuery()) { rs =>
-            if (rs.next()) Some(VersionedMemory(rowToMemory(rs), rs.getLong("version")))
-            else None
+            if (rs.next()) rowToMemory(rs).map(mem => Some(VersionedMemory(mem, rs.getLong("version"))))
+            else Right(None)
           }
         }
       }
-    }.toEither.left.map(e =>
-      ProcessingError("postgres-memory-store", s"Failed to get memory: ${e.getMessage}", cause = Some(e))
-    )
+    }.toEither.left
+      .map[LLMError](e =>
+        ProcessingError("postgres-memory-store", s"Failed to get memory: ${e.getMessage}", cause = Some(e))
+      )
+      .flatMap(identity)
 
   private def withConnection[A](f: Connection => A): A =
     Using.resource(dataSource.getConnection)(f)

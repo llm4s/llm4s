@@ -5,7 +5,7 @@ import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.agent.memory.PostgresMemoryStore.SqlParam._
-import org.llm4s.error.NotFoundError
+import org.llm4s.error.{ NotFoundError, OptimisticLockFailure }
 import org.llm4s.vectorstore.PostgresVectorHelpers
 
 import java.sql.{ Connection, PreparedStatement, ResultSet, SQLException, Timestamp }
@@ -428,7 +428,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (() => mockStmt.close()).expects()
     (() => mockConn.close()).expects()
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.update(MemoryId("mem-cas-1"), _.copy(content = "updated content"))
 
     result.isRight shouldBe true
@@ -469,13 +469,14 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (() => mockStmt.close()).expects()
     (() => mockConn.close()).expects()
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.update(MemoryId("mem-cas-2"), _.copy(content = "updated content"))
 
     result.isLeft shouldBe true
-    val error = result.left.toOption.get
-    error shouldBe an[OptimisticLockFailure]
-    error.asInstanceOf[OptimisticLockFailure].memoryId shouldBe "mem-cas-2"
-    error.asInstanceOf[OptimisticLockFailure].attemptedVersion shouldBe 5L
+    result.left.foreach { error =>
+      error shouldBe an[OptimisticLockFailure]
+      error.asInstanceOf[OptimisticLockFailure].memoryId shouldBe "mem-cas-2"
+      error.asInstanceOf[OptimisticLockFailure].attemptedVersion shouldBe 5L
+    }
   }
 }

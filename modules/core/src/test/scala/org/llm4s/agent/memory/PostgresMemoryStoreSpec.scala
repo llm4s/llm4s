@@ -1,13 +1,11 @@
 package org.llm4s.agent.memory
 
-import org.llm4s.error.OptimisticLockFailure
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
 import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
 import java.util.UUID
-import java.util.concurrent.{ CountDownLatch, Executors, TimeUnit }
 import scala.util.Try
 import java.time.Instant
 import java.sql.DriverManager

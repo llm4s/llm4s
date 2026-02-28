@@ -3,9 +3,6 @@ package org.llm4s.vectorstore
 import org.llm4s.types.Result
 import org.llm4s.error.{ ProcessingError, LLMError }
 
-import org.slf4j.LoggerFactory
-import org.llm4s.util.RateLimitedLogger
-
 import java.sql.{ Connection, PreparedStatement, ResultSet }
 import scala.collection.mutable.ArrayBuffer
 import scala.util.{ Try, Using }
@@ -45,9 +42,6 @@ final class PgVectorStore private (
   val tableName: String,
   private val ownsDataSource: Boolean = true
 ) extends VectorStore {
-
-  private val logger            = LoggerFactory.getLogger(getClass)
-  private val rateLimitedLogger = RateLimitedLogger(logger, throttleSeconds = 60, throttleCount = 100)
 
   // Initialize schema on creation
   initializeSchema()
