@@ -42,15 +42,35 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
 
     val batchRequest = EmbeddingRequest(Seq("text1", "text2"), testModel)
 
-    // Expectation: Only "text2" is requested from the base client
-    val expectedSingleReq = batchRequest.copy(input = Seq("text2"))
+    // Expectation: Only "text2" is sent to the base client in a single batched call
+    val expectedMissReq = batchRequest.copy(input = Seq("text2"))
     (baseClient.embed _)
-      .expects(expectedSingleReq)
+      .expects(expectedMissReq)
       .returning(Right(EmbeddingResponse(Seq(Seq(2.0)))))
       .once()
 
     val result = cachedClient.embed(batchRequest)
 
     result.map(_.embeddings) shouldBe Right(Seq(Seq(1.0), Seq(2.0)))
+  }
+
+  it should "not cache base client errors, allowing the next call to retry" in {
+    val baseClient   = mock[EmbeddingClient]
+    val cache        = new InMemoryEmbeddingCache[Seq[Double]]()
+    val cachedClient = new CachedEmbeddingClient(baseClient, cache)
+
+    val request   = EmbeddingRequest(Seq("hello"), testModel)
+    val testError = EmbeddingError(code = Some("500"), message = "server error", provider = "test")
+
+    // Base client fails on first call then succeeds on second.
+    // If errors were cached the second call would never reach the base client.
+    (baseClient.embed _).expects(request).returning(Left(testError)).once()
+    (baseClient.embed _)
+      .expects(request)
+      .returning(Right(EmbeddingResponse(Seq(Seq(0.1, 0.2)))))
+      .once()
+
+    cachedClient.embed(request) shouldBe Left(testError)
+    cachedClient.embed(request).isRight shouldBe true
   }
 }
