@@ -502,28 +502,44 @@ class WorkspaceAgentInterfaceImpl(
     // Search in files
     var matches      = List.empty[SearchMatch]
     var totalMatches = 0
+    var truncated    = false
 
-    for (file <- filesToSearch if matches.size < defaultLimits.maxSearchResults) {
+    // we always walk every file so that we can correctly report whether the
+    // search stopped early due to the hard cap; we still stop accumulating
+    // `matches` once the cap is reached in order to honour the limit, but we
+    // keep counting hits so callers can see the true total if desired.
+    for (file <- filesToSearch) {
       val relativePath = rootPath.relativize(file).toString
 
       Try(Files.readAllLines(file, StandardCharsets.UTF_8).asScala.toList).toOption.foreach { lines =>
-        for ((line, lineIndex) <- lines.zipWithIndex if matches.size < defaultLimits.maxSearchResults) {
+        for ((line, lineIndex) <- lines.zipWithIndex) {
           val matcher = pattern.matcher(line)
 
           if (matcher.find()) {
             totalMatches += 1
 
-            val lineNumber    = lineIndex + 1
-            val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex)
-            val afterContext  = lines.slice(lineIndex + 1, math.min(lines.size, lineIndex + context + 1))
+            if (matches.size < defaultLimits.maxSearchResults) {
+              val lineNumber    = lineIndex + 1
+              val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex)
+              val afterContext  = lines.slice(lineIndex + 1, math.min(lines.size, lineIndex + context + 1))
 
-            matches = matches :+ SearchMatch(
-              path = relativePath,
-              line = lineNumber,
-              matchText = line,
-              contextBefore = beforeContext,
-              contextAfter = afterContext
-            )
+              matches = matches :+ SearchMatch(
+                path = relativePath,
+                line = lineNumber,
+                matchText = line,
+                contextBefore = beforeContext,
+                contextAfter = afterContext
+              )
+
+              // if we just filled the last allowed slot, mark truncation so we
+              // can report it even though we continue scanning for counting.
+              if (matches.size == defaultLimits.maxSearchResults) {
+                truncated = true
+              }
+            } else {
+              // already at cap, nothing to add but we know we're truncated
+              truncated = true
+            }
           }
         }
       }
@@ -532,7 +548,7 @@ class WorkspaceAgentInterfaceImpl(
     SearchFilesResponse(
       commandId = "local",
       matches = matches,
-      isTruncated = totalMatches > defaultLimits.maxSearchResults,
+      isTruncated = truncated,
       totalMatches = totalMatches
     )
   }
