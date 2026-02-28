@@ -16,6 +16,8 @@ import org.llm4s.toolapi.ToolFunction
  *                  For non-reasoning models, this setting is silently ignored.
  * @param budgetTokens Optional explicit budget for thinking tokens (Anthropic Claude).
  *                     If set, overrides the default budget from reasoning effort level.
+ * @param responseFormat Optional structured output format (e.g. JSON or JSON schema). Support is
+ *                        provider- and model-dependent; see capability validation in RequestTransformer.
  *
  * @example
  * {{{
@@ -29,6 +31,9 @@ import org.llm4s.toolapi.ToolFunction
  * // For Anthropic, set explicit thinking budget
  * val anthropicOptions = CompletionOptions()
  *   .withBudgetTokens(16000)
+ *
+ * // Request JSON output (provider-dependent)
+ * val jsonOptions = CompletionOptions().withResponseFormat(ResponseFormat.Json)
  * }}}
  */
 case class CompletionOptions(
@@ -39,7 +44,8 @@ case class CompletionOptions(
   frequencyPenalty: Double = 0.0,
   tools: Seq[ToolFunction[_, _]] = Seq.empty,
   reasoning: Option[ReasoningEffort] = None,
-  budgetTokens: Option[Int] = None
+  budgetTokens: Option[Int] = None,
+  responseFormat: Option[ResponseFormat] = None
 ) {
 
   /**
@@ -75,4 +81,16 @@ case class CompletionOptions(
    */
   def effectiveBudgetTokens: Option[Int] =
     budgetTokens.orElse(reasoning.map(ReasoningEffort.defaultBudgetTokens)).filter(_ > 0)
+
+  /**
+   * Request structured output in the given format.
+   *
+   * Support is provider- and model-dependent. Capability validation is applied
+   * via RequestTransformer (Json: fallback when unsupported; JsonSchema: strict error).
+   *
+   * @param format the desired response format (e.g. ResponseFormat.Json or ResponseFormat.JsonSchema(schema))
+   * @return new CompletionOptions with responseFormat set
+   */
+  def withResponseFormat(format: ResponseFormat): CompletionOptions =
+    copy(responseFormat = Some(format))
 }
