@@ -295,6 +295,10 @@ class OpenRouterClient(
       base("tools") = toolRegistry.getOpenAITools()
     }
 
+    options.responseFormat.foreach { fmt =>
+      ResponseFormatMapper.toOpenAIResponseFormat(fmt).foreach(rf => base("response_format") = rf)
+    }
+
     // Add reasoning configuration based on model type
     addReasoningConfig(base, options)
 

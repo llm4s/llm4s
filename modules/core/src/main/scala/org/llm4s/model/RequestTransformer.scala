@@ -1,7 +1,7 @@
 package org.llm4s.model
 
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.model.{ CompletionOptions, Message, SystemMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, Message, ResponseFormat, SystemMessage, UserMessage }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -179,6 +179,31 @@ class DefaultRequestTransformer(
       } else {
         errors += s"Function calling not supported for $modelId"
       }
+    }
+
+    // 4. Check response format (structured output) support
+    options.responseFormat.foreach {
+      case ResponseFormat.Json =>
+        capabilities.supportsResponseSchema match {
+          case Some(false) =>
+            if (dropUnsupported) {
+              logger.debug(s"Model $modelId: dropping responseFormat (structured output not supported)")
+              transformed = transformed.copy(responseFormat = None)
+            }
+          // else: no error for Json; we could either add error or allow - issue says fallback, so dropUnsupported path only
+          case _ => () // true or None: keep and send
+        }
+      case _: ResponseFormat.JsonSchema =>
+        capabilities.supportsResponseSchema match {
+          case Some(false) =>
+            if (dropUnsupported) {
+              logger.debug(s"Model $modelId: dropping JsonSchema responseFormat (not supported)")
+              transformed = transformed.copy(responseFormat = None)
+            } else {
+              errors += s"Structured output (JSON schema) not supported for model $modelId"
+            }
+          case _ => () // true or None: keep and send
+        }
     }
 
     if (errors.nonEmpty) {

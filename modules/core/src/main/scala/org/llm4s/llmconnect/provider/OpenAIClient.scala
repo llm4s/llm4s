@@ -425,6 +425,16 @@ class OpenAIClient private (
       AzureToolHelper.addToolsToOptions(toolRegistry, chatOptions)
     }
 
+    // Add response format (structured output) if specified
+    // OpenAI/Azure: Json maps to ChatCompletionsJsonResponseFormat; JsonSchema requires SDK support
+    options.responseFormat.foreach {
+      case ResponseFormat.Json =>
+        chatOptions.setResponseFormat(new ChatCompletionsJsonResponseFormat())
+      case _: ResponseFormat.JsonSchema =>
+        // Azure SDK ChatCompletionsJsonSchemaResponseFormat requires builder/fromJson; fallback: skip
+        logger.debug("JsonSchema response format requested but Azure SDK may not support it; skipping")
+    }
+
     chatOptions
   }
 

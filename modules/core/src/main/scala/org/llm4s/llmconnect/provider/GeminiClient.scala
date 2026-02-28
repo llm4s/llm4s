@@ -263,6 +263,14 @@ class GeminiClient(
     )
     options.maxTokens.foreach(mt => generationConfig("maxOutputTokens") = mt)
 
+    options.responseFormat.foreach {
+      case ResponseFormat.Json =>
+        generationConfig("responseMimeType") = "application/json"
+      case ResponseFormat.JsonSchema(schema) =>
+        generationConfig("responseMimeType") = "application/json"
+        generationConfig("responseSchema") = schema
+    }
+
     // Build request
     val request = ujson.Obj(
       "contents"         -> ujson.Arr(contents.toSeq: _*),
