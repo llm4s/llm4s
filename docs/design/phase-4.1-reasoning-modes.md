@@ -68,6 +68,7 @@ object ReasoningEffort {
     case _        => scala.None
   }
 }
+```
 
 ### Provider Mapping
 
@@ -84,7 +85,7 @@ object ReasoningEffort {
 
 ### Package Structure
 
-```text
+```
 modules/core/src/main/scala/org/llm4s/llmconnect/
 ├── model/
 │   ├── CompletionOptions.scala  # Add reasoning fields
@@ -409,8 +410,7 @@ Two sample applications demonstrate reasoning modes:
    sbt "samples/runMain org.llm4s.samples.reasoning.ReasoningModesExample"
    ```
 
-```md
-2. **ReasoningModesExample**: Demonstrates reasoning modes (including extended thinking when supported)
+2. **ReasoningModesExample**: Anthropic extended thinking
    ```bash
    export LLM_MODEL=anthropic/claude-sonnet-4-5-latest
    export ANTHROPIC_API_KEY=sk-ant-...
