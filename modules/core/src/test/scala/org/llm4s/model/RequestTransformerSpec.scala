@@ -236,6 +236,17 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
     result.toOption.get.responseFormat shouldBe None
   }
 
+  test("should keep Json responseFormat when supportsResponseSchema=false and dropUnsupported=false") {
+    val customCaps        = ModelCapabilities(supportsResponseSchema = Some(false))
+    val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps))
+    val options           = CompletionOptions().withResponseFormat(ResponseFormat.Json)
+
+    val result = customTransformer.transformOptions("test-model", options, dropUnsupported = false)
+
+    result.isRight shouldBe true
+    result.toOption.get.responseFormat shouldBe Some(ResponseFormat.Json)
+  }
+
   test(
     "should return error for JsonSchema responseFormat when supportsResponseSchema=false and dropUnsupported=false"
   ) {
