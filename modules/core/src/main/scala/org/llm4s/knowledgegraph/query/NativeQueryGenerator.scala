@@ -5,6 +5,8 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
 import org.llm4s.types.Result
 
+import scala.util.Try
+
 /**
  * Supported native graph query languages.
  */
@@ -147,17 +149,14 @@ class NativeQueryGenerator(llmClient: LLMClient) {
       .stripSuffix("```")
       .trim
 
-    try {
+    Try {
       val json        = ujson.read(cleaned)
       val queryString = json("query").str
       val explanation = json.obj.get("explanation").map(_.str).getOrElse("")
-
-      Right(NativeQuery(language = language, queryString = queryString, explanation = explanation))
-    } catch {
-      case e: ujson.ParseException =>
-        Left(ProcessingError("native_query_parse", s"Invalid JSON in LLM response: ${e.getMessage}"))
-      case e: Exception =>
-        Left(ProcessingError("native_query_parse", s"Failed to parse native query response: ${e.getMessage}"))
-    }
+      NativeQuery(language = language, queryString = queryString, explanation = explanation)
+    }.fold(
+      e => Left(ProcessingError("native_query_parse", s"Failed to parse native query response: ${e.getMessage}")),
+      Right(_)
+    )
   }
 }

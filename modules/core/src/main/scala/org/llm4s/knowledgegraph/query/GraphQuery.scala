@@ -107,7 +107,7 @@ case class GraphQueryResult(
       summary =
         if (summary.isEmpty) other.summary
         else if (other.summary.isEmpty) summary
-        else s"$summary\n$other.summary"
+        else s"$summary\n${other.summary}"
     )
 }
 

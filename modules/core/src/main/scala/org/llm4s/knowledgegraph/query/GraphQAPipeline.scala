@@ -6,6 +6,8 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
 import org.llm4s.types.Result
 
+import scala.util.Try
+
 /**
  * Graph-guided question answering pipeline.
  *
@@ -294,19 +296,15 @@ class GraphQAPipeline(
       .stripSuffix("```")
       .trim
 
-    try {
+    // If entity extraction fails, continue with empty entities rather than failing
+    Try {
       val arr = ujson.read(cleaned).arr
-      val mentions = arr.map { item =>
+      arr.map { item =>
         val mention = item("mention").str
         val label   = item("label").str
         (mention, label)
       }.toSeq
-      Right(mentions)
-    } catch {
-      case _: Exception =>
-        // If entity extraction fails, continue with empty entities rather than failing
-        Right(Seq.empty)
-    }
+    }.fold(_ => Right(Seq.empty), Right(_))
   }
 
   /**

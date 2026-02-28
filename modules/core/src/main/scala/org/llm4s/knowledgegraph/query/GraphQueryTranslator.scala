@@ -6,6 +6,8 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
 import org.llm4s.types.Result
 
+import scala.util.Try
+
 /**
  * Translates natural language questions into structured [[GraphQuery]] operations using an LLM.
  *
@@ -122,24 +124,20 @@ class GraphQueryTranslator(llmClient: LLMClient, graphStore: GraphStore) {
       .stripSuffix("```")
       .trim
 
-    try {
-      val json      = ujson.read(cleaned)
-      val queryType = json("type").str
-
-      queryType match {
-        case "find_nodes"     => parseFindNodes(json)
-        case "find_neighbors" => parseFindNeighbors(json)
-        case "find_path"      => parseFindPath(json)
-        case "describe_node"  => parseDescribeNode(json)
-        case "composite"      => parseComposite(json)
-        case other            => Left(ProcessingError("query_parse", s"Unknown query type: $other"))
+    Try(ujson.read(cleaned)).fold(
+      e => Left(ProcessingError("query_parse", s"Invalid JSON in LLM response: ${e.getMessage}")),
+      json => {
+        val queryType = json("type").str
+        queryType match {
+          case "find_nodes"     => parseFindNodes(json)
+          case "find_neighbors" => parseFindNeighbors(json)
+          case "find_path"      => parseFindPath(json)
+          case "describe_node"  => parseDescribeNode(json)
+          case "composite"      => parseComposite(json)
+          case other            => Left(ProcessingError("query_parse", s"Unknown query type: $other"))
+        }
       }
-    } catch {
-      case e: ujson.ParseException =>
-        Left(ProcessingError("query_parse", s"Invalid JSON in LLM response: ${e.getMessage}"))
-      case e: Exception =>
-        Left(ProcessingError("query_parse", s"Failed to parse query response: ${e.getMessage}"))
-    }
+    )
   }
 
   private def parseFindNodes(json: ujson.Value): Result[GraphQuery] = {
@@ -238,12 +236,9 @@ class GraphQueryTranslator(llmClient: LLMClient, graphStore: GraphStore) {
         }
       }
 
-      val errors = parsed.collect { case Left(e) => e }
-      if (errors.nonEmpty) {
-        Left(errors.head)
-      } else {
-        Right(GraphQuery.CompositeQuery(parsed.collect { case Right(q) => q }))
-      }
+      parsed
+        .collectFirst { case Left(e) => Left(e) }
+        .getOrElse(Right(GraphQuery.CompositeQuery(parsed.collect { case Right(q) => q })))
     }
   }
 }
