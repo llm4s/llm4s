@@ -64,6 +64,11 @@ case class Completion(
  * @param thinkingTokens Optional number of tokens used for thinking/reasoning.
  *                       Present when using reasoning modes with Claude or o1/o3 models.
  *                       These tokens count toward billing but are separate from completion tokens.
+ * @param cachedTokens Optional number of tokens served from the provider's prompt cache (cache read).
+ *                     When present, these tokens are billed at the cheaper cache-read rate.
+ * @param cacheCreationTokens Optional number of tokens written into the provider's prompt cache.
+ *                            When present, these tokens are billed at the cache-creation rate,
+ *                            which is typically higher than the normal input rate.
  */
 case class TokenUsage(
   promptTokens: Int,

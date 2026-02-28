@@ -263,16 +263,11 @@ curl https://api.anthropic.com/v1/messages \
                     Try(msgDelta.usage()).foreach { usage =>
                       if (usage != null) {
                         val inputTokens = Option(usage.inputTokens()) match {
-                          case Some(opt: java.util.Optional[_]) =>
-                            if (opt.isPresent) {
-                              val v = opt.get()
-                              if (v == null) 0
-                              else v.asInstanceOf[java.lang.Number].intValue()
-                            } else {
-                              0
-                            }
-                          case _ =>
-                            0
+                          case Some(opt: java.util.Optional[_]) if opt.isPresent =>
+                            Option(opt.get())
+                              .collect { case n: java.lang.Number => n.intValue() }
+                              .getOrElse(0)
+                          case _ => 0
                         }
                         val outputTokens = Option(usage.outputTokens()).map(_.toInt).getOrElse(0)
                         if (inputTokens > 0 || outputTokens > 0) accumulator.updateTokens(inputTokens, outputTokens)
