@@ -14,7 +14,6 @@ import scala.sys.process._
 import scala.util.{ Failure, Success, Try, Using }
 import scala.util.control.Breaks.{ break, breakable }
 
-
 /**
  * Implementation of WorkspaceAgentInterface that operates on a local filesystem workspace.
  *
@@ -541,13 +540,13 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
                 )
               } else {
                 truncated = true
-                break ()
+                break()
               }
             }
           }
         }
 
-        if (truncated) break ()
+        if (truncated) break()
       }
     }
 
