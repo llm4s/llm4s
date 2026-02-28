@@ -67,7 +67,7 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "set ChatCompletionsJsonResponseFormat when ResponseFormat.Json is used" in {
-    val model  = "gpt-4"
+    val model = "gpt-4"
     val config = OpenAIConfig.fromValues(
       modelName = model,
       apiKey = "test-api-key",
@@ -102,7 +102,7 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "not crash when ResponseFormat.JsonSchema is used (skips and logs)" in {
-    val model  = "gpt-4"
+    val model = "gpt-4"
     val config = OpenAIConfig.fromValues(
       modelName = model,
       apiKey = "test-api-key",
@@ -124,10 +124,10 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers {
         throw new UnsupportedOperationException("not used")
     }
 
-    val client   = OpenAIClient.forTest(model, transport, config)
-    val schema   = ujson.Obj("type" -> "object")
-    val options  = CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))
-    val result   = client.complete(Conversation(Seq(UserMessage("hello"))), options)
+    val client  = OpenAIClient.forTest(model, transport, config)
+    val schema  = ujson.Obj("type" -> "object")
+    val options = CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))
+    val result  = client.complete(Conversation(Seq(UserMessage("hello"))), options)
 
     result.isRight shouldBe true
   }

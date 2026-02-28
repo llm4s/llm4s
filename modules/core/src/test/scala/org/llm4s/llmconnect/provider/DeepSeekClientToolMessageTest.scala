@@ -132,7 +132,7 @@ class DeepSeekClientToolMessageTest extends AnyFlatSpec with Matchers {
     val options      = CompletionOptions().withResponseFormat(ResponseFormat.Json)
     val requestBody  = DeepSeekRequestBodyTestHelper.createRequestBody(conversation, options)
 
-    requestBody.obj should contain key "response_format"
+    (requestBody.obj should contain).key("response_format")
     requestBody("response_format")("type").str shouldBe "json_object"
   }
 

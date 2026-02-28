@@ -133,7 +133,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "include responseMimeType and no responseSchema when ResponseFormat.Json is set" in {
     var capturedBody: String = ""
-    val mockHttp = stub[Llm4sHttpClient]
+    val mockHttp             = stub[Llm4sHttpClient]
     (mockHttp.post _).when(*, *, *, *).onCall { (_: String, _: Map[String, String], body: String, _: Int) =>
       capturedBody = body
       httpOk(successBody)
@@ -151,7 +151,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "include responseMimeType and responseSchema when ResponseFormat.JsonSchema is set" in {
     var capturedBody: String = ""
-    val mockHttp = stub[Llm4sHttpClient]
+    val mockHttp             = stub[Llm4sHttpClient]
     (mockHttp.post _).when(*, *, *, *).onCall { (_: String, _: Map[String, String], body: String, _: Int) =>
       capturedBody = body
       httpOk(successBody)
@@ -170,7 +170,7 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "omit responseMimeType and responseSchema when responseFormat is not set" in {
     var capturedBody: String = ""
-    val mockHttp = stub[Llm4sHttpClient]
+    val mockHttp             = stub[Llm4sHttpClient]
     (mockHttp.post _).when(*, *, *, *).onCall { (_: String, _: Map[String, String], body: String, _: Int) =>
       capturedBody = body
       httpOk(successBody)
