@@ -175,7 +175,7 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
     val mem = createMemory("Scala language").withEmbedding(Array[Float](1f, 0f))
 
     val result = for {
-      store  <- InMemoryStore.withMemories(Seq(mem))
+      store <- InMemoryStore.withMemories(Seq(mem))
       // Query embedding has 3 dimensions, memory has 2
       scored <- store.search("Scala", Array[Float](1f, 1f, 1f), topK = 10, MemoryFilter.All)
     } yield scored
@@ -211,7 +211,7 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
     val mem = createMemory("Test").withEmbedding(Array[Float](1f, 0f))
 
     val result = for {
-      store  <- InMemoryStore.withMemories(Seq(mem))
+      store <- InMemoryStore.withMemories(Seq(mem))
       // Empty string query or empty embedding array both return empty immediately
       scored <- store.search("query", Array.emptyFloatArray, topK = 10, MemoryFilter.All)
     } yield scored
