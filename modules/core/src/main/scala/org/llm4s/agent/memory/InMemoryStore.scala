@@ -100,7 +100,7 @@ final case class InMemoryStore private (
           } else if (containsNonFinite(vector) || containsNonFinite(queryEmbedding)) {
             None
           } else {
-            val similarity           = org.llm4s.agent.memory.VectorOps.cosineSimilarity(queryEmbedding, vector)
+            val similarity           = VectorOps.cosineSimilarity(queryEmbedding, vector)
             val normalizedSimilarity = (similarity + 1.0) / 2.0
             val score                = math.max(0.0, math.min(1.0, normalizedSimilarity))
             Some(ScoredMemory(memory, score))
