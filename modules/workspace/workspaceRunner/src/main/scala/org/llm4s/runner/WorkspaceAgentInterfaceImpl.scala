@@ -12,6 +12,8 @@ import scala.io.Source
 import scala.jdk.CollectionConverters._
 import scala.sys.process._
 import scala.util.{ Failure, Success, Try, Using }
+import scala.util.control.Breaks.{ break, breakable }
+
 
 /**
  * Implementation of WorkspaceAgentInterface that operates on a local filesystem workspace.
@@ -511,37 +513,48 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
     // Search in files
     var matches      = List.empty[SearchMatch]
     var totalMatches = 0
+    var truncated    = false
+    val maxResults   = defaultLimits.maxSearchResults
 
-    for (file <- filesToSearch if matches.size < defaultLimits.maxSearchResults) {
-      val relativePath = rootPath.relativize(file).toString
+    breakable {
+      for (file <- filesToSearch) {
+        val relativePath = rootPath.relativize(file).toString
 
-      Try(Files.readAllLines(file, StandardCharsets.UTF_8).asScala.toList).toOption.foreach { lines =>
-        for ((line, lineIndex) <- lines.zipWithIndex if matches.size < defaultLimits.maxSearchResults) {
-          val matcher = pattern.matcher(line)
+        Try(Files.readAllLines(file, StandardCharsets.UTF_8).asScala.toList).toOption.foreach { lines =>
+          for ((line, lineIndex) <- lines.zipWithIndex) {
+            val matcher = pattern.matcher(line)
 
-          if (matcher.find()) {
-            totalMatches += 1
+            if (matcher.find()) {
+              totalMatches += 1
 
-            val lineNumber    = lineIndex + 1
-            val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex)
-            val afterContext  = lines.slice(lineIndex + 1, math.min(lines.size, lineIndex + context + 1))
+              if (matches.size < maxResults) {
+                val lineNumber    = lineIndex + 1
+                val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex)
+                val afterContext  = lines.slice(lineIndex + 1, math.min(lines.size, lineIndex + context + 1))
 
-            matches = matches :+ SearchMatch(
-              path = relativePath,
-              line = lineNumber,
-              matchText = line,
-              contextBefore = beforeContext,
-              contextAfter = afterContext
-            )
+                matches = matches :+ SearchMatch(
+                  path = relativePath,
+                  line = lineNumber,
+                  matchText = line,
+                  contextBefore = beforeContext,
+                  contextAfter = afterContext
+                )
+              } else {
+                truncated = true
+                break ()
+              }
+            }
           }
         }
+
+        if (truncated) break ()
       }
     }
 
     SearchFilesResponse(
       commandId = "local",
       matches = matches,
-      isTruncated = totalMatches > defaultLimits.maxSearchResults,
+      isTruncated = truncated,
       totalMatches = totalMatches
     )
   }
