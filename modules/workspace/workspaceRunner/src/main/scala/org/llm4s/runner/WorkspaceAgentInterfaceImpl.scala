@@ -1,6 +1,6 @@
 package org.llm4s.runner
 
-import org.llm4s.shared.{ WorkspaceSandboxConfig, _ }
+import org.llm4s.shared._
 
 import java.io.{ BufferedWriter, PrintWriter }
 import java.nio.charset.StandardCharsets
@@ -502,17 +502,17 @@ class WorkspaceAgentInterfaceImpl(
     // Search in files
     var matches      = List.empty[SearchMatch]
     var totalMatches = 0
-    var truncated    = false
+    var done         = false   // used to break out once we've observed one match past the cap
 
-    // we always walk every file so that we can correctly report whether the
-    // search stopped early due to the hard cap; we still stop accumulating
-    // `matches` once the cap is reached in order to honour the limit, but we
-    // keep counting hits so callers can see the true total if desired.
-    for (file <- filesToSearch) {
+    // stop scanning as soon as we've counted one result beyond the configured
+    // max; that allows us to report `isTruncated` correctly while avoiding a
+    // full workspace sweep. the `totalMatches` value is therefore only guaranteed
+    // to be accurate up to maxSearchResults+1.
+    for (file <- filesToSearch if !done) {
       val relativePath = rootPath.relativize(file).toString
 
       Try(Files.readAllLines(file, StandardCharsets.UTF_8).asScala.toList).toOption.foreach { lines =>
-        for ((line, lineIndex) <- lines.zipWithIndex) {
+        for ((line, lineIndex) <- lines.zipWithIndex if !done) {
           val matcher = pattern.matcher(line)
 
           if (matcher.find()) {
@@ -530,15 +530,11 @@ class WorkspaceAgentInterfaceImpl(
                 contextBefore = beforeContext,
                 contextAfter = afterContext
               )
+            }
 
-              // if we just filled the last allowed slot, mark truncation so we
-              // can report it even though we continue scanning for counting.
-              if (matches.size == defaultLimits.maxSearchResults) {
-                truncated = true
-              }
-            } else {
-              // already at cap, nothing to add but we know we're truncated
-              truncated = true
+            // once we've seen one hit past the cap we can stop scanning entirely
+            if (totalMatches > defaultLimits.maxSearchResults) {
+              done = true
             }
           }
         }
@@ -548,7 +544,7 @@ class WorkspaceAgentInterfaceImpl(
     SearchFilesResponse(
       commandId = "local",
       matches = matches,
-      isTruncated = truncated,
+      isTruncated = totalMatches > matches.size,
       totalMatches = totalMatches
     )
   }
