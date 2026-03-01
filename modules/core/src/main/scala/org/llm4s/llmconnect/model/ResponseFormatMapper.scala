@@ -19,14 +19,14 @@ object ResponseFormatMapper {
     format match {
       case ResponseFormat.Json =>
         Some(ujson.Obj("type" -> "json_object"))
-      case ResponseFormat.JsonSchema(schema) =>
+      case js: ResponseFormat.JsonSchema =>
         Some(
           ujson.Obj(
             "type" -> "json_schema",
             "json_schema" -> ujson.Obj(
-              "name"   -> "response",
-              "strict" -> true,
-              "schema" -> schema
+              "name"   -> js.name,
+              "strict" -> js.strict,
+              "schema" -> js.schema
             )
           )
         )

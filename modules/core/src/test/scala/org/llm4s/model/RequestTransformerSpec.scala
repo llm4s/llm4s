@@ -218,10 +218,6 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
   }
 
   // ============================================
-  // Custom overrides tests
-  // ============================================
-
-  // ============================================
   // Response format (structured output) tests
   // ============================================
 

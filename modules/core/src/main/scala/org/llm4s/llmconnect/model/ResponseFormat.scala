@@ -26,6 +26,14 @@ object ResponseFormat {
    *
    * @param schema JSON schema as ujson value. For OpenAI, the schema is wrapped with
    *               name/strict in the provider mapping layer.
+   * @param name   Schema name for debugging/tracing (OpenAI requires it; max 64 chars).
+   *               Default "response" for backward compatibility.
+   * @param strict When true, model must follow the exact schema (OpenAI strict mode).
+   *               Default true; set false for partial schema adherence.
    */
-  case class JsonSchema(schema: ujson.Value) extends ResponseFormat
+  case class JsonSchema(
+    schema: ujson.Value,
+    name: String = "response",
+    strict: Boolean = true
+  ) extends ResponseFormat
 }

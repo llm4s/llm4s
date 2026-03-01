@@ -181,7 +181,12 @@ class DefaultRequestTransformer(
       }
     }
 
-    // 4. Check response format (structured output) support
+    // 4. Check response format (structured output) support.
+    //    Validation policy (explicit and consistent):
+    //    - Json: allowed fallback — when provider does not support structured output, we either drop (if dropUnsupported)
+    //      or keep and send (if !dropUnsupported). No validation error for Json so callers can still get best-effort.
+    //    - JsonSchema: strict — when provider does not support it and dropUnsupported=false, we return a validation
+    //      error so the caller knows the constraint was not applied. When dropUnsupported=true we drop it.
     options.responseFormat.foreach {
       case ResponseFormat.Json =>
         capabilities.supportsResponseSchema match {
@@ -190,7 +195,7 @@ class DefaultRequestTransformer(
               logger.debug(s"Model $modelId: dropping responseFormat (structured output not supported)")
               transformed = transformed.copy(responseFormat = None)
             }
-          // else: no error for Json; we could either add error or allow - issue says fallback, so dropUnsupported path only
+          // else: keep and send (Json is allowed fallback; provider may ignore or accept)
           case _ => () // true or None: keep and send
         }
       case _: ResponseFormat.JsonSchema =>

@@ -266,9 +266,9 @@ class GeminiClient(
     options.responseFormat.foreach {
       case ResponseFormat.Json =>
         generationConfig("responseMimeType") = "application/json"
-      case ResponseFormat.JsonSchema(schema) =>
+      case js: ResponseFormat.JsonSchema =>
         generationConfig("responseMimeType") = "application/json"
-        generationConfig("responseSchema") = schema
+        generationConfig("responseSchema") = js.schema
     }
 
     // Build request

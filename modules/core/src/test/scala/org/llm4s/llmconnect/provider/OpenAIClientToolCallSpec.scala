@@ -1,6 +1,11 @@
 package org.llm4s.llmconnect.provider
 
-import com.azure.ai.openai.models.{ ChatCompletions, ChatCompletionsOptions, ChatCompletionsJsonResponseFormat }
+import com.azure.ai.openai.models.{
+  ChatCompletions,
+  ChatCompletionsOptions,
+  ChatCompletionsJsonResponseFormat,
+  ChatCompletionsJsonSchemaResponseFormat
+}
 import com.azure.json.JsonProviders
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ResponseFormat, UserMessage }
@@ -101,7 +106,7 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers {
     capturedOptions.getResponseFormat shouldBe a[ChatCompletionsJsonResponseFormat]
   }
 
-  it should "not crash when ResponseFormat.JsonSchema is used (skips and logs)" in {
+  it should "set ChatCompletionsJsonSchemaResponseFormat when ResponseFormat.JsonSchema is used" in {
     val model = "gpt-4"
     val config = OpenAIConfig.fromValues(
       modelName = model,
@@ -115,8 +120,12 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers {
         |"usage":{"completion_tokens":1,"prompt_tokens":1,"total_tokens":2}}""".stripMargin
     )
 
+    var capturedOptions: ChatCompletionsOptions = null
     val transport = new OpenAIClientTransport {
-      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions = completions
+      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions = {
+        capturedOptions = options
+        completions
+      }
       override def getChatCompletionsStream(
         model: String,
         options: ChatCompletionsOptions
@@ -130,5 +139,10 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers {
     val result  = client.complete(Conversation(Seq(UserMessage("hello"))), options)
 
     result.isRight shouldBe true
+    capturedOptions should not be null
+    capturedOptions.getResponseFormat shouldBe a[ChatCompletionsJsonSchemaResponseFormat]
+    val jsSchema = capturedOptions.getResponseFormat.asInstanceOf[ChatCompletionsJsonSchemaResponseFormat]
+    jsSchema.getJsonSchema.getName shouldBe "response"
+    jsSchema.getJsonSchema.isStrict shouldBe true
   }
 }
