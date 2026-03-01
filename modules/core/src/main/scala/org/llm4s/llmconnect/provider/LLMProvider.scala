@@ -22,6 +22,7 @@ sealed trait LLMProvider {
     case LLMProvider.Gemini     => "gemini"
     case LLMProvider.DeepSeek   => "deepseek"
     case LLMProvider.Cohere     => "cohere"
+    case LLMProvider.Mistral    => "mistral"
   }
 }
 
@@ -103,8 +104,17 @@ object LLMProvider {
    */
   case object Cohere extends LLMProvider
 
+  /**
+   * Mistral AI provider for Mistral models.
+   *
+   * Supports Mistral Large, Mistral Small, Codestral and other Mistral models.
+   * Uses OpenAI-compatible chat completions API.
+   * Requires a Mistral AI API key.
+   */
+  case object Mistral extends LLMProvider
+
   /** All available providers */
-  val all: Seq[LLMProvider] = Seq(OpenAI, Azure, Anthropic, OpenRouter, Ollama, Zai, Gemini, DeepSeek, Cohere)
+  val all: Seq[LLMProvider] = Seq(OpenAI, Azure, Anthropic, OpenRouter, Ollama, Zai, Gemini, DeepSeek, Cohere, Mistral)
 
   /**
    * Parses a provider name string to an [[LLMProvider]].
@@ -126,6 +136,7 @@ object LLMProvider {
     case "gemini" | "google" => Some(Gemini)
     case "deepseek"          => Some(DeepSeek)
     case "cohere"            => Some(Cohere)
+    case "mistral"           => Some(Mistral)
     case _                   => None
   }
 }

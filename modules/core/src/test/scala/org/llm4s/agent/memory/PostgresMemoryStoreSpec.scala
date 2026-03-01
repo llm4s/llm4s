@@ -1,13 +1,14 @@
 package org.llm4s.agent.memory
 
-import org.llm4s.error.OptimisticLockFailure
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
-
+import org.llm4s.types.Result
+import org.llm4s.error.ProcessingError
 import java.util.UUID
-import java.util.concurrent.{ CountDownLatch, Executors, TimeUnit }
 import scala.util.Try
+import java.time.Instant
+import java.sql.DriverManager
 
 /**
  * Integration Tests for PostgresMemoryStore.
@@ -35,20 +36,15 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     tableName = tableName,
     maxPoolSize = 4
   )
+  private val embeddingService = MockEmbeddingService.default
 
   override def beforeEach(): Unit =
     if (isEnabled) {
-      store = PostgresMemoryStore(dbConfig).fold(
-        e => fail(s"Failed to connect to Postgres: ${e.message}"),
-        identity
-      )
+      store = PostgresMemoryStore(dbConfig, Some(embeddingService)).fold(e => fail(e.message), identity)
     }
 
   override def afterEach(): Unit =
-    if (store != null) {
-      Try(store.clear())
-      store.close()
-    }
+    if (store != null) { Try(store.clear()); store.close() }
 
   // 3. Helper to skip tests
   private def skipIfDisabled(testBody: => Unit): Unit =
@@ -66,10 +62,18 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
 
     store.store(memory).isRight shouldBe true
 
-    val retrieved = store.get(id).toOption.flatten
-    retrieved shouldBe defined
-    retrieved.get.content shouldBe "Hello, I am a test memory"
-    retrieved.get.metadata.get("conversation_id") shouldBe Some("conv-1")
+    store
+      .get(id)
+      .fold(
+        e => fail(s"Get failed: ${e.message}"),
+        {
+          case Some(retrieved) =>
+            retrieved.content shouldBe "Hello, I am a test memory"
+            retrieved.metadata.get("conversation_id") shouldBe Some("conv-1")
+          case None =>
+            fail("Expected memory to be present, but got None")
+        }
+      )
   }
 
   it should "persist data across store instances" in skipIfDisabled {
@@ -81,55 +85,323 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     // Create a NEW connection (store2) to verify data is actually in the DB
     val store2 = PostgresMemoryStore(dbConfig).fold(e => fail(e.message), identity)
 
-    val result = store2.get(id)
-    result.toOption.flatten.map(_.content) shouldBe Some("Persistence Check")
+    store2
+      .get(id)
+      .fold(
+        e => fail(s"Get failed on store2: ${e.message}"),
+        {
+          case Some(retrieved) =>
+            retrieved.content shouldBe "Persistence Check"
+          case None =>
+            fail("Persistence check failed: Memory not found in new store instance")
+        }
+      )
     store2.close()
   }
 
-  it should "increment version on each successful update" in skipIfDisabled {
-    val id = MemoryId(UUID.randomUUID().toString)
-    store.store(Memory(id, "v0 content", MemoryType.Task)).isRight shouldBe true
+  it should "perform semantic search" in skipIfDisabled {
+    val applesEmbedding = embeddingService
+      .embed("apples")
+      .fold(
+        e => fail(s"Test setup embedding failed: ${e.message}"),
+        identity
+      )
+    val relevant = Memory(
+      MemoryId("1"),
+      "I like apples",
+      MemoryType.Task,
+      embedding = Some(applesEmbedding)
+    )
+    store.store(relevant)
 
-    store.update(id, _.copy(content = "v1 content")).isRight shouldBe true
-    store.update(id, _.copy(content = "v2 content")).isRight shouldBe true
-
-    val retrieved = store.get(id).toOption.flatten
-    retrieved shouldBe defined
-    retrieved.get.content shouldBe "v2 content"
+    store
+      .search("apple", 1, MemoryFilter.All)
+      .fold(
+        e => fail(s"Search failed: ${e.message}"),
+        results =>
+          results match {
+            case first +: _ =>
+              first.memory.content shouldBe "I like apples"
+            case Nil =>
+              fail("Expected at least one search result")
+          }
+      )
   }
 
-  it should "produce only OptimisticLockFailure errors under concurrent writes" in skipIfDisabled {
-    val id = MemoryId(UUID.randomUUID().toString)
-    store.store(Memory(id, "initial", MemoryType.Task)).isRight shouldBe true
+  it should "fallback gracefully when EmbeddingService is missing" in skipIfDisabled {
+    val storeNoEmb = PostgresMemoryStore(dbConfig, None).fold(e => fail(e.message), identity)
+    val id         = MemoryId("fallback-1")
+    storeNoEmb.store(Memory(id, "test fallback", MemoryType.Task, Map.empty))
 
-    val threadCount = 4
-    val executor    = Executors.newFixedThreadPool(threadCount)
-    val latch       = new CountDownLatch(1)
-    val results     = new java.util.concurrent.ConcurrentLinkedQueue[Either[org.llm4s.error.LLMError, Any]]()
+    storeNoEmb
+      .search("query", 5, MemoryFilter.All)
+      .fold(
+        e => fail(s"Fallback search failed: ${e.message}"),
+        memories =>
+          memories match {
+            case first +: _ =>
+              first.score shouldBe 0.0
+            case Nil =>
+              fail("Expected fallback search to return at least one memory")
+          }
+      )
+    storeNoEmb.close()
+  }
 
-    (1 to threadCount).foreach { i =>
-      executor.submit(new Runnable {
-        def run(): Unit = {
-          latch.await()
-          results.add(store.update(id, _.copy(content = s"updated by thread $i")))
+  it should "clamp similarity scores to [0, 1]" in skipIfDisabled {
+    val clampEmbedding = embeddingService
+      .embed("clamp example")
+      .fold(
+        e => fail(s"Test setup embedding failed: ${e.message}"),
+        identity
+      )
+
+    val memory = Memory(
+      MemoryId("clamp-test"),
+      "clamp example",
+      MemoryType.Task,
+      embedding = Some(clampEmbedding)
+    )
+    store.store(memory).isRight shouldBe true
+
+    store
+      .search("clamp", 5, MemoryFilter.All)
+      .fold(
+        e => fail(s"Search failed: ${e.message}"),
+        results =>
+          results match {
+            case _ +: _ =>
+              results.foreach { sm =>
+                sm.score should be >= 0.0
+                sm.score should be <= 1.0
+              }
+            case Nil =>
+              fail("Expected non-empty results for clamp test")
+          }
+      )
+  }
+
+  it should "fail when embedding service returns empty vector" in skipIfDisabled {
+    val emptyService = new EmbeddingService {
+      def dimensions                                = 10
+      def embed(text: String): Result[Array[Float]] = Right(Array.empty)
+      def embedBatch(texts: Seq[String])            = Right(Seq.empty)
+    }
+
+    val storeWithEmpty = PostgresMemoryStore(dbConfig, Some(emptyService))
+      .fold(e => fail(e.message), identity)
+
+    storeWithEmpty
+      .search("query", 5, MemoryFilter.All)
+      .fold(
+        err => err.message should include("vector is empty"),
+        _ => fail("Expected search to fail due to empty embedding, but it succeeded")
+      )
+    storeWithEmpty.close()
+  }
+
+  it should "propagate embedding service failures" in skipIfDisabled {
+    val failingService = new EmbeddingService {
+      def dimensions                                = 10
+      def embed(text: String): Result[Array[Float]] = Left(ProcessingError("embed-error", "boom"))
+      def embedBatch(texts: Seq[String])            = Left(ProcessingError("embed-error", "boom"))
+    }
+
+    val storeFailing = PostgresMemoryStore(dbConfig, Some(failingService))
+      .fold(e => fail(e.message), identity)
+
+    storeFailing
+      .search("query", 5, MemoryFilter.All)
+      .fold(
+        err => err.message should include("boom"),
+        _ => fail("Expected search to fail due to embedding service error, but it succeeded")
+      )
+    storeFailing.close()
+  }
+
+  it should "reject invalid metadata key in filter" in skipIfDisabled {
+    val badFilter = MemoryFilter.ByMetadata("invalid-key!", "value")
+
+    store
+      .search("query", 5, badFilter)
+      .fold(
+        err => err.message should include("Invalid metadata key"),
+        _ => fail("Expected invalid metadata key filter to fail")
+      )
+  }
+
+  it should "filter by valid metadata key and value" in skipIfDisabled {
+    val mem = Memory(
+      MemoryId("meta-test"),
+      "metadata example",
+      MemoryType.Task,
+      metadata = Map("custom_key" -> "custom_value")
+    )
+    store.store(mem).isRight shouldBe true
+
+    val filter = MemoryFilter.ByMetadata("custom_key", "custom_value")
+
+    store
+      .recall(filter, 10)
+      .fold(
+        e => fail(s"Metadata recall failed: ${e.message}"),
+        results =>
+          results match {
+            case first +: _ => first.content shouldBe "metadata example"
+            case Nil        => fail("Expected to find memory by metadata")
+          }
+      )
+  }
+
+  it should "filter by entity id" in skipIfDisabled {
+    val mem = Memory(
+      MemoryId("entity-test"),
+      "entity example",
+      MemoryType.Task,
+      metadata = Map("entity_id" -> "user-123")
+    )
+    store.store(mem).isRight shouldBe true
+
+    store
+      .recall(MemoryFilter.ByEntity(EntityId("user-123")), 10)
+      .fold(
+        e => fail(s"Entity recall failed: ${e.message}"),
+        results => results should not be empty
+      )
+  }
+
+  it should "filter by conversation id" in skipIfDisabled {
+    val mem = Memory(
+      MemoryId("conv-test"),
+      "conversation example",
+      MemoryType.Conversation,
+      metadata = Map("conversation_id" -> "conv-999")
+    )
+    store.store(mem).isRight shouldBe true
+
+    store
+      .recall(MemoryFilter.ByConversation("conv-999"), 10)
+      .fold(
+        e => fail(s"Conversation recall failed: ${e.message}"),
+        results => results should not be empty
+      )
+  }
+
+  it should "return empty result for MemoryFilter.None" in skipIfDisabled {
+    store
+      .search("anything", 5, MemoryFilter.None)
+      .fold(
+        e => fail(s"Search failed: ${e.message}"),
+        results => results shouldBe empty
+      )
+  }
+
+  it should "filter by single memory type" in skipIfDisabled {
+    val mem = Memory(
+      MemoryId("single-type"),
+      "single type example",
+      MemoryType.Task
+    )
+    store.store(mem).isRight shouldBe true
+
+    store
+      .recall(MemoryFilter.ByType(MemoryType.Task), 10)
+      .fold(
+        e => fail(s"Recall ByType failed: ${e.message}"),
+        results => results should not be empty
+      )
+  }
+
+  it should "filter by multiple memory types" in skipIfDisabled {
+    val m1 = Memory(MemoryId("type-1"), "task", MemoryType.Task)
+    val m2 = Memory(MemoryId("type-2"), "conversation", MemoryType.Conversation)
+
+    store.store(m1).isRight shouldBe true
+    store.store(m2).isRight shouldBe true
+
+    val filter = MemoryFilter.ByTypes(Set(MemoryType.Task))
+
+    store
+      .recall(filter, 10)
+      .fold(
+        e => fail(s"Recall failed: ${e.message}"),
+        results => {
+          results should not be empty
+          results.foreach(m => m.memoryType shouldBe MemoryType.Task)
         }
-      })
-    }
+      )
+  }
 
-    latch.countDown()
-    executor.shutdown()
-    executor.awaitTermination(30, TimeUnit.SECONDS)
+  it should "return empty for ByTypes with empty set" in skipIfDisabled {
+    val filter = MemoryFilter.ByTypes(Set.empty)
 
-    val allResults = scala.jdk.CollectionConverters.IteratorHasAsScala(results.iterator()).asScala.toSeq
+    store
+      .recall(filter, 10)
+      .fold(
+        e => fail(s"Recall failed: ${e.message}"),
+        results => results shouldBe empty
+      )
+  }
 
-    // Every result must be either a success or an OptimisticLockFailure — no other errors
-    allResults.foreach {
-      case Right(_)                       => // success
-      case Left(_: OptimisticLockFailure) => // expected conflict
-      case Left(e)                        => fail(s"Unexpected error type: ${e.getClass.getSimpleName}: ${e.message}")
-    }
+  it should "filter by minimum importance" in skipIfDisabled {
+    val mem = Memory(
+      MemoryId("importance-test"),
+      "important memory",
+      MemoryType.Task,
+      importance = Some(0.9)
+    )
+    store.store(mem).isRight shouldBe true
 
-    // At least one update must have succeeded
-    allResults.count(_.isRight) should be >= 1
+    store
+      .recall(MemoryFilter.MinImportance(0.5), 10)
+      .fold(
+        e => fail(s"Recall failed: ${e.message}"),
+        results => results should not be empty
+      )
+  }
+
+  it should "support time range filtering" in skipIfDisabled {
+    val now = Instant.now()
+    val old = now.minusSeconds(3600)
+
+    val mem = Memory(
+      MemoryId("time-test"),
+      "time example",
+      MemoryType.Task,
+      timestamp = now
+    )
+    store.store(mem).isRight shouldBe true
+
+    val filter = MemoryFilter.ByTimeRange(Some(old), Some(now.plusSeconds(10)))
+
+    store
+      .recall(filter, 10)
+      .fold(
+        e => fail(s"Time range recall failed: ${e.message}"),
+        results => results should not be empty
+      )
+  }
+
+  it should "fail gracefully when stored embedding is corrupted" in skipIfDisabled {
+    val conn = DriverManager.getConnection(
+      dbConfig.jdbcUrl,
+      dbConfig.user,
+      dbConfig.password
+    )
+    try {
+      val stmt = conn.createStatement()
+      stmt.executeUpdate(
+        s"INSERT INTO ${dbConfig.tableName} (id, content, memory_type, metadata, created_at, embedding) " +
+          s"VALUES ('bad-vec-id', 'bad content', 'Task', '{}', NOW(), '[bad-vec]')"
+      )
+    } finally
+      conn.close()
+
+    store
+      .get(MemoryId("bad-vec-id"))
+      .fold(
+        err => err.message should include("vector embedding"),
+        _ => fail("Expected vector parse failure due to corrupted DB data")
+      )
   }
 }

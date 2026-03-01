@@ -18,7 +18,6 @@ import org.llm4s.types.Result
 import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ValidationError }
 import org.llm4s.error.ThrowableOps._
 
-import java.util.Optional
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.jdk.CollectionConverters._
 import scala.util.Try
@@ -219,7 +218,6 @@ curl https://api.anthropic.com/v1/messages \
               val streamResponse = messageService.createStreaming(messageParams)
 
               import scala.jdk.StreamConverters._
-              import scala.jdk.OptionConverters._
               val stream: Iterator[RawMessageStreamEvent] = streamResponse.stream().toScala(Iterator)
               val loopTry = Try {
                 stream.foreach { event =>
@@ -310,8 +308,11 @@ curl https://api.anthropic.com/v1/messages \
                     Try(msgDelta.usage()).foreach { usage =>
                       if (usage != null) {
                         val inputTokens = Option(usage.inputTokens()) match {
-                          case Some(opt: Optional[_]) => opt.toScala.map(_.toInt).getOrElse(0)
-                          case _                      => 0
+                          case Some(opt: java.util.Optional[_]) if opt.isPresent =>
+                            Option(opt.get())
+                              .collect { case n: java.lang.Number => n.intValue() }
+                              .getOrElse(0)
+                          case _ => 0
                         }
                         val outputTokens = Option(usage.outputTokens()).map(_.toInt).getOrElse(0)
                         if (inputTokens > 0 || outputTokens > 0) accumulator.updateTokens(inputTokens, outputTokens)
@@ -483,15 +484,22 @@ curl https://api.anthropic.com/v1/messages \
 
     // Extract token usage, including thinking tokens if available
     val usage = response.usage()
-    val baseTokenUsage = TokenUsage(
+
+    val cachedTokens: Option[Int] =
+      Option(usage.cacheReadInputTokens())
+        .flatMap(opt => if (opt.isPresent) Some(opt.get().toInt) else None)
+
+    val cacheCreationTokens: Option[Int] =
+      Option(usage.cacheCreationInputTokens())
+        .flatMap(opt => if (opt.isPresent) Some(opt.get().toInt) else None)
+
+    val tokenUsage = TokenUsage(
       promptTokens = usage.inputTokens().toInt,
       completionTokens = usage.outputTokens().toInt,
-      totalTokens = (usage.inputTokens() + usage.outputTokens()).toInt
+      totalTokens = (usage.inputTokens() + usage.outputTokens()).toInt,
+      cachedTokens = cachedTokens,
+      cacheCreationTokens = cacheCreationTokens
     )
-
-    // Check for thinking tokens in cache usage (Anthropic reports cache_read_input_tokens for thinking)
-    // Note: The SDK may expose thinking tokens differently - adjust as needed
-    val tokenUsage = baseTokenUsage
 
     // Estimate cost using CostEstimator
     val cost = CostEstimator.estimate(config.model, tokenUsage)
