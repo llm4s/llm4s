@@ -14,10 +14,14 @@ import org.scalatest.wordspec.AnyWordSpec
  */
 class Llm4sConfigFacadeSpec extends AnyWordSpec with Matchers {
 
-  private def withProps(props: Map[String, String])(f: => Unit): Unit = {
-    val originals = props.keys.map(k => k -> Option(System.getProperty(k))).toMap
+  private def withProps(props: Map[String, String], clearKeys: Set[String] = Set.empty)(
+    f: => Unit
+  ): Unit = {
+    val allKeys   = props.keySet ++ clearKeys
+    val originals = allKeys.map(k => k -> Option(System.getProperty(k))).toMap
     // scalafix:off DisableSyntax.NoTryCatch
     try {
+      clearKeys.foreach(System.clearProperty)
       props.foreach { case (k, v) => System.setProperty(k, v) }
       ConfigFactory.invalidateCaches()
       f
@@ -37,7 +41,12 @@ class Llm4sConfigFacadeSpec extends AnyWordSpec with Matchers {
 
     "load disabled metrics by default" in {
       // No metrics config set → defaults to disabled
-      withProps(Map.empty) {
+      val metricsKeys = Set(
+        "llm4s.metrics.enabled",
+        "llm4s.metrics.prometheus.enabled",
+        "llm4s.metrics.prometheus.port"
+      )
+      withProps(Map.empty, metricsKeys) {
         val result = Llm4sConfig.metrics()
         result.isRight shouldBe true
         val (collector, endpoint) = result.getOrElse(fail("expected Right"))
@@ -54,7 +63,16 @@ class Llm4sConfigFacadeSpec extends AnyWordSpec with Matchers {
   "Llm4sConfig.pgSearchIndex" should {
 
     "load default pg config from reference.conf" in {
-      withProps(Map.empty) {
+      val pgKeys = Set(
+        "llm4s.rag.permissions.pg.host",
+        "llm4s.rag.permissions.pg.port",
+        "llm4s.rag.permissions.pg.database",
+        "llm4s.rag.permissions.pg.user",
+        "llm4s.rag.permissions.pg.password",
+        "llm4s.rag.permissions.pg.vectorTableName",
+        "llm4s.rag.permissions.pg.maxPoolSize"
+      )
+      withProps(Map.empty, pgKeys) {
         val result = Llm4sConfig.pgSearchIndex()
         result.isRight shouldBe true
         val pg = result.getOrElse(fail("expected Right"))
@@ -99,7 +117,15 @@ class Llm4sConfigFacadeSpec extends AnyWordSpec with Matchers {
   "Llm4sConfig.embeddingsUi" should {
 
     "fall back to defaults when no config" in {
-      withProps(Map.empty) {
+      val uiKeys = Set(
+        "llm4s.embeddings.ui.maxRowsPerFile",
+        "llm4s.embeddings.ui.topDimsPerRow",
+        "llm4s.embeddings.ui.globalTopK",
+        "llm4s.embeddings.ui.showGlobalTop",
+        "llm4s.embeddings.ui.colorEnabled",
+        "llm4s.embeddings.ui.tableWidth"
+      )
+      withProps(Map.empty, uiKeys) {
         val result = Llm4sConfig.embeddingsUi()
         result.isRight shouldBe true
         val ui = result.getOrElse(fail("expected Right"))
@@ -193,7 +219,7 @@ class Llm4sConfigFacadeSpec extends AnyWordSpec with Matchers {
   "Llm4sConfig.experimentalStubsEnabled" should {
 
     "default to false when not configured" in {
-      withProps(Map.empty) {
+      withProps(Map.empty, Set("llm4s.embeddings.experimentalStubs")) {
         Llm4sConfig.experimentalStubsEnabled shouldBe false
       }
     }
