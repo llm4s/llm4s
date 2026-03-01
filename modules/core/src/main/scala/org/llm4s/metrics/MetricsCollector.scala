@@ -106,6 +106,54 @@ trait MetricsCollector {
 
 object MetricsCollector {
 
+  def compose(collectors: MetricsCollector*): MetricsCollector =
+    if (collectors.isEmpty) {
+      noop
+    } else {
+      new MetricsCollector {
+        override def observeRequest(
+          provider: String,
+          model: String,
+          outcome: Outcome,
+          duration: FiniteDuration
+        ): Unit =
+          collectors.foreach(_.observeRequest(provider, model, outcome, duration))
+
+        override def addTokens(
+          provider: String,
+          model: String,
+          inputTokens: Long,
+          outputTokens: Long
+        ): Unit =
+          collectors.foreach(_.addTokens(provider, model, inputTokens, outputTokens))
+
+        override def recordCost(
+          provider: String,
+          model: String,
+          costUsd: Double
+        ): Unit =
+          collectors.foreach(_.recordCost(provider, model, costUsd))
+
+        override def recordRetryAttempt(
+          provider: String,
+          attemptNumber: Int
+        ): Unit =
+          collectors.foreach(_.recordRetryAttempt(provider, attemptNumber))
+
+        override def recordCircuitBreakerTransition(
+          provider: String,
+          newState: String
+        ): Unit =
+          collectors.foreach(_.recordCircuitBreakerTransition(provider, newState))
+
+        override def recordError(
+          errorKind: ErrorKind,
+          provider: String
+        ): Unit =
+          collectors.foreach(_.recordError(errorKind, provider))
+      }
+    }
+
   /**
    * No-op implementation that does nothing.
    * Use as default when metrics are disabled.
