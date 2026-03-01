@@ -96,7 +96,7 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
 
     val lineSep = System.lineSeparator()
 
-// Construct the exact expected string. Note: writer.println adds a newline AFTER EACH line.
+    // Construct the exact expected string. Note: writer.println adds a newline AFTER EACH line.
     val expectedContent = Seq(
       "Line 1",
       "Modified Line 2",
@@ -104,7 +104,7 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
       "Line 5"
     ).mkString(lineSep) + lineSep // Add the trailing newline added by the last println
 
-// Perform the precise comparison
+    // Perform the precise comparison
     content shouldBe expectedContent
 
   }
