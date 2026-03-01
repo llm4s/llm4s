@@ -5,7 +5,7 @@ import org.llm4s.error.ServiceError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk, ToolCall }
 import org.llm4s.toolapi.ToolRegistry
-import org.llm4s.types.Result 
+import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -105,7 +105,7 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
           created = System.currentTimeMillis(),
           content = "",
           model = "test-model",
-          message = AssistantMessage(content = "", toolCalls = List(ghostToolCall)),
+          message = AssistantMessage(toolCalls = List(ghostToolCall)),
           toolCalls = List(ghostToolCall)
         )
         Right(completion)
@@ -123,7 +123,9 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
       case Right(newState) =>
         newState.status shouldBe AgentStatus.WaitingForTools
         val assistantMsgs = newState.conversation.messages.collect { case am: AssistantMessage => am }
-        assistantMsgs.last.toolCalls.head.name shouldBe "ghost_tool"
+        assistantMsgs.lastOption
+          .flatMap(_.toolCalls.headOption)
+          .map(_.name) shouldBe Some("ghost_tool")
       case Left(error) =>
         fail(s"Should handle hallucination, but got error: ${error.message}")
     }
@@ -138,7 +140,7 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
           created = System.currentTimeMillis(),
           content = "",
           model = "test-model",
-          message = AssistantMessage(content = "", toolCalls = List(badToolCall)),
+          message = AssistantMessage(toolCalls = List(badToolCall)),
           toolCalls = List(badToolCall)
         ))
       }

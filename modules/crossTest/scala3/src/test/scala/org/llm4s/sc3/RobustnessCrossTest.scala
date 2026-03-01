@@ -123,7 +123,9 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
       case Right(newState) =>
         newState.status shouldBe AgentStatus.WaitingForTools
         val assistantMsgs = newState.conversation.messages.collect { case am: AssistantMessage => am }
-        assistantMsgs.last.toolCalls.head.name shouldBe "ghost_tool"
+        assistantMsgs.lastOption
+          .flatMap(_.toolCalls.headOption)
+          .map(_.name) shouldBe Some("ghost_tool")
       case Left(error) =>
         fail(s"Should handle hallucination, but got error: ${error.message}")
     }
