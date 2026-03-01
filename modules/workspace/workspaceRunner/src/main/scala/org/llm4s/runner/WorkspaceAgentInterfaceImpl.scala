@@ -505,7 +505,7 @@ class WorkspaceAgentInterfaceImpl(
     // Search in files
     var matches      = List.empty[SearchMatch]
     var totalMatches = 0
-    var done         = false   // used to break out once we've observed one match past the cap
+    var done         = false // used to break out once we've observed one match past the cap
 
     // stop scanning as soon as we've counted one result beyond the configured
     // max; that allows us to report `isTruncated` correctly while avoiding a
