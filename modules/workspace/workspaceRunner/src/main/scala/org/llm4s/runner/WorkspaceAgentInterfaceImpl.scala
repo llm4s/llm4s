@@ -1,6 +1,6 @@
 package org.llm4s.runner
 
-import org.llm4s.shared.{ WorkspaceSandboxConfig, _ }
+import org.llm4s.shared._
 
 import java.io.{ BufferedWriter, PrintWriter }
 import java.nio.charset.StandardCharsets
@@ -76,20 +76,23 @@ class WorkspaceAgentInterfaceImpl(
    * @param excludePatterns Patterns to exclude
    * @return true if the path should be excluded
    */
-  private def isExcluded(path: String, excludePatterns: List[String]): Boolean =
+  private def isExcluded(path: String, excludePatterns: List[String]): Boolean = {
     // Simple glob matching implementation
     // In a real implementation, use a proper glob library
+    val normalizedPath = path.replace("\\", "/")
     excludePatterns.exists { pattern =>
+      val normalizedPattern = pattern.replace("\\", "/")
       // Use a placeholder to avoid corrupting ** when replacing *
       val placeholder = "\u0000DOUBLESTAR\u0000"
-      val regex = pattern
+      val regex = normalizedPattern
         .replace("**", placeholder) // protect ** first
         .replace(".", "\\.")        // escape dots
         .replace("*", "[^/]+")      // single * matches path segment chars
         .replace(placeholder, ".*") // restore ** as .* to match any path
 
-      path.matches(regex)
+      normalizedPath.matches(regex) || (normalizedPath + "/").matches(regex)
     }
+  }
 
   /**
    * List files and directories in a specified path, optionally recursively.
@@ -502,28 +505,40 @@ class WorkspaceAgentInterfaceImpl(
     // Search in files
     var matches      = List.empty[SearchMatch]
     var totalMatches = 0
+    var done         = false   // used to break out once we've observed one match past the cap
 
-    for (file <- filesToSearch if matches.size < defaultLimits.maxSearchResults) {
+    // stop scanning as soon as we've counted one result beyond the configured
+    // max; that allows us to report `isTruncated` correctly while avoiding a
+    // full workspace sweep. the `totalMatches` value is therefore only guaranteed
+    // to be accurate up to maxSearchResults+1.
+    for (file <- filesToSearch if !done) {
       val relativePath = rootPath.relativize(file).toString
 
       Try(Files.readAllLines(file, StandardCharsets.UTF_8).asScala.toList).toOption.foreach { lines =>
-        for ((line, lineIndex) <- lines.zipWithIndex if matches.size < defaultLimits.maxSearchResults) {
+        for ((line, lineIndex) <- lines.zipWithIndex if !done) {
           val matcher = pattern.matcher(line)
 
           if (matcher.find()) {
             totalMatches += 1
 
-            val lineNumber    = lineIndex + 1
-            val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex)
-            val afterContext  = lines.slice(lineIndex + 1, math.min(lines.size, lineIndex + context + 1))
+            if (matches.size < defaultLimits.maxSearchResults) {
+              val lineNumber    = lineIndex + 1
+              val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex)
+              val afterContext  = lines.slice(lineIndex + 1, math.min(lines.size, lineIndex + context + 1))
 
-            matches = matches :+ SearchMatch(
-              path = relativePath,
-              line = lineNumber,
-              matchText = line,
-              contextBefore = beforeContext,
-              contextAfter = afterContext
-            )
+              matches = matches :+ SearchMatch(
+                path = relativePath,
+                line = lineNumber,
+                matchText = line,
+                contextBefore = beforeContext,
+                contextAfter = afterContext
+              )
+            }
+
+            // once we've seen one hit past the cap we can stop scanning entirely
+            if (totalMatches > defaultLimits.maxSearchResults) {
+              done = true
+            }
           }
         }
       }
@@ -532,7 +547,7 @@ class WorkspaceAgentInterfaceImpl(
     SearchFilesResponse(
       commandId = "local",
       matches = matches,
-      isTruncated = totalMatches > defaultLimits.maxSearchResults,
+      isTruncated = totalMatches > matches.size,
       totalMatches = totalMatches
     )
   }

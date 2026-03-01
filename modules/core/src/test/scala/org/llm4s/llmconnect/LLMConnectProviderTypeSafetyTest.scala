@@ -144,6 +144,21 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     }
   }
 
+  test("Mistral provider with MistralConfig returns MistralClient") {
+    val cfg: ProviderConfig = MistralConfig(
+      apiKey = "key",
+      model = "mistral-small-latest",
+      baseUrl = "https://example.invalid",
+      contextWindow = 128000,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(LLMProvider.Mistral, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "MistralClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
   test("OpenAI provider with non-OpenAIConfig should throw IllegalArgumentException") {
     val wrongCfg: ProviderConfig = AnthropicConfig(
       apiKey = "key",

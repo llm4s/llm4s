@@ -363,7 +363,7 @@ object Tracing {
               "Please add 'org.llm4s' %% 'llm4s-trace-opentelemetry' dependency. Falling back to NoOpTracing."
           )
           new NoOpTracing()
-        case e: java.lang.reflect.InvocationTargetException =>
+        case e: Throwable if Option(e.getClass.getSimpleName).contains("InvocationTargetException") =>
           val logger = org.slf4j.LoggerFactory.getLogger(getClass)
           logger.error("OpenTelemetry tracing initialization failed", e.getCause)
           new NoOpTracing()

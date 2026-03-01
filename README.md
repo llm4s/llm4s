@@ -4,6 +4,9 @@
     <a href="https://github.com/llm4s/llm4s/blob/main/LICENSE">
         <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt ="License">
     </a>
+    <a href="https://github.com/llm4s/llm4s/blob/main/CODE_OF_CONDUCT.md">
+        <img src="https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg" alt="Contributor Covenant 2.1">
+    </a>
     <a href="https://discord.gg/4uvTPn6qww">
         <img src="https://img.shields.io/static/v1?label=Chat%20on&message=Discord&color=blue&logo=Discord&style=flat-square" alt="Discord">
     </a>
@@ -677,6 +680,8 @@ Interested in contributing? Start here:
 ## Join the Community
 
 Want to be part of developing this and interact with other developers? Join our Discord community!
+
+Please review our [Code of Conduct](https://github.com/llm4s/llm4s/blob/main/CODE_OF_CONDUCT.md) to understand our community guidelines and expectations.
 
  **LLM4S Discord:** https://lnkd.in/eb4ZFdtG
 

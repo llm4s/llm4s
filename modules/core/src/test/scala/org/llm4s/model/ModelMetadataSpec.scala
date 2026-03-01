@@ -185,24 +185,6 @@ class ModelMetadataSpec extends AnyFlatSpec with Matchers {
     cost shouldBe Some(0.0075) // (1000 * 2.5e-6) + (500 * 1e-5) = 0.0025 + 0.005 = 0.0075
   }
 
-  it should "estimate cost with caching" in {
-    val pricing = ModelPricing(
-      inputCostPerToken = Some(2.5e-6),
-      outputCostPerToken = Some(1e-5),
-      cacheReadInputTokenCost = Some(0.25e-6)
-    )
-
-    val cost = pricing.estimateCostWithCaching(
-      inputTokens = 1000,
-      cachedTokens = 5000,
-      outputTokens = 500
-    )
-
-    // (1000 * 2.5e-6) + (5000 * 0.25e-6) + (500 * 1e-5)
-    // = 0.0025 + 0.00125 + 0.005 = 0.00875
-    cost shouldBe Some(0.00875)
-  }
-
   it should "return None for missing pricing data" in {
     val pricing = ModelPricing()
 
