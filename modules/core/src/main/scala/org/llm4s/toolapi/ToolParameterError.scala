@@ -89,6 +89,22 @@ sealed trait ToolCallError {
 object ToolCallError {
 
   /**
+   * Whether this error is considered retryable (e.g. timeout, transient execution failure).
+   * UnknownFunction, NullArguments, InvalidArguments, HandlerError are not retryable.
+   * ExecutionError is retryable when the cause is IOException or TimeoutException (transient).
+   */
+  def isRetryable(error: ToolCallError): Boolean = error match {
+    case _: UnknownFunction | _: NullArguments | _: InvalidArguments | _: HandlerError =>
+      false
+    case _: Timeout =>
+      true
+    case ExecutionError(_, cause) =>
+      import java.io.IOException
+      import java.util.concurrent.TimeoutException
+      cause.isInstanceOf[IOException] || cause.isInstanceOf[TimeoutException]
+  }
+
+  /**
    * Tool function doesn't exist
    */
   case class UnknownFunction(toolName: String) extends ToolCallError {
@@ -137,6 +153,19 @@ object ToolCallError {
     error: String
   ) extends ToolCallError {
     def getMessage: String = s"failed with error: $error"
+  }
+
+  /**
+   * Tool execution did not complete within the configured timeout.
+   *
+   * @param toolName  Name of the tool that timed out
+   * @param duration Timeout duration that was exceeded
+   */
+  case class Timeout(
+    toolName: String,
+    duration: scala.concurrent.duration.FiniteDuration
+  ) extends ToolCallError {
+    def getMessage: String = s"$toolName timed out after $duration"
   }
 }
 
@@ -268,6 +297,12 @@ object ToolCallErrorJson {
         base("errorType") = "execution_error"
         // Optionally include exception class name for debugging (safe, no stack trace)
         base("exceptionType") = cause.getClass.getSimpleName
+        base
+
+      case ToolCallError.Timeout(_, duration) =>
+        base("errorType") = "timeout"
+        base("code") = "timeout"
+        base("duration") = duration.toString
         base
     }
   }

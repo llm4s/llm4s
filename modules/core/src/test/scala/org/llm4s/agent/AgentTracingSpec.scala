@@ -371,9 +371,13 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "trace unexpected tool processing failures when processToolCalls throws" in {
-    // Tool registry that throws from execute, causing processToolCalls to throw inside runStep
+    // Tool registry that throws from execute, causing processToolCalls to throw inside runStep.
+    // Override the two-arg execute used by ToolProcessor (not the single-arg one).
     val throwingRegistry = new ToolRegistry(Seq.empty) {
-      override def execute(request: ToolCallRequest): Either[ToolCallError, ujson.Value] =
+      override def execute(
+        request: ToolCallRequest,
+        config: ToolExecutionConfig
+      )(implicit ec: scala.concurrent.ExecutionContext): Either[ToolCallError, ujson.Value] =
         throw new RuntimeException("registry failure")
     }
 

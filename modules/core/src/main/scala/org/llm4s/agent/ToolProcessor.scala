@@ -3,7 +3,7 @@ package org.llm4s.agent
 import org.llm4s.agent.streaming.AgentEvent
 import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.model.ToolMessage
-import org.llm4s.toolapi.{ ToolCallErrorJson, ToolCallRequest }
+import org.llm4s.toolapi.{ ToolCallErrorJson, ToolCallRequest, ToolExecutionConfig }
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -104,9 +104,11 @@ private[agent] object ToolProcessor {
           logger.info("[DEBUG]   Executing via ToolRegistry...")
         }
 
-        val result   = toolRegistry.execute(request)
-        val endTime  = System.currentTimeMillis()
-        val duration = endTime - startTime
+        implicit val ec: ExecutionContext = scala.concurrent.ExecutionContext.global
+        val config                        = context.toolExecutionConfig.getOrElse(ToolExecutionConfig())
+        val result                        = toolRegistry.execute(request, config)
+        val endTime                       = System.currentTimeMillis()
+        val duration                      = endTime - startTime
 
         val resultContent = result match {
           case Right(json) =>
@@ -189,9 +191,10 @@ private[agent] object ToolProcessor {
     val requests   = toolCalls.map(tc => ToolCallRequest(tc.name, tc.arguments))
     val startTimes = toolCalls.map(_ => System.currentTimeMillis())
 
-    val resultsFuture = toolRegistry.executeAll(requests, strategy)
-    val timeout       = 5.minutes
-    val results       = Await.result(resultsFuture, timeout)
+    val config        = context.toolExecutionConfig.getOrElse(ToolExecutionConfig())
+    val resultsFuture = toolRegistry.executeAll(requests, strategy, config)
+    val batchTimeout  = config.timeout.fold(5.minutes)(t => t + 10.seconds)
+    val results       = Await.result(resultsFuture, batchTimeout)
 
     val toolMessages = toolCalls.zip(results).zipWithIndex.map { case ((toolCall, result), index) =>
       val duration = System.currentTimeMillis() - startTimes(index)
@@ -259,8 +262,10 @@ private[agent] object ToolProcessor {
 
       onEvent(AgentEvent.toolStarted(toolCall.id, toolCall.name, toolCall.arguments.render()))
 
-      val request = ToolCallRequest(toolCall.name, toolCall.arguments)
-      val result  = toolRegistry.execute(request)
+      val request                       = ToolCallRequest(toolCall.name, toolCall.arguments)
+      implicit val ec: ExecutionContext = scala.concurrent.ExecutionContext.global
+      val config                        = context.toolExecutionConfig.getOrElse(ToolExecutionConfig())
+      val result                        = toolRegistry.execute(request, config)
 
       val toolEndTime = System.currentTimeMillis()
       val duration    = toolEndTime - toolStartTime
