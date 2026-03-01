@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.caching
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-
+import scala.concurrent.duration.DurationInt
 class InMemoryEmbeddingCacheSpec extends AnyFlatSpec with Matchers {
 
   "InMemoryEmbeddingCache" should "evict the least recently used item when maxSize is reached" in {
@@ -35,5 +35,21 @@ class InMemoryEmbeddingCacheSpec extends AnyFlatSpec with Matchers {
     stats.hits should be(1L)
     stats.misses should be(1L)
     stats.totalRequests should be(2L)
+  }
+  // TTL Test Case
+   it should "expire entries after the configured TTL duration" in {
+    val cache = new InMemoryEmbeddingCache[String](maxSize = 10, ttl = Some(100.millis))
+
+    cache.put("tempKey", "tempValue")
+    
+    // Immediate check - should be a hit
+    cache.get("tempKey") shouldBe Some("tempValue")
+    Thread.sleep(150)
+    // Check after expiration - should be a miss
+    cache.get("tempKey") shouldBe None
+    
+    val stats = cache.stats()
+    stats.hits shouldBe 1L
+    stats.misses shouldBe 1L // The expired get counts as a miss
   }
 }
