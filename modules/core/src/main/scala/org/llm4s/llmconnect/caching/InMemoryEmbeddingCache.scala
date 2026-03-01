@@ -4,16 +4,18 @@ import java.util.concurrent.atomic.AtomicLong
 import java.util.Collections
 import java.util.LinkedHashMap
 import scala.concurrent.duration.FiniteDuration
+
 /**
  * Thread-safe in-memory implementation of EmbeddingCache with LRU eviction.
  * * @param maxSize The maximum number of embeddings to store before evicting the oldest.
  * @tparam Embedding The embedding type (usually Seq[Double]).
  */
-class InMemoryEmbeddingCache[Embedding](maxSize: Int = 10000, ttl: Option[FiniteDuration] = None) extends EmbeddingCache[Embedding] {
+class InMemoryEmbeddingCache[Embedding](maxSize: Int = 10000, ttl: Option[FiniteDuration] = None)
+    extends EmbeddingCache[Embedding] {
   private case class CacheEntry(embedding: Embedding, timestamp: Long)
   private val ttlMillis = ttl.map(_.toMillis)
-  private val hits   = new AtomicLong(0L)
-  private val misses = new AtomicLong(0L)
+  private val hits      = new AtomicLong(0L)
+  private val misses    = new AtomicLong(0L)
 
   /**
    * Internal store using LinkedHashMap with accessOrder = true.
@@ -29,7 +31,7 @@ class InMemoryEmbeddingCache[Embedding](maxSize: Int = 10000, ttl: Option[Finite
   /** Retrieves an embedding and updates hit/miss counters. */
   def get(key: String): Option[Embedding] = {
     val entryOpt = Option(store.get(key))
-    
+
     val validEntry = entryOpt.filter { entry =>
       val isExpired = ttlMillis.exists(limit => (System.currentTimeMillis() - entry.timestamp) > limit)
       if (isExpired) store.remove(key)
