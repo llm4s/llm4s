@@ -73,7 +73,8 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
     }
 
     val agent = new Agent(badClient)
-    val state = agent.initialize("hi", new ToolRegistry(Nil))
+    val state = agent.initializeSafe("hi", new ToolRegistry(Nil))
+      .fold(e => fail(s"initializeSafe failed: ${e.message}"), s => s)
     state.status shouldBe AgentStatus.InProgress
   }
 
@@ -86,7 +87,8 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
     }
 
     val agent = new Agent(failClient)
-    val state = agent.initialize("test", new ToolRegistry(Nil))
+    val state = agent.initializeSafe("test", new ToolRegistry(Nil))
+      .fold(e => fail(s"initializeSafe failed: ${e.message}"), s => s)
 
     agent.runStep(state) match {
       case Left(e: ServiceError) =>
@@ -117,7 +119,8 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
     }
 
     val agent = new Agent(hallucinatedToolClient)
-    val state = agent.initialize("test", new ToolRegistry(Nil))
+    val state = agent.initializeSafe("test", new ToolRegistry(Nil))
+      .fold(e => fail(s"initializeSafe failed: ${e.message}"), s => s)
 
     agent.runStep(state) match {
       case Right(newState) =>
@@ -150,7 +153,8 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
     }
 
     val agent = new Agent(malformedJsonClient)
-    val state = agent.initialize("test", new ToolRegistry(Nil))
+    val state = agent.initializeSafe("test", new ToolRegistry(Nil))
+      .fold(e => fail(s"initializeSafe failed: ${e.message}"), s => s)
 
     agent.runStep(state) match {
       case Right(newState) =>

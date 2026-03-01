@@ -73,7 +73,8 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
     }
 
     val agent = new Agent(badClient)
-    val state = agent.initialize("hi", new ToolRegistry(Nil))
+    val state = agent.initializeSafe("hi", new ToolRegistry(Nil))
+      .fold(e => fail(s"initializeSafe failed: ${e.message}"), s => s)
     state.status shouldBe AgentStatus.InProgress
   }
 
@@ -86,7 +87,8 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
     }
 
     val agent = new Agent(failClient)
-    val state = agent.initialize("test", new ToolRegistry(Nil))
+    val state = agent.initializeSafe("test", new ToolRegistry(Nil))
+      .fold(e => fail(s"initializeSafe failed: ${e.message}"), s => s)
 
     agent.runStep(state) match {
       case Left(e: ServiceError) =>
@@ -105,19 +107,20 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
           created = System.currentTimeMillis(),
           content = "",
           model = "test-model",
-          message = AssistantMessage(toolCalls = List(ghostToolCall)),
+          message = AssistantMessage(contentOpt = None, toolCalls = List(ghostToolCall)),
           toolCalls = List(ghostToolCall)
         )
         Right(completion)
       }
-      override def streamComplete(c: Conversation, o: CompletionOptions, cb: StreamedChunk => Unit): Result[Completion] = 
+      override def streamComplete(c: Conversation, o: CompletionOptions, cb: StreamedChunk => Unit): Result[Completion] =
         complete(c, o)
       override def getContextWindow(): Int = 4000
       override def getReserveCompletion(): Int = 1000
     }
 
     val agent = new Agent(hallucinatedToolClient)
-    val state = agent.initialize("test", new ToolRegistry(Nil))
+    val state = agent.initializeSafe("test", new ToolRegistry(Nil))
+      .fold(e => fail(s"initializeSafe failed: ${e.message}"), s => s)
 
     agent.runStep(state) match {
       case Right(newState) =>
@@ -140,7 +143,7 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
           created = System.currentTimeMillis(),
           content = "",
           model = "test-model",
-          message = AssistantMessage(toolCalls = List(badToolCall)),
+          message = AssistantMessage(contentOpt = None, toolCalls = List(badToolCall)),
           toolCalls = List(badToolCall)
         ))
       }
@@ -150,7 +153,8 @@ class RobustnessCrossTest extends AnyFlatSpec with Matchers {
     }
 
     val agent = new Agent(malformedJsonClient)
-    val state = agent.initialize("test", new ToolRegistry(Nil))
+    val state = agent.initializeSafe("test", new ToolRegistry(Nil))
+      .fold(e => fail(s"initializeSafe failed: ${e.message}"), s => s)
 
     agent.runStep(state) match {
       case Right(newState) =>
