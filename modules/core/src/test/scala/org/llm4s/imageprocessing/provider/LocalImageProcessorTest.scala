@@ -197,6 +197,39 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers with ScalaFuture
     processor.analyzeImage("/nonexistent/file.png", None).isLeft shouldBe true
   }
 
+  // ✅ RESTORED NEGATIVE TESTS (Rory’s blocker)
+
+  it should "fail with invalid image file" in {
+    val tempFile = Files.createTempFile("invalid", ".txt")
+    Files.write(tempFile, "not an image".getBytes)
+
+    val result = processor.preprocessImage(tempFile.toString, List())
+
+    result.isLeft shouldBe true
+
+    Files.deleteIfExists(tempFile)
+  }
+
+  it should "fail with invalid resize dimensions" in
+    withTempImage(100, 100) { path =>
+      val result = processor.preprocessImage(
+        path,
+        List(ImageOperation.Resize(-1, 200))
+      )
+
+      result.isLeft shouldBe true
+    }
+
+  it should "fail with invalid crop dimensions" in
+    withTempImage(100, 100) { path =>
+      val result = processor.preprocessImage(
+        path,
+        List(ImageOperation.Crop(0, 0, 500, 500))
+      )
+
+      result.isLeft shouldBe true
+    }
+
   it should "handle WEBP format with fallback" in
     withTempImage() { path =>
       val result = processor.convertFormat(path, ImageFormat.WEBP)
