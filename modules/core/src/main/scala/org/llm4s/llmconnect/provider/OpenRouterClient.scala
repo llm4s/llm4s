@@ -141,7 +141,8 @@ class OpenRouterClient(
         if (response.statusCode() == 200) {
           Right(response)
         } else {
-          val errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
+          val errorBody = Try(new String(response.body().readAllBytes(), StandardCharsets.UTF_8))
+            .getOrElse("<error body unreadable>")
           response.statusCode() match {
             case 401    => Left(AuthenticationError("openrouter", "Invalid API key"))
             case 429    => Left(RateLimitError("openrouter"))
