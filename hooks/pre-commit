@@ -2,8 +2,39 @@
 
 # Git pre-commit hook for LLM4S project
 # Smart hook that only checks affected subprojects instead of running a full build.
+# Compatible with bash 3.2+ (macOS default).
 
 set -e
+
+# ── String-based set helpers (bash 3.2 compatible) ──────────────────────────
+# These replace bash 4+ associative arrays with space-delimited strings.
+
+set_add() {
+  local varname="$1" key="$2"
+  local current
+  eval "current=\$$varname"
+  case " $current " in
+    *" $key "*) ;;
+    *) eval "$varname=\"\${$varname:+\$$varname }\$key\"" ;;
+  esac
+}
+
+set_contains() {
+  local varname="$1" key="$2"
+  local current
+  eval "current=\$$varname"
+  case " $current " in
+    *" $key "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+set_is_empty() {
+  local varname="$1"
+  local current
+  eval "current=\$$varname"
+  [ -z "$current" ]
+}
 
 # ── Gather staged files ──────────────────────────────────────────────────────
 
@@ -49,9 +80,9 @@ fi
 # Sets: projects with ANY change (for scalafmt + compile)
 #        projects with SOURCE changes (for downstream propagation)
 #        projects with TEST changes (for running tests)
-declare -A PROJECT_CHANGED    # any change
-declare -A PROJECT_SRC        # src/main change
-declare -A PROJECT_TEST       # src/test change
+PROJECT_CHANGED=""
+PROJECT_SRC=""
+PROJECT_TEST=""
 
 map_file_to_project() {
   local file="$1"
@@ -82,18 +113,18 @@ while IFS= read -r file; do
     *.scala)
       proj=$(map_file_to_project "$file")
       if [ -n "$proj" ]; then
-        PROJECT_CHANGED[$proj]=1
+        set_add PROJECT_CHANGED "$proj"
         if is_test_file "$file"; then
-          PROJECT_TEST[$proj]=1
+          set_add PROJECT_TEST "$proj"
         else
-          PROJECT_SRC[$proj]=1
+          set_add PROJECT_SRC "$proj"
         fi
       fi
       ;;
   esac
 done <<< "$STAGED_FILES"
 
-if [ ${#PROJECT_CHANGED[@]} -eq 0 ]; then
+if set_is_empty PROJECT_CHANGED; then
   echo "No Scala files in known subprojects — skipping pre-commit checks."
   exit 0
 fi
@@ -101,37 +132,37 @@ fi
 # ── Downstream compile propagation ───────────────────────────────────────────
 # When source files change in a project, downstream dependents must compile.
 
-declare -A DOWNSTREAM_COMPILE  # extra projects that need compile (not test)
+DOWNSTREAM_COMPILE=""
 
 propagate_downstream() {
   local proj="$1"
   case "$proj" in
     core)
-      DOWNSTREAM_COMPILE[samples]=1
-      DOWNSTREAM_COMPILE[traceOpentelemetry]=1
-      DOWNSTREAM_COMPILE[workspaceClient]=1
-      DOWNSTREAM_COMPILE[crossTestScala2]=1
-      DOWNSTREAM_COMPILE[crossTestScala3]=1
-      DOWNSTREAM_COMPILE[workspaceSamples]=1
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE traceOpentelemetry
+      set_add DOWNSTREAM_COMPILE workspaceClient
+      set_add DOWNSTREAM_COMPILE crossTestScala2
+      set_add DOWNSTREAM_COMPILE crossTestScala3
+      set_add DOWNSTREAM_COMPILE workspaceSamples
       ;;
     workspaceShared)
-      DOWNSTREAM_COMPILE[workspaceClient]=1
-      DOWNSTREAM_COMPILE[workspaceRunner]=1
-      DOWNSTREAM_COMPILE[workspaceSamples]=1
+      set_add DOWNSTREAM_COMPILE workspaceClient
+      set_add DOWNSTREAM_COMPILE workspaceRunner
+      set_add DOWNSTREAM_COMPILE workspaceSamples
       ;;
     samples)
-      DOWNSTREAM_COMPILE[workspaceSamples]=1
+      set_add DOWNSTREAM_COMPILE workspaceSamples
       ;;
     workspaceClient)
-      DOWNSTREAM_COMPILE[workspaceSamples]=1
+      set_add DOWNSTREAM_COMPILE workspaceSamples
       ;;
     workspaceRunner)
-      DOWNSTREAM_COMPILE[workspaceSamples]=1
+      set_add DOWNSTREAM_COMPILE workspaceSamples
       ;;
   esac
 }
 
-for proj in "${!PROJECT_SRC[@]}"; do
+for proj in $PROJECT_SRC; do
   propagate_downstream "$proj"
 done
 
@@ -158,31 +189,31 @@ scala_version_switch() {
 SBT_CMDS=()
 
 # 1) scalafmt check for changed projects
-for proj in "${!PROJECT_CHANGED[@]}"; do
+for proj in $PROJECT_CHANGED; do
   SBT_CMDS+=("${proj}/scalafmtCheck")
   SBT_CMDS+=("${proj}/Test/scalafmtCheck")
 done
 
 # 2) compile + test for directly changed projects
-for proj in "${!PROJECT_CHANGED[@]}"; do
+for proj in $PROJECT_CHANGED; do
   if is_cross_test_project "$proj"; then
     ver=$(scala_version_switch "$proj")
     SBT_CMDS+=("$ver" "${proj}/Test/compile")
-    if [ -n "${PROJECT_TEST[$proj]}" ] || [ -n "${PROJECT_SRC[$proj]}" ]; then
+    if set_contains PROJECT_TEST "$proj" || set_contains PROJECT_SRC "$proj"; then
       SBT_CMDS+=("$ver" "${proj}/test")
     fi
   else
     SBT_CMDS+=("+${proj}/compile")
     # Test if source or test files changed (source changes can break tests too)
-    if [ -n "${PROJECT_TEST[$proj]}" ] || [ -n "${PROJECT_SRC[$proj]}" ]; then
+    if set_contains PROJECT_TEST "$proj" || set_contains PROJECT_SRC "$proj"; then
       SBT_CMDS+=("+${proj}/test")
     fi
   fi
 done
 
 # 3) compile-only for downstream dependents (that aren't already being compiled)
-for proj in "${!DOWNSTREAM_COMPILE[@]}"; do
-  if [ -z "${PROJECT_CHANGED[$proj]}" ]; then
+for proj in $DOWNSTREAM_COMPILE; do
+  if ! set_contains PROJECT_CHANGED "$proj"; then
     if is_cross_test_project "$proj"; then
       ver=$(scala_version_switch "$proj")
       SBT_CMDS+=("$ver" "${proj}/Test/compile")
@@ -195,17 +226,17 @@ done
 # ── Run SBT ──────────────────────────────────────────────────────────────────
 
 echo "=== Pre-commit: affected projects ==="
-echo "  Changed: ${!PROJECT_CHANGED[*]}"
-if [ ${#DOWNSTREAM_COMPILE[@]} -gt 0 ]; then
+echo "  Changed: $PROJECT_CHANGED"
+if ! set_is_empty DOWNSTREAM_COMPILE; then
   # Show only downstream projects not already in the changed set
-  EXTRA=()
-  for proj in "${!DOWNSTREAM_COMPILE[@]}"; do
-    if [ -z "${PROJECT_CHANGED[$proj]}" ]; then
-      EXTRA+=("$proj")
+  EXTRA=""
+  for proj in $DOWNSTREAM_COMPILE; do
+    if ! set_contains PROJECT_CHANGED "$proj"; then
+      EXTRA="${EXTRA:+$EXTRA }$proj"
     fi
   done
-  if [ ${#EXTRA[@]} -gt 0 ]; then
-    echo "  Downstream compile: ${EXTRA[*]}"
+  if [ -n "$EXTRA" ]; then
+    echo "  Downstream compile: $EXTRA"
   fi
 fi
 echo "  SBT commands: ${SBT_CMDS[*]}"
