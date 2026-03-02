@@ -1,38 +1,222 @@
 #!/bin/bash
 
 # Git pre-commit hook for LLM4S project
-# Ensures code formatting and passes tests before committing
+# Smart hook that only checks affected subprojects instead of running a full build.
 
 set -e
 
-echo "Running pre-commit checks..."
+# ── Gather staged files ──────────────────────────────────────────────────────
 
-# Check if sbt is available
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=d)
+
+if [ -z "$STAGED_FILES" ]; then
+  echo "No staged files — skipping pre-commit checks."
+  exit 0
+fi
+
+# ── Check for build config changes → full build fallback ─────────────────────
+
+BUILD_CONFIG_CHANGED=false
+while IFS= read -r file; do
+  case "$file" in
+    build.sbt|project/*) BUILD_CONFIG_CHANGED=true; break ;;
+  esac
+done <<< "$STAGED_FILES"
+
+if [ "$BUILD_CONFIG_CHANGED" = true ]; then
+  echo "Build config changed — running full build."
+  sbt scalafmtCheckAll +compile +test
+  echo "All pre-commit checks passed!"
+  exit 0
+fi
+
+# ── Check if any Scala files changed ─────────────────────────────────────────
+
+HAS_SCALA=false
+while IFS= read -r file; do
+  case "$file" in
+    *.scala) HAS_SCALA=true; break ;;
+  esac
+done <<< "$STAGED_FILES"
+
+if [ "$HAS_SCALA" = false ]; then
+  echo "No Scala files changed — skipping pre-commit checks."
+  exit 0
+fi
+
+# ── Map staged files to subprojects ──────────────────────────────────────────
+
+# Sets: projects with ANY change (for scalafmt + compile)
+#        projects with SOURCE changes (for downstream propagation)
+#        projects with TEST changes (for running tests)
+declare -A PROJECT_CHANGED    # any change
+declare -A PROJECT_SRC        # src/main change
+declare -A PROJECT_TEST       # src/test change
+
+map_file_to_project() {
+  local file="$1"
+  case "$file" in
+    modules/core/*)                              echo "core" ;;
+    modules/samples/*)                           echo "samples" ;;
+    modules/trace-opentelemetry/*)               echo "traceOpentelemetry" ;;
+    modules/workspace/workspaceShared/*)          echo "workspaceShared" ;;
+    modules/workspace/workspaceClient/*)          echo "workspaceClient" ;;
+    modules/workspace/workspaceRunner/*)          echo "workspaceRunner" ;;
+    modules/workspace/workspaceSamples/*)         echo "workspaceSamples" ;;
+    modules/crossTest/scala2/*)                  echo "crossTestScala2" ;;
+    modules/crossTest/scala3/*)                  echo "crossTestScala3" ;;
+    *) echo "" ;;
+  esac
+}
+
+is_test_file() {
+  local file="$1"
+  case "$file" in
+    */src/test/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+while IFS= read -r file; do
+  case "$file" in
+    *.scala)
+      proj=$(map_file_to_project "$file")
+      if [ -n "$proj" ]; then
+        PROJECT_CHANGED[$proj]=1
+        if is_test_file "$file"; then
+          PROJECT_TEST[$proj]=1
+        else
+          PROJECT_SRC[$proj]=1
+        fi
+      fi
+      ;;
+  esac
+done <<< "$STAGED_FILES"
+
+if [ ${#PROJECT_CHANGED[@]} -eq 0 ]; then
+  echo "No Scala files in known subprojects — skipping pre-commit checks."
+  exit 0
+fi
+
+# ── Downstream compile propagation ───────────────────────────────────────────
+# When source files change in a project, downstream dependents must compile.
+
+declare -A DOWNSTREAM_COMPILE  # extra projects that need compile (not test)
+
+propagate_downstream() {
+  local proj="$1"
+  case "$proj" in
+    core)
+      DOWNSTREAM_COMPILE[samples]=1
+      DOWNSTREAM_COMPILE[traceOpentelemetry]=1
+      DOWNSTREAM_COMPILE[workspaceClient]=1
+      DOWNSTREAM_COMPILE[crossTestScala2]=1
+      DOWNSTREAM_COMPILE[crossTestScala3]=1
+      DOWNSTREAM_COMPILE[workspaceSamples]=1
+      ;;
+    workspaceShared)
+      DOWNSTREAM_COMPILE[workspaceClient]=1
+      DOWNSTREAM_COMPILE[workspaceRunner]=1
+      DOWNSTREAM_COMPILE[workspaceSamples]=1
+      ;;
+    samples)
+      DOWNSTREAM_COMPILE[workspaceSamples]=1
+      ;;
+    workspaceClient)
+      DOWNSTREAM_COMPILE[workspaceSamples]=1
+      ;;
+    workspaceRunner)
+      DOWNSTREAM_COMPILE[workspaceSamples]=1
+      ;;
+  esac
+}
+
+for proj in "${!PROJECT_SRC[@]}"; do
+  propagate_downstream "$proj"
+done
+
+# ── Determine which projects need cross-version handling ─────────────────────
+# crossTestScala2 and crossTestScala3 are single-version projects and must NOT
+# use the + prefix. All other projects use + for cross-compilation.
+
+is_cross_test_project() {
+  case "$1" in
+    crossTestScala2|crossTestScala3) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+scala_version_switch() {
+  case "$1" in
+    crossTestScala2) echo "++2.13.16" ;;
+    crossTestScala3) echo "++3.7.1" ;;
+  esac
+}
+
+# ── Build the SBT command list ───────────────────────────────────────────────
+
+SBT_CMDS=()
+
+# 1) scalafmt check for changed projects
+for proj in "${!PROJECT_CHANGED[@]}"; do
+  SBT_CMDS+=("${proj}/scalafmtCheck")
+  SBT_CMDS+=("${proj}/Test/scalafmtCheck")
+done
+
+# 2) compile + test for directly changed projects
+for proj in "${!PROJECT_CHANGED[@]}"; do
+  if is_cross_test_project "$proj"; then
+    ver=$(scala_version_switch "$proj")
+    SBT_CMDS+=("$ver" "${proj}/Test/compile")
+    if [ -n "${PROJECT_TEST[$proj]}" ] || [ -n "${PROJECT_SRC[$proj]}" ]; then
+      SBT_CMDS+=("$ver" "${proj}/test")
+    fi
+  else
+    SBT_CMDS+=("+${proj}/compile")
+    # Test if source or test files changed (source changes can break tests too)
+    if [ -n "${PROJECT_TEST[$proj]}" ] || [ -n "${PROJECT_SRC[$proj]}" ]; then
+      SBT_CMDS+=("+${proj}/test")
+    fi
+  fi
+done
+
+# 3) compile-only for downstream dependents (that aren't already being compiled)
+for proj in "${!DOWNSTREAM_COMPILE[@]}"; do
+  if [ -z "${PROJECT_CHANGED[$proj]}" ]; then
+    if is_cross_test_project "$proj"; then
+      ver=$(scala_version_switch "$proj")
+      SBT_CMDS+=("$ver" "${proj}/Test/compile")
+    else
+      SBT_CMDS+=("+${proj}/compile")
+    fi
+  fi
+done
+
+# ── Run SBT ──────────────────────────────────────────────────────────────────
+
+echo "=== Pre-commit: affected projects ==="
+echo "  Changed: ${!PROJECT_CHANGED[*]}"
+if [ ${#DOWNSTREAM_COMPILE[@]} -gt 0 ]; then
+  # Show only downstream projects not already in the changed set
+  EXTRA=()
+  for proj in "${!DOWNSTREAM_COMPILE[@]}"; do
+    if [ -z "${PROJECT_CHANGED[$proj]}" ]; then
+      EXTRA+=("$proj")
+    fi
+  done
+  if [ ${#EXTRA[@]} -gt 0 ]; then
+    echo "  Downstream compile: ${EXTRA[*]}"
+  fi
+fi
+echo "  SBT commands: ${SBT_CMDS[*]}"
+echo "======================================"
+
 if ! command -v sbt &> /dev/null; then
-    echo "Error: sbt is not installed or not in PATH"
-    exit 1
+  echo "Error: sbt is not installed or not in PATH"
+  exit 1
 fi
 
-# Run scalafmt check
-echo "Checking code formatting with scalafmt..."
-if ! sbt scalafmtCheckAll; then
-    echo "Error: Code is not properly formatted!"
-    echo "Please run 'sbt scalafmtAll' to format your code"
-    exit 1
-fi
-
-# Run compilation for all Scala versions
-echo "Compiling for all Scala versions..."
-if ! sbt +compile; then
-    echo "Error: Compilation failed!"
-    exit 1
-fi
-
-# Run tests for all Scala versions
-echo "Running tests for all Scala versions..."
-if ! sbt +test; then
-    echo "Error: Tests failed!"
-    exit 1
-fi
+# Single SBT invocation with all commands
+sbt "${SBT_CMDS[@]}"
 
 echo "All pre-commit checks passed!"
