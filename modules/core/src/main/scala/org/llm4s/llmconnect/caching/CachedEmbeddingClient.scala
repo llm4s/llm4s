@@ -70,13 +70,16 @@ class CachedEmbeddingClient(
           // Map unique texts to their new embeddings
           val freshByText = missTexts.zip(response.embeddings).toMap
           // Cache each freshly generated vector.
-          missesWithIndex.zip(response.embeddings).foreach { case ((idx, _), vector) =>
-            cache.put(keysAndHits(idx)._1, vector)
+          missesWithIndex.foreach { case (idx, text) =>
+            freshByText.get(text).foreach(vector => cache.put(keysAndHits(idx)._1, vector))
           }
 
           // Build an index → vector map for O(1) lookup when assembling the result.
+
           val freshByIndex: Map[Int, Seq[Double]] =
-            missesWithIndex.map { case (idx, text) => idx -> freshByText(text) }.toMap
+            missesWithIndex.flatMap { case (idx, text) =>
+              freshByText.get(text).map(idx -> _)
+            }.toMap
 
           // Assemble final vectors in the original input order.
           val allVectors: Seq[Seq[Double]] = keysAndHits.zipWithIndex.map {

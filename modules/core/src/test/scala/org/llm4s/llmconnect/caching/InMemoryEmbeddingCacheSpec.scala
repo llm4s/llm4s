@@ -44,7 +44,7 @@ class InMemoryEmbeddingCacheSpec extends AnyFlatSpec with Matchers {
 
     // Immediate check - should be a hit
     cache.get("tempKey") shouldBe Some("tempValue")
-    Thread.sleep(150)
+    Thread.sleep(600)
     // Check after expiration - should be a miss
     cache.get("tempKey") shouldBe None
 

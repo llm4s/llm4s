@@ -7,7 +7,8 @@ import scala.concurrent.duration.FiniteDuration
 
 /**
  * Thread-safe in-memory implementation of EmbeddingCache with LRU eviction.
- * * @param maxSize The maximum number of embeddings to store before evicting the oldest.
+ *  @param maxSize The maximum number of embeddings to store before evicting the oldest.
+ * @param ttl     Optional Time-To-Live for cache entries. Expired entries are lazily evicted on access.
  * @tparam Embedding The embedding type (usually Seq[Double]).
  */
 class InMemoryEmbeddingCache[Embedding](maxSize: Int = 10000, ttl: Option[FiniteDuration] = None)
@@ -29,20 +30,21 @@ class InMemoryEmbeddingCache[Embedding](maxSize: Int = 10000, ttl: Option[Finite
   )
 
   /** Retrieves an embedding and updates hit/miss counters. */
-  def get(key: String): Option[Embedding] = {
-    val entryOpt = Option(store.get(key))
+  def get(key: String): Option[Embedding] =
+    store.synchronized {
+      val entryOpt = Option(store.get(key))
 
-    val validEntry = entryOpt.filter { entry =>
-      val isExpired = ttlMillis.exists(limit => (System.currentTimeMillis() - entry.timestamp) > limit)
-      if (isExpired) store.remove(key)
-      !isExpired
+      val validEntry = entryOpt.filter { entry =>
+        val isExpired = ttlMillis.exists(limit => (System.currentTimeMillis() - entry.timestamp) > limit)
+        if (isExpired) store.remove(key)
+        !isExpired
+      }
+
+      if (validEntry.isDefined) hits.incrementAndGet()
+      else misses.incrementAndGet()
+
+      validEntry.map(_.embedding)
     }
-
-    if (validEntry.isDefined) hits.incrementAndGet()
-    else misses.incrementAndGet()
-
-    validEntry.map(_.embedding)
-  }
 
   /** Stores an embedding, potentially triggering LRU eviction. */
   def put(key: String, embedding: Embedding): Unit =
