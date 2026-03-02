@@ -87,7 +87,8 @@ object WorkspaceTools {
         .withProperty(
           Schema.property(
             "end_line",
-            Schema.integer("End line for reading (0-indexed, inclusive)") required = false
+            Schema.integer("End line for reading (0-indexed, inclusive)"),
+            required = false
           )
         )
     } else schema
