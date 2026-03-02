@@ -507,13 +507,16 @@ Get keys from [Langfuse](https://langfuse.com):
 3. Navigate to Settings → API Keys
 4. Copy public and secret keys
 
+
 ### OpenTelemetry
+
 ```bash
-TRACING_MODE=otel
+TRACING_MODE=opentelemetry
 OTEL_SERVICE_NAME=llm4s-runner
 OTEL_EXPORTER_OTLP_ENDPOINT=https://your-collector:4317
 OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer <token>
 ```
+
 ```
 Span: LLM Completion
 Attributes:
@@ -522,6 +525,7 @@ Attributes:
   gen_ai.usage.output_tokens = 30
 Status: OK
 ```
+
 ### Disable Tracing
 
 ```bash

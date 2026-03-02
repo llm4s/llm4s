@@ -215,7 +215,7 @@ You can easily switch models:
 # Try Llama 3.2 (good balance of reasoning and quality)
 export LLM_MODEL=ollama/llama3.2
 
-# Try Phi3 (lightweight,faster, smaller)
+# Try Phi3 (lightweight,faster,smaller)
 export LLM_MODEL=ollama/phi3
 
 # Try CodeLlama (for coding tasks)
