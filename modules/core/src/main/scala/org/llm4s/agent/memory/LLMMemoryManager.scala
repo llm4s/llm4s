@@ -233,10 +233,8 @@ final case class LLMMemoryManager(
    * - Task success status (consolidate successful/failed tasks separately)
    *
    * Only groups with minCount+ memories are returned.
-   * Caps each group at config.maxMemoriesPerGroup to prevent context overflow.
-   *
-   * TODO: Use client.getContextWindow() for more accurate token budget management
-   * instead of relying on maxMemoriesPerGroup as a proxy.
+   * Uses client.getContextBudget() to dynamically limit the group size based on token count
+   * to prevent context window overflow during summarization.
    *
    * @param memories Memories to group
    * @param minCount Minimum memories required per group for consolidation
@@ -245,27 +243,41 @@ final case class LLMMemoryManager(
     memories: Seq[Memory],
     minCount: Int
   ): Seq[Seq[Memory]] = {
+    // Determine token budget (e.g., leaving 20% headroom for instructions/formatting overhead)
+    val tokenBudget = (client.getContextBudget() * 0.8).toInt
+
+    /**
+     * Helper to accumulator memories until the token budget is reached.
+     * Uses a rough heuristic of ~4 characters per token since a strict tokenizer isn't guaranteed.
+     */
+    def takeUntilBudget(mems: Seq[Memory]): Seq[Memory] = {
+      var currentTokens = 0
+      mems.takeWhile { m =>
+        val tokens = m.content.length / 4
+        if (currentTokens + tokens <= tokenBudget) {
+          currentTokens += tokens
+          true
+        } else false
+      }
+    }
+
     // Group by conversation (only Conversation type, sorted by timestamp for stable summaries)
     val byConversation = memories
       .filter(_.memoryType == MemoryType.Conversation)
       .filter(_.conversationId.isDefined)
       .groupBy(_.conversationId.get)
       .values
-      .filter(_.length >= minCount) // Apply minCount per group
-      .map(group =>
-        group
-          .sortBy(_.timestamp) // Sort by timestamp (oldest first)
-          .take(config.consolidationConfig.maxMemoriesPerGroup)
-      ) // Cap group size
+      .map(group => takeUntilBudget(group.sortBy(_.timestamp)) // Sort and apply token budget cap
+      )
+      .filter(_.length >= minCount) // Apply minCount per group *after* capping
       .toSeq
 
     // Group by entity
     val byEntity = memories
       .filter(_.memoryType == MemoryType.Entity)
       .groupBy(_.getMetadata("entity_id"))
-      .collect {
-        case (Some(_), facts) if facts.length >= minCount => facts.take(config.consolidationConfig.maxMemoriesPerGroup)
-      }
+      .collect { case (Some(_), facts) => takeUntilBudget(facts) }
+      .filter(_.length >= minCount)
       .toSeq
 
     // Group user facts by user ID
@@ -273,18 +285,16 @@ final case class LLMMemoryManager(
       .filter(_.memoryType == MemoryType.UserFact)
       .groupBy(_.getMetadata("user_id"))
       .values
-      .filter(_.length >= minCount)                                // Apply minCount per group
-      .map(_.take(config.consolidationConfig.maxMemoriesPerGroup)) // Cap group size
+      .map(takeUntilBudget)
+      .filter(_.length >= minCount)
       .toSeq
 
     // Group knowledge by source
     val byKnowledge = memories
       .filter(_.memoryType == MemoryType.Knowledge)
       .groupBy(_.source)
-      .collect {
-        case (Some(_), entries) if entries.length >= minCount =>
-          entries.take(config.consolidationConfig.maxMemoriesPerGroup)
-      }
+      .collect { case (Some(_), entries) => takeUntilBudget(entries) }
+      .filter(_.length >= minCount)
       .toSeq
 
     // Group tasks by success status
@@ -292,8 +302,8 @@ final case class LLMMemoryManager(
       .filter(_.memoryType == MemoryType.Task)
       .groupBy(_.getMetadata("success").getOrElse("unknown"))
       .values
-      .filter(_.length >= minCount)                                // Apply minCount per group
-      .map(_.take(config.consolidationConfig.maxMemoriesPerGroup)) // Cap group size
+      .map(takeUntilBudget)
+      .filter(_.length >= minCount)
       .toSeq
 
     byConversation ++ byEntity ++ byUser ++ byKnowledge ++ byTask
