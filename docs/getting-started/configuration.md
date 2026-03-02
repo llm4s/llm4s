@@ -519,11 +519,7 @@ OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer <token>
 
 ```
 Span: LLM Completion
-Attributes:
-  gen_ai.request.model = gpt-4
-  gen_ai.usage.input_tokens = 120
-  gen_ai.usage.output_tokens = 30
-Status: OK
+Span: Token Usage - completion
 ```
 
 ### Disable Tracing
