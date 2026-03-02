@@ -125,7 +125,8 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
 
     // create an interface with a very small search limit so we hit truncation
     val tinyLimits = WorkspaceSandboxConfig.DefaultLimits.copy(maxSearchResults = 2)
-    val smallInterface = new WorkspaceAgentInterfaceImpl(workspacePath, isWindowsHost, Some(WorkspaceSandboxConfig(limits = tinyLimits)))
+    val smallInterface =
+      new WorkspaceAgentInterfaceImpl(workspacePath, isWindowsHost, Some(WorkspaceSandboxConfig(limits = tinyLimits)))
 
     val resp = smallInterface.searchFiles(
       paths = List("."),

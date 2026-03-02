@@ -120,33 +120,40 @@ class OpenRouterClient(
 
       val accumulator = StreamingAccumulator.create()
 
-      val attempt =
-        Try {
-          val request = HttpRequest
-            .newBuilder()
-            .uri(URI.create(s"${config.baseUrl}/chat/completions"))
-            .header("Content-Type", "application/json")
-            .header("Authorization", s"Bearer ${config.apiKey}")
-            .header("HTTP-Referer", "https://github.com/llm4s/llm4s")
-            .header("X-Title", "LLM4S")
-            .timeout(Duration.ofMinutes(5))
-            .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
-            .build()
+      // Send the HTTP request, converting transport exceptions to Left
+      val responseOrError = Try {
+        val request = HttpRequest
+          .newBuilder()
+          .uri(URI.create(s"${config.baseUrl}/chat/completions"))
+          .header("Content-Type", "application/json")
+          .header("Authorization", s"Bearer ${config.apiKey}")
+          .header("HTTP-Referer", "https://github.com/llm4s/llm4s")
+          .header("X-Title", "LLM4S")
+          .timeout(Duration.ofMinutes(5))
+          .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
+          .build()
 
-          val response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
+        httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
+      }.toEither.left.map(_.toLLMError)
 
-          if (response.statusCode() != 200) {
-            val errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
-            response.statusCode() match {
-              case 401 => throw new RuntimeException(AuthenticationError("openrouter", "Invalid API key").formatted)
-              case 429 => throw new RuntimeException(RateLimitError("openrouter").formatted)
-              case status =>
-                throw new RuntimeException(
-                  s"${ServiceError(status, "openrouter", s"OpenRouter API error: $errorBody").formatted}"
-                )
-            }
+      // Check HTTP status, returning typed errors for known failure codes
+      val streamOrError = responseOrError.flatMap { response =>
+        if (response.statusCode() == 200) {
+          Right(response)
+        } else {
+          val errorBody = Try(new String(response.body().readAllBytes(), StandardCharsets.UTF_8))
+            .getOrElse("<error body unreadable>")
+          response.statusCode() match {
+            case 401    => Left(AuthenticationError("openrouter", "Invalid API key"))
+            case 429    => Left(RateLimitError("openrouter"))
+            case status => Left(ServiceError(status, "openrouter", s"OpenRouter API error: $errorBody"))
           }
+        }
+      }
 
+      // Process the SSE stream, converting any I/O exceptions to Left
+      val attempt = streamOrError.flatMap { response =>
+        Try {
           val sseParser = SSEParser.createStreamingParser()
           val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
           try {
@@ -171,9 +178,8 @@ class OpenRouterClient(
             Try(reader.close())
             Try(response.body().close())
           }
-
-        }.toEither.left
-          .map(_.toLLMError)
+        }.toEither.left.map(_.toLLMError)
+      }
 
       attempt.flatMap(_ =>
         accumulator.toCompletion.map { c =>
