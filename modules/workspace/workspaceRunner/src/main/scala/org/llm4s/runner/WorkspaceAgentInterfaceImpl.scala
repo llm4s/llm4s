@@ -214,11 +214,11 @@ class WorkspaceAgentInterfaceImpl(
         .getOrElse(0)
       // endLine is inclusive index; convert to exclusive slice bound
       val end = endLine
-        .map(l => {
+        .map { l =>
           // ensure end is at least start and at most last index
           val inclusive = math.max(start, math.min(l, totalLines - 1))
           inclusive + 1
-        })
+        }
         .getOrElse(totalLines)
 
       val selectedLines = lines.slice(start, end)
@@ -523,7 +523,7 @@ class WorkspaceAgentInterfaceImpl(
     // Search in files
     var matches      = List.empty[SearchMatch]
     var totalMatches = 0
-    var done         = false   // used to break out once we've observed one match past the cap
+    var done         = false // used to break out once we've observed one match past the cap
 
     // stop scanning as soon as we've counted one result beyond the configured
     // max; that allows us to report `isTruncated` correctly while avoiding a
