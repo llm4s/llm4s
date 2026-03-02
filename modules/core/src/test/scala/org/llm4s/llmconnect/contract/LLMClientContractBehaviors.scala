@@ -180,8 +180,14 @@ trait LLMClientContractBehaviors { this: AnyWordSpec with Matchers =>
       for {
         c <- completeResult
         s <- streamResult
-      }
+      } {
         c.model shouldBe s.model
+        c.message.role shouldBe s.message.role
+        c.id should not be empty
+        s.id should not be empty
+        c.content should not be null
+        s.content should not be null
+      }
     }
   }
 }

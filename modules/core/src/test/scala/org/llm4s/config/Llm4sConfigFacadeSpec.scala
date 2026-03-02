@@ -25,11 +25,13 @@ class Llm4sConfigFacadeSpec extends AnyWordSpec with Matchers {
       props.foreach { case (k, v) => System.setProperty(k, v) }
       ConfigFactory.invalidateCaches()
       f
-    } finally
+    } finally {
       originals.foreach {
         case (k, Some(v)) => System.setProperty(k, v)
         case (k, None)    => System.clearProperty(k)
       }
+      ConfigFactory.invalidateCaches()
+    }
     // scalafix:on DisableSyntax.NoTryCatch
   }
 
