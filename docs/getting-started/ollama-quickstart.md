@@ -212,10 +212,10 @@ the Java Virtual Machine (JVM).
 You can easily switch models:
 
 ```bash
-# Try Llama 3.2 (good balance of reasoning and quality)
+# Try Llama 3.2 (good balance of reasoning and quality,impressive 128K context window)
 export LLM_MODEL=ollama/llama3.2
 
-# Try Phi3 (lightweight,faster,smaller)
+# Try Phi3 (lightweight,faster,smaller(1.4GB))
 export LLM_MODEL=ollama/phi3
 
 # Try CodeLlama (for coding tasks)
@@ -226,56 +226,7 @@ Then run your program again without code changes!
 
 ---
 
-## Step 6a: Write Your First LLM4S + Ollama/Llama3.2 App
-
-Llama 3.2 is Meta's latest with an impressive 128K context window. Perfect for processing large documents and long conversations.
-
-For the code, use the same Scala example from **Step 5** - simply change the configuration:
-
-```bash
-# Linux / macOS
-export LLM_MODEL=ollama/llama3.2
-
-# Windows PowerShell
-$env:LLM_MODEL = "ollama/llama3.2"
-```
-
-Then run:
-
-```bash
-sbt run
-```
-
-{: .tip }
-> **Why Llama 3.2?** Latest Llama model with 128K context window. Excellent for RAG applications, long-form content generation, and processing large documents. Available in 1B, 3B, 8B, 70B, and 405B sizes.
-
----
-
-## Step 6b: Write Your First LLM4S + Ollama/Phi3 App
-
-Phi3 is Microsoft's efficient model, even smaller than Phi. Ideal for ultra-low-latency applications and edge deployment.
-
-For the code, use the same Scala example from **Step 5** - simply change the configuration:
-
-```bash
-# Linux / macOS
-export LLM_MODEL=ollama/phi3
-
-# Windows PowerShell
-$env:LLM_MODEL = "ollama/phi3"
-```
-
-Then run:
-
-```bash
-sbt run
-```
-
-{: .tip }
-> **Why Phi3?** Microsoft's compact model optimized for efficiency. Smaller than Phi (1.4GB) with competitive quality. Perfect for resource-constrained environments and real-time applications requiring minimal latency.
-
----
-## Step 6c: Write Your First LLM4S + Ollama/CodeLlama App
+## Step 6a: Write Your First LLM4S + Ollama/CodeLlama App
 
 CodeLlama is purpose-built for code generation and understanding. Create `HelloCodeLlama.scala`:
 
