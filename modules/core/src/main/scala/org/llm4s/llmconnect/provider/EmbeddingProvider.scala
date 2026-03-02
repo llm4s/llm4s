@@ -50,7 +50,7 @@ trait EmbeddingProvider {
       org.llm4s.llmconnect.model.EmbeddingError(
         code = Some("501"),
         message = s"Multimodal embeddings (modality: ${request.modality}) not implemented by this provider.",
-        provider = "provider"
+        provider = "encoder"
       )
     )
 }
