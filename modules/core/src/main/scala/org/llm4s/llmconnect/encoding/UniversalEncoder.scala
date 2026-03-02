@@ -53,7 +53,7 @@ object UniversalEncoder {
 
   // Maximum dimension size for stub embeddings to prevent OOM in tests
   private val MAX_STUB_DIMENSION = 8192
-  
+
   // Maximum media file size to prevent OOM when loading files into byte arrays
   private val MAX_MEDIA_FILE_SIZE = 50 * 1024 * 1024 // 50MB
 
@@ -184,7 +184,9 @@ object UniversalEncoder {
       }
       return modelResult.flatMap { model =>
         Try(java.nio.file.Files.readAllBytes(file.toPath)).toEither.left
-          .map(e => EmbeddingError(None, s"Failed to read ${modality.toString.toLowerCase} file: ${e.getMessage}", "encoder"))
+          .map(e =>
+            EmbeddingError(None, s"Failed to read ${modality.toString.toLowerCase} file: ${e.getMessage}", "encoder")
+          )
           .flatMap { bytes =>
             val req = MultimediaEmbeddingRequest(
               inputs = Seq(RawMediaInput(bytes, mime)),
@@ -193,7 +195,7 @@ object UniversalEncoder {
               meta = Map("mime" -> mime, "file" -> file.getName)
             )
             client.embedMultimodal(req).map { resp =>
-              val dim = model.dimensions
+              val dim    = model.dimensions
               val prefix = modality.toString.toLowerCase
               resp.embeddings.zipWithIndex.map { case (vec, i) =>
                 EmbeddingVector(
