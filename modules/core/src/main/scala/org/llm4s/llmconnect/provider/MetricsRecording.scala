@@ -13,21 +13,33 @@ import scala.concurrent.duration.{ FiniteDuration, NANOSECONDS }
  * recording tokens, and reading costs from completion results.
  */
 trait MetricsRecording {
+
+  /**
+   * The [[org.llm4s.metrics.MetricsCollector]] that receives timing, token, and cost events.
+   *
+   * Injected by each concrete provider client. Defaults to
+   * `MetricsCollector.noop` in all public constructors, so
+   * callers that do not need metrics do not pay an allocation cost.
+   */
   protected def metrics: MetricsCollector
 
   /**
-   * Execute a block of code while recording metrics for the operation.
+   * Executes `operation` and records metrics for the call.
    *
-   * This version extracts cost directly from the result (preferred approach).
-   * The cost should already be computed and stored in the Completion.estimatedCost field.
+   * Latency and outcome (success or classified error) are recorded for every
+   * call regardless of result. Token counts and cost are recorded **only on
+   * success** — a `Left` result emits an [[org.llm4s.metrics.Outcome.Error]]
+   * event whose kind is derived from the [[org.llm4s.error.LLMError]] subtype
+   * via `ErrorKind.fromLLMError`.
    *
-   * @param provider Provider name (e.g., "openai", "anthropic")
-   * @param model Model name
-   * @param f The operation to execute
-   * @param extractUsage Function to extract usage from successful result
-   * @param extractCost Function to extract cost from successful result
-   * @tparam A Result type
-   * @return The result of the operation
+   * @param provider     Provider label forwarded to the collector (e.g. `"openai"`).
+   * @param model        Model identifier forwarded to the collector.
+   * @param operation    The LLM call to time and observe.
+   * @param extractUsage Extracts prompt/completion token counts from a successful
+   *                     result; return `None` to skip token recording.
+   * @param extractCost  Extracts the pre-computed cost (USD) from a successful
+   *                     result; return `None` to skip cost recording.
+   * @return The result of `operation`, unchanged.
    */
   protected def withMetrics[A](
     provider: String,

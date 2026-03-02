@@ -1,44 +1,16 @@
 package org.llm4s.rag.evaluation
 
-import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
+import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.rag.evaluation.metrics.AnswerRelevancy
+import org.llm4s.testutil.MockLLMClients
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class AnswerRelevancySpec extends AnyFlatSpec with Matchers {
-
-  private def mockCompletion(content: String): Completion = Completion(
-    id = "test-id",
-    created = System.currentTimeMillis(),
-    content = content,
-    model = "test-model",
-    message = AssistantMessage(content)
-  )
-
-  class MockLLMClient(response: String) extends LLMClient {
-    var lastConversation: Option[Conversation] = None
-
-    override def complete(
-      conversation: Conversation,
-      options: CompletionOptions
-    ): Result[Completion] = {
-      lastConversation = Some(conversation)
-      Right(mockCompletion(response))
-    }
-
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
-      onChunk: StreamedChunk => Unit
-    ): Result[Completion] = complete(conversation, options)
-
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
-  }
 
   class MockEmbeddingProvider(embeddings: Map[String, Seq[Double]]) extends EmbeddingProvider {
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
@@ -55,7 +27,7 @@ class AnswerRelevancySpec extends AnyFlatSpec with Matchers {
   private val testEmbeddingConfig = EmbeddingModelConfig("test-model", 3)
 
   "AnswerRelevancy" should "have correct metadata" in {
-    val mockLLM       = new MockLLMClient("[]")
+    val mockLLM       = new MockLLMClients.SimpleMock("[]")
     val mockEmbedding = createMockEmbeddingClient(Map.empty)
     val metric        = AnswerRelevancy(mockLLM, mockEmbedding, testEmbeddingConfig)
 
@@ -74,7 +46,7 @@ class AnswerRelevancySpec extends AnyFlatSpec with Matchers {
     val originalEmbedding   = Seq(1.0, 0.0, 0.0)
     val generatedEmbeddings = Seq(1.0, 0.0, 0.0) // Same as original
 
-    val mockLLM = new MockLLMClient(questionsResponse)
+    val mockLLM = new MockLLMClients.SimpleMock(questionsResponse)
     val mockEmbedding = createMockEmbeddingClient(
       Map(
         "What is the capital of France?"         -> originalEmbedding,
@@ -106,7 +78,7 @@ class AnswerRelevancySpec extends AnyFlatSpec with Matchers {
     val originalEmbedding  = Seq(1.0, 0.0, 0.0)
     val differentEmbedding = Seq(0.0, 1.0, 0.0)
 
-    val mockLLM = new MockLLMClient(questionsResponse)
+    val mockLLM = new MockLLMClients.SimpleMock(questionsResponse)
     val mockEmbedding = createMockEmbeddingClient(
       Map(
         "What is the capital of France?" -> originalEmbedding,
@@ -132,7 +104,7 @@ class AnswerRelevancySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return score 0.0 for empty answer" in {
-    val mockLLM       = new MockLLMClient("[]")
+    val mockLLM       = new MockLLMClients.SimpleMock("[]")
     val mockEmbedding = createMockEmbeddingClient(Map.empty)
     val metric        = AnswerRelevancy(mockLLM, mockEmbedding, testEmbeddingConfig)
 
@@ -150,7 +122,7 @@ class AnswerRelevancySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return score 0.0 for empty question" in {
-    val mockLLM       = new MockLLMClient("[]")
+    val mockLLM       = new MockLLMClients.SimpleMock("[]")
     val mockEmbedding = createMockEmbeddingClient(Map.empty)
     val metric        = AnswerRelevancy(mockLLM, mockEmbedding, testEmbeddingConfig)
 
@@ -174,7 +146,7 @@ class AnswerRelevancySpec extends AnyFlatSpec with Matchers {
 
     val embedding = Seq(1.0, 0.0, 0.0)
 
-    val mockLLM       = new MockLLMClient(questionsResponse)
+    val mockLLM       = new MockLLMClients.SimpleMock(questionsResponse)
     val mockEmbedding = createMockEmbeddingClient(Map.empty.withDefaultValue(embedding))
     val metric        = AnswerRelevancy(mockLLM, mockEmbedding, testEmbeddingConfig)
 
@@ -194,7 +166,7 @@ class AnswerRelevancySpec extends AnyFlatSpec with Matchers {
 
     val embedding = Seq(1.0, 0.0, 0.0)
 
-    val mockLLM       = new MockLLMClient(questionsResponse)
+    val mockLLM       = new MockLLMClients.SimpleMock(questionsResponse)
     val mockEmbedding = createMockEmbeddingClient(Map.empty.withDefaultValue(embedding))
     val metric        = AnswerRelevancy(mockLLM, mockEmbedding, testEmbeddingConfig)
 
@@ -213,7 +185,7 @@ class AnswerRelevancySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "reject invalid number of generated questions" in {
-    val mockLLM       = new MockLLMClient("[]")
+    val mockLLM       = new MockLLMClients.SimpleMock("[]")
     val mockEmbedding = createMockEmbeddingClient(Map.empty)
 
     an[IllegalArgumentException] should be thrownBy {
@@ -227,5 +199,38 @@ class AnswerRelevancySpec extends AnyFlatSpec with Matchers {
 
   it should "use default number of questions" in {
     AnswerRelevancy.DEFAULT_NUM_QUESTIONS shouldBe 3
+  }
+
+  it should "propagate LLM client errors" in {
+    val mockLLM       = new MockLLMClients.FailingMock("LLM service unavailable")
+    val mockEmbedding = createMockEmbeddingClient(Map.empty)
+    val metric        = AnswerRelevancy(mockLLM, mockEmbedding, testEmbeddingConfig)
+
+    val sample = EvalSample(
+      question = "What is the capital?",
+      answer = "Paris is the capital.",
+      contexts = Seq("Some context")
+    )
+
+    val result = metric.evaluate(sample)
+
+    result.isLeft shouldBe true
+    result.left.toOption.get.message should include("LLM service unavailable")
+  }
+
+  it should "return error on malformed JSON response" in {
+    val mockLLM       = new MockLLMClients.SimpleMock("not valid json at all")
+    val mockEmbedding = createMockEmbeddingClient(Map.empty)
+    val metric        = AnswerRelevancy(mockLLM, mockEmbedding, testEmbeddingConfig)
+
+    val sample = EvalSample(
+      question = "What is the capital?",
+      answer = "Paris is the capital.",
+      contexts = Seq("Some context")
+    )
+
+    val result = metric.evaluate(sample)
+
+    result.isLeft shouldBe true
   }
 }

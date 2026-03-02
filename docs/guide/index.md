@@ -11,6 +11,11 @@ Comprehensive guides for LLM4S features.
 
 ## Available Guides
 
+### Fundamentals
+
+- **[Basic Usage](basic-usage)** - Get started with LLM calls, client creation, and error handling
+- **[Providers](providers)** - Overview of supported providers and how to configure them
+
 ### Agent Framework
 
 - **[Agents Overview](agents/)** - Build LLM-powered agents with tools, guardrails, and multi-turn conversations
@@ -44,6 +49,14 @@ Comprehensive guides for LLM4S features.
 - **[Image Generation](image-generation)** - Generate images with DALL-E and other providers
 - **[Speech](speech)** - Speech-to-text (STT) and text-to-speech (TTS)
 
+### Observability
+
+- **[Monitoring](observability/)** - Production monitoring for LLM4S applications
+  - **Tracing**: Langfuse and OpenTelemetry integration
+  - **Logging**: Structured JSON logging with SLF4J/Logback
+  - **Health Checks**: Startup validation and readiness probes
+  - **Cost Monitoring**: Token usage tracking and budget awareness
+
 ## Feature Coverage via Examples
 
 For features not yet documented as dedicated guides, see our **[Examples Gallery](/examples/)** which includes 69 working examples:
@@ -60,7 +73,7 @@ For features not yet documented as dedicated guides, see our **[Examples Gallery
 | Streaming | [Streaming Examples](/examples/#streaming-examples) |
 | Embeddings & RAG | [Embeddings Examples](/examples/#embeddings-examples) |
 | MCP Integration | [MCP Examples](/examples/#mcp-examples) |
-| Observability | [Observability in Examples](/examples/#other-examples) |
+| Observability | [Monitoring Guide](observability/) |
 
 ## Design Documents
 

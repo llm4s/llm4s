@@ -105,15 +105,21 @@ object ChunkerFactory {
    * @param strategy Strategy name: "simple", "sentence", "markdown", "semantic"
    * @return DocumentChunker or None if strategy unknown
    *
-   * Note: "semantic" strategy requires an EmbeddingProvider and returns
-   * a SentenceChunker as fallback. Use semantic() method for proper semantic chunking.
+   * Note: The "semantic" strategy has a special fallback behavior:
+   * - When requested via create("semantic"), a SentenceChunker is returned as fallback
+   * - This is because semantic chunking requires an embedding client (not available via factory)
+   * - To use true semantic chunking with embeddings, use semantic(embeddingClient, modelConfig)
+   * - The fallback ensures graceful degradation instead of failing when embeddings aren't configured
+   *
+   * This design allows applications to specify "semantic" as a strategy preference without
+   * requiring embedding setup at construction time, while still providing a usable result.
    */
   def create(strategy: String): Option[DocumentChunker] =
     Strategy.fromString(strategy).map {
       case Strategy.Simple   => simple()
       case Strategy.Sentence => sentence()
       case Strategy.Markdown => markdown()
-      case Strategy.Semantic => sentence() // Fallback - semantic requires embedding provider
+      case Strategy.Semantic => sentence() // Fallback - semantic requires embedding provider; see docstring above
     }
 
   /**
@@ -121,12 +127,28 @@ object ChunkerFactory {
    *
    * @param strategy Chunking strategy
    * @return DocumentChunker
+   *
+   * Note on Semantic Strategy:
+   * When Strategy.Semantic is passed, this method returns a SentenceChunker as a fallback.
+   * This is intentional and provides several benefits:
+   *
+   * 1. **Graceful Degradation**: Applications can safely request semantic chunking without
+   *    requiring embedding configuration, falling back to sentence-based chunking.
+   *
+   * 2. **Type Safety**: Unlike create(String), this method always returns a DocumentChunker
+   *    (never fails), which is important for code that must execute.
+   *
+   * 3. **Ease of Testing**: Tests can specify Strategy.Semantic without needing to mock
+   *    embedding clients, while still verifying that a chunker is returned.
+   *
+   * For actual semantic chunking with embeddings, use the semantic(embeddingClient, modelConfig)
+   * method directly, which provides full semantic chunking capabilities.
    */
   def create(strategy: Strategy): DocumentChunker = strategy match {
     case Strategy.Simple   => simple()
     case Strategy.Sentence => sentence()
     case Strategy.Markdown => markdown()
-    case Strategy.Semantic => sentence() // Fallback - semantic requires embedding provider
+    case Strategy.Semantic => sentence() // See docstring above for explanation of this fallback
   }
 
   /**
@@ -154,9 +176,9 @@ object ChunkerFactory {
   private def detectMarkdown(text: String): Boolean = {
     // Check for common markdown patterns
     val hasCodeBlock    = text.contains("```")
-    val hasHeading      = text.matches("""(?m)^#{1,6}\s+\S.*""")
-    val hasListItems    = text.matches("""(?m)^[\s]*[-*+]\s+\S.*""")
-    val hasNumberedList = text.matches("""(?m)^[\s]*\d+\.\s+\S.*""")
+    val hasHeading      = text.linesIterator.exists(_.matches("""^#{1,6}\s+\S.*"""))
+    val hasListItems    = text.linesIterator.exists(_.matches("""^[\s]*[-*+]\s+\S.*"""))
+    val hasNumberedList = text.linesIterator.exists(_.matches("""^[\s]*\d+\.\s+\S.*"""))
     val hasLinks        = text.contains("](")
     val hasImages       = text.contains("![")
 

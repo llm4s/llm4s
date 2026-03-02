@@ -1,5 +1,6 @@
 package org.llm4s.toolapi
 
+import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default._
@@ -16,11 +17,12 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers {
 
   /**
    * Creates a test tool that records when it was called and can simulate delays.
+   * Returns Result — never extracts from the container.
    */
   def createDelayingTool(
     name: String,
     delayMs: Long = 0
-  ): ToolFunction[Map[String, Any], TestResult] = {
+  ): Result[ToolFunction[Map[String, Any], TestResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Test parameters")
       .withProperty(Schema.property("input", Schema.string("Input value")))
@@ -35,7 +37,7 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers {
         Thread.sleep(delayMs)
       }
       extractor.getString("input").map(input => TestResult(s"$name: $input", startTime))
-    }.build()
+    }.buildSafe()
   }
 
   // ==========================================================================
@@ -70,33 +72,37 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "ToolRegistry.executeAsync" should "execute a tool asynchronously" in {
-    val tool     = createDelayingTool("async_tool", 0)
-    val registry = new ToolRegistry(Seq(tool))
+    createDelayingTool("async_tool", 0).fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val registry = new ToolRegistry(Seq(tool))
+        val request  = ToolCallRequest("async_tool", ujson.Obj("input" -> "test_value"))
+        val future   = registry.executeAsync(request)
+        val result   = Await.result(future, 5.seconds)
 
-    val request = ToolCallRequest("async_tool", ujson.Obj("input" -> "test_value"))
-    val future  = registry.executeAsync(request)
-
-    val result = Await.result(future, 5.seconds)
-
-    result shouldBe a[Right[_, _]]
-    val json   = result.getOrElse(fail("Expected success"))
-    val parsed = read[TestResult](json)
-    parsed.value shouldBe "async_tool: test_value"
+        result shouldBe a[Right[_, _]]
+        val json   = result.fold(e => fail(s"Expected success: ${e.getMessage}"), identity)
+        val parsed = read[TestResult](json)
+        parsed.value shouldBe "async_tool: test_value"
+      }
+    )
   }
 
   it should "return error for unknown function" in {
-    val tool     = createDelayingTool("known_tool", 0)
-    val registry = new ToolRegistry(Seq(tool))
+    createDelayingTool("known_tool", 0).fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val registry = new ToolRegistry(Seq(tool))
+        val request  = ToolCallRequest("unknown_tool", ujson.Obj("input" -> "test"))
+        val future   = registry.executeAsync(request)
+        val result   = Await.result(future, 5.seconds)
 
-    val request = ToolCallRequest("unknown_tool", ujson.Obj("input" -> "test"))
-    val future  = registry.executeAsync(request)
-
-    val result = Await.result(future, 5.seconds)
-
-    result shouldBe a[Left[_, _]]
-    val error = result.left.getOrElse(fail("Expected error"))
-    error shouldBe a[ToolCallError.UnknownFunction]
-    error.asInstanceOf[ToolCallError.UnknownFunction].toolName shouldBe "unknown_tool"
+        result shouldBe a[Left[_, _]]
+        val error = result.fold(identity, v => fail(s"Expected error but got: $v"))
+        error shouldBe a[ToolCallError.UnknownFunction]
+        error.asInstanceOf[ToolCallError.UnknownFunction].toolName shouldBe "unknown_tool"
+      }
+    )
   }
 
   // ==========================================================================
@@ -104,109 +110,115 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "ToolRegistry.executeAll" should "execute requests sequentially with Sequential strategy" in {
-    val tool1 = createDelayingTool("tool1", 50)
-    val tool2 = createDelayingTool("tool2", 50)
-    val tool3 = createDelayingTool("tool3", 50)
+    val result = for {
+      tool1 <- createDelayingTool("tool1", 50)
+      tool2 <- createDelayingTool("tool2", 50)
+      tool3 <- createDelayingTool("tool3", 50)
+    } yield {
+      val registry = new ToolRegistry(Seq(tool1, tool2, tool3))
+      val requests = Seq(
+        ToolCallRequest("tool1", ujson.Obj("input" -> "a")),
+        ToolCallRequest("tool2", ujson.Obj("input" -> "b")),
+        ToolCallRequest("tool3", ujson.Obj("input" -> "c"))
+      )
 
-    val registry = new ToolRegistry(Seq(tool1, tool2, tool3))
+      val startTime = System.currentTimeMillis()
+      val future    = registry.executeAll(requests, ToolExecutionStrategy.Sequential)
+      val results   = Await.result(future, 10.seconds)
+      val totalTime = System.currentTimeMillis() - startTime
 
-    val requests = Seq(
-      ToolCallRequest("tool1", ujson.Obj("input" -> "a")),
-      ToolCallRequest("tool2", ujson.Obj("input" -> "b")),
-      ToolCallRequest("tool3", ujson.Obj("input" -> "c"))
-    )
+      // Sequential execution: should take at least 150ms (3 x 50ms)
+      totalTime should be >= 150L
 
-    val startTime = System.currentTimeMillis()
-    val future    = registry.executeAll(requests, ToolExecutionStrategy.Sequential)
-    val results   = Await.result(future, 10.seconds)
-    val totalTime = System.currentTimeMillis() - startTime
+      // All results should be successful
+      results.foreach(r => r shouldBe a[Right[_, _]])
 
-    // Sequential execution: should take at least 150ms (3 x 50ms)
-    totalTime should be >= 150L
+      // Results should be in order
+      results.size shouldBe 3
 
-    // All results should be successful
-    results.foreach(result => result shouldBe a[Right[_, _]])
-
-    // Results should be in order
-    results.size shouldBe 3
-
-    val values = results.map { r =>
-      val json = r.getOrElse(fail("Expected success"))
-      read[TestResult](json).value
+      val values = results.map { r =>
+        val json = r.fold(e => fail(s"Expected success: ${e.getMessage}"), identity)
+        read[TestResult](json).value
+      }
+      values shouldBe Seq("tool1: a", "tool2: b", "tool3: c")
     }
-    values shouldBe Seq("tool1: a", "tool2: b", "tool3: c")
+    result.left.foreach(e => fail(s"Tool creation failed: ${e.formatted}"))
   }
 
   it should "execute requests in parallel with Parallel strategy" in {
-    val tool1 = createDelayingTool("tool1", 100)
-    val tool2 = createDelayingTool("tool2", 100)
-    val tool3 = createDelayingTool("tool3", 100)
+    val result = for {
+      tool1 <- createDelayingTool("tool1", 100)
+      tool2 <- createDelayingTool("tool2", 100)
+      tool3 <- createDelayingTool("tool3", 100)
+    } yield {
+      val registry = new ToolRegistry(Seq(tool1, tool2, tool3))
+      val requests = Seq(
+        ToolCallRequest("tool1", ujson.Obj("input" -> "a")),
+        ToolCallRequest("tool2", ujson.Obj("input" -> "b")),
+        ToolCallRequest("tool3", ujson.Obj("input" -> "c"))
+      )
 
-    val registry = new ToolRegistry(Seq(tool1, tool2, tool3))
+      val startTime = System.currentTimeMillis()
+      val future    = registry.executeAll(requests, ToolExecutionStrategy.Parallel)
+      val results   = Await.result(future, 10.seconds)
+      val totalTime = System.currentTimeMillis() - startTime
 
-    val requests = Seq(
-      ToolCallRequest("tool1", ujson.Obj("input" -> "a")),
-      ToolCallRequest("tool2", ujson.Obj("input" -> "b")),
-      ToolCallRequest("tool3", ujson.Obj("input" -> "c"))
-    )
+      // Parallel execution: should take around 100ms, not 300ms
+      // Allow some tolerance for thread scheduling
+      totalTime should be < 250L
 
-    val startTime = System.currentTimeMillis()
-    val future    = registry.executeAll(requests, ToolExecutionStrategy.Parallel)
-    val results   = Await.result(future, 10.seconds)
-    val totalTime = System.currentTimeMillis() - startTime
+      // All results should be successful
+      results.foreach(r => r shouldBe a[Right[_, _]])
 
-    // Parallel execution: should take around 100ms, not 300ms
-    // Allow some tolerance for thread scheduling
-    totalTime should be < 250L
+      // Results should still be in order
+      results.size shouldBe 3
 
-    // All results should be successful
-    results.foreach(result => result shouldBe a[Right[_, _]])
-
-    // Results should still be in order
-    results.size shouldBe 3
-
-    val values = results.map { r =>
-      val json = r.getOrElse(fail("Expected success"))
-      read[TestResult](json).value
+      val values = results.map { r =>
+        val json = r.fold(e => fail(s"Expected success: ${e.getMessage}"), identity)
+        read[TestResult](json).value
+      }
+      values shouldBe Seq("tool1: a", "tool2: b", "tool3: c")
     }
-    values shouldBe Seq("tool1: a", "tool2: b", "tool3: c")
+    result.left.foreach(e => fail(s"Tool creation failed: ${e.formatted}"))
   }
 
   it should "respect concurrency limit with ParallelWithLimit strategy" in {
-    val tool1 = createDelayingTool("tool1", 100)
-    val tool2 = createDelayingTool("tool2", 100)
-    val tool3 = createDelayingTool("tool3", 100)
-    val tool4 = createDelayingTool("tool4", 100)
+    val result = for {
+      tool1 <- createDelayingTool("tool1", 100)
+      tool2 <- createDelayingTool("tool2", 100)
+      tool3 <- createDelayingTool("tool3", 100)
+      tool4 <- createDelayingTool("tool4", 100)
+    } yield {
+      val registry = new ToolRegistry(Seq(tool1, tool2, tool3, tool4))
+      val requests = Seq(
+        ToolCallRequest("tool1", ujson.Obj("input" -> "a")),
+        ToolCallRequest("tool2", ujson.Obj("input" -> "b")),
+        ToolCallRequest("tool3", ujson.Obj("input" -> "c")),
+        ToolCallRequest("tool4", ujson.Obj("input" -> "d"))
+      )
 
-    val registry = new ToolRegistry(Seq(tool1, tool2, tool3, tool4))
+      val startTime = System.currentTimeMillis()
+      val future    = registry.executeAll(requests, ToolExecutionStrategy.ParallelWithLimit(2))
+      val results   = Await.result(future, 10.seconds)
+      val totalTime = System.currentTimeMillis() - startTime
 
-    val requests = Seq(
-      ToolCallRequest("tool1", ujson.Obj("input" -> "a")),
-      ToolCallRequest("tool2", ujson.Obj("input" -> "b")),
-      ToolCallRequest("tool3", ujson.Obj("input" -> "c")),
-      ToolCallRequest("tool4", ujson.Obj("input" -> "d"))
-    )
+      // With limit of 2, 4 tools should take ~200ms (2 batches of 2)
+      // Should be faster than sequential (400ms) but slower than full parallel (100ms)
+      totalTime should be >= 180L
+      totalTime should be < 350L
 
-    val startTime = System.currentTimeMillis()
-    val future    = registry.executeAll(requests, ToolExecutionStrategy.ParallelWithLimit(2))
-    val results   = Await.result(future, 10.seconds)
-    val totalTime = System.currentTimeMillis() - startTime
+      // All results should be successful
+      results.foreach(r => r shouldBe a[Right[_, _]])
 
-    // With limit of 2, 4 tools should take ~200ms (2 batches of 2)
-    // Should be faster than sequential (400ms) but slower than full parallel (100ms)
-    totalTime should be >= 180L
-    totalTime should be < 350L
-
-    // All results should be successful
-    results.foreach(result => result shouldBe a[Right[_, _]])
-
-    // Results should still be in order
-    results.size shouldBe 4
+      // Results should still be in order
+      results.size shouldBe 4
+    }
+    result.left.foreach(e => fail(s"Tool creation failed: ${e.formatted}"))
   }
 
   it should "handle mixed success and failure results" in {
     // Create a tool that fails for a specific input
-    val failingTool = ToolBuilder[Map[String, Any], TestResult](
+    ToolBuilder[Map[String, Any], TestResult](
       "failing_tool",
       "Tool that fails on 'fail' input",
       Schema
@@ -220,48 +232,55 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers {
           Right(TestResult(s"success: $input", System.currentTimeMillis()))
         }
       }
-    }.build()
+    }.buildSafe()
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        failingTool => {
+          val registry = new ToolRegistry(Seq(failingTool))
+          val requests = Seq(
+            ToolCallRequest("failing_tool", ujson.Obj("input" -> "ok1")),
+            ToolCallRequest("failing_tool", ujson.Obj("input" -> "fail")),
+            ToolCallRequest("failing_tool", ujson.Obj("input" -> "ok2"))
+          )
 
-    val registry = new ToolRegistry(Seq(failingTool))
+          val future  = registry.executeAll(requests, ToolExecutionStrategy.Parallel)
+          val results = Await.result(future, 5.seconds)
 
-    val requests = Seq(
-      ToolCallRequest("failing_tool", ujson.Obj("input" -> "ok1")),
-      ToolCallRequest("failing_tool", ujson.Obj("input" -> "fail")),
-      ToolCallRequest("failing_tool", ujson.Obj("input" -> "ok2"))
-    )
+          // First and third should succeed
+          results(0) shouldBe a[Right[_, _]]
+          results(2) shouldBe a[Right[_, _]]
 
-    val future  = registry.executeAll(requests, ToolExecutionStrategy.Parallel)
-    val results = Await.result(future, 5.seconds)
-
-    // First and third should succeed
-    results(0) shouldBe a[Right[_, _]]
-    results(2) shouldBe a[Right[_, _]]
-
-    // Second should fail
-    results(1) shouldBe a[Left[_, _]]
-    results(1).left.getOrElse(fail("Expected error")) shouldBe a[ToolCallError.HandlerError]
+          // Second should fail
+          results(1) shouldBe a[Left[_, _]]
+          results(1).fold(identity, v => fail(s"Expected error but got: $v")) shouldBe a[ToolCallError.HandlerError]
+        }
+      )
   }
 
   it should "handle empty request list" in {
-    val tool     = createDelayingTool("tool", 0)
-    val registry = new ToolRegistry(Seq(tool))
-
-    val future  = registry.executeAll(Seq.empty, ToolExecutionStrategy.Parallel)
-    val results = Await.result(future, 5.seconds)
-
-    results shouldBe empty
+    createDelayingTool("tool", 0).fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val registry = new ToolRegistry(Seq(tool))
+        val future   = registry.executeAll(Seq.empty, ToolExecutionStrategy.Parallel)
+        val results  = Await.result(future, 5.seconds)
+        results shouldBe empty
+      }
+    )
   }
 
   it should "handle single request" in {
-    val tool     = createDelayingTool("tool", 0)
-    val registry = new ToolRegistry(Seq(tool))
-
-    val requests = Seq(ToolCallRequest("tool", ujson.Obj("input" -> "single")))
-    val future   = registry.executeAll(requests, ToolExecutionStrategy.Parallel)
-    val results  = Await.result(future, 5.seconds)
-
-    results.size shouldBe 1
-    results.head shouldBe a[Right[_, _]]
+    createDelayingTool("tool", 0).fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val registry = new ToolRegistry(Seq(tool))
+        val requests = Seq(ToolCallRequest("tool", ujson.Obj("input" -> "single")))
+        val future   = registry.executeAll(requests, ToolExecutionStrategy.Parallel)
+        val results  = Await.result(future, 5.seconds)
+        results.size shouldBe 1
+        results.head shouldBe a[Right[_, _]]
+      }
+    )
   }
 
   // ==========================================================================
@@ -269,23 +288,25 @@ class AsyncToolExecutionSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   it should "use Sequential by default" in {
-    val tool     = createDelayingTool("tool", 50)
-    val registry = new ToolRegistry(Seq(tool))
+    createDelayingTool("tool", 50).fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val registry = new ToolRegistry(Seq(tool))
+        val requests = Seq(
+          ToolCallRequest("tool", ujson.Obj("input" -> "a")),
+          ToolCallRequest("tool", ujson.Obj("input" -> "b"))
+        )
 
-    val requests = Seq(
-      ToolCallRequest("tool", ujson.Obj("input" -> "a")),
-      ToolCallRequest("tool", ujson.Obj("input" -> "b"))
+        val startTime = System.currentTimeMillis()
+        // Use default (no strategy specified)
+        val future    = registry.executeAll(requests)
+        val results   = Await.result(future, 10.seconds)
+        val totalTime = System.currentTimeMillis() - startTime
+
+        // Sequential: should take at least 100ms (2 x 50ms)
+        totalTime should be >= 100L
+        results.size shouldBe 2
+      }
     )
-
-    val startTime = System.currentTimeMillis()
-    // Use default (no strategy specified)
-    val future    = registry.executeAll(requests)
-    val results   = Await.result(future, 10.seconds)
-    val totalTime = System.currentTimeMillis() - startTime
-
-    // Sequential: should take at least 100ms (2 x 50ms)
-    totalTime should be >= 100L
-
-    results.size shouldBe 2
   }
 }

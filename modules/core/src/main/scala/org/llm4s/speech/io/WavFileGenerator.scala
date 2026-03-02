@@ -88,51 +88,52 @@ object WavFileGenerator {
     } yield savedPath
 
   /**
-   * Read WAV file and return GeneratedAudio
+   * Read WAV file and return GeneratedAudio, parsing actual RIFF/WAV header fields.
+   *
+   * WAV header layout (little-endian):
+   *   Offset 22: NumChannels (Short)
+   *   Offset 24: SampleRate (Int)
+   *   Offset 34: BitsPerSample (Short)
+   *   Offset 44+: audio data
    */
   def readWavFile(path: Path): Result[GeneratedAudio] =
     Try {
       val bytes = Files.readAllBytes(path)
-      // For simplicity, assume standard PCM16 format - in production,
-      // this could be enhanced to read actual WAV headers
-      val meta = AudioMeta(sampleRate = 22050, numChannels = 1, bitDepth = 16)
-      GeneratedAudio(bytes, meta, AudioFormat.WavPcm16)
+      import BinaryReader._
+      val (numChannels, _)   = bytes.read[Short](22)
+      val (sampleRate, _)    = bytes.read[Int](24)
+      val (bitsPerSample, _) = bytes.read[Short](34)
+      val audioData          = bytes.drop(44)
+      val meta               = AudioMeta(sampleRate = sampleRate, numChannels = numChannels, bitDepth = bitsPerSample)
+      GeneratedAudio(audioData, meta, AudioFormat.WavPcm16)
     }.toResult.left.map(_ => WavGenerationFailed(s"Failed to read WAV file: $path"))
 
   /**
    * Utility for creating WAV headers manually (advanced usage)
-   * Uses implicit binary writers for clean little-endian format
+   * Uses BinaryWriter typeclass instances for correct little-endian encoding.
    */
   def createWavHeader(dataSize: Int, meta: AudioMeta): Array[Byte] = {
+    val iw         = BinaryWriter.intWriter
+    val sw         = BinaryWriter.shortWriter
     val byteRate   = meta.sampleRate * meta.numChannels * (meta.bitDepth / 8)
     val blockAlign = (meta.numChannels * meta.bitDepth / 8).toShort
 
     val header = new ByteArrayOutputStream(44)
     val dos    = new DataOutputStream(header)
 
-    // Use the data-driven programming style suggested by @atulkhot
-    val headerData = List(
-      "RIFF".getBytes,                   // ChunkID
-      (dataSize + 36).asInstanceOf[Int], // ChunkSize
-      "WAVE".getBytes,                   // Format
-      "fmt ".getBytes,                   // Subchunk1ID
-      16.asInstanceOf[Int],              // Subchunk1Size
-      1.toShort,                         // AudioFormat (PCM)
-      meta.numChannels.toShort,          // NumChannels
-      meta.sampleRate.asInstanceOf[Int], // SampleRate
-      byteRate.asInstanceOf[Int],        // ByteRate
-      blockAlign,                        // BlockAlign
-      meta.bitDepth.toShort,             // BitsPerSample
-      "data".getBytes,                   // Subchunk2ID
-      dataSize.asInstanceOf[Int]         // Subchunk2Size
-    )
-
-    // This demonstrates the data-driven approach - each value is written with its appropriate type
-    headerData.foreach {
-      case bytes: Array[Byte] => dos.write(bytes)
-      case int: Int           => dos.write(int)
-      case short: Short       => dos.write(short)
-    }
+    dos.write("RIFF".getBytes)
+    iw.write(dos, dataSize + 36)
+    dos.write("WAVE".getBytes)
+    dos.write("fmt ".getBytes)
+    iw.write(dos, 16)
+    sw.write(dos, 1.toShort)
+    sw.write(dos, meta.numChannels.toShort)
+    iw.write(dos, meta.sampleRate)
+    iw.write(dos, byteRate)
+    sw.write(dos, blockAlign)
+    sw.write(dos, meta.bitDepth.toShort)
+    dos.write("data".getBytes)
+    iw.write(dos, dataSize)
 
     header.toByteArray
   }

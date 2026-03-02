@@ -158,6 +158,8 @@ class OpenAIClient private (
     // Mark client as closed to prevent further operations.
     // Note: AzureOpenAIClient does not implement AutoCloseable,
     // so we only track the logical closed state for thread-safety.
+    // The Azure SDK's HttpClient is managed externally or by the builder,
+    // and the client itself has no close() method to call.
     if (closed.compareAndSet(false, true)) {
       logger.debug(s"OpenAI client for model $model closed")
     }
@@ -513,13 +515,25 @@ class OpenAIClient private (
     val assistantMessage =
       AssistantMessage(contentOpt = if (content.isEmpty) None else Some(content), toolCalls = toolCalls)
 
-    val usage = Option(completions.getUsage).map(u =>
+    val usage = Option(completions.getUsage).map { u =>
+      val cachedTokens: Option[Int] =
+        Option(u.getPromptTokensDetails)
+          .flatMap(details => Option(details.getCachedTokens))
+          .map(_.intValue())
+
+      val thinkingTokens: Option[Int] =
+        Option(u.getCompletionTokensDetails)
+          .flatMap(details => Option(details.getReasoningTokens))
+          .map(_.intValue())
+
       TokenUsage(
         promptTokens = u.getPromptTokens,
         completionTokens = u.getCompletionTokens,
-        totalTokens = u.getTotalTokens
+        totalTokens = u.getTotalTokens,
+        thinkingTokens = thinkingTokens,
+        cachedTokens = cachedTokens
       )
-    )
+    }
 
     // Estimate cost using CostEstimator
     val cost = usage.flatMap(u => CostEstimator.estimate(this.model, u))

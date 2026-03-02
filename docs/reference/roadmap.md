@@ -28,13 +28,13 @@ The single source of truth for LLM4S project status and future direction.
 
 | Category | Feature | Status | Documentation |
 |----------|---------|--------|---------------|
-| **LLM Connectivity** | Multi-Provider Support | ✅ Complete | [Providers](/guide/providers) |
-| | OpenAI Integration | ✅ Complete | [Basic Usage](/guide/basic-usage) |
-| | Anthropic Integration | ✅ Complete | [Providers](/guide/providers) |
-| | Google Gemini Integration | ✅ Complete | [Providers](/guide/providers) |
-| | Azure OpenAI Integration | ✅ Complete | [Providers](/guide/providers) |
-| | DeepSeek Integration | ✅ Complete | [Providers](/guide/providers) |
-| | Ollama (Local Models) | ✅ Complete | [Providers](/guide/providers) |
+| **LLM Connectivity** | Multi-Provider Support | ✅ Complete | [Providers](../guide/providers) |
+| | OpenAI Integration | ✅ Complete | [Basic Usage](../guide/basic-usage) |
+| | Anthropic Integration | ✅ Complete | [Providers](../guide/providers) |
+| | Google Gemini Integration | ✅ Complete | [Providers](../guide/providers) |
+| | Azure OpenAI Integration | ✅ Complete | [Providers](../guide/providers) |
+| | DeepSeek Integration | ✅ Complete | [Providers](../guide/providers) |
+| | Ollama (Local Models) | ✅ Complete | [Providers](../guide/providers) |
 | | Streaming Responses | ✅ Complete | [Streaming](/guide/streaming) |
 | | Model Metadata API | ✅ Complete | [API Reference](/api/llm-client) |
 | **Content** | Image Generation | ✅ Complete | [Image Generation](/guide/image-generation) |
@@ -47,8 +47,8 @@ The single source of truth for LLM4S project status and future direction.
 | | Workspace Isolation | ✅ Complete | [Workspace](/advanced/workspace) |
 | **Infrastructure** | Type-Safe Configuration | ✅ Complete | [Configuration](/guide/configuration) |
 | | Result-Based Errors | ✅ Complete | [Error Handling](/guide/error-handling) |
-| | Langfuse Observability | ✅ Complete | [Observability](/guide/observability) |
-| | OpenTelemetry Tracing | ✅ Complete | [Tracing](/guide/observability) |
+| | Langfuse Observability | ✅ Complete | [Observability](../guide/observability) |
+| | OpenTelemetry Tracing | ✅ Complete | [Tracing](../guide/observability) |
 | | Cross-Version (2.13/3.x) | ✅ Complete | [Installation](/getting-started/installation) |
 
 ### Agent Framework
@@ -106,8 +106,8 @@ The following features have been implemented and are production-ready but were n
 
 | Feature | Status | Description | Documentation |
 |---------|--------|-------------|---------------|
-| **Google Gemini Provider** | ✅ Complete | Full integration with Google's Gemini models (2.0-flash, 1.5-pro) | [Providers](/guide/providers) |
-| **DeepSeek Provider** | ✅ Complete | Support for DeepSeek LLM models including reasoning-capable deepseek-reasoner | [Providers](/guide/providers) |
+| **Google Gemini Provider** | ✅ Complete | Full integration with Google's Gemini models (2.0-flash, 1.5-pro) | [Providers](../guide/providers) |
+| **DeepSeek Provider** | ✅ Complete | Support for DeepSeek LLM models including reasoning-capable deepseek-reasoner | [Providers](../guide/providers) |
 | **OpenTelemetry Module** | ✅ Complete | Dedicated tracing module with OTLP export support | [Observability](/guide/observability) |
 | **Metrics Collection** | ✅ Complete | Token usage tracking, cost estimation, latency metrics | [API Reference](/api/llm-client) |
 | **Prometheus Metrics** | ✅ Complete | Production-grade metrics with PrometheusMetrics, MetricsCollector, PrometheusEndpoint, health checks | [Metrics Samples](/samples/metrics) |

@@ -144,7 +144,7 @@ Choose your path based on what you want to build:
 
 **Start here:**
 1. [Production Readiness](/advanced/production)
-2. [Observability Guide](/guide/observability)
+2. [Observability Guide](../guide/observability)
 3. [Error Handling](/advanced/error-handling)
 4. [Security Guide](/advanced/security)
 
@@ -230,7 +230,7 @@ Trace LLM calls with Langfuse integration.
 TRACING_MODE=langfuse
 ```
 
-[Learn more →](/guide/observability)
+[Learn more →](../guide/observability)
 
 ---
 
@@ -441,7 +441,7 @@ val state2 = agent.continueConversation(
 
 - **Discord**: [Join our community](https://discord.gg/4uvTPn6qww) - Active community for questions
 - **GitHub Issues**: [Report bugs](https://github.com/llm4s/llm4s/issues) - Bug reports and feature requests
-- **Documentation**: Browse the [user guide](/guide/basic-usage) - Comprehensive guides
+- **Documentation**: Browse the [user guide](../guide/basic-usage) - Comprehensive guides
 - **Examples**: Check [working examples](/examples/) - 46 code samples
 
 ### Stay Updated
@@ -462,7 +462,7 @@ val state2 = agent.continueConversation(
 
 ### Week 1: Fundamentals
 1. ✅ Complete Getting Started (you are here!)
-2. Read [Basic Usage Guide](/guide/basic-usage)
+2. Read [Basic Usage Guide](../guide/basic-usage)
 3. Try [Basic Examples](/examples/basic)
 4. Experiment with different providers
 
@@ -475,7 +475,7 @@ val state2 = agent.continueConversation(
 ### Week 3: Advanced Patterns
 1. Implement [Multi-Turn Conversations](/guide/multi-turn)
 2. Add [Context Management](/guide/context-management)
-3. Set up [Observability](/guide/observability)
+3. Set up [Observability](../guide/observability)
 4. Try [Long Conversation Example](/examples/#long-conversation)
 
 ### Week 4: Production
@@ -489,7 +489,7 @@ val state2 = agent.continueConversation(
 ## Quick Links
 
 ### Documentation
-- [User Guide](/guide/basic-usage) - Feature guides
+- [User Guide](../guide/basic-usage) - Feature guides
 - [API Reference](/api/llm-client) - API docs
 - [Advanced Topics](/advanced/production) - Production topics
 

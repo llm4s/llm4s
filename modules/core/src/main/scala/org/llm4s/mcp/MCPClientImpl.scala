@@ -9,9 +9,26 @@ import java.util.concurrent.atomic.AtomicLong
 import scala.util.{ Failure, Success, Try }
 
 /**
- * Implementation of MCP client that connects to and communicates with MCP servers.
- * Handles JSON-RPC communication, tool discovery, and execution delegation.
- * Supports both 2025-06-18 (Streamable HTTP) and 2024-11-05 (HTTP+SSE) transports.
+ * `MCPClient` implementation that connects to an MCP server over JSON-RPC.
+ *
+ * == Transport auto-detection ==
+ * For HTTP-based server configs (`StreamableHTTPTransport` or `SSETransport`),
+ * this client first attempts to connect using the MCP 2025-06-18 Streamable HTTP
+ * protocol.  If the server responds with HTTP 404 or 405, it automatically falls
+ * back to the older 2024-11-05 HTTP+SSE protocol.  Stdio servers always use the
+ * 2024-11-05 protocol.
+ *
+ * == Error swallowing in `getTools` ==
+ * `getTools()` never returns a `Left`: any failure during tool discovery (network
+ * error, parse error, missing transport) is logged and an empty sequence is
+ * returned instead. Callers cannot distinguish "server has no tools" from
+ * "server could not be reached".
+ *
+ * == Thread safety ==
+ * This class is not thread-safe. Concurrent calls to `initialize`, `getTools`,
+ * or `close` from different threads require external synchronisation.
+ *
+ * @param config Server configuration including transport type, URL/command, and timeout.
  */
 class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
   private val logger                                   = LoggerFactory.getLogger(getClass)
@@ -187,7 +204,17 @@ class MCPClientImpl(config: MCPServerConfig) extends MCPClient {
   // Track if transport was initialized during testing
   private var isTransportInitialized = false
 
-  // Retrieves and converts all available tools from the MCP server
+  /**
+   * Retrieves all tools advertised by the MCP server, converting them to
+   * `ToolFunction` instances that the agent framework can invoke.
+   *
+   * Calls `initialize()` automatically if not already connected.  Any error
+   * during transport initialisation, tool listing, or JSON parsing is logged
+   * and swallowed: this method always returns `Right(tools)` where `tools` is
+   * the (possibly empty) sequence of successfully parsed tool definitions.
+   *
+   * @return always `Right`; `Right(Seq.empty)` on any communication or parse failure
+   */
   override def getTools(): Either[String, Seq[ToolFunction[_, _]]] = {
     val result = for {
       _             <- initialize() // Ensure we're initialized

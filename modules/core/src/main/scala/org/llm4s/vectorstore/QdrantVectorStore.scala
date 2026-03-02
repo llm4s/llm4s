@@ -2,6 +2,7 @@ package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
+import org.llm4s.http.Llm4sHttpClient
 
 import scala.util.Try
 
@@ -29,7 +30,8 @@ import scala.util.Try
 final class QdrantVectorStore private (
   val baseUrl: String,
   val collectionName: String,
-  private val apiKey: Option[String]
+  private val apiKey: Option[String],
+  private val httpClient: Llm4sHttpClient
 ) extends VectorStore {
 
   private val collectionsUrl = s"$baseUrl/collections/$collectionName"
@@ -250,14 +252,8 @@ final class QdrantVectorStore private (
       .flatMap(identity)
 
   override def clear(): Result[Unit] =
-    Try {
-      // Delete and recreate collection
-      httpDelete(collectionsUrl)
-      // Collection will be recreated on next upsert
-      Right(())
-    }.toEither.left
-      .map(e => ProcessingError("qdrant-store", s"Failed to clear: ${e.getMessage}"))
-      .flatMap(identity)
+    // Delete collection - it will be recreated on next upsert
+    httpDelete(collectionsUrl)
 
   override def stats(): Result[VectorStoreStats] =
     Try {
@@ -292,63 +288,53 @@ final class QdrantVectorStore private (
 
   private def httpGet(url: String): Result[ujson.Value] =
     Try {
-      val response = requests.get(
-        url,
-        headers = authHeaders,
-        check = false
-      )
-      handleResponse(response)
+      httpClient.get(url, headers = authHeaders)
     }.toEither.left
       .map(e => ProcessingError("qdrant-store", s"HTTP GET failed: ${e.getMessage}"))
-      .flatMap(identity)
+      .flatMap(handleResponse)
 
   private def httpPost(url: String, body: ujson.Value): Result[ujson.Value] =
     Try {
-      val response = requests.post(
+      httpClient.post(
         url,
         headers = authHeaders ++ Map("Content-Type" -> "application/json"),
-        data = ujson.write(body),
-        check = false
+        body = ujson.write(body)
       )
-      handleResponse(response)
     }.toEither.left
       .map(e => ProcessingError("qdrant-store", s"HTTP POST failed: ${e.getMessage}"))
-      .flatMap(identity)
+      .flatMap(handleResponse)
 
   private def httpPut(url: String, body: ujson.Value): Result[Unit] =
     Try {
-      val response = requests.put(
+      httpClient.put(
         url,
         headers = authHeaders ++ Map("Content-Type" -> "application/json"),
-        data = ujson.write(body),
-        check = false
+        body = ujson.write(body)
       )
-      if (response.statusCode >= 200 && response.statusCode < 300) Right(())
-      else Left(ProcessingError("qdrant-store", s"HTTP PUT failed: ${response.statusCode} - ${response.text()}"))
     }.toEither.left
       .map(e => ProcessingError("qdrant-store", s"HTTP PUT failed: ${e.getMessage}"))
-      .flatMap(identity)
+      .flatMap { response =>
+        if (response.statusCode >= 200 && response.statusCode < 300) Right(())
+        else Left(ProcessingError("qdrant-store", s"HTTP PUT failed: ${response.statusCode} - ${response.body}"))
+      }
 
   private def httpDelete(url: String): Result[Unit] =
     Try {
-      val response = requests.delete(
-        url,
-        headers = authHeaders,
-        check = false
-      )
-      if (response.statusCode >= 200 && response.statusCode < 300) Right(())
-      else Left(ProcessingError("qdrant-store", s"HTTP DELETE failed: ${response.statusCode}"))
+      httpClient.delete(url, headers = authHeaders)
     }.toEither.left
       .map(e => ProcessingError("qdrant-store", s"HTTP DELETE failed: ${e.getMessage}"))
-      .flatMap(identity)
+      .flatMap { response =>
+        if (response.statusCode >= 200 && response.statusCode < 300) Right(())
+        else Left(ProcessingError("qdrant-store", s"HTTP DELETE failed: ${response.statusCode}"))
+      }
 
-  private def handleResponse(response: requests.Response): Result[ujson.Value] =
+  private def handleResponse(response: org.llm4s.http.HttpResponse): Result[ujson.Value] =
     if (response.statusCode >= 200 && response.statusCode < 300) {
-      Right(ujson.read(response.text()))
+      Right(ujson.read(response.body))
     } else if (response.statusCode == 404) {
       Left(ProcessingError("qdrant-store", "Not found"))
     } else {
-      Left(ProcessingError("qdrant-store", s"HTTP error: ${response.statusCode} - ${response.text()}"))
+      Left(ProcessingError("qdrant-store", s"HTTP error: ${response.statusCode} - ${response.body}"))
     }
 
   private def authHeaders: Map[String, String] =
@@ -480,12 +466,20 @@ object QdrantVectorStore {
    * Create a QdrantVectorStore from configuration.
    *
    * @param config The store configuration
+   * @param httpClient HTTP client for DI/testing (defaults to JDK implementation)
    * @return The vector store or error
    */
-  def apply(config: Config): Result[QdrantVectorStore] =
+  def apply(
+    config: Config,
+    httpClient: Llm4sHttpClient
+  ): Result[QdrantVectorStore] =
     Try {
-      new QdrantVectorStore(config.baseUrl, config.collectionName, config.apiKey)
+      new QdrantVectorStore(config.baseUrl, config.collectionName, config.apiKey, httpClient)
     }.toEither.left.map(e => ProcessingError("qdrant-store", s"Failed to create store: ${e.getMessage}"))
+
+  /** Create a QdrantVectorStore from configuration with the default JDK HTTP client. */
+  def apply(config: Config): Result[QdrantVectorStore] =
+    apply(config, Llm4sHttpClient.create())
 
   /**
    * Create a QdrantVectorStore from base URL.
@@ -493,15 +487,17 @@ object QdrantVectorStore {
    * @param baseUrl Base URL for Qdrant API
    * @param collectionName Collection name
    * @param apiKey Optional API key
+   * @param httpClient HTTP client for DI/testing (defaults to JDK implementation)
    * @return The vector store or error
    */
   def apply(
     baseUrl: String,
     collectionName: String = "vectors",
-    apiKey: Option[String] = None
+    apiKey: Option[String] = None,
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
   ): Result[QdrantVectorStore] =
     Try {
-      new QdrantVectorStore(baseUrl, collectionName, apiKey)
+      new QdrantVectorStore(baseUrl, collectionName, apiKey, httpClient)
     }.toEither.left.map(e => ProcessingError("qdrant-store", s"Failed to create store: ${e.getMessage}"))
 
   /**
@@ -510,10 +506,14 @@ object QdrantVectorStore {
    * Connects to localhost:6333.
    *
    * @param collectionName Collection name (default: "vectors")
+   * @param httpClient HTTP client for DI/testing (defaults to JDK implementation)
    * @return The vector store or error
    */
-  def local(collectionName: String = "vectors"): Result[QdrantVectorStore] =
-    apply(Config(collectionName = collectionName))
+  def local(
+    collectionName: String = "vectors",
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
+  ): Result[QdrantVectorStore] =
+    apply(Config(collectionName = collectionName), httpClient)
 
   /**
    * Create a QdrantVectorStore for Qdrant Cloud.
@@ -521,12 +521,14 @@ object QdrantVectorStore {
    * @param cloudUrl Qdrant Cloud URL
    * @param apiKey API key for authentication
    * @param collectionName Collection name
+   * @param httpClient HTTP client for DI/testing (defaults to JDK implementation)
    * @return The vector store or error
    */
   def cloud(
     cloudUrl: String,
     apiKey: String,
-    collectionName: String = "vectors"
+    collectionName: String = "vectors",
+    httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
   ): Result[QdrantVectorStore] =
-    apply(cloudUrl, collectionName, Some(apiKey))
+    apply(cloudUrl, collectionName, Some(apiKey), httpClient)
 }

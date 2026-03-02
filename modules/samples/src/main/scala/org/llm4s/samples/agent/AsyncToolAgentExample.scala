@@ -39,8 +39,8 @@ object AsyncToolAgentExample {
       client      <- LLMConnect.getClient(providerCfg)
 
       // Create weather tool
-      weatherTool = createWeatherTool()
-      tools       = new ToolRegistry(Seq(weatherTool))
+      weatherTool <- createWeatherTool()
+      tools = new ToolRegistry(Seq(weatherTool))
 
       agent = new Agent(client)
 
@@ -98,7 +98,7 @@ object AsyncToolAgentExample {
   /**
    * Creates a weather tool that simulates API latency.
    */
-  private def createWeatherTool(): ToolFunction[Map[String, Any], WeatherResult] = {
+  private def createWeatherTool(): org.llm4s.types.Result[ToolFunction[Map[String, Any], WeatherResult]] = {
     val schema = Schema
       .`object`[Map[String, Any]]("Weather query parameters")
       .withProperty(Schema.property("city", Schema.string("City name to get weather for")))
@@ -135,6 +135,6 @@ object AsyncToolAgentExample {
         logger.info("  [Tool] {} weather: {}C, {}", city, result.temperature, result.condition)
         result
       }
-    }.build()
+    }.buildSafe()
   }
 }

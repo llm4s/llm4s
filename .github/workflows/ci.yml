@@ -130,6 +130,9 @@ jobs:
       - name: Run tests
         run: sbt ++${{ matrix.scala }} test
       
+      - name: Run cross-version tests
+        run: sbt testCross
+      
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4

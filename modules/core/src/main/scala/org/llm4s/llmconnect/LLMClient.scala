@@ -10,7 +10,7 @@ import org.llm4s.types.{ Result, TokenBudget, HeadroomPercent }
  * providing a unified interface for completion requests, streaming responses, and token management.
  * Implementations handle provider-specific authentication, message formatting, and tool calling.
  */
-trait LLMClient {
+trait LLMClient extends AutoCloseable {
 
   /**
    * Executes a blocking completion request and returns the full response.

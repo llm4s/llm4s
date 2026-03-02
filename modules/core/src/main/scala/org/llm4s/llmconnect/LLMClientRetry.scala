@@ -13,8 +13,8 @@ import scala.concurrent.duration.{ FiniteDuration, DurationInt }
  * Retries only on recoverable errors (e.g. rate limit, timeout). Fails immediately on non-recoverable errors.
  *
  * '''Retry delay precedence''' (honors upstream backpressure):
- * - If the error provides a provider retry-delay hint (e.g. [[RateLimitError.retryDelay]], [[ServiceError.retryDelay]])
- *   and it is present and positive, that value is used so we do not retry before the server is ready.
+ * - If the error provides a provider retry-delay hint (e.g. `retryDelay` on [[org.llm4s.error.RateLimitError]],
+ *   [[org.llm4s.error.ServiceError]]) and it is present and positive, that value is used so we do not retry before the server is ready.
  * - Otherwise we fall back to local exponential backoff (baseDelay * 2^attempt) to avoid tight retry loops.
  * - The chosen delay is always capped at 30 seconds so waits remain bounded.
  */
@@ -130,8 +130,8 @@ object LLMClientRetry {
   /**
    * Chooses retry delay in milliseconds: provider hint when valid, else exponential backoff; always capped.
    *
-   * Provider retry-delay is read only from existing error types that expose it ([[RateLimitError.retryDelay]],
-   * [[ServiceError.retryDelay]]). Missing, zero, or negative values are treated as "not present" and we fall back
+   * Provider retry-delay is read only from existing error types that expose it (`retryDelay` on
+   * [[org.llm4s.error.RateLimitError]], [[org.llm4s.error.ServiceError]]). Missing, zero, or negative values are treated as "not present" and we fall back
    * to computed backoff so retry semantics remain well-defined.
    *
    * Precedence: (1) use provider delay if present and > 0; (2) else use exponential backoff. Final delay is

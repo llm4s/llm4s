@@ -1,14 +1,30 @@
 package org.llm4s.toolapi
 
 /**
- * Base trait for all schema definitions
+ * Base trait for all JSON Schema definitions used in tool parameter specifications.
+ *
+ * Each concrete subclass corresponds to a JSON Schema type and can be converted
+ * to a `ujson.Value` for inclusion in OpenAI-compatible tool definitions via
+ * [[SchemaDefinition.toJsonSchema]].
  */
 sealed trait SchemaDefinition[T] {
+
+  /**
+   * Serialise this schema to a JSON Schema `ujson.Value`.
+   *
+   * @param strict When `true`, all object properties are treated as required,
+   *               matching OpenAI strict-mode tool definitions.
+   */
   def toJsonSchema(strict: Boolean): ujson.Value
 }
 
 /**
- * String schema with validation options
+ * String schema with validation options.
+ *
+ * @param description  Human-readable description shown to the LLM
+ * @param enumValues   Restricts valid values to this closed set
+ * @param minLength    Minimum allowed string length
+ * @param maxLength    Maximum allowed string length
  */
 case class StringSchema(
   description: String,
@@ -29,13 +45,33 @@ case class StringSchema(
     base
   }
 
+  /**
+   * Restrict valid values to the given closed enumeration.
+   *
+   * @param values Allowed string values
+   */
   def withEnum(values: Seq[String]): StringSchema = copy(enumValues = Some(values))
+
+  /**
+   * Add minimum and/or maximum length constraints.
+   *
+   * @param min Optional minimum length (inclusive)
+   * @param max Optional maximum length (inclusive)
+   */
   def withLengthConstraints(min: Option[Int] = None, max: Option[Int] = None): StringSchema =
     copy(minLength = min, maxLength = max)
 }
 
 /**
- * Number schema with validation options
+ * Number schema (floating-point) with range and divisibility constraints.
+ *
+ * @param description      Human-readable description shown to the LLM
+ * @param isInteger        When `true` the JSON type is `"integer"` instead of `"number"`
+ * @param minimum          Inclusive lower bound
+ * @param maximum          Inclusive upper bound
+ * @param exclusiveMinimum Exclusive lower bound
+ * @param exclusiveMaximum Exclusive upper bound
+ * @param multipleOf       Value must be a multiple of this number
  */
 case class NumberSchema(
   description: String,
@@ -61,18 +97,42 @@ case class NumberSchema(
     base
   }
 
+  /**
+   * Add inclusive minimum and/or maximum range constraints.
+   *
+   * @param min Optional inclusive lower bound
+   * @param max Optional inclusive upper bound
+   */
   def withRange(min: Option[Double] = None, max: Option[Double] = None): NumberSchema =
     copy(minimum = min, maximum = max)
 
+  /**
+   * Add exclusive minimum and/or maximum range constraints.
+   *
+   * @param min Optional exclusive lower bound
+   * @param max Optional exclusive upper bound
+   */
   def withExclusiveRange(min: Option[Double] = None, max: Option[Double] = None): NumberSchema =
     copy(exclusiveMinimum = min, exclusiveMaximum = max)
 
+  /**
+   * Require the value to be an integer multiple of `multiple`.
+   *
+   * @param multiple The divisor
+   */
   def withMultipleOf(multiple: Double): NumberSchema =
     copy(multipleOf = Some(multiple))
 }
 
 /**
- * Integer schema with validation options
+ * Integer schema with range and divisibility constraints.
+ *
+ * @param description      Human-readable description shown to the LLM
+ * @param minimum          Inclusive lower bound
+ * @param maximum          Inclusive upper bound
+ * @param exclusiveMinimum Exclusive lower bound
+ * @param exclusiveMaximum Exclusive upper bound
+ * @param multipleOf       Value must be a multiple of this integer
  */
 case class IntegerSchema(
   description: String,
@@ -97,18 +157,37 @@ case class IntegerSchema(
     base
   }
 
+  /**
+   * Add inclusive minimum and/or maximum range constraints.
+   *
+   * @param min Optional inclusive lower bound
+   * @param max Optional inclusive upper bound
+   */
   def withRange(min: Option[Int] = None, max: Option[Int] = None): IntegerSchema =
     copy(minimum = min, maximum = max)
 
+  /**
+   * Add exclusive minimum and/or maximum range constraints.
+   *
+   * @param min Optional exclusive lower bound
+   * @param max Optional exclusive upper bound
+   */
   def withExclusiveRange(min: Option[Int] = None, max: Option[Int] = None): IntegerSchema =
     copy(exclusiveMinimum = min, exclusiveMaximum = max)
 
+  /**
+   * Require the value to be an integer multiple of `multiple`.
+   *
+   * @param multiple The divisor
+   */
   def withMultipleOf(multiple: Int): IntegerSchema =
     copy(multipleOf = Some(multiple))
 }
 
 /**
- * Boolean schema
+ * Boolean schema.
+ *
+ * @param description Human-readable description shown to the LLM
  */
 case class BooleanSchema(
   description: String
@@ -121,7 +200,13 @@ case class BooleanSchema(
 }
 
 /**
- * Array schema with validation options
+ * Array schema with item type and size constraints.
+ *
+ * @param description Human-readable description shown to the LLM
+ * @param itemSchema  Schema applied to every element of the array
+ * @param minItems    Minimum number of elements (inclusive)
+ * @param maxItems    Maximum number of elements (inclusive)
+ * @param uniqueItems When `true`, all elements must be distinct
  */
 case class ArraySchema[A](
   description: String,
@@ -144,15 +229,30 @@ case class ArraySchema[A](
     base
   }
 
+  /**
+   * Add minimum and/or maximum array size constraints.
+   *
+   * @param min Optional minimum number of items
+   * @param max Optional maximum number of items
+   */
   def withSizeConstraints(min: Option[Int] = None, max: Option[Int] = None): ArraySchema[A] =
     copy(minItems = min, maxItems = max)
 
+  /**
+   * Require all array elements to be unique.
+   *
+   * @param unique `true` to enforce uniqueness (default)
+   */
   def withUniqueItems(unique: Boolean = true): ArraySchema[A] =
     copy(uniqueItems = unique)
 }
 
 /**
- * Property definition for object schemas
+ * A named property within an [[ObjectSchema]].
+ *
+ * @param name     Property key in the JSON object
+ * @param schema   Schema applied to the property value
+ * @param required Whether the property is required
  */
 case class PropertyDefinition[T](
   name: String,
@@ -161,7 +261,15 @@ case class PropertyDefinition[T](
 )
 
 /**
- * Object schema with properties
+ * Object schema with a fixed set of typed properties.
+ *
+ * In strict mode all properties are emitted as required regardless of
+ * the individual [[PropertyDefinition.required]] flag, matching the
+ * behaviour expected by OpenAI strict-mode tool definitions.
+ *
+ * @param description          Human-readable description shown to the LLM
+ * @param properties           Ordered sequence of property definitions
+ * @param additionalProperties Whether to allow extra keys beyond those listed
  */
 case class ObjectSchema[T](
   description: String,
@@ -185,6 +293,11 @@ case class ObjectSchema[T](
     )
   }
 
+  /**
+   * Return a copy of this schema with `property` appended to the properties list.
+   *
+   * @param property The property definition to add
+   */
   def withProperty[P](property: PropertyDefinition[P]): ObjectSchema[T] =
     copy(properties = properties :+ property)
 
@@ -208,7 +321,11 @@ case class ObjectSchema[T](
 }
 
 /**
- * Nullable schema wrapper
+ * Nullable schema wrapper that widens an existing schema to also accept `null`.
+ *
+ * Emits `"type": ["<original>", "null"]` in the JSON Schema output.
+ *
+ * @param underlying The non-nullable schema to wrap
  */
 case class NullableSchema[T](
   underlying: SchemaDefinition[T]
