@@ -204,18 +204,19 @@ case class UsageSummary(
   def formattedSummary: String = {
     val avgCost =
       averageCostPerRequest.setScale(6, BigDecimal.RoundingMode.HALF_UP)
-    val cost1k       = costPer1KTokens.setScale(6, BigDecimal.RoundingMode.HALF_UP)
-    val totalCostFmt = totalCost.setScale(6, BigDecimal.RoundingMode.HALF_UP)
+    val cost1k =
+      costPer1KTokens.setScale(6, BigDecimal.RoundingMode.HALF_UP)
+    val totalCostFmt =
+      totalCost.setScale(6, BigDecimal.RoundingMode.HALF_UP)
 
-    s"""
-       |Requests: $requestCount
-       |Input tokens: $inputTokens
-       |Output tokens: $outputTokens
-       |Thinking tokens: $thinkingTokens
-       |Total cost (USD): $$${totalCostFmt}
-       |Average cost/request: $$${avgCost}
-       |Cost per 1K tokens: $$${cost1k}
-       |""".stripMargin
+    s"""Requests: $requestCount
+     |Input tokens: $inputTokens
+     |Output tokens: $outputTokens
+     |Thinking tokens: $thinkingTokens
+     |Total cost (USD): $$${totalCostFmt}
+     |Average cost/request: $$${avgCost}
+     |Cost per 1K tokens: $$${cost1k}
+     |""".stripMargin
   }
 }
 

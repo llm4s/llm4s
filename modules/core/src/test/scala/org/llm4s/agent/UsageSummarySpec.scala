@@ -88,6 +88,18 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
       "openai/gpt-4o",
       "gemini/gemini-2.0-flash"
     )
+
+    val openAi = merged.byModel("openai/gpt-4o")
+    openAi.requestCount shouldBe 2L
+    openAi.inputTokens shouldBe 13L
+    openAi.outputTokens shouldBe 12L
+    openAi.totalCost shouldBe BigDecimal("0.01")
+
+    val gemini = merged.byModel("gemini/gemini-2.0-flash")
+    gemini.requestCount shouldBe 1L
+    gemini.inputTokens shouldBe 1L
+    gemini.outputTokens shouldBe 2L
+    gemini.totalCost shouldBe BigDecimal("0.005")
   }
 
   "UsageSummary JSON" should "round-trip correctly" in {
