@@ -1,10 +1,10 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.util.Redaction
-import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ServiceError, ValidationError }
+import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, ValidationError }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.http.Llm4sHttpClient
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming._
@@ -16,7 +16,6 @@ import org.slf4j.LoggerFactory
 import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 /**
@@ -62,10 +61,11 @@ class GeminiClient(
   config: GeminiConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
-) extends LLMClient
+) extends BaseLifecycleLLMClient
     with MetricsRecording {
-  private val logger                = LoggerFactory.getLogger(getClass)
-  private val closed: AtomicBoolean = new AtomicBoolean(false)
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  protected def clientDescription: String = s"Gemini client for model ${config.model}"
 
   override def complete(
     conversation: Conversation,
@@ -465,19 +465,10 @@ class GeminiClient(
     }
   }
 
-  override def close(): Unit =
-    if (closed.compareAndSet(false, true)) {
-      (httpClient: Any) match {
-        case c: AutoCloseable => c.close()
-        case _                => ()
-      }
-    }
-
-  private def validateNotClosed: Result[Unit] =
-    if (closed.get()) {
-      Left(ConfigurationError(s"Gemini client for model ${config.model} is already closed"))
-    } else {
-      Right(())
+  override protected def releaseResources(): Unit =
+    (httpClient: Any) match {
+      case c: AutoCloseable => c.close()
+      case _                => ()
     }
 }
 

@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ServiceError, ValidationError }
 import org.llm4s.error.ThrowableOps._
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.MistralConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -11,7 +11,6 @@ import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
 import java.time.Duration
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 /**
@@ -29,11 +28,12 @@ import scala.util.Try
 class MistralClient(
   config: MistralConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-) extends LLMClient
+) extends BaseLifecycleLLMClient
     with MetricsRecording {
 
-  private val httpClient            = HttpClient.newHttpClient()
-  private val closed: AtomicBoolean = new AtomicBoolean(false)
+  private val httpClient = HttpClient.newHttpClient()
+
+  protected def clientDescription: String = s"Mistral client for model ${config.model}"
 
   override def complete(
     conversation: Conversation,
@@ -85,18 +85,6 @@ class MistralClient(
   override def getContextWindow(): Int = config.contextWindow
 
   override def getReserveCompletion(): Int = config.reserveCompletion
-
-  override def close(): Unit =
-    if (closed.compareAndSet(false, true)) {
-      ()
-    }
-
-  private def validateNotClosed: Result[Unit] =
-    if (closed.get()) {
-      Left(ConfigurationError(s"Mistral client for model ${config.model} is already closed"))
-    } else {
-      Right(())
-    }
 
   private def buildChatRequest(
     conversation: Conversation,

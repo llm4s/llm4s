@@ -8,17 +8,16 @@ import com.anthropic.models.messages.{
   ThinkingConfigEnabled,
   Tool
 }
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.TransformationResult
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ValidationError }
+import org.llm4s.error.{ AuthenticationError, RateLimitError, ValidationError }
 import org.llm4s.error.ThrowableOps._
 
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
@@ -70,7 +69,7 @@ import scala.util.Try
 class AnthropicClient(
   config: AnthropicConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-) extends LLMClient
+) extends BaseLifecycleLLMClient
     with MetricsRecording {
   // Store config for budget calculations
   private val providerConfig: ProviderConfig = config
@@ -82,7 +81,7 @@ class AnthropicClient(
     .baseUrl(config.baseUrl)
     .build()
 
-  private val closed: AtomicBoolean = new AtomicBoolean(false)
+  protected def clientDescription: String = s"Anthropic client for model ${config.model}"
 
   override def complete(
     conversation: Conversation,
@@ -537,17 +536,8 @@ curl https://api.anthropic.com/v1/messages \
     toolCalls
   }
 
-  override def close(): Unit =
-    if (closed.compareAndSet(false, true)) {
-      client.close()
-    }
-
-  private def validateNotClosed: Result[Unit] =
-    if (closed.get()) {
-      Left(ConfigurationError(s"Anthropic client for model ${config.model} is already closed"))
-    } else {
-      Right(())
-    }
+  override protected def releaseResources(): Unit =
+    client.close()
 }
 
 object AnthropicClient {

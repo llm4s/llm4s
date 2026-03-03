@@ -1,13 +1,13 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ServiceError }
+import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
 import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
@@ -15,7 +15,6 @@ import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.time.Duration
 import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 /**
@@ -33,11 +32,12 @@ import scala.util.Try
 class DeepSeekClient(
   config: DeepSeekConfig,
   protected val metrics: MetricsCollector = MetricsCollector.noop
-) extends LLMClient
+) extends BaseLifecycleLLMClient
     with MetricsRecording {
   private val httpClient = HttpClient.newHttpClient()
   private val logger     = org.slf4j.LoggerFactory.getLogger(getClass)
-  private val closed     = new AtomicBoolean(false)
+
+  protected def clientDescription: String = s"DeepSeek client for model ${config.model}"
 
   override def complete(
     conversation: Conversation,
@@ -320,19 +320,10 @@ class DeepSeekClient(
 
   override def getReserveCompletion(): Int = config.reserveCompletion
 
-  override def close(): Unit =
-    if (closed.compareAndSet(false, true)) {
-      (httpClient: Any) match {
-        case c: AutoCloseable => c.close()
-        case _                => ()
-      }
-    }
-
-  private def validateNotClosed: Result[Unit] =
-    if (closed.get()) {
-      Left(ConfigurationError(s"DeepSeek client for model ${config.model} is already closed"))
-    } else {
-      Right(())
+  override protected def releaseResources(): Unit =
+    (httpClient: Any) match {
+      case c: AutoCloseable => c.close()
+      case _                => ()
     }
 }
 

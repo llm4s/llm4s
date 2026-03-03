@@ -1,13 +1,13 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.serialization.OpenRouterToolCallDeserializer
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ServiceError }
+import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
 import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
@@ -15,7 +15,6 @@ import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.time.Duration
 import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 /**
@@ -59,10 +58,11 @@ import scala.util.Try
 class OpenRouterClient(
   config: OpenAIConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-) extends LLMClient
+) extends BaseLifecycleLLMClient
     with MetricsRecording {
-  private val httpClient            = HttpClient.newHttpClient()
-  private val closed: AtomicBoolean = new AtomicBoolean(false)
+  private val httpClient = HttpClient.newHttpClient()
+
+  protected def clientDescription: String = s"OpenRouter client for model ${config.model}"
 
   override def complete(
     conversation: Conversation,
@@ -420,19 +420,10 @@ class OpenRouterClient(
 
   override def getReserveCompletion(): Int = config.reserveCompletion
 
-  override def close(): Unit =
-    if (closed.compareAndSet(false, true)) {
-      (httpClient: Any) match {
-        case c: AutoCloseable => c.close()
-        case _                => ()
-      }
-    }
-
-  private def validateNotClosed: Result[Unit] =
-    if (closed.get()) {
-      Left(ConfigurationError(s"OpenRouter client for model ${config.model} is already closed"))
-    } else {
-      Right(())
+  override protected def releaseResources(): Unit =
+    (httpClient: Any) match {
+      case c: AutoCloseable => c.close()
+      case _                => ()
     }
 }
 

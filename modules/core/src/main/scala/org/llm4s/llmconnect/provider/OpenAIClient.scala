@@ -4,9 +4,8 @@ import com.azure.ai.openai.models._
 import com.azure.ai.openai.{ OpenAIClientBuilder, OpenAIServiceVersion, OpenAIClient => AzureOpenAIClient }
 import com.azure.core.credential.{ AzureKeyCredential, KeyCredential }
 import com.azure.core.util.IterableStream
-import org.llm4s.error.ConfigurationError
 import org.llm4s.error.ThrowableOps._
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming._
@@ -15,7 +14,6 @@ import org.llm4s.toolapi.{ AzureToolHelper, ToolRegistry }
 import org.llm4s.types.Result
 import org.slf4j.{ Logger, LoggerFactory }
 
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
@@ -53,11 +51,12 @@ class OpenAIClient private (
   private val transport: OpenAIClientTransport,
   private val config: ProviderConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector
-) extends LLMClient
+) extends BaseLifecycleLLMClient
     with MetricsRecording {
 
-  private lazy val logger: Logger   = LoggerFactory.getLogger(getClass)
-  private val closed: AtomicBoolean = new AtomicBoolean(false)
+  private lazy val logger: Logger = LoggerFactory.getLogger(getClass)
+
+  protected def clientDescription: String = s"OpenAI client for model $model"
 
   /**
    * Creates an OpenAI client for direct OpenAI API access.
@@ -154,33 +153,8 @@ class OpenAIClient private (
     extractCost = (c: Completion) => c.estimatedCost
   )
 
-  override def close(): Unit =
-    // Mark client as closed to prevent further operations.
-    // Note: AzureOpenAIClient does not implement AutoCloseable,
-    // so we only track the logical closed state for thread-safety.
-    // The Azure SDK's HttpClient is managed externally or by the builder,
-    // and the client itself has no close() method to call.
-    if (closed.compareAndSet(false, true)) {
-      logger.debug(s"OpenAI client for model $model closed")
-    }
-
-  /**
-   * Validates that the client is not closed before performing operations.
-   *
-   * Note: There is an inherent TOCTOU (time-of-check to time-of-use) gap between
-   * this validation and the actual operation. This is acceptable because the
-   * underlying AzureOpenAIClient does not implement AutoCloseable, so we only
-   * track logical closed state. Operations may still succeed even if close()
-   * is called concurrently, but subsequent operations will fail validation.
-   *
-   * @return Right(()) if client is open, Left(ConfigurationError) if closed
-   */
-  private def validateNotClosed: Result[Unit] =
-    if (closed.get()) {
-      Left(ConfigurationError(s"OpenAI client for model $model is already closed"))
-    } else {
-      Right(())
-    }
+  override protected def releaseResources(): Unit =
+    logger.debug(s"OpenAI client for model $model closed")
 
   /**
    * Handles fake streaming for models that don't support native streaming.
