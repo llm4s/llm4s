@@ -80,14 +80,14 @@ object WorkspaceTools {
         .withProperty(
           Schema.property(
             "start_line",
-            Schema.integer("Start line for reading (0-indexed)"),
+            Schema.integer("Start line for reading (1-indexed)"),
             required = false
           )
         )
         .withProperty(
           Schema.property(
             "end_line",
-            Schema.integer("End line for reading (0-indexed)"),
+            Schema.integer("End line for reading (1-indexed)"),
             required = false
           )
         )
@@ -273,10 +273,10 @@ object WorkspaceTools {
         )
       )
       .withProperty(
-        Schema.property("start_line", Schema.integer("Start line for the operation (0-indexed)"))
+        Schema.property("start_line", Schema.integer("Start line for the operation (1-indexed)"))
       )
       .withProperty(
-        Schema.property("end_line", Schema.integer("End line for the operation (0-indexed)"))
+        Schema.property("end_line", Schema.integer("End line for the operation (1-indexed)"))
       )
       .withProperty(
         Schema.property(
