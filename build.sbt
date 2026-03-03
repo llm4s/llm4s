@@ -79,6 +79,18 @@ addCommandAlias(
 )
 addCommandAlias("compileAll", ";+compile")
 addCommandAlias("testCross", ";++2.13.16 crossTestScala2/test;++3.7.1 crossTestScala3/test")
+// ---- Three-tier test aliases ----
+// Default `test` runs unit + local HTTP server tests (Tier 1), excluding tagged tests.
+// testOllama: Tier 2 — integration tests against a local Ollama instance (requires `ollama pull qwen2.5:0.5b`)
+// testSmoke:  Tier 3 — cloud smoke tests against real APIs (requires API keys in .env or environment)
+addCommandAlias(
+  "testOllama",
+  """;set core / Test / testOptions := Seq(); core/testOnly -- -n org.llm4s.tags.OllamaRequired"""
+)
+addCommandAlias(
+  "testSmoke",
+  """;set core / Test / testOptions := Seq(); core/testOnly -- -n org.llm4s.tags.CloudSmoke"""
+)
 addCommandAlias(
   "fullCrossTest",
   ";clean ;crossTestScala2/clean ;crossTestScala3/clean ;+publishLocal ;testCross"
@@ -134,6 +146,28 @@ lazy val core = (project in file("modules/core"))
     name := "llm4s-core",
     commonSettings,
     Test / fork := true,
+    // Pass API key entries from .env into forked test JVM (for smoke/integration tests).
+    // Only forwards *_API_KEY variables to avoid polluting test configuration
+    // (e.g. TRACING_MODE would break Llm4sConfigTracingSpec defaults).
+    Test / envVars ++= {
+      val envFile = (ThisBuild / baseDirectory).value / ".env"
+      if (envFile.exists()) {
+        IO.readLines(envFile)
+          .filterNot(l => l.trim.isEmpty || l.trim.startsWith("#"))
+          .flatMap { line =>
+            line.split("=", 2) match {
+              case Array(k, v) if k.trim.endsWith("_API_KEY") => Some(k.trim -> v.trim)
+              case _                                          => None
+            }
+          }
+          .toMap
+      } else Map.empty
+    },
+    Test / testOptions += Tests.Argument(
+      TestFrameworks.ScalaTest,
+      "-l", "org.llm4s.tags.OllamaRequired",
+      "-l", "org.llm4s.tags.CloudSmoke"
+    ),
     Compile / mainClass := None,
     Compile / discoveredMainClasses := Seq.empty,
     resolvers += "Vosk Repository" at "https://alphacephei.com/maven/",

@@ -165,3 +165,62 @@ jobs:
             exit 1
           fi
           echo "All tests passed!"
+
+  # Tier 2: Ollama integration tests — verifies full round-trip against a real
+  # local LLM. Only runs on pushes to main to avoid slowing down PR builds.
+  ollama-integration:
+    name: Ollama Integration
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Pull test model
+        run: ollama pull qwen2.5:0.5b
+
+      - name: Run Ollama integration tests
+        run: sbt testOllama
+
+  # Tier 3: Cloud smoke tests — minimal sanity checks against real cloud APIs.
+  # Manual trigger only (workflow_dispatch) to avoid unintended API costs.
+  cloud-smoke:
+    name: Cloud Smoke Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Run cloud smoke tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: sbt testSmoke
