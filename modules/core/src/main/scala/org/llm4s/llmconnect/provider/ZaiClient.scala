@@ -7,7 +7,6 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
 import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
@@ -74,20 +73,11 @@ class ZaiClient(
         .map(_.toLLMError)
 
     attempt.flatMap { response =>
-      response.statusCode() match {
-        case 200 =>
-          val responseJson = ujson.read(response.body())
-          Right(parseCompletion(responseJson))
-        case 401 => Left(AuthenticationError("zai", "Invalid API key"))
-        case 429 => Left(RateLimitError("zai"))
-        case status =>
-          Left(
-            ServiceError(
-              status,
-              "zai",
-              s"Z.ai API error: ${org.llm4s.util.Redaction.truncateForLog(response.body())}"
-            )
-          )
+      if (response.statusCode() >= 200 && response.statusCode() < 300) {
+        val responseJson = ujson.read(response.body())
+        Right(parseCompletion(responseJson))
+      } else {
+        HttpErrorMapper.mapHttpError(response.statusCode(), response.body(), providerName)
       }
     }
   }
@@ -119,14 +109,7 @@ class ZaiClient(
     requestResult.flatMap { response =>
       if (response.statusCode() != 200) {
         val errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
-        response.statusCode() match {
-          case 401 => Left(AuthenticationError("zai", "Invalid API key"))
-          case 429 => Left(RateLimitError("zai"))
-          case status =>
-            Left(
-              ServiceError(status, "zai", s"Z.ai API error: ${org.llm4s.util.Redaction.truncateForLog(errorBody)}")
-            )
-        }
+        HttpErrorMapper.mapHttpError(response.statusCode(), errorBody, providerName)
       } else {
         val streamResult = Try {
           val sseParser = SSEParser.createStreamingParser()

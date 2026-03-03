@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ AuthenticationError, ExecutionError, NetworkError, RateLimitError, ServiceError }
+import org.llm4s.error.{ ExecutionError, NetworkError, ServiceError }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.OllamaConfig
@@ -66,13 +66,11 @@ class OllamaClient(
     val headers     = Map("Content-Type" -> "application/json")
     try {
       val response = httpClient.post(url, headers, requestBody.render(), timeout = 120000)
-      response.statusCode match {
-        case 200 =>
-          Try(ujson.read(response.body)).toResult
-            .flatMap(json => Try(parseCompletion(json)).toResult)
-        case 401 => Left(AuthenticationError("ollama", "Unauthorized"))
-        case 429 => Left(RateLimitError("ollama"))
-        case s   => Left(ServiceError(s, "ollama", s"Ollama error: ${response.body}"))
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        Try(ujson.read(response.body)).toResult
+          .flatMap(json => Try(parseCompletion(json)).toResult)
+      } else {
+        HttpErrorMapper.mapHttpError(response.statusCode, response.body, providerName)
       }
     } catch {
       case e: InterruptedException =>
@@ -107,11 +105,7 @@ class OllamaClient(
       if (response.statusCode != 200) {
         val err = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)
         response.body.close()
-        response.statusCode match {
-          case 401 => Left(AuthenticationError("ollama", "Unauthorized"))
-          case 429 => Left(RateLimitError("ollama"))
-          case s   => Left(ServiceError(s, "ollama", s"Ollama error: $err"))
-        }
+        HttpErrorMapper.mapHttpError(response.statusCode, err, providerName)
       } else {
         val accumulator = StreamingAccumulator.create()
         val reader      = new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))

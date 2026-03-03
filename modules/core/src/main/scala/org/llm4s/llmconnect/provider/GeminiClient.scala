@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.util.Redaction
-import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, ValidationError }
+import org.llm4s.error.ValidationError
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
@@ -435,23 +435,9 @@ class GeminiClient(
       }
     }.toOption.flatten
 
-  /**
-   * Handle error responses from Gemini API.
-   */
   private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] = {
     logger.error(s"[Gemini] Error response: $statusCode")
-
-    val errorMessage = Try {
-      val json = ujson.read(body)
-      json("error")("message").str
-    }.getOrElse(body)
-
-    statusCode match {
-      case 401 | 403 => Left(AuthenticationError("gemini", errorMessage))
-      case 429       => Left(RateLimitError("gemini"))
-      case 400       => Left(ValidationError("request", errorMessage))
-      case _         => Left(ServiceError(statusCode, "gemini", s"Gemini API error: $errorMessage"))
-    }
+    HttpErrorMapper.mapHttpError(statusCode, body, providerName)
   }
 
   override protected def releaseResources(): Unit =

@@ -7,7 +7,6 @@ import org.llm4s.llmconnect.serialization.OpenRouterToolCallDeserializer
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
 import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
@@ -90,14 +89,11 @@ class OpenRouterClient(
         .map(_.toLLMError)
 
     attempt.flatMap { response =>
-      // Handle response status
-      response.statusCode() match {
-        case 200 =>
-          val responseJson = ujson.read(response.body())
-          Right(parseCompletion(responseJson))
-        case 401    => Left(AuthenticationError("openrouter", "Invalid API key"))
-        case 429    => Left(RateLimitError("openrouter"))
-        case status => Left(ServiceError(status, "openrouter", s"OpenRouter API error: ${response.body()}"))
+      if (response.statusCode() >= 200 && response.statusCode() < 300) {
+        val responseJson = ujson.read(response.body())
+        Right(parseCompletion(responseJson))
+      } else {
+        HttpErrorMapper.mapHttpError(response.statusCode(), response.body(), providerName)
       }
     }
   }
@@ -135,11 +131,7 @@ class OpenRouterClient(
       } else {
         val errorBody = Try(new String(response.body().readAllBytes(), StandardCharsets.UTF_8))
           .getOrElse("<error body unreadable>")
-        response.statusCode() match {
-          case 401    => Left(AuthenticationError("openrouter", "Invalid API key"))
-          case 429    => Left(RateLimitError("openrouter"))
-          case status => Left(ServiceError(status, "openrouter", s"OpenRouter API error: $errorBody"))
-        }
+        HttpErrorMapper.mapHttpError(response.statusCode(), errorBody, providerName)
       }
     }
 

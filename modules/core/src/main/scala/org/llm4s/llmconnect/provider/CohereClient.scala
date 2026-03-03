@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ServiceError, ValidationError }
+import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.CohereConfig
@@ -213,24 +213,8 @@ class CohereClient(
       }
     }.toEither.left.map(_.toLLMError).flatten
 
-  private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] = {
-    val details = Try {
-      val json = ujson.read(body)
-      json.obj
-        .get("message")
-        .flatMap(_.strOpt)
-        .orElse(json.obj.get("error").flatMap(_.strOpt))
-        .getOrElse(body)
-    }.getOrElse(body)
-
-    statusCode match {
-      case 401 | 403     => Left(AuthenticationError("cohere", details))
-      case 429           => Left(RateLimitError("cohere"))
-      case 400           => Left(ValidationError("request", details))
-      case s if s >= 500 => Left(ServiceError(s, "cohere", details))
-      case s             => Left(ServiceError(s, "cohere", details))
-    }
-  }
+  private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] =
+    HttpErrorMapper.mapHttpError(statusCode, body, providerName)
 }
 
 object CohereClient {

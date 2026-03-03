@@ -174,7 +174,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     result.isLeft shouldBe true
     val err = result.swap.toOption.get
     err shouldBe a[ServiceError]
-    err.message should include("OpenRouter API error")
+    err.message should include("Service unavailable")
   }
 
   it should "not invoke onChunk callback on error responses" in withServer { exchange =>

@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ServiceError, ValidationError }
+import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.MistralConfig
@@ -212,37 +212,8 @@ class MistralClient(
       }
     }.toEither.left.map(_.toLLMError).flatten
 
-  private val MaxErrorLength = 256
-
-  private def sanitizeErrorDetail(raw: String): String = {
-    val trimmed = raw.trim
-    if (trimmed.length <= MaxErrorLength) trimmed
-    else trimmed.take(MaxErrorLength) + "…[truncated]"
-  }
-
-  private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] = {
-    val details = sanitizeErrorDetail(
-      Try {
-        val json = ujson.read(body)
-        json.obj
-          .get("message")
-          .flatMap(_.strOpt)
-          .orElse(
-            json.obj
-              .get("error")
-              .flatMap(v => v.obj.get("message").flatMap(_.strOpt).orElse(v.strOpt))
-          )
-          .getOrElse(s"Mistral API error (HTTP $statusCode)")
-      }.getOrElse(s"Mistral API error (HTTP $statusCode)")
-    )
-
-    statusCode match {
-      case 401 | 403 => Left(AuthenticationError("mistral", details))
-      case 429       => Left(RateLimitError("mistral"))
-      case 400       => Left(ValidationError("request", details))
-      case s         => Left(ServiceError(s, "mistral", details))
-    }
-  }
+  private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] =
+    HttpErrorMapper.mapHttpError(statusCode, body, providerName)
 
 }
 

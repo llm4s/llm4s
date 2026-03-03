@@ -7,7 +7,6 @@ import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, Streami
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
 import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
@@ -68,15 +67,13 @@ class DeepSeekClient(
         .map(_.toLLMError)
 
     attempt.flatMap { response =>
-      response.statusCode() match {
-        case 200 =>
-          Try {
-            val responseJson = ujson.read(response.body())
-            parseCompletion(responseJson)
-          }.toEither.left.map(_.toLLMError)
-        case 401    => Left(AuthenticationError("deepseek", "Invalid API key"))
-        case 429    => Left(RateLimitError("deepseek"))
-        case status => Left(ServiceError(status, "deepseek", s"DeepSeek API error: ${response.body()}"))
+      if (response.statusCode() >= 200 && response.statusCode() < 300) {
+        Try {
+          val responseJson = ujson.read(response.body())
+          parseCompletion(responseJson)
+        }.toEither.left.map(_.toLLMError)
+      } else {
+        HttpErrorMapper.mapHttpError(response.statusCode(), response.body(), providerName)
       }
     }
   }
@@ -109,11 +106,7 @@ class DeepSeekClient(
       if (response.statusCode() != 200) {
         val errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
         Try(response.body().close()) // Ensure stream is closed on error path
-        response.statusCode() match {
-          case 401    => Left(AuthenticationError("deepseek", "Invalid API key"))
-          case 429    => Left(RateLimitError("deepseek"))
-          case status => Left(ServiceError(status, "deepseek", s"DeepSeek API error: $errorBody"))
-        }
+        HttpErrorMapper.mapHttpError(response.statusCode(), errorBody, providerName)
       } else {
         val sseParser = SSEParser.createStreamingParser()
         val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
