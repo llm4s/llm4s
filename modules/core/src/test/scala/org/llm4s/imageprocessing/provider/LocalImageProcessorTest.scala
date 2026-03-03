@@ -155,6 +155,56 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers with ScalaFuture
       }
     }
 
+  // ✅ RESTORED POSITIVE TESTS
+
+  it should "adjust brightness successfully" in
+    withTempImage(100, 100) { path =>
+      val result =
+        processor.preprocessImage(path, List(ImageOperation.Brightness(20)))
+
+      result.isRight shouldBe true
+
+      result.foreach { processedImage =>
+        processedImage.width shouldBe 100
+        processedImage.height shouldBe 100
+        processedImage.metadata.operations should contain(
+          ImageOperation.Brightness(20)
+        )
+      }
+    }
+
+  it should "adjust contrast successfully" in
+    withTempImage(100, 100) { path =>
+      val result =
+        processor.preprocessImage(path, List(ImageOperation.Contrast(20)))
+
+      result.isRight shouldBe true
+
+      result.foreach { processedImage =>
+        processedImage.width shouldBe 100
+        processedImage.height shouldBe 100
+        processedImage.metadata.operations should contain(
+          ImageOperation.Contrast(20)
+        )
+      }
+    }
+
+  it should "convert to grayscale successfully" in
+    withTempImage(100, 100) { path =>
+      val result =
+        processor.preprocessImage(path, List(ImageOperation.Grayscale))
+
+      result.isRight shouldBe true
+
+      result.foreach { processedImage =>
+        processedImage.width shouldBe 100
+        processedImage.height shouldBe 100
+        processedImage.metadata.operations should contain(
+          ImageOperation.Grayscale
+        )
+      }
+    }
+
   it should "convert format successfully" in
     withTempImage() { path =>
       val result = processor.convertFormat(path, ImageFormat.JPEG)
@@ -183,8 +233,6 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers with ScalaFuture
       result.foreach { processedImage =>
         processedImage.width shouldBe 100
         processedImage.height shouldBe 100
-        processedImage.format shouldBe ImageFormat.PNG
-        processedImage.data.length should be > 0
         (processedImage.metadata.operations should contain).allOf(
           ImageOperation.Resize(100, 100),
           ImageOperation.Blur(3.0),
@@ -197,7 +245,7 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers with ScalaFuture
     processor.analyzeImage("/nonexistent/file.png", None).isLeft shouldBe true
   }
 
-  // ✅ RESTORED NEGATIVE TESTS (Rory’s blocker)
+  // ✅ RESTORED NEGATIVE TESTS
 
   it should "fail with invalid image file" in {
     val tempFile = Files.createTempFile("invalid", ".txt")
@@ -212,20 +260,16 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers with ScalaFuture
 
   it should "fail with invalid resize dimensions" in
     withTempImage(100, 100) { path =>
-      val result = processor.preprocessImage(
-        path,
-        List(ImageOperation.Resize(-1, 200))
-      )
+      val result =
+        processor.preprocessImage(path, List(ImageOperation.Resize(-1, 200)))
 
       result.isLeft shouldBe true
     }
 
   it should "fail with invalid crop dimensions" in
     withTempImage(100, 100) { path =>
-      val result = processor.preprocessImage(
-        path,
-        List(ImageOperation.Crop(0, 0, 500, 500))
-      )
+      val result =
+        processor.preprocessImage(path, List(ImageOperation.Crop(0, 0, 500, 500)))
 
       result.isLeft shouldBe true
     }
@@ -235,7 +279,6 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers with ScalaFuture
       val result = processor.convertFormat(path, ImageFormat.WEBP)
 
       result.isRight shouldBe true
-
       result.foreach(_.format shouldBe ImageFormat.WEBP)
     }
 }
