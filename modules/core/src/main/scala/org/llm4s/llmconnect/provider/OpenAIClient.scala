@@ -51,12 +51,13 @@ class OpenAIClient private (
   private val transport: OpenAIClientTransport,
   private val config: ProviderConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector
-) extends BaseLifecycleLLMClient
-    with MetricsRecording {
+) extends BaseLifecycleLLMClient {
 
   private lazy val logger: Logger = LoggerFactory.getLogger(getClass)
 
   protected def clientDescription: String = s"OpenAI client for model $model"
+  protected def providerName: String      = "openai"
+  protected def modelName: String         = model
 
   /**
    * Creates an OpenAI client for direct OpenAI API access.
@@ -98,60 +99,48 @@ class OpenAIClient private (
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics(
-    provider = "openai",
-    model = model,
-    operation = validateNotClosed.flatMap { _ =>
-      // Transform options and messages for model-specific constraints
-      for {
-        transformed <- TransformationResult.transform(
-          model,
-          options,
-          conversation.messages,
-          dropUnsupported = true
-        )
-        transformedConversation = conversation.copy(messages = transformed.messages)
-        chatOptions = prepareChatOptions(
-          transformedConversation,
-          transformed.options,
-          transformed.requiresMaxCompletionTokens
-        )
-        completions <- Try(transport.getChatCompletions(model, chatOptions)).toEither.left
-          .map { e =>
-            logger.error(s"OpenAI completion failed for model $model", e)
-            e.toLLMError
-          }
-      } yield convertFromOpenAIFormat(completions)
-    },
-    extractUsage = (c: Completion) => c.usage,
-    extractCost = (c: Completion) => c.estimatedCost
-  )
+  ): Result[Completion] = completeWithMetrics {
+    // Transform options and messages for model-specific constraints
+    for {
+      transformed <- TransformationResult.transform(
+        model,
+        options,
+        conversation.messages,
+        dropUnsupported = true
+      )
+      transformedConversation = conversation.copy(messages = transformed.messages)
+      chatOptions = prepareChatOptions(
+        transformedConversation,
+        transformed.options,
+        transformed.requiresMaxCompletionTokens
+      )
+      completions <- Try(transport.getChatCompletions(model, chatOptions)).toEither.left
+        .map { e =>
+          logger.error(s"OpenAI completion failed for model $model", e)
+          e.toLLMError
+        }
+    } yield convertFromOpenAIFormat(completions)
+  }
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics(
-    provider = "openai",
-    model = model,
-    operation = validateNotClosed.flatMap { _ =>
-      // Transform options and messages for model-specific constraints
-      TransformationResult.transform(model, options, conversation.messages, dropUnsupported = true).flatMap {
-        transformed =>
-          val transformedConversation = conversation.copy(messages = transformed.messages)
-          val chatOptions =
-            prepareChatOptions(transformedConversation, transformed.options, transformed.requiresMaxCompletionTokens)
+  ): Result[Completion] = completeWithMetrics {
+    // Transform options and messages for model-specific constraints
+    TransformationResult.transform(model, options, conversation.messages, dropUnsupported = true).flatMap {
+      transformed =>
+        val transformedConversation = conversation.copy(messages = transformed.messages)
+        val chatOptions =
+          prepareChatOptions(transformedConversation, transformed.options, transformed.requiresMaxCompletionTokens)
 
-          if (transformed.requiresFakeStreaming) {
-            executeFakeStreaming(chatOptions, onChunk)
-          } else {
-            executeNativeStreaming(chatOptions, onChunk)
-          }
-      }
-    },
-    extractUsage = (c: Completion) => c.usage,
-    extractCost = (c: Completion) => c.estimatedCost
-  )
+        if (transformed.requiresFakeStreaming) {
+          executeFakeStreaming(chatOptions, onChunk)
+        } else {
+          executeNativeStreaming(chatOptions, onChunk)
+        }
+    }
+  }
 
   override protected def releaseResources(): Unit =
     logger.debug(s"OpenAI client for model $model closed")

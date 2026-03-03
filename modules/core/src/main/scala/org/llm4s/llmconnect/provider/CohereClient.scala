@@ -28,48 +28,42 @@ import scala.util.Try
 class CohereClient(
   config: CohereConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-) extends BaseLifecycleLLMClient
-    with MetricsRecording {
+) extends BaseLifecycleLLMClient {
 
   private val httpClient = HttpClient.newHttpClient()
 
   protected def clientDescription: String = s"Cohere client for model ${config.model}"
+  protected def providerName: String      = "cohere"
+  protected def modelName: String         = config.model
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] =
-    withMetrics(
-      provider = "cohere",
-      model = config.model,
-      operation = validateNotClosed.flatMap { _ =>
-        buildChatRequest(conversation, options).flatMap { requestBody =>
-          val request = HttpRequest
-            .newBuilder()
-            .uri(URI.create(s"${config.baseUrl}/v2/chat"))
-            .header("Content-Type", "application/json")
-            .header("Authorization", s"Bearer ${config.apiKey}")
-            .timeout(Duration.ofMinutes(2))
-            .POST(HttpRequest.BodyPublishers.ofString(requestBody.render(), StandardCharsets.UTF_8))
-            .build()
+  ): Result[Completion] = completeWithMetrics {
+    buildChatRequest(conversation, options).flatMap { requestBody =>
+      val request = HttpRequest
+        .newBuilder()
+        .uri(URI.create(s"${config.baseUrl}/v2/chat"))
+        .header("Content-Type", "application/json")
+        .header("Authorization", s"Bearer ${config.apiKey}")
+        .timeout(Duration.ofMinutes(2))
+        .POST(HttpRequest.BodyPublishers.ofString(requestBody.render(), StandardCharsets.UTF_8))
+        .build()
 
-          val attempt = Try {
-            httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
-          }.toEither.left.map(_.toLLMError)
+      val attempt = Try {
+        httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+      }.toEither.left.map(_.toLLMError)
 
-          attempt.flatMap { response =>
-            val status = response.statusCode()
-            if (status >= 200 && status < 300) {
-              parseChatResponse(response.body())
-            } else {
-              handleErrorResponse(status, response.body())
-            }
-          }
+      attempt.flatMap { response =>
+        val status = response.statusCode()
+        if (status >= 200 && status < 300) {
+          parseChatResponse(response.body())
+        } else {
+          handleErrorResponse(status, response.body())
         }
-      },
-      extractUsage = (c: Completion) => c.usage,
-      extractCost = (c: Completion) => c.estimatedCost
-    )
+      }
+    }
+  }
 
   override def streamComplete(
     conversation: Conversation,
