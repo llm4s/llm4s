@@ -15,6 +15,17 @@ import scala.annotation.tailrec
  * Performance: Optimal for testing and small to medium graphs (<100k nodes).
  * Not suitable for graphs requiring persistence.
  *
+ * @example
+ * {{{
+ * val store = new InMemoryGraphStore()
+ * for {
+ *   _ <- store.upsertNode(Node("n1", "Person", Map("name" -> ujson.Str("Alice"))))
+ *   _ <- store.upsertNode(Node("n2", "Organization", Map("name" -> ujson.Str("Acme"))))
+ *   _ <- store.upsertEdge(Edge("n1", "n2", "WORKS_FOR"))
+ *   stats <- store.stats()
+ * } yield stats // GraphStats(nodeCount=2, edgeCount=1, ...)
+ * }}}
+ *
  * @param initialGraph Optional initial graph state (defaults to empty)
  */
 class InMemoryGraphStore(initialGraph: Graph = Graph.empty) extends GraphStore {

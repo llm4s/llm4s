@@ -41,6 +41,16 @@ case class NativeQuery(
  * The primary query path uses [[GraphQueryExecutor]] against the `GraphStore` trait;
  * this generator provides an alternative for engines where native queries are more efficient.
  *
+ * @example
+ * {{{
+ * val generator = new NativeQueryGenerator(llmClient)
+ * val result = generator.generate(
+ *   question = "Find all people who work at Acme",
+ *   language = QueryLanguage.Cypher
+ * )
+ * // result: Right(NativeQuery(Cypher, "MATCH (p:Person)-[:WORKS_FOR]->(o {name:'Acme'}) RETURN p", ...))
+ * }}}
+ *
  * @param llmClient The LLM client to use for query generation
  */
 class NativeQueryGenerator(llmClient: LLMClient) {

@@ -14,6 +14,13 @@ import scala.util.Try
  * The translator provides the LLM with a summary of the graph's schema (node labels,
  * relationship types, sample properties) so it can generate appropriate query operations.
  *
+ * @example
+ * {{{
+ * val translator = new GraphQueryTranslator(llmClient, graphStore)
+ * val query = translator.translate("Who are Alice's coworkers?")
+ * // query: Right(GraphQuery.FindNeighbors(nodeId = "alice", ...))
+ * }}}
+ *
  * @param llmClient The LLM client to use for translation
  * @param graphStore The graph store whose schema is used as context
  */

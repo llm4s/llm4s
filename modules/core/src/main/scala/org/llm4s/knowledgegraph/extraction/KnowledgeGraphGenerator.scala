@@ -9,6 +9,16 @@ import org.llm4s.types.Result
 /**
  * Generates a Knowledge Graph from unstructured text using an LLM and writes it to a GraphStore.
  *
+ * @example
+ * {{{
+ * val generator = new KnowledgeGraphGenerator(llmClient, graphStore)
+ * val result = generator.extract(
+ *   text = "Alice works at Acme Corp in San Francisco.",
+ *   entityTypes = List("Person", "Organization", "Location")
+ * )
+ * // result: Right(Graph) with nodes for Alice, Acme Corp, San Francisco
+ * }}}
+ *
  * @param llmClient The LLM client to use for extraction
  * @param graphStore The graph store to write extracted entities and relationships to
  */
