@@ -636,8 +636,8 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
             // Get the underlying Java Process and use ProcessHandle for force kill
             val processField = process.getClass.getDeclaredField("p")
             processField.setAccessible(true)
-            val javaProcess = processField.get(process).asInstanceOf[java.lang.Process]
-            val pid         = javaProcess.pid()
+            val javaProcess   = processField.get(process).asInstanceOf[java.lang.Process]
+            val pid           = javaProcess.pid()
             val processHandle = java.lang.ProcessHandle.of(pid)
             if (processHandle.isPresent) {
               processHandle.get().destroyForcibly()
