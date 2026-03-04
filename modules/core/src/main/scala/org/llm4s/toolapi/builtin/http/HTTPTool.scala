@@ -125,7 +125,11 @@ object HTTPTool {
    */
   val toolSafe: Result[ToolFunction[Map[String, Any], HTTPResult]] = createSafe()
 
-  private[http] def makeRequest(
+  /** Headers that must be stripped when a redirect crosses to a different host. */
+  private val SensitiveHeaders: Set[String] =
+    Set("authorization", "cookie", "proxy-authorization")
+
+  private def makeRequest(
     urlStr: String,
     method: String,
     headers: Option[Map[String, String]],
@@ -148,63 +152,86 @@ object HTTPTool {
        *  4. If the response is 3xx and we still have hops left, extract
        *     the `Location` header, resolve it to an absolute URL, and loop.
        *
-       * This prevents the open-redirect SSRF bypass where an attacker
-       * supplies a "safe" initial URL that subsequently redirects to an
-       * internal address (e.g. 169.254.169.254).
+       * Security measures applied on each redirect:
+       *  - Sensitive headers (Authorization, Cookie) are stripped on cross-origin hops
+       *  - 301/302 convert POST→GET and drop the request body (per HTTP spec)
+       *  - 307/308 preserve the original method and body
        */
-      def go(currentUrlStr: String, hopsLeft: Int): Either[String, HTTPResult] =
+      def go(
+        currentUrlStr: String,
+        currentMethod: String,
+        currentHeaders: Option[Map[String, String]],
+        currentBody: Option[String],
+        previousHost: Option[String],
+        hopsLeft: Int
+      ): Either[String, HTTPResult] =
         Try(URI.create(currentUrlStr).toURL).toEither.left
           .map(e => s"Invalid URL: ${e.getMessage}")
           .flatMap { url =>
-            // Layer 1: scheme enforcement – only http and https are permitted.
-            // Rejecting alternative schemes (file, ftp, gopher, jar, mailto, …)
-            // prevents protocol-smuggling attacks even when a redirect is involved.
             val scheme = url.getProtocol.toLowerCase
             if (scheme != "http" && scheme != "https")
               Left(
                 s"UNSUPPORTED_PROTOCOL: Only http and https are allowed (got: '$scheme')"
               )
             else {
-              // Layer 2: SSRF domain/IP validation.
               val domain = Option(url.getHost).getOrElse("")
               if (domain.isEmpty)
                 Left("URL has no host")
               else if (!config.validateDomainWithSSRF(domain))
                 Left(s"SSRF_BLOCKED: domain '$domain' is not allowed")
-              else
-                executeRequest(url, currentUrlStr, method, headers, body, contentType, config).flatMap { result =>
-                  // Only treat standard redirect codes as redirects.
-                  // 304 (Not Modified) and other 3xx codes are not redirects.
-                  val isRedirect =
-                    Set(301, 302, 307, 308).contains(result.statusCode)
-                  if (config.followRedirects && isRedirect) {
-                    // Case-insensitive lookup – servers capitalise headers inconsistently.
-                    val locationOpt =
-                      result.headers
-                        .find { case (k, _) => k.equalsIgnoreCase("Location") }
-                        .map(_._2)
-                    locationOpt match {
-                      case None =>
-                        Right(result) // No Location header; return the redirect as-is.
-                      case Some(_) if hopsLeft <= 0 =>
-                        Left(
-                          s"TOO_MANY_REDIRECTS: Too many redirects (max ${config.maxRedirects})"
-                        )
-                      case Some(location) =>
-                        // Resolve relative Location values against the current URL so that
-                        // paths like "/callback" or "../other" are handled correctly.
-                        val absoluteLocation =
-                          Try(url.toURI.resolve(location).toString).getOrElse(location)
-                        go(absoluteLocation, hopsLeft - 1)
-                    }
-                  } else {
-                    Right(result)
-                  }
+              else {
+                // Strip sensitive headers when the redirect crosses to a different host.
+                val safeHeaders = previousHost match {
+                  case Some(prevHost) if !prevHost.equalsIgnoreCase(domain) =>
+                    currentHeaders.map(_.filterNot { case (k, _) =>
+                      SensitiveHeaders.contains(k.toLowerCase)
+                    })
+                  case _ => currentHeaders
                 }
+
+                executeRequest(url, currentUrlStr, currentMethod, safeHeaders, currentBody, contentType, config)
+                  .flatMap { result =>
+                    val isRedirect =
+                      Set(301, 302, 307, 308).contains(result.statusCode)
+                    if (config.followRedirects && isRedirect) {
+                      val locationOpt =
+                        result.headers
+                          .find { case (k, _) => k.equalsIgnoreCase("Location") }
+                          .map(_._2)
+                      locationOpt match {
+                        case None =>
+                          Right(result)
+                        case Some(_) if hopsLeft <= 0 =>
+                          Left(
+                            s"TOO_MANY_REDIRECTS: Too many redirects (max ${config.maxRedirects})"
+                          )
+                        case Some(location) =>
+                          val absoluteLocation =
+                            Try(url.toURI.resolve(location).toString).getOrElse(location)
+
+                          // Per HTTP spec: 301/302 convert POST→GET and drop the body.
+                          // 307/308 preserve the original method and body.
+                          val (nextMethod, nextBody) =
+                            if (
+                              Set(301, 302).contains(
+                                result.statusCode
+                              ) && currentMethod.toUpperCase != "GET" && currentMethod.toUpperCase != "HEAD"
+                            )
+                              ("GET", None)
+                            else
+                              (currentMethod, currentBody)
+
+                          go(absoluteLocation, nextMethod, currentHeaders, nextBody, Some(domain), hopsLeft - 1)
+                      }
+                    } else {
+                      Right(result)
+                    }
+                  }
+              }
             }
           }
 
-      go(urlStr, config.maxRedirects)
+      go(urlStr, method, headers, body, previousHost = None, config.maxRedirects)
     }
 
   private def executeRequest(

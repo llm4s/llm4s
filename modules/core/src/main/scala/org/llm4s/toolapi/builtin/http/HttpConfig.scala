@@ -30,7 +30,7 @@ case class HttpConfig(
   blockInternalIPs: Boolean = true,
   maxResponseSize: Long = 10 * 1024 * 1024, // 10 MB
   timeoutMs: Int = 30000,                   // 30 seconds
-  followRedirects: Boolean = false,         // Secure default: redirects are followed only when explicitly opted-in,
+  followRedirects: Boolean = false,         // Secure default: redirects are followed only when explicitly opted-in.
   maxRedirects: Int = 5,
   allowedMethods: Seq[String] = Seq("GET", "HEAD"), // Safe default: read-only
   userAgent: String = "llm4s-http-tool/1.0"
@@ -105,6 +105,16 @@ case class HttpConfig(
    */
   def withInternalIPsAllowed: HttpConfig =
     copy(blockInternalIPs = false)
+
+  /**
+   * Create a copy with redirect following enabled.
+   *
+   * Each redirect hop is re-validated against the SSRF filter, sensitive headers
+   * (Authorization, Cookie) are stripped on cross-origin hops, and 301/302
+   * redirects convert POST to GET per the HTTP specification.
+   */
+  def withRedirectsEnabled: HttpConfig =
+    copy(followRedirects = true)
 }
 
 object HttpConfig {
