@@ -12,7 +12,6 @@ import scala.io.Source
 import scala.jdk.CollectionConverters._
 import scala.sys.process._
 import scala.util.{ Failure, Success, Try, Using }
-import scala.util.control.Breaks.{ break, breakable }
 
 /**
  * Implementation of WorkspaceAgentInterface that operates on a local filesystem workspace.
@@ -86,20 +85,23 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
    * @param excludePatterns Patterns to exclude
    * @return true if the path should be excluded
    */
-  private def isExcluded(path: String, excludePatterns: List[String]): Boolean =
+  private def isExcluded(path: String, excludePatterns: List[String]): Boolean = {
     // Simple glob matching implementation
     // In a real implementation, use a proper glob library
+    val normalizedPath = path.replace("\\", "/")
     excludePatterns.exists { pattern =>
+      val normalizedPattern = pattern.replace("\\", "/")
       // Use a placeholder to avoid corrupting ** when replacing *
       val placeholder = "\u0000DOUBLESTAR\u0000"
-      val regex = pattern
+      val regex = normalizedPattern
         .replace("**", placeholder) // protect ** first
         .replace(".", "\\.")        // escape dots
         .replace("*", "[^/]+")      // single * matches path segment chars
         .replace(placeholder, ".*") // restore ** as .* to match any path
 
-      path.matches(regex)
+      normalizedPath.matches(regex) || (normalizedPath + "/").matches(regex)
     }
+  }
 
   /**
    * List files and directories in a specified path, optionally recursively.
@@ -512,54 +514,56 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
     // Search in files
     var matches      = List.empty[SearchMatch]
     var totalMatches = 0
-    var truncated    = false
-    val maxResults   = defaultLimits.maxSearchResults
+    var done         = false // used to break out once we've observed one match past the cap
 
-    breakable {
-      for (file <- filesToSearch) {
-        val relativePath = rootPath.relativize(file).toString
+    // stop scanning as soon as we've counted one result beyond the configured
+    // max; that allows us to report `isTruncated` correctly while avoiding a
+    // full workspace sweep. the `totalMatches` value is therefore only guaranteed
+    // to be accurate up to maxSearchResults+1.
+    for (file <- filesToSearch if !done) {
+      val relativePath = rootPath.relativize(file).toString
 
-        Try(Files.readAllLines(file, StandardCharsets.UTF_8).asScala.toList).toOption.foreach { lines =>
-          for ((line, lineIndex) <- lines.zipWithIndex) {
-            val matcher = pattern.matcher(line)
+      Try(Files.readAllLines(file, StandardCharsets.UTF_8).asScala.toList).toOption.foreach { lines =>
+        for ((line, lineIndex) <- lines.zipWithIndex if !done) {
+          val matcher = pattern.matcher(line)
 
-            if (matcher.find()) {
-              totalMatches += 1
+          if (matcher.find()) {
+            totalMatches += 1
 
-              if (matches.size < maxResults) {
-                val lineNumber    = lineIndex + 1
-                val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex)
-                val afterContext  = lines.slice(lineIndex + 1, math.min(lines.size, lineIndex + context + 1))
+            if (matches.size < defaultLimits.maxSearchResults) {
+              val lineNumber    = lineIndex + 1
+              val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex)
+              val afterContext  = lines.slice(lineIndex + 1, math.min(lines.size, lineIndex + context + 1))
 
-                matches = matches :+ SearchMatch(
-                  path = relativePath,
-                  line = lineNumber,
-                  matchText = line,
-                  contextBefore = beforeContext,
-                  contextAfter = afterContext
-                )
-              } else {
-                truncated = true
-                break()
-              }
+              matches = matches :+ SearchMatch(
+                path = relativePath,
+                line = lineNumber,
+                matchText = line,
+                contextBefore = beforeContext,
+                contextAfter = afterContext
+              )
+            }
+
+            // once we've seen one hit past the cap we can stop scanning entirely
+            if (totalMatches > defaultLimits.maxSearchResults) {
+              done = true
             }
           }
         }
-
-        if (truncated) break()
       }
     }
 
     SearchFilesResponse(
       commandId = "local",
       matches = matches,
-      isTruncated = truncated,
+      isTruncated = totalMatches > matches.size,
       totalMatches = totalMatches
     )
   }
 
   /**
    * Execute a shell command in the workspace.
+   * When sandbox config has shellAllowed=false, throws WorkspaceAgentException.
    */
   override def executeCommand(
     command: String,
@@ -617,7 +621,41 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
       val completed = !process.isAlive()
 
       if (!completed) {
+        // Attempt graceful termination first
         process.destroy()
+
+        // Wait briefly for graceful termination (3 seconds)
+        val gracefulTerminationTimeoutMs = 3000L
+        val terminationStart             = System.currentTimeMillis()
+        while (process.isAlive() && System.currentTimeMillis() - terminationStart < gracefulTerminationTimeoutMs)
+          Thread.sleep(100)
+
+        // If still alive, force kill the process using ProcessHandle API
+        if (process.isAlive()) {
+          Try {
+            // Get the underlying Java Process and use ProcessHandle for force kill
+            val processField = process.getClass.getDeclaredField("p")
+            processField.setAccessible(true)
+            val javaProcess = processField.get(process).asInstanceOf[java.lang.Process]
+            val pid         = javaProcess.pid()
+            val processHandle = java.lang.ProcessHandle.of(pid)
+            if (processHandle.isPresent) {
+              processHandle.get().destroyForcibly()
+            }
+          }.recover { case _: Exception =>
+            // Fallback: try to call destroyForcibly via reflection if ProcessHandle approach fails
+            Try {
+              process.getClass.getMethod("destroyForcibly").invoke(process)
+            }
+          }
+
+          // Wait briefly for forced termination (2 seconds)
+          val forceTerminationTimeoutMs = 2000L
+          val forceStart                = System.currentTimeMillis()
+          while (process.isAlive() && System.currentTimeMillis() - forceStart < forceTerminationTimeoutMs)
+            Thread.sleep(100)
+        }
+
         throw new WorkspaceAgentException(
           s"Command execution timed out after ${timeoutMs}ms",
           "TIMEOUT",
