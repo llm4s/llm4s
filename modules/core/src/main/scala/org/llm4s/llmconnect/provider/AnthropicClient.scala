@@ -8,26 +8,68 @@ import com.anthropic.models.messages.{
   ThinkingConfigEnabled,
   Tool
 }
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.TransformationResult
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ValidationError }
+import org.llm4s.error.{ AuthenticationError, RateLimitError, ValidationError }
 import org.llm4s.error.ThrowableOps._
 
-import java.util.Optional
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
+/**
+ * [[LLMClient]] implementation for Anthropic Claude models.
+ *
+ * Uses the official Anthropic Java SDK (`AnthropicOkHttpClient`) for all
+ * API calls. SDK exceptions are mapped to the appropriate [[org.llm4s.error.LLMError]]
+ * subtypes before being returned.
+ *
+ * == Message format adaptations ==
+ *
+ * The Anthropic Messages API differs from the OpenAI convention in several
+ * ways that this client handles transparently:
+ *
+ *  - **Default system prompt**: if the conversation contains no
+ *    `SystemMessage`, the client injects `"You are Claude, a helpful AI
+ *    assistant."` automatically. Supply an explicit `SystemMessage` to
+ *    override this.
+ *
+ *  - **Tool results as user messages**: the Anthropic API does not accept
+ *    native tool-result messages in the same turn structure as OpenAI.
+ *    `ToolMessage` values are therefore forwarded as user messages with
+ *    the prefix `"[Tool result for <toolCallId>]: "`.
+ *
+ *  - **Assistant messages with tool calls are skipped**: when an
+ *    `AssistantMessage` carries pending tool calls, it is not forwarded —
+ *    Anthropic infers the assistant turn from the subsequent tool-result
+ *    user messages.
+ *
+ *  - **Schema sanitisation**: OpenAI-specific fields (`strict`,
+ *    `additionalProperties`) are stripped from tool schemas before sending,
+ *    because Anthropic's API rejects them.
+ *
+ * == Extended thinking ==
+ *
+ * When `CompletionOptions.reasoning` is set, a `thinking` block is added
+ * to the request. The token budget is clamped to `[1024, maxTokens - 1]`
+ * to satisfy the Anthropic API constraint; the effective budget may
+ * therefore differ from what was requested.
+ *
+ * `maxTokens` defaults to 2048 when not set in `CompletionOptions` because
+ * the Anthropic API requires the field.
+ *
+ * @param config  `AnthropicConfig` carrying the API key, model name, and base URL.
+ * @param metrics Receives per-call latency and token-usage events.
+ *                Defaults to `MetricsCollector.noop`.
+ */
 class AnthropicClient(
   config: AnthropicConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-) extends LLMClient
-    with MetricsRecording {
+) extends BaseLifecycleLLMClient {
   // Store config for budget calculations
   private val providerConfig: ProviderConfig = config
 
@@ -38,66 +80,62 @@ class AnthropicClient(
     .baseUrl(config.baseUrl)
     .build()
 
-  private val closed: AtomicBoolean = new AtomicBoolean(false)
+  protected def clientDescription: String = s"Anthropic client for model ${config.model}"
+  protected def providerName: String      = "anthropic"
+  protected def modelName: String         = config.model
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics(
-    provider = "anthropic",
-    model = config.model,
-    operation = validateNotClosed.flatMap { _ =>
-      // Transform options and messages for model-specific constraints
-      TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
-        transformed =>
-          val transformedConversation = conversation.copy(messages = transformed.messages)
+  ): Result[Completion] = completeWithMetrics {
+    // Transform options and messages for model-specific constraints
+    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
+      transformed =>
+        val transformedConversation = conversation.copy(messages = transformed.messages)
 
-          // Create message parameters builder
-          val paramsBuilder = MessageCreateParams
-            .builder()
-            .model(config.model)
-            .temperature(transformed.options.temperature.floatValue())
-            .topP(transformed.options.topP.floatValue())
+        // Create message parameters builder
+        val paramsBuilder = MessageCreateParams
+          .builder()
+          .model(config.model)
+          .temperature(transformed.options.temperature.floatValue())
+          .topP(transformed.options.topP.floatValue())
 
-          // Add max tokens if specified
-          // max tokens is required by the api
-          val maxTokens = transformed.options.maxTokens.getOrElse(2048)
-          paramsBuilder.maxTokens(maxTokens)
+        // Add max tokens if specified
+        // max tokens is required by the api
+        val maxTokens = transformed.options.maxTokens.getOrElse(2048)
+        paramsBuilder.maxTokens(maxTokens)
 
-          // Add extended thinking configuration if requested
-          // Minimum budget is 1024 tokens, must be less than max_tokens
-          transformed.options.effectiveBudgetTokens.foreach { budgetTokens =>
-            val effectiveBudget = math.max(1024, math.min(budgetTokens, maxTokens - 1))
-            paramsBuilder.thinking(
-              ThinkingConfigEnabled.builder().budgetTokens(effectiveBudget.toLong).build()
-            )
-          }
+        // Add extended thinking configuration if requested
+        // Minimum budget is 1024 tokens, must be less than max_tokens
+        transformed.options.effectiveBudgetTokens.foreach { budgetTokens =>
+          val effectiveBudget = clampBudgetTokens(budgetTokens, maxTokens)
+          paramsBuilder.thinking(
+            ThinkingConfigEnabled.builder().budgetTokens(effectiveBudget.toLong).build()
+          )
+        }
 
-          // Add tools if specified
-          if (transformed.options.tools.nonEmpty) {
-            transformed.options.tools.foreach(tool => paramsBuilder.addTool(convertToolToAnthropicTool(tool)))
-          }
+        // Add tools if specified
+        if (transformed.options.tools.nonEmpty) {
+          transformed.options.tools.foreach(tool => paramsBuilder.addTool(convertToolToAnthropicTool(tool)))
+        }
 
-          // Add messages from conversation
-          addMessagesToParams(transformedConversation, paramsBuilder)
+        // Add messages from conversation
+        addMessagesToParams(transformedConversation, paramsBuilder)
 
-          // Build the parameters
-          val messageParams = paramsBuilder.build()
+        // Build the parameters
+        val messageParams = paramsBuilder.build()
 
-          val messageService = client.messages()
-          // Make API call
-          val attempt = Try(messageService.create(messageParams)).toEither.left.map {
-            case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
-            case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
-            case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
-            case e: Exception                                          => e.toLLMError
-          }
-          attempt.map(convertFromAnthropicResponse) // Convert response to our model
-      }
-    },
-    extractUsage = (c: Completion) => c.usage,
-    extractCost = (c: Completion) => c.estimatedCost
-  )
+        val messageService = client.messages()
+        // Make API call
+        val attempt = Try(messageService.create(messageParams)).toEither.left.map {
+          case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
+          case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
+          case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
+          case e: Exception                                          => e.toLLMError
+        }
+        attempt.map(convertFromAnthropicResponse) // Convert response to our model
+    }
+  }
 
   /*
 curl https://api.anthropic.com/v1/messages \
@@ -127,184 +165,192 @@ curl https://api.anthropic.com/v1/messages \
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics(
-    provider = "anthropic",
-    model = config.model,
-    operation = {
-      validateNotClosed.flatMap { _ =>
-        // Transform options and messages for model-specific constraints
-        TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
-          transformed =>
-            val transformedConversation = conversation.copy(messages = transformed.messages)
+  ): Result[Completion] = completeWithMetrics {
+    // Transform options and messages for model-specific constraints
+    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
+      transformed =>
+        val transformedConversation = conversation.copy(messages = transformed.messages)
 
-            // Build parameters
-            val paramsBuilder = MessageCreateParams
-              .builder()
-              .model(config.model)
-              .temperature(transformed.options.temperature.floatValue())
-              .topP(transformed.options.topP.floatValue())
+        // Build parameters
+        val paramsBuilder = MessageCreateParams
+          .builder()
+          .model(config.model)
+          .temperature(transformed.options.temperature.floatValue())
+          .topP(transformed.options.topP.floatValue())
 
-            // Add max tokens if specified (required by the API)
-            val maxTokens = transformed.options.maxTokens.getOrElse(2048)
-            paramsBuilder.maxTokens(maxTokens)
+        // Add max tokens if specified (required by the API)
+        val maxTokens = transformed.options.maxTokens.getOrElse(2048)
+        paramsBuilder.maxTokens(maxTokens)
 
-            // Add extended thinking configuration if requested
-            transformed.options.effectiveBudgetTokens.foreach { budgetTokens =>
-              val effectiveBudget = math.max(1024, math.min(budgetTokens, maxTokens - 1))
-              paramsBuilder.thinking(
-                ThinkingConfigEnabled.builder().budgetTokens(effectiveBudget.toLong).build()
-              )
-            }
+        // Add extended thinking configuration if requested
+        transformed.options.effectiveBudgetTokens.foreach { budgetTokens =>
+          val effectiveBudget = clampBudgetTokens(budgetTokens, maxTokens)
+          paramsBuilder.thinking(
+            ThinkingConfigEnabled.builder().budgetTokens(effectiveBudget.toLong).build()
+          )
+        }
 
-            // Add tools if specified
-            if (transformed.options.tools.nonEmpty)
-              transformed.options.tools.foreach(t => paramsBuilder.addTool(convertToolToAnthropicTool(t)))
-            // Add messages from conversation
-            addMessagesToParams(transformedConversation, paramsBuilder)
-            // Build the parameters
-            val messageParams = paramsBuilder.build()
+        // Add tools if specified
+        if (transformed.options.tools.nonEmpty)
+          transformed.options.tools.foreach(t => paramsBuilder.addTool(convertToolToAnthropicTool(t)))
+        // Add messages from conversation
+        addMessagesToParams(transformedConversation, paramsBuilder)
+        // Build the parameters
+        val messageParams = paramsBuilder.build()
 
-            // Create accumulator for building the final completion
-            val accumulator                      = StreamingAccumulator.create()
-            var currentMessageId: Option[String] = None
+        // Create accumulator for building the final completion
+        val accumulator                      = StreamingAccumulator.create()
+        var currentMessageId: Option[String] = None
 
-            // Process the stream
-            val attempt = Try {
-              val messageService = client.messages()
-              val streamResponse = messageService.createStreaming(messageParams)
+        // Process the stream
+        val attempt = Try {
+          val messageService = client.messages()
+          val streamResponse = messageService.createStreaming(messageParams)
 
-              import scala.jdk.StreamConverters._
-              import scala.jdk.OptionConverters._
-              val stream: Iterator[RawMessageStreamEvent] = streamResponse.stream().toScala(Iterator)
-              val loopTry = Try {
-                stream.foreach { event =>
-                  // Process different event types using the event's accessor methods
-                  // Check for message start event
-                  val messageStartOpt = event.messageStart()
-                  if (messageStartOpt != null && messageStartOpt.isPresent) {
-                    val msgStart = messageStartOpt.get()
-                    currentMessageId = Some(msgStart.message().id())
-                  }
+          import scala.jdk.StreamConverters._
+          val stream: Iterator[RawMessageStreamEvent] = streamResponse.stream().toScala(Iterator)
+          val loopTry = Try {
+            stream.foreach { event =>
+              // Process different event types using the event's accessor methods
+              // Check for message start event
+              val messageStartOpt = event.messageStart()
+              if (messageStartOpt != null && messageStartOpt.isPresent) {
+                val msgStart = messageStartOpt.get()
+                currentMessageId = Some(msgStart.message().id())
+              }
 
-                  // Check for content block delta event
-                  val contentDeltaOpt = event.contentBlockDelta()
-                  if (contentDeltaOpt != null && contentDeltaOpt.isPresent) {
-                    val contentDelta = contentDeltaOpt.get()
-                    val delta        = contentDelta.delta()
+              // Check for content block delta event
+              val contentDeltaOpt = event.contentBlockDelta()
+              if (contentDeltaOpt != null && contentDeltaOpt.isPresent) {
+                val contentDelta = contentDeltaOpt.get()
+                val delta        = contentDelta.delta()
 
-                    // Handle text content delta
-                    Try(delta.text()).foreach { textOpt =>
-                      if (textOpt != null && textOpt.isPresent) {
-                        val textDelta = textOpt.get()
-                        val text      = textDelta.text()
-                        if (text != null && text.nonEmpty) {
-                          val chunk = StreamedChunk(
-                            id = currentMessageId.getOrElse(""),
-                            content = Some(text),
-                            toolCall = None,
-                            finishReason = None
-                          )
-                          accumulator.addChunk(chunk)
-                          onChunk(chunk)
-                        }
-                      }
-                    }
-
-                    // Handle thinking content delta
-                    Try(delta.thinking()).foreach { thinkingOpt =>
-                      if (thinkingOpt != null && thinkingOpt.isPresent) {
-                        val thinkingDelta = thinkingOpt.get()
-                        val thinkingText  = thinkingDelta.thinking()
-                        if (thinkingText != null && thinkingText.nonEmpty) {
-                          val chunk = StreamedChunk(
-                            id = currentMessageId.getOrElse(""),
-                            content = None,
-                            toolCall = None,
-                            finishReason = None,
-                            thinkingDelta = Some(thinkingText)
-                          )
-                          accumulator.addChunk(chunk)
-                          onChunk(chunk)
-                        }
-                      }
-                    }
-                  }
-
-                  val contentStartOpt = event.contentBlockStart()
-                  if (contentStartOpt != null && contentStartOpt.isPresent) {
-                    val contentStart = contentStartOpt.get()
-                    val block        = contentStart.contentBlock()
-                    if (block.isToolUse) {
-                      val toolUse = block.asToolUse()
+                // Handle text content delta
+                Try(delta.text()).foreach { textOpt =>
+                  if (textOpt != null && textOpt.isPresent) {
+                    val textDelta = textOpt.get()
+                    val text      = textDelta.text()
+                    if (text != null && text.nonEmpty) {
                       val chunk = StreamedChunk(
                         id = currentMessageId.getOrElse(""),
-                        content = None,
-                        toolCall = Some(ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = ujson.Null)),
+                        content = Some(text),
+                        toolCall = None,
                         finishReason = None
                       )
                       accumulator.addChunk(chunk)
                       onChunk(chunk)
                     }
                   }
+                }
 
-                  val messageStopOpt = event.messageStop()
-                  if (messageStopOpt != null && messageStopOpt.isPresent) {
-                    val chunk = StreamedChunk(
-                      id = currentMessageId.getOrElse(""),
-                      content = None,
-                      toolCall = None,
-                      finishReason = Some("stop")
-                    )
-                    accumulator.addChunk(chunk)
-                    onChunk(chunk)
-                  }
-
-                  val messageDeltaOpt = event.messageDelta()
-                  if (messageDeltaOpt != null && messageDeltaOpt.isPresent) {
-                    val msgDelta = messageDeltaOpt.get()
-                    Try(msgDelta.usage()).foreach { usage =>
-                      if (usage != null) {
-                        val inputTokens = Option(usage.inputTokens()) match {
-                          case Some(opt: Optional[_]) => opt.toScala.map(_.toInt).getOrElse(0)
-                          case _                      => 0
-                        }
-                        val outputTokens = Option(usage.outputTokens()).map(_.toInt).getOrElse(0)
-                        if (inputTokens > 0 || outputTokens > 0) accumulator.updateTokens(inputTokens, outputTokens)
-                      }
+                // Handle thinking content delta
+                Try(delta.thinking()).foreach { thinkingOpt =>
+                  if (thinkingOpt != null && thinkingOpt.isPresent) {
+                    val thinkingDelta = thinkingOpt.get()
+                    val thinkingText  = thinkingDelta.thinking()
+                    if (thinkingText != null && thinkingText.nonEmpty) {
+                      val chunk = StreamedChunk(
+                        id = currentMessageId.getOrElse(""),
+                        content = None,
+                        toolCall = None,
+                        finishReason = None,
+                        thinkingDelta = Some(thinkingText)
+                      )
+                      accumulator.addChunk(chunk)
+                      onChunk(chunk)
                     }
                   }
                 }
               }
-              Try(streamResponse.close());
-              loopTry.get
-            }.toEither.left
-              .map {
-                case e: com.anthropic.errors.UnauthorizedException => AuthenticationError("anthropic", e.getMessage)
-                case _: com.anthropic.errors.RateLimitException    => RateLimitError("anthropic")
-                case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
-                case e: Exception                                          => e.toLLMError
+
+              val contentStartOpt = event.contentBlockStart()
+              if (contentStartOpt != null && contentStartOpt.isPresent) {
+                val contentStart = contentStartOpt.get()
+                val block        = contentStart.contentBlock()
+                if (block.isToolUse) {
+                  val toolUse = block.asToolUse()
+                  val chunk = StreamedChunk(
+                    id = currentMessageId.getOrElse(""),
+                    content = None,
+                    toolCall = Some(ToolCall(id = toolUse.id(), name = toolUse.name(), arguments = ujson.Obj())),
+                    finishReason = None
+                  )
+                  accumulator.addChunk(chunk)
+                  onChunk(chunk)
+                }
               }
 
-            // Return the accumulated completion
-            attempt.flatMap(_ =>
-              accumulator.toCompletion.map { c =>
-                val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-                c.copy(model = config.model, estimatedCost = cost)
+              val messageStopOpt = event.messageStop()
+              if (messageStopOpt != null && messageStopOpt.isPresent) {
+                val chunk = StreamedChunk(
+                  id = currentMessageId.getOrElse(""),
+                  content = None,
+                  toolCall = None,
+                  finishReason = Some("stop")
+                )
+                accumulator.addChunk(chunk)
+                onChunk(chunk)
               }
-            )
-        }
-      }
-    },
-    extractUsage = (c: Completion) => c.usage,
-    extractCost = (c: Completion) => c.estimatedCost
-  )
+
+              val messageDeltaOpt = event.messageDelta()
+              if (messageDeltaOpt != null && messageDeltaOpt.isPresent) {
+                val msgDelta = messageDeltaOpt.get()
+                Try(msgDelta.usage()).foreach { usage =>
+                  if (usage != null) {
+                    val inputTokens = Option(usage.inputTokens()) match {
+                      case Some(opt: java.util.Optional[_]) if opt.isPresent =>
+                        Option(opt.get())
+                          .collect { case n: java.lang.Number => n.intValue() }
+                          .getOrElse(0)
+                      case _ => 0
+                    }
+                    val outputTokens = Option(usage.outputTokens()).map(_.toInt).getOrElse(0)
+                    if (inputTokens > 0 || outputTokens > 0) accumulator.updateTokens(inputTokens, outputTokens)
+                  }
+                }
+              }
+            }
+          }
+          Try(streamResponse.close());
+          loopTry.get
+        }.toEither.left
+          .map {
+            case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
+            case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
+            case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
+            case e: Exception                                          => e.toLLMError
+          }
+
+        // Return the accumulated completion
+        attempt.flatMap(_ =>
+          accumulator.toCompletion.map { c =>
+            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+            c.copy(model = config.model, estimatedCost = cost)
+          }
+        )
+    }
+  }
 
   override def getContextWindow(): Int = providerConfig.contextWindow
 
   override def getReserveCompletion(): Int = providerConfig.reserveCompletion
 
+  /**
+   * Clamps an extended-thinking budget to the range `[1024, maxTokens - 1]`.
+   *
+   * The Anthropic API requires `budgetTokens >= 1024` and `budgetTokens < maxTokens`.
+   * Values outside this range are silently adjusted; callers should prefer
+   * supplying valid budgets rather than relying on clamping.
+   *
+   * @param budgetTokens requested thinking-token budget; may be any non-negative value
+   * @param maxTokens    effective `max_tokens` for the request; determines the upper bound
+   * @return the clamped budget in `[1024, maxTokens - 1]`
+   */
+  private[provider] def clampBudgetTokens(budgetTokens: Int, maxTokens: Int): Int =
+    math.max(1024, math.min(budgetTokens, maxTokens - 1))
+
   // Add messages from conversation to the parameters builder
-  private def addMessagesToParams(
+  private[provider] def addMessagesToParams(
     conversation: Conversation,
     paramsBuilder: MessageCreateParams.Builder
   ): Unit = {
@@ -341,26 +387,34 @@ curl https://api.anthropic.com/v1/messages \
     }
   }
 
-  // Convert our ToolFunction to Anthropic's Tool
-  private def convertToolToAnthropicTool(toolFunction: ToolFunction[_, _]): Tool = {
-    // note: in case of debug set this environment variable -- `ANTHROPIC_LOG=debug`
-
-    val objectSchema  = toolFunction.schema.asInstanceOf[ObjectSchema[_]]
+  /**
+   * Convert a ToolFunction to Anthropic's Tool format.
+   * Strips OpenAI-specific fields like 'strict' and 'additionalProperties' from the schema
+   * to maintain compatibility with the Anthropic API.
+   */
+  private[provider] def convertToolToAnthropicTool(toolFunction: ToolFunction[_, _]): Tool = {
+    val objectSchema = toolFunction.schema.asInstanceOf[ObjectSchema[_]]
+    // Generate raw schema without 'strict' mode
     val jsonSchemaStr = objectSchema.toJsonSchema(false).render()
 
-    // Parse the JSON schema and extract properties
+    // Parse the JSON and sanitize the schema
+    val jsonNode = ujson.read(jsonSchemaStr)
+
+    // Fix: Remove OpenAI-only top-level fields
+    jsonNode.obj.remove("strict")
+    jsonNode.obj.remove("additionalProperties")
+
+    // Recursively strip additionalProperties from nested parts
+    stripAdditionalProperties(jsonNode)
+
+    val sanitizedSchemaStr = jsonNode.render()
     val jsonSchema: JsonObject =
-      ObjectMappers.jsonMapper().readValue(jsonSchemaStr, classOf[JsonObject])
+      ObjectMappers.jsonMapper().readValue(sanitizedSchemaStr, classOf[JsonObject])
     val jsonSchemaMap = jsonSchema.values()
 
-    // Build the input schema using raw JSON value for properties
-    // The new SDK requires proper Properties type, so we use the putAdditionalProperty approach
     val inputSchemaBuilder = Tool.InputSchema.builder()
-
-    // Convert the properties JsonValue to Properties type
-    val propertiesValue = jsonSchemaMap.get("properties")
+    val propertiesValue    = jsonSchemaMap.get("properties")
     if (propertiesValue != null) {
-      // Use the properties via JsonValue wrapper
       val propertiesObj = ObjectMappers
         .jsonMapper()
         .readValue(
@@ -370,14 +424,29 @@ curl https://api.anthropic.com/v1/messages \
       inputSchemaBuilder.properties(propertiesObj)
     }
 
-    val tool = Tool
+    Tool
       .builder()
       .name(toolFunction.name)
       .description(toolFunction.description)
       .inputSchema(inputSchemaBuilder.build().validate())
       .build()
-    tool
   }
+
+  /**
+   * Recursively strip 'additionalProperties' from all levels of a JSON schema.
+   * This ensures compatibility with providers that don't support OpenAI-specific schema extensions.
+   */
+  private[provider] def stripAdditionalProperties(json: ujson.Value): Unit =
+    json match {
+      case obj: ujson.Obj =>
+        obj.value.remove("additionalProperties")
+        obj.value.get("properties").foreach(props => props.obj.values.foreach(stripAdditionalProperties))
+        obj.value.get("items").foreach(stripAdditionalProperties)
+        Seq("anyOf", "oneOf", "allOf").foreach { key =>
+          obj.value.get(key).foreach(arr => arr.arr.foreach(stripAdditionalProperties))
+        }
+      case _ =>
+    }
 
   // Convert Anthropic response to our model
   private def convertFromAnthropicResponse(response: Message): Completion = {
@@ -401,15 +470,22 @@ curl https://api.anthropic.com/v1/messages \
 
     // Extract token usage, including thinking tokens if available
     val usage = response.usage()
-    val baseTokenUsage = TokenUsage(
+
+    val cachedTokens: Option[Int] =
+      Option(usage.cacheReadInputTokens())
+        .flatMap(opt => if (opt.isPresent) Some(opt.get().toInt) else None)
+
+    val cacheCreationTokens: Option[Int] =
+      Option(usage.cacheCreationInputTokens())
+        .flatMap(opt => if (opt.isPresent) Some(opt.get().toInt) else None)
+
+    val tokenUsage = TokenUsage(
       promptTokens = usage.inputTokens().toInt,
       completionTokens = usage.outputTokens().toInt,
-      totalTokens = (usage.inputTokens() + usage.outputTokens()).toInt
+      totalTokens = (usage.inputTokens() + usage.outputTokens()).toInt,
+      cachedTokens = cachedTokens,
+      cacheCreationTokens = cacheCreationTokens
     )
-
-    // Check for thinking tokens in cache usage (Anthropic reports cache_read_input_tokens for thinking)
-    // Note: The SDK may expose thinking tokens differently - adjust as needed
-    val tokenUsage = baseTokenUsage
 
     // Estimate cost using CostEstimator
     val cost = CostEstimator.estimate(config.model, tokenUsage)
@@ -447,23 +523,23 @@ curl https://api.anthropic.com/v1/messages \
     toolCalls
   }
 
-  override def close(): Unit =
-    if (closed.compareAndSet(false, true)) {
-      // The Anthropic OkHttpClient does not expose a close() method.
-      // We track logical closed state for thread-safety.
-    }
-
-  private def validateNotClosed: Result[Unit] =
-    if (closed.get()) {
-      Left(ConfigurationError(s"Anthropic client for model ${config.model} is already closed"))
-    } else {
-      Right(())
-    }
+  override protected def releaseResources(): Unit =
+    client.close()
 }
 
 object AnthropicClient {
   import org.llm4s.types.TryOps
 
+  /**
+   * Constructs an [[AnthropicClient]], wrapping any construction-time
+   * exception in a `Left`.
+   *
+   * @param config  `AnthropicConfig` with API key, model, and base URL.
+   * @param metrics Receives per-call latency and token-usage events.
+   *                Defaults to `MetricsCollector.noop`.
+   * @return `Right(client)` on success; `Left(LLMError)` if the underlying
+   *         SDK client cannot be initialised.
+   */
   def apply(
     config: AnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop

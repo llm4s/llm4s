@@ -2,49 +2,220 @@ name: Claude Code
 
 on:
   issue_comment:
-    types: [created]
+    types: [ created ]
   pull_request_review_comment:
-    types: [created]
+    types: [ created ]
   issues:
-    types: [opened, assigned]
+    types: [ opened, assigned ]
   pull_request_review:
-    types: [submitted]
+    types: [ submitted ]
 
 jobs:
   claude:
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-      (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      pull-requests: write
+      issues: write
       id-token: write
-      actions: read # Required for Claude to read CI results on PRs
+      actions: read
+    env:
+      DEFAULT_REVIEW_DOC: docs/reference/review-guidelines.md
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
+      - name: Resolve PR context
+        id: context
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          case "${GITHUB_EVENT_NAME}" in
+            issue_comment)
+              pr_number="$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")"
+              trigger_text="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")"
+              ;;
+            pull_request_review_comment)
+              pr_number="$(jq -r '.pull_request.number' "$GITHUB_EVENT_PATH")"
+              trigger_text="$(jq -r '.comment.body // ""' "$GITHUB_EVENT_PATH")"
+              ;;
+            pull_request_review)
+              pr_number="$(jq -r '.pull_request.number' "$GITHUB_EVENT_PATH")"
+              trigger_text="$(jq -r '.review.body // ""' "$GITHUB_EVENT_PATH")"
+              ;;
+            *)
+              echo "Unsupported event: ${GITHUB_EVENT_NAME}" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ -z "$pr_number" || "$pr_number" == "null" ]]; then
+            echo "Unable to resolve PR number from event payload" >&2
+            exit 1
+          fi
+
+          {
+            echo "pr_number=$pr_number"
+            echo "trigger_text<<EOF"
+            echo "$trigger_text"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Claude prompt
+        id: prepare_prompt
+        shell: bash
+        env:
+          TRIGGER_TEXT: ${{ steps.context.outputs.trigger_text }}
+        run: |
+          set -euo pipefail
+
+          review_doc=""
+          if [[ "$TRIGGER_TEXT" =~ --reviewdoc[[:space:]]+([^[:space:]]+) ]]; then
+            review_doc="${BASH_REMATCH[1]}"
+            review_doc="${review_doc%\"}"
+            review_doc="${review_doc#\"}"
+            review_doc="${review_doc%\'}"
+            review_doc="${review_doc#\'}"
+          else
+            review_doc="$DEFAULT_REVIEW_DOC"
+          fi
+
+          if [[ "$review_doc" = /* ]]; then
+            echo "Absolute paths are not allowed for --reviewdoc: $review_doc" >&2
+            exit 1
+          fi
+
+          if [[ "$review_doc" == *"/../"* ]] || [[ "$review_doc" == "../"* ]] || [[ "$review_doc" == *"/.." ]]; then
+            echo "Path traversal is not allowed for --reviewdoc: $review_doc" >&2
+            exit 1
+          fi
+
+          if [[ "$review_doc" == -* ]]; then
+            echo "Invalid --reviewdoc value: $review_doc" >&2
+            exit 1
+          fi
+
+          if [[ ! -f "$review_doc" ]]; then
+            echo "Review guideline document not found: $review_doc" >&2
+            exit 1
+          fi
+
+          clean_request="$(printf '%s' "$TRIGGER_TEXT" | sed -E 's/[[:space:]]--reviewdoc[[:space:]]+(["\047][^"\047]+["\047]|[^[:space:]]+)//g')"
+          clean_request="$(printf '%s' "$clean_request" | sed -E 's/@claude//g')"
+          clean_request="$(printf '%s' "$clean_request" | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+
+          if [[ -z "$clean_request" ]]; then
+            clean_request="Run mandatory strict review now."
+          fi
+
+          {
+            echo "review_doc_path=$review_doc"
+            echo "clean_request<<EOF"
+            echo "$clean_request"
+            echo "EOF"
+            echo "prompt<<EOF"
+            printf '%s\n' \
+              "MANDATORY PR REVIEW MODE" \
+              "" \
+              "Pull request number: #${{ steps.context.outputs.pr_number }}" \
+              "Review guideline source of truth: $review_doc" \
+              "" \
+              "Non-negotiable instructions:" \
+              "1. Review the full PR diff in detail." \
+              "2. Review the entire repository holistically (aerial architecture/system impact), not just changed files." \
+              "3. Apply all sections and subsections from the review guideline document." \
+              "4. Classify findings into blocking and non-blocking." \
+              "5. Every finding must include file:line references." \
+              "6. Use practical, strict, realistic feedback." \
+              "7. Do not respond with placeholders like 'ready when you are'." \
+              "" \
+              "Execution constraints:" \
+              "- Use gh/git/ripgrep and shell commands as needed." \
+              "- Do not run build or tests. State explicitly that tests/build were not run." \
+              "" \
+              "User request:" \
+              "$clean_request" \
+              "" \
+              "Output contract:" \
+              "- Return structured JSON only via the provided schema fields." \
+              "- Put final PR-ready markdown summary in review_summary_markdown." \
+              "- If there are no findings, return empty arrays and explain residual risk in holistic_assessment."
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Run Claude Code
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          
-          # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
             actions: read
+          prompt: ${{ steps.prepare_prompt.outputs.prompt }}
+          claude_args: |
+            --max-turns 30
+            --allowedTools "Bash"
+            --json-schema '{"type":"object","properties":{"review_status":{"type":"string","enum":["request_changes","comment"]},"blocking_findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"line":{"type":"integer","minimum":1},"title":{"type":"string"},"details":{"type":"string"}},"required":["file","line","title","details"]}},"non_blocking_findings":{"type":"array","items":{"type":"object","properties":{"file":{"type":"string"},"line":{"type":"integer","minimum":1},"title":{"type":"string"},"details":{"type":"string"}},"required":["file","line","title","details"]}},"holistic_assessment":{"type":"string"},"review_summary_markdown":{"type":"string"}},"required":["review_status","blocking_findings","non_blocking_findings","holistic_assessment","review_summary_markdown"]}'
 
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
+      - name: Publish workflow summary
+        shell: bash
+        env:
+          STRUCTURED_OUTPUT: ${{ steps.claude.outputs.structured_output }}
+          PR_NUMBER: ${{ steps.context.outputs.pr_number }}
+          REVIEW_DOC_PATH: ${{ steps.prepare_prompt.outputs.review_doc_path }}
+        run: |
+          set -euo pipefail
 
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://docs.anthropic.com/en/docs/claude-code/sdk#command-line for available options
-          # claude_args: '--model claude-opus-4-1-20250805 --allowed-tools Bash(gh pr:*)'
+          if [[ -z "$STRUCTURED_OUTPUT" ]]; then
+            echo "Claude structured output is empty" >&2
+            exit 1
+          fi
 
+          blocking_count="$(jq -r '.blocking_findings | length' <<< "$STRUCTURED_OUTPUT")"
+          non_blocking_count="$(jq -r '.non_blocking_findings | length' <<< "$STRUCTURED_OUTPUT")"
+          status="$(jq -r '.review_status' <<< "$STRUCTURED_OUTPUT")"
+          holistic="$(jq -r '.holistic_assessment' <<< "$STRUCTURED_OUTPUT")"
+
+          {
+            echo "# Claude Review Summary"
+            echo
+            echo "- PR: #${PR_NUMBER}"
+            echo "- Guideline doc: ${REVIEW_DOC_PATH}"
+            echo "- Status: $status"
+            echo "- Blocking findings: $blocking_count"
+            echo "- Non-blocking findings: $non_blocking_count"
+            echo
+            echo "## Holistic Assessment"
+            echo
+            echo "$holistic"
+            echo
+            echo "## Full Review Summary"
+            echo
+            jq -r '.review_summary_markdown' <<< "$STRUCTURED_OUTPUT"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post review summary to PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STRUCTURED_OUTPUT: ${{ steps.claude.outputs.structured_output }}
+          PR_NUMBER: ${{ steps.context.outputs.pr_number }}
+          REVIEW_DOC_PATH: ${{ steps.prepare_prompt.outputs.review_doc_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          review_markdown="$(jq -r '.review_summary_markdown' <<< "$STRUCTURED_OUTPUT")"
+          repo="${GITHUB_REPOSITORY}"
+
+          gh pr comment "$PR_NUMBER" --repo "$repo" --body "$(cat <<EOF
+          $review_markdown
+          ---
+          Guideline source: $REVIEW_DOC_PATH
+          EOF
+          )"

@@ -1,9 +1,10 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.util.Redaction
-import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ServiceError, ValidationError }
+import org.llm4s.error.ValidationError
 import org.llm4s.error.ThrowableOps._
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming._
@@ -13,134 +14,120 @@ import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
 import java.io.{ BufferedReader, InputStreamReader }
-import java.net.URI
-import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
-import java.time.Duration
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 /**
- * LLMClient implementation for Google Gemini models.
+ * [[LLMClient]] implementation for Google Gemini models.
  *
- * Provides access to Gemini 2.0, 1.5 Pro, 1.5 Flash and other Gemini models
- * via Google's Generative AI API.
+ * Calls the Google Generative AI REST API directly using
+ * [[org.llm4s.http.Llm4sHttpClient]].
  *
- * == Supported Features ==
- *  - Chat completions
- *  - Streaming responses
- *  - Tool/function calling
- *  - Large context windows (up to 1M+ tokens)
+ * == Message format ==
  *
- * == Configuration ==
- * {{{
- * export LLM_MODEL=gemini/gemini-2.0-flash
- * export GOOGLE_API_KEY=your-api-key
- * }}}
+ * Gemini uses a different conversation structure from OpenAI:
+ *  - Roles are `"user"` and `"model"` (not `"user"` and `"assistant"`).
+ *  - `SystemMessage` values are sent as a separate `systemInstruction`
+ *    field, not inside the `contents` array.
+ *  - Tool results (`ToolMessage`) are sent as `functionResponse` parts
+ *    inside a `"user"` turn, keyed by function name (not tool-call ID).
+ *    The function name is resolved from an in-request map built while
+ *    processing the preceding `AssistantMessage`.
  *
- * == API Format ==
+ * == Tool call IDs ==
  *
- * Gemini uses a different message format than OpenAI:
- * - Messages have `role` (user/model) and `parts` (array of content)
- * - System instructions are sent separately
- * - Tool calls use `functionDeclarations` format
+ * The Gemini API does not return an ID with function-call responses.
+ * This client generates a random UUID for each tool call so that the
+ * llm4s `ToolCall` / `ToolMessage` pairing convention is preserved.
+ * These IDs are synthetic and are not round-tripped to Gemini.
  *
- * @param config Gemini configuration with API key, model, and base URL
- * @param metrics metrics collector for observability (default: noop)
+ * == Authentication ==
  *
- * @see [[org.llm4s.llmconnect.config.GeminiConfig]] for configuration options
+ * The API key is appended as a `?key=` query parameter on every request
+ * (Google's API requires this; it is not sent as a header). The full URL
+ * is not logged; only the base URL and model are emitted at DEBUG level.
+ *
+ * == Schema sanitisation ==
+ *
+ * OpenAI-specific fields (`strict`, `additionalProperties`) are stripped
+ * from tool schemas before sending, because Gemini's API rejects them.
+ *
+ * @param config  `GeminiConfig` with API key, model, and base URL.
+ * @param metrics Receives per-call latency and token-usage events.
+ *                Defaults to `MetricsCollector.noop`.
  */
 class GeminiClient(
   config: GeminiConfig,
-  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-) extends LLMClient
-    with MetricsRecording {
-  private val logger                = LoggerFactory.getLogger(getClass)
-  private val httpClient            = HttpClient.newHttpClient()
-  private val closed: AtomicBoolean = new AtomicBoolean(false)
+  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
+  private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
+) extends BaseLifecycleLLMClient {
+  private val logger = LoggerFactory.getLogger(getClass)
+
+  protected def clientDescription: String = s"Gemini client for model ${config.model}"
+  protected def providerName: String      = "gemini"
+  protected def modelName: String         = config.model
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics(
-    provider = "gemini",
-    model = config.model,
-    operation = validateNotClosed.flatMap { _ =>
-      TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
-        transformed =>
-          val transformedConversation = conversation.copy(messages = transformed.messages)
-          val requestBody             = buildRequestBody(transformedConversation, transformed.options)
-          val url                     = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
+  ): Result[Completion] = completeWithMetrics {
+    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
+      transformed =>
+        val transformedConversation = conversation.copy(messages = transformed.messages)
+        val requestBody             = buildRequestBody(transformedConversation, transformed.options)
+        val url                     = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
 
-          // Note: URL contains API key as query param - do not log full URL
-          logger.debug(s"[Gemini] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
-          logger.debug(s"[Gemini] Request body: ${Redaction.redactForLogging(requestBody.render())}")
+        // Note: URL contains API key as query param - do not log full URL
+        logger.debug(s"[Gemini] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
+        logger.debug(s"[Gemini] Request body: ${Redaction.redactForLogging(requestBody.render())}")
 
-          val request = HttpRequest
-            .newBuilder()
-            .uri(URI.create(url))
-            .header("Content-Type", "application/json")
-            .timeout(Duration.ofMinutes(2))
-            .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
-            .build()
+        val headers = Map("Content-Type" -> "application/json")
 
-          val attempt = Try {
-            val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+        val attempt = Try {
+          val response = httpClient.post(url, headers, requestBody.render(), timeout = 120000)
 
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
-              parseCompletionResponse(response.body())
-            } else {
-              handleErrorResponse(response.statusCode(), response.body())
-            }
-          }.toEither.left
-            .map(e => e.toLLMError)
-            .flatten
+          if (response.statusCode >= 200 && response.statusCode < 300) {
+            parseCompletionResponse(response.body)
+          } else {
+            handleErrorResponse(response.statusCode, response.body)
+          }
+        }.toEither.left
+          .map(e => e.toLLMError)
+          .flatten
 
-          attempt
-      }
-    },
-    extractUsage = (c: Completion) => c.usage,
-    extractCost = (c: Completion) => c.estimatedCost
-  )
+        attempt
+    }
+  }
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics(
-    provider = "gemini",
-    model = config.model,
-    operation = validateNotClosed.flatMap { _ =>
-      TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
-        transformed =>
-          val transformedConversation = conversation.copy(messages = transformed.messages)
-          val requestBody             = buildRequestBody(transformedConversation, transformed.options)
-          val url = s"${config.baseUrl}/models/${config.model}:streamGenerateContent?key=${config.apiKey}&alt=sse"
+  ): Result[Completion] = completeWithMetrics {
+    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
+      transformed =>
+        val transformedConversation = conversation.copy(messages = transformed.messages)
+        val requestBody             = buildRequestBody(transformedConversation, transformed.options)
+        val url = s"${config.baseUrl}/models/${config.model}:streamGenerateContent?key=${config.apiKey}&alt=sse"
 
-          // Note: URL contains API key as query param - do not log full URL
-          logger.debug(s"[Gemini] Starting stream to ${config.baseUrl}/models/${config.model}:streamGenerateContent")
+        // Note: URL contains API key as query param - do not log full URL
+        logger.debug(s"[Gemini] Starting stream to ${config.baseUrl}/models/${config.model}:streamGenerateContent")
 
-          val request = HttpRequest
-            .newBuilder()
-            .uri(URI.create(url))
-            .header("Content-Type", "application/json")
-            .timeout(Duration.ofMinutes(10))
-            .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
-            .build()
+        val headers  = Map("Content-Type" -> "application/json")
+        val response = httpClient.postStream(url, headers, requestBody.render(), timeout = 600000)
 
-          val response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          val err = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)
+          response.body.close()
+          handleErrorResponse(response.statusCode, err)
+        } else {
+          val accumulator = StreamingAccumulator.create()
+          val messageId   = UUID.randomUUID().toString
+          val reader      = new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))
 
-          if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            val err = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
-            response.body().close()
-            handleErrorResponse(response.statusCode(), err)
-          } else {
-            val accumulator = StreamingAccumulator.create()
-            val messageId   = UUID.randomUUID().toString
-            val reader      = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
-
-            val processEither = Try {
+          Try {
+            try {
               var line: String = null
               while ({ line = reader.readLine(); line != null }) {
                 val trimmed = line.trim
@@ -153,40 +140,45 @@ class GeminiClient(
                         accumulator.addChunk(chunk)
                         onChunk(chunk)
                       }
+                      // Extract token usage from usageMetadata if present
+                      for {
+                        usage      <- Try(json("usageMetadata")).toOption
+                        prompt     <- Try(usage("promptTokenCount").num.toInt).toOption
+                        completion <- Try(usage("candidatesTokenCount").num.toInt).toOption
+                      } accumulator.updateTokens(prompt, completion)
                     }
                   }
                 }
               }
-            }.toEither
 
-            // Close resources
-            Try(reader.close())
-            Try(response.body().close())
-
-            processEither.left
-              .map(_.toLLMError)
-              .flatMap(_ =>
-                accumulator.toCompletion.map { c =>
-                  val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-                  c.copy(model = config.model, estimatedCost = cost)
-                }
-              )
-          }
-      }
-    },
-    extractUsage = (c: Completion) => c.usage,
-    extractCost = (c: Completion) => c.estimatedCost
-  )
+              // Close resources INSIDE Try block
+            } finally {
+              Try(reader.close())
+              Try(response.body.close())
+            }
+          }.toEither.left
+            .map(_.toLLMError)
+            .flatMap(_ =>
+              accumulator.toCompletion.map { c =>
+                val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+                c.copy(model = config.model, estimatedCost = cost)
+              }
+            )
+        }
+    }
+  }
 
   override def getContextWindow(): Int = config.contextWindow
 
   override def getReserveCompletion(): Int = config.reserveCompletion
 
   /**
-   * Build the request body for Gemini API.
+   * Builds the Gemini API request body from a conversation and options.
    *
-   * @param conversation The conversation to convert
-   * @param options Completion options
+   * [[SystemMessage]] is extracted into `systemInstruction`; all other
+   * messages are placed in `contents`. Tool-call IDs are tracked in a local
+   * map so that subsequent [[ToolMessage]] entries can be keyed by function
+   * name rather than ID (Gemini's requirement).
    */
   private def buildRequestBody(
     conversation: Conversation,
@@ -286,12 +278,18 @@ class GeminiClient(
 
   /**
    * Convert a tool to Gemini's function declaration format.
-   * Gemini doesn't accept additionalProperties in schemas, so we strip it out.
+   * Strips OpenAI-specific fields like 'strict' and 'additionalProperties' from the schema
+   * to maintain compatibility with the Gemini API.
    */
-  private def convertToolToGeminiFormat(tool: ToolFunction[_, _]): ujson.Value = {
+  private[provider] def convertToolToGeminiFormat(tool: ToolFunction[_, _]): ujson.Value = {
+    // Generate base JSON schema without strict mode
     val schema = ujson.read(tool.schema.toJsonSchema(false).render())
 
-    // Recursively remove additionalProperties from all objects in the schema
+    // Fix: Explicitly remove OpenAI-only fields to meet Gemini's contract
+    schema.obj.remove("strict")
+    schema.obj.remove("additionalProperties")
+
+    // Recursively remove additionalProperties from all nested objects
     stripAdditionalProperties(schema)
 
     ujson.Obj(
@@ -305,7 +303,7 @@ class GeminiClient(
    * Recursively strip additionalProperties from a JSON schema.
    * Gemini's API doesn't accept this field.
    */
-  private def stripAdditionalProperties(json: ujson.Value): Unit =
+  private[provider] def stripAdditionalProperties(json: ujson.Value): Unit =
     json match {
       case obj: ujson.Obj =>
         // Remove additionalProperties at this level
@@ -437,36 +435,15 @@ class GeminiClient(
       }
     }.toOption.flatten
 
-  /**
-   * Handle error responses from Gemini API.
-   */
   private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] = {
     logger.error(s"[Gemini] Error response: $statusCode")
-
-    val errorMessage = Try {
-      val json = ujson.read(body)
-      json("error")("message").str
-    }.getOrElse(body)
-
-    statusCode match {
-      case 401 | 403 => Left(AuthenticationError("gemini", errorMessage))
-      case 429       => Left(RateLimitError("gemini"))
-      case 400       => Left(ValidationError("request", errorMessage))
-      case _         => Left(ServiceError(statusCode, "gemini", s"Gemini API error: $errorMessage"))
-    }
+    HttpErrorMapper.mapHttpError(statusCode, body, providerName)
   }
 
-  override def close(): Unit =
-    if (closed.compareAndSet(false, true)) {
-      // Java HttpClient does not have explicit close()
-      // We track logical closed state for thread-safety
-    }
-
-  private def validateNotClosed: Result[Unit] =
-    if (closed.get()) {
-      Left(ConfigurationError(s"Gemini client for model ${config.model} is already closed"))
-    } else {
-      Right(())
+  override protected def releaseResources(): Unit =
+    (httpClient: Any) match {
+      case c: AutoCloseable => c.close()
+      case _                => ()
     }
 }
 

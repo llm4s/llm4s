@@ -21,7 +21,12 @@ object TypeUsage {
   def exampleTypeSafeIds(): Unit = {
     val modelName = ModelName.GPT_4
     val provider  = ProviderName.OPENAI
-    val apiKey    = ApiKey("sk-test123").getOrElse(throw new RuntimeException("Invalid API key"))
+    val apiKey = ApiKey("sk-test123") match {
+      case Right(k) => k
+      case Left(_) =>
+        logger.error("Invalid API key")
+        return
+    }
 
     logger.info("Using model {} from provider {}", modelName, provider)
     logger.info("API key: {}", apiKey) // Safely prints masked version

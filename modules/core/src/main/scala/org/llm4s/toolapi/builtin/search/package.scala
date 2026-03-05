@@ -63,10 +63,10 @@ package org.llm4s.toolapi.builtin
  * toolsResult match {
  *   case Right(tools) =>
  *     // Use tools with agent
- *     println(s"Successfully loaded ${tools.tools.size} search tools")
+ *     println(s"Successfully loaded $${tools.tools.size} search tools")
  *   case Left(error) =>
  *     // Handle configuration or validation errors
- *     println(s"Failed to load search tools: ${error.message}")
+ *     println(s"Failed to load search tools: $${error.message}")
  * }
  * }}}
  *

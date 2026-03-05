@@ -2,15 +2,17 @@ package org.llm4s.imagegeneration.clients
 
 import org.llm4s.imagegeneration._
 import org.llm4s.imagegeneration.provider._
+import org.llm4s.http.{ HttpRawResponse, HttpResponse }
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import requests.Response
 
 import org.scalatest.concurrent.ScalaFutures
 import scala.util.Success
 import java.io.File
+import java.awt.image.BufferedImage
+import javax.imageio.ImageIO
 import scala.concurrent.ExecutionContext.Implicits.global
 
 class ImageGenerationClientsTest
@@ -25,14 +27,8 @@ class ImageGenerationClientsTest
   val mockResponseBytes = """{"data":[{"b64_json":"base64data","url":null}],"created":1234567890}""".getBytes
 
   // Response helpers
-  def createResponse(statusCode: Int, body: String): Response = Response(
-    url = "http://test",
-    statusCode = statusCode,
-    statusMessage = if (statusCode == 200) "OK" else "Error",
-    data = new geny.Bytes(body.getBytes),
-    headers = Map.empty,
-    history = None
-  )
+  def createResponse(statusCode: Int, body: String): HttpResponse =
+    HttpResponse(statusCode = statusCode, body = body)
 
   val mockSuccessResponse = createResponse(200, """{"data":[{"b64_json":"base64data"}],"created":1234567890}""")
   val mockErrorResponse   = createResponse(400, """{"error":{"message":"Invalid request"}}""")
@@ -176,7 +172,7 @@ class ImageGenerationClientsTest
     }"""
     (mockHttpClient.postMultipart _).when(*, *, *, *).returns(Success(createResponse(200, responseBody)))
 
-    val tempFile = File.createTempFile("test", ".png")
+    val tempFile = createTempPngFile("test")
     try {
       val result = client.editImage(tempFile.toPath, "edit prompt")
       result.isRight shouldBe true
@@ -227,7 +223,7 @@ class ImageGenerationClientsTest
       result.value.length shouldBe 1
     }
 
-    val tempFile = File.createTempFile("test", ".png")
+    val tempFile = createTempPngFile("test")
     try {
       val editResponseBody = """{"created": 1234567890, "data": [{"b64_json": "edited"}]}"""
       (mockHttpClient.postMultipart _).when(*, *, *, *).returns(Success(createResponse(200, editResponseBody)))
@@ -247,7 +243,8 @@ class ImageGenerationClientsTest
     val config         = HuggingFaceConfig(apiKey = "test-key")
     val client         = new HuggingFaceClient(config, mockHttpClient)
 
-    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(200, "imagebytes")))
+    val fakeBytes = Array[Byte](0xff.toByte, 0xd8.toByte, 0xff.toByte, 0xe0.toByte)
+    (mockHttpClient.postRaw _).when(*, *, *, *).returns(Success(HttpRawResponse(200, fakeBytes)))
 
     val result = client.generateImage(prompt)
     result.isRight shouldBe true
@@ -259,7 +256,8 @@ class ImageGenerationClientsTest
     val config         = HuggingFaceConfig(apiKey = "test-key")
     val client         = new HuggingFaceClient(config, mockHttpClient)
 
-    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(200, "imagebytes")))
+    val fakeBytes = Array[Byte](0xff.toByte, 0xd8.toByte, 0xff.toByte, 0xe0.toByte)
+    (mockHttpClient.postRaw _).when(*, *, *, *).returns(Success(HttpRawResponse(200, fakeBytes)))
 
     val result = client.generateImages(prompt, 2)
     result.isRight shouldBe true
@@ -271,7 +269,9 @@ class ImageGenerationClientsTest
     val config         = HuggingFaceConfig(apiKey = "test-key")
     val client         = new HuggingFaceClient(config, mockHttpClient)
 
-    (mockHttpClient.post _).when(*, *, *, *).returns(Success(mockErrorResponse))
+    (mockHttpClient.postRaw _)
+      .when(*, *, *, *)
+      .returns(Success(HttpRawResponse(400, "Invalid request".getBytes)))
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
@@ -282,7 +282,9 @@ class ImageGenerationClientsTest
     val config         = HuggingFaceConfig(apiKey = "test-key")
     val client         = new HuggingFaceClient(config, mockHttpClient)
 
-    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(401, "Unauthorized")))
+    (mockHttpClient.postRaw _)
+      .when(*, *, *, *)
+      .returns(Success(HttpRawResponse(401, "Unauthorized".getBytes)))
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
@@ -294,7 +296,9 @@ class ImageGenerationClientsTest
     val config         = HuggingFaceConfig(apiKey = "test-key")
     val client         = new HuggingFaceClient(config, mockHttpClient)
 
-    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(429, "Rate limit")))
+    (mockHttpClient.postRaw _)
+      .when(*, *, *, *)
+      .returns(Success(HttpRawResponse(429, "Rate limit".getBytes)))
 
     val result = client.generateImage(prompt)
     result.isLeft shouldBe true
@@ -318,7 +322,8 @@ class ImageGenerationClientsTest
     val config         = HuggingFaceConfig(apiKey = "test-key")
     val client         = new HuggingFaceClient(config, mockHttpClient)
 
-    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(200, "imagebytes")))
+    val fakeBytes = Array[Byte](0xff.toByte, 0xd8.toByte, 0xff.toByte, 0xe0.toByte)
+    (mockHttpClient.postRaw _).when(*, *, *, *).returns(Success(HttpRawResponse(200, fakeBytes)))
 
     whenReady(client.generateImageAsync(prompt)) { result =>
       result.isRight shouldBe true
@@ -429,12 +434,192 @@ class ImageGenerationClientsTest
   }
 
   // ==========================================
+  // Stability AI Client Tests
+  // ==========================================
+
+  test("StabilityAIClient should generate single image") {
+    val mockHttpClient = stub[HttpClient]
+    val config         = StabilityAIConfig(apiKey = "test-key")
+    val client         = new StabilityAIClient(config, mockHttpClient)
+
+    val responseBody = """{
+      "artifacts": [{"base64": "base64data", "seed": 12345}]
+    }"""
+    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(200, responseBody)))
+
+    val result = client.generateImage(prompt)
+    result.isRight shouldBe true
+    result.value.data shouldBe "base64data"
+    result.value.seed shouldBe Some(12345L)
+  }
+
+  test("StabilityAIClient should generate multiple images") {
+    val mockHttpClient = stub[HttpClient]
+    val config         = StabilityAIConfig(apiKey = "test-key")
+    val client         = new StabilityAIClient(config, mockHttpClient)
+
+    val responseBody = """{
+      "artifacts": [
+        {"base64": "img1", "seed": 1},
+        {"base64": "img2", "seed": 2}
+      ]
+    }"""
+    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(200, responseBody)))
+
+    val result = client.generateImages(prompt, 2)
+    result.isRight shouldBe true
+    result.value.length shouldBe 2
+    result.value(0).data shouldBe "img1"
+    result.value(1).data shouldBe "img2"
+  }
+
+  test("StabilityAIClient should handle API errors") {
+    val mockHttpClient = stub[HttpClient]
+    val config         = StabilityAIConfig(apiKey = "test-key")
+    val client         = new StabilityAIClient(config, mockHttpClient)
+
+    (mockHttpClient.post _).when(*, *, *, *).returns(Success(mockErrorResponse))
+
+    val result = client.generateImage(prompt)
+    result.isLeft shouldBe true
+    result.left.value shouldBe a[ValidationError]
+  }
+
+  test("StabilityAIClient should handle 401 Unauthorized") {
+    val mockHttpClient = stub[HttpClient]
+    val config         = StabilityAIConfig(apiKey = "test-key")
+    val client         = new StabilityAIClient(config, mockHttpClient)
+
+    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(401, "Unauthorized")))
+
+    val result = client.generateImage(prompt)
+    result.isLeft shouldBe true
+    result.left.value shouldBe a[AuthenticationError]
+  }
+
+  test("StabilityAIClient should handle 429 Rate Limit") {
+    val mockHttpClient = stub[HttpClient]
+    val config         = StabilityAIConfig(apiKey = "test-key")
+    val client         = new StabilityAIClient(config, mockHttpClient)
+
+    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(429, "Rate limit")))
+
+    val result = client.generateImage(prompt)
+    result.isLeft shouldBe true
+    result.left.value shouldBe a[RateLimitError]
+  }
+
+  test("StabilityAIClient should handle 402 Payment Required") {
+    val mockHttpClient = stub[HttpClient]
+    val config         = StabilityAIConfig(apiKey = "test-key")
+    val client         = new StabilityAIClient(config, mockHttpClient)
+
+    val errorBody = """{"message": "Insufficient credits"}"""
+    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(402, errorBody)))
+
+    val result = client.generateImage(prompt)
+    result.isLeft shouldBe true
+    result.left.value shouldBe a[InsufficientResourcesError]
+  }
+
+  test("StabilityAIClient should validate prompt") {
+    val mockHttpClient = stub[HttpClient]
+    val config         = StabilityAIConfig(apiKey = "test-key")
+    val client         = new StabilityAIClient(config, mockHttpClient)
+
+    val result = client.generateImage("")
+    result.isLeft shouldBe true
+    result.left.value shouldBe a[ValidationError]
+  }
+
+  test("StabilityAIClient should validate count") {
+    val mockHttpClient = stub[HttpClient]
+    val config         = StabilityAIConfig(apiKey = "test-key")
+    val client         = new StabilityAIClient(config, mockHttpClient)
+
+    val result = client.generateImages(prompt, 11) // Max is 10
+    result.isLeft shouldBe true
+    result.left.value shouldBe a[ValidationError]
+  }
+
+  test("StabilityAIClient health check should return healthy") {
+    val mockHttpClient = stub[HttpClient]
+    val config         = StabilityAIConfig(apiKey = "test-key")
+    val client         = new StabilityAIClient(config, mockHttpClient)
+
+    (mockHttpClient.get _).when(*, *, *).returns(Success(createResponse(200, "{}")))
+
+    val result = client.health()
+    result.isRight shouldBe true
+    result.value.status shouldBe HealthStatus.Healthy
+  }
+
+  test("StabilityAIClient should handle malformed JSON response") {
+    val mockHttpClient = stub[HttpClient]
+    val config         = StabilityAIConfig(apiKey = "test-key")
+    val client         = new StabilityAIClient(config, mockHttpClient)
+
+    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(200, "{invalid-json")))
+
+    val result = client.generateImage(prompt)
+    result.isLeft shouldBe true
+    result.left.value shouldBe a[UnknownError]
+  }
+
+  test("StabilityAIClient should support async methods") {
+    val mockHttpClient = stub[HttpClient]
+    val config         = StabilityAIConfig(apiKey = "test-key")
+    val client         = new StabilityAIClient(config, mockHttpClient)
+
+    val responseBody = """{"artifacts": [{"base64": "img1", "seed": 1}]}"""
+    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(200, responseBody)))
+
+    whenReady(client.generateImageAsync(prompt)) { result =>
+      result.isRight shouldBe true
+      result.value.data shouldBe "img1"
+    }
+
+    whenReady(client.generateImagesAsync(prompt, 1)) { result =>
+      result.isRight shouldBe true
+      result.value.length shouldBe 1
+    }
+
+    val tempFile = File.createTempFile("test", ".png")
+    try
+      whenReady(client.editImageAsync(tempFile.toPath, "edit")) { result =>
+        result.isLeft shouldBe true
+        result.left.value shouldBe a[UnsupportedOperation]
+      }
+    finally tempFile.delete()
+  }
+
+  test("StabilityAIClient should handle negative prompts") {
+    val mockHttpClient = stub[HttpClient]
+    val config         = StabilityAIConfig(apiKey = "test-key")
+    val client         = new StabilityAIClient(config, mockHttpClient)
+
+    val responseBody = """{"artifacts": [{"base64": "base64data"}]}"""
+    (mockHttpClient.post _).when(*, *, *, *).returns(Success(createResponse(200, responseBody)))
+
+    val options = ImageGenerationOptions(negativePrompt = Some("blurry, low quality"))
+    val result  = client.generateImage(prompt, options)
+    result.isRight shouldBe true
+  }
+
+  // ==========================================
   // HttpClient Tests
   // ==========================================
 
   test("HttpClient should return failure on exception") {
-    val client = new SimpleHttpClient()
+    val client = HttpClient.create()
     val result = client.post("http://0.0.0.0:0/invalid", Map.empty, "", 100)
     result.isFailure shouldBe true
+  }
+
+  private def createTempPngFile(prefix: String): File = {
+    val file  = File.createTempFile(prefix, ".png")
+    val image = new BufferedImage(512, 512, BufferedImage.TYPE_INT_ARGB)
+    ImageIO.write(image, "png", file)
+    file
   }
 }

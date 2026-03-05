@@ -6,7 +6,24 @@ import java.time.Instant
 import java.util.UUID
 
 /**
- * Type-safe trace events for better composability and type safety
+ * Type-safe, sealed hierarchy of trace events emitted during LLM agent execution.
+ *
+ * Each subtype carries the data relevant to one observable moment in the
+ * agent lifecycle (completion received, tool executed, token usage recorded,
+ * etc.).  All subtypes are serialisable to JSON via `toJson`, which produces a
+ * flat object containing at minimum `"event_type"` and `"timestamp"` fields.
+ *
+ * == Error truncation ==
+ * `ErrorOccurred.toJson` includes only the first 5 frames of the stack trace
+ * to limit payload size.
+ *
+ * == Timestamp default ==
+ * Every case class defaults `timestamp` to `Instant.now()` at construction
+ * time.  Override explicitly when replaying historical events or writing
+ * deterministic tests.
+ *
+ * @see [[Tracing]] for the interface that consumes these events
+ * @see [[TraceEvent.createTraceEvent]] for the Langfuse batch-envelope helper
  */
 sealed trait TraceEvent {
   def timestamp: Instant
@@ -223,6 +240,25 @@ object TraceEvent {
     }
   }
 
+  /**
+   * Builds a Langfuse `"trace-create"` batch-envelope object.
+   *
+   * The resulting JSON is suitable for inclusion in the `batch` array sent to
+   * the Langfuse ingest endpoint.  A new random UUID is generated for the
+   * outer envelope `"id"` on every call; the trace identity is carried by
+   * `traceId`.  The `"sessionId"` field is derived from `System.currentTimeMillis()`
+   * and therefore reflects wall-clock time at call time, not the event timestamp.
+   *
+   * @param traceId      Stable identifier for the trace; correlates spans across calls
+   * @param now          ISO-8601 timestamp string for both envelope and body `"timestamp"` fields
+   * @param environment  Deployment environment label forwarded to Langfuse metadata
+   * @param release      Application release string forwarded to Langfuse metadata
+   * @param version      Framework version string forwarded to Langfuse metadata
+   * @param traceInput   The user query or agent input recorded as the trace input
+   * @param traceOutput  The agent's final response recorded as the trace output
+   * @param modelName    Model name forwarded to the Langfuse `"model"` field
+   * @param messageCount Conversation length forwarded to Langfuse metadata
+   */
   def createTraceEvent(
     traceId: String,
     now: String,

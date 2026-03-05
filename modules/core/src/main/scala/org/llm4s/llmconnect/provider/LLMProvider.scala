@@ -21,6 +21,8 @@ sealed trait LLMProvider {
     case LLMProvider.Zai        => "zai"
     case LLMProvider.Gemini     => "gemini"
     case LLMProvider.DeepSeek   => "deepseek"
+    case LLMProvider.Cohere     => "cohere"
+    case LLMProvider.Mistral    => "mistral"
   }
 }
 
@@ -95,14 +97,34 @@ object LLMProvider {
    */
   case object DeepSeek extends LLMProvider
 
-  /** All available providers */
-  val all: Seq[LLMProvider] = Seq(OpenAI, Azure, Anthropic, OpenRouter, Ollama, Zai, Gemini, DeepSeek)
+  /**
+   * Cohere provider for Command models.
+   *
+   * Minimal v1 support: non-streaming chat/text generation only.
+   */
+  case object Cohere extends LLMProvider
 
   /**
-   * Parses a provider name string to LLMProvider.
+   * Mistral AI provider for Mistral models.
    *
-   * @param name provider name (case-insensitive)
-   * @return Some(provider) if valid, None otherwise
+   * Supports Mistral Large, Mistral Small, Codestral and other Mistral models.
+   * Uses OpenAI-compatible chat completions API.
+   * Requires a Mistral AI API key.
+   */
+  case object Mistral extends LLMProvider
+
+  /** All available providers */
+  val all: Seq[LLMProvider] = Seq(OpenAI, Azure, Anthropic, OpenRouter, Ollama, Zai, Gemini, DeepSeek, Cohere, Mistral)
+
+  /**
+   * Parses a provider name string to an [[LLMProvider]].
+   *
+   * Matching is case-insensitive. `"google"` is accepted as an alias for
+   * `Gemini` for compatibility with the `LLM_MODEL=google/...` environment
+   * variable format.
+   *
+   * @param name Provider name; see [[all]] for the canonical set of names.
+   * @return `Some(provider)` for recognised names; `None` for unrecognised input.
    */
   def fromName(name: String): Option[LLMProvider] = name.toLowerCase match {
     case "openai"            => Some(OpenAI)
@@ -113,6 +135,8 @@ object LLMProvider {
     case "zai"               => Some(Zai)
     case "gemini" | "google" => Some(Gemini)
     case "deepseek"          => Some(DeepSeek)
+    case "cohere"            => Some(Cohere)
+    case "mistral"           => Some(Mistral)
     case _                   => None
   }
 }

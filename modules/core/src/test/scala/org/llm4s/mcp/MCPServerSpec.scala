@@ -20,18 +20,21 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
     def pingHandler(params: SafeParameterExtractor): Either[String, String] =
       params.getString("message").map(msg => s"Echo: $msg")
 
-    val pingTool = ToolBuilder[Map[String, Any], String](
+    val pingToolResult = ToolBuilder[Map[String, Any], String](
       "ping",
       "Echoes a message",
       pingSchema
-    ).withHandler(pingHandler).build()
+    ).withHandler(pingHandler).buildSafe()
 
-    // 2. Setup Server
-    val options = MCPServerOptions(0, "/mcp", "TestServer", "1.0.0")
-    server = new MCPServer(options, Seq(pingTool))
-    server.start().fold(e => throw e, _ => ())
-    // Give it a moment to bind (though bind is synchronous, 0 port assignment happens then)
-    port = server.boundPort
+    pingToolResult.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      pingTool => {
+        val options = MCPServerOptions(0, "/mcp", "TestServer", "1.0.0")
+        server = new MCPServer(options, Seq(pingTool))
+        server.start().fold(e => throw e, _ => ())
+        port = server.boundPort
+      }
+    )
   }
 
   override def afterAll(): Unit =
@@ -55,7 +58,7 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
         // Get Tools
         val toolsResult = client.getTools()
         toolsResult.isRight should be(true)
-        val tools = toolsResult.getOrElse(Seq.empty)
+        val tools = toolsResult.fold(_ => Seq.empty, identity)
 
         tools should have size 1
         tools.head.name should be("ping")
@@ -65,7 +68,7 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
         val execResult = tools.head.execute(args)
 
         execResult.isRight should be(true)
-        val successMsg = execResult.toOption.get.str
+        val successMsg = execResult.fold(e => fail(s"Expected success but got: ${e.getMessage}"), identity).str
         successMsg should include("Echo: Hello World")
 
       } finally

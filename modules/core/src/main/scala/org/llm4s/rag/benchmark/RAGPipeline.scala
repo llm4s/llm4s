@@ -158,8 +158,10 @@ final class RAGPipeline private (
 
     val result = for {
       response <- tracedEmbeddingClient.withOperation("query").embed(request)
-      _              = { embeddingTokens = response.usage.map(_.totalTokens) }
-      queryEmbedding = response.embeddings.head.map(_.toFloat).toArray
+      _ = { embeddingTokens = response.usage.map(_.totalTokens) }
+      queryEmbedding <- response.embeddings.headOption
+        .toRight(EmbeddingError(None, "Embedding provider returned empty embeddings list", embeddingModelConfig.name))
+        .map(_.map(_.toFloat).toArray)
       results <-
         if (config.useReranker) {
           hybridSearcher.searchWithReranking(

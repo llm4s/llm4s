@@ -22,12 +22,16 @@ class SessionStoreConcurrencySpec extends AnyFunSpec with Matchers with BeforeAn
     // Define a simple tool
     val pingTool = ToolBuilder[Map[String, Any], String]("ping", "Echo", Schema.`object`[Map[String, Any]]("p"))
       .withHandler(_ => Right("pong"))
-      .build()
+      .buildSafe()
 
-    server = new MCPServer(MCPServerOptions(0, "/mcp", "TestServer", "1.0"), Seq(pingTool))
-    server.start().fold(e => throw e, _ => ())
-    // Thread.sleep(100) - Removed as per mentor feedback code is synchronous
-    port = server.boundPort
+    pingTool.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        server = new MCPServer(MCPServerOptions(0, "/mcp", "TestServer", "1.0"), Seq(tool))
+        server.start().fold(e => throw e, _ => ())
+        port = server.boundPort
+      }
+    )
   }
 
   override def afterAll(): Unit = {

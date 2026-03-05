@@ -37,10 +37,11 @@ object MCPAgentExample {
     val agentState = for {
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
+      weatherTool <- WeatherTool.toolSafe
       agent = new Agent(client)
       query = "Convert 100 USD to EUR and then check the weather in Paris"
       _     = logger.info(s"🎯 Running agent query: $query")
-      agentState <- Using.resource(new MCPToolRegistry(Seq(serverConfig), Seq(WeatherTool.tool), 10.minutes)) {
+      agentState <- Using.resource(new MCPToolRegistry(Seq(serverConfig), Seq(weatherTool), 10.minutes)) {
         mcpRegistry =>
           val allTools = mcpRegistry.getAllTools
           logger.info(s"📦 Available tools (${allTools.size} total):")
