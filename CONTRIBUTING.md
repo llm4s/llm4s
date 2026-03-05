@@ -103,6 +103,22 @@ BREAKING CHANGE: If applicable
 
 Types: `[FEATURE]`, `[BUG FIX]`, `[ENHANCEMENT]`, `[REFACTOR]`, `[DOCS]`, `[TEST]`, `[PERF]`
 
+## Contributing Examples
+
+We've moved examples to a dedicated repository to keep the framework focused and examples organized.
+
+**Add new examples here:** https://github.com/llm4s/llm4s-examples
+
+### Contributing to the Framework
+
+When your contribution adds new framework features:
+
+1. Create a corresponding example in [llm4s-examples](https://github.com/llm4s/llm4s-examples)
+2. Update API documentation in `docs/`
+3. Add tests to ensure framework behavior
+
+See [llm4s-examples CONTRIBUTING.md](https://github.com/llm4s/llm4s-examples/blob/main/CONTRIBUTING.md) for example contribution guidelines.
+
 ## Getting Help
 
 - **Issues:** [GitHub Issues](https://github.com/llm4s/llm4s/issues)

@@ -99,9 +99,12 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
 - **modules/core**: Core LLM4S framework
 - **modules/workspace**: Workspace runner/client/shared
 - **modules/crossTest**: Cross-version tests
-- **modules/samples**: Usage examples
 - **docs**: Documentation site and references
 - **hooks**: Pre-commit hook installer
+
+-> Examples are now maintained in a separate repository:
+
+📚 https://github.com/llm4s/llm4s-examples
 
 ## Getting Started
 
@@ -232,19 +235,20 @@ This will allow you to run the non-containerized examples.
 
 ### Running the Examples
 
+All examples have been moved to a dedicated repository for better organization and discoverability.
+
+📚 **[→ Visit llm4s-examples](https://github.com/llm4s/llm4s-examples)**
+
+The examples repository includes:
+- **Getting Started**: Hello world, first completion, configuration (15 minutes)
+- **Advanced**: Agents, tools, streaming, error handling (2-4 hours)
+- **Integrations**: RAG, Web APIs, MCP (real-world use cases)
+
+Quick start:
 ```bash
-# Using Scala 3
-sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
-```
-
-### Run containerized demo
-
-```bash
-sbt docker:publishLocal
-sbt "workspaceSamples/runMain org.llm4s.samples.workspace.ContainerisedWorkspaceDemo"
-
-# Using Scala 2.13
-sbt ++2.13.16 "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
+git clone https://github.com/llm4s/llm4s-examples
+cd llm4s-examples
+sbt "helloWorld/runMain org.llm4s.examples.HelloWorld"
 ```
 
 ### Cross Compilation
@@ -514,20 +518,16 @@ Tracing
   - Legacy bridge: `Llm4sConfig.tracing().map(Tracing.create)`
   - Low-level: `LangfuseTracing.fromEnv()` → `Result[LangfuseTracing]`
 
-Example (no application.conf required):
+Examples are now maintained in the separate repository:
 
-```
-sbt -Dllm4s.llm.model=openai/gpt-4o -Dllm4s.openai.apiKey=sk-... "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
-```
+https://github.com/llm4s/llm4s-examples
 
-Or with environment variables (picked up via `reference.conf`):
+Clone and run examples from there:
 
-```
-export LLM_MODEL=openai/gpt-4o
-export OPENAI_API_KEY=sk-...
-sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
-```
-
+```bash
+git clone https://github.com/llm4s/llm4s-examples
+cd llm4s-examples
+sbt "helloWorld/runMain org.llm4s.examples.HelloWorld"
 
 ## Continuous Integration (CI)
 

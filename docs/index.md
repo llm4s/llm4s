@@ -181,40 +181,41 @@ object HelloLLM extends App {
 
 ---
 
-## Example Gallery
+## Learning & Examples
 
-Explore **69 working examples** covering all features:
+**All examples have been moved to a dedicated repository for better organization and discoverability.**
 
-<div class="code-example" markdown="1">
+📚 **[→ Visit llm4s-examples](https://github.com/llm4s/llm4s-examples)**
 
-**Basic Examples**
-- [Basic LLM Calling](/examples/#basic-llm-calling) - Simple conversations
-- [Streaming Responses](/examples/#streaming) - Real-time token streaming
-- [Multi-Provider](/examples/#ollama) - OpenAI, Anthropic, Ollama
+### Learning Path
 
-**Agent Examples**
-- [Multi-Turn Conversations](/examples/#multi-turn) - Functional conversation API
-- [Async Tool Execution](/examples/#agent-examples) - Parallel tool strategies
-- [Conversation Persistence](/examples/#persistence) - Save and resume
+The examples repository includes a structured learning path:
 
-**Guardrails & Safety**
-- [Input/Output Validation](/examples/#guardrails-examples) - Length, profanity, JSON
-- [LLM-as-Judge](/examples/#guardrails-examples) - Semantic validation
-- [Custom Guardrails](/examples/#custom) - Build your own validators
+**Getting Started** (30 minutes)
+- [Hello World](https://github.com/llm4s/llm4s-examples/tree/main/getting-started/hello-world) - Your first LLM4S program
+- [First Completion](https://github.com/llm4s/llm4s-examples/tree/main/getting-started/first-completion) - Multi-turn conversations
+- [Configuration](https://github.com/llm4s/llm4s-examples/tree/main/getting-started/configuration) - All providers and settings
 
-**Handoffs & Memory**
-- [Agent Handoffs](/examples/#handoff-examples) - Specialist delegation
-- [Memory System](/examples/#memory-examples) - Entity and context memory
-- [Vector Search](/examples/#memory-examples) - Semantic retrieval
+**Advanced** (2-4 hours)
+- [Agents](https://github.com/llm4s/llm4s-examples/tree/main/advanced/agents) - Intelligent decision-making
+- [Tools](https://github.com/llm4s/llm4s-examples/tree/main/advanced/tools) - Custom tool creation
+- [Streaming](https://github.com/llm4s/llm4s-examples/tree/main/advanced/streaming) - Real-time responses
+- [Error Handling](https://github.com/llm4s/llm4s-examples/tree/main/advanced/error-handling) - Production patterns
 
-**Tools & Streaming**
-- [Built-in Tools](/examples/#tool-examples) - DateTime, HTTP, file access
-- [Streaming Events](/examples/#streaming-examples) - Real-time agent events
-- [Reasoning Modes](/examples/#reasoning-examples) - Extended thinking
+**Integrations** (Real-world use cases)
+- [RAG](https://github.com/llm4s/llm4s-examples/tree/main/integrations/rag) - Retrieval-Augmented Generation
+- [Web APIs](https://github.com/llm4s/llm4s-examples/tree/main/integrations/web-api) - REST API integration
+- [MCP](https://github.com/llm4s/llm4s-examples/tree/main/integrations/mcp) - Model Context Protocol
 
-</div>
+### Quick Start
 
-[Browse all examples →](/examples/)
+```bash
+git clone https://github.com/llm4s/llm4s-examples
+cd llm4s-examples
+sbt "helloWorld/runMain org.llm4s.examples.HelloWorld"
+```
+
+[Browse all examples →](https://github.com/llm4s/llm4s-examples)
 
 ---
 

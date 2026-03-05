@@ -50,7 +50,6 @@ inThisBuild(
     ThisBuild / coverageHighlighting     := true,
     ThisBuild / coverageExcludedPackages := Seq(
       "org\\.llm4s\\.runner\\..*",
-      "org\\.llm4s\\.samples\\..*",
       "org\\.llm4s\\.workspace\\..*"
     ).mkString(";"),
     ThisBuild / (coverageReport / aggregate) := false,
@@ -124,7 +123,7 @@ lazy val commonSettings = Seq(
 
 // ---- projects ----
 lazy val llm4s = (project in file("."))
-  .aggregate(core, samples, workspaceShared, workspaceRunner, workspaceClient, workspaceSamples, traceOpentelemetry)
+  .aggregate(core, workspaceShared, workspaceRunner, workspaceClient, workspaceSamples, traceOpentelemetry)
   .settings(
     publish / skip := true
   )
@@ -216,17 +215,14 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   )
   .settings(WorkspaceRunnerDocker.settings)
 
-lazy val samples = (project in file("modules//samples"))
-  .dependsOn(core)
-  .settings(
-    name := "samples",
-    commonSettings,
-    publish / skip := true,
-    coverageEnabled := false
-  )
+// Samples have been moved to https://github.com/llm4s/llm4s-examples
+// For examples and tutorials, see: https://github.com/llm4s/llm4s-examples
+// lazy val samples = (project in file("modules//samples")) // REMOVED
+//   .dependsOn(core)
+//   .settings(...)
 
 lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))
-  .dependsOn(workspaceShared, workspaceRunner, workspaceClient, samples)
+  .dependsOn(workspaceShared, workspaceRunner, workspaceClient)
   .settings(
     name := "workspaceSamples",
     commonSettings,
