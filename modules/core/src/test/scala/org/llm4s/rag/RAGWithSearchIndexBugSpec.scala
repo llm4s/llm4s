@@ -100,18 +100,21 @@ class RAGWithSearchIndexBugSpec extends AnyFlatSpec with Matchers with BeforeAnd
     config.pgVectorConnectionString shouldBe None
   }
 
-  "RAGConfig.withSearchIndex with PgSearchIndex" should "automatically configure pgVectorConnectionString (FIX)" in {
+  "RAGConfig.withSearchIndex with PgSearchIndex" should "automatically configure pgVector and pgKeywordTableName (FIX)" in {
     requirePg()
     val index = searchIndex.get
 
     val config = RAGConfig.default.withSearchIndex(index)
 
-    // FIX: withSearchIndex now auto-configures pgVector settings from PgSearchIndex
+    // FIX: withSearchIndex now auto-configures pgVector AND pgKeyword settings from PgSearchIndex
+    // so that regular RAG ingest/query use full PostgreSQL hybrid (pgvector + FTS) instead of
+    // falling back to in-memory/SQLite keyword index
     config.searchIndex shouldBe defined
     config.pgVectorConnectionString shouldBe defined
     config.pgVectorUser shouldBe defined
     config.pgVectorPassword shouldBe defined
     config.pgVectorTableName shouldBe defined
+    config.pgKeywordTableName shouldBe defined
 
     // Verify the values match the PgSearchIndex config
     val pgCfg = index.pgConfig.get
@@ -119,6 +122,7 @@ class RAGWithSearchIndexBugSpec extends AnyFlatSpec with Matchers with BeforeAnd
     config.pgVectorUser shouldBe Some(pgCfg.user)
     config.pgVectorPassword shouldBe Some(pgCfg.password)
     config.pgVectorTableName shouldBe Some(pgCfg.vectorTableName)
+    config.pgKeywordTableName shouldBe Some(pgCfg.keywordTableName)
   }
 
   "RAG created with non-Pg SearchIndex" should "use in-memory storage for regular ingest (expected)" in {

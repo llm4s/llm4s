@@ -175,6 +175,7 @@ object SearchIndex {
    * @param password Database password
    * @param vectorTableName Name of the vectors table
    * @param maxPoolSize Maximum connection pool size
+   * @param keywordTableName Base table name for keywords (creates {tableName}_keyword table). Used by RAG for full PostgreSQL hybrid (pgvector + FTS). Default: "documents".
    */
   final case class PgConfig(
     host: String = "localhost",
@@ -183,7 +184,8 @@ object SearchIndex {
     user: String = "postgres",
     password: String = "",
     vectorTableName: String = "vectors",
-    maxPoolSize: Int = 10
+    maxPoolSize: Int = 10,
+    keywordTableName: String = "documents"
   ) {
     def jdbcUrl: String = s"jdbc:postgresql://$host:$port/$database"
   }

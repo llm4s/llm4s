@@ -7,16 +7,42 @@ import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 
 object PgSearchIndexConfigLoader {
 
-  implicit private val pgConfigReader: PureConfigReader[SearchIndex.PgConfig] =
-    PureConfigReader.forProduct7(
+  private final case class PgConfigOpt(
+    host: String,
+    port: Int,
+    database: String,
+    user: String,
+    password: String,
+    vectorTableName: String,
+    maxPoolSize: Int,
+    keywordTableName: Option[String]
+  )
+
+  implicit private val pgConfigOptReader: PureConfigReader[PgConfigOpt] =
+    PureConfigReader.forProduct8(
       "host",
       "port",
       "database",
       "user",
       "password",
       "vectorTableName",
-      "maxPoolSize"
-    )(SearchIndex.PgConfig.apply)
+      "maxPoolSize",
+      "keywordTableName"
+    )(PgConfigOpt.apply)
+
+  implicit private val pgConfigReader: PureConfigReader[SearchIndex.PgConfig] =
+    pgConfigOptReader.map { opt =>
+      SearchIndex.PgConfig(
+        host = opt.host,
+        port = opt.port,
+        database = opt.database,
+        user = opt.user,
+        password = opt.password,
+        vectorTableName = opt.vectorTableName,
+        maxPoolSize = opt.maxPoolSize,
+        keywordTableName = opt.keywordTableName.getOrElse("documents")
+      )
+    }
 
   def load(source: ConfigSource): Result[SearchIndex.PgConfig] =
     source

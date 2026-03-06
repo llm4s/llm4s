@@ -224,13 +224,48 @@ You usually do **not** need new tests for:
 
 ---
 
-## 11. Getting Help
+## 11. Finding Where Tests Are Needed
+
+The llm4s project provides **automated coverage analysis tools** to help you identify which parts of the codebase would benefit most from additional tests.
+
+### Using Coverage Gap Analysis
+
+```bash
+# Generate coverage report
+sbt coverage core/test coverageAggregate
+
+# Analyze coverage gaps
+python3 scripts/analyze-coverage.py --local
+```
+
+This generates a detailed report showing:
+- Files with the lowest test coverage
+- Specific uncovered functions
+- Module-by-module coverage breakdown
+- Actionable recommendations
+
+For detailed instructions, see [Test Coverage Gap Analysis Guide](coverage-gaps-guide.md).
+
+### Starting with High-Impact Areas
+
+The coverage report will show you:
+
+1. **Lowest-coverage files** - These are the highest priority
+2. **Uncovered functions** - Specific functions that have no tests
+3. **Modules needing attention** - Which subsystems need work most
+
+Pick one low-coverage file or function and write tests for it. This has the most impact and gives reviewers clear wins to see in PRs.
+
+---
+
+## 12. Getting Help
 
 If you're unsure how to test something:
 
 * Ask in the issue or PR
 * Mention maintainers
 * Look for similar tests in the codebase
+* Use the [coverage gap analysis tools](coverage-gaps-guide.md) to find high-impact areas
 
 Clear tests help reviewers help you faster.
 

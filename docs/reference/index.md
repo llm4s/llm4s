@@ -16,6 +16,7 @@ Start here if you want to contribute to the project.
 - **[Contributing Guide](contributing)** - How to submit your first PR (read this first)
 - **[Code Review Guidelines](review-guidelines)** - Coding standards and patterns expected in PRs
 - **[Testing Guide](testing-guide)** - How to write tests (contributor-focused)
+- **[Test Coverage Gap Analysis](../guide/agents/coverage-gaps-guide)** - Find which parts need more tests
 - **[Code of Conduct](https://github.com/llm4s/llm4s/blob/main/CODE_OF_CONDUCT.md)** - Community guidelines
 
 ## Project Documentation
