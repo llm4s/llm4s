@@ -7,6 +7,8 @@ import org.llm4s.types.Result
 import scala.concurrent.{ ExecutionContext, Future, blocking }
 import java.util.concurrent.atomic.AtomicInteger
 import scala.util.control.NonFatal
+import scala.concurrent.duration._
+import java.util.concurrent.TimeoutException
 
 /**
  * Carries the name and parsed JSON arguments for a single tool invocation.
@@ -44,10 +46,25 @@ case class ToolCallRequest(
  *
  * @param initialTools The tools available in this registry
  */
-class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
+class ToolRegistry(
+  initialTools: Seq[ToolFunction[_, _]],
+  toolTimeout: Option[FiniteDuration] = None
+) {
 
   /** All tools registered in this registry. */
   def tools: Seq[ToolFunction[_, _]] = initialTools
+  private def withTimeout[T](
+    future: Future[T],
+    timeout: FiniteDuration
+  )(implicit ec: ExecutionContext): Future[T] = {
+
+    val timeoutFuture = Future {
+      Thread.sleep(timeout.toMillis)
+      throw new TimeoutException("Tool execution timed out")
+    }
+
+    Future.firstCompletedOf(Seq(future, timeoutFuture))
+  }
 
   /**
    * Get a specific tool by name
@@ -98,8 +115,26 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
    */
   def executeAsync(request: ToolCallRequest)(implicit
     ec: ExecutionContext
-  ): Future[Either[ToolCallError, ujson.Value]] =
-    Future(blocking(execute(request)))
+  ): Future[Either[ToolCallError, ujson.Value]] = {
+
+    val baseFuture = Future(blocking(execute(request)))
+
+    toolTimeout match {
+
+      case Some(timeout) =>
+        withTimeout(baseFuture, timeout).recover { case _: TimeoutException =>
+          Left(
+            ToolCallError.ExecutionError(
+              request.functionName,
+              new Exception("Tool execution timed out")
+            )
+          )
+        }
+
+      case None =>
+        baseFuture
+    }
+  }
 
   /**
    * Execute multiple tool calls with a configurable strategy.
