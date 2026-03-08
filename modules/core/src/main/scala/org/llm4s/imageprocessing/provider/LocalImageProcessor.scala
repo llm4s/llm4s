@@ -9,6 +9,7 @@ import java.io.{ ByteArrayOutputStream, File }
 import javax.imageio.ImageIO
 import java.time.Instant
 import scala.util.Try
+import scala.concurrent.{ ExecutionContext, Future, blocking }
 
 /**
  * Local image processor that uses Java's built-in image processing capabilities.
@@ -44,6 +45,16 @@ class LocalImageProcessor extends org.llm4s.imageprocessing.ImageProcessingClien
           )
         }
       }
+
+  override def analyzeImageAsync(
+    imagePath: String,
+    prompt: Option[String] = None
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, ImageAnalysisResult]] =
+    Future {
+      blocking {
+        analyzeImage(imagePath, prompt)
+      }
+    }
 
   override def preprocessImage(
     imagePath: String,

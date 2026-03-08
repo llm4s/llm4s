@@ -7,6 +7,9 @@ import java.nio.file.{ Files, Paths }
 import java.awt.image.BufferedImage
 import java.awt.Color
 import javax.imageio.ImageIO
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Await
+import scala.concurrent.duration._
 
 class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
 
@@ -300,6 +303,58 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers {
         processedImage.format shouldBe ImageFormat.WEBP
         // The actual file content would be PNG format
       }
+    } finally
+      Files.deleteIfExists(tempFile)
+  }
+
+  it should "analyzeImageAsync returns successful result for valid image" in {
+    val tempFile = Files.createTempFile("test", ".png")
+    try {
+      val testImage = createTestImage(100, 100)
+      saveTestImage(testImage, tempFile.toString)
+
+      val future = processor.analyzeImageAsync(tempFile.toString, None)
+      val result = Await.result(future, 10.seconds)
+
+      result.isRight shouldBe true
+      result.foreach { analysis =>
+        analysis.description should include("100x100")
+        analysis.confidence should be > 0.0
+      }
+    } finally
+      Files.deleteIfExists(tempFile)
+  }
+
+  it should "analyzeImageAsync with prompt returns successful result" in {
+    val tempFile = Files.createTempFile("test", ".png")
+    try {
+      val testImage = createTestImage(50, 50)
+      saveTestImage(testImage, tempFile.toString)
+
+      val future = processor.analyzeImageAsync(tempFile.toString, Some("Describe the colors"))
+      val result = Await.result(future, 10.seconds)
+
+      result.isRight shouldBe true
+    } finally
+      Files.deleteIfExists(tempFile)
+  }
+
+  it should "analyzeImageAsync returns Left for non-existent image" in {
+    val future = processor.analyzeImageAsync("/nonexistent/image.png", None)
+    val result = Await.result(future, 10.seconds)
+
+    result.isLeft shouldBe true
+  }
+
+  it should "analyzeImageAsync returns Left for invalid image file" in {
+    val tempFile = Files.createTempFile("notanimage", ".txt")
+    try {
+      Files.write(tempFile, "not an image".getBytes)
+
+      val future = processor.analyzeImageAsync(tempFile.toString, None)
+      val result = Await.result(future, 10.seconds)
+
+      result.isLeft shouldBe true
     } finally
       Files.deleteIfExists(tempFile)
   }

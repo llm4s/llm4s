@@ -13,6 +13,7 @@ import java.time.{ Duration, Instant }
 import java.util.Base64
 import scala.util.Try
 import scala.util.control.NonFatal
+import scala.concurrent.{ ExecutionContext, Future, blocking }
 
 /**
  * OpenAI Vision client for AI-powered image analysis using GPT-4 Vision.
@@ -55,6 +56,16 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
       visionResponse <- callOpenAIVisionAPI(base64Image, analysisPrompt, mediaType).toEither.left
         .map(e => LLMError.apiCallFailed("OpenAI", s"OpenAI Vision API call failed: ${e.getMessage}"))
     } yield parseVisionResponse(visionResponse, metadata)
+
+  override def analyzeImageAsync(
+    imagePath: String,
+    prompt: Option[String] = None
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, ImageAnalysisResult]] =
+    Future {
+      blocking {
+        analyzeImage(imagePath, prompt)
+      }
+    }
 
   /**
    * Preprocesses an image by applying a sequence of operations.

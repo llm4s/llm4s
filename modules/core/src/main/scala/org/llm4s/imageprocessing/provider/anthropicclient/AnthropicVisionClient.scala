@@ -14,6 +14,7 @@ import java.time.{ Duration, Instant }
 import java.util.Base64
 import scala.util.Try
 import scala.util.control.NonFatal
+import scala.concurrent.{ ExecutionContext, Future, blocking }
 
 /**
  * Anthropic Claude Vision client for AI-powered image analysis.
@@ -59,6 +60,16 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
       visionResponse <- callAnthropicVisionAPI(base64Image, analysisPrompt, mediaType).toEither.left
         .map(e => LLMError.apiCallFailed("Anthropic", s"Anthropic Vision API call failed: ${e.getMessage}"))
     } yield parseVisionResponse(visionResponse, metadata) // Parse the response and extract structured information
+
+  override def analyzeImageAsync(
+    imagePath: String,
+    prompt: Option[String] = None
+  )(implicit ec: ExecutionContext): Future[Either[LLMError, ImageAnalysisResult]] =
+    Future {
+      blocking {
+        analyzeImage(imagePath, prompt)
+      }
+    }
 
   /**
    * Preprocesses an image by applying a sequence of operations.

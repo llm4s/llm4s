@@ -10,6 +10,9 @@ import java.nio.file.Files
 import java.awt.image.BufferedImage
 import java.awt.Color
 import javax.imageio.ImageIO
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Await
+import scala.concurrent.duration._
 
 class AnthropicVisionClientTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
@@ -185,5 +188,33 @@ class AnthropicVisionClientTest extends AnyFlatSpec with Matchers with BeforeAnd
       Files.deleteIfExists(pngFile)
       Files.deleteIfExists(jpgFile)
     }
+  }
+
+  it should "analyzeImageAsync completes with Left for invalid API key" in {
+    val client = new AnthropicVisionClient(config)
+
+    val future = client.analyzeImageAsync(tempFile.toString, None)
+    val result = Await.result(future, 15.seconds)
+
+    // Will fail with API error since key is invalid — but must complete, not throw
+    result.isLeft shouldBe true
+  }
+
+  it should "analyzeImageAsync with prompt completes with Left for invalid API key" in {
+    val client = new AnthropicVisionClient(config)
+
+    val future = client.analyzeImageAsync(tempFile.toString, Some("Describe this image"))
+    val result = Await.result(future, 15.seconds)
+
+    result.isLeft shouldBe true
+  }
+
+  it should "analyzeImageAsync returns Left for non-existent file" in {
+    val client = new AnthropicVisionClient(config)
+
+    val future = client.analyzeImageAsync("/nonexistent/file.png", None)
+    val result = Await.result(future, 10.seconds)
+
+    result.isLeft shouldBe true
   }
 }
