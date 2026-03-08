@@ -4,7 +4,6 @@ import Common._
 
 inThisBuild(
   List(
-    crossScalaVersions := List(scala213, scala3),
     scalaVersion       := scala3,
     organization       := "org.llm4s",
     organizationName   := "llm4s",
@@ -63,12 +62,9 @@ inThisBuild(
 // ---- Handy aliases ----
 addCommandAlias("cov", ";clean;coverage;test;coverageAggregate;coverageReport;coverageOff")
 addCommandAlias("covReport", ";clean;coverage;test;coverageReport;coverageOff")
-addCommandAlias("buildAll", ";clean;+compile;+test")
-addCommandAlias("publishAll", ";clean;+publish")
-addCommandAlias(
-  "testAll",
-  ";test;++2.13.16 crossTestScala2/test;++3.7.1 crossTestScala3/test"
-)
+addCommandAlias("buildAll", ";clean;compile;test")
+addCommandAlias("publishAll", ";clean;publish")
+addCommandAlias("testAll", ";test")
 addCommandAlias(
   "cleanTestAll",
   ";clean;testAll"
@@ -77,28 +73,27 @@ addCommandAlias(
   "cleanTestAllAndFormat",
   ";scalafmtAll;cleanTestAll"
 )
-addCommandAlias("compileAll", ";+compile")
-addCommandAlias("testCross", ";++2.13.16 crossTestScala2/test;++3.7.1 crossTestScala3/test")
+addCommandAlias("compileAll", ";compile")
+// ---- Three-tier test aliases ----
+// Default `test` runs unit + local HTTP server tests (Tier 1), excluding tagged tests.
+// testOllama: Tier 2 — integration tests against a local Ollama instance (requires `ollama pull qwen2.5:0.5b`)
+// testSmoke:  Tier 3 — cloud smoke tests against real APIs (requires API keys in .env or environment)
 addCommandAlias(
-  "fullCrossTest",
-  ";clean ;crossTestScala2/clean ;crossTestScala3/clean ;+publishLocal ;testCross"
+  "testOllama",
+  """;set core / Test / testOptions := Seq(); core/testOnly -- -n org.llm4s.tags.OllamaRequired"""
 )
-
-
+addCommandAlias(
+  "testSmoke",
+  """;set core / Test / testOptions := Seq(); core/testOnly -- -n org.llm4s.tags.CloudSmoke"""
+)
 
 // ---- shared settings ----
 lazy val commonSettings = Seq(
-  crossScalaVersions := Seq(scala213, scala3),
   Compile / scalacOptions := scalacOptionsForVersion(scalaVersion.value),
   Test / scalacOptions    := scalacOptionsForVersion(scalaVersion.value),
   // Suppress ScalaDoc warnings from third-party libraries (e.g., ScalaTest)
-  Compile / doc / scalacOptions ++= {
-    CrossVersion.partialVersion(scalaVersion.value) match {
-      case Some((3, _)) => Seq("-Wconf:cat=scaladoc:silent")
-      case _ => Seq.empty
-    }
-  },
-  semanticdbEnabled       := CrossVersion.partialVersion(scalaVersion.value).exists(_._1 == 3),
+  Compile / doc / scalacOptions ++= Seq("-Wconf:cat=scaladoc:silent"),
+  semanticdbEnabled       := true,
   Test / scalafix / unmanagedSources := Seq.empty,
   Compile / packageDoc / publishArtifact := !isSnapshot.value,
   // Disable test Scaladoc generation during publish (not needed, saves memory in CI)
@@ -112,6 +107,7 @@ lazy val commonSettings = Seq(
     Deps.monocleMacro,
     Deps.scalatest % Test,
     Deps.scalamock % Test,
+    Deps.scalatestplusScalacheck % Test,
     Deps.fansi,
     Deps.postgres,
     Deps.sqlite,
@@ -133,6 +129,28 @@ lazy val core = (project in file("modules/core"))
     name := "llm4s-core",
     commonSettings,
     Test / fork := true,
+    // Pass API key entries from .env into forked test JVM (for smoke/integration tests).
+    // Only forwards *_API_KEY variables to avoid polluting test configuration
+    // (e.g. TRACING_MODE would break Llm4sConfigTracingSpec defaults).
+    Test / envVars ++= {
+      val envFile = (ThisBuild / baseDirectory).value / ".env"
+      if (envFile.exists()) {
+        IO.readLines(envFile)
+          .filterNot(l => l.trim.isEmpty || l.trim.startsWith("#"))
+          .flatMap { line =>
+            line.split("=", 2) match {
+              case Array(k, v) if k.trim.endsWith("_API_KEY") => Some(k.trim -> v.trim)
+              case _                                          => None
+            }
+          }
+          .toMap
+      } else Map.empty
+    },
+    Test / testOptions += Tests.Argument(
+      TestFrameworks.ScalaTest,
+      "-l", "org.llm4s.tags.OllamaRequired",
+      "-l", "org.llm4s.tags.CloudSmoke"
+    ),
     Compile / mainClass := None,
     Compile / discoveredMainClasses := Seq.empty,
     resolvers += "Vosk Repository" at "https://alphacephei.com/maven/",
@@ -140,7 +158,6 @@ lazy val core = (project in file("modules/core"))
       Deps.azureOpenAI,
       Deps.anthropic,
       Deps.jtokkit,
-      Deps.requests,
       Deps.websocket,
       Deps.scalatest % Test,
       Deps.scalamock % Test,
@@ -149,7 +166,6 @@ lazy val core = (project in file("modules/core"))
       Deps.commonsIO,
       Deps.tika,
       Deps.poi,
-      Deps.requests,
       Deps.jsoup,
       Deps.jna,
       Deps.vosk,
@@ -182,7 +198,6 @@ lazy val workspaceClient = (project in file("modules/workspace/workspaceClient")
       Deps.azureOpenAI,
       Deps.anthropic,
       Deps.jtokkit,
-      Deps.requests,
       Deps.websocket,
       Deps.scalatest % Test,
       Deps.scalamock % Test,
@@ -191,7 +206,6 @@ lazy val workspaceClient = (project in file("modules/workspace/workspaceClient")
       Deps.commonsIO,
       Deps.tika,
       Deps.poi,
-      Deps.requests,
       Deps.jsoup,
       Deps.jna,
       Deps.vosk,
@@ -210,7 +224,6 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
     Compile / mainClass := Some("org.llm4s.runner.RunnerMain"),
     libraryDependencies ++= Seq(
       Deps.cask,
-      Deps.requests,
       Deps.postgres,
       Deps.config,
       Deps.hikariCP
@@ -247,39 +260,5 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
       Deps.opentelemetryApi,
       Deps.opentelemetrySdk,
       Deps.opentelemetryExporterOtlp
-    )
-  )
-
-lazy val crossTestScala2 = (project in file("modules/crossTest/scala2"))
-  .dependsOn(core)
-  .settings(
-    name         := "crosstest-scala2",
-    scalaVersion := scala213,
-    Test / fork  := true,
-    resolvers   += Resolver.mavenLocal,
-    resolvers   += Resolver.defaultLocal,
-    scalacOptions ++= scala2CompilerOptions,
-    libraryDependencies ++= Seq(
-      Deps.scalatest % Test,
-      Deps.ujson
-    ),
-    excludeDependencies ++= Seq(
-      ExclusionRule(organization = "com.lihaoyi", name = "geny_3"),
-      ExclusionRule(organization = "com.lihaoyi", name = "ujson_3"),
-      ExclusionRule(organization = "com.lihaoyi", name = "upickle-core_3")
-    )
-  )
-
-lazy val crossTestScala3 = (project in file("modules/crossTest/scala3"))
-  .dependsOn(core)
-  .settings(
-    name         := "crosstest-scala3",
-    scalaVersion := scala3,
-    Test / fork  := true,
-    resolvers   += Resolver.mavenLocal,
-    resolvers   += Resolver.defaultLocal,
-    scalacOptions ++= scala3CompilerOptions,
-    libraryDependencies ++= Seq(
-      Deps.scalatest % Test
     )
   )

@@ -55,26 +55,66 @@ object CostEstimator {
     metadata.flatMap { meta =>
       val pricing = meta.pricing
 
+      val cachedTokens        = usage.cachedTokens.getOrElse(0)
+      val cacheCreationTokens = usage.cacheCreationTokens.getOrElse(0)
+      val hasCacheBreakdown   = usage.cachedTokens.isDefined || usage.cacheCreationTokens.isDefined
+
+      val normalInputTokens =
+        math.max(
+          0,
+          usage.promptTokens -
+            cachedTokens -
+            cacheCreationTokens
+        )
+
+      def estimateInputCostWithCaching(outputCost: Double): Option[Double] =
+        if (hasCacheBreakdown) {
+          (usage.cachedTokens, usage.cacheCreationTokens) match {
+            case (Some(_), Some(_)) =>
+              for {
+                inCost      <- pricing.inputCostPerToken
+                cacheRead   <- pricing.cacheReadInputTokenCost
+                cacheCreate <- pricing.cacheCreationInputTokenCost
+              } yield (normalInputTokens * inCost) + (cachedTokens * cacheRead) + (cacheCreationTokens * cacheCreate) + outputCost
+
+            case (Some(_), None) =>
+              for {
+                inCost    <- pricing.inputCostPerToken
+                cacheRead <- pricing.cacheReadInputTokenCost
+              } yield (normalInputTokens * inCost) + (cachedTokens * cacheRead) + outputCost
+
+            case (None, Some(_)) =>
+              for {
+                inCost      <- pricing.inputCostPerToken
+                cacheCreate <- pricing.cacheCreationInputTokenCost
+              } yield (normalInputTokens * inCost) + (cacheCreationTokens * cacheCreate) + outputCost
+
+            case (None, None) =>
+              pricing.estimateCost(normalInputTokens, 0).map(_ + outputCost)
+          }
+        } else {
+          pricing.estimateCost(normalInputTokens, 0).map(_ + outputCost)
+        }
+
       (usage.thinkingTokens, pricing.outputCostPerReasoningToken) match {
         case (Some(thinkingTokens), Some(reasoningCostPerToken)) =>
-          for {
-            inputCostPerToken  <- pricing.inputCostPerToken
-            outputCostPerToken <- pricing.outputCostPerToken
-          } yield {
+          pricing.outputCostPerToken.flatMap { outputCostPerToken =>
             val effectiveThinkingTokens   = math.max(0, thinkingTokens)
             val effectiveCompletionTokens = math.max(0, usage.completionTokens)
             val normalCompletionTokens    = math.max(0, effectiveCompletionTokens - effectiveThinkingTokens)
-            val inputCost                 = usage.promptTokens * inputCostPerToken
             val normalOutputCost          = normalCompletionTokens * outputCostPerToken
             val reasoningOutputCost       = effectiveThinkingTokens * reasoningCostPerToken
-            inputCost + normalOutputCost + reasoningOutputCost
+            val outputCost                = normalOutputCost + reasoningOutputCost
+            estimateInputCostWithCaching(outputCost)
           }
 
         case _ =>
           // For models with thinking tokens, include them in the output token count
           // as they are typically billed at the completion token rate
           val effectiveOutputTokens = usage.totalOutputTokens
-          pricing.estimateCost(usage.promptTokens, effectiveOutputTokens)
+
+          val outputCostOpt = pricing.outputCostPerToken.map(outCost => math.max(0, effectiveOutputTokens) * outCost)
+          outputCostOpt.flatMap(estimateInputCostWithCaching)
       }
     }
 

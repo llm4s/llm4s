@@ -1,7 +1,8 @@
 package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
-import org.llm4s.error.ProcessingError
+import org.llm4s.error.{ ProcessingError, LLMError }
+import org.llm4s.util.SqlIdentifier
 
 import java.sql.{ Connection, PreparedStatement, ResultSet }
 import scala.collection.mutable.ArrayBuffer
@@ -20,6 +21,14 @@ import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
  * - Connection pooling via HikariCP
  * - ACID transactions
  * - Scalable to millions of vectors
+ * - Graceful handling of corrupt embeddings
+ *
+ * Corrupt Embedding Handling:
+ * - Records with unparseable embeddings are skipped during search/query/list operations
+ * - get() returns None for records with corrupt embeddings
+ * - Corrupt records are logged with id and embedding_dim for debugging
+ * - Operations continue successfully with remaining valid records
+ * - No silent data corruption - failures are observable via logs
  *
  * Requirements:
  * - PostgreSQL 16+ with pgvector extension (18+ recommended)
@@ -109,7 +118,7 @@ final class PgVectorStore private (
 
         Using.resource(conn.prepareStatement(sql)) { stmt =>
           stmt.setString(1, record.id)
-          stmt.setString(2, embeddingToString(record.embedding))
+          stmt.setString(2, PostgresVectorHelpers.embeddingToString(record.embedding))
           stmt.setInt(3, record.dimensions)
           record.content match {
             case Some(c) => stmt.setString(4, c)
@@ -143,7 +152,7 @@ final class PgVectorStore private (
             Using.resource(conn.prepareStatement(sql)) { stmt =>
               records.foreach { record =>
                 stmt.setString(1, record.id)
-                stmt.setString(2, embeddingToString(record.embedding))
+                stmt.setString(2, PostgresVectorHelpers.embeddingToString(record.embedding))
                 stmt.setInt(3, record.dimensions)
                 record.content match {
                   case Some(c) => stmt.setString(4, c)
@@ -168,6 +177,13 @@ final class PgVectorStore private (
         }
       }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to upsert batch: ${e.getMessage}"))
 
+  /**
+   * Search for the most similar vectors.
+   *
+   * Note: if the database contains corrupt embeddings, those rows are silently skipped.
+   * Because filtering happens after the SQL `LIMIT topK`, fewer than `topK` results may
+   * be returned when corrupt rows are present.
+   */
   override def search(
     queryVector: Array[Float],
     topK: Int,
@@ -189,7 +205,7 @@ final class PgVectorStore private (
         """
 
         Using.resource(conn.prepareStatement(sql)) { stmt =>
-          val vectorStr = embeddingToString(queryVector)
+          val vectorStr = PostgresVectorHelpers.embeddingToString(queryVector)
           stmt.setString(1, vectorStr)
 
           params.zipWithIndex.foreach { case (param, idx) =>
@@ -200,19 +216,29 @@ final class PgVectorStore private (
           stmt.setInt(params.size + 3, topK)
 
           Using.resource(stmt.executeQuery()) { rs =>
-            val results = ArrayBuffer.empty[ScoredRecord]
-            while (rs.next()) {
-              val record = rowToRecord(rs)
-              val score  = rs.getDouble("similarity")
-              // Clamp score to [0, 1] range
-              val normalizedScore = math.max(0.0, math.min(1.0, score))
-              results += ScoredRecord(record, normalizedScore)
+            val results                 = ArrayBuffer.empty[ScoredRecord]
+            var error: Option[LLMError] = None
+
+            while (rs.next() && error.isEmpty)
+              rowToRecord(rs) match {
+                case Right(record) =>
+                  val score           = rs.getDouble("similarity")
+                  val normalizedScore = math.max(0.0, math.min(1.0, score))
+                  results += ScoredRecord(record, normalizedScore)
+                case Left(e) =>
+                  error = Some(e)
+              }
+
+            error match {
+              case Some(e) => Left(e)
+              case None    => Right(results.toSeq)
             }
-            results.toSeq
           }
         }
       }
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Search failed: ${e.getMessage}"))
+    }.toEither.left
+      .map[LLMError](e => ProcessingError("pgvector-store", s"Search failed: ${e.getMessage}"))
+      .flatMap(identity)
 
   override def get(id: String): Result[Option[VectorRecord]] =
     Try {
@@ -220,12 +246,17 @@ final class PgVectorStore private (
         Using.resource(conn.prepareStatement(s"SELECT * FROM $tableName WHERE id = ?")) { stmt =>
           stmt.setString(1, id)
           Using.resource(stmt.executeQuery()) { rs =>
-            if (rs.next()) Some(rowToRecord(rs))
-            else None
+            if (rs.next()) {
+              rowToRecord(rs).map(Some(_))
+            } else {
+              Right(None)
+            }
           }
         }
       }
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to get: ${e.getMessage}"))
+    }.toEither.left
+      .map[LLMError](e => ProcessingError("pgvector-store", s"Failed to get: ${e.getMessage}"))
+      .flatMap(identity)
 
   override def getBatch(ids: Seq[String]): Result[Seq[VectorRecord]] =
     if (ids.isEmpty) Right(Seq.empty)
@@ -240,14 +271,25 @@ final class PgVectorStore private (
               stmt.setString(idx + 1, id)
             }
             Using.resource(stmt.executeQuery()) { rs =>
-              val records = ArrayBuffer.empty[VectorRecord]
-              while (rs.next())
-                records += rowToRecord(rs)
-              records.toSeq
+              val records                 = ArrayBuffer.empty[VectorRecord]
+              var error: Option[LLMError] = None
+
+              while (rs.next() && error.isEmpty)
+                rowToRecord(rs) match {
+                  case Right(r) => records += r
+                  case Left(e)  => error = Some(e)
+                }
+
+              error match {
+                case Some(e) => Left(e)
+                case None    => Right(records.toSeq)
+              }
             }
           }
         }
-      }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to get batch: ${e.getMessage}"))
+      }.toEither.left
+        .map[LLMError](e => ProcessingError("pgvector-store", s"Failed to get batch: ${e.getMessage}"))
+        .flatMap(identity)
 
   override def delete(id: String): Result[Unit] =
     Try {
@@ -333,14 +375,25 @@ final class PgVectorStore private (
           stmt.setInt(params.size + 2, offset)
 
           Using.resource(stmt.executeQuery()) { rs =>
-            val records = ArrayBuffer.empty[VectorRecord]
-            while (rs.next())
-              records += rowToRecord(rs)
-            records.toSeq
+            val records                 = ArrayBuffer.empty[VectorRecord]
+            var error: Option[LLMError] = None
+
+            while (rs.next() && error.isEmpty)
+              rowToRecord(rs) match {
+                case Right(r) => records += r
+                case Left(e)  => error = Some(e)
+              }
+
+            error match {
+              case Some(e) => Left(e)
+              case None    => Right(records.toSeq)
+            }
           }
         }
       }
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to list: ${e.getMessage}"))
+    }.toEither.left
+      .map[LLMError](e => ProcessingError("pgvector-store", s"Failed to list: ${e.getMessage}"))
+      .flatMap(identity)
 
   override def clear(): Result[Unit] =
     Try {
@@ -407,19 +460,21 @@ final class PgVectorStore private (
     }
   }
 
-  private def rowToRecord(rs: ResultSet): VectorRecord = {
+  private def rowToRecord(rs: ResultSet): Result[VectorRecord] = {
     val embeddingStr = rs.getString("embedding")
-    val embedding    = stringToEmbedding(embeddingStr)
-    val content      = Option(rs.getString("content")).filter(_.nonEmpty)
-    val metadataJson = rs.getString("metadata")
-    val metadata     = jsonToMetadata(metadataJson)
 
-    VectorRecord(
-      id = rs.getString("id"),
-      embedding = embedding,
-      content = content,
-      metadata = metadata
-    )
+    PostgresVectorHelpers.stringToEmbedding(embeddingStr).map { embedding =>
+      val content      = Option(rs.getString("content")).filter(_.nonEmpty)
+      val metadataJson = rs.getString("metadata")
+      val metadata     = jsonToMetadata(metadataJson)
+
+      VectorRecord(
+        id = rs.getString("id"),
+        embedding = embedding,
+        content = content,
+        metadata = metadata
+      )
+    }
   }
 
   private def filterToSql(filter: MetadataFilter): (String, Seq[Any]) = filter match {
@@ -463,17 +518,6 @@ final class PgVectorStore private (
     case other      => stmt.setString(index, other.toString)
   }
 
-  private def embeddingToString(embedding: Array[Float]): String =
-    embedding.mkString("[", ",", "]")
-
-  private def stringToEmbedding(s: String): Array[Float] =
-    if (s == null || s.isEmpty) Array.empty
-    else {
-      val cleaned = s.stripPrefix("[").stripSuffix("]")
-      if (cleaned.isEmpty) Array.empty
-      else cleaned.split(",").map(_.trim.toFloat)
-    }
-
   private def metadataToJson(metadata: Map[String, String]): String =
     if (metadata.isEmpty) "{}"
     else metadata.map { case (k, v) => s""""$k":"$v"""" }.mkString("{", ",", "}")
@@ -487,6 +531,29 @@ final class PgVectorStore private (
 }
 
 object PgVectorStore {
+
+  /**
+   * Validate a table name against PostgreSQL identifier rules.
+   * Delegates to the shared SqlIdentifier validator.
+   */
+  def validateTableName(name: String): Result[String] =
+    SqlIdentifier.validate(name, "pgvector-store")
+
+  /**
+   * Create a PgVectorStore from an existing HikariDataSource after validating the table name.
+   * Validation is performed before any side-effects (like opening connections) occur.
+   *
+   * By default, the dataSource is NOT owned (ownsDataSource = false), meaning the caller remains
+   * responsible for managing the dataSource lifecycle. Pass ownsDataSource = true if you want
+   * the PgVectorStore to close the dataSource on close(). This is safe for exclusive-use pools
+   * but dangerous for shared pools across multiple stores.
+   */
+  def create(dataSource: HikariDataSource, tableName: String, ownsDataSource: Boolean = false): Result[PgVectorStore] =
+    validateTableName(tableName).flatMap { _ =>
+      Try {
+        new PgVectorStore(dataSource, tableName, ownsDataSource)
+      }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+    }
 
   /**
    * Configuration for PgVectorStore.
@@ -518,20 +585,22 @@ object PgVectorStore {
    * @return The vector store or error
    */
   def apply(config: Config): Result[PgVectorStore] =
-    Try {
-      val hikariConfig = new HikariConfig()
-      hikariConfig.setJdbcUrl(config.jdbcUrl)
-      hikariConfig.setUsername(config.user)
-      hikariConfig.setPassword(config.password)
-      hikariConfig.setMaximumPoolSize(config.maxPoolSize)
-      hikariConfig.setMinimumIdle(1)
-      hikariConfig.setConnectionTimeout(30000)
-      hikariConfig.setIdleTimeout(600000)
-      hikariConfig.setMaxLifetime(1800000)
+    validateTableName(config.tableName).flatMap { _ =>
+      Try {
+        val hikariConfig = new HikariConfig()
+        hikariConfig.setJdbcUrl(config.jdbcUrl)
+        hikariConfig.setUsername(config.user)
+        hikariConfig.setPassword(config.password)
+        hikariConfig.setMaximumPoolSize(config.maxPoolSize)
+        hikariConfig.setMinimumIdle(1)
+        hikariConfig.setConnectionTimeout(30000)
+        hikariConfig.setIdleTimeout(600000)
+        hikariConfig.setMaxLifetime(1800000)
 
-      val dataSource = new HikariDataSource(hikariConfig)
-      new PgVectorStore(dataSource, config.tableName)
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+        val dataSource = new HikariDataSource(hikariConfig)
+        new PgVectorStore(dataSource, config.tableName)
+      }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+    }
 
   /**
    * Create a PgVectorStore from connection string.
@@ -548,17 +617,19 @@ object PgVectorStore {
     password: String = "",
     tableName: String = "vectors"
   ): Result[PgVectorStore] =
-    Try {
-      val hikariConfig = new HikariConfig()
-      hikariConfig.setJdbcUrl(connectionString)
-      hikariConfig.setUsername(user)
-      hikariConfig.setPassword(password)
-      hikariConfig.setMaximumPoolSize(10)
-      hikariConfig.setMinimumIdle(1)
+    validateTableName(tableName).flatMap { _ =>
+      Try {
+        val hikariConfig = new HikariConfig()
+        hikariConfig.setJdbcUrl(connectionString)
+        hikariConfig.setUsername(user)
+        hikariConfig.setPassword(password)
+        hikariConfig.setMaximumPoolSize(10)
+        hikariConfig.setMinimumIdle(1)
 
-      val dataSource = new HikariDataSource(hikariConfig)
-      new PgVectorStore(dataSource, tableName)
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+        val dataSource = new HikariDataSource(hikariConfig)
+        new PgVectorStore(dataSource, tableName)
+      }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+    }
 
   /**
    * Create a PgVectorStore with default local settings.
@@ -585,7 +656,5 @@ object PgVectorStore {
    * @return The vector store or error
    */
   def apply(dataSource: HikariDataSource, tableName: String): Result[PgVectorStore] =
-    Try {
-      new PgVectorStore(dataSource, tableName, ownsDataSource = false)
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+    create(dataSource, tableName, ownsDataSource = false)
 }

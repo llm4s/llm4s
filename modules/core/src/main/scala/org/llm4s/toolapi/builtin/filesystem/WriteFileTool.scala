@@ -1,6 +1,7 @@
 package org.llm4s.toolapi.builtin.filesystem
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 
 import java.nio.file.{ Files, Paths, StandardOpenOption }
@@ -76,11 +77,11 @@ object WriteFileTool {
     )
 
   /**
-   * Create a write file tool with the given configuration.
+   * Create a write file tool with the given configuration, returning a Result for safe error handling.
    *
    * @param config Write configuration with required allowedPaths
    */
-  def create(config: WriteConfig): ToolFunction[Map[String, Any], WriteFileResult] =
+  def createSafe(config: WriteConfig): Result[ToolFunction[Map[String, Any], WriteFileResult]] =
     ToolBuilder[Map[String, Any], WriteFileResult](
       name = "write_file",
       description = s"Write content to a file. " +
@@ -92,11 +93,11 @@ object WriteFileTool {
       for {
         pathStr <- extractor.getString("path")
         content <- extractor.getString("content")
-        append   = extractor.getBoolean("append").toOption.getOrElse(false)
-        encoding = extractor.getString("encoding").toOption.getOrElse("UTF-8")
+        append   = extractor.getBoolean("append").fold(_ => false, identity)
+        encoding = extractor.getString("encoding").fold(_ => "UTF-8", identity)
         result <- writeFile(pathStr, content, append, encoding, config)
       } yield result
-    }.build()
+    }.buildSafe()
 
   private def writeFile(
     pathStr: String,

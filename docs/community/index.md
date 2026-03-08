@@ -254,7 +254,7 @@ We are committed to providing a welcoming and inclusive community. Please read o
 ## Questions?
 
 - 💬 **Discord**: [Ask in Discord](https://discord.gg/4uvTPn6qww)
-- 📖 **Docs**: [Browse documentation](/guide/basic-usage)
+- 📖 **Docs**: [Browse documentation](../guide/basic-usage)
 - 🐛 **Issues**: [GitHub Issues](https://github.com/llm4s/llm4s/issues)
 
 **Join us in building the future of LLM applications in Scala!** 🚀

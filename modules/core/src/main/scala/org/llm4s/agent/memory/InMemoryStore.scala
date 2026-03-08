@@ -69,19 +69,63 @@ final case class InMemoryStore private (
     if (query.trim.isEmpty) {
       return Right(Seq.empty)
     }
-    // First filter by criteria
     val filtered = memories.values.filter(filter.matches).toSeq
+    keywordSearch(query, filtered, topK)
+  }
 
-    // Check if we have embeddings available
-    val hasEmbeddings = filtered.exists(_.isEmbedded)
+  /**
+   * Semantic search for memories similar to an embedded query vector.
+   *
+   * Computes cosine similarity between the query embedding and the stored
+   * memory embeddings, returning the top-K results.
+   */
+  def search(
+    query: String,
+    queryEmbedding: Array[Float],
+    topK: Int,
+    filter: MemoryFilter
+  ): Result[Seq[ScoredMemory]] = {
+    if (queryEmbedding.isEmpty) {
+      return Right(Seq.empty)
+    }
 
-    if (hasEmbeddings) {
-      // TODO: Implement vector similarity search when embeddings are available
-      // For now, fall back to keyword search
-      keywordSearch(query, filtered, topK)
+    val filtered         = memories.values.filter(filter.matches).toSeq
+    val embeddedMemories = filtered.filter(_.isEmbedded)
+
+    if (embeddedMemories.nonEmpty) {
+      val queryNonFinite = containsNonFinite(queryEmbedding)
+      val candidates = embeddedMemories.flatMap { memory =>
+        memory.embedding.flatMap { vector =>
+          if (vector.length != queryEmbedding.length) {
+            None
+          } else if (queryNonFinite || containsNonFinite(vector)) {
+            None
+          } else {
+            val similarity           = VectorOps.cosineSimilarity(queryEmbedding, vector)
+            val normalizedSimilarity = (similarity + 1.0) / 2.0
+            val score                = math.max(0.0, math.min(1.0, normalizedSimilarity))
+            Some(ScoredMemory(memory, score))
+          }
+        }
+      }
+
+      if (candidates.isEmpty) keywordSearch(query, filtered, topK)
+      else Right(candidates.sorted(ScoredMemory.byScoreDescending).take(topK))
     } else {
       keywordSearch(query, filtered, topK)
     }
+  }
+
+  /**
+   * Check if an array contains any non-finite values (NaN, Inf, -Inf).
+   */
+  private def containsNonFinite(arr: Array[Float]): Boolean = {
+    var i = 0
+    while (i < arr.length) {
+      if (!java.lang.Float.isFinite(arr(i))) return true
+      i += 1
+    }
+    false
   }
 
   /**

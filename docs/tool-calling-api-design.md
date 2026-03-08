@@ -1,3 +1,9 @@
+---
+layout: page
+title: Tool Calling API Design
+parent: API Reference
+---
+
 # Scala Tool Calling API Design
 
 This document outlines the design for a type-safe Scala API for defining, validating, and executing tool calls for LLMs. It provides a clean, functional approach to tool function definitions with JSON Schema validation.

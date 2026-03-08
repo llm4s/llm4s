@@ -1,6 +1,7 @@
 package org.llm4s.toolapi.builtin.core
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 
 import scala.util.Try
@@ -65,9 +66,9 @@ object JSONTool {
     )
 
   /**
-   * The JSON tool instance.
+   * The JSON tool instance, returning a Result for safe error handling.
    */
-  val tool: ToolFunction[Map[String, Any], JSONResult] =
+  val toolSafe: Result[ToolFunction[Map[String, Any], JSONResult]] =
     ToolBuilder[Map[String, Any], JSONResult](
       name = "json_tool",
       description = "Parse, format, query, or validate JSON data. " +
@@ -83,7 +84,7 @@ object JSONTool {
         pathOpt = extractor.getString("path").toOption
         result <- processJSON(operation, json, pathOpt)
       } yield result
-    }.build()
+    }.buildSafe()
 
   private def processJSON(
     operation: String,

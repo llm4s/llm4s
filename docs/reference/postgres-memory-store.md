@@ -209,3 +209,54 @@ The store follows a functional error handling model.
 ### Semantic Search
 Although the schema supports vector embeddings, calling `search(...)` currently returns a `ProcessingError`. This requires integration with an `EmbeddingService`.
 
+---
+
+## Usage Examples
+
+This section shows how a developer would use `PostgresMemoryStore` in a real application after configuration is complete.
+
+### End-to-End Example (Result-based workflow)
+
+```scala
+import java.time.Instant
+import org.llm4s.agent.memory.{PostgresMemoryStore, Memory, MemoryFilter, MemoryId, MemoryType}
+
+val config = PostgresMemoryStore.Config(
+  host = "localhost",
+  port = 5432,
+  database = "my_app_db",
+  user = "postgres",
+  password = "secure_password",
+  tableName = "agent_memories"
+)
+
+val memory = Memory(
+  id = MemoryId("memory-1"),
+  content = "Scala enables reliable AI systems",
+  memoryType = MemoryType.Knowledge,
+  metadata = Map("topic" -> "scala"),
+  timestamp = Instant.now(),
+  importance = Some(0.8),
+  embedding = None
+)
+
+val result = for {
+  store   <- PostgresMemoryStore(config)
+  store2  <- store.store(memory)
+  results <- store2.recall(MemoryFilter.ByMetadata("topic", "scala"), limit = 5)
+  store3  <- store2.update(MemoryId("memory-1"), m => m.copy(content = "Updated memory content"))
+  _       <- store3.delete(MemoryId("memory-1"))
+} yield results
+```
+
+---
+
+## Troubleshooting
+
+| Problem | Cause | Fix |
+|--------|------|-----|
+| `extension "vector" does not exist` | pgvector not installed or enabled | Run `CREATE EXTENSION vector;` in your database |
+| Connection timeout or pool exhaustion | Incorrect DB URL or pool size too small | Check host/port/credentials and `maxPoolSize` config |
+| Embedding dimension mismatch | Stored embeddings use a different model size | Use the same embedding model for both storage and queries |
+| Table name validation error | Table name does not match allowed pattern | Use only letters, numbers, and underscores, starting with a letter or underscore |
+| Metadata key validation errors | Invalid metadata keys in filters | Ensure keys match `^[a-zA-Z_][a-zA-Z0-9_]*$` |

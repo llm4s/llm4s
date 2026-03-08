@@ -4,6 +4,7 @@ import org.llm4s.agent.streaming.AgentEvent
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -18,7 +19,7 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers with MockFactory {
   implicit val toolResultRW: ReadWriter[ToolResult] = macroRW[ToolResult]
 
   // Helper to create a failing tool
-  def createFailingTool(name: String, errorMessage: String): ToolFunction[Map[String, Any], ToolResult] = {
+  def createFailingTool(name: String, errorMessage: String): Result[ToolFunction[Map[String, Any], ToolResult]] = {
 
     val schema = Schema
       .`object`[Map[String, Any]]("Tool parameters")
@@ -32,212 +33,224 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers with MockFactory {
     ).withHandler { _ =>
       // Return the specified error
       Left(errorMessage)
-    }.build()
+    }.buildSafe()
   }
 
   "Agent" should "handle tool execution failures gracefully without creating empty messages" in {
     // Create a mock LLM client
     val mockClient = mock[LLMClient]
+    val agent      = new Agent(mockClient)
 
-    // Create a tool that fails with the error from the trace
-    val failingTool = createFailingTool("add_inventory_item", "Expected object at '' but found Null$")
-
-    val toolRegistry = new ToolRegistry(Seq(failingTool))
-    val agent        = new Agent(mockClient)
-
-    // Initialize agent state
-    val initialState = agent.initialize(
-      query = "Add an apple to inventory",
-      tools = toolRegistry
-    )
-
-    // First interaction: LLM requests tool call with null arguments
-    val toolCallId = "call_123"
-    val assistantResponseWithToolCall = AssistantMessage(
-      contentOpt = None,
-      toolCalls = Seq(
-        ToolCall(
-          id = toolCallId,
-          name = "add_inventory_item",
-          arguments = ujson.Null // This is the problematic null argument
-        )
+    val setup = for {
+      failingTool <- createFailingTool("add_inventory_item", "Expected object at '' but found Null$")
+      initialState <- agent.initializeSafe(
+        query = "Add an apple to inventory",
+        tools = new ToolRegistry(Seq(failingTool))
       )
+    } yield initialState
+
+    setup.fold(
+      e => fail(s"Setup failed: ${e.formatted}"),
+      initialState => {
+        // First interaction: LLM requests tool call with null arguments
+        val toolCallId = "call_123"
+        val assistantResponseWithToolCall = AssistantMessage(
+          contentOpt = None,
+          toolCalls = Seq(
+            ToolCall(
+              id = toolCallId,
+              name = "add_inventory_item",
+              arguments = ujson.Null // This is the problematic null argument
+            )
+          )
+        )
+
+        val completionWithToolCall = Completion(
+          id = "completion-123",
+          created = System.currentTimeMillis() / 1000,
+          content = assistantResponseWithToolCall.content,
+          model = "test-model",
+          message = assistantResponseWithToolCall,
+          toolCalls = assistantResponseWithToolCall.toolCalls.toList,
+          usage = Some(TokenUsage(100, 50, 150))
+        )
+
+        // Mock the first LLM call that returns a tool call request
+        (mockClient.complete _)
+          .expects(*, *)
+          .returning(Right(completionWithToolCall))
+          .once()
+
+        // Run the first step - should get tool call
+        val step1Result = agent.runStep(initialState)
+        (step1Result should be).a(Symbol("right"))
+
+        val stateAfterToolCall = step1Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+        stateAfterToolCall.status shouldBe AgentStatus.WaitingForTools
+
+        // Run the next step - process the tool call (which will fail)
+        val step2Result = agent.runStep(stateAfterToolCall)
+        (step2Result should be).a(Symbol("right"))
+
+        val stateAfterToolExecution = step2Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+
+        // Verify the tool message was created with error content (not empty)
+        val toolMessages = stateAfterToolExecution.conversation.messages.collect { case tm: ToolMessage => tm }
+
+        toolMessages should have size 1
+        val toolMessage = toolMessages.head
+        toolMessage.toolCallId shouldBe toolCallId
+        toolMessage.content should not be empty
+        toolMessage.content should include("isError")
+        toolMessage.content should include("Tool call 'add_inventory_item'")
+        toolMessage.content should include("received null arguments")
+
+        // Verify the message passes validation
+        (toolMessage.validate should be).a(Symbol("right"))
+
+        // The state should be ready to continue (InProgress)
+        stateAfterToolExecution.status shouldBe AgentStatus.InProgress
+
+        // Verify the conversation is valid
+        val validationResult = Message.validateConversation(stateAfterToolExecution.conversation.messages.toList)
+        (validationResult should be).a(Symbol("right"))
+      }
     )
-
-    val completionWithToolCall = Completion(
-      id = "completion-123",
-      created = System.currentTimeMillis() / 1000,
-      content = assistantResponseWithToolCall.content,
-      model = "test-model",
-      message = assistantResponseWithToolCall,
-      toolCalls = assistantResponseWithToolCall.toolCalls.toList,
-      usage = Some(TokenUsage(100, 50, 150))
-    )
-
-    // Mock the first LLM call that returns a tool call request
-    (mockClient.complete _)
-      .expects(*, *)
-      .returning(Right(completionWithToolCall))
-      .once()
-
-    // Run the first step - should get tool call
-    val step1Result = agent.runStep(initialState)
-    (step1Result should be).a(Symbol("right"))
-
-    val stateAfterToolCall = step1Result.getOrElse(fail("Expected successful step"))
-    stateAfterToolCall.status shouldBe AgentStatus.WaitingForTools
-
-    // Run the next step - process the tool call (which will fail)
-    val step2Result = agent.runStep(stateAfterToolCall)
-    (step2Result should be).a(Symbol("right"))
-
-    val stateAfterToolExecution = step2Result.getOrElse(fail("Expected successful step"))
-
-    // Verify the tool message was created with error content (not empty)
-    val toolMessages = stateAfterToolExecution.conversation.messages.collect { case tm: ToolMessage => tm }
-
-    toolMessages should have size 1
-    val toolMessage = toolMessages.head
-    toolMessage.toolCallId shouldBe toolCallId
-    toolMessage.content should not be empty
-    toolMessage.content should include("isError")
-    toolMessage.content should include("Tool call 'add_inventory_item'")
-    toolMessage.content should include("received null arguments")
-
-    // Verify the message passes validation
-    (toolMessage.validate should be).a(Symbol("right"))
-
-    // The state should be ready to continue (InProgress)
-    stateAfterToolExecution.status shouldBe AgentStatus.InProgress
-
-    // Verify the conversation is valid
-    val validationResult = Message.validateConversation(stateAfterToolExecution.conversation.messages.toList)
-    (validationResult should be).a(Symbol("right"))
   }
 
   "Agent" should "handle tool execution with empty error messages" in {
     val mockClient = mock[LLMClient]
+    val agent      = new Agent(mockClient)
 
-    // Create a tool that fails with an empty error message
-    val failingTool = createFailingTool("test_tool", "")
-
-    val toolRegistry = new ToolRegistry(Seq(failingTool))
-    val agent        = new Agent(mockClient)
-
-    val initialState = agent.initialize(
-      query = "Test query",
-      tools = toolRegistry
-    )
-
-    val toolCallId = "call_456"
-    val assistantResponseWithToolCall = AssistantMessage(
-      contentOpt = Some("I'll use the test tool"),
-      toolCalls = Seq(
-        ToolCall(
-          id = toolCallId,
-          name = "test_tool",
-          arguments = ujson.Obj()
-        )
+    val setup = for {
+      failingTool <- createFailingTool("test_tool", "")
+      initialState <- agent.initializeSafe(
+        query = "Test query",
+        tools = new ToolRegistry(Seq(failingTool))
       )
+    } yield initialState
+
+    setup.fold(
+      e => fail(s"Setup failed: ${e.formatted}"),
+      initialState => {
+        val toolCallId = "call_456"
+        val assistantResponseWithToolCall = AssistantMessage(
+          contentOpt = Some("I'll use the test tool"),
+          toolCalls = Seq(
+            ToolCall(
+              id = toolCallId,
+              name = "test_tool",
+              arguments = ujson.Obj()
+            )
+          )
+        )
+
+        val completionWithToolCall = Completion(
+          id = "completion-123",
+          created = System.currentTimeMillis() / 1000,
+          content = assistantResponseWithToolCall.content,
+          model = "test-model",
+          message = assistantResponseWithToolCall,
+          toolCalls = assistantResponseWithToolCall.toolCalls.toList,
+          usage = Some(TokenUsage(100, 50, 150))
+        )
+
+        (mockClient.complete _)
+          .expects(*, *)
+          .returning(Right(completionWithToolCall))
+          .once()
+
+        // Run steps
+        val step1Result = agent.runStep(initialState)
+        (step1Result should be).a(Symbol("right"))
+
+        val stateAfterToolCall = step1Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+        val step2Result        = agent.runStep(stateAfterToolCall)
+        (step2Result should be).a(Symbol("right"))
+
+        val stateAfterToolExecution = step2Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+
+        // Verify tool message has non-empty content even with empty error
+        val toolMessages = stateAfterToolExecution.conversation.messages.collect { case tm: ToolMessage => tm }
+
+        toolMessages should have size 1
+        val toolMessage = toolMessages.head
+        toolMessage.content should not be empty
+        toolMessage.content should include("isError")
+
+        // Verify message and conversation validation
+        (toolMessage.validate should be).a(Symbol("right"))
+        (Message.validateConversation(stateAfterToolExecution.conversation.messages.toList) should be).a(
+          Symbol("right")
+        )
+      }
     )
-
-    val completionWithToolCall = Completion(
-      id = "completion-123",
-      created = System.currentTimeMillis() / 1000,
-      content = assistantResponseWithToolCall.content,
-      model = "test-model",
-      message = assistantResponseWithToolCall,
-      toolCalls = assistantResponseWithToolCall.toolCalls.toList,
-      usage = Some(TokenUsage(100, 50, 150))
-    )
-
-    (mockClient.complete _)
-      .expects(*, *)
-      .returning(Right(completionWithToolCall))
-      .once()
-
-    // Run steps
-    val step1Result = agent.runStep(initialState)
-    (step1Result should be).a(Symbol("right"))
-
-    val stateAfterToolCall = step1Result.getOrElse(fail("Expected successful step"))
-    val step2Result        = agent.runStep(stateAfterToolCall)
-    (step2Result should be).a(Symbol("right"))
-
-    val stateAfterToolExecution = step2Result.getOrElse(fail("Expected successful step"))
-
-    // Verify tool message has non-empty content even with empty error
-    val toolMessages = stateAfterToolExecution.conversation.messages.collect { case tm: ToolMessage => tm }
-
-    toolMessages should have size 1
-    val toolMessage = toolMessages.head
-    toolMessage.content should not be empty
-    toolMessage.content should include("isError")
-
-    // Verify message and conversation validation
-    (toolMessage.validate should be).a(Symbol("right"))
-    (Message.validateConversation(stateAfterToolExecution.conversation.messages.toList) should be).a(Symbol("right"))
   }
 
   "Agent" should "handle tool execution errors with special characters" in {
     val mockClient = mock[LLMClient]
+    val agent      = new Agent(mockClient)
 
-    // Create a tool that fails with special characters in error message
-    val failingTool = createFailingTool("special_char_tool", "Error with \"quotes\" and \\ backslash")
-
-    val toolRegistry = new ToolRegistry(Seq(failingTool))
-    val agent        = new Agent(mockClient)
-
-    val initialState = agent.initialize(
-      query = "Test special characters",
-      tools = toolRegistry
-    )
-
-    val assistantResponseWithToolCall = AssistantMessage(
-      contentOpt = None,
-      toolCalls = Seq(
-        ToolCall(
-          id = "call_789",
-          name = "special_char_tool",
-          arguments = ujson.Obj()
-        )
+    val setup = for {
+      failingTool <- createFailingTool("special_char_tool", "Error with \"quotes\" and \\ backslash")
+      initialState <- agent.initializeSafe(
+        query = "Test special characters",
+        tools = new ToolRegistry(Seq(failingTool))
       )
+    } yield initialState
+
+    setup.fold(
+      e => fail(s"Setup failed: ${e.formatted}"),
+      initialState => {
+        val assistantResponseWithToolCall = AssistantMessage(
+          contentOpt = None,
+          toolCalls = Seq(
+            ToolCall(
+              id = "call_789",
+              name = "special_char_tool",
+              arguments = ujson.Obj()
+            )
+          )
+        )
+
+        val completionWithToolCall = Completion(
+          id = "completion-123",
+          created = System.currentTimeMillis() / 1000,
+          content = assistantResponseWithToolCall.content,
+          model = "test-model",
+          message = assistantResponseWithToolCall,
+          toolCalls = assistantResponseWithToolCall.toolCalls.toList,
+          usage = Some(TokenUsage(100, 50, 150))
+        )
+
+        (mockClient.complete _)
+          .expects(*, *)
+          .returning(Right(completionWithToolCall))
+          .once()
+
+        val step1Result        = agent.runStep(initialState)
+        val stateAfterToolCall = step1Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+
+        val step2Result             = agent.runStep(stateAfterToolCall)
+        val stateAfterToolExecution = step2Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+
+        // Verify tool message content is valid JSON-like structure
+        val toolMessages = stateAfterToolExecution.conversation.messages.collect { case tm: ToolMessage => tm }
+
+        toolMessages should have size 1
+        val toolMessage = toolMessages.head
+        toolMessage.content should not be empty
+
+        // The error message should be properly escaped in the JSON
+        toolMessage.content should include("isError")
+
+        // Verify validation passes
+        (toolMessage.validate should be).a(Symbol("right"))
+        (Message.validateConversation(stateAfterToolExecution.conversation.messages.toList) should be).a(
+          Symbol("right")
+        )
+      }
     )
-
-    val completionWithToolCall = Completion(
-      id = "completion-123",
-      created = System.currentTimeMillis() / 1000,
-      content = assistantResponseWithToolCall.content,
-      model = "test-model",
-      message = assistantResponseWithToolCall,
-      toolCalls = assistantResponseWithToolCall.toolCalls.toList,
-      usage = Some(TokenUsage(100, 50, 150))
-    )
-
-    (mockClient.complete _)
-      .expects(*, *)
-      .returning(Right(completionWithToolCall))
-      .once()
-
-    val step1Result        = agent.runStep(initialState)
-    val stateAfterToolCall = step1Result.getOrElse(fail("Expected successful step"))
-
-    val step2Result             = agent.runStep(stateAfterToolCall)
-    val stateAfterToolExecution = step2Result.getOrElse(fail("Expected successful step"))
-
-    // Verify tool message content is valid JSON-like structure
-    val toolMessages = stateAfterToolExecution.conversation.messages.collect { case tm: ToolMessage => tm }
-
-    toolMessages should have size 1
-    val toolMessage = toolMessages.head
-    toolMessage.content should not be empty
-
-    // The error message should be properly escaped in the JSON
-    toolMessage.content should include("isError")
-
-    // Verify validation passes
-    (toolMessage.validate should be).a(Symbol("right"))
-    (Message.validateConversation(stateAfterToolExecution.conversation.messages.toList) should be).a(Symbol("right"))
   }
 
   // ============================================================================
@@ -246,240 +259,261 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers with MockFactory {
 
   "Agent" should "produce structured JSON with errorType null_arguments" in {
     val mockClient = mock[LLMClient]
+    val agent      = new Agent(mockClient)
 
     // Create a tool that requires parameters
     val schema = Schema
       .`object`[Map[String, Any]]("Tool parameters")
       .withRequiredField("query", Schema.string("Search query"))
 
-    val searchTool = ToolBuilder[Map[String, Any], ToolResult](
-      "search_tool",
-      "Search for items",
-      schema
-    ).withHandler(extractor => extractor.getString("query").map(q => ToolResult(s"Found: $q"))).build()
+    val setup = for {
+      searchTool <- ToolBuilder[Map[String, Any], ToolResult](
+        "search_tool",
+        "Search for items",
+        schema
+      ).withHandler(extractor => extractor.getString("query").map(q => ToolResult(s"Found: $q"))).buildSafe()
+      initialState <- agent.initializeSafe(query = "Search for apples", tools = new ToolRegistry(Seq(searchTool)))
+    } yield initialState
 
-    val toolRegistry = new ToolRegistry(Seq(searchTool))
-    val agent        = new Agent(mockClient)
+    setup.fold(
+      e => fail(s"Setup failed: ${e.formatted}"),
+      initialState => {
+        val assistantResponseWithToolCall = AssistantMessage(
+          contentOpt = None,
+          toolCalls = Seq(
+            ToolCall(id = "call_null", name = "search_tool", arguments = ujson.Null)
+          )
+        )
 
-    val initialState = agent.initialize(query = "Search for apples", tools = toolRegistry)
+        val completionWithToolCall = Completion(
+          id = "completion-null",
+          created = System.currentTimeMillis() / 1000,
+          content = assistantResponseWithToolCall.content,
+          model = "test-model",
+          message = assistantResponseWithToolCall,
+          toolCalls = assistantResponseWithToolCall.toolCalls.toList,
+          usage = Some(TokenUsage(100, 50, 150))
+        )
 
-    val assistantResponseWithToolCall = AssistantMessage(
-      contentOpt = None,
-      toolCalls = Seq(
-        ToolCall(id = "call_null", name = "search_tool", arguments = ujson.Null)
-      )
+        (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
+
+        val step1Result        = agent.runStep(initialState)
+        val stateAfterToolCall = step1Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+        val step2Result        = agent.runStep(stateAfterToolCall)
+        val stateAfterExec     = step2Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+
+        val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
+        toolMessages should have size 1
+
+        val json = ujson.read(toolMessages.head.content)
+
+        // Validate structured JSON fields
+        json("isError").bool shouldBe true
+        json("toolName").str shouldBe "search_tool"
+        json("errorType").str shouldBe "null_arguments"
+        json("message").str should include("null arguments")
+        json("error").str should include("Tool call 'search_tool'") // Legacy field
+      }
     )
-
-    val completionWithToolCall = Completion(
-      id = "completion-null",
-      created = System.currentTimeMillis() / 1000,
-      content = assistantResponseWithToolCall.content,
-      model = "test-model",
-      message = assistantResponseWithToolCall,
-      toolCalls = assistantResponseWithToolCall.toolCalls.toList,
-      usage = Some(TokenUsage(100, 50, 150))
-    )
-
-    (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
-
-    val step1Result        = agent.runStep(initialState)
-    val stateAfterToolCall = step1Result.getOrElse(fail("Expected successful step"))
-    val step2Result        = agent.runStep(stateAfterToolCall)
-    val stateAfterExec     = step2Result.getOrElse(fail("Expected successful step"))
-
-    val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
-    toolMessages should have size 1
-
-    val json = ujson.read(toolMessages.head.content)
-
-    // Validate structured JSON fields
-    json("isError").bool shouldBe true
-    json("toolName").str shouldBe "search_tool"
-    json("errorType").str shouldBe "null_arguments"
-    json("message").str should include("null arguments")
-    json("error").str should include("Tool call 'search_tool'") // Legacy field
   }
 
   "Agent" should "produce structured JSON with errorType handler_error" in {
     val mockClient = mock[LLMClient]
+    val agent      = new Agent(mockClient)
 
-    val failingTool = createFailingTool("database_tool", "Connection timeout after 30s")
+    val setup = for {
+      failingTool  <- createFailingTool("database_tool", "Connection timeout after 30s")
+      initialState <- agent.initializeSafe(query = "Query database", tools = new ToolRegistry(Seq(failingTool)))
+    } yield initialState
 
-    val toolRegistry = new ToolRegistry(Seq(failingTool))
-    val agent        = new Agent(mockClient)
+    setup.fold(
+      e => fail(s"Setup failed: ${e.formatted}"),
+      initialState => {
+        val assistantResponseWithToolCall = AssistantMessage(
+          contentOpt = None,
+          toolCalls = Seq(
+            ToolCall(id = "call_handler", name = "database_tool", arguments = ujson.Obj("item" -> "test"))
+          )
+        )
 
-    val initialState = agent.initialize(query = "Query database", tools = toolRegistry)
+        val completionWithToolCall = Completion(
+          id = "completion-handler",
+          created = System.currentTimeMillis() / 1000,
+          content = assistantResponseWithToolCall.content,
+          model = "test-model",
+          message = assistantResponseWithToolCall,
+          toolCalls = assistantResponseWithToolCall.toolCalls.toList,
+          usage = Some(TokenUsage(100, 50, 150))
+        )
 
-    val assistantResponseWithToolCall = AssistantMessage(
-      contentOpt = None,
-      toolCalls = Seq(
-        ToolCall(id = "call_handler", name = "database_tool", arguments = ujson.Obj("item" -> "test"))
-      )
+        (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
+
+        val step1Result        = agent.runStep(initialState)
+        val stateAfterToolCall = step1Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+        val step2Result        = agent.runStep(stateAfterToolCall)
+        val stateAfterExec     = step2Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+
+        val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
+        toolMessages should have size 1
+
+        val json = ujson.read(toolMessages.head.content)
+
+        // Validate structured JSON fields
+        json("isError").bool shouldBe true
+        json("toolName").str shouldBe "database_tool"
+        json("errorType").str shouldBe "handler_error"
+        json("message").str should include("Connection timeout after 30s")
+        json("error").str should include("Tool call 'database_tool'")
+      }
     )
-
-    val completionWithToolCall = Completion(
-      id = "completion-handler",
-      created = System.currentTimeMillis() / 1000,
-      content = assistantResponseWithToolCall.content,
-      model = "test-model",
-      message = assistantResponseWithToolCall,
-      toolCalls = assistantResponseWithToolCall.toolCalls.toList,
-      usage = Some(TokenUsage(100, 50, 150))
-    )
-
-    (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
-
-    val step1Result        = agent.runStep(initialState)
-    val stateAfterToolCall = step1Result.getOrElse(fail("Expected successful step"))
-    val step2Result        = agent.runStep(stateAfterToolCall)
-    val stateAfterExec     = step2Result.getOrElse(fail("Expected successful step"))
-
-    val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
-    toolMessages should have size 1
-
-    val json = ujson.read(toolMessages.head.content)
-
-    // Validate structured JSON fields
-    json("isError").bool shouldBe true
-    json("toolName").str shouldBe "database_tool"
-    json("errorType").str shouldBe "handler_error"
-    json("message").str should include("Connection timeout after 30s")
-    json("error").str should include("Tool call 'database_tool'")
   }
 
   "Agent" should "always include legacy error field for backward compatibility" in {
     val mockClient = mock[LLMClient]
+    val agent      = new Agent(mockClient)
 
-    val failingTool = createFailingTool("legacy_test_tool", "Test error")
+    val setup = for {
+      failingTool  <- createFailingTool("legacy_test_tool", "Test error")
+      initialState <- agent.initializeSafe(query = "Test", tools = new ToolRegistry(Seq(failingTool)))
+    } yield initialState
 
-    val toolRegistry = new ToolRegistry(Seq(failingTool))
-    val agent        = new Agent(mockClient)
+    setup.fold(
+      e => fail(s"Setup failed: ${e.formatted}"),
+      initialState => {
+        val assistantResponseWithToolCall = AssistantMessage(
+          contentOpt = None,
+          toolCalls = Seq(
+            ToolCall(id = "call_legacy", name = "legacy_test_tool", arguments = ujson.Obj())
+          )
+        )
 
-    val initialState = agent.initialize(query = "Test", tools = toolRegistry)
+        val completionWithToolCall = Completion(
+          id = "completion-legacy",
+          created = System.currentTimeMillis() / 1000,
+          content = assistantResponseWithToolCall.content,
+          model = "test-model",
+          message = assistantResponseWithToolCall,
+          toolCalls = assistantResponseWithToolCall.toolCalls.toList,
+          usage = Some(TokenUsage(100, 50, 150))
+        )
 
-    val assistantResponseWithToolCall = AssistantMessage(
-      contentOpt = None,
-      toolCalls = Seq(
-        ToolCall(id = "call_legacy", name = "legacy_test_tool", arguments = ujson.Obj())
-      )
+        (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
+
+        val step1Result        = agent.runStep(initialState)
+        val stateAfterToolCall = step1Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+        val step2Result        = agent.runStep(stateAfterToolCall)
+        val stateAfterExec     = step2Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+
+        val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
+        val json         = ujson.read(toolMessages.head.content)
+
+        // Legacy error field must always be present
+        json.obj.contains("error") shouldBe true
+        json("error").str should not be empty
+        json("error").str should include("Tool call")
+      }
     )
-
-    val completionWithToolCall = Completion(
-      id = "completion-legacy",
-      created = System.currentTimeMillis() / 1000,
-      content = assistantResponseWithToolCall.content,
-      model = "test-model",
-      message = assistantResponseWithToolCall,
-      toolCalls = assistantResponseWithToolCall.toolCalls.toList,
-      usage = Some(TokenUsage(100, 50, 150))
-    )
-
-    (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
-
-    val step1Result        = agent.runStep(initialState)
-    val stateAfterToolCall = step1Result.getOrElse(fail("Expected successful step"))
-    val step2Result        = agent.runStep(stateAfterToolCall)
-    val stateAfterExec     = step2Result.getOrElse(fail("Expected successful step"))
-
-    val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
-    val json         = ujson.read(toolMessages.head.content)
-
-    // Legacy error field must always be present
-    json.obj.contains("error") shouldBe true
-    json("error").str should not be empty
-    json("error").str should include("Tool call")
   }
 
   "Agent" should "produce valid JSON without double-escaping special characters" in {
     val mockClient = mock[LLMClient]
+    val agent      = new Agent(mockClient)
 
     // Error with quotes, newlines, backslashes, tabs
     val specialError = "Error: \"user\" not found\nPath: C:\\Users\\test\tEnd"
-    val failingTool  = createFailingTool("special_json_tool", specialError)
 
-    val toolRegistry = new ToolRegistry(Seq(failingTool))
-    val agent        = new Agent(mockClient)
+    val setup = for {
+      failingTool  <- createFailingTool("special_json_tool", specialError)
+      initialState <- agent.initializeSafe(query = "Test", tools = new ToolRegistry(Seq(failingTool)))
+    } yield initialState
 
-    val initialState = agent.initialize(query = "Test", tools = toolRegistry)
+    setup.fold(
+      e => fail(s"Setup failed: ${e.formatted}"),
+      initialState => {
+        val assistantResponseWithToolCall = AssistantMessage(
+          contentOpt = None,
+          toolCalls = Seq(
+            ToolCall(id = "call_special", name = "special_json_tool", arguments = ujson.Obj())
+          )
+        )
 
-    val assistantResponseWithToolCall = AssistantMessage(
-      contentOpt = None,
-      toolCalls = Seq(
-        ToolCall(id = "call_special", name = "special_json_tool", arguments = ujson.Obj())
-      )
+        val completionWithToolCall = Completion(
+          id = "completion-special",
+          created = System.currentTimeMillis() / 1000,
+          content = assistantResponseWithToolCall.content,
+          model = "test-model",
+          message = assistantResponseWithToolCall,
+          toolCalls = assistantResponseWithToolCall.toolCalls.toList,
+          usage = Some(TokenUsage(100, 50, 150))
+        )
+
+        (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
+
+        val step1Result        = agent.runStep(initialState)
+        val stateAfterToolCall = step1Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+        val step2Result        = agent.runStep(stateAfterToolCall)
+        val stateAfterExec     = step2Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+
+        val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
+        val content      = toolMessages.head.content
+
+        // Must be valid JSON (no parse errors)
+        val parseResult = scala.util.Try(ujson.read(content))
+        parseResult.isSuccess shouldBe true
+
+        val json = parseResult.get
+        // The message field should contain the special characters properly
+        json("message").str should include("\"user\"")
+        json("message").str should include("not found")
+      }
     )
-
-    val completionWithToolCall = Completion(
-      id = "completion-special",
-      created = System.currentTimeMillis() / 1000,
-      content = assistantResponseWithToolCall.content,
-      model = "test-model",
-      message = assistantResponseWithToolCall,
-      toolCalls = assistantResponseWithToolCall.toolCalls.toList,
-      usage = Some(TokenUsage(100, 50, 150))
-    )
-
-    (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
-
-    val step1Result        = agent.runStep(initialState)
-    val stateAfterToolCall = step1Result.getOrElse(fail("Expected successful step"))
-    val step2Result        = agent.runStep(stateAfterToolCall)
-    val stateAfterExec     = step2Result.getOrElse(fail("Expected successful step"))
-
-    val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
-    val content      = toolMessages.head.content
-
-    // Must be valid JSON (no parse errors)
-    val parseResult = scala.util.Try(ujson.read(content))
-    parseResult.isSuccess shouldBe true
-
-    val json = parseResult.get
-    // The message field should contain the special characters properly
-    json("message").str should include("\"user\"")
-    json("message").str should include("not found")
   }
 
   "Agent" should "pass ToolMessage validation with structured error content" in {
     val mockClient = mock[LLMClient]
+    val agent      = new Agent(mockClient)
 
-    val failingTool = createFailingTool("validation_tool", "Validation test error")
+    val setup = for {
+      failingTool  <- createFailingTool("validation_tool", "Validation test error")
+      initialState <- agent.initializeSafe(query = "Test", tools = new ToolRegistry(Seq(failingTool)))
+    } yield initialState
 
-    val toolRegistry = new ToolRegistry(Seq(failingTool))
-    val agent        = new Agent(mockClient)
+    setup.fold(
+      e => fail(s"Setup failed: ${e.formatted}"),
+      initialState => {
+        val assistantResponseWithToolCall = AssistantMessage(
+          contentOpt = None,
+          toolCalls = Seq(
+            ToolCall(id = "call_validate", name = "validation_tool", arguments = ujson.Obj())
+          )
+        )
 
-    val initialState = agent.initialize(query = "Test", tools = toolRegistry)
+        val completionWithToolCall = Completion(
+          id = "completion-validate",
+          created = System.currentTimeMillis() / 1000,
+          content = assistantResponseWithToolCall.content,
+          model = "test-model",
+          message = assistantResponseWithToolCall,
+          toolCalls = assistantResponseWithToolCall.toolCalls.toList,
+          usage = Some(TokenUsage(100, 50, 150))
+        )
 
-    val assistantResponseWithToolCall = AssistantMessage(
-      contentOpt = None,
-      toolCalls = Seq(
-        ToolCall(id = "call_validate", name = "validation_tool", arguments = ujson.Obj())
-      )
+        (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
+
+        val step1Result        = agent.runStep(initialState)
+        val stateAfterToolCall = step1Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+        val step2Result        = agent.runStep(stateAfterToolCall)
+        val stateAfterExec     = step2Result.fold(e => fail(s"Expected successful step: ${e.formatted}"), identity)
+
+        val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
+
+        // All messages should pass validation
+        toolMessages.foreach(msg => (msg.validate should be).a(Symbol("right")))
+
+        // Conversation should also be valid
+        (Message.validateConversation(stateAfterExec.conversation.messages.toList) should be).a(Symbol("right"))
+      }
     )
-
-    val completionWithToolCall = Completion(
-      id = "completion-validate",
-      created = System.currentTimeMillis() / 1000,
-      content = assistantResponseWithToolCall.content,
-      model = "test-model",
-      message = assistantResponseWithToolCall,
-      toolCalls = assistantResponseWithToolCall.toolCalls.toList,
-      usage = Some(TokenUsage(100, 50, 150))
-    )
-
-    (mockClient.complete _).expects(*, *).returning(Right(completionWithToolCall)).once()
-
-    val step1Result        = agent.runStep(initialState)
-    val stateAfterToolCall = step1Result.getOrElse(fail("Expected successful step"))
-    val step2Result        = agent.runStep(stateAfterToolCall)
-    val stateAfterExec     = step2Result.getOrElse(fail("Expected successful step"))
-
-    val toolMessages = stateAfterExec.conversation.messages.collect { case tm: ToolMessage => tm }
-
-    // All messages should pass validation
-    toolMessages.foreach(msg => (msg.validate should be).a(Symbol("right")))
-
-    // Conversation should also be valid
-    (Message.validateConversation(stateAfterExec.conversation.messages.toList) should be).a(Symbol("right"))
   }
 
   // ============================================================================
@@ -678,59 +712,62 @@ class AgentToolFailureTest extends AnyFlatSpec with Matchers with MockFactory {
   }
 
   "Agent.runWithEvents" should "emit ToolCallFailed event when tool execution fails" in {
-    // Create a tool that always fails
-    val failingTool  = createFailingTool("failing_stream_tool", "Simulated streaming failure")
-    val toolRegistry = new ToolRegistry(Seq(failingTool))
+    createFailingTool("failing_stream_tool", "Simulated streaming failure").fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      failingTool => {
+        val toolRegistry = new ToolRegistry(Seq(failingTool))
 
-    // Create tool call response
-    val toolCall = ToolCall(
-      id = "stream_call_001",
-      name = "failing_stream_tool",
-      arguments = ujson.Obj("item" -> "test", "quantity" -> 1)
+        // Create tool call response
+        val toolCall = ToolCall(
+          id = "stream_call_001",
+          name = "failing_stream_tool",
+          arguments = ujson.Obj("item" -> "test", "quantity" -> 1)
+        )
+        val toolCallResponse = AssistantMessage(
+          contentOpt = Some("Let me use the tool"),
+          toolCalls = Seq(toolCall)
+        )
+        val completion1 = Completion(
+          id = "comp-1",
+          created = System.currentTimeMillis() / 1000,
+          content = toolCallResponse.content,
+          model = "test-model",
+          message = toolCallResponse,
+          toolCalls = List(toolCall),
+          usage = Some(TokenUsage(10, 10, 20))
+        )
+
+        // Final response after tool error
+        val finalResponse = AssistantMessage(contentOpt = Some("Tool failed, sorry."))
+        val completion2 = Completion(
+          id = "comp-2",
+          created = System.currentTimeMillis() / 1000,
+          content = finalResponse.content,
+          model = "test-model",
+          message = finalResponse,
+          toolCalls = Nil,
+          usage = Some(TokenUsage(10, 10, 20))
+        )
+
+        val mockClient = new StreamingMockLLMClient(Seq(Right(completion1), Right(completion2)))
+        val agent      = new Agent(mockClient)
+
+        val events = ArrayBuffer[AgentEvent]()
+
+        val result = agent.runWithEvents(
+          query = "Use the failing tool",
+          tools = toolRegistry,
+          onEvent = events += _
+        )
+
+        result.isRight shouldBe true
+
+        // Should have received ToolCallFailed event
+        val failedEvents = events.collect { case e: AgentEvent.ToolCallFailed => e }
+        failedEvents should have size 1
+        failedEvents.head.toolName shouldBe "failing_stream_tool"
+        failedEvents.head.error should include("isError")
+      }
     )
-    val toolCallResponse = AssistantMessage(
-      contentOpt = Some("Let me use the tool"),
-      toolCalls = Seq(toolCall)
-    )
-    val completion1 = Completion(
-      id = "comp-1",
-      created = System.currentTimeMillis() / 1000,
-      content = toolCallResponse.content,
-      model = "test-model",
-      message = toolCallResponse,
-      toolCalls = List(toolCall),
-      usage = Some(TokenUsage(10, 10, 20))
-    )
-
-    // Final response after tool error
-    val finalResponse = AssistantMessage(contentOpt = Some("Tool failed, sorry."))
-    val completion2 = Completion(
-      id = "comp-2",
-      created = System.currentTimeMillis() / 1000,
-      content = finalResponse.content,
-      model = "test-model",
-      message = finalResponse,
-      toolCalls = Nil,
-      usage = Some(TokenUsage(10, 10, 20))
-    )
-
-    val mockClient = new StreamingMockLLMClient(Seq(Right(completion1), Right(completion2)))
-    val agent      = new Agent(mockClient)
-
-    val events = ArrayBuffer[AgentEvent]()
-
-    val result = agent.runWithEvents(
-      query = "Use the failing tool",
-      tools = toolRegistry,
-      onEvent = events += _
-    )
-
-    result.isRight shouldBe true
-
-    // Should have received ToolCallFailed event
-    val failedEvents = events.collect { case e: AgentEvent.ToolCallFailed => e }
-    failedEvents should have size 1
-    failedEvents.head.toolName shouldBe "failing_stream_tool"
-    failedEvents.head.error should include("isError")
   }
 }

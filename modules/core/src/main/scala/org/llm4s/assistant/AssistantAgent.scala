@@ -105,7 +105,10 @@ class AssistantAgent(
   /**
    * Processes user input - either a command or a query for the agent
    */
-  private def processInput(input: String, state: SessionState): Either[AssistantError, (SessionState, String)] =
+  private[assistant] def processInput(
+    input: String,
+    state: SessionState
+  ): Either[AssistantError, (SessionState, String)] =
     if (input.startsWith("/")) {
       handleCommand(input, state)
     } else if (input.nonEmpty) {
@@ -122,7 +125,12 @@ class AssistantAgent(
     for {
       updatedState <- addUserMessage(query, state)
       finalState <- runAgentToCompletion(updatedState).leftMap(llmError =>
-        AssistantError.SessionError(s"Agent execution failed: ${llmError.message}", state.sessionId, "agent-execution")
+        AssistantError.SessionError(
+          s"Agent execution failed: ${llmError.message}",
+          state.sessionId,
+          "agent-execution",
+          llmCause = Some(llmError)
+        )
       )
       response <- extractFinalResponse(finalState)
     } yield {
@@ -295,27 +303,33 @@ class AssistantAgent(
   /**
    * Adds user message to the conversation - initializes if first message
    */
-  private def addUserMessage(query: String, state: SessionState): Either[AssistantError, SessionState] =
-    Right(
-      state.agentState
-        .map { agentState =>
-          // Some case - add to existing conversation
-          val updatedAgentState = agentState
-            .addMessage(UserMessage(query))
-            .withStatus(AgentStatus.InProgress)
-          state.withAgentState(updatedAgentState)
-        }
-        .getOrElse {
-          // None case - initialize agent
-          val initialState = agent.initialize(query, tools)
-          state.withAgentState(initialState)
-        }
-    )
+  private[assistant] def addUserMessage(query: String, state: SessionState): Either[AssistantError, SessionState] =
+    state.agentState match {
+      case Some(agentState) =>
+        // Existing conversation - add message
+        val updatedAgentState = agentState
+          .addMessage(UserMessage(query))
+          .withStatus(AgentStatus.InProgress)
+        Right(state.withAgentState(updatedAgentState))
+      case None =>
+        // First message - initialize agent
+        agent
+          .initializeSafe(query, tools)
+          .map(state.withAgentState)
+          .leftMap(llmError =>
+            AssistantError.SessionError(
+              s"Agent initialization failed: ${llmError.message}",
+              state.sessionId,
+              "agent-initialization",
+              llmCause = Some(llmError)
+            )
+          )
+    }
 
   /**
    * Runs the agent until completion or failure
    */
-  private def runAgentToCompletion(state: SessionState): Either[LLMError, SessionState] =
+  private[assistant] def runAgentToCompletion(state: SessionState): Either[LLMError, SessionState] =
     state.agentState match {
       case None => Left(ConfigurationError("No agent state to run"))
       case Some(agentState) =>
@@ -336,7 +350,7 @@ class AssistantAgent(
   /**
    * Extracts the final response from the agent state
    */
-  private def extractFinalResponse(state: SessionState): Either[AssistantError, String] =
+  private[assistant] def extractFinalResponse(state: SessionState): Either[AssistantError, String] =
     state.agentState match {
       case None => Left(AssistantError.SessionError("No agent state available", state.sessionId, "extract-response"))
       case Some(agentState) =>

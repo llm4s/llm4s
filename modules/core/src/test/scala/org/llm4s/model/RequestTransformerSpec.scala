@@ -1,6 +1,6 @@
 package org.llm4s.model
 
-import org.llm4s.llmconnect.model.{ CompletionOptions, SystemMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, ResponseFormat, SystemMessage, UserMessage }
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -215,6 +215,81 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
     val disallowed = transformer.getDisallowedParams("gpt-4o")
 
     disallowed shouldBe empty
+  }
+
+  // ============================================
+  // Response format (structured output) tests
+  // ============================================
+
+  test("should drop Json responseFormat when supportsResponseSchema=false and dropUnsupported=true") {
+    val customCaps        = ModelCapabilities(supportsResponseSchema = Some(false))
+    val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps))
+    val options           = CompletionOptions().withResponseFormat(ResponseFormat.Json)
+
+    val result = customTransformer.transformOptions("test-model", options, dropUnsupported = true)
+
+    result.isRight shouldBe true
+    result.toOption.get.responseFormat shouldBe None
+  }
+
+  test("should keep Json responseFormat when supportsResponseSchema=false and dropUnsupported=false") {
+    val customCaps        = ModelCapabilities(supportsResponseSchema = Some(false))
+    val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps))
+    val options           = CompletionOptions().withResponseFormat(ResponseFormat.Json)
+
+    val result = customTransformer.transformOptions("test-model", options, dropUnsupported = false)
+
+    result.isRight shouldBe true
+    result.toOption.get.responseFormat shouldBe Some(ResponseFormat.Json)
+  }
+
+  test(
+    "should return error for JsonSchema responseFormat when supportsResponseSchema=false and dropUnsupported=false"
+  ) {
+    val customCaps        = ModelCapabilities(supportsResponseSchema = Some(false))
+    val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps))
+    val schema            = ujson.Obj("type" -> "object")
+    val options           = CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))
+
+    val result = customTransformer.transformOptions("test-model", options, dropUnsupported = false)
+
+    result.isLeft shouldBe true
+    result.left.value.message should include("Structured output")
+    result.left.value.message should include("JSON schema")
+  }
+
+  test("should drop JsonSchema when supportsResponseSchema=false and dropUnsupported=true") {
+    val customCaps        = ModelCapabilities(supportsResponseSchema = Some(false))
+    val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps))
+    val schema            = ujson.Obj("type" -> "object")
+    val options           = CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))
+
+    val result = customTransformer.transformOptions("test-model", options, dropUnsupported = true)
+
+    result.isRight shouldBe true
+    result.toOption.get.responseFormat shouldBe None
+  }
+
+  test("should preserve responseFormat when supportsResponseSchema=true") {
+    val customCaps        = ModelCapabilities(supportsResponseSchema = Some(true))
+    val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps))
+    val options           = CompletionOptions().withResponseFormat(ResponseFormat.Json)
+
+    val result = customTransformer.transformOptions("test-model", options, dropUnsupported = false)
+
+    result.isRight shouldBe true
+    result.toOption.get.responseFormat shouldBe Some(ResponseFormat.Json)
+  }
+
+  test("should preserve responseFormat when supportsResponseSchema=None (unknown)") {
+    val customCaps        = ModelCapabilities(supportsResponseSchema = None)
+    val customTransformer = RequestTransformer.withOverrides(Map("unknown-model" -> customCaps))
+    val options           = CompletionOptions().withResponseFormat(ResponseFormat.Json)
+
+    val result = customTransformer.transformOptions("unknown-model", options, dropUnsupported = false)
+
+    result.isRight shouldBe true
+    result.toOption.get.responseFormat shouldBe Some(ResponseFormat.Json)
   }
 
   // ============================================

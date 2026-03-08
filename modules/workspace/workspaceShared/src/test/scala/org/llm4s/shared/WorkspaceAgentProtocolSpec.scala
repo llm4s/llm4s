@@ -296,6 +296,22 @@ class WorkspaceAgentProtocolSpec extends AnyFlatSpec with Matchers {
     parsed.isComplete shouldBe false
   }
 
+  "CancelCommandMessage" should "serialize correctly" in {
+    val msg    = CancelCommandMessage("cancel-1")
+    val json   = write(msg)
+    val parsed = read[CancelCommandMessage](json)
+
+    parsed.commandId shouldBe "cancel-1"
+  }
+
+  "WebSocketMessage" should "round-trip CancelCommandMessage polymorphically" in {
+    val msg    = CancelCommandMessage("cancel-2")
+    val json   = write[WebSocketMessage](msg)
+    val parsed = read[WebSocketMessage](json)
+
+    parsed shouldBe msg
+  }
+
   // ============ Polymorphic Serialization ============
 
   "WorkspaceAgentCommand" should "serialize polymorphically" in {

@@ -66,6 +66,32 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
       }
     )
 
+    // Binary handler — echoes raw bytes that include invalid UTF-8 sequences.
+    // Used to verify postRaw preserves every byte without charset corruption.
+    server.createContext(
+      "/binary",
+      new HttpHandler {
+        override def handle(exchange: HttpExchange): Unit = {
+          // JPEG magic bytes + high bytes that are invalid UTF-8 — would be corrupted
+          // by BodyHandlers.ofString() + .getBytes(ISO_8859_1)
+          val responseBytes = Array[Byte](
+            0xff.toByte,
+            0xd8.toByte,
+            0xff.toByte, // JPEG SOI marker
+            0xe0.toByte,
+            0x00.toByte,
+            0x10.toByte, // APP0 marker
+            0x80.toByte,
+            0xc0.toByte,
+            0xfe.toByte // more high bytes (invalid UTF-8)
+          )
+          exchange.sendResponseHeaders(200, responseBytes.length.toLong)
+          exchange.getResponseBody.write(responseBytes)
+          exchange.getResponseBody.close()
+        }
+      }
+    )
+
     // Multipart handler — echoes content-type header to verify boundary
     server.createContext(
       "/multipart",
@@ -108,6 +134,13 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
     val headers  = Map("content-type" -> Seq("application/json"))
     val response = HttpResponse(200, "{}", headers)
     response.headers("content-type") shouldBe Seq("application/json")
+  }
+
+  "HttpRawResponse" should "hold status code and raw bytes" in {
+    val bytes    = Array[Byte](0xff.toByte, 0xd8.toByte, 0x00.toByte)
+    val response = HttpRawResponse(200, bytes)
+    response.statusCode shouldBe 200
+    response.body shouldEqual bytes
   }
 
   // ============================================================
@@ -228,6 +261,51 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
     val response = client.delete(s"$baseUrl/echo")
     response.statusCode shouldBe 200
     response.body should include("method=DELETE")
+  }
+
+  // ============================================================
+  // postRaw tests
+  // ============================================================
+
+  "JdkHttpClient.postRaw" should "return an HttpRawResponse with the correct status code" in {
+    val response = client.postRaw(s"$baseUrl/binary", body = "{}")
+    response.statusCode shouldBe 200
+  }
+
+  it should "return body as exact raw bytes without charset corruption" in {
+    val response = client.postRaw(s"$baseUrl/binary", body = "{}")
+    // These bytes contain invalid UTF-8 sequences (0xFF, 0xD8, 0x80, 0xC0, 0xFE).
+    // BodyHandlers.ofString() would replace them with U+FFFD then ISO_8859_1 would
+    // map U+FFFD to '?' (0x3F), corrupting the payload.
+    // postRaw must return the exact wire bytes.
+    val expected = Array[Byte](
+      0xff.toByte,
+      0xd8.toByte,
+      0xff.toByte,
+      0xe0.toByte,
+      0x00.toByte,
+      0x10.toByte,
+      0x80.toByte,
+      0xc0.toByte,
+      0xfe.toByte
+    )
+    response.body shouldEqual expected
+  }
+
+  it should "send the POST body to the server" in {
+    val response = client.postRaw(
+      s"$baseUrl/echo",
+      headers = Map("Content-Type" -> "application/json"),
+      body = """{"ping":"pong"}"""
+    )
+    response.statusCode shouldBe 200
+    // /echo returns a UTF-8 text response — decode it to verify the body was sent
+    new String(response.body, StandardCharsets.UTF_8) should include("""body={"ping":"pong"}""")
+  }
+
+  it should "return the correct status code for non-2xx responses" in {
+    val response = client.postRaw(s"$baseUrl/status/429", body = "")
+    response.statusCode shouldBe 429
   }
 
   // ============================================================

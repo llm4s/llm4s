@@ -60,6 +60,7 @@ Detailed design documents for agent framework phases:
 - [Tool Calling API Design](https://github.com/llm4s/llm4s/blob/main/docs/tool-calling-api-design.md)
 - [Workspace Protocol](https://github.com/llm4s/llm4s/blob/main/docs/workspace-agent-protocol.md)
 - [Langfuse Workflow Patterns](https://github.com/llm4s/llm4s/blob/main/docs/langfuse-workflow-patterns.md)
+- [Reliability Guide](https://github.com/llm4s/llm4s/blob/main/docs/reliability-guide.md) - Retry, circuit breaker, and deadline enforcement
 
 ## Community Resources
 

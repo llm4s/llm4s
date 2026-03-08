@@ -4,7 +4,11 @@ import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import org.llm4s.error.ProcessingError
 import org.llm4s.rag.permissions._
 import org.llm4s.types.Result
+import org.llm4s.util.SqlIdentifier
 import org.llm4s.vectorstore.{ MetadataFilter, ScoredRecord, VectorRecord }
+import org.llm4s.util.RateLimitedLogger
+
+import org.slf4j.LoggerFactory
 
 import java.sql.{ Array => SqlArray, Connection, ResultSet }
 import scala.collection.mutable.ArrayBuffer
@@ -20,6 +24,13 @@ import scala.util.{ Try, Using }
  * 1. Extends the vectors table with collection_id and readable_by columns
  * 2. Uses GIN indexes for efficient array containment queries
  * 3. Applies two-level permission filtering (collection + document)
+ * 4. Gracefully handles corrupt embeddings without failing queries
+ *
+ * Corrupt Embedding Handling:
+ * - Records with unparseable embeddings are skipped during query operations
+ * - Corrupt records are logged with id and embedding_dim for debugging
+ * - Queries continue successfully and return topK valid results
+ * - No silent data corruption - failures are observable via logs
  *
  * @param dataSource HikariCP data source for connection pooling
  * @param vectorTableName Name of the vectors table
@@ -30,6 +41,9 @@ final class PgSearchIndex private (
   private val _pgConfig: SearchIndex.PgConfig
 ) extends SearchIndex {
 
+  private val logger            = LoggerFactory.getLogger(getClass)
+  private val rateLimitedLogger = RateLimitedLogger(logger, throttleSeconds = 60, throttleCount = 100)
+
   /** Expose PostgreSQL configuration for automatic RAG integration */
   override def pgConfig: Option[SearchIndex.PgConfig] = Some(_pgConfig)
 
@@ -39,6 +53,13 @@ final class PgSearchIndex private (
   override def principals: PrincipalStore   = _principals
   override def collections: CollectionStore = _collections
 
+  /**
+   * Query for the most similar vectors matching the user's permissions.
+   *
+   * Note: if the database contains corrupt embeddings, those rows are silently skipped.
+   * Because filtering happens after the SQL `LIMIT topK`, fewer than `topK` results may
+   * be returned when corrupt rows are present.
+   */
   override def query(
     auth: UserAuthorization,
     collectionPattern: CollectionPattern,
@@ -138,11 +159,11 @@ final class PgSearchIndex private (
 
         Using.resource(stmt.executeQuery()) { rs =>
           val buffer = ArrayBuffer[ScoredRecord]()
-          while (rs.next()) {
-            val record = rowToRecord(rs)
-            val score  = math.max(0.0, math.min(1.0, rs.getDouble("similarity")))
-            buffer += ScoredRecord(record, score)
-          }
+          while (rs.next())
+            rowToRecord(rs).foreach { record =>
+              val score = math.max(0.0, math.min(1.0, rs.getDouble("similarity")))
+              buffer += ScoredRecord(record, score)
+            }
           buffer.toSeq
         }
       }
@@ -333,28 +354,40 @@ final class PgSearchIndex private (
       else (s"NOT ($innerSql)", innerParams)
   }
 
-  private def rowToRecord(rs: ResultSet): VectorRecord = {
+  private def rowToRecord(rs: ResultSet): Option[VectorRecord] = {
+    val id           = rs.getString("id")
     val embeddingStr = rs.getString("embedding")
-    val embedding    = parseEmbedding(embeddingStr)
-    val metadata     = jsonToMap(rs.getString("metadata"))
+    val embeddingDim = rs.getInt("embedding_dim")
 
-    VectorRecord(
-      id = rs.getString("id"),
-      embedding = embedding,
-      content = Option(rs.getString("content")),
-      metadata = metadata
-    )
+    parseEmbedding(embeddingStr) match {
+      case Some(embedding) =>
+        val metadata = jsonToMap(rs.getString("metadata"))
+
+        Some(
+          VectorRecord(
+            id = id,
+            embedding = embedding,
+            content = Option(rs.getString("content")),
+            metadata = metadata
+          )
+        )
+
+      case None =>
+        rateLimitedLogger.warn(s"Skipping corrupt vector record: id=$id, embedding_dim=$embeddingDim")
+        None
+    }
   }
 
   private def embeddingToString(embedding: Array[Float]): String =
     "[" + embedding.map(f => f.toString).mkString(",") + "]"
 
-  private def parseEmbedding(str: String): Array[Float] = {
-    if (str == null || str.isEmpty) return Array.empty
-    val cleaned = str.stripPrefix("[").stripSuffix("]")
-    if (cleaned.isEmpty) Array.empty
-    else cleaned.split(",").map(_.trim.toFloat)
-  }
+  /**
+   * Parse embedding string to float array.
+   * Returns None if parsing fails (logged by caller with context).
+   * Package-private for unit testing.
+   */
+  private[pg] def parseEmbedding(str: String): Option[Array[Float]] =
+    org.llm4s.vectorstore.EmbeddingParser.parse(str)
 
   private def createIntArray(conn: Connection, values: Seq[Int]): SqlArray =
     conn.createArrayOf("integer", values.map(Int.box).toArray)
@@ -397,20 +430,23 @@ object PgSearchIndex {
    * @param config PostgreSQL configuration
    * @return The search index, or error
    */
-  def apply(config: SearchIndex.PgConfig): Result[PgSearchIndex] = Try {
-    val hikariConfig = new HikariConfig()
-    hikariConfig.setJdbcUrl(config.jdbcUrl)
-    hikariConfig.setUsername(config.user)
-    hikariConfig.setPassword(config.password)
-    hikariConfig.setMaximumPoolSize(config.maxPoolSize)
-    hikariConfig.setMinimumIdle(1)
-    hikariConfig.setConnectionTimeout(30000)
-    hikariConfig.setIdleTimeout(600000)
-    hikariConfig.setMaxLifetime(1800000)
+  def apply(config: SearchIndex.PgConfig): Result[PgSearchIndex] =
+    SqlIdentifier.validate(config.vectorTableName, "pg-search-index-create").flatMap { _ =>
+      Try {
+        val hikariConfig = new HikariConfig()
+        hikariConfig.setJdbcUrl(config.jdbcUrl)
+        hikariConfig.setUsername(config.user)
+        hikariConfig.setPassword(config.password)
+        hikariConfig.setMaximumPoolSize(config.maxPoolSize)
+        hikariConfig.setMinimumIdle(1)
+        hikariConfig.setConnectionTimeout(30000)
+        hikariConfig.setIdleTimeout(600000)
+        hikariConfig.setMaxLifetime(1800000)
 
-    val dataSource = new HikariDataSource(hikariConfig)
-    new PgSearchIndex(dataSource, config.vectorTableName, config)
-  }.toEither.left.map(e => ProcessingError("pg-search-index-create", e.getMessage))
+        val dataSource = new HikariDataSource(hikariConfig)
+        new PgSearchIndex(dataSource, config.vectorTableName, config)
+      }.toEither.left.map(e => ProcessingError("pg-search-index-create", e.getMessage))
+    }
 
   /**
    * Create a PgSearchIndex from a JDBC URL.

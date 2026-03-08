@@ -24,7 +24,7 @@ Get LLM4S up and running in minutes.
 Before installing LLM4S, ensure you have:
 
 - **Java Development Kit (JDK) 11 or higher** (JDK 21 recommended)
-- **Scala 2.13.16** or **Scala 3.7.1** (or both for cross-compilation)
+- **Scala 3.7.1**
 - **SBT 1.10.6** or higher
 - An API key from at least one LLM provider (OpenAI, Anthropic, Azure OpenAI, or Ollama)
 
@@ -35,7 +35,7 @@ Before installing LLM4S, ensure you have:
 java -version  # Should show 11 or higher
 
 # Check Scala version
-scala -version  # 2.13.16 or 3.7.1
+scala -version  # 3.7.1
 
 # Check SBT version
 sbt version  # 1.10.6 or higher
@@ -50,11 +50,9 @@ sbt version  # 1.10.6 or higher
 Add LLM4S to your `build.sbt`:
 
 ```scala
-// For Scala 2.13 or 3.x
+// Scala 3
 libraryDependencies += "org.llm4s" %% "core" % "0.1.16"
-
-// Cross-compile for both versions
-ThisBuild / scalaVersion := "2.13.16"  // or "3.7.1"
+ThisBuild / scalaVersion := "3.7.1"
 ```
 
 ### Maven
@@ -67,12 +65,6 @@ ThisBuild / scalaVersion := "2.13.16"  // or "3.7.1"
     <version>0.1.16</version>
 </dependency>
 
-<!-- For Scala 2.13 -->
-<dependency>
-    <groupId>org.llm4s</groupId>
-    <artifactId>core_2.13</artifactId>
-    <version>0.1.16</version>
-</dependency>
 ```
 
 ### Multi-Module Project
@@ -83,7 +75,7 @@ If you have a multi-module project:
 lazy val myProject = (project in file("."))
   .settings(
     name := "my-llm-project",
-    scalaVersion := "2.13.16",
+    scalaVersion := "3.7.1",
     libraryDependencies ++= Seq(
       "org.llm4s" %% "core" % "0.1.16"
     )
@@ -112,7 +104,7 @@ sbt new llm4s/llm4s.g8
 # Follow the prompts
 # name [My LLM Project]: my-awesome-agent
 # organization [com.example]: com.mycompany
-# scala_version [2.13.16]:
+# scala_version [3.7.1]:
 # llm4s_version [0.1.16]:
 
 cd my-awesome-agent

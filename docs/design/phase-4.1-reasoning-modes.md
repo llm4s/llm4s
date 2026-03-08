@@ -410,11 +410,11 @@ Two sample applications demonstrate reasoning modes:
    sbt "samples/runMain org.llm4s.samples.reasoning.ReasoningModesExample"
    ```
 
-2. **ExtendedThinkingExample**: Anthropic extended thinking
+2. **ReasoningModesExample**: Anthropic extended thinking
    ```bash
    export LLM_MODEL=anthropic/claude-sonnet-4-5-latest
    export ANTHROPIC_API_KEY=sk-ant-...
-   sbt "samples/runMain org.llm4s.samples.reasoning.ExtendedThinkingExample"
+   sbt "samples/runMain org.llm4s.samples.reasoning.ReasoningModesExample"
    ```
 
 ## Success Criteria

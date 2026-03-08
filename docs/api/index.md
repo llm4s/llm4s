@@ -19,10 +19,9 @@ The **[Scaladoc](/scaladoc/)** provides comprehensive, auto-generated API docume
 
 | Document | Description |
 |----------|-------------|
-| [LLM4S API Spec](/reference/llm4s-api-spec) | Complete API specification |
-| [Tool Calling API Design](/design/tool-calling-api-design) | Tool calling interface design |
-
-|[Workspace Agent Protocol](/workspace-agent-protocol)| Standardized interface for LLM workspace interaction |
+| [LLM4S API Spec](../llm4s-api-spec) | Complete API specification |
+| [Tool Calling API Design](../tool-calling-api-design) | Tool calling interface design |
+| [Workspace Agent Protocol](../workspace-agent-protocol) | Standardized interface for LLM workspace interaction |
 
 ## API Design Principles
 

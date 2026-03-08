@@ -13,6 +13,34 @@ import java.io.File
 import java.nio.file.Path
 import scala.util.Try
 
+/**
+ * Encodes files of arbitrary MIME types into embedding vector sequences.
+ *
+ * MIME type is detected automatically via Apache Tika. Dispatch then
+ * depends on the media type:
+ *
+ *  - **Text-like files** (plain text, HTML, PDF, source code, …): text is
+ *    extracted by `UniversalExtractor`, optionally chunked, then embedded
+ *    via the supplied `EmbeddingClient`. Real embeddings are produced.
+ *
+ *  - **Image / Audio / Video**: only available when `experimentalStubsEnabled`
+ *    is `true`. When disabled, these modalities return a `Left` with error
+ *    code `501`. When enabled, a deterministic L2-normalised vector is
+ *    returned instead of a real embedding; the vector is seeded from the
+ *    file name, size, and last-modified time, so the same file always
+ *    produces the same stub vector.
+ *
+ * == Stub dimensions ==
+ *
+ * Stub vectors are capped at `MAX_STUB_DIMENSION` (8 192) regardless of
+ * the configured model dimension, to prevent OOM errors during testing.
+ *
+ * == Modality disambiguation ==
+ *
+ * Each modality (image, audio, video) uses a different XOR seed constant
+ * when generating stub vectors, so stubs for the same file differ across
+ * modalities.
+ */
 object UniversalEncoder {
   private val logger = LoggerFactory.getLogger(getClass)
   private val tika   = new Tika()
@@ -20,8 +48,30 @@ object UniversalEncoder {
   // Maximum dimension size for stub embeddings to prevent OOM in tests
   private val MAX_STUB_DIMENSION = 8192
 
+  /**
+   * Controls how extracted text is split before embedding.
+   *
+   * @param enabled When `false`, the full extracted text is embedded as a single unit.
+   * @param size    Target chunk size in characters.
+   * @param overlap Number of characters shared between adjacent chunks, to preserve
+   *                context at chunk boundaries.
+   */
   final case class TextChunkingConfig(enabled: Boolean, size: Int, overlap: Int)
 
+  /**
+   * Encodes the file at `path` into one or more embedding vectors.
+   *
+   * @param path                     Path to the file to encode; must exist and be a regular file.
+   * @param client                   Embedding client used for text files; not called for image/audio/video stubs.
+   * @param textModel                Model configuration (name + dimensions) forwarded to `client`.
+   * @param chunking                 Text chunking settings; if `enabled`, the extracted text is split before embedding.
+   * @param experimentalStubsEnabled When `false`, image/audio/video files return `Left(EmbeddingError)` with code
+   *                                 `501`. When `true`, deterministic stub vectors are returned for those modalities.
+   * @param localModels              Model configurations for image, audio, and video stubs.
+   * @return `Right(vectors)` — one vector per text chunk, or one stub vector for non-text files.
+   *         `Left(EmbeddingError)` when the file does not exist, the MIME type is unsupported,
+   *         or stub generation is disabled.
+   */
   def encodeFromPath(
     path: Path,
     client: EmbeddingClient,

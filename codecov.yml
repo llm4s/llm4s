@@ -6,7 +6,8 @@ coverage:
         threshold: 1%
     patch:
       default:
-        target: 80%
+        target: 90%
+        threshold: 5%
 
 # Coverage flags for per-module tracking
 # Only track main source code (not tests or resources)
