@@ -105,8 +105,5 @@ object Common {
   )
 
   def scalacOptionsForVersion(scalaVersion: String): Seq[String] =
-    CrossVersion.partialVersion(scalaVersion) match {
-      case Some((3, _)) => scala3CompilerOptions
-      case _ => Seq.empty
-    }
+    scala3CompilerOptions
 }
