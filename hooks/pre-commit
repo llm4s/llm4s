@@ -94,8 +94,6 @@ map_file_to_project() {
     modules/workspace/workspaceClient/*)          echo "workspaceClient" ;;
     modules/workspace/workspaceRunner/*)          echo "workspaceRunner" ;;
     modules/workspace/workspaceSamples/*)         echo "workspaceSamples" ;;
-    modules/crossTest/scala2/*)                  echo "crossTestScala2" ;;
-    modules/crossTest/scala3/*)                  echo "crossTestScala3" ;;
     *) echo "" ;;
   esac
 }
@@ -141,8 +139,6 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE traceOpentelemetry
       set_add DOWNSTREAM_COMPILE workspaceClient
-      set_add DOWNSTREAM_COMPILE crossTestScala2
-      set_add DOWNSTREAM_COMPILE crossTestScala3
       set_add DOWNSTREAM_COMPILE workspaceSamples
       ;;
     workspaceShared)
@@ -165,24 +161,6 @@ propagate_downstream() {
 for proj in $PROJECT_SRC; do
   propagate_downstream "$proj"
 done
-
-# ── Determine which projects need cross-version handling ─────────────────────
-# crossTestScala2 and crossTestScala3 are single-version projects and must NOT
-# use the + prefix. All other projects use + for cross-compilation.
-
-is_cross_test_project() {
-  case "$1" in
-    crossTestScala2|crossTestScala3) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-scala_version_switch() {
-  case "$1" in
-    crossTestScala2) echo "++2.13.16" ;;
-    crossTestScala3) echo "++3.7.1" ;;
-  esac
-}
 
 # ── Build the SBT command list ───────────────────────────────────────────────
 

@@ -64,10 +64,7 @@ addCommandAlias("cov", ";clean;coverage;test;coverageAggregate;coverageReport;co
 addCommandAlias("covReport", ";clean;coverage;test;coverageReport;coverageOff")
 addCommandAlias("buildAll", ";clean;compile;test")
 addCommandAlias("publishAll", ";clean;publish")
-addCommandAlias(
-  "testAll",
-  ";test;crossTestScala3/test"
-)
+addCommandAlias("testAll", ";test")
 addCommandAlias(
   "cleanTestAll",
   ";clean;testAll"
@@ -77,7 +74,6 @@ addCommandAlias(
   ";scalafmtAll;cleanTestAll"
 )
 addCommandAlias("compileAll", ";compile")
-addCommandAlias("testCross", ";crossTestScala3/test")
 // ---- Three-tier test aliases ----
 // Default `test` runs unit + local HTTP server tests (Tier 1), excluding tagged tests.
 // testOllama: Tier 2 — integration tests against a local Ollama instance (requires `ollama pull qwen2.5:0.5b`)
@@ -90,12 +86,6 @@ addCommandAlias(
   "testSmoke",
   """;set core / Test / testOptions := Seq(); core/testOnly -- -n org.llm4s.tags.CloudSmoke"""
 )
-addCommandAlias(
-  "fullCrossTest",
-  ";clean ;crossTestScala3/clean ;publishLocal ;testCross"
-)
-
-
 
 // ---- shared settings ----
 lazy val commonSettings = Seq(
@@ -270,19 +260,5 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
       Deps.opentelemetryApi,
       Deps.opentelemetrySdk,
       Deps.opentelemetryExporterOtlp
-    )
-  )
-
-lazy val crossTestScala3 = (project in file("modules/crossTest/scala3"))
-  .dependsOn(core)
-  .settings(
-    name         := "crosstest-scala3",
-    scalaVersion := scala3,
-    Test / fork  := true,
-    resolvers   += Resolver.mavenLocal,
-    resolvers   += Resolver.defaultLocal,
-    scalacOptions ++= scala3CompilerOptions,
-    libraryDependencies ++= Seq(
-      Deps.scalatest % Test
     )
   )

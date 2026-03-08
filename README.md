@@ -98,7 +98,6 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
 
 - **modules/core**: Core LLM4S framework
 - **modules/workspace**: Workspace runner/client/shared
-- **modules/crossTest**: Cross-version tests
 - **modules/samples**: Usage examples
 - **docs**: Documentation site and references
 - **hooks**: Pre-commit hook installer
@@ -263,20 +262,6 @@ sbt buildAll
 # Publish current Scala 3 artifacts
 sbt publishAll
 ```
-
-### Compatibility Testing
-
-We use a specialized test project to verify compatibility-sensitive behavior in the Scala 3 build.
-
-```bash
-# Run the Scala 3 compatibility suite
-sbt testCross
-
-# Full clean, publish, and test verification
-sbt fullCrossTest
-```
-
-> **Note:** For detailed information about our cross-testing strategy and setup, see [modules/crossTest/README.md](modules/crossTest/README.md)
 
 ## Roadmap
 
