@@ -17,7 +17,9 @@ import org.llm4s.core.safety.NetworkSecurity
  * @param blockInternalIPs Whether to block requests to internal/private IP ranges (default: true).
  * @param maxResponseSize Maximum response size in bytes.
  * @param timeoutMs Request timeout in milliseconds.
- * @param followRedirects Whether to follow HTTP redirects.
+ * @param followRedirects Whether to follow HTTP redirects.  Defaults to `false`; when
+ *                        `true` each redirect hop is re-validated against the SSRF filter
+ *                        before the next request is issued (open-redirect bypass prevention).
  * @param maxRedirects Maximum number of redirects to follow.
  * @param allowedMethods HTTP methods that are allowed (default: GET, HEAD for safety).
  * @param userAgent User-Agent header to use.
@@ -28,7 +30,7 @@ case class HttpConfig(
   blockInternalIPs: Boolean = true,
   maxResponseSize: Long = 10 * 1024 * 1024, // 10 MB
   timeoutMs: Int = 30000,                   // 30 seconds
-  followRedirects: Boolean = true,
+  followRedirects: Boolean = false,         // Secure default: redirects are followed only when explicitly opted-in,
   maxRedirects: Int = 5,
   allowedMethods: Seq[String] = Seq("GET", "HEAD"), // Safe default: read-only
   userAgent: String = "llm4s-http-tool/1.0"

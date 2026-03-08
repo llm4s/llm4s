@@ -11,6 +11,14 @@ import org.llm4s.types.Result
  * storage layer, translating each query variant into the appropriate
  * `GraphStore` and `GraphEngine` calls.
  *
+ * @example
+ * {{{
+ * val executor = new GraphQueryExecutor(graphStore)
+ * val query = GraphQuery.FindNodes(label = Some("Person"))
+ * val result = executor.execute(query)
+ * // result: Right(GraphQueryResult(nodes = Seq(...), edges = Seq(...)))
+ * }}}
+ *
  * @param graphStore The graph store to query against
  */
 class GraphQueryExecutor(graphStore: GraphStore) {

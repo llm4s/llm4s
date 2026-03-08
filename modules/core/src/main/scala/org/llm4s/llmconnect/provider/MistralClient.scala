@@ -1,8 +1,8 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ServiceError, ValidationError }
+import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.error.ThrowableOps._
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.MistralConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -11,7 +11,6 @@ import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
 import java.time.Duration
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 /**
@@ -29,47 +28,42 @@ import scala.util.Try
 class MistralClient(
   config: MistralConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-) extends LLMClient
-    with MetricsRecording {
+) extends BaseLifecycleLLMClient {
 
-  private val httpClient            = HttpClient.newHttpClient()
-  private val closed: AtomicBoolean = new AtomicBoolean(false)
+  private val httpClient = HttpClient.newHttpClient()
+
+  protected def clientDescription: String = s"Mistral client for model ${config.model}"
+  protected def providerName: String      = "mistral"
+  protected def modelName: String         = config.model
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] =
-    withMetrics(
-      provider = "mistral",
-      model = config.model,
-      operation = validateNotClosed.flatMap { _ =>
-        buildChatRequest(conversation, options).flatMap { requestBody =>
-          val request = HttpRequest
-            .newBuilder()
-            .uri(URI.create(s"${config.baseUrl}/v1/chat/completions"))
-            .header("Content-Type", "application/json")
-            .header("Authorization", s"Bearer ${config.apiKey}")
-            .timeout(Duration.ofMinutes(2))
-            .POST(HttpRequest.BodyPublishers.ofString(requestBody.render(), StandardCharsets.UTF_8))
-            .build()
+  ): Result[Completion] = completeWithMetrics {
+    buildChatRequest(conversation, options).flatMap { requestBody =>
+      val request = HttpRequest
+        .newBuilder()
+        .uri(URI.create(s"${config.baseUrl}/v1/chat/completions"))
+        .header("Content-Type", "application/json")
+        .header("Authorization", s"Bearer ${config.apiKey}")
+        .timeout(Duration.ofMinutes(2))
+        .POST(HttpRequest.BodyPublishers.ofString(requestBody.render(), StandardCharsets.UTF_8))
+        .build()
 
-          val attempt = Try {
-            httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
-          }.toEither.left.map(_.toLLMError)
+      val attempt = Try {
+        httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+      }.toEither.left.map(_.toLLMError)
 
-          attempt.flatMap { response =>
-            val status = response.statusCode()
-            if (status >= 200 && status < 300) {
-              parseChatResponse(response.body())
-            } else {
-              handleErrorResponse(status, response.body())
-            }
-          }
+      attempt.flatMap { response =>
+        val status = response.statusCode()
+        if (status >= 200 && status < 300) {
+          parseChatResponse(response.body())
+        } else {
+          handleErrorResponse(status, response.body())
         }
-      },
-      extractUsage = (c: Completion) => c.usage,
-      extractCost = (c: Completion) => c.estimatedCost
-    )
+      }
+    }
+  }
 
   override def streamComplete(
     conversation: Conversation,
@@ -85,18 +79,6 @@ class MistralClient(
   override def getContextWindow(): Int = config.contextWindow
 
   override def getReserveCompletion(): Int = config.reserveCompletion
-
-  override def close(): Unit =
-    if (closed.compareAndSet(false, true)) {
-      ()
-    }
-
-  private def validateNotClosed: Result[Unit] =
-    if (closed.get()) {
-      Left(ConfigurationError(s"Mistral client for model ${config.model} is already closed"))
-    } else {
-      Right(())
-    }
 
   private def buildChatRequest(
     conversation: Conversation,
@@ -230,37 +212,8 @@ class MistralClient(
       }
     }.toEither.left.map(_.toLLMError).flatten
 
-  private val MaxErrorLength = 256
-
-  private def sanitizeErrorDetail(raw: String): String = {
-    val trimmed = raw.trim
-    if (trimmed.length <= MaxErrorLength) trimmed
-    else trimmed.take(MaxErrorLength) + "…[truncated]"
-  }
-
-  private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] = {
-    val details = sanitizeErrorDetail(
-      Try {
-        val json = ujson.read(body)
-        json.obj
-          .get("message")
-          .flatMap(_.strOpt)
-          .orElse(
-            json.obj
-              .get("error")
-              .flatMap(v => v.obj.get("message").flatMap(_.strOpt).orElse(v.strOpt))
-          )
-          .getOrElse(s"Mistral API error (HTTP $statusCode)")
-      }.getOrElse(s"Mistral API error (HTTP $statusCode)")
-    )
-
-    statusCode match {
-      case 401 | 403 => Left(AuthenticationError("mistral", details))
-      case 429       => Left(RateLimitError("mistral"))
-      case 400       => Left(ValidationError("request", details))
-      case s         => Left(ServiceError(s, "mistral", details))
-    }
-  }
+  private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] =
+    HttpErrorMapper.mapHttpError(statusCode, body, providerName)
 
 }
 

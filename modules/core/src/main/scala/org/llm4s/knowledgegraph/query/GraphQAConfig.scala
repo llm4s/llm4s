@@ -3,6 +3,17 @@ package org.llm4s.knowledgegraph.query
 /**
  * Configuration for the graph-guided question answering pipeline.
  *
+ * @example
+ * {{{
+ * val config = GraphQAConfig(
+ *   maxHops = 3,
+ *   useRanking = true,
+ *   rankingAlgorithm = RankingAlgorithm.PageRank,
+ *   includeCitations = true
+ * )
+ * val pipeline = new GraphQAPipeline(llmClient, graphStore, config)
+ * }}}
+ *
  * @param maxHops Maximum number of hops for graph traversal during context gathering
  * @param maxContextNodes Maximum number of nodes to include in LLM context
  * @param maxContextEdges Maximum number of edges to include in LLM context

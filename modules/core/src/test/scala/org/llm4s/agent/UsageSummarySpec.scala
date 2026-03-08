@@ -124,4 +124,106 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
 
     decoded shouldBe original
   }
+
+  "UsageSummary derived metrics" should "compute averages correctly" in {
+    val summary = UsageSummary(
+      requestCount = 2,
+      inputTokens = 100,
+      outputTokens = 100,
+      totalCost = BigDecimal("0.20")
+    )
+
+    summary.averageCostPerRequest shouldBe BigDecimal("0.10")
+    summary.averageInputTokensPerRequest shouldBe BigDecimal("50")
+    summary.averageOutputTokensPerRequest shouldBe BigDecimal("50")
+  }
+
+  it should "return zero averages when requestCount is zero" in {
+    val summary = UsageSummary()
+
+    summary.averageCostPerRequest shouldBe BigDecimal(0)
+    summary.averageInputTokensPerRequest shouldBe BigDecimal(0)
+    summary.averageOutputTokensPerRequest shouldBe BigDecimal(0)
+  }
+
+  it should "compute cost per 1K tokens correctly" in {
+    val summary = UsageSummary(
+      requestCount = 1,
+      inputTokens = 500,
+      outputTokens = 500,
+      totalCost = BigDecimal("0.10")
+    )
+
+    summary.costPer1KTokens shouldBe BigDecimal("0.10")
+  }
+
+  it should "return zero cost per 1K tokens when total tokens are zero" in {
+    val summary = UsageSummary(
+      requestCount = 1,
+      inputTokens = 0,
+      outputTokens = 0,
+      totalCost = BigDecimal("0.10")
+    )
+
+    summary.costPer1KTokens shouldBe BigDecimal(0)
+  }
+
+  it should "produce formatted summary string" in {
+    val summary = UsageSummary(
+      requestCount = 1,
+      inputTokens = 100,
+      outputTokens = 50,
+      totalCost = BigDecimal("0.01")
+    )
+
+    val formatted = summary.formattedSummary
+
+    formatted should include("Requests: 1")
+    formatted should include("Input tokens: 100")
+    formatted should include("Output tokens: 50")
+    formatted should include("Total cost")
+  }
+
+  it should "handle unexpected JSON values for BigDecimal deserialization" in {
+    val invalidJson =
+      """{
+        |  "requestCount": 0,
+        |  "inputTokens": 0,
+        |  "outputTokens": 0,
+        |  "thinkingTokens": 0,
+        |  "totalCost": true,
+        |  "byModel": {}
+        |}""".stripMargin
+
+    val decoded = read[UsageSummary](invalidJson)
+
+    decoded.totalCost shouldBe BigDecimal(0)
+  }
+
+  it should "compute average cost per request for ModelUsage" in {
+    val usage = ModelUsage(
+      requestCount = 2,
+      inputTokens = 10,
+      outputTokens = 10,
+      totalCost = BigDecimal("0.20")
+    )
+
+    usage.averageCostPerRequest shouldBe BigDecimal("0.10")
+  }
+
+  it should "deserialize numeric BigDecimal values correctly" in {
+    val numericJson =
+      """{
+      |  "requestCount": 1,
+      |  "inputTokens": 10,
+      |  "outputTokens": 5,
+      |  "thinkingTokens": 0,
+      |  "totalCost": 0.50,
+      |  "byModel": {}
+      |}""".stripMargin
+
+    val decoded = read[UsageSummary](numericJson)
+
+    decoded.totalCost shouldBe BigDecimal("0.50")
+  }
 }

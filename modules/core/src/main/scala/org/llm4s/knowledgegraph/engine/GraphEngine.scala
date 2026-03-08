@@ -7,6 +7,20 @@ import scala.annotation.tailrec
 /**
  * Engine for traversing and querying the Knowledge Graph.
  *
+ * @example
+ * {{{
+ * val graph = Graph.empty
+ *   .addNode(Node("a", "Person"))
+ *   .addNode(Node("b", "Person"))
+ *   .addNode(Node("c", "Person"))
+ *   .addEdge(Edge("a", "b", "KNOWS"))
+ *   .addEdge(Edge("b", "c", "KNOWS"))
+ *
+ * val engine = new GraphEngine(graph)
+ * val reachable = engine.traverse("a", maxDepth = 2) // Set(a, b, c)
+ * val path = engine.findShortestPath("a", "c") // Some(List(a->b, b->c))
+ * }}}
+ *
  * @param graph The graph to traverse
  */
 class GraphEngine(graph: Graph) {

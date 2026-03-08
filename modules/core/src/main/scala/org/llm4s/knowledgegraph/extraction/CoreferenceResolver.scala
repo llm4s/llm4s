@@ -13,6 +13,13 @@ import org.slf4j.LoggerFactory
  * "its founder") with explicit entity names. This pre-processing step reduces duplicate
  * nodes that would otherwise be created when the extractor encounters unresolved references.
  *
+ * @example
+ * {{{
+ * val resolver = new CoreferenceResolver(llmClient)
+ * val resolved = resolver.resolve("Alice works at Acme. She is the CEO.")
+ * // resolved: Right("Alice works at Acme. Alice is the CEO.")
+ * }}}
+ *
  * @param llmClient The LLM client to use for coreference resolution
  */
 class CoreferenceResolver(llmClient: LLMClient) {

@@ -77,6 +77,17 @@ case class EdgeNodePair(edge: Edge, node: Node)
  * This trait is designed to be engine-agnostic, allowing implementations
  * for various graph databases (Neo4j, TinkerPop, SPARQL, etc.) while
  * maintaining a consistent interface.
+ *
+ * @example
+ * {{{
+ * val store: GraphStore = new InMemoryGraphStore()
+ * for {
+ *   _ <- store.upsertNode(Node("alice", "Person", Map("name" -> ujson.Str("Alice"))))
+ *   _ <- store.upsertNode(Node("acme", "Organization"))
+ *   _ <- store.upsertEdge(Edge("alice", "acme", "WORKS_FOR"))
+ *   neighbors <- store.getNeighbors("alice")
+ * } yield neighbors
+ * }}}
  */
 trait GraphStore {
 

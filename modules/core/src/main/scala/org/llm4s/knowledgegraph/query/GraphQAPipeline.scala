@@ -17,6 +17,16 @@ import scala.util.Try
  * Multi-hop traversal follows relationship chains to gather evidence beyond direct neighbors.
  * Citations track which nodes and edges contributed to the answer.
  *
+ * @example
+ * {{{
+ * val pipeline = new GraphQAPipeline(llmClient, graphStore)
+ * val result: Result[GraphQAResult] = pipeline.ask("Who does Alice work with?")
+ * result.foreach { r =>
+ *   println(r.answer)
+ *   r.citations.foreach(c => println(s"Source: ${c.nodeLabel} ${c.nodeId}"))
+ * }
+ * }}}
+ *
  * @param llmClient The LLM client for entity identification and answer generation
  * @param graphStore The graph store containing the knowledge graph
  * @param config Pipeline configuration

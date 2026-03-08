@@ -125,7 +125,7 @@ object HTTPTool {
    */
   val toolSafe: Result[ToolFunction[Map[String, Any], HTTPResult]] = createSafe()
 
-  private def makeRequest(
+  private[http] def makeRequest(
     urlStr: String,
     method: String,
     headers: Option[Map[String, String]],
@@ -137,21 +137,74 @@ object HTTPTool {
     if (!config.isMethodAllowed(method)) {
       Left(s"HTTP method '$method' is not allowed. Allowed: ${config.allowedMethods.mkString(", ")}")
     } else {
-      // Parse and validate URL
-      val urlResult = Try(URI.create(urlStr).toURL).toEither.left.map(e => s"Invalid URL: ${e.getMessage}")
 
-      urlResult.flatMap { url =>
-        // Extract domain from URL
-        val domain = Option(url.getHost).getOrElse("")
+      /**
+       * Recursively follow redirects with per-hop SSRF validation.
+       *
+       * For every hop we:
+       *  1. Parse and validate the URL
+       *  2. Check the destination domain/IP against the SSRF filter
+       *  3. Execute the request with auto-redirects disabled
+       *  4. If the response is 3xx and we still have hops left, extract
+       *     the `Location` header, resolve it to an absolute URL, and loop.
+       *
+       * This prevents the open-redirect SSRF bypass where an attacker
+       * supplies a "safe" initial URL that subsequently redirects to an
+       * internal address (e.g. 169.254.169.254).
+       */
+      def go(currentUrlStr: String, hopsLeft: Int): Either[String, HTTPResult] =
+        Try(URI.create(currentUrlStr).toURL).toEither.left
+          .map(e => s"Invalid URL: ${e.getMessage}")
+          .flatMap { url =>
+            // Layer 1: scheme enforcement – only http and https are permitted.
+            // Rejecting alternative schemes (file, ftp, gopher, jar, mailto, …)
+            // prevents protocol-smuggling attacks even when a redirect is involved.
+            val scheme = url.getProtocol.toLowerCase
+            if (scheme != "http" && scheme != "https")
+              Left(
+                s"UNSUPPORTED_PROTOCOL: Only http and https are allowed (got: '$scheme')"
+              )
+            else {
+              // Layer 2: SSRF domain/IP validation.
+              val domain = Option(url.getHost).getOrElse("")
+              if (domain.isEmpty)
+                Left("URL has no host")
+              else if (!config.validateDomainWithSSRF(domain))
+                Left(s"SSRF_BLOCKED: domain '$domain' is not allowed")
+              else
+                executeRequest(url, currentUrlStr, method, headers, body, contentType, config).flatMap { result =>
+                  // Only treat standard redirect codes as redirects.
+                  // 304 (Not Modified) and other 3xx codes are not redirects.
+                  val isRedirect =
+                    Set(301, 302, 307, 308).contains(result.statusCode)
+                  if (config.followRedirects && isRedirect) {
+                    // Case-insensitive lookup – servers capitalise headers inconsistently.
+                    val locationOpt =
+                      result.headers
+                        .find { case (k, _) => k.equalsIgnoreCase("Location") }
+                        .map(_._2)
+                    locationOpt match {
+                      case None =>
+                        Right(result) // No Location header; return the redirect as-is.
+                      case Some(_) if hopsLeft <= 0 =>
+                        Left(
+                          s"TOO_MANY_REDIRECTS: Too many redirects (max ${config.maxRedirects})"
+                        )
+                      case Some(location) =>
+                        // Resolve relative Location values against the current URL so that
+                        // paths like "/callback" or "../other" are handled correctly.
+                        val absoluteLocation =
+                          Try(url.toURI.resolve(location).toString).getOrElse(location)
+                        go(absoluteLocation, hopsLeft - 1)
+                    }
+                  } else {
+                    Right(result)
+                  }
+                }
+            }
+          }
 
-        if (domain.isEmpty) {
-          Left("URL has no host")
-        } else if (!config.validateDomainWithSSRF(domain)) {
-          Left(s"Domain '$domain' is not allowed")
-        } else {
-          executeRequest(url, urlStr, method, headers, body, contentType, config)
-        }
-      }
+      go(urlStr, config.maxRedirects)
     }
 
   private def executeRequest(
@@ -172,7 +225,9 @@ object HTTPTool {
       connection.setRequestMethod(method.toUpperCase)
       connection.setConnectTimeout(config.timeoutMs)
       connection.setReadTimeout(config.timeoutMs)
-      connection.setInstanceFollowRedirects(config.followRedirects)
+      // Auto-redirects are always disabled; the makeRequest loop handles
+      // redirect following with per-hop SSRF validation (Issue #788).
+      connection.setInstanceFollowRedirects(false)
       connection.setRequestProperty("User-Agent", config.userAgent)
 
       // Set headers

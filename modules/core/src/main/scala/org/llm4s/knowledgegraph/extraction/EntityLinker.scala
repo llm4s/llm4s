@@ -17,6 +17,17 @@ import scala.util.Try
  *  2. LLM-assisted disambiguation (optional): ambiguous clusters (e.g., "Jobs" vs
  *     "Steve Jobs") are sent to the LLM to confirm or reject merges.
  *
+ * @example
+ * {{{
+ * // Deterministic linking only
+ * val linker = new EntityLinker(None)
+ * val deduped = linker.link(graphWithDuplicates)
+ *
+ * // With LLM-assisted disambiguation
+ * val smartLinker = new EntityLinker(Some(llmClient))
+ * val result = smartLinker.link(graphWithAmbiguousEntities)
+ * }}}
+ *
  * @param llmClient Optional LLM client for disambiguation. If None, only deterministic merging is performed.
  */
 class EntityLinker(llmClient: Option[LLMClient] = None) {

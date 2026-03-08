@@ -12,6 +12,19 @@ import scala.annotation.tailrec
  *
  * These scores are used by [[GraphQAPipeline]] to prioritize which entities
  * to include in LLM context when the result set exceeds context limits.
+ *
+ * @example
+ * {{{
+ * val graph = Graph.empty
+ *   .addNode(Node("a", "Person"))
+ *   .addNode(Node("b", "Person"))
+ *   .addNode(Node("c", "Person"))
+ *   .addEdge(Edge("a", "b", "KNOWS"))
+ *   .addEdge(Edge("b", "c", "KNOWS"))
+ *
+ * val scores = GraphRanking.pageRank(graph)
+ * val centrality = GraphRanking.degreeCentrality(graph)
+ * }}}
  */
 object GraphRanking {
 

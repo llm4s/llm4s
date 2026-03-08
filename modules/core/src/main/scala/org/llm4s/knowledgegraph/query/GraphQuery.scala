@@ -11,6 +11,21 @@ import org.llm4s.knowledgegraph.storage.Direction
  *
  * This approach is engine-agnostic — the same query ADT works with in-memory stores,
  * JSON-backed stores, or future external graph database implementations.
+ *
+ * @example
+ * {{{
+ * // Find all Person nodes
+ * val findPeople = GraphQuery.FindNodes(label = Some("Person"))
+ *
+ * // Find neighbors of a specific node
+ * val neighbors = GraphQuery.FindNeighbors(nodeId = "alice", maxDepth = 2)
+ *
+ * // Find path between two nodes
+ * val path = GraphQuery.FindPath(fromNodeId = "alice", toNodeId = "bob")
+ *
+ * // Compose multiple queries
+ * val composite = GraphQuery.CompositeQuery(Seq(findPeople, neighbors))
+ * }}}
  */
 sealed trait GraphQuery
 
