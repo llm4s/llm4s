@@ -2,6 +2,7 @@ package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
 import org.llm4s.error.{ ProcessingError, LLMError }
+import org.llm4s.util.SqlIdentifier
 
 import java.sql.{ Connection, PreparedStatement, ResultSet }
 import scala.collection.mutable.ArrayBuffer
@@ -531,17 +532,12 @@ final class PgVectorStore private (
 
 object PgVectorStore {
 
-  private val TableNamePattern = "^[a-zA-Z0-9_]+$"
-
   /**
-   * Validate a table name. Only letters, digits and underscores are allowed.
+   * Validate a table name against PostgreSQL identifier rules.
+   * Delegates to the shared SqlIdentifier validator.
    */
   def validateTableName(name: String): Result[String] =
-    if (name != null && name.matches(TableNamePattern)) Right(name)
-    else
-      Left(
-        ProcessingError("pgvector-store", s"Invalid table name: '$name'. Allowed: only letters, digits and underscore.")
-      )
+    SqlIdentifier.validate(name, "pgvector-store")
 
   /**
    * Create a PgVectorStore from an existing HikariDataSource after validating the table name.

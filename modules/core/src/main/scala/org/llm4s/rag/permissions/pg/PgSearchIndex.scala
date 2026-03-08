@@ -4,6 +4,7 @@ import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import org.llm4s.error.ProcessingError
 import org.llm4s.rag.permissions._
 import org.llm4s.types.Result
+import org.llm4s.util.SqlIdentifier
 import org.llm4s.vectorstore.{ MetadataFilter, ScoredRecord, VectorRecord }
 import org.llm4s.util.RateLimitedLogger
 
@@ -429,20 +430,23 @@ object PgSearchIndex {
    * @param config PostgreSQL configuration
    * @return The search index, or error
    */
-  def apply(config: SearchIndex.PgConfig): Result[PgSearchIndex] = Try {
-    val hikariConfig = new HikariConfig()
-    hikariConfig.setJdbcUrl(config.jdbcUrl)
-    hikariConfig.setUsername(config.user)
-    hikariConfig.setPassword(config.password)
-    hikariConfig.setMaximumPoolSize(config.maxPoolSize)
-    hikariConfig.setMinimumIdle(1)
-    hikariConfig.setConnectionTimeout(30000)
-    hikariConfig.setIdleTimeout(600000)
-    hikariConfig.setMaxLifetime(1800000)
+  def apply(config: SearchIndex.PgConfig): Result[PgSearchIndex] =
+    SqlIdentifier.validate(config.vectorTableName, "pg-search-index-create").flatMap { _ =>
+      Try {
+        val hikariConfig = new HikariConfig()
+        hikariConfig.setJdbcUrl(config.jdbcUrl)
+        hikariConfig.setUsername(config.user)
+        hikariConfig.setPassword(config.password)
+        hikariConfig.setMaximumPoolSize(config.maxPoolSize)
+        hikariConfig.setMinimumIdle(1)
+        hikariConfig.setConnectionTimeout(30000)
+        hikariConfig.setIdleTimeout(600000)
+        hikariConfig.setMaxLifetime(1800000)
 
-    val dataSource = new HikariDataSource(hikariConfig)
-    new PgSearchIndex(dataSource, config.vectorTableName, config)
-  }.toEither.left.map(e => ProcessingError("pg-search-index-create", e.getMessage))
+        val dataSource = new HikariDataSource(hikariConfig)
+        new PgSearchIndex(dataSource, config.vectorTableName, config)
+      }.toEither.left.map(e => ProcessingError("pg-search-index-create", e.getMessage))
+    }
 
   /**
    * Create a PgSearchIndex from a JDBC URL.

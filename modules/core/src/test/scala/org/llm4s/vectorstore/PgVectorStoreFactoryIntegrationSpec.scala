@@ -25,7 +25,9 @@ class PgVectorStoreFactoryIntegrationSpec extends AnyFlatSpec with Matchers {
       "spaces not allowed",     // contains spaces
       "",                       // empty
       "table;",                 // contains semicolon
-      "table.name"              // contains dot
+      "table.name",             // contains dot
+      "123",                    // starts with digit (invalid in PostgreSQL)
+      "1table"                  // starts with digit (invalid in PostgreSQL)
     )
 
     invalidNames.foreach { name =>

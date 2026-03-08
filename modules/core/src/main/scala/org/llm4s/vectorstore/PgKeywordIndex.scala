@@ -2,6 +2,7 @@ package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
+import org.llm4s.util.SqlIdentifier
 
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import java.sql.{ Connection, PreparedStatement, ResultSet }
@@ -497,20 +498,22 @@ object PgKeywordIndex {
    * @return The keyword index or error
    */
   def apply(config: Config): Result[PgKeywordIndex] =
-    Try {
-      val hikariConfig = new HikariConfig()
-      hikariConfig.setJdbcUrl(config.jdbcUrl)
-      hikariConfig.setUsername(config.user)
-      hikariConfig.setPassword(config.password)
-      hikariConfig.setMaximumPoolSize(config.maxPoolSize)
-      hikariConfig.setMinimumIdle(1)
-      hikariConfig.setConnectionTimeout(30000)
-      hikariConfig.setIdleTimeout(600000)
-      hikariConfig.setMaxLifetime(1800000)
+    SqlIdentifier.validate(config.tableName, "pg-keyword-index").flatMap { _ =>
+      Try {
+        val hikariConfig = new HikariConfig()
+        hikariConfig.setJdbcUrl(config.jdbcUrl)
+        hikariConfig.setUsername(config.user)
+        hikariConfig.setPassword(config.password)
+        hikariConfig.setMaximumPoolSize(config.maxPoolSize)
+        hikariConfig.setMinimumIdle(1)
+        hikariConfig.setConnectionTimeout(30000)
+        hikariConfig.setIdleTimeout(600000)
+        hikariConfig.setMaxLifetime(1800000)
 
-      val dataSource = new HikariDataSource(hikariConfig)
-      new PgKeywordIndex(dataSource, config.tableName, config.language, ownsDataSource = true)
-    }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Failed to create index: ${e.getMessage}"))
+        val dataSource = new HikariDataSource(hikariConfig)
+        new PgKeywordIndex(dataSource, config.tableName, config.language, ownsDataSource = true)
+      }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Failed to create index: ${e.getMessage}"))
+    }
 
   /**
    * Create a PgKeywordIndex with an existing HikariDataSource.
@@ -523,9 +526,11 @@ object PgKeywordIndex {
    * @return The keyword index or error
    */
   def apply(dataSource: HikariDataSource, tableName: String, language: String): Result[PgKeywordIndex] =
-    Try {
-      new PgKeywordIndex(dataSource, tableName, language, ownsDataSource = false)
-    }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Failed to create index: ${e.getMessage}"))
+    SqlIdentifier.validate(tableName, "pg-keyword-index").flatMap { _ =>
+      Try {
+        new PgKeywordIndex(dataSource, tableName, language, ownsDataSource = false)
+      }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Failed to create index: ${e.getMessage}"))
+    }
 
   /**
    * Create a PgKeywordIndex with an existing HikariDataSource using default language.
@@ -538,9 +543,11 @@ object PgKeywordIndex {
    * @return The keyword index or error
    */
   def apply(dataSource: HikariDataSource, tableName: String): Result[PgKeywordIndex] =
-    Try {
-      new PgKeywordIndex(dataSource, tableName, language = "english", ownsDataSource = false)
-    }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Failed to create index: ${e.getMessage}"))
+    SqlIdentifier.validate(tableName, "pg-keyword-index").flatMap { _ =>
+      Try {
+        new PgKeywordIndex(dataSource, tableName, language = "english", ownsDataSource = false)
+      }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Failed to create index: ${e.getMessage}"))
+    }
 
   /**
    * Create a PgKeywordIndex from connection string.

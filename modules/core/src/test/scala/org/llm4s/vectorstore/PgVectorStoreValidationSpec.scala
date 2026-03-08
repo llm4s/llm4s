@@ -41,6 +41,15 @@ class PgVectorStoreValidationSpec extends AnyFlatSpec with Matchers {
 
   it should "reject null table names" in {
     PgVectorStore.validateTableName(null) should matchPattern {
+      case Left(ProcessingError(msg, op, _)) if msg.contains("must not be null") && op == "pgvector-store" =>
+    }
+  }
+
+  it should "reject table names starting with a digit" in {
+    PgVectorStore.validateTableName("123") should matchPattern {
+      case Left(ProcessingError(msg, op, _)) if msg.contains("Invalid table name") && op == "pgvector-store" =>
+    }
+    PgVectorStore.validateTableName("1table") should matchPattern {
       case Left(ProcessingError(msg, op, _)) if msg.contains("Invalid table name") && op == "pgvector-store" =>
     }
   }
