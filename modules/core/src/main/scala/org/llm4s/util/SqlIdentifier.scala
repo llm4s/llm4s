@@ -3,10 +3,11 @@ package org.llm4s.util
 import org.llm4s.error.ProcessingError
 import org.llm4s.types.Result
 
-/** Validator for PostgreSQL identifiers (table/index/column).
-  * Enforces: start with letter/_, allowed [a-zA-Z0-9_], max 63 chars.
-  * Returns a ProcessingError on null/invalid inputs.
-  */
+/**
+ * Validator for PostgreSQL identifiers (table/index/column).
+ * Enforces: start with letter/_, allowed [a-zA-Z0-9_], max 63 chars.
+ * Returns a ProcessingError on null/invalid inputs.
+ */
 object SqlIdentifier {
 
   private val Pattern = "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$"
