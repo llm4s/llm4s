@@ -48,7 +48,7 @@ case class ToolCallRequest(
  */
 class ToolRegistry(
   initialTools: Seq[ToolFunction[_, _]],
-  toolTimeout: Option[FiniteDuration] = None
+  executionTimeout: Option[FiniteDuration] = None
 ) {
 
   /** All tools registered in this registry. */
@@ -58,12 +58,24 @@ class ToolRegistry(
     timeout: FiniteDuration
   )(implicit ec: ExecutionContext): Future[T] = {
 
-    val timeoutFuture = Future {
-      Thread.sleep(timeout.toMillis)
-      throw new TimeoutException("Tool execution timed out")
+    // Note: Scala Futures cannot be cancelled once started.
+    // If the timeout fires, the underlying tool execution may still
+    // continue running in the background, but its result will be ignored.
+
+    val promise = scala.concurrent.Promise[T]()
+
+    val task = ToolRegistry.scheduler.schedule(
+      (() => promise.tryFailure(new TimeoutException("Tool execution timed out"))): Runnable,
+      timeout.toMillis,
+      java.util.concurrent.TimeUnit.MILLISECONDS
+    )
+
+    future.onComplete { result =>
+      task.cancel(false)
+      promise.tryComplete(result)
     }
 
-    Future.firstCompletedOf(Seq(future, timeoutFuture))
+    promise.future
   }
 
   /**
@@ -119,7 +131,7 @@ class ToolRegistry(
 
     val baseFuture = Future(blocking(execute(request)))
 
-    toolTimeout match {
+    executionTimeout match {
 
       case Some(timeout) =>
         withTimeout(baseFuture, timeout).recover { case _: TimeoutException =>
@@ -265,7 +277,16 @@ class ToolRegistry(
     AzureToolHelper.addToolsToOptions(this, chatOptions)
 }
 
+import java.util.concurrent.{ Executors, ScheduledExecutorService }
+
 object ToolRegistry {
+
+  private val scheduler: ScheduledExecutorService =
+    Executors.newSingleThreadScheduledExecutor { r =>
+      val t = new Thread(r, "tool-timeout-scheduler")
+      t.setDaemon(true)
+      t
+    }
 
   /**
    * Creates an empty tool registry with no tools
