@@ -3,7 +3,7 @@ package org.llm4s.runner
 import org.llm4s.shared._
 
 import java.io.{ BufferedWriter, PrintWriter }
-import java.nio.charset.StandardCharsets
+import java.nio.charset.{ Charset, StandardCharsets }
 import java.nio.file.{ Files, Path, Paths, StandardOpenOption }
 import java.time.Instant
 import java.time.format.DateTimeFormatter
@@ -603,7 +603,7 @@ class WorkspaceAgentInterfaceImpl(
       // Read stdout and stderr in background threads to prevent blocking
       val stdoutThread = new Thread(() => {
         val reader = new java.io.BufferedReader(
-          new java.io.InputStreamReader(process.getInputStream, StandardCharsets.UTF_8)
+          new java.io.InputStreamReader(process.getInputStream, Charset.defaultCharset())
         )
         try {
           var line = reader.readLine()
@@ -618,7 +618,7 @@ class WorkspaceAgentInterfaceImpl(
 
       val stderrThread = new Thread(() => {
         val reader = new java.io.BufferedReader(
-          new java.io.InputStreamReader(process.getErrorStream, StandardCharsets.UTF_8)
+          new java.io.InputStreamReader(process.getErrorStream, Charset.defaultCharset())
         )
         try {
           var line = reader.readLine()
