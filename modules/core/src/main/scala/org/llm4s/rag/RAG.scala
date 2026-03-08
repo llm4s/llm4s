@@ -525,7 +525,11 @@ final class RAG private (
               None
           }
         }
-      }.recover { case _ => None }
+      }.recover { case _ =>
+        // On error, treat as unchanged so the document stays in seenIds
+        // and is not incorrectly deleted during the deletion step.
+        Some(ProcessDoc(doc, UnchangedDoc))
+      }
     }
 
     // Process change detection in batches
