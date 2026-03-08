@@ -336,7 +336,8 @@ final case class RAGConfig(
           pgVectorConnectionString = Some(pgCfg.jdbcUrl),
           pgVectorUser = Some(pgCfg.user),
           pgVectorPassword = Some(pgCfg.password),
-          pgVectorTableName = Some(pgCfg.vectorTableName)
+          pgVectorTableName = Some(pgCfg.vectorTableName),
+          pgKeywordTableName = Some(pgCfg.keywordTableName)
         )
       case None =>
         baseConfig
