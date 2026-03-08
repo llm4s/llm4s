@@ -434,6 +434,8 @@ final class RAG private (
             case LoadResult.Skipped(_, _) =>
               ("skipped", None)
           }
+        }.recover { case ex =>
+          ("failed", Some(("unknown", org.llm4s.error.ThrowableOps.RichThrowable(ex).toLLMError)))
         }
       }
 
@@ -523,7 +525,7 @@ final class RAG private (
               None
           }
         }
-      }
+      }.recover { case _ => None }
     }
 
     // Process change detection in batches
@@ -599,7 +601,7 @@ final class RAG private (
         _     <- clear()
         stats <- ingest(loader)
       } yield SyncStats(added = stats.successful, updated = 0, deleted = 0, unchanged = 0)
-    }
+    }.recover { case ex => Left(org.llm4s.error.ThrowableOps.RichThrowable(ex).toLLMError) }
 
   private def ingestDocument(doc: Document): Result[Int] = {
     // Choose chunker based on hints if configured

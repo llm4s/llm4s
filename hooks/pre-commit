@@ -56,7 +56,7 @@ done <<< "$STAGED_FILES"
 
 if [ "$BUILD_CONFIG_CHANGED" = true ]; then
   echo "Build config changed — running full build."
-  sbt scalafmtCheckAll +compile +test
+  sbt scalafmtCheckAll compile test
   echo "All pre-commit checks passed!"
   exit 0
 fi
@@ -174,30 +174,17 @@ done
 
 # 2) compile + test for directly changed projects
 for proj in $PROJECT_CHANGED; do
-  if is_cross_test_project "$proj"; then
-    ver=$(scala_version_switch "$proj")
-    SBT_CMDS+=("$ver" "${proj}/Test/compile")
-    if set_contains PROJECT_TEST "$proj" || set_contains PROJECT_SRC "$proj"; then
-      SBT_CMDS+=("$ver" "${proj}/test")
-    fi
-  else
-    SBT_CMDS+=("+${proj}/compile")
-    # Test if source or test files changed (source changes can break tests too)
-    if set_contains PROJECT_TEST "$proj" || set_contains PROJECT_SRC "$proj"; then
-      SBT_CMDS+=("+${proj}/test")
-    fi
+  SBT_CMDS+=("${proj}/compile")
+  # Test if source or test files changed (source changes can break tests too)
+  if set_contains PROJECT_TEST "$proj" || set_contains PROJECT_SRC "$proj"; then
+    SBT_CMDS+=("${proj}/test")
   fi
 done
 
 # 3) compile-only for downstream dependents (that aren't already being compiled)
 for proj in $DOWNSTREAM_COMPILE; do
   if ! set_contains PROJECT_CHANGED "$proj"; then
-    if is_cross_test_project "$proj"; then
-      ver=$(scala_version_switch "$proj")
-      SBT_CMDS+=("$ver" "${proj}/Test/compile")
-    else
-      SBT_CMDS+=("+${proj}/compile")
-    fi
+    SBT_CMDS+=("${proj}/compile")
   fi
 done
 

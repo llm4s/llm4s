@@ -93,7 +93,7 @@ trait ImageProcessingClient {
       blocking {
         analyzeImage(imagePath, prompt)
       }
-    }
+    }.recover { case ex => Left(org.llm4s.error.ThrowableOps.RichThrowable(ex).toLLMError) }
 
   /**
    * Preprocesses an image with specified operations.
