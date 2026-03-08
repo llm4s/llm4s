@@ -37,8 +37,8 @@ jobs:
       - name: Check formatting
         run: sbt scalafmtCheckAll
       
-      - name: Compile all Scala versions
-        run: sbt +compile
+      - name: Compile
+        run: sbt compile
 
   # Code coverage (runs on one configuration to avoid duplication)
   coverage:
@@ -111,7 +111,6 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        scala: [2.13.16, 3.7.1]
         java: [21]
 
     runs-on: ${{ matrix.os }}
@@ -128,20 +127,19 @@ jobs:
       - uses: sbt/setup-sbt@v1
       
       - name: Run tests
-        run: sbt ++${{ matrix.scala }} test
+        run: sbt test
       
-      - name: Run cross-version tests
+      - name: Run Scala 3 compatibility tests
         run: sbt testCross
       
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          # Include OS and Scala version to make CI failures easier to diagnose
-          name: test-reports-${{ matrix.os }}-scala-${{ matrix.scala }}
+          name: test-reports-${{ matrix.os }}
           path: |
             **/target/test-reports/
-            **/target/scala-${{ matrix.scala }}/test-reports/
+            **/target/scala-3.7.1/test-reports/
           retention-days: 5
 
   # All tests must pass

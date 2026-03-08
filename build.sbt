@@ -4,7 +4,7 @@ import Common._
 
 inThisBuild(
   List(
-    crossScalaVersions := List(scala213, scala3),
+    crossScalaVersions := List(scala3),
     scalaVersion       := scala3,
     organization       := "org.llm4s",
     organizationName   := "llm4s",
@@ -63,11 +63,11 @@ inThisBuild(
 // ---- Handy aliases ----
 addCommandAlias("cov", ";clean;coverage;test;coverageAggregate;coverageReport;coverageOff")
 addCommandAlias("covReport", ";clean;coverage;test;coverageReport;coverageOff")
-addCommandAlias("buildAll", ";clean;+compile;+test")
-addCommandAlias("publishAll", ";clean;+publish")
+addCommandAlias("buildAll", ";clean;compile;test")
+addCommandAlias("publishAll", ";clean;publish")
 addCommandAlias(
   "testAll",
-  ";test;++2.13.16 crossTestScala2/test;++3.7.1 crossTestScala3/test"
+  ";test;crossTestScala3/test"
 )
 addCommandAlias(
   "cleanTestAll",
@@ -77,8 +77,8 @@ addCommandAlias(
   "cleanTestAllAndFormat",
   ";scalafmtAll;cleanTestAll"
 )
-addCommandAlias("compileAll", ";+compile")
-addCommandAlias("testCross", ";++2.13.16 crossTestScala2/test;++3.7.1 crossTestScala3/test")
+addCommandAlias("compileAll", ";compile")
+addCommandAlias("testCross", ";crossTestScala3/test")
 // ---- Three-tier test aliases ----
 // Default `test` runs unit + local HTTP server tests (Tier 1), excluding tagged tests.
 // testOllama: Tier 2 — integration tests against a local Ollama instance (requires `ollama pull qwen2.5:0.5b`)
@@ -93,14 +93,14 @@ addCommandAlias(
 )
 addCommandAlias(
   "fullCrossTest",
-  ";clean ;crossTestScala2/clean ;crossTestScala3/clean ;+publishLocal ;testCross"
+  ";clean ;crossTestScala3/clean ;publishLocal ;testCross"
 )
 
 
 
 // ---- shared settings ----
 lazy val commonSettings = Seq(
-  crossScalaVersions := Seq(scala213, scala3),
+  crossScalaVersions := Seq(scala3),
   Compile / scalacOptions := scalacOptionsForVersion(scalaVersion.value),
   Test / scalacOptions    := scalacOptionsForVersion(scalaVersion.value),
   // Suppress ScalaDoc warnings from third-party libraries (e.g., ScalaTest)
@@ -277,26 +277,6 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
       Deps.opentelemetryApi,
       Deps.opentelemetrySdk,
       Deps.opentelemetryExporterOtlp
-    )
-  )
-
-lazy val crossTestScala2 = (project in file("modules/crossTest/scala2"))
-  .dependsOn(core)
-  .settings(
-    name         := "crosstest-scala2",
-    scalaVersion := scala213,
-    Test / fork  := true,
-    resolvers   += Resolver.mavenLocal,
-    resolvers   += Resolver.defaultLocal,
-    scalacOptions ++= scala2CompilerOptions,
-    libraryDependencies ++= Seq(
-      Deps.scalatest % Test,
-      Deps.ujson
-    ),
-    excludeDependencies ++= Seq(
-      ExclusionRule(organization = "com.lihaoyi", name = "geny_3"),
-      ExclusionRule(organization = "com.lihaoyi", name = "ujson_3"),
-      ExclusionRule(organization = "com.lihaoyi", name = "upickle-core_3")
     )
   )
 

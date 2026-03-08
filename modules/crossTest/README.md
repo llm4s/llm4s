@@ -2,13 +2,12 @@
 
 ## Overview
 
-This directory contains test projects that verify cross-version compatibility of LLM4S across **Scala 2.13** and **Scala 3.x**. The same test logic lives in both `scala2/` and `scala3/`; only the package name differs (`org.llm4s.sc2` vs `org.llm4s.sc3`). Running both suites ensures behavior is consistent across versions.
+This directory contains Scala 3 compatibility tests for LLM4S. The active test project lives under `scala3/` and exercises behavior that used to be covered across multiple Scala versions before the Scala 3-only migration.
 
 **Important:** Cross-test projects use `dependsOn(core)`. They run against the **locally compiled `core`** project in the same build, not against published artifacts. See [Limitations](#limitations) below.
 
 ## Test Projects Structure
 
-- `scala2/` – Tests for Scala 2.13 (sbt project: `crossTestScala2`)
 - `scala3/` – Tests for Scala 3.x (sbt project: `crossTestScala3`)
 
 ## What Is Implemented
@@ -21,7 +20,7 @@ This directory contains test projects that verify cross-version compatibility of
 
 ## Limitations
 
-- **No verification against published artifacts by default.** The build uses `crossTestScala2.dependsOn(core)` and `crossTestScala3.dependsOn(core)`. So `testCross` runs tests against the **current build’s compiled `core`**, not against a published JAR. Packaging and dependency-resolution issues that only appear when consuming a published artifact are not covered by the default test run.
+- **No verification against published artifacts by default.** The build uses `crossTestScala3.dependsOn(core)`. So `testCross` runs tests against the **current build’s compiled `core`**, not against a published JAR. Packaging and dependency-resolution issues that only appear when consuming a published artifact are not covered by the default test run.
 - **`fullCrossTest`** runs `+publishLocal` then `testCross`. Publishing ensures the repo can publish, but the cross-test projects still resolve `core` via the project dependency; they do not consume the newly published local JAR unless the build is changed to depend on the published module instead of the project.
 
 ## Available Commands
@@ -32,9 +31,9 @@ This directory contains test projects that verify cross-version compatibility of
 sbt testCross
 ```
 
-Alias: `;++2.13.16 crossTestScala2/test;++3.7.1 crossTestScala3/test`
+Alias: `;crossTestScala3/test`
 
-- Runs tests for both Scala 2.13 and 3.7.1.
+- Runs the dedicated Scala 3 compatibility suite.
 - Uses the locally compiled `core` project (same build).
 
 ### Full verification (clean, publish locally, then run cross-tests)
@@ -43,7 +42,7 @@ Alias: `;++2.13.16 crossTestScala2/test;++3.7.1 crossTestScala3/test`
 sbt fullCrossTest
 ```
 
-Alias: `;clean ;crossTestScala2/clean ;crossTestScala3/clean ;+publishLocal ;testCross`
+Alias: `;clean ;crossTestScala3/clean ;publishLocal ;testCross`
 
 - Cleans and publishes all versions to the local repository, then runs `testCross`.
 - Cross-tests still run against the project dependency unless the build is changed to use the published artifact.
@@ -52,7 +51,6 @@ Alias: `;clean ;crossTestScala2/clean ;crossTestScala3/clean ;+publishLocal ;tes
 
 Tests live in:
 
-- `scala2/src/test/scala/org/llm4s/sc2/`
 - `scala3/src/test/scala/org/llm4s/sc3/`
 
 ### Provider config parsing
@@ -83,7 +81,7 @@ All config tests use pure construction (no env, config files, or network).
 
 ## Adding New Cross-Tests
 
-1. Add the **same** test class in both `scala2/.../sc2/` and `scala3/.../sc3/` with identical logic (only package differs).
+1. Add the test class under `scala3/.../sc3/`.
 2. Use ScalaTest and the same style as existing cross-tests.
 3. Prefer behavior-based assertions (e.g. contains, non-empty) over brittle exact counts or order.
 4. Add both positive and negative cases where safe (invalid inputs, unsupported options).
