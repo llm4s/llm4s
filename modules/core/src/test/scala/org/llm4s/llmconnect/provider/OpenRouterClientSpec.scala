@@ -136,6 +136,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
     requestBody.obj should not contain key("response_format")
   }
+
   // ==========================================================================
   // complete() error handling
   // ==========================================================================

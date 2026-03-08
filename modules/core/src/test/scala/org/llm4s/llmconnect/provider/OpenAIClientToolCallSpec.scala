@@ -140,9 +140,12 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers {
 
     result.isRight shouldBe true
     capturedOptions should not be null
-    capturedOptions.getResponseFormat shouldBe a[ChatCompletionsJsonSchemaResponseFormat]
-    val jsSchema = capturedOptions.getResponseFormat.asInstanceOf[ChatCompletionsJsonSchemaResponseFormat]
-    jsSchema.getJsonSchema.getName shouldBe "response"
-    jsSchema.getJsonSchema.isStrict shouldBe true
+    capturedOptions.getResponseFormat match {
+      case fmt: ChatCompletionsJsonSchemaResponseFormat =>
+        fmt.getJsonSchema.getName shouldBe "response"
+        fmt.getJsonSchema.isStrict shouldBe true
+      case other =>
+        fail(s"Expected ChatCompletionsJsonSchemaResponseFormat but got ${other.getClass.getSimpleName}")
+    }
   }
 }
