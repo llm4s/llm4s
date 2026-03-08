@@ -54,6 +54,17 @@ case class ValidationResult(
  * each node and edge. The underlying `Graph` remains a pure data structure;
  * provenance is tracked externally.
  *
+ * @example
+ * {{{
+ * val doc = DocumentSource("doc1", "Annual Report")
+ * val graph = Graph.empty
+ *   .addNode(Node("alice", "Person"))
+ *   .addEdge(Edge("alice", "acme", "WORKS_FOR"))
+ *
+ * val tracked = SourceTrackedGraph.fromGraph(graph, doc)
+ * tracked.getNodeSources("alice") // Set(doc)
+ * }}}
+ *
  * @param graph The underlying knowledge graph
  * @param sources All document sources that contributed to this graph
  * @param nodeSources Mapping of node ID to the set of source document IDs that contributed it

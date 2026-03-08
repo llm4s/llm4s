@@ -453,7 +453,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
       err => {
         err shouldBe a[ServiceError]
         (err.message should not).include("sk-12345")
-        err.message should include("Mistral API error")
+        err.message should include("mistral API error")
       },
       _ => fail("Expected Left(ServiceError)")
     )

@@ -13,6 +13,16 @@ import org.llm4s.types.Result
  * from an `ExtractionSchema`. The LLM output is still parsed as JSON but the prompt
  * strongly constrains what types are produced.
  *
+ * @example
+ * {{{
+ * val schema = ExtractionSchema.simple(
+ *   entityTypes = Seq("Person", "Organization"),
+ *   relationshipTypes = Seq("WORKS_FOR", "MANAGES")
+ * )
+ * val extractor = new SchemaGuidedExtractor(llmClient)
+ * val result = extractor.extract("Alice manages Bob at Acme Corp.", schema)
+ * }}}
+ *
  * @param llmClient The LLM client to use for extraction
  */
 class SchemaGuidedExtractor(llmClient: LLMClient) {

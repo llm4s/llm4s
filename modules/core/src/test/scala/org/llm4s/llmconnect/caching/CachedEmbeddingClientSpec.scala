@@ -73,4 +73,30 @@ class CachedEmbeddingClientSpec extends AnyFlatSpec with Matchers with MockFacto
     cachedClient.embed(request) shouldBe Left(testError)
     cachedClient.embed(request).isRight shouldBe true
   }
+
+  it should "deduplicate identical texts within the same batch before calling the base client" in {
+    val baseClient   = mock[EmbeddingClient]
+    val cache        = new InMemoryEmbeddingCache[Seq[Double]]()
+    val cachedClient = new CachedEmbeddingClient(baseClient, cache)
+
+    // Request with duplicated inputs
+    val request = EmbeddingRequest(Seq("duplicate text", "unique text", "duplicate text"), testModel)
+
+    // Expectation: Base client should only receive the deduplicated texts
+    val expectedUniqueReq  = request.copy(input = Seq("duplicate text", "unique text"))
+    val mockUniqueResponse = EmbeddingResponse(Seq(Seq(1.1, 1.1), Seq(2.2, 2.2)))
+
+    (baseClient.embed _)
+      .expects(expectedUniqueReq)
+      .returning(Right(mockUniqueResponse))
+      .once()
+
+    val result = cachedClient.embed(request)
+
+    // The final result should contain 3 vectors, reconstructing the duplicates
+    // in the exact order they were requested.
+    val expectedFinalVectors = Seq(Seq(1.1, 1.1), Seq(2.2, 2.2), Seq(1.1, 1.1))
+
+    result.map(_.embeddings) shouldBe Right(expectedFinalVectors)
+  }
 }

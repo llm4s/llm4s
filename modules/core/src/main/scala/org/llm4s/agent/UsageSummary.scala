@@ -56,6 +56,10 @@ case class ModelUsage(
       thinkingTokens = thinkingTokens + other.thinkingTokens,
       totalCost = totalCost + other.totalCost
     )
+
+  def averageCostPerRequest: BigDecimal =
+    if (requestCount == 0) BigDecimal(0)
+    else totalCost / BigDecimal(requestCount)
 }
 
 object ModelUsage {
@@ -145,6 +149,47 @@ case class UsageSummary(
       totalCost = totalCost + other.totalCost,
       byModel = mergedByModel
     )
+  }
+
+  /** Average cost per request (USD). */
+  def averageCostPerRequest: BigDecimal =
+    if (requestCount == 0) BigDecimal(0)
+    else totalCost / BigDecimal(requestCount)
+
+  /** Average input tokens per request. */
+  def averageInputTokensPerRequest: BigDecimal =
+    if (requestCount == 0) BigDecimal(0)
+    else BigDecimal(inputTokens) / BigDecimal(requestCount)
+
+  /** Average output tokens per request. */
+  def averageOutputTokensPerRequest: BigDecimal =
+    if (requestCount == 0) BigDecimal(0)
+    else BigDecimal(outputTokens) / BigDecimal(requestCount)
+
+  /** Cost per 1K total tokens (input + output). */
+  def costPer1KTokens: BigDecimal = {
+    val totalTokens = inputTokens + outputTokens
+    if (totalTokens == 0) BigDecimal(0)
+    else (totalCost / BigDecimal(totalTokens)) * BigDecimal(1000)
+  }
+
+  /** Human-readable summary string for logging/CLI usage. */
+  def formattedSummary: String = {
+    val avgCost =
+      averageCostPerRequest.setScale(6, BigDecimal.RoundingMode.HALF_UP)
+    val cost1k =
+      costPer1KTokens.setScale(6, BigDecimal.RoundingMode.HALF_UP)
+    val totalCostFmt =
+      totalCost.setScale(6, BigDecimal.RoundingMode.HALF_UP)
+
+    s"""Requests: $requestCount
+     |Input tokens: $inputTokens
+     |Output tokens: $outputTokens
+     |Thinking tokens: $thinkingTokens
+     |Total cost (USD): $$${totalCostFmt}
+     |Average cost/request: $$${avgCost}
+     |Cost per 1K tokens: $$${cost1k}
+     |""".stripMargin
   }
 }
 

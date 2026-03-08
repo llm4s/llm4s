@@ -1,13 +1,12 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.serialization.OpenRouterToolCallDeserializer
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, ConfigurationError, RateLimitError, ServiceError }
 import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
@@ -15,7 +14,6 @@ import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.time.Duration
 import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 /**
@@ -59,138 +57,121 @@ import scala.util.Try
 class OpenRouterClient(
   config: OpenAIConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-) extends LLMClient
-    with MetricsRecording {
-  private val httpClient            = HttpClient.newHttpClient()
-  private val closed: AtomicBoolean = new AtomicBoolean(false)
+) extends BaseLifecycleLLMClient {
+  private val httpClient = HttpClient.newHttpClient()
+
+  protected def clientDescription: String = s"OpenRouter client for model ${config.model}"
+  protected def providerName: String      = "openrouter"
+  protected def modelName: String         = config.model
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics(
-    provider = "openrouter",
-    model = config.model,
-    operation = validateNotClosed.flatMap { _ =>
-      // Convert conversation to OpenRouter format
-      val requestBody = createRequestBody(conversation, options)
+  ): Result[Completion] = completeWithMetrics {
+    // Convert conversation to OpenRouter format
+    val requestBody = createRequestBody(conversation, options)
 
-      // Make API call safely (no try/catch)
-      val attempt =
-        Try {
-          val request = HttpRequest
-            .newBuilder()
-            .uri(URI.create(s"${config.baseUrl}/chat/completions"))
-            .header("Content-Type", "application/json")
-            .header("Authorization", s"Bearer ${config.apiKey}")
-            .header("HTTP-Referer", "https://github.com/llm4s/llm4s") // Required by OpenRouter
-            .header("X-Title", "LLM4S")                               // Required by OpenRouter
-            .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
-            .build()
-
-          httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-        }.toEither.left
-          .map(_.toLLMError)
-
-      attempt.flatMap { response =>
-        // Handle response status
-        response.statusCode() match {
-          case 200 =>
-            val responseJson = ujson.read(response.body())
-            Right(parseCompletion(responseJson))
-          case 401    => Left(AuthenticationError("openrouter", "Invalid API key"))
-          case 429    => Left(RateLimitError("openrouter"))
-          case status => Left(ServiceError(status, "openrouter", s"OpenRouter API error: ${response.body()}"))
-        }
-      }
-    },
-    extractUsage = (c: Completion) => c.usage,
-    extractCost = (c: Completion) => c.estimatedCost
-  )
-
-  override def streamComplete(
-    conversation: Conversation,
-    options: CompletionOptions = CompletionOptions(),
-    onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics(
-    provider = "openrouter",
-    model = config.model,
-    operation = validateNotClosed.flatMap { _ =>
-      val requestBody = createRequestBody(conversation, options)
-      requestBody("stream") = true
-
-      val accumulator = StreamingAccumulator.create()
-
-      // Send the HTTP request, converting transport exceptions to Left
-      val responseOrError = Try {
+    // Make API call safely (no try/catch)
+    val attempt =
+      Try {
         val request = HttpRequest
           .newBuilder()
           .uri(URI.create(s"${config.baseUrl}/chat/completions"))
           .header("Content-Type", "application/json")
           .header("Authorization", s"Bearer ${config.apiKey}")
-          .header("HTTP-Referer", "https://github.com/llm4s/llm4s")
-          .header("X-Title", "LLM4S")
-          .timeout(Duration.ofMinutes(5))
+          .header("HTTP-Referer", "https://github.com/llm4s/llm4s") // Required by OpenRouter
+          .header("X-Title", "LLM4S")                               // Required by OpenRouter
           .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
           .build()
 
-        httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
-      }.toEither.left.map(_.toLLMError)
+        httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+      }.toEither.left
+        .map(_.toLLMError)
 
-      // Check HTTP status, returning typed errors for known failure codes
-      val streamOrError = responseOrError.flatMap { response =>
-        if (response.statusCode() == 200) {
-          Right(response)
-        } else {
-          val errorBody = Try(new String(response.body().readAllBytes(), StandardCharsets.UTF_8))
-            .getOrElse("<error body unreadable>")
-          response.statusCode() match {
-            case 401    => Left(AuthenticationError("openrouter", "Invalid API key"))
-            case 429    => Left(RateLimitError("openrouter"))
-            case status => Left(ServiceError(status, "openrouter", s"OpenRouter API error: $errorBody"))
-          }
-        }
+    attempt.flatMap { response =>
+      if (response.statusCode() >= 200 && response.statusCode() < 300) {
+        val responseJson = ujson.read(response.body())
+        Right(parseCompletion(responseJson))
+      } else {
+        HttpErrorMapper.mapHttpError(response.statusCode(), response.body(), providerName)
       }
+    }
+  }
 
-      // Process the SSE stream, converting any I/O exceptions to Left
-      val attempt = streamOrError.flatMap { response =>
-        Try {
-          val sseParser = SSEParser.createStreamingParser()
-          val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
-          try {
-            var line: String = null
-            while ({ line = reader.readLine(); line != null }) {
-              sseParser.addChunk(line + "\n")
-              while (sseParser.hasEvents)
-                sseParser.nextEvent().foreach { event =>
-                  event.data.foreach { data =>
-                    if (data != "[DONE]") {
-                      val json   = ujson.read(data)
-                      val chunks = parseStreamingChunks(json)
-                      chunks.foreach { c =>
-                        accumulator.addChunk(c)
-                        onChunk(c)
-                      }
+  override def streamComplete(
+    conversation: Conversation,
+    options: CompletionOptions = CompletionOptions(),
+    onChunk: StreamedChunk => Unit
+  ): Result[Completion] = completeWithMetrics {
+    val requestBody = createRequestBody(conversation, options)
+    requestBody("stream") = true
+
+    val accumulator = StreamingAccumulator.create()
+
+    // Send the HTTP request, converting transport exceptions to Left
+    val responseOrError = Try {
+      val request = HttpRequest
+        .newBuilder()
+        .uri(URI.create(s"${config.baseUrl}/chat/completions"))
+        .header("Content-Type", "application/json")
+        .header("Authorization", s"Bearer ${config.apiKey}")
+        .header("HTTP-Referer", "https://github.com/llm4s/llm4s")
+        .header("X-Title", "LLM4S")
+        .timeout(Duration.ofMinutes(5))
+        .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
+        .build()
+
+      httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
+    }.toEither.left.map(_.toLLMError)
+
+    // Check HTTP status, returning typed errors for known failure codes
+    val streamOrError = responseOrError.flatMap { response =>
+      if (response.statusCode() == 200) {
+        Right(response)
+      } else {
+        val errorBody = Try(new String(response.body().readAllBytes(), StandardCharsets.UTF_8))
+          .getOrElse("<error body unreadable>")
+        HttpErrorMapper.mapHttpError(response.statusCode(), errorBody, providerName)
+      }
+    }
+
+    // Process the SSE stream, converting any I/O exceptions to Left
+    val attempt = streamOrError.flatMap { response =>
+      Try {
+        val sseParser = SSEParser.createStreamingParser()
+        val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
+        try {
+          var line: String = null
+          while ({ line = reader.readLine(); line != null }) {
+            sseParser.addChunk(line + "\n")
+            while (sseParser.hasEvents)
+              sseParser.nextEvent().foreach { event =>
+                event.data.foreach { data =>
+                  if (data != "[DONE]") {
+                    val json   = ujson.read(data)
+                    val chunks = parseStreamingChunks(json)
+                    chunks.foreach { c =>
+                      accumulator.addChunk(c)
+                      onChunk(c)
                     }
                   }
                 }
-            }
-          } finally {
-            Try(reader.close())
-            Try(response.body().close())
+              }
           }
-        }.toEither.left.map(_.toLLMError)
-      }
-
-      attempt.flatMap(_ =>
-        accumulator.toCompletion.map { c =>
-          val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-          c.copy(model = config.model, estimatedCost = cost)
+        } finally {
+          Try(reader.close())
+          Try(response.body().close())
         }
-      )
-    },
-    extractUsage = (c: Completion) => c.usage,
-    extractCost = (c: Completion) => c.estimatedCost
-  )
+      }.toEither.left.map(_.toLLMError)
+    }
+
+    attempt.flatMap(_ =>
+      accumulator.toCompletion.map { c =>
+        val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+        c.copy(model = config.model, estimatedCost = cost)
+      }
+    )
+  }
 
   private def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
     val choices = json("choices").arr
@@ -424,19 +405,10 @@ class OpenRouterClient(
 
   override def getReserveCompletion(): Int = config.reserveCompletion
 
-  override def close(): Unit =
-    if (closed.compareAndSet(false, true)) {
-      (httpClient: Any) match {
-        case c: AutoCloseable => c.close()
-        case _                => ()
-      }
-    }
-
-  private def validateNotClosed: Result[Unit] =
-    if (closed.get()) {
-      Left(ConfigurationError(s"OpenRouter client for model ${config.model} is already closed"))
-    } else {
-      Right(())
+  override protected def releaseResources(): Unit =
+    (httpClient: Any) match {
+      case c: AutoCloseable => c.close()
+      case _                => ()
     }
 }
 
