@@ -32,7 +32,9 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "not add cost when cost is None" in {
-    val s1 = UsageSummary().add(
+    val s0 = UsageSummary()
+
+    val s1 = s0.add(
       model = "openai/gpt-4o",
       usage = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15),
       cost = None
@@ -43,14 +45,11 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "accumulate thinking tokens" in {
-    val s1 = UsageSummary().add(
+    val s0 = UsageSummary()
+
+    val s1 = s0.add(
       model = "anthropic/claude",
-      usage = TokenUsage(
-        promptTokens = 10,
-        completionTokens = 5,
-        totalTokens = 23,
-        thinkingTokens = Some(8)
-      ),
+      usage = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 23, thinkingTokens = Some(8)),
       cost = Some(0.02)
     )
 
@@ -59,11 +58,12 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
   }
 
   "UsageSummary.merge" should "sum totals and merge byModel" in {
-    val left = UsageSummary().add(
-      model = "openai/gpt-4o",
-      usage = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15),
-      cost = Some(0.01)
-    )
+    val left = UsageSummary()
+      .add(
+        model = "openai/gpt-4o",
+        usage = TokenUsage(promptTokens = 10, completionTokens = 5, totalTokens = 15),
+        cost = Some(0.01)
+      )
 
     val right = UsageSummary()
       .add(
@@ -84,10 +84,7 @@ class UsageSummarySpec extends AnyFlatSpec with Matchers {
     merged.outputTokens shouldBe 14L
     merged.totalCost shouldBe BigDecimal("0.015")
 
-    merged.byModel.keySet shouldBe Set(
-      "openai/gpt-4o",
-      "gemini/gemini-2.0-flash"
-    )
+    merged.byModel.keySet shouldBe Set("openai/gpt-4o", "gemini/gemini-2.0-flash")
 
     val openAi = merged.byModel("openai/gpt-4o")
     openAi.requestCount shouldBe 2L
