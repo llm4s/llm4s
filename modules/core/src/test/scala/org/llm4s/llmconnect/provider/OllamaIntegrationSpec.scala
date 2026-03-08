@@ -43,12 +43,20 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
       connection.setRequestMethod("GET")
       val code = connection.getResponseCode
       if (code == 200) {
-        val body = scala.io.Source.fromInputStream(connection.getInputStream).mkString
-        body.contains(testModel)
+        val source = scala.io.Source.fromInputStream(connection.getInputStream)
+        try source.mkString.contains(testModel)
+        finally source.close()
       } else false
     }.getOrElse(false)
 
   private def conversation(msg: String): Conversation = Conversation(Seq(UserMessage(msg)))
+
+  /** Runs a test block with a fresh OllamaClient, closing it afterwards. */
+  private def withClient[T](f: OllamaClient => T): T = {
+    val client = new OllamaClient(config)
+    try f(client)
+    finally client.close()
+  }
 
   // ==========================================================================
   // Basic round-trip
@@ -57,12 +65,13 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
   "OllamaClient" should "complete a basic request" taggedAs OllamaRequired in {
     assume(ollamaAvailable, s"Ollama not available with model $testModel")
 
-    val client = new OllamaClient(config)
-    val result = client.complete(conversation("Say hi in one word"), CompletionOptions())
+    withClient { client =>
+      val result = client.complete(conversation("Say hi in one word"), CompletionOptions())
 
-    result.isRight shouldBe true
-    val completion = result.toOption.get
-    completion.content should not be empty
+      result.isRight shouldBe true
+      val completion = result.toOption.get
+      completion.content should not be empty
+    }
   }
 
   // ==========================================================================
@@ -72,18 +81,19 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
   it should "stream a response with chunks" taggedAs OllamaRequired in {
     assume(ollamaAvailable, s"Ollama not available with model $testModel")
 
-    val client = new OllamaClient(config)
-    val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
-    val result = client.streamComplete(
-      conversation("Say hello in one word"),
-      CompletionOptions(),
-      c => chunks += c
-    )
+    withClient { client =>
+      val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
+      val result = client.streamComplete(
+        conversation("Say hello in one word"),
+        CompletionOptions(),
+        c => chunks += c
+      )
 
-    result.isRight shouldBe true
-    val completion = result.toOption.get
-    completion.content should not be empty
-    chunks should not be empty
+      result.isRight shouldBe true
+      val completion = result.toOption.get
+      completion.content should not be empty
+      chunks should not be empty
+    }
   }
 
   // ==========================================================================
@@ -93,17 +103,18 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
   it should "handle a multi-turn conversation" taggedAs OllamaRequired in {
     assume(ollamaAvailable, s"Ollama not available with model $testModel")
 
-    val client = new OllamaClient(config)
-    val multiTurnConv = Conversation(
-      Seq(
-        SystemMessage("You are a helpful assistant. Be very brief."),
-        UserMessage("What is 2+2?")
+    withClient { client =>
+      val multiTurnConv = Conversation(
+        Seq(
+          SystemMessage("You are a helpful assistant. Be very brief."),
+          UserMessage("What is 2+2?")
+        )
       )
-    )
-    val result = client.complete(multiTurnConv, CompletionOptions())
+      val result = client.complete(multiTurnConv, CompletionOptions())
 
-    result.isRight shouldBe true
-    result.toOption.get.content should not be empty
+      result.isRight shouldBe true
+      result.toOption.get.content should not be empty
+    }
   }
 
   // ==========================================================================
@@ -113,14 +124,15 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
   it should "report token usage" taggedAs OllamaRequired in {
     assume(ollamaAvailable, s"Ollama not available with model $testModel")
 
-    val client = new OllamaClient(config)
-    val result = client.complete(conversation("Say yes"), CompletionOptions())
+    withClient { client =>
+      val result = client.complete(conversation("Say yes"), CompletionOptions())
 
-    result.isRight shouldBe true
-    val completion = result.toOption.get
-    completion.usage shouldBe defined
-    completion.usage.get.promptTokens should be > 0
-    completion.usage.get.completionTokens should be > 0
+      result.isRight shouldBe true
+      val completion = result.toOption.get
+      completion.usage shouldBe defined
+      completion.usage.get.promptTokens should be > 0
+      completion.usage.get.completionTokens should be > 0
+    }
   }
 
   // ==========================================================================
