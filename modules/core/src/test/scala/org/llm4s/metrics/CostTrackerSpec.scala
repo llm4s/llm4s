@@ -127,6 +127,25 @@ class CostTrackerSpec extends AnyFlatSpec with Matchers {
     (snap.byModel should contain).key("gpt-4o")
   }
 
+  it should "produce a snapshot where totals match byModel breakdown" in {
+    val tracker = mkTracker()
+
+    tracker.observeRequest("openai", "gpt-4o", Outcome.Success, 1.second)
+    tracker.addTokens("openai", "gpt-4o", 100L, 50L)
+    tracker.recordCost("openai", "gpt-4o", 0.01)
+
+    tracker.observeRequest("anthropic", "claude-sonnet", Outcome.Success, 2.seconds)
+    tracker.addTokens("anthropic", "claude-sonnet", 200L, 80L)
+    tracker.recordCost("anthropic", "claude-sonnet", 0.02)
+
+    val snap = tracker.snapshot
+
+    snap.requestCount shouldBe snap.byModel.values.map(_.requestCount).sum
+    snap.inputTokens shouldBe snap.byModel.values.map(_.inputTokens).sum
+    snap.outputTokens shouldBe snap.byModel.values.map(_.outputTokens).sum
+    snap.totalCost shouldBe snap.byModel.values.map(_.totalCost).sum
+  }
+
   "MetricsCollector.compose" should "fan out to all collectors" in {
     val tracker1 = mkTracker()
     val tracker2 = mkTracker()
@@ -140,5 +159,28 @@ class CostTrackerSpec extends AnyFlatSpec with Matchers {
     tracker2.totalRequests shouldBe 1L
     tracker1.totalTokens shouldBe 150L
     tracker2.totalCost shouldBe BigDecimal.decimal(0.01)
+  }
+
+  it should "continue to remaining collectors when one throws" in {
+    val failing = new MetricsCollector {
+      override def observeRequest(p: String, m: String, o: Outcome, d: FiniteDuration): Unit =
+        throw new RuntimeException("boom")
+      override def addTokens(p: String, m: String, i: Long, o: Long): Unit =
+        throw new RuntimeException("boom")
+      override def recordCost(p: String, m: String, c: Double): Unit =
+        throw new RuntimeException("boom")
+    }
+    val tracker  = mkTracker()
+    val composed = MetricsCollector.compose(failing, tracker)
+
+    noException should be thrownBy {
+      composed.observeRequest("openai", "gpt-4o", Outcome.Success, 1.second)
+      composed.addTokens("openai", "gpt-4o", 100L, 50L)
+      composed.recordCost("openai", "gpt-4o", 0.01)
+    }
+
+    tracker.totalRequests shouldBe 1L
+    tracker.totalTokens shouldBe 150L
+    tracker.totalCost shouldBe BigDecimal.decimal(0.01)
   }
 }

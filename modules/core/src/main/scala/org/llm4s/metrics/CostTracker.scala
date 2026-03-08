@@ -111,27 +111,41 @@ final class CostTracker private () extends MetricsCollector {
 
   /** Returns a [[UsageSummary]] for interop with agent-level tracking. */
   def snapshot: UsageSummary = {
-    val models = byModel
+    val current = state.get()
+    val models = current.map { case (model, acc) =>
+      model -> ModelUsage(
+        requestCount = acc.requestCount,
+        inputTokens = acc.inputTokens,
+        outputTokens = acc.outputTokens,
+        thinkingTokens = 0L,
+        totalCost = acc.totalCost
+      )
+    }
     UsageSummary(
-      requestCount = totalRequests,
-      inputTokens = totalInputTokens,
-      outputTokens = totalOutputTokens,
+      requestCount = current.values.foldLeft(0L)(_ + _.requestCount),
+      inputTokens = current.values.foldLeft(0L)(_ + _.inputTokens),
+      outputTokens = current.values.foldLeft(0L)(_ + _.outputTokens),
       thinkingTokens = 0L,
-      totalCost = totalCost,
+      totalCost = current.values.foldLeft(BigDecimal(0))(_ + _.totalCost),
       byModel = models
     )
   }
 
   /** Human-readable summary string. */
   def summary: String = {
-    val cost   = totalCost.setScale(6, BigDecimal.RoundingMode.HALF_UP)
-    val models = state.get()
-    val modelLines = models.toSeq.sortBy(_._1).map { case (model, acc) =>
+    val current  = state.get()
+    val reqCount = current.values.foldLeft(0L)(_ + _.requestCount)
+    val tokenCount = current.values.foldLeft(0L)(_ + _.inputTokens) +
+      current.values.foldLeft(0L)(_ + _.outputTokens)
+    val cost = current.values
+      .foldLeft(BigDecimal(0))(_ + _.totalCost)
+      .setScale(6, BigDecimal.RoundingMode.HALF_UP)
+    val modelLines = current.toSeq.sortBy(_._1).map { case (model, acc) =>
       val mc = acc.totalCost.setScale(6, BigDecimal.RoundingMode.HALF_UP)
       s"  $model: ${acc.requestCount} requests, ${acc.inputTokens + acc.outputTokens} tokens, $$$mc"
     }
     val header =
-      s"CostTracker: $totalRequests requests, $totalTokens tokens, $$$cost"
+      s"CostTracker: $reqCount requests, $tokenCount tokens, $$$cost"
     if (modelLines.isEmpty) header
     else (header +: modelLines).mkString("\n")
   }
