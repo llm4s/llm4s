@@ -132,13 +132,12 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
       scored <- store.search("Scala JVM", topK = 10)
     } yield scored
 
-    result.isRight shouldBe true
-    val scored = result.toOption.get
+    val scored = result.getOrElse(fail("Expected Right"))
     scored.size shouldBe 3
 
     // "Scala also runs on the JVM" should score highest (matches both terms)
-    scored.head.memory.content should include("Scala")
-    scored.head.memory.content should include("JVM")
+    scored(0).memory.content should include("Scala")
+    scored(0).memory.content should include("JVM")
   }
 
   it should "return empty results for blank search queries" in {
@@ -163,8 +162,7 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
       scored <- store.search("fruit", Array[Float](1f, 0f, 0f), topK = 10, MemoryFilter.All)
     } yield scored
 
-    result.isRight shouldBe true
-    val scored = result.toOption.get
+    val scored = result.getOrElse(fail("Expected Right"))
     scored.map(_.memory.content) shouldBe Seq("Apple", "Banana", "Orange")
     scored(0).score shouldBe 1.0 +- 1e-6
     scored(1).score shouldBe 0.5 +- 1e-6
@@ -180,10 +178,9 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
       scored <- store.search("Scala", Array[Float](1f, 1f, 1f), topK = 10, MemoryFilter.All)
     } yield scored
 
-    result.isRight shouldBe true
-    val scored = result.toOption.get
+    val scored = result.getOrElse(fail("Expected Right"))
     scored.size shouldBe 1
-    scored.head.memory.content should include("Scala")
+    scored(0).memory.content should include("Scala")
   }
 
   it should "fallback to keyword search if vectors contain non-finite values in direct search" in {
@@ -195,16 +192,14 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
       scored <- store.search("keyword", Array[Float](Float.NaN, 0f), topK = 10, MemoryFilter.All)
     } yield scored
 
-    result1.isRight shouldBe true
-    result1.toOption.get.map(_.memory.content) shouldBe Seq("Normal keyword")
+    result1.getOrElse(fail("Expected Right")).map(_.memory.content) shouldBe Seq("Normal keyword")
 
     val result2 = for {
       store  <- InMemoryStore.withMemories(Seq(nanMem))
       scored <- store.search("text", Array[Float](1f, 0f), topK = 10, MemoryFilter.All)
     } yield scored
 
-    result2.isRight shouldBe true
-    result2.toOption.get.map(_.memory.content) shouldBe Seq("NaN text")
+    result2.getOrElse(fail("Expected Right")).map(_.memory.content) shouldBe Seq("NaN text")
   }
 
   it should "return empty results when direct search called with empty embedding array" in {
@@ -228,11 +223,10 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
       scored <- store.search("search", Array[Float](1f, 0f, 0f), topK = 10, MemoryFilter.All)
     } yield scored
 
-    result.isRight shouldBe true
-    val scored = result.toOption.get
+    val scored = result.getOrElse(fail("Expected Right"))
     scored.size shouldBe 1
-    scored.head.memory.content shouldBe "Embedded Apple"
-    scored.head.score shouldBe 1.0 +- 1e-6
+    scored(0).memory.content shouldBe "Embedded Apple"
+    scored(0).score shouldBe 1.0 +- 1e-6
   }
 
   it should "use embedding similarity search when embeddings and embedding service are available" in {
@@ -260,13 +254,12 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
       scored <- s3.search("query", topK = 10)
     } yield scored
 
-    result.isRight shouldBe true
-    val scored = result.toOption.get
+    val scored = result.getOrElse(fail("Expected Right"))
 
     // Keyword search would return empty here ("query" doesn't appear in any memory),
     // so non-empty results confirm the embedding path is being used.
     scored.map(_.memory.content) shouldBe Seq("A", "B", "C")
-    scored.head.score shouldBe 1.0 +- 1e-6
+    scored(0).score shouldBe 1.0 +- 1e-6
     scored(1).score shouldBe 0.5 +- 1e-6
     scored(2).score shouldBe 0.0 +- 1e-6
   }
@@ -403,9 +396,11 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
       updated <- store.update(original.id, _.copy(id = newId))
     } yield updated
 
-    result.isLeft shouldBe true
-    result.swap.toOption.get shouldBe a[ValidationError]
-    result.swap.toOption.get.formatted should include("ID")
+    result match {
+      case Left(err: ValidationError) => err.formatted should include("ID")
+      case Left(other)                => fail(s"Expected ValidationError but got ${other.getClass.getSimpleName}")
+      case Right(_)                   => fail("Expected Left but got Right")
+    }
   }
 
   it should "handle NaN embeddings without throwing" in {
@@ -426,8 +421,7 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
     } yield scored
 
     // Should not throw, should return only valid memories
-    result.isRight shouldBe true
-    val scored = result.toOption.get
+    val scored = result.getOrElse(fail("Expected Right"))
     // The NaN memory should be skipped, only normal memory returned
     scored.map(_.memory.content) shouldBe Seq("Normal")
   }
@@ -448,8 +442,7 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
       scored <- s2.search("query", topK = 10)
     } yield scored
 
-    result.isRight shouldBe true
-    val scored = result.toOption.get
+    val scored = result.getOrElse(fail("Expected Right"))
     scored.map(_.memory.content) shouldBe Seq("Normal")
   }
 
@@ -470,10 +463,9 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
     } yield scored
 
     // Should succeed with keyword search fallback
-    result.isRight shouldBe true
-    val scored = result.toOption.get
+    val scored = result.getOrElse(fail("Expected Right"))
     scored.nonEmpty shouldBe true
     // First result should contain "Scala" (keyword match)
-    scored.head.memory.content should include("Scala")
+    scored(0).memory.content should include("Scala")
   }
 }

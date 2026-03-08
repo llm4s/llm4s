@@ -85,7 +85,7 @@ final case class InMemoryStore private (
     topK: Int,
     filter: MemoryFilter
   ): Result[Seq[ScoredMemory]] = {
-    if (queryEmbedding.isEmpty || query.trim.isEmpty) {
+    if (queryEmbedding.isEmpty) {
       return Right(Seq.empty)
     }
 
@@ -93,11 +93,12 @@ final case class InMemoryStore private (
     val embeddedMemories = filtered.filter(_.isEmbedded)
 
     if (embeddedMemories.nonEmpty) {
+      val queryNonFinite = containsNonFinite(queryEmbedding)
       val candidates = embeddedMemories.flatMap { memory =>
         memory.embedding.flatMap { vector =>
           if (vector.length != queryEmbedding.length) {
             None
-          } else if (containsNonFinite(vector) || containsNonFinite(queryEmbedding)) {
+          } else if (queryNonFinite || containsNonFinite(vector)) {
             None
           } else {
             val similarity           = VectorOps.cosineSimilarity(queryEmbedding, vector)
