@@ -7,7 +7,7 @@ import scala.concurrent.duration.FiniteDuration
 
 /**
  * Thread-safe in-memory implementation of EmbeddingCache with LRU eviction.
- *  @param maxSize The maximum number of embeddings to store before evicting the oldest.
+ * @param maxSize The maximum number of embeddings to store before evicting the oldest.
  * @param ttl     Optional Time-To-Live for cache entries. Expired entries are lazily evicted on access.
  * @tparam Embedding The embedding type (usually Seq[Double]).
  */

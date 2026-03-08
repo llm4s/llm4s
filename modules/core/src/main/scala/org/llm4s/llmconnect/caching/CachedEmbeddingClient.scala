@@ -75,7 +75,6 @@ class CachedEmbeddingClient(
           }
 
           // Build an index → vector map for O(1) lookup when assembling the result.
-
           val freshByIndex: Map[Int, Seq[Double]] =
             missesWithIndex.flatMap { case (idx, text) =>
               freshByText.get(text).map(idx -> _)
