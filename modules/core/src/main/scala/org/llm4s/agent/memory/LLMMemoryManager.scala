@@ -84,7 +84,12 @@ final case class LLMMemoryManager(
    *
    * Only groups with minCount+ memories are returned.
    * Uses client.getContextBudget() to dynamically limit the group size based on token count
-   * to prevent context window overflow during summarization.
+   * to prevent context window overflow during summarization. The token budget is also
+   * capped by config.maxMemoriesPerGroup as a secondary limit.
+   *
+   * Note: minCount is applied after budget capping. A group whose members all exceed the
+   * token budget individually will be skipped (the first memory is always included to avoid
+   * empty groups, but subsequent oversized memories are dropped).
    *
    * @param memories Memories to group
    * @param minCount Minimum memories required per group for consolidation
@@ -93,40 +98,47 @@ final case class LLMMemoryManager(
     memories: Seq[Memory],
     minCount: Int
   ): Seq[Seq[Memory]] = {
-    // Determine token budget (e.g., leaving 20% headroom for instructions/formatting overhead)
-    val tokenBudget = (client.getContextBudget() * 0.8).toInt
+    // getContextBudget() already applies HeadroomPercent.Standard (~8% headroom)
+    val tokenBudget = client.getContextBudget()
+    val maxPerGroup = config.consolidationConfig.maxMemoriesPerGroup
 
     /**
-     * Helper to accumulator memories until the token budget is reached.
-     * Uses a rough heuristic of ~4 characters per token since a strict tokenizer isn't guaranteed.
+     * Take memories until the token budget is exhausted, using ~4 chars/token heuristic.
+     * Always includes the first memory to avoid empty groups for oversized items.
+     * Also caps at maxMemoriesPerGroup as a secondary limit.
      */
     def takeUntilBudget(mems: Seq[Memory]): Seq[Memory] = {
-      var currentTokens = 0
-      mems.takeWhile { m =>
-        val tokens = m.content.length / 4
-        if (currentTokens + tokens <= tokenBudget) {
-          currentTokens += tokens
-          true
-        } else false
-      }
+      val capped = mems.take(maxPerGroup)
+      if (capped.isEmpty) return Seq.empty
+      // Always include the first memory, then accumulate until budget is reached
+      val first           = capped.head
+      val firstTokens     = first.content.length / 4
+      val remainingBudget = tokenBudget - firstTokens
+      val rest = capped.tail
+        .scanLeft(0)((acc, m) => acc + m.content.length / 4)
+        .drop(1)
+        .zip(capped.tail)
+        .takeWhile(_._1 <= remainingBudget)
+        .map(_._2)
+      first +: rest
     }
 
     // Group by conversation (only Conversation type, sorted by timestamp for stable summaries)
     val byConversation = memories
       .filter(_.memoryType == MemoryType.Conversation)
       .filter(_.conversationId.isDefined)
-      .groupBy(_.conversationId.get)
+      .groupBy(_.metadata.getOrElse("conversation_id", ""))
+      .filter(_._1.nonEmpty)
       .values
-      .map(group => takeUntilBudget(group.sortBy(_.timestamp)) // Sort and apply token budget cap
-      )
-      .filter(_.length >= minCount) // Apply minCount per group *after* capping
+      .map(group => takeUntilBudget(group.toSeq.sortBy(_.timestamp)))
+      .filter(_.length >= minCount)
       .toSeq
 
     // Group by entity
     val byEntity = memories
       .filter(_.memoryType == MemoryType.Entity)
       .groupBy(_.getMetadata("entity_id"))
-      .collect { case (Some(_), facts) => takeUntilBudget(facts) }
+      .collect { case (Some(_), facts) => takeUntilBudget(facts.toSeq) }
       .filter(_.length >= minCount)
       .toSeq
 
@@ -135,7 +147,7 @@ final case class LLMMemoryManager(
       .filter(_.memoryType == MemoryType.UserFact)
       .groupBy(_.getMetadata("user_id"))
       .values
-      .map(takeUntilBudget)
+      .map(group => takeUntilBudget(group.toSeq))
       .filter(_.length >= minCount)
       .toSeq
 
@@ -143,7 +155,7 @@ final case class LLMMemoryManager(
     val byKnowledge = memories
       .filter(_.memoryType == MemoryType.Knowledge)
       .groupBy(_.source)
-      .collect { case (Some(_), entries) => takeUntilBudget(entries) }
+      .collect { case (Some(_), entries) => takeUntilBudget(entries.toSeq) }
       .filter(_.length >= minCount)
       .toSeq
 
@@ -152,7 +164,7 @@ final case class LLMMemoryManager(
       .filter(_.memoryType == MemoryType.Task)
       .groupBy(_.getMetadata("success").getOrElse("unknown"))
       .values
-      .map(takeUntilBudget)
+      .map(group => takeUntilBudget(group.toSeq))
       .filter(_.length >= minCount)
       .toSeq
 
