@@ -14,6 +14,14 @@ import scala.concurrent.duration.{ Duration, DurationInt, DurationLong }
  */
 object ErrorRecovery {
 
+  /** Binary-compatible overload — delegates to the full version with Thread.sleep. */
+  def recoverWithBackoff[A](
+    operation: () => Result[A],
+    maxAttempts: Int,
+    baseDelay: Duration
+  ): Result[A] =
+    recoverWithBackoff(operation, maxAttempts, baseDelay, Thread.sleep)
+
   /** Intelligent error recovery with exponential backoff */
   def recoverWithBackoff[A](
     operation: () => Result[A],

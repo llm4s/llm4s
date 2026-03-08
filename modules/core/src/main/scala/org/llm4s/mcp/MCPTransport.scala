@@ -621,6 +621,10 @@ class StdioTransportImpl(
   override val name: String,
   startupTimeoutMs: Int = 10000
 ) extends MCPTransportImpl {
+
+  /** Binary-compatible auxiliary constructor matching the pre-timeout 2-param signature. */
+  def this(command: Seq[String], name: String) = this(command, name, 10000)
+
   private val logger                                       = LoggerFactory.getLogger(getClass)
   private var process: Option[Process]                     = None
   private val requestId                                    = new AtomicLong(0)

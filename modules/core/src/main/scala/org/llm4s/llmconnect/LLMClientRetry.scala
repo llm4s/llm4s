@@ -25,12 +25,26 @@ object LLMClientRetry {
 
   /**
    * Calls `client.complete` with retries on recoverable errors.
+   * Binary-compatible overload that delegates to the full version with Thread.sleep.
+   */
+  def completeWithRetry(
+    client: LLMClient,
+    conversation: Conversation,
+    options: CompletionOptions,
+    maxAttempts: Int,
+    baseDelay: FiniteDuration
+  ): Result[Completion] =
+    completeWithRetry(client, conversation, options, maxAttempts, baseDelay, Thread.sleep)
+
+  /**
+   * Calls `client.complete` with retries on recoverable errors.
    *
    * @param client       LLM client
    * @param conversation conversation to complete
    * @param options      completion options (default: CompletionOptions())
    * @param maxAttempts  maximum attempts including the first (default: 3); must be positive
    * @param baseDelay    base delay for backoff when provider retry-delay hints are absent (default: 1 second); must be positive
+   * @param sleepFn      function used to pause between retries (default: Thread.sleep); override for testing
    * @return Right(Completion) on success, Left(error) when retries exhausted, non-recoverable error, invalid input, or interrupted
    */
   def completeWithRetry(
@@ -64,6 +78,19 @@ object LLMClientRetry {
 
   /**
    * Calls `client.streamComplete` with retries only when failure occurs before any chunk is emitted.
+   * Binary-compatible overload that delegates to the full version with Thread.sleep.
+   */
+  def streamCompleteWithRetry(
+    client: LLMClient,
+    conversation: Conversation,
+    options: CompletionOptions,
+    maxAttempts: Int,
+    baseDelay: FiniteDuration
+  )(onChunk: StreamedChunk => Unit): Result[Completion] =
+    streamCompleteWithRetry(client, conversation, options, maxAttempts, baseDelay, Thread.sleep)(onChunk)
+
+  /**
+   * Calls `client.streamComplete` with retries only when failure occurs before any chunk is emitted.
    * Once streaming has started (at least one chunk delivered), any error is returned immediately without retry.
    *
    * @param client       LLM client
@@ -71,6 +98,7 @@ object LLMClientRetry {
    * @param options      completion options (default: CompletionOptions())
    * @param maxAttempts  maximum attempts including the first (default: 3); must be positive
    * @param baseDelay    base delay for backoff when provider retry-delay hints are absent (default: 1 second); must be positive
+   * @param sleepFn      function used to pause between retries (default: Thread.sleep); override for testing
    * @param onChunk      callback for each streamed chunk
    * @return Right(Completion) on success, Left(error) when retries exhausted, non-recoverable error, invalid input, or interrupted
    */

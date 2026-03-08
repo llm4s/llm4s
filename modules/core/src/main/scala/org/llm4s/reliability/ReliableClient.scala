@@ -35,6 +35,15 @@ final class ReliableClient(
   clock: () => Long = () => System.currentTimeMillis()
 ) extends LLMClient {
 
+  /** Binary-compatible auxiliary constructor matching the pre-clock 4-param signature. */
+  def this(
+    underlying: LLMClient,
+    providerName: String,
+    config: ReliabilityConfig,
+    collector: Option[MetricsCollector]
+  ) =
+    this(underlying, providerName, config, collector, () => System.currentTimeMillis())
+
   // Circuit breaker state (thread-safe via atomic references)
   private val circuitState    = new AtomicReference[CircuitState](CircuitState.Closed)
   private val failureCount    = new AtomicInteger(0)

@@ -16,6 +16,10 @@ class InMemoryEmbeddingCache[Embedding](
   ttl: Option[FiniteDuration] = None,
   clock: () => Long = () => System.currentTimeMillis()
 ) extends EmbeddingCache[Embedding] {
+
+  /** Binary-compatible auxiliary constructor matching the pre-clock 2-param signature. */
+  def this(maxSize: Int, ttl: Option[FiniteDuration]) = this(maxSize, ttl, () => System.currentTimeMillis())
+
   private case class CacheEntry(embedding: Embedding, timestamp: Long)
   private val ttlMillis = ttl.map(_.toMillis)
   private val hits      = new AtomicLong(0L)
