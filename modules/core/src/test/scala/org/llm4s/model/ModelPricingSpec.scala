@@ -166,19 +166,29 @@ class ModelPricingSpec extends AnyFlatSpec with Matchers {
     pricing.outputCostPerTokenPriority shouldBe Some(2.0e-5)
   }
 
-  it should "expose audio and image pricing fields" in {
+  it should "expose audio pricing fields" in {
     val pricing = ModelPricing(
       inputCostPerAudioToken = Some(6.25e-6),
-      outputCostPerAudioToken = Some(1.2e-5),
-      inputCostPerImage = Some(1.0e-3),
-      outputCostPerImage = Some(2.0e-3),
-      inputCostPerPixel = Some(1.0e-8),
-      outputCostPerPixel = Some(2.0e-8)
+      outputCostPerAudioToken = Some(1.2e-5)
     )
     pricing.inputCostPerAudioToken shouldBe Some(6.25e-6)
     pricing.outputCostPerAudioToken shouldBe Some(1.2e-5)
+  }
+
+  it should "expose image pricing fields" in {
+    val pricing = ModelPricing(
+      inputCostPerImage = Some(1.0e-3),
+      outputCostPerImage = Some(2.0e-3)
+    )
     pricing.inputCostPerImage shouldBe Some(1.0e-3)
     pricing.outputCostPerImage shouldBe Some(2.0e-3)
+  }
+
+  it should "expose pixel pricing fields" in {
+    val pricing = ModelPricing(
+      inputCostPerPixel = Some(1.0e-8),
+      outputCostPerPixel = Some(2.0e-8)
+    )
     pricing.inputCostPerPixel shouldBe Some(1.0e-8)
     pricing.outputCostPerPixel shouldBe Some(2.0e-8)
   }
@@ -195,5 +205,73 @@ class ModelPricingSpec extends AnyFlatSpec with Matchers {
     )
     pricing.cacheCreationInputTokenCost shouldBe Some(3.75e-6)
     pricing.cacheReadInputTokenCost shouldBe Some(0.3e-6)
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Additional fromJson edge cases
+  // ─────────────────────────────────────────────────────────────
+
+  "ModelPricing.fromJson" should "parse integer values as doubles" in {
+    val json = ujson.Obj(
+      "input_cost_per_token"  -> 0,
+      "output_cost_per_token" -> 1
+    )
+    val pricing = ModelPricing.fromJson(json)
+    pricing.inputCostPerToken shouldBe Some(0.0)
+    pricing.outputCostPerToken shouldBe Some(1.0)
+  }
+
+  it should "ignore unknown fields in JSON without error" in {
+    val json = ujson.Obj(
+      "input_cost_per_token"  -> 2.5e-6,
+      "output_cost_per_token" -> 1.0e-5,
+      "unknown_future_field"  -> 42.0,
+      "another_unknown"       -> "ignored"
+    )
+    val pricing = ModelPricing.fromJson(json)
+    pricing.inputCostPerToken shouldBe Some(2.5e-6)
+    pricing.outputCostPerToken shouldBe Some(1.0e-5)
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // Additional estimateCost edge cases
+  // ─────────────────────────────────────────────────────────────
+
+  "ModelPricing.estimateCost" should "calculate correctly with only input tokens (zero output)" in {
+    val pricing = ModelPricing(
+      inputCostPerToken = Some(2.5e-6),
+      outputCostPerToken = Some(1.0e-5)
+    )
+    pricing.estimateCost(1000, 0) shouldBe Some(0.0025)
+  }
+
+  it should "calculate correctly with only output tokens (zero input)" in {
+    val pricing = ModelPricing(
+      inputCostPerToken = Some(2.5e-6),
+      outputCostPerToken = Some(1.0e-5)
+    )
+    pricing.estimateCost(0, 500) shouldBe Some(0.005)
+  }
+
+  it should "not be affected by presence of cache or specialist pricing fields" in {
+    val pricing = ModelPricing(
+      inputCostPerToken = Some(2.5e-6),
+      outputCostPerToken = Some(1.0e-5),
+      cacheCreationInputTokenCost = Some(3.75e-6),
+      cacheReadInputTokenCost = Some(0.3e-6),
+      outputCostPerReasoningToken = Some(1.5e-5)
+    )
+    // estimateCost only uses input/output base rates
+    pricing.estimateCost(1000, 500) shouldBe Some(0.0075)
+  }
+
+  it should "maintain precision with very small per-token costs" in {
+    val pricing = ModelPricing(
+      inputCostPerToken = Some(1.0e-10),
+      outputCostPerToken = Some(2.0e-10)
+    )
+    val result = pricing.estimateCost(100, 100)
+    result shouldBe defined
+    result.get shouldBe (3.0e-8 +- 1.0e-15)
   }
 }
