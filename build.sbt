@@ -74,6 +74,10 @@ addCommandAlias(
   ";scalafmtAll;cleanTestAll"
 )
 addCommandAlias("compileAll", ";compile")
+addCommandAlias(
+  "testFast",
+  """;set core / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", "org.llm4s.tags.SlowTest"); test"""
+)
 // ---- Three-tier test aliases ----
 // Default `test` runs unit + local HTTP server tests (Tier 1), excluding tagged tests.
 // testOllama: Tier 2 — integration tests against a local Ollama instance (requires `ollama pull qwen2.5:0.5b`)
@@ -129,6 +133,12 @@ lazy val core = (project in file("modules/core"))
     name := "llm4s-core",
     commonSettings,
     Test / fork := true,
+    Test / javaOptions ++= Seq(
+      "-Xmx2g", "-Xms512m",
+      "-XX:+UseG1GC",
+      "-XX:+TieredCompilation",
+      "-XX:TieredStopAtLevel=1"
+    ),
     // Pass API key entries from .env into forked test JVM (for smoke/integration tests).
     // Only forwards *_API_KEY variables to avoid polluting test configuration
     // (e.g. TRACING_MODE would break Llm4sConfigTracingSpec defaults).

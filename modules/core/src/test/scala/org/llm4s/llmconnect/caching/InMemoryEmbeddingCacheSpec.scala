@@ -39,13 +39,17 @@ class InMemoryEmbeddingCacheSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "expire entries after the configured TTL duration" in {
-    val cache = new InMemoryEmbeddingCache[String](maxSize = 10, ttl = Some(100.millis))
+    var fakeTime = 0L
+    val cache    = new InMemoryEmbeddingCache[String](maxSize = 10, ttl = Some(100.millis), clock = () => fakeTime)
 
     cache.put("tempKey", "tempValue")
 
     // Immediate check - should be a hit
     cache.get("tempKey") shouldBe Some("tempValue")
-    Thread.sleep(600)
+
+    // Advance clock past TTL
+    fakeTime += 200
+
     // Check after expiration - should be a miss
     cache.get("tempKey") shouldBe None
 

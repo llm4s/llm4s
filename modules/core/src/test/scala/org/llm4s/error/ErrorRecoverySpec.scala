@@ -22,7 +22,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       Result.success("success")
     }
 
-    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 3, baseDelay = 10.millis)
+    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 3, baseDelay = 10.millis, sleepFn = _ => ())
 
     result shouldBe Right("success")
     callCount shouldBe 1
@@ -39,7 +39,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       }
     }
 
-    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 5, baseDelay = 10.millis)
+    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 5, baseDelay = 10.millis, sleepFn = _ => ())
 
     result shouldBe Right("success after retries")
     callCount shouldBe 3
@@ -52,7 +52,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       Result.failure[String](AuthenticationError("provider", "invalid key"))
     }
 
-    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 5, baseDelay = 10.millis)
+    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 5, baseDelay = 10.millis, sleepFn = _ => ())
 
     result.isLeft shouldBe true
     callCount shouldBe 1
@@ -65,7 +65,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       Result.failure[String](RateLimitError("provider"))
     }
 
-    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 3, baseDelay = 10.millis)
+    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 3, baseDelay = 10.millis, sleepFn = _ => ())
 
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe a[ExecutionError]
@@ -84,24 +84,19 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       }
     }
 
-    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 3, baseDelay = 10.millis)
+    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 3, baseDelay = 10.millis, sleepFn = _ => ())
 
     result shouldBe Right("recovered")
     callCount shouldBe 2
   }
 
   it should "use retry delay from RateLimitError when available" in {
-    var callCount                  = 0
-    var lastCallTime: Option[Long] = None
+    var callCount      = 0
+    var observedDelays = List.empty[Long]
+
+    val capturingSleepFn: Long => Unit = ms => observedDelays = observedDelays :+ ms
 
     val operation = () => {
-      val currentTime = System.currentTimeMillis()
-      lastCallTime.foreach { last =>
-        // Verify delay was applied (with some tolerance for test execution time)
-        (currentTime - last) should be >= 5L
-      }
-      lastCallTime = Some(currentTime)
-
       callCount += 1
       if (callCount < 2) {
         Result.failure[String](RateLimitError("provider", 10L)) // 10ms retry delay
@@ -110,9 +105,12 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       }
     }
 
-    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 3, baseDelay = 10.millis)
+    val result =
+      ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 3, baseDelay = 100.millis, sleepFn = capturingSleepFn)
 
     result shouldBe Right("success")
+    // Should have used the provider's 10ms delay, not the 100ms baseDelay
+    observedDelays shouldBe List(10L)
   }
 
   // ============ CircuitBreaker ============
@@ -288,7 +286,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
       Result.failure[String](error)
     }
 
-    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 5, baseDelay = 10.millis)
+    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 5, baseDelay = 10.millis, sleepFn = _ => ())
 
     result.isLeft shouldBe true
     callCount shouldBe 3 // Stopped on non-recoverable error
@@ -309,7 +307,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
         }
       }
 
-    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 5, baseDelay = 10.millis)
+    val result = ErrorRecovery.recoverWithBackoff(operation, maxAttempts = 5, baseDelay = 10.millis, sleepFn = _ => ())
 
     // The combination should eventually succeed
     result shouldBe Right("success")
@@ -432,17 +430,19 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "allow exactly one probe thread through when transitioning from Open to HalfOpen" in {
+    var fakeTime = 0L
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
-      recoveryTimeout = 60.millis
+      recoveryTimeout = 60.millis,
+      clock = () => fakeTime
     )
 
     // Open the circuit
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
 
-    // Wait for recovery timeout to elapse
-    Thread.sleep(120)
+    // Advance clock past recovery timeout
+    fakeTime += 120
 
     val threadCount   = 10
     val barrier       = new CyclicBarrier(threadCount)
@@ -483,16 +483,19 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
   // ============ HalfOpen Re-open Edge Cases ============
 
   "CircuitBreaker HalfOpen re-open" should "reject calls immediately after a HalfOpen probe fails" in {
+    var fakeTime = 0L
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
-      recoveryTimeout = 50.millis
+      recoveryTimeout = 50.millis,
+      clock = () => fakeTime
     )
 
     // Open the circuit
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
 
-    Thread.sleep(100)
+    // Advance clock past recovery timeout
+    fakeTime += 100
 
     // HalfOpen probe fails → circuit re-opens
     val probeResult = cb.execute(() => Result.failure(ServiceError(500, "p", "re-open")))
@@ -514,31 +517,33 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
 
   it should "require a fresh recovery timeout before probing again after HalfOpen failure" in {
     val recoveryMs = 120L
+    var fakeTime   = 0L
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
-      recoveryTimeout = recoveryMs.millis
+      recoveryTimeout = recoveryMs.millis,
+      clock = () => fakeTime
     )
 
     // Open the circuit
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
 
-    // Wait for the first recovery timeout
-    Thread.sleep(recoveryMs + 60)
+    // Advance past the first recovery timeout
+    fakeTime += recoveryMs + 60
 
     // HalfOpen probe fails → circuit re-opens, starting a new timeout window
     cb.execute(() => Result.failure(ServiceError(500, "p", "re-open")))
 
     // Halfway through the new timeout — should still be Open
-    Thread.sleep(recoveryMs / 2)
+    fakeTime += recoveryMs / 2
     val tooEarly = cb.execute(() => Result.success("too early"))
     tooEarly match {
       case Left(err) => err.message should include("Circuit breaker is open")
       case Right(v)  => fail(s"Expected Left (circuit open), got Right($v)")
     }
 
-    // Wait for the rest plus a margin
-    Thread.sleep(recoveryMs + 60)
+    // Advance past the rest plus a margin
+    fakeTime += recoveryMs + 60
 
     // Now the second recovery window has elapsed — a probe should get through
     var secondProbeRan = false
@@ -552,16 +557,19 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
   }
 
   it should "close the circuit permanently after a successful HalfOpen probe" in {
+    var fakeTime = 0L
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
-      recoveryTimeout = 50.millis
+      recoveryTimeout = 50.millis,
+      clock = () => fakeTime
     )
 
     // Open the circuit
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
 
-    Thread.sleep(100)
+    // Advance clock past recovery timeout
+    fakeTime += 100
 
     // Successful HalfOpen probe → circuit Closes
     cb.execute(() => Result.success("probe succeeds"))
@@ -577,16 +585,18 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
 
   "CircuitBreaker timeout boundary" should "remain Open before the recovery timeout has elapsed" in {
     val recoveryMs = 200L
+    var fakeTime   = 0L
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
-      recoveryTimeout = recoveryMs.millis
+      recoveryTimeout = recoveryMs.millis,
+      clock = () => fakeTime
     )
 
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
 
-    // Sleep for clearly less than the timeout
-    Thread.sleep(recoveryMs / 2)
+    // Advance clock to less than the timeout
+    fakeTime += recoveryMs / 2
 
     val result = cb.execute(() => Result.success("too early"))
     result match {
@@ -597,16 +607,18 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
 
   it should "allow a probe after the recovery timeout has elapsed" in {
     val recoveryMs = 100L
+    var fakeTime   = 0L
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
-      recoveryTimeout = recoveryMs.millis
+      recoveryTimeout = recoveryMs.millis,
+      clock = () => fakeTime
     )
 
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
 
-    // Sleep well past the timeout
-    Thread.sleep(recoveryMs + 100)
+    // Advance clock well past the timeout
+    fakeTime += recoveryMs + 100
 
     var probeRan = false
     val result = cb.execute { () =>
@@ -622,27 +634,26 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     // The implementation: (now - lastFailure) > recoveryTimeout.toMillis
     // Exactly at recoveryTimeout ms the circuit is still Open; only strictly after does it flip.
     val recoveryMs = 150L
+    var fakeTime   = 0L
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 1,
-      recoveryTimeout = recoveryMs.millis
+      recoveryTimeout = recoveryMs.millis,
+      clock = () => fakeTime
     )
 
-    val openedAt = System.currentTimeMillis()
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
 
-    // Busy-wait until we are close to but before the boundary (leave ≥50ms buffer)
-    while (System.currentTimeMillis() - openedAt < recoveryMs - 50)
-      Thread.sleep(5)
+    // Advance to exactly the boundary — should still be Open (strictly greater than)
+    fakeTime += recoveryMs
 
-    // Still before the timeout — must be Open
     val beforeBoundary = cb.execute(() => Result.success("before boundary"))
     beforeBoundary match {
       case Left(err) => err.message should include("Circuit breaker is open")
       case Right(v)  => fail(s"Expected Left (circuit open), got Right($v)")
     }
 
-    // Wait until clearly past the timeout
-    Thread.sleep(recoveryMs)
+    // Advance past the boundary
+    fakeTime += 1
 
     // Now strictly past — must transition to HalfOpen and execute the probe
     var afterRan = false
@@ -657,30 +668,29 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
 
   it should "reset the timeout clock on each re-open, not use the original open time" in {
     val recoveryMs = 80L
+    var fakeTime   = 0L
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 1,
-      recoveryTimeout = recoveryMs.millis
+      recoveryTimeout = recoveryMs.millis,
+      clock = () => fakeTime
     )
 
     // First open
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
-    Thread.sleep(recoveryMs + 40)
+
+    // Advance past recovery timeout
+    fakeTime += recoveryMs + 40
 
     // Move to HalfOpen → fail → re-open (new clock starts here)
-    val reOpenedAt = System.currentTimeMillis()
     cb.execute(() => Result.failure(ServiceError(500, "p", "re-open")))
 
-    // Wait less than recoveryMs since last re-open — should still be Open
-    Thread.sleep(recoveryMs / 2)
-    val elapsed = System.currentTimeMillis() - reOpenedAt
-    // Only bother asserting if we genuinely slept less than the timeout
-    if (elapsed < recoveryMs) {
-      val tooEarly = cb.execute(() => Result.success("too early"))
-      tooEarly.isLeft shouldBe true
-    }
+    // Advance less than recoveryMs since last re-open — should still be Open
+    fakeTime += recoveryMs / 2
+    val tooEarly = cb.execute(() => Result.success("too early"))
+    tooEarly.isLeft shouldBe true
 
-    // Wait until clearly past the re-open timeout
-    Thread.sleep(recoveryMs + 60)
+    // Advance past the re-open timeout
+    fakeTime += recoveryMs + 60
 
     var probeRan = false
     val lateProbe = cb.execute { () =>

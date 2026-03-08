@@ -10,7 +10,7 @@ import scala.concurrent.duration._
 
 /**
  * Deterministic unit tests for [[LLMClientRetry]].
- * Uses a stub LLMClient; no real sleep or network.
+ * Uses a stub LLMClient and a no-op sleepFn; no real sleep or network.
  */
 class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
 
@@ -29,6 +29,9 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
     finishReason = None,
     thinkingDelta = None
   )
+
+  /** No-op sleep for deterministic tests. */
+  private val noSleep: Long => Unit = _ => ()
 
   /** Stub client that returns a sequence of results for complete() and streamComplete(). */
   private def stubClient(
@@ -71,7 +74,8 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       client,
       conv,
       maxAttempts = 3,
-      baseDelay = 1.milli
+      baseDelay = 1.milli,
+      sleepFn = noSleep
     )
     result shouldBe Right(stubCompletion)
   }
@@ -88,7 +92,8 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       client,
       conv,
       maxAttempts = 3,
-      baseDelay = 1.milli
+      baseDelay = 1.milli,
+      sleepFn = noSleep
     )
     result shouldBe Right(stubCompletion)
   }
@@ -102,7 +107,8 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       client,
       conv,
       maxAttempts = 3,
-      baseDelay = 1.milli
+      baseDelay = 1.milli,
+      sleepFn = noSleep
     )
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe a[AuthenticationError]
@@ -120,7 +126,8 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       client,
       conv,
       maxAttempts = 3,
-      baseDelay = 1.milli
+      baseDelay = 1.milli,
+      sleepFn = noSleep
     )
     result shouldBe Right(stubCompletion)
   }
@@ -135,7 +142,8 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       client,
       conv,
       maxAttempts = 3,
-      baseDelay = 1.milli
+      baseDelay = 1.milli,
+      sleepFn = noSleep
     )
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe err
@@ -153,7 +161,8 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       client,
       conv,
       maxAttempts = 3,
-      baseDelay = 1.milli
+      baseDelay = 1.milli,
+      sleepFn = noSleep
     )
     result shouldBe Right(stubCompletion)
   }
@@ -170,7 +179,8 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       client,
       conv,
       maxAttempts = 3,
-      baseDelay = 1.milli
+      baseDelay = 1.milli,
+      sleepFn = noSleep
     )
     result shouldBe Right(stubCompletion)
   }
@@ -185,7 +195,8 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       client,
       conv,
       maxAttempts = 3,
-      baseDelay = 1.milli
+      baseDelay = 1.milli,
+      sleepFn = noSleep
     )
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe err
@@ -261,7 +272,8 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       client,
       conv,
       maxAttempts = 3,
-      baseDelay = 1.milli
+      baseDelay = 1.milli,
+      sleepFn = noSleep
     )(_ => chunkCount += 1)
     result shouldBe Right(stubCompletion)
     chunkCount shouldBe 1
@@ -281,7 +293,8 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       client,
       conv,
       maxAttempts = 3,
-      baseDelay = 1.milli
+      baseDelay = 1.milli,
+      sleepFn = noSleep
     )(_ => chunkCount += 1)
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe err
@@ -324,7 +337,8 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
       client,
       conv,
       maxAttempts = 3,
-      baseDelay = 1.milli
+      baseDelay = 1.milli,
+      sleepFn = noSleep
     )(_ => ())
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe err

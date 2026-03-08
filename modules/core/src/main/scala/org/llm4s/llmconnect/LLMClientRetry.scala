@@ -38,7 +38,8 @@ object LLMClientRetry {
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     maxAttempts: Int = 3,
-    baseDelay: FiniteDuration = 1.second
+    baseDelay: FiniteDuration = 1.second,
+    sleepFn: Long => Unit = Thread.sleep
   ): Result[Completion] =
     validateRetryParams(maxAttempts, baseDelay) match {
       case Left(err) => Left(err)
@@ -53,7 +54,7 @@ object LLMClientRetry {
               else if (!isRetryable(e))
                 Left(e)
               else
-                sleepForRetry(e, attemptNumber, baseDelay) match {
+                sleepForRetry(e, attemptNumber, baseDelay, sleepFn) match {
                   case Left(err) => Left(err)
                   case Right(()) => attempt(attemptNumber + 1)
                 }
@@ -78,7 +79,8 @@ object LLMClientRetry {
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     maxAttempts: Int = 3,
-    baseDelay: FiniteDuration = 1.second
+    baseDelay: FiniteDuration = 1.second,
+    sleepFn: Long => Unit = Thread.sleep
   )(onChunk: StreamedChunk => Unit): Result[Completion] =
     validateRetryParams(maxAttempts, baseDelay) match {
       case Left(err) => Left(err)
@@ -101,7 +103,7 @@ object LLMClientRetry {
               else if (!isRetryable(e))
                 Left(e)
               else
-                sleepForRetry(e, attemptNumber, baseDelay) match {
+                sleepForRetry(e, attemptNumber, baseDelay, sleepFn) match {
                   case Left(err) => Left(err)
                   case Right(()) => attempt(attemptNumber + 1)
                 }
@@ -155,11 +157,12 @@ object LLMClientRetry {
   private def sleepForRetry(
     e: LLMError,
     attemptNumber: Int,
-    baseDelay: FiniteDuration
+    baseDelay: FiniteDuration,
+    sleepFn: Long => Unit
   ): Result[Unit] = {
     val delayMs = delayMsForError(e, attemptNumber, baseDelay)
     try {
-      Thread.sleep(delayMs)
+      sleepFn(delayMs)
       Right(())
     } catch {
       case _: InterruptedException =>

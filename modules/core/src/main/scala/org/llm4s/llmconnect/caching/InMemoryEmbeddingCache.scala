@@ -11,8 +11,11 @@ import scala.concurrent.duration.FiniteDuration
  * @param ttl     Optional Time-To-Live for cache entries. Expired entries are lazily evicted on access.
  * @tparam Embedding The embedding type (usually Seq[Double]).
  */
-class InMemoryEmbeddingCache[Embedding](maxSize: Int = 10000, ttl: Option[FiniteDuration] = None)
-    extends EmbeddingCache[Embedding] {
+class InMemoryEmbeddingCache[Embedding](
+  maxSize: Int = 10000,
+  ttl: Option[FiniteDuration] = None,
+  clock: () => Long = () => System.currentTimeMillis()
+) extends EmbeddingCache[Embedding] {
   private case class CacheEntry(embedding: Embedding, timestamp: Long)
   private val ttlMillis = ttl.map(_.toMillis)
   private val hits      = new AtomicLong(0L)
@@ -35,7 +38,7 @@ class InMemoryEmbeddingCache[Embedding](maxSize: Int = 10000, ttl: Option[Finite
       val entryOpt = Option(store.get(key))
 
       val validEntry = entryOpt.filter { entry =>
-        val isExpired = ttlMillis.exists(limit => (System.currentTimeMillis() - entry.timestamp) > limit)
+        val isExpired = ttlMillis.exists(limit => (clock() - entry.timestamp) > limit)
         if (isExpired) store.remove(key)
         !isExpired
       }
@@ -48,7 +51,7 @@ class InMemoryEmbeddingCache[Embedding](maxSize: Int = 10000, ttl: Option[Finite
 
   /** Stores an embedding, potentially triggering LRU eviction. */
   def put(key: String, embedding: Embedding): Unit =
-    store.put(key, CacheEntry(embedding, System.currentTimeMillis()))
+    store.put(key, CacheEntry(embedding, clock()))
 
   /** Clears all cached entries and resets statistics. */
   override def clear(): Unit = {

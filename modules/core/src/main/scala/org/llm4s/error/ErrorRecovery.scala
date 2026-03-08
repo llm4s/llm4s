@@ -18,7 +18,8 @@ object ErrorRecovery {
   def recoverWithBackoff[A](
     operation: () => Result[A],
     maxAttempts: Int = 3,
-    baseDelay: Duration = 1.second
+    baseDelay: Duration = 1.second,
+    sleepFn: Long => Unit = Thread.sleep
   ): Result[A] = {
 
     @tailrec
@@ -32,15 +33,15 @@ object ErrorRecovery {
           error match {
             case re: RateLimitError =>
               val delay = re.retryDelay.map(_.millis).getOrElse(baseDelay * Math.pow(2, attemptNumber).doubleValue)
-              Thread.sleep(delay.toMillis)
+              sleepFn(delay.toMillis)
               attempt(attemptNumber + 1)
 
             case _: ServiceError with RecoverableError =>
-              Thread.sleep(baseDelay.toMillis * attemptNumber)
+              sleepFn(baseDelay.toMillis * attemptNumber)
               attempt(attemptNumber + 1)
 
             case _: TimeoutError =>
-              Thread.sleep(baseDelay.toMillis)
+              sleepFn(baseDelay.toMillis)
               attempt(attemptNumber + 1)
 
             case _ => Left(error) // Non-recoverable
