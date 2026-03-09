@@ -115,9 +115,11 @@ class EmbeddingClient(
     textModel: EmbeddingModelConfig,
     chunking: UniversalEncoder.TextChunkingConfig,
     experimentalStubsEnabled: Boolean,
-    localModels: LocalEmbeddingModels
+    localModels: LocalEmbeddingModels,
+    maxMediaFileSize: Long = UniversalEncoder.DEFAULT_MAX_MEDIA_FILE_SIZE
   ): Result[Seq[EmbeddingVector]] =
-    UniversalEncoder.encodeFromPath(path, this, textModel, chunking, experimentalStubsEnabled, localModels)
+    UniversalEncoder
+      .encodeFromPath(path, this, textModel, chunking, experimentalStubsEnabled, localModels, maxMediaFileSize)
 }
 
 object EmbeddingClient {
