@@ -12,7 +12,7 @@ import scala.concurrent.{ExecutionContext, Future}
  * Provides unified, non-blocking search over both vector embeddings (semantic similarity)
  * and keyword indexes (BM25 term matching). Features complete architectural 
  * concurrency—vector search and keyword search execute in parallel across independent
- * blocking thread configurations, slashing P99 latency by ~50% during RRF/Weighted queries.
+ * blocking thread configurations, optimizing latency during RRF/Weighted queries.
  */
 final class AsyncHybridSearcher private (
   val vectorStore: AsyncVectorStore,
@@ -64,11 +64,13 @@ final class AsyncHybridSearcher private (
             )
             // Assuming r.rerank returns Future-wrapped Result (AsyncResult) in an async architecture
             // but if it is synchronous Result, wrap it:
-            Future(r.rerank(request)).map {
+            Future(r.rerank(request)).recover {
+              case ex: Throwable => Left(ProcessingError(s"Reranking failed: ${ex.getMessage}"))
+            }.map {
               case Left(err) => Left(err)
               case Right(response) => Right(
-                response.results.map { rr =>
-                   candidates(rr.index).copy(score = rr.score)
+                response.results.flatMap { rr =>
+                   candidates.lift(rr.index).map(_.copy(score = rr.score))
                 }
               )
             }
@@ -240,7 +242,7 @@ object AsyncHybridSearcher {
 
   def apply(syncSearcher: HybridSearcher): AsyncHybridSearcher = {
     new AsyncHybridSearcher(
-      AsyncPgVectorStore(syncSearcher.vectorStore),
+      AsyncVectorStore(syncSearcher.vectorStore),
       AsyncKeywordIndex(syncSearcher.keywordIndex),
       syncSearcher.defaultStrategy
     )

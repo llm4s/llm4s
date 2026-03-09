@@ -33,15 +33,7 @@ trait AsyncKeywordIndex {
 
   def deleteByPrefix(prefix: String)(implicit ec: ExecutionContext): AsyncResult[Long]
 
-  def update(doc: KeywordDocument)(implicit ec: ExecutionContext): AsyncResult[Unit] = {
-    import cats.implicits._
-    Future {
-      for {
-        _ <- syncStore.delete(doc.id)
-        _ <- syncStore.index(doc)
-      } yield ()
-    }
-  }
+  def update(doc: KeywordDocument)(implicit ec: ExecutionContext): AsyncResult[Unit]
 
   def count()(implicit ec: ExecutionContext): AsyncResult[Long]
 
@@ -50,8 +42,6 @@ trait AsyncKeywordIndex {
   def stats()(implicit ec: ExecutionContext): AsyncResult[KeywordIndexStats]
 
   def close(): Unit
-
-  protected def syncStore: KeywordIndex
 }
 
 /**
@@ -104,6 +94,15 @@ final class AsyncKeywordIndexWrapper(
 
   override def stats()(implicit ec: ExecutionContext): AsyncResult[KeywordIndexStats] =
     Future(syncStore.stats())
+
+  override def update(doc: KeywordDocument)(implicit ec: ExecutionContext): AsyncResult[Unit] = {
+    Future {
+      for {
+        _ <- syncStore.delete(doc.id)
+        _ <- syncStore.index(doc)
+      } yield ()
+    }
+  }
 
   override def close(): Unit = syncStore.close()
 }

@@ -48,3 +48,12 @@ trait AsyncVectorStore {
 
   def close(): Unit
 }
+
+object AsyncVectorStore {
+  /**
+   * Create an AsyncVectorStore wrapping an existing VectorStore instance.
+   * This uses AsyncPgVectorStore internally as the default async wrapper implementation.
+   */
+  def apply(syncStore: VectorStore): AsyncVectorStore =
+    AsyncPgVectorStore(syncStore)
+}
