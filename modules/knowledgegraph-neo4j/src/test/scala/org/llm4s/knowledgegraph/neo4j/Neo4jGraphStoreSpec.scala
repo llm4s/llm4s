@@ -38,6 +38,10 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
         store = s
         // Probe with a quick query to confirm the server is actually reachable
         neo4jAvailable = store.stats().isRight
+        if (!neo4jAvailable && store != null) {
+          store.close()
+          store = null
+        }
       case Left(_) =>
         neo4jAvailable = false
     }
@@ -75,6 +79,27 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
     store.getNode("1").toOption.get.flatMap(_.properties.get("name")) shouldBe Some(ujson.Str("Alicia"))
   }
 
+  test("upsertNode: replacement semantics remove old properties") {
+    requireNeo4j()
+    store.upsertNode(Node("1", "Person", Map("name" -> ujson.Str("Alice"), "city" -> ujson.Str("NYC")))) shouldBe Right(
+      ()
+    )
+    store.upsertNode(Node("1", "Person", Map("name" -> ujson.Str("Alicia")))) shouldBe Right(())
+    val props = store.getNode("1").toOption.flatten.map(_.properties).getOrElse(Map.empty)
+    props.get("name") shouldBe Some(ujson.Str("Alicia"))
+    props.contains("city") shouldBe false
+  }
+
+  test("upsertNode: ujson.Null properties are skipped explicitly") {
+    requireNeo4j()
+    store.upsertNode(Node("1", "Person", Map("nickname" -> ujson.Null, "name" -> ujson.Str("Alice")))) shouldBe Right(
+      ()
+    )
+    val props = store.getNode("1").toOption.flatten.map(_.properties).getOrElse(Map.empty)
+    props.contains("nickname") shouldBe false
+    props.get("name") shouldBe Some(ujson.Str("Alice"))
+  }
+
   test("getNode: returns Right(None) for a missing node") {
     requireNeo4j()
     store.getNode("does-not-exist") shouldBe Right(None)
@@ -99,6 +124,25 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
     store.upsertNode(Node("1", "A"))
     store.upsertNode(Node("2", "B"))
     store.upsertEdge(Edge("1", "2", "KNOWS")) shouldBe Right(())
+  }
+
+  test("upsertEdge: rejects invalid relationship type characters") {
+    requireNeo4j()
+    store.upsertNode(Node("1", "A"))
+    store.upsertNode(Node("2", "B"))
+    store.upsertEdge(Edge("1", "2", "WORKS-FOR")) shouldBe a[Left[_, _]]
+  }
+
+  test("upsertEdge: replacement semantics remove old edge properties") {
+    requireNeo4j()
+    store.upsertNode(Node("1", "A")); store.upsertNode(Node("2", "B"))
+    store.upsertEdge(Edge("1", "2", "KNOWS", Map("since" -> ujson.Num(2020), "weight" -> ujson.Num(1)))) shouldBe Right(
+      ()
+    )
+    store.upsertEdge(Edge("1", "2", "KNOWS", Map("weight" -> ujson.Num(2)))) shouldBe Right(())
+    val edge = store.getNeighbors("1", Direction.Outgoing).toOption.get.find(_.node.id == "2").map(_.edge).get
+    edge.properties.contains("since") shouldBe false
+    edge.properties.get("weight") shouldBe Some(ujson.Num(2))
   }
 
   // ─── Neighbors ────────────────────────────────────────────────────────────
@@ -146,6 +190,26 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
       .toSet shouldBe Set("1")
   }
 
+  test("query: filters numeric property values using string semantics") {
+    requireNeo4j()
+    store.upsertNode(Node("1", "Person", Map("age" -> ujson.Num(42))))
+    store.upsertNode(Node("2", "Person", Map("age" -> ujson.Num(7))))
+    store
+      .query(GraphFilter(propertyKey = Some("age"), propertyValue = Some("42.0")))
+      .toOption
+      .get
+      .nodes
+      .keys
+      .toSet shouldBe Set("1")
+  }
+
+  test("query: rejects unsafe propertyKey input") {
+    requireNeo4j()
+    store.upsertNode(Node("1", "Person", Map("city" -> ujson.Str("NYC"))))
+    val result = store.query(GraphFilter(propertyKey = Some("city` OR 1=1 OR n.`x"), propertyValue = Some("NYC")))
+    result shouldBe a[Left[_, _]]
+  }
+
   test("query: filters edges by relationship type") {
     requireNeo4j()
     store.upsertNode(Node("1", "A")); store.upsertNode(Node("2", "B")); store.upsertNode(Node("3", "C"))
@@ -153,6 +217,15 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
     val result = store.query(GraphFilter(relationshipType = Some("KNOWS"))).toOption.get
     result.edges.size shouldBe 1
     result.edges.head.relationship shouldBe "KNOWS"
+  }
+
+  test("query: relationshipType is parameterized and does not allow query-shaping input") {
+    requireNeo4j()
+    store.upsertNode(Node("1", "A")); store.upsertNode(Node("2", "B")); store.upsertNode(Node("3", "C"))
+    store.upsertEdge(Edge("1", "2", "KNOWS")); store.upsertEdge(Edge("1", "3", "WORKS_FOR"))
+    val injectedType = "KNOWS' OR 1=1 OR type(r) = 'X"
+    val result       = store.query(GraphFilter(relationshipType = Some(injectedType))).toOption.get
+    result.edges shouldBe empty
   }
 
   // ─── Traversal ────────────────────────────────────────────────────────────

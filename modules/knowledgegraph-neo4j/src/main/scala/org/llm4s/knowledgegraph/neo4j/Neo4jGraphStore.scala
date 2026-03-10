@@ -52,7 +52,8 @@ final class Neo4jGraphStore private (
       session.executeWriteWithoutResult { tx =>
         tx.run(
           """MERGE (n:LLM4S {llm4s_id: $id})
-            |SET n.llm4s_label = $label, n += $props""".stripMargin,
+            |SET n = { llm4s_id: $id, llm4s_label: $label }
+            |SET n += $props""".stripMargin,
           params
         )
         ()
@@ -61,30 +62,39 @@ final class Neo4jGraphStore private (
     }
 
   override def upsertEdge(edge: Edge): Result[Unit] =
-    withSession { session =>
-      val srcExists = nodeExistsInSession(session, edge.source)
-      val tgtExists = nodeExistsInSession(session, edge.target)
-      if (!srcExists || !tgtExists) {
-        Left(
-          ProcessingError("neo4j-store", s"Edge(${edge.source}->${edge.target}): source or target node does not exist")
-        )
-      } else {
+    validateRelType(edge.relationship).flatMap { relType =>
+      withSession { session =>
         val params = new java.util.HashMap[String, AnyRef]()
         params.put("src", edge.source)
         params.put("tgt", edge.target)
         params.put("props", toNeo4jMap(edge.properties))
-        val relType = sanitizeRelType(edge.relationship)
         Try {
-          session.executeWriteWithoutResult { tx =>
-            tx.run(
-              s"""MATCH (a:LLM4S {llm4s_id: $$src}), (b:LLM4S {llm4s_id: $$tgt})
-                 |MERGE (a)-[r:$relType]->(b)
-                 |SET r += $$props""".stripMargin,
-              params
-            )
-            ()
+          session.executeWrite { tx =>
+            val srcExists =
+              tx.run("MATCH (n:LLM4S {llm4s_id: $src}) RETURN count(n) AS c", params).single().get("c").asLong() > 0
+            val tgtExists =
+              tx.run("MATCH (n:LLM4S {llm4s_id: $tgt}) RETURN count(n) AS c", params).single().get("c").asLong() > 0
+
+            if (!srcExists || !tgtExists) {
+              Left(
+                ProcessingError(
+                  "neo4j-store",
+                  s"Edge(${edge.source}->${edge.target}): source or target node does not exist"
+                )
+              )
+            } else {
+              tx.run(
+                s"""MATCH (a:LLM4S {llm4s_id: $$src}), (b:LLM4S {llm4s_id: $$tgt})
+                   |MERGE (a)-[r:$relType]->(b)
+                   |SET r = $$props""".stripMargin,
+                params
+              )
+              Right(())
+            }
           }
-        }.toEither.left.map(e => ProcessingError("neo4j-store", s"Failed to upsert edge: ${e.getMessage}"))
+        }.toEither.left
+          .map(e => ProcessingError("neo4j-store", s"Failed to upsert edge: ${e.getMessage}"))
+          .flatMap(identity)
       }
     }
 
@@ -133,92 +143,83 @@ final class Neo4jGraphStore private (
     }
 
   override def query(filter: GraphFilter): Result[Graph] =
-    withSession { session =>
-      val (whereClauses, params) = buildWhereClause(filter)
-      val nodeWhere              = if (whereClauses.isEmpty) "" else s"WHERE ${whereClauses.mkString(" AND ")}"
+    buildWhereClause(filter).flatMap { case (whereClauses, params) =>
+      withSession { session =>
+        val nodeWhere = if (whereClauses.isEmpty) "" else s"WHERE ${whereClauses.mkString(" AND ")}"
 
-      val nodes: Map[String, Node] = session.executeRead { tx =>
-        val rs  = tx.run(s"MATCH (n:LLM4S) $nodeWhere RETURN n", params)
-        val buf = scala.collection.mutable.ArrayBuffer.empty[(String, Node)]
-        while (rs.hasNext) {
-          val n = recordToNode(rs.next().get("n").asNode())
-          buf += n.id -> n
-        }
-        buf.toMap
-      }
-
-      val edges: List[Edge] = if (nodes.isEmpty) {
-        List.empty
-      } else {
-        val relTypeFilter = filter.relationshipType.fold("")(rt => s" AND type(r) = '${rt.replace("'", "\\'")}'")
-        session.executeRead { tx =>
-          val edgeParams = new java.util.HashMap[String, AnyRef]()
-          edgeParams.put("nodeIds", nodes.keys.toList.asJava)
-          val rs = tx.run(
-            s"MATCH (a:LLM4S)-[r]->(b:LLM4S) WHERE a.llm4s_id IN $$nodeIds AND b.llm4s_id IN $$nodeIds$relTypeFilter RETURN a.llm4s_id AS src, b.llm4s_id AS tgt, type(r) AS relType, r",
-            edgeParams
-          )
-          val buf = scala.collection.mutable.ArrayBuffer.empty[Edge]
+        val nodes: Map[String, Node] = session.executeRead { tx =>
+          val rs  = tx.run(s"MATCH (n:LLM4S) $nodeWhere RETURN n", params)
+          val buf = scala.collection.mutable.ArrayBuffer.empty[(String, Node)]
           while (rs.hasNext) {
-            val rec      = rs.next()
-            val relProps = fromNeo4jRelProps(rec.get("r").asRelationship())
-            buf += Edge(
-              source = rec.get("src").asString(),
-              target = rec.get("tgt").asString(),
-              relationship = rec.get("relType").asString(),
-              properties = relProps
-            )
+            val n = recordToNode(rs.next().get("n").asNode())
+            buf += n.id -> n
           }
-          buf.toList
+          buf.toMap
         }
+
+        val edges: List[Edge] = if (nodes.isEmpty) {
+          List.empty
+        } else {
+          session.executeRead { tx =>
+            val edgeParams = new java.util.HashMap[String, AnyRef]()
+            edgeParams.put("nodeIds", nodes.keys.toList.asJava)
+            val relTypeClause = filter.relationshipType match {
+              case Some(rt) =>
+                edgeParams.put("filterRelType", rt)
+                " AND type(r) = $filterRelType"
+              case None =>
+                ""
+            }
+            val rs = tx.run(
+              s"MATCH (a:LLM4S)-[r]->(b:LLM4S) WHERE a.llm4s_id IN $$nodeIds AND b.llm4s_id IN $$nodeIds$relTypeClause RETURN a.llm4s_id AS src, b.llm4s_id AS tgt, type(r) AS relType, r",
+              edgeParams
+            )
+            val buf = scala.collection.mutable.ArrayBuffer.empty[Edge]
+            while (rs.hasNext) {
+              val rec      = rs.next()
+              val relProps = fromNeo4jRelProps(rec.get("r").asRelationship())
+              buf += Edge(
+                source = rec.get("src").asString(),
+                target = rec.get("tgt").asString(),
+                relationship = rec.get("relType").asString(),
+                properties = relProps
+              )
+            }
+            buf.toList
+          }
+        }
+
+        Right(Graph(nodes, edges))
+      }
+    }
+
+  override def traverse(startId: String, config: TraversalConfig = TraversalConfig()): Result[Seq[Node]] =
+    withSession { session =>
+      // Uses one read query to avoid per-node session churn.
+      // Follow-up: if GraphTraversal visibility is widened, shared traversal helpers can be reused across stores.
+      val params = new java.util.HashMap[String, AnyRef]()
+      params.put("startId", startId)
+      params.put("maxDepth", Integer.valueOf(config.maxDepth))
+      params.put("excludedIds", config.visitedNodeIds.toList.asJava)
+
+      val pattern = config.direction match {
+        case Direction.Outgoing => "-[*0..$maxDepth]->"
+        case Direction.Incoming => "<-[*0..$maxDepth]-"
+        case Direction.Both     => "-[*0..$maxDepth]-"
       }
 
-      Right(Graph(nodes, edges))
-    }
+      Right(session.executeRead { tx =>
+        val rs = tx.run(
+          s"MATCH p=(start:LLM4S {llm4s_id: $$startId})$pattern(n:LLM4S) WHERE NOT n.llm4s_id IN $$excludedIds WITH n, min(length(p)) AS depth ORDER BY depth ASC, n.llm4s_id ASC RETURN n",
+          params
+        )
 
-  override def traverse(startId: String, config: TraversalConfig = TraversalConfig()): Result[Seq[Node]] = {
-    // GraphTraversal is private[storage], so we inline the same BFS algorithm here.
-    import scala.annotation.tailrec
-    import scala.collection.immutable.Queue
-
-    getNode(startId).flatMap {
-      case None => Right(Seq.empty)
-      case Some(_) =>
-        @tailrec
-        def loop(
-          queue: Queue[(String, Int)],
-          visited: Set[String],
-          acc: Vector[Node]
-        ): Result[Vector[Node]] =
-          if (queue.isEmpty) Right(acc)
-          else {
-            val ((currentId, depth), rest) = queue.dequeue
-            if (visited.contains(currentId) || config.visitedNodeIds.contains(currentId))
-              loop(rest, visited, acc)
-            else
-              getNode(currentId) match {
-                case Left(err)   => Left(err)
-                case Right(None) => loop(rest, visited, acc)
-                case Right(Some(node)) =>
-                  val newVisited = visited + currentId
-                  val newAcc     = acc :+ node
-                  if (depth < config.maxDepth) {
-                    getNeighbors(currentId, config.direction) match {
-                      case Left(err) => Left(err)
-                      case Right(pairs) =>
-                        val nextQueue = pairs.map(_.node.id).foldLeft(rest) { (q, nextId) =>
-                          if (!newVisited.contains(nextId) && !config.visitedNodeIds.contains(nextId))
-                            q.enqueue((nextId, depth + 1))
-                          else q
-                        }
-                        loop(nextQueue, newVisited, newAcc)
-                    }
-                  } else loop(rest, newVisited, newAcc)
-              }
-          }
-        loop(Queue((startId, 0)), Set.empty, Vector.empty).map(_.toSeq)
+        val buf = scala.collection.mutable.ArrayBuffer.empty[Node]
+        while (rs.hasNext)
+          buf += recordToNode(rs.next().get("n").asNode())
+        buf.toSeq
+      })
     }
-  }
 
   override def deleteNode(id: String): Result[Unit] =
     withSession { session =>
@@ -232,19 +233,20 @@ final class Neo4jGraphStore private (
     }
 
   override def deleteEdge(source: String, target: String, relationship: String): Result[Unit] =
-    withSession { session =>
-      val params = new java.util.HashMap[String, AnyRef]()
-      params.put("src", source)
-      params.put("tgt", target)
-      val relType = sanitizeRelType(relationship)
-      session.executeWriteWithoutResult { tx =>
-        tx.run(
-          s"MATCH (a:LLM4S {llm4s_id: $$src})-[r:$relType]->(b:LLM4S {llm4s_id: $$tgt}) DELETE r",
-          params
-        )
-        ()
+    validateRelType(relationship).flatMap { relType =>
+      withSession { session =>
+        val params = new java.util.HashMap[String, AnyRef]()
+        params.put("src", source)
+        params.put("tgt", target)
+        session.executeWriteWithoutResult { tx =>
+          tx.run(
+            s"MATCH (a:LLM4S {llm4s_id: $$src})-[r:$relType]->(b:LLM4S {llm4s_id: $$tgt}) DELETE r",
+            params
+          )
+          ()
+        }
+        Right(())
       }
-      Right(())
     }
 
   override def loadAll(): Result[Graph] =
@@ -383,17 +385,6 @@ final class Neo4jGraphStore private (
       .map(e => ProcessingError("neo4j-store", s"Session error: ${e.getMessage}"))
       .flatMap(identity)
 
-  private def nodeExistsInSession(session: Session, id: String): Boolean = {
-    val params = new java.util.HashMap[String, AnyRef]()
-    params.put("id", id)
-    session.executeRead { tx =>
-      tx.run("MATCH (n:LLM4S {llm4s_id: $id}) RETURN count(n) AS c", params)
-        .single()
-        .get("c")
-        .asLong() > 0
-    }
-  }
-
   private def recordToNode(n: org.neo4j.driver.types.Node): Node = {
     val id    = n.get("llm4s_id").asString()
     val label = n.get("llm4s_label").asString()
@@ -427,20 +418,21 @@ final class Neo4jGraphStore private (
       case (k, ujson.Str(s))  => m.put(k, s)
       case (k, ujson.Bool(b)) => m.put(k, java.lang.Boolean.valueOf(b))
       case (k, ujson.Num(n))  => m.put(k, java.lang.Double.valueOf(n))
-      case (k, ujson.Null)    => m.put(k, null)
+      case (_, ujson.Null)    => ()
       case (k, other)         => m.put(k, other.toString)
     }
     m
   }
 
-  /**
-   * Sanitises a relationship type so it is safe to embed in Cypher.
-   * Neo4j relationship types cannot be parameterised.
-   */
-  private def sanitizeRelType(relType: String): String =
-    relType.replaceAll("[^A-Za-z0-9_]", "_")
+  private def validateRelType(relType: String): Result[String] =
+    if (relType.matches("^[A-Za-z0-9_]+$")) Right(relType)
+    else Left(ProcessingError("neo4j-store", s"Invalid relationship type '$relType'. Allowed pattern: [A-Za-z0-9_]+"))
 
-  private def buildWhereClause(filter: GraphFilter): (List[String], java.util.Map[String, AnyRef]) = {
+  private def sanitizePropertyKey(key: String): Result[String] =
+    if (key.matches("^[A-Za-z0-9_]+$")) Right(key)
+    else Left(ProcessingError("neo4j-store", s"Invalid property key '$key'. Allowed pattern: [A-Za-z0-9_]+"))
+
+  private def buildWhereClause(filter: GraphFilter): Result[(List[String], java.util.Map[String, AnyRef])] = {
     val clauses = scala.collection.mutable.ListBuffer.empty[String]
     val params  = new java.util.HashMap[String, AnyRef]()
 
@@ -449,12 +441,16 @@ final class Neo4jGraphStore private (
       params.put("filterLabel", lbl)
     }
 
-    filter.propertyKey.zip(filter.propertyValue).foreach { case (key, value) =>
-      clauses += s"n.`$key` = $$filterPropValue"
-      params.put("filterPropValue", value)
+    val propResult = filter.propertyKey.zip(filter.propertyValue).foldLeft[Result[Unit]](Right(())) {
+      case (Right(_), (key, value)) =>
+        sanitizePropertyKey(key).map { safeKey =>
+          clauses += s"toString(n.`$safeKey`) = $$filterPropValue"
+          params.put("filterPropValue", value)
+        }
+      case (Left(err), _) => Left(err)
     }
 
-    (clauses.toList, params)
+    propResult.map(_ => (clauses.toList, params))
   }
 }
 

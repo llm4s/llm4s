@@ -57,13 +57,4 @@ class Neo4jGraphStoreUnitSpec extends AnyFunSuite with Matchers {
     val result = Neo4jGraphStore("invalid://localhost:7687")
     result shouldBe a[Left[_, _]]
   }
-
-  test("local(): returns Left for an invalid host (when Neo4j is not running)") {
-    // local() with wrong password fails only when the connection is verified
-    // (lazy driver). We only assert the type; the value may be Right on a
-    // machine that happens to have a local Neo4j running.
-    val result = Neo4jGraphStore
-      .apply(Neo4jGraphStore.Config(uri = "invalid://localhost:7687"))
-    result shouldBe a[Left[_, _]]
-  }
 }
