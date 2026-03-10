@@ -175,15 +175,77 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
   }
 
   it should "execute commands" in {
-    // This test is platform-dependent, so we'll use a simple command
-    val testCommand = if (System.getProperty("os.name").startsWith("Windows")) {
-      "echo test command"
-    } else {
-      "echo 'test command'"
-    }
-    val response = interface.executeCommand(testCommand)
+    // Use 'git --version': a real cross-platform executable that is in
+    // AllowedExecutables and does not rely on shell built-ins.
+    val response = interface.executeCommand("git --version")
     response.exitCode shouldBe 0
-    response.stdout should include("test command")
+    response.stdout should include("git")
+  }
+
+  it should "execute built-in echo command on Windows via cmd.exe /c" in {
+    // On Windows, echo is a cmd.exe built-in. WorkspaceAgentInterfaceImpl should
+    // detect this and prepend "cmd.exe /c" automatically.
+    // On Unix, echo is a real executable on PATH and works directly.
+    val response = interface.executeCommand("echo hello world")
+    response.exitCode shouldBe 0
+    response.stdout should include("hello world")
+  }
+
+  it should "block shell metacharacters before execution, not merely treat them as literal args" in {
+    // Previously this test verified that 'git --version ; echo INJECTED' ran
+    // git with ';' and 'echo' as literal args.  With the FORBIDDEN_CHARACTERS
+    // layer the command is now rejected outright before any process is
+    // launched – a strictly stronger guarantee.
+    val ex = the[WorkspaceAgentException] thrownBy
+      interface.executeCommand("git --version ; echo INJECTED")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include(";")
+  }
+
+  it should "reject executeCommand for executables not in the allowlist" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("curl https://evil.example")
+    ex.code shouldBe "EXECUTABLE_NOT_ALLOWED"
+    ex.error should include("curl")
+  }
+
+  it should "reject executeCommand for executables specified with a path separator" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("/usr/bin/ls -la")
+    ex.code shouldBe "EXECUTABLE_PATH_NOT_ALLOWED"
+    ex.error should include("/usr/bin/ls")
+  }
+
+  it should "treat an unclosed double-quote as consuming the rest of the string into the token" in {
+    // "git --version" with an unclosed leading quote on the flag:
+    // tokenizeCommand("git \"--version") => Seq("git", "--version")
+    // git receives "--version" as a literal arg and succeeds normally.
+    val response = interface.executeCommand("git \"--version")
+    response.exitCode shouldBe 0
+    response.stdout should include("git")
+  }
+
+  it should "treat an unclosed single-quote as consuming the rest of the string into the token" in {
+    // tokenizeCommand("git '--version") => Seq("git", "--version")
+    val response = interface.executeCommand("git '--version")
+    response.exitCode shouldBe 0
+    response.stdout should include("git")
+  }
+
+  it should "block echo hello & whoami due to forbidden character '&'" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("echo hello & whoami")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include("&")
+  }
+
+  it should "block git --version ; echo pwned due to forbidden character ';'" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("git --version ; echo pwned")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include(";")
+  }
+
+  it should "block commands containing pipe character '|'" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("echo foo | grep foo")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include("|")
   }
 
   it should "reject executeCommand when sandbox has shellAllowed=false" in {
