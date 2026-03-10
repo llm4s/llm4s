@@ -42,79 +42,18 @@ final class EmbeddingMemoryStore private (
       return Right(Seq.empty)
     }
 
-    // First filter by criteria
-    val filtered = inner.all.filter(filter.matches)
+    val hasEmbeddings = inner.all.exists(m => filter.matches(m) && m.isEmbedded)
 
-    // Check if we have embeddings available
-    val embeddedMemories = filtered.filter(_.isEmbedded)
-
-    if (embeddedMemories.nonEmpty) {
+    if (hasEmbeddings) {
       embeddingService.embed(query) match {
         case Right(queryEmbedding) =>
-          val candidates = embeddedMemories.flatMap { memory =>
-            memory.embedding.flatMap { vector =>
-              if (vector.length != queryEmbedding.length) {
-                None
-              } else if (containsNonFinite(vector) || containsNonFinite(queryEmbedding)) {
-                // Skip memories or queries with non-finite values
-                None
-              } else {
-                val similarity = VectorOps.cosineSimilarity(queryEmbedding, vector)
-                // Normalize to 0-1 range
-                val normalizedSimilarity = (similarity + 1.0) / 2.0
-                val score                = math.max(0.0, math.min(1.0, normalizedSimilarity))
-                Some(ScoredMemory(memory, score))
-              }
-            }
-          }
-
-          if (candidates.isEmpty) keywordSearch(query, filtered, topK)
-          else Right(candidates.sorted(ScoredMemory.byScoreDescending).take(topK))
-
+          inner.search(query, queryEmbedding, topK, filter)
         case Left(_) =>
-          // Fallback to keyword search when embedding fails
-          keywordSearch(query, filtered, topK)
+          inner.search(query, topK, filter)
       }
     } else {
-      keywordSearch(query, filtered, topK)
+      inner.search(query, topK, filter)
     }
-  }
-
-  /**
-   * Simple keyword-based search scoring (substring matching).
-   */
-  private def keywordSearch(
-    query: String,
-    memories: Seq[Memory],
-    topK: Int
-  ): Result[Seq[ScoredMemory]] = {
-    val queryTerms = query.toLowerCase.split("\\s+").toSet
-
-    val scored = memories.map { memory =>
-      val content      = memory.content.toLowerCase
-      val matchedTerms = queryTerms.count(content.contains)
-      val score        = if (queryTerms.isEmpty) 0.0 else matchedTerms.toDouble / queryTerms.size
-      ScoredMemory(memory, score)
-    }
-
-    val sorted = scored
-      .filter(_.score > 0)
-      .sorted(ScoredMemory.byScoreDescending)
-      .take(topK)
-
-    Right(sorted)
-  }
-
-  /**
-   * Check if an array contains any non-finite values (NaN, Inf, -Inf).
-   */
-  private def containsNonFinite(arr: Array[Float]): Boolean = {
-    var i = 0
-    while (i < arr.length) {
-      if (!java.lang.Float.isFinite(arr(i))) return true
-      i += 1
-    }
-    false
   }
 
   override def delete(id: MemoryId): Result[MemoryStore] =

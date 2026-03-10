@@ -46,9 +46,9 @@ class ContainerisedWorkspace(
   private val ResponseTimeoutBufferSec = 5
 
   // State tracking
-  private val containerRunning                            = new AtomicBoolean(false)
-  private val wsConnected                                 = new AtomicBoolean(false)
-  private val heartbeatExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
+  private val containerRunning  = new AtomicBoolean(false)
+  private val wsConnected       = new AtomicBoolean(false)
+  private val heartbeatExecutor = new AtomicReference[ScheduledExecutorService]()
 
   // WebSocket client and response handling
   private val wsClient          = new AtomicReference[WebSocketClient]()
@@ -264,7 +264,9 @@ class ContainerisedWorkspace(
   private def startHeartbeatTask(): Unit = {
     logger.info("Starting heartbeat task")
 
-    heartbeatExecutor.scheduleAtFixedRate(
+    val executor = Executors.newSingleThreadScheduledExecutor()
+    heartbeatExecutor.set(executor)
+    executor.scheduleAtFixedRate(
       () =>
         if (containerRunning.get() && wsConnected.get()) {
           val hb = Try(sendHeartbeat())
@@ -310,9 +312,11 @@ class ContainerisedWorkspace(
     }
 
     // Shutdown heartbeat task
-    heartbeatExecutor.shutdown()
-    val term = Try(heartbeatExecutor.awaitTermination(3, TimeUnit.SECONDS)).getOrElse(false)
-    if (!term) heartbeatExecutor.shutdownNow()
+    Option(heartbeatExecutor.getAndSet(null)).foreach { executor =>
+      executor.shutdown()
+      val term = Try(executor.awaitTermination(3, TimeUnit.SECONDS)).getOrElse(false)
+      if (!term) executor.shutdownNow()
+    }
 
     // Execute stop and remove as separate commands
     val stopResult = Try {

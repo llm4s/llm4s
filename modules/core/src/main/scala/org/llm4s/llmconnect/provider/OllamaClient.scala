@@ -1,15 +1,8 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{
-  AuthenticationError,
-  ConfigurationError,
-  ExecutionError,
-  NetworkError,
-  RateLimitError,
-  ServiceError
-}
+import org.llm4s.error.{ ExecutionError, NetworkError, ServiceError }
 import org.llm4s.http.Llm4sHttpClient
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
@@ -17,7 +10,6 @@ import org.llm4s.types.{ Result, TryOps }
 
 import java.io.{ BufferedReader, IOException, InputStreamReader }
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Try
 
 /**
@@ -55,20 +47,18 @@ class OllamaClient(
   config: OllamaConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
-) extends LLMClient
-    with MetricsRecording {
-  private val closed: AtomicBoolean = new AtomicBoolean(false)
+) extends BaseLifecycleLLMClient {
+
+  protected def clientDescription: String = s"Ollama client for model ${config.model}"
+  protected def providerName: String      = "ollama"
+  protected def modelName: String         = config.model
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics(
-    provider = "ollama",
-    model = config.model,
-    operation = validateNotClosed.flatMap(_ => connect(conversation, options)),
-    extractUsage = (c: Completion) => c.usage,
-    extractCost = (c: Completion) => c.estimatedCost
-  )
+  ): Result[Completion] = completeWithMetrics {
+    connect(conversation, options)
+  }
 
   private def connect(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
     val requestBody = createRequestBody(conversation, options, stream = false)
@@ -76,13 +66,11 @@ class OllamaClient(
     val headers     = Map("Content-Type" -> "application/json")
     try {
       val response = httpClient.post(url, headers, requestBody.render(), timeout = 120000)
-      response.statusCode match {
-        case 200 =>
-          Try(ujson.read(response.body)).toResult
-            .flatMap(json => Try(parseCompletion(json)).toResult)
-        case 401 => Left(AuthenticationError("ollama", "Unauthorized"))
-        case 429 => Left(RateLimitError("ollama"))
-        case s   => Left(ServiceError(s, "ollama", s"Ollama error: ${response.body}"))
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        Try(ujson.read(response.body)).toResult
+          .flatMap(json => Try(parseCompletion(json)).toResult)
+      } else {
+        HttpErrorMapper.mapHttpError(response.statusCode, response.body, providerName)
       }
     } catch {
       case e: InterruptedException =>
@@ -107,93 +95,83 @@ class OllamaClient(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics(
-    provider = "ollama",
-    model = config.model,
-    operation = validateNotClosed.flatMap { _ =>
-      val requestBody = createRequestBody(conversation, options, stream = true)
-      val url         = s"${config.baseUrl}/api/chat"
-      val headers     = Map("Content-Type" -> "application/json")
+  ): Result[Completion] = completeWithMetrics {
+    val requestBody = createRequestBody(conversation, options, stream = true)
+    val url         = s"${config.baseUrl}/api/chat"
+    val headers     = Map("Content-Type" -> "application/json")
 
-      try {
-        val response = httpClient.postStream(url, headers, requestBody.render(), timeout = 600000)
-        if (response.statusCode != 200) {
-          val err = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)
-          response.body.close()
-          response.statusCode match {
-            case 401 => Left(AuthenticationError("ollama", "Unauthorized"))
-            case 429 => Left(RateLimitError("ollama"))
-            case s   => Left(ServiceError(s, "ollama", s"Ollama error: $err"))
-          }
-        } else {
-          val accumulator = StreamingAccumulator.create()
-          val reader      = new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))
-          val processEither = Try {
-            try {
-              var line: String = null
-              while ({ line = reader.readLine(); line != null }) {
-                val trimmed = line.trim
-                if (trimmed.nonEmpty) {
-                  val json = ujson.read(trimmed)
-                  // Ollama streams incremental content in json lines
-                  val done = json.obj.get("done").exists(_.bool)
-                  val contentOpt = json.obj
-                    .get("message")
-                    .flatMap(_.obj.get("content"))
-                    .flatMap(_.strOpt)
-                    .filter(_.nonEmpty)
+    try {
+      val response = httpClient.postStream(url, headers, requestBody.render(), timeout = 600000)
+      if (response.statusCode != 200) {
+        val err = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)
+        response.body.close()
+        HttpErrorMapper.mapHttpError(response.statusCode, err, providerName)
+      } else {
+        val accumulator = StreamingAccumulator.create()
+        val reader      = new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))
+        val processEither = Try {
+          try {
+            var line: String = null
+            while ({ line = reader.readLine(); line != null }) {
+              val trimmed = line.trim
+              if (trimmed.nonEmpty) {
+                val json = ujson.read(trimmed)
+                // Ollama streams incremental content in json lines
+                val done = json.obj.get("done").exists(_.bool)
+                val contentOpt = json.obj
+                  .get("message")
+                  .flatMap(_.obj.get("content"))
+                  .flatMap(_.strOpt)
+                  .filter(_.nonEmpty)
 
-                  val chunk = StreamedChunk(
-                    id = json.obj.get("id").flatMap(_.strOpt).getOrElse(""),
-                    content = contentOpt,
-                    toolCall = None,
-                    finishReason = if (done) Some("stop") else None
-                  )
+                val chunk = StreamedChunk(
+                  id = json.obj.get("id").flatMap(_.strOpt).getOrElse(""),
+                  content = contentOpt,
+                  toolCall = None,
+                  finishReason = if (done) Some("stop") else None
+                )
 
-                  accumulator.addChunk(chunk)
-                  onChunk(chunk)
+                accumulator.addChunk(chunk)
+                onChunk(chunk)
 
-                  // token counts (if present) only appear at the end
-                  if (done) {
-                    val prompt = json.obj.get("prompt_eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
-                    val comp   = json.obj.get("eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
-                    if (prompt > 0 || comp > 0) accumulator.updateTokens(prompt, comp)
-                  }
+                // token counts (if present) only appear at the end
+                if (done) {
+                  val prompt = json.obj.get("prompt_eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
+                  val comp   = json.obj.get("eval_count").flatMap(_.numOpt).map(_.toInt).getOrElse(0)
+                  if (prompt > 0 || comp > 0) accumulator.updateTokens(prompt, comp)
                 }
               }
-            } finally {
-              Try(reader.close())
-              Try(response.body.close())
             }
-          }.toEither
-          processEither.left.foreach(_ => ())
-
-          accumulator.toCompletion.map { c =>
-            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            c.copy(model = config.model, estimatedCost = cost)
+          } finally {
+            Try(reader.close())
+            Try(response.body.close())
           }
+        }.toEither
+        processEither.left.foreach(_ => ())
+
+        accumulator.toCompletion.map { c =>
+          val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+          c.copy(model = config.model, estimatedCost = cost)
         }
-      } catch {
-        case e: InterruptedException =>
-          Thread.currentThread().interrupt()
-          Left(
-            ExecutionError(
-              s"Ollama streaming request interrupted: ${e.getMessage}",
-              operation = "ollama.stream",
-              exitCode = None,
-              cause = Some(e),
-              context = Map.empty
-            )
-          )
-        case e: IOException =>
-          Left(NetworkError("Failed to connect to Ollama stream", Some(e), config.baseUrl))
-        case scala.util.control.NonFatal(e) =>
-          Left(ServiceError(500, "ollama", s"Unexpected streaming error: ${e.getMessage}"))
       }
-    },
-    extractUsage = (c: Completion) => c.usage,
-    extractCost = (c: Completion) => c.estimatedCost
-  )
+    } catch {
+      case e: InterruptedException =>
+        Thread.currentThread().interrupt()
+        Left(
+          ExecutionError(
+            s"Ollama streaming request interrupted: ${e.getMessage}",
+            operation = "ollama.stream",
+            exitCode = None,
+            cause = Some(e),
+            context = Map.empty
+          )
+        )
+      case e: IOException =>
+        Left(NetworkError("Failed to connect to Ollama stream", Some(e), config.baseUrl))
+      case scala.util.control.NonFatal(e) =>
+        Left(ServiceError(500, "ollama", s"Unexpected streaming error: ${e.getMessage}"))
+    }
+  }
 
   private[provider] def createRequestBody(
     conversation: Conversation,
@@ -254,19 +232,10 @@ class OllamaClient(
 
   override def getReserveCompletion(): Int = config.reserveCompletion
 
-  override def close(): Unit =
-    if (closed.compareAndSet(false, true)) {
-      (httpClient: Any) match {
-        case c: AutoCloseable => c.close()
-        case _                => ()
-      }
-    }
-
-  private def validateNotClosed: Result[Unit] =
-    if (closed.get()) {
-      Left(ConfigurationError(s"Ollama client for model ${config.model} is already closed"))
-    } else {
-      Right(())
+  override protected def releaseResources(): Unit =
+    (httpClient: Any) match {
+      case c: AutoCloseable => c.close()
+      case _                => ()
     }
 }
 

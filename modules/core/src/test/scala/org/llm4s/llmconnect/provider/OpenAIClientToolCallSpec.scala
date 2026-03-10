@@ -1,9 +1,14 @@
 package org.llm4s.llmconnect.provider
 
-import com.azure.ai.openai.models.{ ChatCompletions, ChatCompletionsOptions }
+import com.azure.ai.openai.models.{
+  ChatCompletions,
+  ChatCompletionsOptions,
+  ChatCompletionsJsonResponseFormat,
+  ChatCompletionsJsonSchemaResponseFormat
+}
 import com.azure.json.JsonProviders
 import org.llm4s.llmconnect.config.OpenAIConfig
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ResponseFormat, UserMessage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -64,5 +69,83 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers {
     val completion = result.getOrElse(fail("Expected successful completion"))
     completion.toolCalls should have size 1
     completion.toolCalls(0).arguments("x").num shouldBe 1
+  }
+
+  it should "set ChatCompletionsJsonResponseFormat when ResponseFormat.Json is used" in {
+    val model = "gpt-4"
+    val config = OpenAIConfig.fromValues(
+      modelName = model,
+      apiKey = "test-api-key",
+      organization = None,
+      baseUrl = "https://example.invalid/v1"
+    )
+
+    val completions = completionsFromJson(
+      """{"id":"chatcmpl-1","created":0,"choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],
+        |"usage":{"completion_tokens":1,"prompt_tokens":1,"total_tokens":2}}""".stripMargin
+    )
+
+    var capturedOptions: ChatCompletionsOptions = null
+    val transport = new OpenAIClientTransport {
+      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions = {
+        capturedOptions = options
+        completions
+      }
+      override def getChatCompletionsStream(
+        model: String,
+        options: ChatCompletionsOptions
+      ): com.azure.core.util.IterableStream[ChatCompletions] =
+        throw new UnsupportedOperationException("not used")
+    }
+
+    val client  = OpenAIClient.forTest(model, transport, config)
+    val options = CompletionOptions().withResponseFormat(ResponseFormat.Json)
+    client.complete(Conversation(Seq(UserMessage("hello"))), options)
+
+    capturedOptions should not be null
+    capturedOptions.getResponseFormat shouldBe a[ChatCompletionsJsonResponseFormat]
+  }
+
+  it should "set ChatCompletionsJsonSchemaResponseFormat when ResponseFormat.JsonSchema is used" in {
+    val model = "gpt-4"
+    val config = OpenAIConfig.fromValues(
+      modelName = model,
+      apiKey = "test-api-key",
+      organization = None,
+      baseUrl = "https://example.invalid/v1"
+    )
+
+    val completions = completionsFromJson(
+      """{"id":"chatcmpl-1","created":0,"choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],
+        |"usage":{"completion_tokens":1,"prompt_tokens":1,"total_tokens":2}}""".stripMargin
+    )
+
+    var capturedOptions: ChatCompletionsOptions = null
+    val transport = new OpenAIClientTransport {
+      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions = {
+        capturedOptions = options
+        completions
+      }
+      override def getChatCompletionsStream(
+        model: String,
+        options: ChatCompletionsOptions
+      ): com.azure.core.util.IterableStream[ChatCompletions] =
+        throw new UnsupportedOperationException("not used")
+    }
+
+    val client  = OpenAIClient.forTest(model, transport, config)
+    val schema  = ujson.Obj("type" -> "object")
+    val options = CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))
+    val result  = client.complete(Conversation(Seq(UserMessage("hello"))), options)
+
+    result.isRight shouldBe true
+    capturedOptions should not be null
+    capturedOptions.getResponseFormat match {
+      case fmt: ChatCompletionsJsonSchemaResponseFormat =>
+        fmt.getJsonSchema.getName shouldBe "response"
+        fmt.getJsonSchema.isStrict shouldBe true
+      case other =>
+        fail(s"Expected ChatCompletionsJsonSchemaResponseFormat but got ${other.getClass.getSimpleName}")
+    }
   }
 }

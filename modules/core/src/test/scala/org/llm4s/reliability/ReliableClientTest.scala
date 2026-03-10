@@ -227,16 +227,17 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
+    var fakeTime       = 0L
     val metrics        = new TestMetricsCollector()
-    val reliableClient = new ReliableClient(mockClient, "test", config, Some(metrics))
+    val reliableClient = new ReliableClient(mockClient, "test", config, Some(metrics), clock = () => fakeTime)
 
     // Open the circuit
     reliableClient.complete(testConversation)
     reliableClient.complete(testConversation)
     reliableClient.currentCircuitState shouldBe CircuitState.Open
 
-    // Wait for recovery timeout (generous margin to avoid CI flakiness)
-    Thread.sleep(500)
+    // Advance clock past recovery timeout
+    fakeTime += 500
 
     // State should still be Open before any request
     reliableClient.currentCircuitState shouldBe CircuitState.Open
@@ -263,16 +264,17 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
+    var fakeTime       = 0L
     val metrics        = new TestMetricsCollector()
-    val reliableClient = new ReliableClient(mockClient, "test", config, Some(metrics))
+    val reliableClient = new ReliableClient(mockClient, "test", config, Some(metrics), clock = () => fakeTime)
 
     // Open the circuit
     reliableClient.complete(testConversation)
     reliableClient.complete(testConversation)
     reliableClient.currentCircuitState shouldBe CircuitState.Open
 
-    // Wait and make successful request (generous margin to avoid CI flakiness)
-    Thread.sleep(500)
+    // Advance clock past recovery timeout
+    fakeTime += 500
     val result = reliableClient.complete(testConversation)
 
     result shouldBe Right(testCompletion)
@@ -294,15 +296,16 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None)
+    var fakeTime       = 0L
+    val reliableClient = new ReliableClient(mockClient, "test", config, None, clock = () => fakeTime)
 
     // Open the circuit
     reliableClient.complete(testConversation) // fail #1
     reliableClient.complete(testConversation) // fail #2
     reliableClient.currentCircuitState shouldBe CircuitState.Open
 
-    // Wait for recovery (generous margin to avoid CI flakiness)
-    Thread.sleep(500)
+    // Advance clock past recovery timeout
+    fakeTime += 500
 
     // First probe in HalfOpen: permit acquired, succeeds, permit released (needs 2 successes total)
     val probe1 = reliableClient.complete(testConversation)
@@ -470,7 +473,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
   }
 
   test("ReliableClient preserves original error type after retries") {
-    val rateLimitError = RateLimitError("test", 1000)
+    val rateLimitError = RateLimitError("test", 1)
     val mockClient     = new MockClient(() => Left(rateLimitError))
 
     val config = ReliabilityConfig(

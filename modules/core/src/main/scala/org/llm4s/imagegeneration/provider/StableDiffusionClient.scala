@@ -111,7 +111,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
       blocking {
         generateImage(prompt, options)
       }
-    }
+    }.recover { case ex => Left(UnknownError(ex)) }
 
   override def generateImagesAsync(
     prompt: String,
@@ -122,7 +122,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
       blocking {
         generateImages(prompt, count, options)
       }
-    }
+    }.recover { case ex => Left(UnknownError(ex)) }
 
   override def editImageAsync(
     imagePath: Path,
@@ -134,7 +134,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
       blocking {
         editImage(imagePath, prompt, maskPath, options)
       }
-    }
+    }.recover { case ex => Left(UnknownError(ex)) }
 
   override def editImage(
     imagePath: Path,

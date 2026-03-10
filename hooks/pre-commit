@@ -1,38 +1,218 @@
 #!/bin/bash
 
 # Git pre-commit hook for LLM4S project
-# Ensures code formatting and passes tests before committing
+# Smart hook that only checks affected subprojects instead of running a full build.
+# Compatible with bash 3.2+ (macOS default).
 
 set -e
 
-echo "Running pre-commit checks..."
+# ── String-based set helpers (bash 3.2 compatible) ──────────────────────────
+# These replace bash 4+ associative arrays with space-delimited strings.
 
-# Check if sbt is available
+set_add() {
+  local varname="$1" key="$2"
+  local current
+  eval "current=\$$varname"
+  case " $current " in
+    *" $key "*) ;;
+    *) eval "$varname=\"\${$varname:+\$$varname }\$key\"" ;;
+  esac
+}
+
+set_contains() {
+  local varname="$1" key="$2"
+  local current
+  eval "current=\$$varname"
+  case " $current " in
+    *" $key "*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+set_is_empty() {
+  local varname="$1"
+  local current
+  eval "current=\$$varname"
+  [ -z "$current" ]
+}
+
+# ── Gather staged files ──────────────────────────────────────────────────────
+
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=d)
+
+if [ -z "$STAGED_FILES" ]; then
+  echo "No staged files — skipping pre-commit checks."
+  exit 0
+fi
+
+# ── Check for build config changes → full build fallback ─────────────────────
+
+BUILD_CONFIG_CHANGED=false
+while IFS= read -r file; do
+  case "$file" in
+    build.sbt|project/*) BUILD_CONFIG_CHANGED=true; break ;;
+  esac
+done <<< "$STAGED_FILES"
+
+if [ "$BUILD_CONFIG_CHANGED" = true ]; then
+  echo "Build config changed — running full build."
+  sbt scalafmtCheckAll compile test
+  echo "All pre-commit checks passed!"
+  exit 0
+fi
+
+# ── Check if any Scala files changed ─────────────────────────────────────────
+
+HAS_SCALA=false
+while IFS= read -r file; do
+  case "$file" in
+    *.scala) HAS_SCALA=true; break ;;
+  esac
+done <<< "$STAGED_FILES"
+
+if [ "$HAS_SCALA" = false ]; then
+  echo "No Scala files changed — skipping pre-commit checks."
+  exit 0
+fi
+
+# ── Map staged files to subprojects ──────────────────────────────────────────
+
+# Sets: projects with ANY change (for scalafmt + compile)
+#        projects with SOURCE changes (for downstream propagation)
+#        projects with TEST changes (for running tests)
+PROJECT_CHANGED=""
+PROJECT_SRC=""
+PROJECT_TEST=""
+
+map_file_to_project() {
+  local file="$1"
+  case "$file" in
+    modules/core/*)                              echo "core" ;;
+    modules/samples/*)                           echo "samples" ;;
+    modules/trace-opentelemetry/*)               echo "traceOpentelemetry" ;;
+    modules/workspace/workspaceShared/*)          echo "workspaceShared" ;;
+    modules/workspace/workspaceClient/*)          echo "workspaceClient" ;;
+    modules/workspace/workspaceRunner/*)          echo "workspaceRunner" ;;
+    modules/workspace/workspaceSamples/*)         echo "workspaceSamples" ;;
+    *) echo "" ;;
+  esac
+}
+
+is_test_file() {
+  local file="$1"
+  case "$file" in
+    */src/test/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+while IFS= read -r file; do
+  case "$file" in
+    *.scala)
+      proj=$(map_file_to_project "$file")
+      if [ -n "$proj" ]; then
+        set_add PROJECT_CHANGED "$proj"
+        if is_test_file "$file"; then
+          set_add PROJECT_TEST "$proj"
+        else
+          set_add PROJECT_SRC "$proj"
+        fi
+      fi
+      ;;
+  esac
+done <<< "$STAGED_FILES"
+
+if set_is_empty PROJECT_CHANGED; then
+  echo "No Scala files in known subprojects — skipping pre-commit checks."
+  exit 0
+fi
+
+# ── Downstream compile propagation ───────────────────────────────────────────
+# When source files change in a project, downstream dependents must compile.
+
+DOWNSTREAM_COMPILE=""
+
+propagate_downstream() {
+  local proj="$1"
+  case "$proj" in
+    core)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE traceOpentelemetry
+      set_add DOWNSTREAM_COMPILE workspaceClient
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
+    workspaceShared)
+      set_add DOWNSTREAM_COMPILE workspaceClient
+      set_add DOWNSTREAM_COMPILE workspaceRunner
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
+    samples)
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
+    workspaceClient)
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
+    workspaceRunner)
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
+  esac
+}
+
+for proj in $PROJECT_SRC; do
+  propagate_downstream "$proj"
+done
+
+# ── Build the SBT command list ───────────────────────────────────────────────
+
+SBT_CMDS=()
+
+# 1) scalafmt check for changed projects
+for proj in $PROJECT_CHANGED; do
+  SBT_CMDS+=("${proj}/scalafmtCheck")
+  SBT_CMDS+=("${proj}/Test/scalafmtCheck")
+done
+
+# 2) compile + test for directly changed projects
+for proj in $PROJECT_CHANGED; do
+  SBT_CMDS+=("${proj}/compile")
+  # Test if source or test files changed (source changes can break tests too)
+  if set_contains PROJECT_TEST "$proj" || set_contains PROJECT_SRC "$proj"; then
+    SBT_CMDS+=("${proj}/test")
+  fi
+done
+
+# 3) compile-only for downstream dependents (that aren't already being compiled)
+for proj in $DOWNSTREAM_COMPILE; do
+  if ! set_contains PROJECT_CHANGED "$proj"; then
+    SBT_CMDS+=("${proj}/compile")
+  fi
+done
+
+# ── Run SBT ──────────────────────────────────────────────────────────────────
+
+echo "=== Pre-commit: affected projects ==="
+echo "  Changed: $PROJECT_CHANGED"
+if ! set_is_empty DOWNSTREAM_COMPILE; then
+  # Show only downstream projects not already in the changed set
+  EXTRA=""
+  for proj in $DOWNSTREAM_COMPILE; do
+    if ! set_contains PROJECT_CHANGED "$proj"; then
+      EXTRA="${EXTRA:+$EXTRA }$proj"
+    fi
+  done
+  if [ -n "$EXTRA" ]; then
+    echo "  Downstream compile: $EXTRA"
+  fi
+fi
+echo "  SBT commands: ${SBT_CMDS[*]}"
+echo "======================================"
+
 if ! command -v sbt &> /dev/null; then
-    echo "Error: sbt is not installed or not in PATH"
-    exit 1
+  echo "Error: sbt is not installed or not in PATH"
+  exit 1
 fi
 
-# Run scalafmt check
-echo "Checking code formatting with scalafmt..."
-if ! sbt scalafmtCheckAll; then
-    echo "Error: Code is not properly formatted!"
-    echo "Please run 'sbt scalafmtAll' to format your code"
-    exit 1
-fi
-
-# Run compilation for all Scala versions
-echo "Compiling for all Scala versions..."
-if ! sbt +compile; then
-    echo "Error: Compilation failed!"
-    exit 1
-fi
-
-# Run tests for all Scala versions
-echo "Running tests for all Scala versions..."
-if ! sbt +test; then
-    echo "Error: Tests failed!"
-    exit 1
-fi
+# Single SBT invocation with all commands
+sbt "${SBT_CMDS[@]}"
 
 echo "All pre-commit checks passed!"

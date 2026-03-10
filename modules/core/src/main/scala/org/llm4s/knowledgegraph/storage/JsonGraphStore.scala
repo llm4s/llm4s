@@ -10,10 +10,21 @@ import java.nio.charset.StandardCharsets
 import scala.util.Try
 
 /**
- * JSON-based implementation of GraphStore.
+ * JSON-based implementation of GraphStore that persists graphs as JSON files.
  *
  * Thread-safety note: This implementation is NOT thread-safe.
  * For concurrent access, wrap with synchronization or use a thread-safe alternative.
+ *
+ * @example
+ * {{{
+ * val store = new JsonGraphStore(java.nio.file.Paths.get("/tmp/graph.json"))
+ * for {
+ *   _ <- store.upsertNode(Node("n1", "Person", Map("name" -> ujson.Str("Alice"))))
+ *   _ <- store.upsertNode(Node("n2", "Organization"))
+ *   _ <- store.upsertEdge(Edge("n1", "n2", "WORKS_FOR"))
+ *   graph <- store.loadAll()
+ * } yield graph
+ * }}}
  *
  * @param path The file path to save/load the graph
  */

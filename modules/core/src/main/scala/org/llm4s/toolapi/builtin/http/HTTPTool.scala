@@ -125,6 +125,10 @@ object HTTPTool {
    */
   val toolSafe: Result[ToolFunction[Map[String, Any], HTTPResult]] = createSafe()
 
+  /** Headers that must be stripped when a redirect crosses to a different host. */
+  private val SensitiveHeaders: Set[String] =
+    Set("authorization", "cookie", "proxy-authorization")
+
   private def makeRequest(
     urlStr: String,
     method: String,
@@ -137,21 +141,97 @@ object HTTPTool {
     if (!config.isMethodAllowed(method)) {
       Left(s"HTTP method '$method' is not allowed. Allowed: ${config.allowedMethods.mkString(", ")}")
     } else {
-      // Parse and validate URL
-      val urlResult = Try(URI.create(urlStr).toURL).toEither.left.map(e => s"Invalid URL: ${e.getMessage}")
 
-      urlResult.flatMap { url =>
-        // Extract domain from URL
-        val domain = Option(url.getHost).getOrElse("")
+      /**
+       * Recursively follow redirects with per-hop SSRF validation.
+       *
+       * For every hop we:
+       *  1. Parse and validate the URL
+       *  2. Check the destination domain/IP against the SSRF filter
+       *  3. Execute the request with auto-redirects disabled
+       *  4. If the response is 3xx and we still have hops left, extract
+       *     the `Location` header, resolve it to an absolute URL, and loop.
+       *
+       * Security measures applied on each redirect:
+       *  - Sensitive headers (Authorization, Cookie) are stripped on cross-origin hops
+       *  - 301/302 convert POST→GET and drop the request body (per HTTP spec)
+       *  - 307/308 preserve the original method and body
+       */
+      def go(
+        currentUrlStr: String,
+        currentMethod: String,
+        currentHeaders: Option[Map[String, String]],
+        currentBody: Option[String],
+        previousHost: Option[String],
+        hopsLeft: Int
+      ): Either[String, HTTPResult] =
+        Try(URI.create(currentUrlStr).toURL).toEither.left
+          .map(e => s"Invalid URL: ${e.getMessage}")
+          .flatMap { url =>
+            val scheme = url.getProtocol.toLowerCase
+            if (scheme != "http" && scheme != "https")
+              Left(
+                s"UNSUPPORTED_PROTOCOL: Only http and https are allowed (got: '$scheme')"
+              )
+            else {
+              val domain = Option(url.getHost).getOrElse("")
+              if (domain.isEmpty)
+                Left("URL has no host")
+              else if (!config.validateDomainWithSSRF(domain))
+                Left(s"SSRF_BLOCKED: domain '$domain' is not allowed")
+              else {
+                // Strip sensitive headers when the redirect crosses to a different host.
+                val safeHeaders = previousHost match {
+                  case Some(prevHost) if !prevHost.equalsIgnoreCase(domain) =>
+                    currentHeaders.map(_.filterNot { case (k, _) =>
+                      SensitiveHeaders.contains(k.toLowerCase)
+                    })
+                  case _ => currentHeaders
+                }
 
-        if (domain.isEmpty) {
-          Left("URL has no host")
-        } else if (!config.validateDomainWithSSRF(domain)) {
-          Left(s"Domain '$domain' is not allowed")
-        } else {
-          executeRequest(url, urlStr, method, headers, body, contentType, config)
-        }
-      }
+                executeRequest(url, currentUrlStr, currentMethod, safeHeaders, currentBody, contentType, config)
+                  .flatMap { result =>
+                    val isRedirect =
+                      Set(301, 302, 307, 308).contains(result.statusCode)
+                    if (config.followRedirects && isRedirect) {
+                      val locationOpt =
+                        result.headers
+                          .find { case (k, _) => k.equalsIgnoreCase("Location") }
+                          .map(_._2)
+                      locationOpt match {
+                        case None =>
+                          Right(result)
+                        case Some(_) if hopsLeft <= 0 =>
+                          Left(
+                            s"TOO_MANY_REDIRECTS: Too many redirects (max ${config.maxRedirects})"
+                          )
+                        case Some(location) =>
+                          val absoluteLocation =
+                            Try(url.toURI.resolve(location).toString).getOrElse(location)
+
+                          // Per HTTP spec: 301/302 convert POST→GET and drop the body.
+                          // 307/308 preserve the original method and body.
+                          val (nextMethod, nextBody) =
+                            if (
+                              Set(301, 302).contains(
+                                result.statusCode
+                              ) && currentMethod.toUpperCase != "GET" && currentMethod.toUpperCase != "HEAD"
+                            )
+                              ("GET", None)
+                            else
+                              (currentMethod, currentBody)
+
+                          go(absoluteLocation, nextMethod, currentHeaders, nextBody, Some(domain), hopsLeft - 1)
+                      }
+                    } else {
+                      Right(result)
+                    }
+                  }
+              }
+            }
+          }
+
+      go(urlStr, method, headers, body, previousHost = None, config.maxRedirects)
     }
 
   private def executeRequest(
@@ -172,7 +252,9 @@ object HTTPTool {
       connection.setRequestMethod(method.toUpperCase)
       connection.setConnectTimeout(config.timeoutMs)
       connection.setReadTimeout(config.timeoutMs)
-      connection.setInstanceFollowRedirects(config.followRedirects)
+      // Auto-redirects are always disabled; the makeRequest loop handles
+      // redirect following with per-hop SSRF validation (Issue #788).
+      connection.setInstanceFollowRedirects(false)
       connection.setRequestProperty("User-Agent", config.userAgent)
 
       // Set headers

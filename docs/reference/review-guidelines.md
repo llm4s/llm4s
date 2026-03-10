@@ -147,7 +147,7 @@ llm4s/
 │       └── trace/          # Langfuse, observability
 ├── modules/samples/        # Examples (relaxed review)
 ├── modules/workspace/      # Docker runner (relaxed review)
-└── modules/crossTest/      # Scala 2.13 + 3.x behavior tests
+└── modules/workspace/      # Docker runner and workspace support
 ```
 
 ### 2.2 Key API surfaces
@@ -169,7 +169,7 @@ llm4s/
 | **Config boundary**      | Scalafix: ban `sys.env` outside `config/` | `sys.env("OPENAI_API_KEY")` in `LLMClient`          |
 | **Purity**               | IO at edges only                          | `scala.io.Source.fromFile` in validation logic      |
 | **Type safety**          | Newtypes, not primitives                  | `def setModel(name: String)` instead of `ModelName` |
-| **Cross-build**          | Single source, `ScalaCompat` shims        | Version-specific logic in shared source             |
+| **Version boundaries**   | Keep shared code Scala 3-first and isolate version-specific logic | Carrying compatibility shims in shared source |
 
 ### 2.4 Scalafix enforcements
 
@@ -834,16 +834,15 @@ val connection: Result[HttpURLConnection] = url.openConnection() match {
 - [ ] No `asInstanceOf[T]` - use pattern matching with error handling
 - [ ] Use `.collect` for safe type filtering in collections
 
-### 5.4 Cross-build compatibility (MEDIUM)
+### 5.4 Version-specific code (MEDIUM)
 
-**Rule**: Single source tree for Scala 2.13.16 and 3.7.1. Use `ScalaCompat` for shims.
+**Rule**: Keep shared source as the default. Only introduce version-specific source trees when compiler or language behavior genuinely differs.
 
 **Check**:
 
-- [ ] No Scala 3-only syntax in shared source (`src/main/scala/`)
-- [ ] Version-specific code in `src/main/scala-2.13/` or `src/main/scala-3/`
-- [ ] Run `sbt +test` before merge
-- [ ] No `import scala.language.experimental.*` in Scala 2 code
+- [ ] No unnecessary version-specific logic in shared source (`src/main/scala/`)
+- [ ] Version-specific code exists only when Scala-version behavior actually differs
+- [ ] Run the appropriate build/test command for the supported branch before merge
 
 ### 5.5 Error handling patterns (HIGH)
 

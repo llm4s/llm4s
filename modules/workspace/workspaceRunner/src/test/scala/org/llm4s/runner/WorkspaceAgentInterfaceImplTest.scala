@@ -1,11 +1,14 @@
 package org.llm4s.runner
 
 import org.llm4s.shared._
+
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import scala.jdk.CollectionConverters._
+import scala.util.Using
 
 class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org.scalatest.BeforeAndAfterAll {
 
@@ -86,27 +89,17 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
     // Verify modification
     val content = new String(Files.readAllBytes(tempDir.resolve("modify-test.txt")), StandardCharsets.UTF_8)
 
-    println("----- DEBUG [TEST]: Content read after modifyFile -----")
-    println(s"```\n${content}\n```") // Print the content clearly delimited
-    println("----- END DEBUG [TEST] -----")
-
     content should include("Modified Line 2")
     content should include("Modified Line 3")
-    // (content should not).include("Line 3")
 
     val lineSep = System.lineSeparator()
-
-// Construct the exact expected string. Note: writer.println adds a newline AFTER EACH line.
     val expectedContent = Seq(
       "Line 1",
       "Modified Line 2",
       "Modified Line 3",
       "Line 5"
-    ).mkString(lineSep) + lineSep // Add the trailing newline added by the last println
-
-// Perform the precise comparison
+    ).mkString(lineSep) + lineSep
     content shouldBe expectedContent
-
   }
 
   it should "search files for content" in {
@@ -120,6 +113,65 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
     response.matches should not be empty
     response.matches.exists(_.path == "test1.txt") shouldBe true
     response.matches.exists(_.path == "test2.txt") shouldBe true
+    // truncated should be false when number of hits is small
+    response.isTruncated shouldBe false
+  }
+
+  it should "set isTruncated when result cap is reached" in {
+    // prepare a file with multiple matches
+    val bigFile = tempDir.resolve("big.txt")
+    val content = List.fill(5)("needle").mkString("\n")
+    Files.write(bigFile, content.getBytes(StandardCharsets.UTF_8))
+
+    // create an interface with a very small search limit so we hit truncation
+    val tinyLimits = WorkspaceSandboxConfig.DefaultLimits.copy(maxSearchResults = 2)
+    val smallInterface =
+      new WorkspaceAgentInterfaceImpl(workspacePath, isWindowsHost, Some(WorkspaceSandboxConfig(limits = tinyLimits)))
+
+    val resp = smallInterface.searchFiles(
+      paths = List("."),
+      query = "needle",
+      searchType = "literal",
+      recursive = Some(true)
+    )
+
+    resp.matches.size shouldBe 2
+    resp.isTruncated shouldBe true
+    // totalMatches is only guaranteed to go one past the cap; we don't scan the
+    // whole workspace for performance reasons.
+    resp.totalMatches shouldBe 3
+  }
+
+  it should "exclude default patterns consistently with Windows path separators" in {
+    val issueDir      = tempDir.resolve("issue-718")
+    val projectDir    = issueDir.resolve("project")
+    val gitDir        = projectDir.resolve(".git")
+    val gitConfigFile = gitDir.resolve("config")
+    val targetDir     = projectDir.resolve("target")
+    val classFile     = targetDir.resolve("App.class")
+    val srcDir        = projectDir.resolve("src")
+    val srcFile       = srcDir.resolve("Main.scala")
+
+    Files.createDirectories(projectDir)
+    Files.createDirectories(gitDir)
+    Files.createDirectories(targetDir)
+    Files.createDirectories(srcDir)
+    Files.write(gitConfigFile, "[core]\nrepositoryformatversion = 0".getBytes(StandardCharsets.UTF_8))
+    Files.write(classFile, "bytecode".getBytes(StandardCharsets.UTF_8))
+    Files.write(srcFile, "object Main".getBytes(StandardCharsets.UTF_8))
+
+    val response = interface.exploreFiles(
+      "issue-718",
+      recursive = Some(true),
+      excludePatterns = Some(List("**/.git/**", "**/target/**"))
+    )
+
+    val normalizedPaths = response.files.map(_.path.replace("\\", "/"))
+    normalizedPaths should not contain "issue-718/project/.git"
+    normalizedPaths should not contain "issue-718/project/.git/config"
+    normalizedPaths should not contain "issue-718/project/target"
+    normalizedPaths should not contain "issue-718/project/target/App.class"
+    normalizedPaths should contain("issue-718/project/src/Main.scala")
   }
 
   it should "execute commands" in {
@@ -145,12 +197,33 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
     ex.error should include("shellAllowed")
   }
 
+  it should "forcibly terminate timed-out commands" in {
+    // Use a command that ignores SIGTERM (trap '' TERM) and sleeps
+    // The fix should escalate to destroyForcibly after destroy() fails
+    if (!isWindowsHost) {
+      val shortTimeoutConfig = WorkspaceSandboxConfig(
+        defaultCommandTimeoutSeconds = 1
+      )
+      val timedInterface = new WorkspaceAgentInterfaceImpl(
+        workspacePath,
+        isWindowsHost,
+        Some(shortTimeoutConfig)
+      )
+
+      val ex = the[WorkspaceAgentException] thrownBy {
+        timedInterface.executeCommand("sleep 60")
+      }
+      ex.code shouldBe "TIMEOUT"
+      ex.error should include("timed out")
+    }
+  }
+
   // Clean up after tests
   override def afterAll(): Unit = {
     // Delete temporary directory recursively
     def deleteRecursively(path: java.nio.file.Path): Unit = {
       if (Files.isDirectory(path)) {
-        Files.list(path).forEach(p => deleteRecursively(p))
+        Using.resource(Files.list(path))(stream => stream.iterator().asScala.foreach(deleteRecursively))
       }
       Files.deleteIfExists(path)
     }

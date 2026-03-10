@@ -158,7 +158,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       blocking {
         generateImage(prompt, options)
       }
-    }
+    }.recover { case ex => Left(UnknownError(ex)) }
 
   override def generateImagesAsync(
     prompt: String,
@@ -169,7 +169,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       blocking {
         generateImages(prompt, count, options)
       }
-    }
+    }.recover { case ex => Left(UnknownError(ex)) }
 
   override def editImageAsync(
     imagePath: Path,
@@ -181,7 +181,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       blocking {
         editImage(imagePath, prompt, maskPath, options)
       }
-    }
+    }.recover { case ex => Left(UnknownError(ex)) }
 
   override def health(): Either[ImageGenerationError, ServiceStatus] = {
     val healthUrl = s"${config.baseUrl.stripSuffix("/images/generations").stripSuffix("/v1")}/v1/models"

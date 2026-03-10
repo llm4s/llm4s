@@ -49,6 +49,8 @@ object LLMConnect {
         DeepSeekClient(cfg, metrics)
       case cfg: CohereConfig =>
         CohereClient(cfg, metrics)
+      case cfg: MistralConfig =>
+        MistralClient(cfg, metrics)
     }
 
   // ---- Config-driven construction -----------------------------------------
@@ -120,6 +122,7 @@ object LLMConnect {
       case (LLMProvider.Gemini, cfg: GeminiConfig)       => GeminiClient(cfg, metrics)
       case (LLMProvider.DeepSeek, cfg: DeepSeekConfig)   => DeepSeekClient(cfg, metrics)
       case (LLMProvider.Cohere, cfg: CohereConfig)       => CohereClient(cfg, metrics)
+      case (LLMProvider.Mistral, cfg: MistralConfig)     => MistralClient(cfg, metrics)
       case (prov, wrongCfg) =>
         val cfgType = wrongCfg.getClass.getSimpleName
         val msg     = s"Invalid config type $cfgType for provider $prov"
