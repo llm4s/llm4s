@@ -18,6 +18,10 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
   private val isWindowsHost = System.getProperty("os.name").startsWith("Windows")
   val interface             = new WorkspaceAgentInterfaceImpl(workspacePath, isWindowsHost)
 
+  /** Creates a fresh interface with the given sandbox config for isolation. */
+  private def newInterface(config: WorkspaceSandboxConfig) =
+    new WorkspaceAgentInterfaceImpl(workspacePath, isWindowsHost, Some(config))
+
   // Create some test files
   val testFile1 = tempDir.resolve("test1.txt")
   val testFile2 = tempDir.resolve("test2.txt")
@@ -248,13 +252,15 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
     ex.error should include("|")
   }
 
+  it should "block commands containing percent expansion '%'" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("echo %PATH%")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include("%")
+  }
+
   it should "reject executeCommand when sandbox has shellAllowed=false" in {
-    val lockedInterface = new WorkspaceAgentInterfaceImpl(
-      workspacePath,
-      isWindowsHost,
-      Some(WorkspaceSandboxConfig.LockedDown)
-    )
-    val ex = the[WorkspaceAgentException] thrownBy lockedInterface.executeCommand("echo hello")
+    val ex = the[WorkspaceAgentException] thrownBy
+      newInterface(WorkspaceSandboxConfig.LockedDown).executeCommand("echo hello")
     ex.code shouldBe "SHELL_DISABLED"
     ex.error should include("shellAllowed")
   }
@@ -277,6 +283,43 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
       }
       ex.code shouldBe "TIMEOUT"
       ex.error should include("timed out")
+    }
+  }
+
+  it should "reject destructive commands under a read-only sandbox configuration" in {
+    // ReadOnlyCommands excludes write-capable commands like 'rm'. Verify that
+    // 'rm test.txt' is blocked at the allowlist check with EXECUTABLE_NOT_ALLOWED.
+    val ex = the[WorkspaceAgentException] thrownBy
+      newInterface(WorkspaceSandboxConfig(allowedCommands = WorkspaceSandboxConfig.ReadOnlyCommands))
+        .executeCommand("rm test.txt")
+    ex.code shouldBe "EXECUTABLE_NOT_ALLOWED"
+    ex.error should include("rm")
+  }
+
+  it should "reject destructive commands under default sandbox policy" in {
+    // WorkspaceSandboxConfig() defaults to shellAllowed=true and ReadOnlyCommands.
+    val ex = the[WorkspaceAgentException] thrownBy
+      newInterface(WorkspaceSandboxConfig())
+        .executeCommand("rm test.txt")
+    ex.code shouldBe "EXECUTABLE_NOT_ALLOWED"
+    ex.error should include("rm")
+  }
+
+  it should "allow write commands under a read-write sandbox configuration" in {
+    // ReadWriteCommands must pass the allowlist gate for write-capable commands.
+    // The command may fail at the OS level but must NOT throw EXECUTABLE_NOT_ALLOWED.
+    val cmd =
+      if (isWindowsHost) "mkdir test-write-sandbox-check"
+      else "rm nonexistent-file-12345.txt"
+    try {
+      newInterface(WorkspaceSandboxConfig(allowedCommands = WorkspaceSandboxConfig.ReadWriteCommands))
+        .executeCommand(cmd)
+      succeed
+    } catch {
+      case e: WorkspaceAgentException if e.code == "EXECUTABLE_NOT_ALLOWED" =>
+        fail(s"Write command was incorrectly rejected by the allowlist: ${e.error}")
+      case _: WorkspaceAgentException =>
+        succeed // EXECUTION_FAILED / TIMEOUT means allowlist check passed
     }
   }
 
