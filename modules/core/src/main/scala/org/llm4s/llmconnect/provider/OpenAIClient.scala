@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import com.azure.ai.openai.models._
 import com.azure.ai.openai.{ OpenAIClientBuilder, OpenAIServiceVersion, OpenAIClient => AzureOpenAIClient }
 import com.azure.core.credential.{ AzureKeyCredential, KeyCredential }
-import com.azure.core.util.IterableStream
+import com.azure.core.util.{ BinaryData, IterableStream }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig }
@@ -386,6 +386,18 @@ class OpenAIClient private (
     if (options.tools.nonEmpty) {
       val toolRegistry = new ToolRegistry(options.tools)
       AzureToolHelper.addToolsToOptions(toolRegistry, chatOptions)
+    }
+
+    // Add response format (structured output) if specified
+    // OpenAI/Azure: Json -> ChatCompletionsJsonResponseFormat; JsonSchema -> ChatCompletionsJsonSchemaResponseFormat
+    options.responseFormat.foreach {
+      case ResponseFormat.Json =>
+        chatOptions.setResponseFormat(new ChatCompletionsJsonResponseFormat())
+      case js: ResponseFormat.JsonSchema =>
+        val inner = new ChatCompletionsJsonSchemaResponseFormatJsonSchema(js.name)
+        inner.setSchema(BinaryData.fromString(js.schema.render()))
+        inner.setStrict(js.strict)
+        chatOptions.setResponseFormat(new ChatCompletionsJsonSchemaResponseFormat(inner))
     }
 
     chatOptions

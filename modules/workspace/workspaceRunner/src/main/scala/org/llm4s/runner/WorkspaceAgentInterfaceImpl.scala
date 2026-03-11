@@ -3,15 +3,15 @@ package org.llm4s.runner
 import org.llm4s.shared._
 
 import java.io.{ BufferedWriter, PrintWriter }
-import java.nio.charset.StandardCharsets
+import java.nio.charset.{ Charset, StandardCharsets }
 import java.nio.file.{ Files, Path, Paths, StandardOpenOption }
 import java.time.Instant
 import java.time.format.DateTimeFormatter
 import java.util.regex.Pattern
 import scala.io.Source
 import scala.jdk.CollectionConverters._
-import scala.sys.process._
 import scala.util.{ Failure, Success, Try, Using }
+import java.util.concurrent.TimeUnit
 
 /**
  * Implementation of WorkspaceAgentInterface that operates on a local filesystem workspace.
@@ -585,43 +585,63 @@ class WorkspaceAgentInterfaceImpl(
     val timeoutMs = (timeoutSeconds.getOrElse(config.defaultCommandTimeoutSeconds) * 1000).toLong
     val env       = environment.getOrElse(Map.empty)
 
-    val cmd = if (isWindows) {
-      Seq("cmd.exe", "/c", command)
+    val builder = if (isWindows) {
+      new java.lang.ProcessBuilder("cmd.exe", "/c", command)
     } else {
-      Seq("sh", "-c", command)
+      new java.lang.ProcessBuilder("sh", "-c", command)
     }
-    val processBuilder = Process(
-      command = cmd,
-      cwd = workDir,
-      extraEnv = env.toSeq: _*
-    )
+    builder.directory(workDir)
+    env.foreach { case (k, v) => builder.environment().put(k, v) }
 
     val stdout    = new StringBuilder
     val stderr    = new StringBuilder
     val startTime = System.currentTimeMillis()
 
     val exitCode = Try {
-      val process = processBuilder.run(
-        ProcessLogger(
-          line =>
+      val process = builder.start()
+
+      // Read stdout and stderr in background threads to prevent blocking
+      val stdoutThread = new Thread(() => {
+        val reader = new java.io.BufferedReader(
+          new java.io.InputStreamReader(process.getInputStream, Charset.defaultCharset())
+        )
+        try {
+          var line = reader.readLine()
+          while (line != null) {
             if (stdout.length < defaultLimits.maxOutputSize) {
               stdout.append(line).append("\n")
-            },
-          line =>
+            }
+            line = reader.readLine()
+          }
+        } finally reader.close()
+      })
+
+      val stderrThread = new Thread(() => {
+        val reader = new java.io.BufferedReader(
+          new java.io.InputStreamReader(process.getErrorStream, Charset.defaultCharset())
+        )
+        try {
+          var line = reader.readLine()
+          while (line != null) {
             if (stderr.length < defaultLimits.maxOutputSize) {
               stderr.append(line).append("\n")
             }
-        )
-      )
+            line = reader.readLine()
+          }
+        } finally reader.close()
+      })
 
-      while (process.isAlive() && System.currentTimeMillis() - startTime < timeoutMs)
-        Thread.sleep(100)
+      stdoutThread.setDaemon(true)
+      stderrThread.setDaemon(true)
+      stdoutThread.start()
+      stderrThread.start()
 
-      val completed = !process.isAlive()
+      val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
 
       if (!completed) {
         // Attempt graceful termination first
         process.destroy()
+<<<<<<< new-branch
 
         // Wait briefly for graceful termination (3 seconds)
         val gracefulTerminationTimeoutMs = 3000L
@@ -655,12 +675,23 @@ class WorkspaceAgentInterfaceImpl(
             Thread.sleep(100)
         }
 
+=======
+        // Wait up to 2 seconds for graceful termination before escalating
+        if (!process.waitFor(2, TimeUnit.SECONDS)) {
+          process.destroyForcibly()
+          process.waitFor(3, TimeUnit.SECONDS)
+        }
+>>>>>>> main
         throw new WorkspaceAgentException(
           s"Command execution timed out after ${timeoutMs}ms",
           "TIMEOUT",
           None
         )
       }
+
+      // Wait for output threads to finish capturing
+      stdoutThread.join(2000)
+      stderrThread.join(2000)
 
       process.exitValue()
     }.recover {

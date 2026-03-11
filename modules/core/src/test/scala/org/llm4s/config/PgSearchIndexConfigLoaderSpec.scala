@@ -28,6 +28,7 @@ class PgSearchIndexConfigLoaderSpec extends AnyWordSpec with Matchers with Eithe
           |        user = "pguser"
           |        password = "pgpass123"
           |        vectorTableName = "my_vectors"
+          |        keywordTableName = "my_keywords"
           |        maxPoolSize = 20
           |      }
           |    }
@@ -45,6 +46,7 @@ class PgSearchIndexConfigLoaderSpec extends AnyWordSpec with Matchers with Eithe
       pg.user shouldBe "pguser"
       pg.password shouldBe "pgpass123"
       pg.vectorTableName shouldBe "my_vectors"
+      pg.keywordTableName shouldBe "my_keywords"
       pg.maxPoolSize shouldBe 20
     }
 
@@ -95,6 +97,7 @@ class PgSearchIndexConfigLoaderSpec extends AnyWordSpec with Matchers with Eithe
           |        user = "postgres"
           |        password = ""
           |        vectorTableName = "vectors"
+          |        keywordTableName = "documents"
           |        maxPoolSize = 10
           |      }
           |    }
@@ -110,6 +113,7 @@ class PgSearchIndexConfigLoaderSpec extends AnyWordSpec with Matchers with Eithe
       pg.port shouldBe 5432
       pg.database shouldBe "postgres"
       pg.vectorTableName shouldBe "vectors"
+      pg.keywordTableName shouldBe "documents"
       pg.maxPoolSize shouldBe 10
       pg.jdbcUrl shouldBe "jdbc:postgresql://localhost:5432/postgres"
     }

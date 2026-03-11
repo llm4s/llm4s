@@ -89,7 +89,6 @@ object Deps {
 }
 
 object Common {
-  val scala213 = "2.13.16"
   val scala3 = "3.7.1"
 
   val scala3CompilerOptions = Seq(
@@ -105,25 +104,6 @@ object Common {
     "-Werror"
   )
 
-  val scala2CompilerOptions = Seq(
-    "-Xfatal-warnings",
-    "-feature",
-    "-unchecked",
-    "-deprecation",
-    "-Wunused:nowarn",
-    "-Wunused:imports",
-    "-Wunused:locals",
-    "-Wunused:patvars",
-    "-Wunused:params",
-    "-Wunused:linted",
-    "-Ytasty-reader"
-  )
-
-  // ---- scalacOptions helper ----
   def scalacOptionsForVersion(scalaVersion: String): Seq[String] =
-    CrossVersion.partialVersion(scalaVersion) match {
-      case Some((2, 13)) => scala2CompilerOptions
-      case Some((3, _)) => scala3CompilerOptions
-      case _ => Seq.empty
-    }
+    scala3CompilerOptions
 }

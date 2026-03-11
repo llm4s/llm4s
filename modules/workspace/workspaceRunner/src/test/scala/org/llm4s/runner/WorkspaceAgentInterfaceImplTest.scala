@@ -197,6 +197,27 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
     ex.error should include("shellAllowed")
   }
 
+  it should "forcibly terminate timed-out commands" in {
+    // Use a command that ignores SIGTERM (trap '' TERM) and sleeps
+    // The fix should escalate to destroyForcibly after destroy() fails
+    if (!isWindowsHost) {
+      val shortTimeoutConfig = WorkspaceSandboxConfig(
+        defaultCommandTimeoutSeconds = 1
+      )
+      val timedInterface = new WorkspaceAgentInterfaceImpl(
+        workspacePath,
+        isWindowsHost,
+        Some(shortTimeoutConfig)
+      )
+
+      val ex = the[WorkspaceAgentException] thrownBy {
+        timedInterface.executeCommand("sleep 60")
+      }
+      ex.code shouldBe "TIMEOUT"
+      ex.error should include("timed out")
+    }
+  }
+
   // Clean up after tests
   override def afterAll(): Unit = {
     // Delete temporary directory recursively

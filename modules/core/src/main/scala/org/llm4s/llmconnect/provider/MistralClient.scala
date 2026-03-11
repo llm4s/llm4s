@@ -36,6 +36,12 @@ class MistralClient(
   protected def providerName: String      = "mistral"
   protected def modelName: String         = config.model
 
+  override protected def releaseResources(): Unit =
+    (httpClient: Any) match {
+      case c: AutoCloseable => c.close()
+      case _                => ()
+    }
+
   override def complete(
     conversation: Conversation,
     options: CompletionOptions

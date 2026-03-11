@@ -37,8 +37,8 @@ jobs:
       - name: Check formatting
         run: sbt scalafmtCheckAll
       
-      - name: Compile all Scala versions
-        run: sbt +compile
+      - name: Compile
+        run: sbt compile
 
   # Code coverage (runs on one configuration to avoid duplication)
   coverage:
@@ -111,7 +111,6 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        scala: [2.13.16, 3.7.1]
         java: [21]
 
     runs-on: ${{ matrix.os }}
@@ -128,20 +127,16 @@ jobs:
       - uses: sbt/setup-sbt@v1
       
       - name: Run tests
-        run: sbt ++${{ matrix.scala }} test
-      
-      - name: Run cross-version tests
-        run: sbt testCross
+        run: sbt test
       
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          # Include OS and Scala version to make CI failures easier to diagnose
-          name: test-reports-${{ matrix.os }}-scala-${{ matrix.scala }}
+          name: test-reports-${{ matrix.os }}
           path: |
             **/target/test-reports/
-            **/target/scala-${{ matrix.scala }}/test-reports/
+            **/target/scala-3.7.1/test-reports/
           retention-days: 5
 
   # All tests must pass
@@ -165,3 +160,62 @@ jobs:
             exit 1
           fi
           echo "All tests passed!"
+
+  # Tier 2: Ollama integration tests — verifies full round-trip against a real
+  # local LLM. Only runs on pushes to main to avoid slowing down PR builds.
+  ollama-integration:
+    name: Ollama Integration
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Install Ollama
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      - name: Pull test model
+        run: ollama pull qwen2.5:0.5b
+
+      - name: Run Ollama integration tests
+        run: sbt testOllama
+
+  # Tier 3: Cloud smoke tests — minimal sanity checks against real cloud APIs.
+  # Manual trigger only (workflow_dispatch) to avoid unintended API costs.
+  cloud-smoke:
+    name: Cloud Smoke Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Run cloud smoke tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: sbt testSmoke

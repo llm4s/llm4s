@@ -2,6 +2,10 @@
 
 Thank you for your interest in contributing to LLM4S!
 
+## Code of Conduct
+
+This project follows our [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold these standards.
+
 ## Quick Start
 
 1. **Read the docs:**

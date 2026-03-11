@@ -242,10 +242,49 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     consolidated.isRight shouldBe true
 
     // Verify no consolidation happened
-    val finalStore = consolidated.toOption.get.store
+    val finalStore = consolidated.getOrElse(fail("Expected Right")).store
     val remaining  = finalStore.recall(MemoryFilter.All, 100)
 
-    (remaining.toOption.get should have).length(2)
+    (remaining.getOrElse(fail("Expected Right")) should have).length(2)
+  }
+
+  it should "limit consolidation groups dynamically based on token budget" in {
+    // MockLLMClient returns contextWindow=4096, reserveCompletion=1024
+    // getContextBudget() with Standard headroom (8%) = (4096 - 1024) * 0.92 = 2826 tokens
+    val manager = createManager()
+
+    // Each string ~8000 chars ≈ 2000 tokens. Two would exceed ~2826 token budget.
+    val massiveString = "A" * 8000
+
+    val populated = for {
+      // 3 massive memories for the same user (each ~2000 tokens, only first fits in budget)
+      m1 <- manager.recordUserFact(massiveString + "1", Some("user-limit"), None)
+      m2 <- m1.recordUserFact(massiveString + "2", Some("user-limit"), None)
+      m3 <- m2.recordUserFact(massiveString + "3", Some("user-limit"), None)
+      // 3 tiny memories (all fit in budget together)
+      m4 <- m3.recordUserFact("Tiny 1", Some("user-tiny"), None)
+      m5 <- m4.recordUserFact("Tiny 2", Some("user-tiny"), None)
+      m6 <- m5.recordUserFact("Tiny 3", Some("user-tiny"), None)
+    } yield m6
+
+    val consolidated = populated.flatMap(
+      _.consolidateMemories(
+        olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
+        minCount = 3
+      )
+    )
+
+    consolidated.isRight shouldBe true
+    val store = consolidated.getOrElse(fail("Expected Right")).store
+
+    // Tiny user group (minCount=3): all fit in budget → consolidated into 1 memory
+    val tinyMemories = store.recall(MemoryFilter.ByMetadata("user_id", "user-tiny"), 100)
+    tinyMemories.getOrElse(fail("Expected Right")).length shouldBe 1
+
+    // Large user group: first memory always included (~2000 tokens), but second exceeds
+    // remaining budget (~826 tokens). Group capped to 1 → fails minCount=3 → not consolidated.
+    val largeMemories = store.recall(MemoryFilter.ByMetadata("user_id", "user-limit"), 100)
+    largeMemories.getOrElse(fail("Expected Right")).length shouldBe 3
   }
 
   it should "not consolidate when each group is below minCount" in {

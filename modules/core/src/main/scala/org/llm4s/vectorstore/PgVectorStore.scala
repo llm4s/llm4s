@@ -2,6 +2,7 @@ package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
 import org.llm4s.error.{ ProcessingError, LLMError }
+import org.llm4s.util.SqlIdentifier
 
 import java.sql.{ Connection, PreparedStatement, ResultSet }
 import scala.collection.mutable.ArrayBuffer
@@ -532,6 +533,29 @@ final class PgVectorStore private (
 object PgVectorStore {
 
   /**
+   * Validate a table name against PostgreSQL identifier rules.
+   * Delegates to the shared SqlIdentifier validator.
+   */
+  def validateTableName(name: String): Result[String] =
+    SqlIdentifier.validate(name, "pgvector-store")
+
+  /**
+   * Create a PgVectorStore from an existing HikariDataSource after validating the table name.
+   * Validation is performed before any side-effects (like opening connections) occur.
+   *
+   * By default, the dataSource is NOT owned (ownsDataSource = false), meaning the caller remains
+   * responsible for managing the dataSource lifecycle. Pass ownsDataSource = true if you want
+   * the PgVectorStore to close the dataSource on close(). This is safe for exclusive-use pools
+   * but dangerous for shared pools across multiple stores.
+   */
+  def create(dataSource: HikariDataSource, tableName: String, ownsDataSource: Boolean = false): Result[PgVectorStore] =
+    validateTableName(tableName).flatMap { _ =>
+      Try {
+        new PgVectorStore(dataSource, tableName, ownsDataSource)
+      }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+    }
+
+  /**
    * Configuration for PgVectorStore.
    *
    * @param host Database host
@@ -561,20 +585,22 @@ object PgVectorStore {
    * @return The vector store or error
    */
   def apply(config: Config): Result[PgVectorStore] =
-    Try {
-      val hikariConfig = new HikariConfig()
-      hikariConfig.setJdbcUrl(config.jdbcUrl)
-      hikariConfig.setUsername(config.user)
-      hikariConfig.setPassword(config.password)
-      hikariConfig.setMaximumPoolSize(config.maxPoolSize)
-      hikariConfig.setMinimumIdle(1)
-      hikariConfig.setConnectionTimeout(30000)
-      hikariConfig.setIdleTimeout(600000)
-      hikariConfig.setMaxLifetime(1800000)
+    validateTableName(config.tableName).flatMap { _ =>
+      Try {
+        val hikariConfig = new HikariConfig()
+        hikariConfig.setJdbcUrl(config.jdbcUrl)
+        hikariConfig.setUsername(config.user)
+        hikariConfig.setPassword(config.password)
+        hikariConfig.setMaximumPoolSize(config.maxPoolSize)
+        hikariConfig.setMinimumIdle(1)
+        hikariConfig.setConnectionTimeout(30000)
+        hikariConfig.setIdleTimeout(600000)
+        hikariConfig.setMaxLifetime(1800000)
 
-      val dataSource = new HikariDataSource(hikariConfig)
-      new PgVectorStore(dataSource, config.tableName)
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+        val dataSource = new HikariDataSource(hikariConfig)
+        new PgVectorStore(dataSource, config.tableName)
+      }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+    }
 
   /**
    * Create a PgVectorStore from connection string.
@@ -591,17 +617,19 @@ object PgVectorStore {
     password: String = "",
     tableName: String = "vectors"
   ): Result[PgVectorStore] =
-    Try {
-      val hikariConfig = new HikariConfig()
-      hikariConfig.setJdbcUrl(connectionString)
-      hikariConfig.setUsername(user)
-      hikariConfig.setPassword(password)
-      hikariConfig.setMaximumPoolSize(10)
-      hikariConfig.setMinimumIdle(1)
+    validateTableName(tableName).flatMap { _ =>
+      Try {
+        val hikariConfig = new HikariConfig()
+        hikariConfig.setJdbcUrl(connectionString)
+        hikariConfig.setUsername(user)
+        hikariConfig.setPassword(password)
+        hikariConfig.setMaximumPoolSize(10)
+        hikariConfig.setMinimumIdle(1)
 
-      val dataSource = new HikariDataSource(hikariConfig)
-      new PgVectorStore(dataSource, tableName)
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+        val dataSource = new HikariDataSource(hikariConfig)
+        new PgVectorStore(dataSource, tableName)
+      }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+    }
 
   /**
    * Create a PgVectorStore with default local settings.
@@ -628,7 +656,5 @@ object PgVectorStore {
    * @return The vector store or error
    */
   def apply(dataSource: HikariDataSource, tableName: String): Result[PgVectorStore] =
-    Try {
-      new PgVectorStore(dataSource, tableName, ownsDataSource = false)
-    }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to create store: ${e.getMessage}"))
+    create(dataSource, tableName, ownsDataSource = false)
 }

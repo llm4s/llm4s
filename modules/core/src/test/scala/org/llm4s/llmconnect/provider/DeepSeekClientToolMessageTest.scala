@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.llmconnect.model.{
   Conversation,
   CompletionOptions,
+  ResponseFormat,
   ToolMessage,
   UserMessage,
   AssistantMessage,
@@ -124,5 +125,21 @@ class DeepSeekClientToolMessageTest extends AnyFlatSpec with Matchers {
     val toolMsg2 = messages(3).obj
     toolMsg2("tool_call_id").str shouldBe "call_2"
     toolMsg2("content").str shouldBe """{"temp": 45}"""
+  }
+
+  it should "include response_format when ResponseFormat.Json is set" in {
+    val conversation = Conversation(Seq(UserMessage("Hello")))
+    val options      = CompletionOptions().withResponseFormat(ResponseFormat.Json)
+    val requestBody  = DeepSeekRequestBodyTestHelper.createRequestBody(conversation, options)
+
+    (requestBody.obj should contain).key("response_format")
+    requestBody("response_format")("type").str shouldBe "json_object"
+  }
+
+  it should "omit response_format when responseFormat is not set" in {
+    val conversation = Conversation(Seq(UserMessage("Hello")))
+    val requestBody  = DeepSeekRequestBodyTestHelper.createRequestBody(conversation, CompletionOptions())
+
+    requestBody.obj should not contain key("response_format")
   }
 }

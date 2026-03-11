@@ -616,7 +616,15 @@ class SSETransportImpl(
 // - Lock management (ReentrantLock release in finally)
 // - Thread interrupt handling (catching InterruptedException)
 // - Low-level concurrent I/O error handling
-class StdioTransportImpl(command: Seq[String], override val name: String) extends MCPTransportImpl {
+class StdioTransportImpl(
+  command: Seq[String],
+  override val name: String,
+  startupTimeoutMs: Int = 10000
+) extends MCPTransportImpl {
+
+  /** Binary-compatible auxiliary constructor matching the pre-timeout 2-param signature. */
+  def this(command: Seq[String], name: String) = this(command, name, 10000)
+
   private val logger                                       = LoggerFactory.getLogger(getClass)
   private var process: Option[Process]                     = None
   private val requestId                                    = new AtomicLong(0)
@@ -634,8 +642,8 @@ class StdioTransportImpl(command: Seq[String], override val name: String) extend
 
   // Timeout for server responses (30 seconds)
   private val RESPONSE_TIMEOUT_MS = 30000L
-  // Timeout for server startup (10 seconds)
-  private val STARTUP_TIMEOUT_MS = 10000
+  // Timeout for server startup
+  private val STARTUP_TIMEOUT_MS = startupTimeoutMs
 
   logger.info(s"StdioTransport($name) initialized with command: ${command.mkString(" ")}")
 
@@ -807,7 +815,7 @@ class StdioTransportImpl(command: Seq[String], override val name: String) extend
         return Right(())
       }
 
-      Thread.sleep(100) // Small delay before checking again
+      Thread.sleep(10) // Small delay before checking again
     }
 
     // Server might be ready even without immediate output

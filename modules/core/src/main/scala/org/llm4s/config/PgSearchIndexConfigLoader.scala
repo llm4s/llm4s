@@ -8,13 +8,14 @@ import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 object PgSearchIndexConfigLoader {
 
   implicit private val pgConfigReader: PureConfigReader[SearchIndex.PgConfig] =
-    PureConfigReader.forProduct7(
+    PureConfigReader.forProduct8(
       "host",
       "port",
       "database",
       "user",
       "password",
       "vectorTableName",
+      "keywordTableName",
       "maxPoolSize"
     )(SearchIndex.PgConfig.apply)
 

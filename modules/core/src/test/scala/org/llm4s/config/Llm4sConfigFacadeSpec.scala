@@ -72,6 +72,7 @@ class Llm4sConfigFacadeSpec extends AnyWordSpec with Matchers {
         "llm4s.rag.permissions.pg.user",
         "llm4s.rag.permissions.pg.password",
         "llm4s.rag.permissions.pg.vectorTableName",
+        "llm4s.rag.permissions.pg.keywordTableName",
         "llm4s.rag.permissions.pg.maxPoolSize"
       )
       withProps(Map.empty, pgKeys) {
@@ -88,13 +89,14 @@ class Llm4sConfigFacadeSpec extends AnyWordSpec with Matchers {
 
     "load valid pg config with overrides" in {
       val props = Map(
-        "llm4s.rag.permissions.pg.host"            -> "localhost",
-        "llm4s.rag.permissions.pg.port"            -> "5432",
-        "llm4s.rag.permissions.pg.database"        -> "testdb",
-        "llm4s.rag.permissions.pg.user"            -> "testuser",
-        "llm4s.rag.permissions.pg.password"        -> "testpass",
-        "llm4s.rag.permissions.pg.vectorTableName" -> "test_vectors",
-        "llm4s.rag.permissions.pg.maxPoolSize"     -> "5"
+        "llm4s.rag.permissions.pg.host"             -> "localhost",
+        "llm4s.rag.permissions.pg.port"             -> "5432",
+        "llm4s.rag.permissions.pg.database"         -> "testdb",
+        "llm4s.rag.permissions.pg.user"             -> "testuser",
+        "llm4s.rag.permissions.pg.password"         -> "testpass",
+        "llm4s.rag.permissions.pg.vectorTableName"  -> "test_vectors",
+        "llm4s.rag.permissions.pg.keywordTableName" -> "test_keywords",
+        "llm4s.rag.permissions.pg.maxPoolSize"      -> "5"
       )
 
       withProps(props) {
@@ -107,6 +109,7 @@ class Llm4sConfigFacadeSpec extends AnyWordSpec with Matchers {
         pg.user shouldBe "testuser"
         pg.password shouldBe "testpass"
         pg.vectorTableName shouldBe "test_vectors"
+        pg.keywordTableName shouldBe "test_keywords"
         pg.maxPoolSize shouldBe 5
       }
     }

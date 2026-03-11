@@ -1,7 +1,7 @@
 package org.llm4s.model
 
 import org.llm4s.error.ValidationError
-import org.llm4s.llmconnect.model.{ CompletionOptions, Message, SystemMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, Message, ResponseFormat, SystemMessage, UserMessage }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -179,6 +179,36 @@ class DefaultRequestTransformer(
       } else {
         errors += s"Function calling not supported for $modelId"
       }
+    }
+
+    // 4. Check response format (structured output) support.
+    //    Validation policy (explicit and consistent):
+    //    - Json: allowed fallback — when provider does not support structured output, we either drop (if dropUnsupported)
+    //      or keep and send (if !dropUnsupported). No validation error for Json so callers can still get best-effort.
+    //    - JsonSchema: strict — when provider does not support it and dropUnsupported=false, we return a validation
+    //      error so the caller knows the constraint was not applied. When dropUnsupported=true we drop it.
+    options.responseFormat.foreach {
+      case ResponseFormat.Json =>
+        capabilities.supportsResponseSchema match {
+          case Some(false) =>
+            if (dropUnsupported) {
+              logger.debug(s"Model $modelId: dropping responseFormat (structured output not supported)")
+              transformed = transformed.copy(responseFormat = None)
+            }
+          // else: keep and send (Json is allowed fallback; provider may ignore or accept)
+          case _ => () // true or None: keep and send
+        }
+      case _: ResponseFormat.JsonSchema =>
+        capabilities.supportsResponseSchema match {
+          case Some(false) =>
+            if (dropUnsupported) {
+              logger.debug(s"Model $modelId: dropping JsonSchema responseFormat (not supported)")
+              transformed = transformed.copy(responseFormat = None)
+            } else {
+              errors += s"Structured output (JSON schema) not supported for model $modelId"
+            }
+          case _ => () // true or None: keep and send
+        }
     }
 
     if (errors.nonEmpty) {

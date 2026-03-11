@@ -1,11 +1,13 @@
 package org.llm4s.toolapi.builtin.http
 
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
+import org.llm4s.toolapi.SafeParameterExtractor
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.net.InetSocketAddress
+import java.nio.charset.StandardCharsets
 
 /**
  * Test suite for SSRF protection and validated redirect handling in [[HTTPTool]].
@@ -136,6 +138,54 @@ class HTTPToolSSRFSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
       }
     )
 
+    // /echo-headers → 200 with JSON body echoing received request headers and method
+    server.createContext(
+      "/echo-headers",
+      { (ex: HttpExchange) =>
+        val authHeader    = Option(ex.getRequestHeaders.getFirst("Authorization")).getOrElse("")
+        val cookieHeader  = Option(ex.getRequestHeaders.getFirst("Cookie")).getOrElse("")
+        val customHeader  = Option(ex.getRequestHeaders.getFirst("X-Custom")).getOrElse("")
+        val requestMethod = ex.getRequestMethod
+        val requestBody   = new String(ex.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)
+        val body =
+          s"""{"auth":"$authHeader","cookie":"$cookieHeader","custom":"$customHeader","method":"$requestMethod","body":"$requestBody"}"""
+        val bytes = body.getBytes("UTF-8")
+        ex.sendResponseHeaders(200, bytes.length.toLong)
+        ex.getResponseBody.write(bytes)
+        ex.close()
+      }
+    )
+
+    // /redirect-to-echo → 302 Location: /echo-headers (same host)
+    server.createContext(
+      "/redirect-to-echo",
+      { (ex: HttpExchange) =>
+        ex.getResponseHeaders.set("Location", s"http://127.0.0.1:$port/echo-headers")
+        ex.sendResponseHeaders(302, -1)
+        ex.close()
+      }
+    )
+
+    // /redirect-307-to-echo → 307 Location: /echo-headers (method-preserving)
+    server.createContext(
+      "/redirect-307-to-echo",
+      { (ex: HttpExchange) =>
+        ex.getResponseHeaders.set("Location", s"http://127.0.0.1:$port/echo-headers")
+        ex.sendResponseHeaders(307, -1)
+        ex.close()
+      }
+    )
+
+    // /redirect-301-to-echo → 301 Location: /echo-headers
+    server.createContext(
+      "/redirect-301-to-echo",
+      { (ex: HttpExchange) =>
+        ex.getResponseHeaders.set("Location", s"http://127.0.0.1:$port/echo-headers")
+        ex.sendResponseHeaders(301, -1)
+        ex.close()
+      }
+    )
+
     server.setExecutor(null)
     server.start()
   }
@@ -149,24 +199,37 @@ class HTTPToolSSRFSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
    * HttpConfig that allows 127.0.0.1 for the test server while keeping
    * 169.254.169.254 (cloud metadata) on the blocked list.
    */
-  def testConfig(followRedirects: Boolean = false, maxRedirects: Int = 5): HttpConfig =
+  def testConfig(
+    followRedirects: Boolean = false,
+    maxRedirects: Int = 5,
+    allowedMethods: Seq[String] = Seq("GET", "POST")
+  ): HttpConfig =
     HttpConfig(
       blockedDomains = Seq("169.254.169.254"),
       blockInternalIPs = false,
       followRedirects = followRedirects,
       maxRedirects = maxRedirects,
-      allowedMethods = Seq("GET")
+      allowedMethods = allowedMethods
     )
 
-  def invoke(config: HttpConfig, url: String): Either[String, HTTPResult] =
-    HTTPTool.makeRequest(
-      urlStr = url,
-      method = "GET",
-      headers = None,
-      body = None,
-      contentType = None,
-      config = config
-    )
+  /** Invoke HTTPTool through the public createSafe API. */
+  def invoke(
+    config: HttpConfig,
+    url: String,
+    method: String = "GET",
+    headers: Option[Map[String, String]] = None,
+    body: Option[String] = None
+  ): Either[String, HTTPResult] = {
+    val params = ujson.Obj("url" -> url, "method" -> method)
+    headers.foreach(h => params("headers") = ujson.Obj.from(h.map { case (k, v) => k -> ujson.Str(v) }))
+    body.foreach(b => params("body") = b)
+    HTTPTool
+      .createSafe(config)
+      .fold(
+        e => Left(s"Tool creation failed: ${e.formatted}"),
+        tool => tool.handler(SafeParameterExtractor(params))
+      )
+  }
 
   // ── SSRF: initial URL validation ──────────────────────────────────────────
 
@@ -222,7 +285,6 @@ class HTTPToolSSRFSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   }
 
   it should "follow a multi-hop safe redirect chain to a final 200 response" in {
-    // /redirect-chain-1 → /redirect-chain-2 → /ok (2 hops, maxRedirects=5)
     val result = invoke(testConfig(followRedirects = true), s"http://127.0.0.1:$port/redirect-chain-1")
     result.isRight shouldBe true
     result.toOption.get.statusCode shouldBe 200
@@ -232,10 +294,6 @@ class HTTPToolSSRFSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   // ── Per-hop SSRF validation (the core fix for Issue #788) ─────────────────
 
   it should "block a redirect that targets the cloud metadata IP (open-redirect SSRF bypass)" in {
-    // Scenario: attacker supplies a URL on a "trusted" host that subsequently
-    // redirects (via 302) to http://169.254.169.254/metadata.
-    // With the fix, the second hop is validated and rejected BEFORE the request
-    // to 169.254.169.254 is ever issued.
     val result = invoke(testConfig(followRedirects = true), s"http://127.0.0.1:$port/redirect-to-blocked")
     result.isLeft shouldBe true
     val err = result.swap.toOption.get
@@ -246,7 +304,6 @@ class HTTPToolSSRFSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   // ── Redirect loop / DoS prevention ───────────────────────────────────────
 
   it should "stop following redirects and return an error after maxRedirects hops" in {
-    // /redirect-self → /redirect-self → … (infinite), maxRedirects=3
     val result = invoke(
       testConfig(followRedirects = true, maxRedirects = 3),
       s"http://127.0.0.1:$port/redirect-self"
@@ -258,7 +315,6 @@ class HTTPToolSSRFSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   }
 
   it should "succeed when the number of hops is exactly maxRedirects" in {
-    // Chain of 2 hops (/chain-1 → /chain-2 → /ok) with maxRedirects=2
     val result = invoke(
       testConfig(followRedirects = true, maxRedirects = 2),
       s"http://127.0.0.1:$port/redirect-chain-1"
@@ -268,7 +324,6 @@ class HTTPToolSSRFSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   }
 
   it should "fail when the number of hops exceeds maxRedirects" in {
-    // Chain of 2 hops but maxRedirects=1: the second redirect is one too many
     val result = invoke(
       testConfig(followRedirects = true, maxRedirects = 1),
       s"http://127.0.0.1:$port/redirect-chain-1"
@@ -280,8 +335,6 @@ class HTTPToolSSRFSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   // ── Case-insensitive Location header ─────────────────────────────────────
 
   it should "follow a redirect when the Location header name is lowercase" in {
-    // The server sends 'location: /ok' (lowercase). Our equalsIgnoreCase lookup
-    // must find it regardless of capitalisation.
     val result = invoke(testConfig(followRedirects = true), s"http://127.0.0.1:$port/redirect-lowercase")
     result.isRight shouldBe true
     result.toOption.get.statusCode shouldBe 200
@@ -307,8 +360,6 @@ class HTTPToolSSRFSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   }
 
   it should "block a redirect that switches to the file:// scheme (protocol smuggling)" in {
-    // Server at /redirect-to-file sends: 302 Location: file:///etc/passwd
-    // The scheme check on the redirect target must fire BEFORE any connection is opened.
     val result = invoke(testConfig(followRedirects = true), s"http://127.0.0.1:$port/redirect-to-file")
     result.isLeft shouldBe true
     val err = result.swap.toOption.get
@@ -329,5 +380,82 @@ class HTTPToolSSRFSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
     )
     result.isLeft shouldBe true
     result.swap.toOption.get should include("TOO_MANY_REDIRECTS")
+  }
+
+  // ── 301/302 method conversion (POST → GET per HTTP spec) ──────────────────
+
+  "HTTPTool redirect method handling" should "convert POST to GET on 302 redirect" in {
+    val result = invoke(
+      testConfig(followRedirects = true),
+      s"http://127.0.0.1:$port/redirect-to-echo",
+      method = "POST",
+      body = Some("""{"data":"test"}""")
+    )
+    result.isRight shouldBe true
+    val responseBody = result.toOption.get.body
+    responseBody should include(""""method":"GET"""")
+    responseBody should include(""""body":""""") // body should be empty after conversion
+  }
+
+  it should "convert POST to GET on 301 redirect" in {
+    val result = invoke(
+      testConfig(followRedirects = true),
+      s"http://127.0.0.1:$port/redirect-301-to-echo",
+      method = "POST",
+      body = Some("""{"data":"test"}""")
+    )
+    result.isRight shouldBe true
+    result.toOption.get.body should include(""""method":"GET"""")
+  }
+
+  it should "preserve POST method on 307 redirect" in {
+    val result = invoke(
+      testConfig(followRedirects = true),
+      s"http://127.0.0.1:$port/redirect-307-to-echo",
+      method = "POST",
+      body = Some("""{"data":"test"}""")
+    )
+    result.isRight shouldBe true
+    val responseBody = result.toOption.get.body
+    responseBody should include(""""method":"POST"""")
+  }
+
+  it should "keep GET as GET on 302 redirect" in {
+    val result = invoke(
+      testConfig(followRedirects = true),
+      s"http://127.0.0.1:$port/redirect-to-echo"
+    )
+    result.isRight shouldBe true
+    result.toOption.get.body should include(""""method":"GET"""")
+  }
+
+  // ── Cross-origin sensitive header stripping ───────────────────────────────
+
+  "HTTPTool cross-origin header stripping" should "preserve all headers on same-host redirect" in {
+    val hdrs = Some(Map("Authorization" -> "Bearer secret", "X-Custom" -> "keep-me"))
+    val result = invoke(
+      testConfig(followRedirects = true),
+      s"http://127.0.0.1:$port/redirect-to-echo",
+      headers = hdrs
+    )
+    result.isRight shouldBe true
+    val responseBody = result.toOption.get.body
+    // Same host redirect: Authorization should be preserved
+    responseBody should include(""""auth":"Bearer secret"""")
+    responseBody should include(""""custom":"keep-me"""")
+  }
+
+  // ── withRedirectsEnabled convenience method ────────────────────────────────
+
+  "HttpConfig.withRedirectsEnabled" should "enable redirect following" in {
+    val config = HttpConfig().withRedirectsEnabled
+    config.followRedirects shouldBe true
+  }
+
+  it should "preserve other settings" in {
+    val config = HttpConfig(maxRedirects = 10, timeoutMs = 5000).withRedirectsEnabled
+    config.followRedirects shouldBe true
+    config.maxRedirects shouldBe 10
+    config.timeoutMs shouldBe 5000
   }
 }

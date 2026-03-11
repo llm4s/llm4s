@@ -262,6 +262,10 @@ class ZaiClient(
       base("tools") = toolRegistry.getOpenAITools()
     }
 
+    options.responseFormat.foreach { fmt =>
+      ResponseFormatMapper.toOpenAIResponseFormat(fmt).foreach(rf => base("response_format") = rf)
+    }
+
     base
   }
 

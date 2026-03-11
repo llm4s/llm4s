@@ -11,7 +11,7 @@
         <img src="https://img.shields.io/static/v1?label=Chat%20on&message=Discord&color=blue&logo=Discord&style=flat-square" alt="Discord">
     </a>
     <a href="https://codecov.io/gh/llm4s/llm4s">
-        <img src="https://codecov.io/gh/llm4s/llm4s/branch/main/graph/badge.svg" alt="codecov">
+        <img src="https://codecov.io/gh/llm4s/llm4s/branch/main/graph/badge.svg?token=WQSNRKV121" alt="codecov">
     </a>
 </h4>
 <h4 align="center">
@@ -98,7 +98,6 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
 
 - **modules/core**: Core LLM4S framework
 - **modules/workspace**: Workspace runner/client/shared
-- **modules/crossTest**: Cross-version tests
 - **modules/samples**: Usage examples
 - **docs**: Documentation site and references
 - **hooks**: Pre-commit hook installer
@@ -130,8 +129,8 @@ To ensure code quality, we use a Git pre-commit hook that automatically checks c
 
 # The hook will automatically:
 # - Check code formatting with scalafmt
-# - Compile code for both Scala 2.13 and 3
-# - Run tests for both Scala versions
+# - Compile code
+# - Run tests
 
 # To skip the hook temporarily (not recommended):
 # git commit --no-verify
@@ -165,10 +164,7 @@ echo 'export PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH"' >> ~/.zshrc
 ```bash
 sbt compile
 
-# For all supported Scala versions (2.13 and 3)
-sbt +compile
-
-# Build and test all versions
+# Build and test
 sbt buildAll
 ```
 ### Setup your IDE
@@ -242,50 +238,30 @@ sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```bash
 sbt docker:publishLocal
 sbt "workspaceSamples/runMain org.llm4s.samples.workspace.ContainerisedWorkspaceDemo"
-
-# Using Scala 2.13
-sbt ++2.13.16 "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
-### Cross Compilation
+### Scala Version
 
-LLM4S supports Scala 2.13 and Scala 3.7.1. The build supports version-specific code through source directories when needed:
+LLM4S now targets Scala 3.7.1 only. The build keeps compatibility-oriented aliases for Scala 3 verification:
 
 - `src/main/scala` - Common code for all versions
-- `src/main/scala-2.13` - Scala 2.13 specific code (add when needed)
 - `src/main/scala-3` - Scala 3 specific code (add when needed)
 
-When you need to use version-specific features, place the code in the appropriate directory.
-
-We've added convenient aliases for cross-compilation:
+We've kept convenient build aliases:
 
 ```bash
-# Compile for all Scala versions
+# Compile the repo
 sbt compileAll
 
-# Test all Scala versions
+# Test the repo
 sbt testAll
 
-# Both compile and test
+# Clean, compile, and test
 sbt buildAll
 
-# Publish for all versions
+# Publish current Scala 3 artifacts
 sbt publishAll
 ```
-
-### Cross-Compilation Testing
-
-We use specialized test projects to verify cross-version compatibility against the published artifacts. These tests ensure that the library works correctly across different Scala versions by testing against actual published JARs rather than local target directories.
-
-```bash
-# Run tests for both Scala 2 and 3 against published JARs
-sbt testCross
-
-# Full clean, publish, and test verification
-sbt fullCrossTest
-```
-
-> **Note:** For detailed information about our cross-testing strategy and setup, see [modules/crossTest/README.md](modules/crossTest/README.md)
 
 ## Roadmap
 
@@ -540,7 +516,7 @@ LLM4S uses GitHub Actions for continuous integration to ensure code quality and 
 Our unified CI workflow runs on every push and pull request to main/master branches:
 
 - **Quick Checks**: Fast-failing checks for code formatting and compilation
-- **Cross-Platform Testing**: Tests run on Ubuntu and Windows with Scala 2.13.16 and 3.7.1
+- **Cross-Platform Testing**: Tests run on Ubuntu and Windows with Scala 3.7.1
 - **Template Validation**: Verifies the g8 template works correctly
 - **Caching**: Optimized caching strategy with Coursier for faster builds
 
@@ -571,11 +547,11 @@ You can run the same checks locally before pushing:
 # Check formatting
 sbt scalafmtCheckAll
 
-# Compile all Scala versions
-sbt +compile
+# Compile
+sbt compile
 
 # Run all tests
-sbt +test
+sbt test
 
 # Full build (compile + test)
 sbt buildAll
