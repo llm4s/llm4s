@@ -201,6 +201,19 @@ class KeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach
       orResults.toOption.get.size shouldBe 2
     }
 
+    "reject unsafe metadata keys in filters" in {
+      val docs = Seq(
+        KeywordDocument("doc-1", "Scala content", Map("lang" -> "en"))
+      )
+      index.indexBatch(docs) shouldBe Right(())
+
+      val unsafeKey = "lang') OR 1=1 --"
+      val result    = index.search("Scala", topK = 10, filter = Some(MetadataFilter.Equals(unsafeKey, "en")))
+
+      result.isLeft shouldBe true
+      result.left.toOption.get.formatted should include("Invalid metadata key")
+    }
+
     "return correct statistics" in {
       val docs = Seq(
         KeywordDocument("s1", "Short content"),
@@ -248,6 +261,14 @@ class KeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach
 
       result.isRight shouldBe true
       result.toOption.get.close()
+    }
+
+    "reject invalid table names" in {
+      val invalidName = "docs; DROP TABLE users; --"
+      val result      = SQLiteKeywordIndex.inMemory(invalidName)
+
+      result.isLeft shouldBe true
+      result.left.toOption.get.formatted should include("Invalid table name")
     }
 
     "support file-based persistence" in {

@@ -2,6 +2,7 @@ package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
+import org.llm4s.util.SqlIdentifier
 
 import java.sql.{ Connection, DriverManager, ResultSet }
 import scala.util.Try
@@ -269,6 +270,8 @@ final class SQLiteKeywordIndex private (
 
   // Helper methods
 
+  private val ValidMetadataKeyPattern = "^[a-zA-Z_][a-zA-Z0-9_.-]*$".r
+
   private def withTransaction[T](f: => T): Result[Unit] =
     Try {
       val autoCommit = connection.getAutoCommit
@@ -326,14 +329,14 @@ final class SQLiteKeywordIndex private (
     case MetadataFilter.All =>
       "1=1"
     case MetadataFilter.Equals(key, value) =>
-      s"json_extract(d.metadata, '$$.$key') = '${escapeString(value)}'"
+      s"json_extract(d.metadata, '${escapeString(jsonPathForKey(key))}') = '${escapeString(value)}'"
     case MetadataFilter.Contains(key, substring) =>
-      s"json_extract(d.metadata, '$$.$key') LIKE '%${escapeString(substring)}%'"
+      s"json_extract(d.metadata, '${escapeString(jsonPathForKey(key))}') LIKE '%${escapeString(substring)}%'"
     case MetadataFilter.In(key, values) =>
       val escaped = values.map(v => s"'${escapeString(v)}'").mkString(",")
-      s"json_extract(d.metadata, '$$.$key') IN ($escaped)"
+      s"json_extract(d.metadata, '${escapeString(jsonPathForKey(key))}') IN ($escaped)"
     case MetadataFilter.HasKey(key) =>
-      s"json_extract(d.metadata, '$$.$key') IS NOT NULL"
+      s"json_extract(d.metadata, '${escapeString(jsonPathForKey(key))}') IS NOT NULL"
     case MetadataFilter.And(left, right) =>
       s"(${buildFilterClause(left)} AND ${buildFilterClause(right)})"
     case MetadataFilter.Or(left, right) =>
@@ -341,6 +344,33 @@ final class SQLiteKeywordIndex private (
     case MetadataFilter.Not(inner) =>
       s"NOT (${buildFilterClause(inner)})"
   }
+
+  private def validateMetadataKey(key: String): Either[String, Unit] = {
+    val trimmed = Option(key).map(_.trim).getOrElse("")
+    if (trimmed.isEmpty)
+      Left("Invalid metadata key: key must not be empty")
+    else if (
+      !ValidMetadataKeyPattern.matches(trimmed) || trimmed.startsWith(".") || trimmed.endsWith(".") || trimmed.contains(
+        ".."
+      )
+    )
+      Left(s"Invalid metadata key: '$key'")
+    else
+      Right(())
+  }
+
+  private def jsonPathForKey(key: String): String = {
+    validateMetadataKey(key) match {
+      case Left(msg) => throw new IllegalArgumentException(msg)
+      case Right(_)  => ()
+    }
+    val normalized = key.trim
+    val segments   = normalized.split("\\.").toSeq
+    "$" + segments.map(seg => s"""."${escapeJsonPathSegment(seg)}"""").mkString
+  }
+
+  private def escapeJsonPathSegment(seg: String): String =
+    seg.replace("\\", "\\\\").replace("\"", "\\\"")
 
   private def escapeString(s: String): String =
     s.replace("'", "''")
@@ -357,6 +387,9 @@ final class SQLiteKeywordIndex private (
 
 object SQLiteKeywordIndex {
 
+  private def validateTableName(tableName: String): Result[String] =
+    SqlIdentifier.validate(tableName, "keyword-index")
+
   /**
    * Create a file-based keyword index.
    *
@@ -365,11 +398,13 @@ object SQLiteKeywordIndex {
    * @return New keyword index
    */
   def apply(path: String, tableName: String = "documents"): Result[SQLiteKeywordIndex] =
-    Try {
-      Class.forName("org.sqlite.JDBC")
-      val connection = DriverManager.getConnection(s"jdbc:sqlite:$path")
-      new SQLiteKeywordIndex(connection, tableName)
-    }.toEither.left.map(e => ProcessingError("keyword-index", s"Failed to create index: ${e.getMessage}"))
+    validateTableName(tableName).flatMap { _ =>
+      Try {
+        Class.forName("org.sqlite.JDBC")
+        val connection = DriverManager.getConnection(s"jdbc:sqlite:$path")
+        new SQLiteKeywordIndex(connection, tableName)
+      }.toEither.left.map(e => ProcessingError("keyword-index", s"Failed to create index: ${e.getMessage}"))
+    }
 
   /**
    * Create an in-memory keyword index.
@@ -378,11 +413,13 @@ object SQLiteKeywordIndex {
    * @return New keyword index
    */
   def inMemory(tableName: String = "documents"): Result[SQLiteKeywordIndex] =
-    Try {
-      Class.forName("org.sqlite.JDBC")
-      val connection = DriverManager.getConnection("jdbc:sqlite::memory:")
-      new SQLiteKeywordIndex(connection, tableName)
-    }.toEither.left.map(e => ProcessingError("keyword-index", s"Failed to create in-memory index: ${e.getMessage}"))
+    validateTableName(tableName).flatMap { _ =>
+      Try {
+        Class.forName("org.sqlite.JDBC")
+        val connection = DriverManager.getConnection("jdbc:sqlite::memory:")
+        new SQLiteKeywordIndex(connection, tableName)
+      }.toEither.left.map(e => ProcessingError("keyword-index", s"Failed to create in-memory index: ${e.getMessage}"))
+    }
 
   /**
    * Configuration for SQLite keyword index.
