@@ -214,6 +214,18 @@ class KeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach
       result.left.toOption.get.formatted should include("Invalid metadata key")
     }
 
+    "allow metadata keys that begin with digits" in {
+      val docs = Seq(
+        KeywordDocument("doc-2024", "Scala release notes", Map("2024" -> "yes"))
+      )
+      index.indexBatch(docs) shouldBe Right(())
+
+      val result = index.search("Scala", topK = 10, filter = Some(MetadataFilter.Equals("2024", "yes")))
+
+      result.isRight shouldBe true
+      result.toOption.get.map(_.id).toSet shouldBe Set("doc-2024")
+    }
+
     "return correct statistics" in {
       val docs = Seq(
         KeywordDocument("s1", "Short content"),
@@ -269,6 +281,14 @@ class KeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach
 
       result.isLeft shouldBe true
       result.left.toOption.get.formatted should include("Invalid table name")
+    }
+
+    "allow SQLite-compatible table names longer than 63 characters" in {
+      val longTableName = "docs_" + ("x" * 80)
+      val result        = SQLiteKeywordIndex.inMemory(longTableName)
+
+      result.isRight shouldBe true
+      result.toOption.get.close()
     }
 
     "support file-based persistence" in {

@@ -2,7 +2,6 @@ package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
-import org.llm4s.util.SqlIdentifier
 
 import java.sql.{ Connection, DriverManager, ResultSet }
 import scala.util.Try
@@ -270,7 +269,7 @@ final class SQLiteKeywordIndex private (
 
   // Helper methods
 
-  private val ValidMetadataKeyPattern = "^[a-zA-Z_][a-zA-Z0-9_.-]*$".r
+  private val ValidMetadataKeyPattern = "^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$".r
 
   private def withTransaction[T](f: => T): Result[Unit] =
     Try {
@@ -387,8 +386,22 @@ final class SQLiteKeywordIndex private (
 
 object SQLiteKeywordIndex {
 
-  private def validateTableName(tableName: String): Result[String] =
-    SqlIdentifier.validate(tableName, "keyword-index")
+  private val ValidSqliteTableNamePattern = "^[a-zA-Z_][a-zA-Z0-9_]*$".r
+
+  private def validateTableName(tableName: String): Result[String] = {
+    val trimmed = Option(tableName).map(_.trim).getOrElse("")
+    if (trimmed.isEmpty)
+      Left(ProcessingError("keyword-index", "Table name must not be empty"))
+    else if (!ValidSqliteTableNamePattern.matches(trimmed))
+      Left(
+        ProcessingError(
+          "keyword-index",
+          s"Invalid table name: '$tableName'. Must start with a letter or underscore and contain only letters, digits, or underscores."
+        )
+      )
+    else
+      Right(trimmed)
+  }
 
   /**
    * Create a file-based keyword index.
@@ -398,11 +411,11 @@ object SQLiteKeywordIndex {
    * @return New keyword index
    */
   def apply(path: String, tableName: String = "documents"): Result[SQLiteKeywordIndex] =
-    validateTableName(tableName).flatMap { _ =>
+    validateTableName(tableName).flatMap { validatedTableName =>
       Try {
         Class.forName("org.sqlite.JDBC")
         val connection = DriverManager.getConnection(s"jdbc:sqlite:$path")
-        new SQLiteKeywordIndex(connection, tableName)
+        new SQLiteKeywordIndex(connection, validatedTableName)
       }.toEither.left.map(e => ProcessingError("keyword-index", s"Failed to create index: ${e.getMessage}"))
     }
 
@@ -413,11 +426,11 @@ object SQLiteKeywordIndex {
    * @return New keyword index
    */
   def inMemory(tableName: String = "documents"): Result[SQLiteKeywordIndex] =
-    validateTableName(tableName).flatMap { _ =>
+    validateTableName(tableName).flatMap { validatedTableName =>
       Try {
         Class.forName("org.sqlite.JDBC")
         val connection = DriverManager.getConnection("jdbc:sqlite::memory:")
-        new SQLiteKeywordIndex(connection, tableName)
+        new SQLiteKeywordIndex(connection, validatedTableName)
       }.toEither.left.map(e => ProcessingError("keyword-index", s"Failed to create in-memory index: ${e.getMessage}"))
     }
 
