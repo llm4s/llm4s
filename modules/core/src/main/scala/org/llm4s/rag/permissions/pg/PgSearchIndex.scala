@@ -5,7 +5,7 @@ import org.llm4s.error.ProcessingError
 import org.llm4s.rag.permissions._
 import org.llm4s.types.Result
 import org.llm4s.util.SqlIdentifier
-import org.llm4s.vectorstore.{ MetadataFilter, ScoredRecord, VectorRecord }
+import org.llm4s.vectorstore.{ HikariDefaults, MetadataFilter, ScoredRecord, VectorRecord }
 import org.llm4s.util.RateLimitedLogger
 
 import org.slf4j.LoggerFactory
@@ -439,9 +439,9 @@ object PgSearchIndex {
         hikariConfig.setPassword(config.password)
         hikariConfig.setMaximumPoolSize(config.maxPoolSize)
         hikariConfig.setMinimumIdle(1)
-        hikariConfig.setConnectionTimeout(30000)
-        hikariConfig.setIdleTimeout(600000)
-        hikariConfig.setMaxLifetime(1800000)
+        hikariConfig.setConnectionTimeout(HikariDefaults.CONNECTION_TIMEOUT_MS)
+        hikariConfig.setIdleTimeout(HikariDefaults.IDLE_TIMEOUT_MS)
+        hikariConfig.setMaxLifetime(HikariDefaults.MAX_LIFETIME_MS)
 
         val dataSource = new HikariDataSource(hikariConfig)
         new PgSearchIndex(dataSource, config.vectorTableName, config)

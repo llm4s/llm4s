@@ -877,7 +877,7 @@ class StdioTransportImpl(
                 readAvailableStderr()
 
                 val requestJson = write(request)
-                logger.info(s"StdioTransport($name) writing to stdin: $requestJson")
+                logger.debug(s"StdioTransport($name) writing to stdin: $requestJson")
 
                 // Write request as line-delimited JSON (one complete JSON object per line)
                 writer.println(requestJson)
@@ -900,7 +900,7 @@ class StdioTransportImpl(
                   if (responseLine.isEmpty) {
                     Left(s"No response from MCP server for request ${request.id}")
                   } else {
-                    logger.info(s"StdioTransport($name) received from stdout: $responseLine")
+                    logger.debug(s"StdioTransport($name) received from stdout: $responseLine")
 
                     // Parse JSON response
                     Try(read[JsonRpcResponse](responseLine)) match {
@@ -1033,7 +1033,7 @@ class StdioTransportImpl(
               readAvailableStderr()
 
               val notificationJson = write(notification)
-              logger.info(s"StdioTransport($name) writing notification to stdin: $notificationJson")
+              logger.debug(s"StdioTransport($name) writing notification to stdin: $notificationJson")
 
               // Write notification as line-delimited JSON (one complete JSON object per line)
               writer.println(notificationJson)

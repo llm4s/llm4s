@@ -193,16 +193,16 @@ private[agent] object HandoffExecutor {
       reason.map(r => s" (Reason: $r)").getOrElse("")
 
     if (context.debug) {
-      logger.info("[DEBUG] {}", logEntry)
-      logger.info("[DEBUG] preserveContext: {}", handoff.preserveContext)
-      logger.info("[DEBUG] transferSystemMessage: {}", handoff.transferSystemMessage)
+      logger.debug("{}", logEntry)
+      logger.debug("preserveContext: {}", handoff.preserveContext)
+      logger.debug("transferSystemMessage: {}", handoff.transferSystemMessage)
     }
 
     val targetState = buildHandoffState(sourceState, handoff, reason)
 
     if (context.debug) {
-      logger.info("[DEBUG] Target state conversation messages: {}", targetState.conversation.messages.length)
-      logger.info("[DEBUG] Target state system message: {}", targetState.systemMessage.isDefined)
+      logger.debug("Target state conversation messages: {}", targetState.conversation.messages.length)
+      logger.debug("Target state system message: {}", targetState.systemMessage.isDefined)
     }
 
     handoff.targetAgent.run(targetState, maxSteps, context).map { targetFinalState =>

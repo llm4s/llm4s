@@ -147,7 +147,7 @@ class OllamaClient(
             Try(response.body.close())
           }
         }.toEither
-        processEither.left.foreach(_ => ())
+        val _ = processEither
 
         accumulator.toCompletion.map { c =>
           val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
@@ -208,10 +208,10 @@ class OllamaClient(
       .flatMap(_.strOpt)
       .getOrElse("")
 
-    val usage = (for {
+    val usage = for {
       prompt <- json.obj.get("prompt_eval_count").flatMap(_.numOpt).map(_.toInt)
       comp   <- json.obj.get("eval_count").flatMap(_.numOpt).map(_.toInt)
-    } yield TokenUsage(prompt, comp, prompt + comp)).orElse(None)
+    } yield TokenUsage(prompt, comp, prompt + comp)
 
     // Estimate cost using CostEstimator
     val cost = usage.flatMap(u => CostEstimator.estimate(config.model, u))

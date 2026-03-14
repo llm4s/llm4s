@@ -263,10 +263,10 @@ class Agent(client: LLMClient) {
         val options = state.completionOptions.copy(tools = state.tools.tools)
 
         if (context.debug) {
-          logger.info("[DEBUG] Running completion step")
-          logger.info("[DEBUG] Status: InProgress -> requesting LLM completion")
-          logger.info("[DEBUG] Available tools: {}", state.tools.tools.map(_.name).mkString(", "))
-          logger.info("[DEBUG] Conversation history: {} messages", state.conversation.messages.size)
+          logger.debug("Running completion step")
+          logger.debug("Status: InProgress -> requesting LLM completion")
+          logger.debug("Available tools: {}", state.tools.tools.map(_.name).mkString(", "))
+          logger.debug("Conversation history: {} messages", state.conversation.messages.size)
         } else {
           logger.debug("Running completion step with tools: {}", state.tools.tools.map(_.name).mkString(", "))
         }
@@ -288,21 +288,21 @@ class Agent(client: LLMClient) {
             }
 
             if (context.debug) {
-              logger.info("[DEBUG] LLM response received")
-              logger.info(
-                "[DEBUG] Response type: {}",
+              logger.debug("LLM response received")
+              logger.debug(
+                "Response type: {}",
                 if (completion.message.toolCalls.isEmpty) "text" else "tool_calls"
               )
               if (Option(completion.message.content).exists(_.nonEmpty)) {
-                logger.info("[DEBUG] Response content: {}", completion.message.content)
+                logger.debug("Response content: {}", completion.message.content)
               }
               if (completion.message.toolCalls.nonEmpty) {
-                logger.info("[DEBUG] Tool calls requested: {}", completion.message.toolCalls.size)
+                logger.debug("Tool calls requested: {}", completion.message.toolCalls.size)
                 completion.message.toolCalls.foreach { tc =>
-                  logger.info("[DEBUG]   - Tool: {}", tc.name)
-                  logger.info("[DEBUG]     ID: {}", tc.id)
-                  logger.info("[DEBUG]     Arguments (raw): {}", tc.arguments)
-                  logger.info("[DEBUG]     Arguments type: {}", tc.arguments.getClass.getSimpleName)
+                  logger.debug("  - Tool: {}", tc.name)
+                  logger.debug("    ID: {}", tc.id)
+                  logger.debug("    Arguments (raw): {}", tc.arguments)
+                  logger.debug("    Arguments type: {}", tc.arguments.getClass.getSimpleName)
                 }
               }
             }
@@ -314,13 +314,13 @@ class Agent(client: LLMClient) {
             completion.message.toolCalls match {
               case Seq() =>
                 if (context.debug) {
-                  logger.info("[DEBUG] Status: InProgress -> Complete (no tool calls)")
+                  logger.debug("Status: InProgress -> Complete (no tool calls)")
                 }
                 Right(updatedState.withStatus(AgentStatus.Complete))
 
               case _ =>
                 if (context.debug) {
-                  logger.info("[DEBUG] Status: InProgress -> WaitingForTools")
+                  logger.debug("Status: InProgress -> WaitingForTools")
                 } else {
                   logger.debug("Tool calls identified, setting state to waiting for tools")
                 }
@@ -348,13 +348,13 @@ class Agent(client: LLMClient) {
             val stateWithLog = state.log(logMessage)
 
             if (context.debug) {
-              logger.info("[DEBUG] Status: WaitingForTools -> processing tools")
-              logger.info("[DEBUG] Processing {} tool calls: {}", assistantMessage.toolCalls.size, toolNames)
+              logger.debug("Status: WaitingForTools -> processing tools")
+              logger.debug("Processing {} tool calls: {}", assistantMessage.toolCalls.size, toolNames)
             }
 
             Try {
               if (context.debug) {
-                logger.info("[DEBUG] Calling processToolCalls with {} tools", assistantMessage.toolCalls.size)
+                logger.debug("Calling processToolCalls with {} tools", assistantMessage.toolCalls.size)
               } else {
                 logger.debug("Processing {} tool calls", assistantMessage.toolCalls.size)
               }
@@ -362,14 +362,14 @@ class Agent(client: LLMClient) {
             } match {
               case Success(newState) =>
                 if (context.debug) {
-                  logger.info("[DEBUG] Tool processing successful")
+                  logger.debug("Tool processing successful")
                 }
 
                 HandoffExecutor.detectHandoff(newState) match {
                   case Some((handoff, reason)) =>
                     if (context.debug) {
-                      logger.info("[DEBUG] Handoff detected: {}", handoff.handoffName)
-                      logger.info("[DEBUG] Status: WaitingForTools -> HandoffRequested")
+                      logger.debug("Handoff detected: {}", handoff.handoffName)
+                      logger.debug("Status: WaitingForTools -> HandoffRequested")
                     } else {
                       logger.info("Handoff requested: {}", handoff.handoffName)
                     }
@@ -377,7 +377,7 @@ class Agent(client: LLMClient) {
 
                   case None =>
                     if (context.debug) {
-                      logger.info("[DEBUG] Status: WaitingForTools -> InProgress")
+                      logger.debug("Status: WaitingForTools -> InProgress")
                     } else {
                       logger.debug("Tool processing successful - continuing")
                     }
@@ -403,7 +403,7 @@ class Agent(client: LLMClient) {
 
       case _ =>
         if (context.debug) {
-          logger.info("[DEBUG] Agent already in terminal state: {}", state.status)
+          logger.debug("Agent already in terminal state: {}", state.status)
         }
         Right(state)
     }
@@ -479,12 +479,12 @@ class Agent(client: LLMClient) {
     context: AgentContext
   ): Result[AgentState] = {
     if (context.debug) {
-      logger.info("[DEBUG] ========================================")
-      logger.info("[DEBUG] Starting Agent.run")
-      logger.info("[DEBUG] Max steps: {}", maxSteps.getOrElse("unlimited"))
-      logger.info("[DEBUG] Trace log: {}", context.traceLogPath.getOrElse("disabled"))
-      logger.info("[DEBUG] Initial status: {}", initialState.status)
-      logger.info("[DEBUG] ========================================")
+      logger.debug("========================================")
+      logger.debug("Starting Agent.run")
+      logger.debug("Max steps: {}", maxSteps.getOrElse("unlimited"))
+      logger.debug("Trace log: {}", context.traceLogPath.getOrElse("disabled"))
+      logger.debug("Initial status: {}", initialState.status)
+      logger.debug("========================================")
     }
 
     context.traceLogPath.foreach(path => AgentTraceFormatter.writeTraceLog(initialState, path))
@@ -510,12 +510,12 @@ class Agent(client: LLMClient) {
 
         case (s, _) if s == AgentStatus.InProgress || s == AgentStatus.WaitingForTools =>
           if (context.debug) {
-            logger.info("[DEBUG] ========================================")
-            logger.info("[DEBUG] ITERATION {}", iteration)
-            logger.info("[DEBUG] Current status: {}", state.status)
-            logger.info("[DEBUG] Steps remaining: {}", stepsRemaining.map(_.toString).getOrElse("unlimited"))
-            logger.info("[DEBUG] Conversation messages: {}", state.conversation.messages.size)
-            logger.info("[DEBUG] ========================================")
+            logger.debug("========================================")
+            logger.debug("ITERATION {}", iteration)
+            logger.debug("Current status: {}", state.status)
+            logger.debug("Steps remaining: {}", stepsRemaining.map(_.toString).getOrElse("unlimited"))
+            logger.debug("Conversation messages: {}", state.conversation.messages.size)
+            logger.debug("========================================")
           }
 
           runStep(state, context) match {
@@ -527,8 +527,8 @@ class Agent(client: LLMClient) {
               val nextSteps = if (shouldDecrementStep) stepsRemaining.map(_ - 1) else stepsRemaining
 
               if (context.debug && shouldDecrementStep) {
-                logger.info(
-                  "[DEBUG] Step completed. Next steps remaining: {}",
+                logger.debug(
+                  "Step completed. Next steps remaining: {}",
                   nextSteps.map(_.toString).getOrElse("unlimited")
                 )
               }
@@ -550,10 +550,10 @@ class Agent(client: LLMClient) {
 
         case (AgentStatus.HandoffRequested(handoff, reason), _) =>
           if (context.debug) {
-            logger.info("[DEBUG] ========================================")
-            logger.info("[DEBUG] Handoff requested - executing handoff")
-            logger.info("[DEBUG] Handoff: {}", handoff.handoffName)
-            logger.info("[DEBUG] ========================================")
+            logger.debug("========================================")
+            logger.debug("Handoff requested - executing handoff")
+            logger.debug("Handoff: {}", handoff.handoffName)
+            logger.debug("========================================")
           }
           context.traceLogPath.foreach(path => AgentTraceFormatter.writeTraceLog(state, path))
 
@@ -561,11 +561,11 @@ class Agent(client: LLMClient) {
 
         case (_, _) =>
           if (context.debug) {
-            logger.info("[DEBUG] ========================================")
-            logger.info("[DEBUG] Agent completed")
-            logger.info("[DEBUG] Final status: {}", state.status)
-            logger.info("[DEBUG] Total iterations: {}", iteration)
-            logger.info("[DEBUG] ========================================")
+            logger.debug("========================================")
+            logger.debug("Agent completed")
+            logger.debug("Final status: {}", state.status)
+            logger.debug("Total iterations: {}", iteration)
+            logger.debug("========================================")
           }
           context.traceLogPath.foreach(path => AgentTraceFormatter.writeTraceLog(state, path))
           Right(state)
@@ -637,14 +637,14 @@ class Agent(client: LLMClient) {
       validatedQuery <- GuardrailApplicator.validateInput(query, inputGuardrails)
 
       _ = if (context.debug) {
-        logger.info("[DEBUG] ========================================")
-        logger.info("[DEBUG] Initializing new agent with query")
-        logger.info("[DEBUG] Query: {}", validatedQuery)
-        logger.info("[DEBUG] Tools: {}", tools.tools.map(_.name).mkString(", "))
-        logger.info("[DEBUG] Input guardrails: {}", inputGuardrails.map(_.name).mkString(", "))
-        logger.info("[DEBUG] Output guardrails: {}", outputGuardrails.map(_.name).mkString(", "))
-        logger.info("[DEBUG] Handoffs: {}", handoffs.length)
-        logger.info("[DEBUG] ========================================")
+        logger.debug("========================================")
+        logger.debug("Initializing new agent with query")
+        logger.debug("Query: {}", validatedQuery)
+        logger.debug("Tools: {}", tools.tools.map(_.name).mkString(", "))
+        logger.debug("Input guardrails: {}", inputGuardrails.map(_.name).mkString(", "))
+        logger.debug("Output guardrails: {}", outputGuardrails.map(_.name).mkString(", "))
+        logger.debug("Handoffs: {}", handoffs.length)
+        logger.debug("========================================")
       }
       initialState <- initializeSafe(validatedQuery, tools, handoffs, systemPromptAddition, completionOptions)
       finalState   <- run(initialState, maxSteps, context)

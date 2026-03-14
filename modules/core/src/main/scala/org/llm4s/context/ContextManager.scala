@@ -213,16 +213,14 @@ object ContextManager {
     create(tokenCounter, ContextConfig.default, llmClient, artifactStore)
 
   private def validateConfig(config: ContextConfig): Result[Unit] =
-    config.headroomPercent.isValid match {
-      case true => Right(())
-      case false =>
-        Left(
-          org.llm4s.error.ValidationError(
-            s"Invalid headroom percent: ${config.headroomPercent}. Must be between 0.0 and 1.0",
-            "headroomPercent"
-          )
+    if (config.headroomPercent.isValid) Right(())
+    else
+      Left(
+        org.llm4s.error.ValidationError(
+          s"Invalid headroom percent: ${config.headroomPercent}. Must be between 0.0 and 1.0",
+          "headroomPercent"
         )
-    }
+      )
 }
 
 /**
@@ -280,10 +278,8 @@ case class ContextStep(
   applied: Boolean
 ) {
   def summary: String =
-    applied match {
-      case true  => f"$name: $tokensBefore → $tokensAfter tokens (${tokensSaved} saved)"
-      case false => f"$name: skipped ($tokensBefore tokens)"
-    }
+    if (applied) f"$name: $tokensBefore → $tokensAfter tokens (${tokensSaved} saved)"
+    else f"$name: skipped ($tokensBefore tokens)"
 
   def tokensSaved: Int         = tokensBefore - tokensAfter
   def compressionRatio: Double = tokensAfter.toDouble / tokensBefore
