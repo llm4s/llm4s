@@ -3,15 +3,15 @@ package org.llm4s.runner
 import org.llm4s.shared._
 
 import java.io.{ BufferedWriter, PrintWriter }
-import java.nio.charset.StandardCharsets
+import java.nio.charset.{ Charset, StandardCharsets }
 import java.nio.file.{ Files, Path, Paths, StandardOpenOption }
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 import scala.collection.mutable.ListBuffer
 import scala.io.Source
 import scala.jdk.CollectionConverters._
-import scala.sys.process._
 import scala.util.{ Failure, Success, Try, Using }
 
 /**
@@ -795,51 +795,75 @@ class WorkspaceAgentInterfaceImpl(
         argv
     // --------------------------------------------------------------------------
 
-    val processBuilder = Process(
-      command = finalArgv,
-      cwd = workDir,
-      extraEnv = env.toSeq: _*
-    )
+    // Use java.lang.ProcessBuilder with the tokenized argv directly – no shell
+    // wrapper.  This preserves the destroyForcibly() and waitFor(timeout) APIs
+    // introduced in #830 for reliable timeout handling.
+    val builder = new java.lang.ProcessBuilder(finalArgv.asJava)
+    builder.directory(workDir)
+    env.foreach { case (k, v) => builder.environment().put(k, v) }
 
-    val stdout          = new StringBuilder
-    val stderr          = new StringBuilder
-    var stdoutTruncated = false
-    var stderrTruncated = false
-    val startTime       = System.currentTimeMillis()
+    val stdout    = new StringBuilder
+    val stderr    = new StringBuilder
+    val startTime = System.currentTimeMillis()
 
     val exitCode = Try {
-      val process = processBuilder.run(
-        ProcessLogger(
-          line =>
-            if (stdout.length + line.length < defaultLimits.maxOutputSize) {
-              stdout.append(line).append("\n")
-            } else {
-              stdoutTruncated = true
-            },
-          line =>
-            if (stderr.length + line.length < defaultLimits.maxOutputSize) {
-              stderr.append(line).append("\n")
-            } else {
-              stderrTruncated = true
-            }
+      val process = builder.start()
+
+      // Read stdout and stderr in background threads to prevent blocking
+      val stdoutThread = new Thread(() => {
+        val reader = new java.io.BufferedReader(
+          new java.io.InputStreamReader(process.getInputStream, Charset.defaultCharset())
         )
-      )
+        try {
+          var line = reader.readLine()
+          while (line != null) {
+            if (stdout.length < defaultLimits.maxOutputSize) {
+              stdout.append(line).append("\n")
+            }
+            line = reader.readLine()
+          }
+        } finally reader.close()
+      })
 
-      while (process.isAlive() && System.currentTimeMillis() - startTime < timeoutMs)
-        Thread.sleep(100)
+      val stderrThread = new Thread(() => {
+        val reader = new java.io.BufferedReader(
+          new java.io.InputStreamReader(process.getErrorStream, Charset.defaultCharset())
+        )
+        try {
+          var line = reader.readLine()
+          while (line != null) {
+            if (stderr.length < defaultLimits.maxOutputSize) {
+              stderr.append(line).append("\n")
+            }
+            line = reader.readLine()
+          }
+        } finally reader.close()
+      })
 
-      val completed = !process.isAlive()
+      stdoutThread.setDaemon(true)
+      stderrThread.setDaemon(true)
+      stdoutThread.start()
+      stderrThread.start()
+
+      val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
 
       if (!completed) {
         process.destroy()
-        // Give the process a moment to exit gracefully before throwing.
-        Thread.sleep(200)
+        // Wait up to 2 seconds for graceful termination before escalating
+        if (!process.waitFor(2, TimeUnit.SECONDS)) {
+          process.destroyForcibly()
+          process.waitFor(3, TimeUnit.SECONDS)
+        }
         throw new WorkspaceAgentException(
           s"Command execution timed out after ${timeoutMs}ms",
           "TIMEOUT",
           None
         )
       }
+
+      // Wait for output threads to finish capturing
+      stdoutThread.join(2000)
+      stderrThread.join(2000)
 
       process.exitValue()
     }.recover {
@@ -852,14 +876,15 @@ class WorkspaceAgentInterfaceImpl(
     }.get
 
     val duration          = System.currentTimeMillis() - startTime
-    val isOutputTruncated = stdoutTruncated || stderrTruncated
+    val isStdoutTruncated = stdout.length >= defaultLimits.maxOutputSize
+    val isStderrTruncated = stderr.length >= defaultLimits.maxOutputSize
 
     ExecuteCommandResponse(
       commandId = "local",
       stdout = stdout.toString(),
       stderr = stderr.toString(),
       exitCode = exitCode,
-      isOutputTruncated = isOutputTruncated,
+      isOutputTruncated = isStdoutTruncated || isStderrTruncated,
       durationMs = duration
     )
   }

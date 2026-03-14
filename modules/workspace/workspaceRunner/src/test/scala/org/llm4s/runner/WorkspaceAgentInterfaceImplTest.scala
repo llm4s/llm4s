@@ -270,7 +270,8 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
     // The fix should escalate to destroyForcibly after destroy() fails
     if (!isWindowsHost) {
       val shortTimeoutConfig = WorkspaceSandboxConfig(
-        defaultCommandTimeoutSeconds = 1
+        defaultCommandTimeoutSeconds = 1,
+        allowedCommands = WorkspaceSandboxConfig.ReadOnlyCommands + "sleep"
       )
       val timedInterface = new WorkspaceAgentInterfaceImpl(
         workspacePath,
