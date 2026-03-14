@@ -1,16 +1,16 @@
 package org.llm4s.vectorstore
 
 import org.llm4s.error.ProcessingError
-import org.llm4s.reranker.{RerankRequest, Reranker}
-import org.llm4s.types.{AsyncResult, Result}
+import org.llm4s.reranker.{ RerankRequest, Reranker }
+import org.llm4s.types.AsyncResult
 
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ ExecutionContext, Future }
 
 /**
  * Asynchronous Hybrid Searcher.
- * 
+ *
  * Provides unified, non-blocking search over both vector embeddings (semantic similarity)
- * and keyword indexes (BM25 term matching). Features complete architectural 
+ * and keyword indexes (BM25 term matching). Features complete architectural
  * concurrency—vector search and keyword search execute in parallel across independent
  * blocking thread configurations, optimizing latency during RRF/Weighted queries.
  */
@@ -49,10 +49,10 @@ final class AsyncHybridSearcher private (
     strategy: FusionStrategy = defaultStrategy,
     filter: Option[MetadataFilter] = None,
     reranker: Option[Reranker] = None
-  )(implicit ec: ExecutionContext): AsyncResult[Seq[HybridSearchResult]] = {
+  )(implicit ec: ExecutionContext): AsyncResult[Seq[HybridSearchResult]] =
     // 1. Await concurrent candidates
     search(queryEmbedding, queryText, rerankTopK, strategy, filter).flatMap {
-      case Left(err) => Future.successful(Left(err))
+      case Left(err)         => Future.successful(Left(err))
       case Right(candidates) =>
         // 2. Apply reranking if provided
         reranker match {
@@ -64,27 +64,28 @@ final class AsyncHybridSearcher private (
             )
             // Assuming r.rerank returns Future-wrapped Result (AsyncResult) in an async architecture
             // but if it is synchronous Result, wrap it:
-            Future(r.rerank(request)).recover {
-              case ex: Throwable => Left(ProcessingError(s"Reranking failed: ${ex.getMessage}"))
-            }.map {
-              case Left(err) => Left(err)
-              case Right(response) => Right(
-                response.results.flatMap { rr =>
-                   candidates.lift(rr.index).map(_.copy(score = rr.score))
-                }
-              )
-            }
+            Future(r.rerank(request))
+              .recover { case ex: Throwable =>
+                Left(ProcessingError("reranking", s"Reranking failed: ${ex.getMessage}"))
+              }
+              .map {
+                case Left(err) => Left(err)
+                case Right(response) =>
+                  Right(
+                    response.results.flatMap(rr => candidates.lift(rr.index).map(_.copy(score = rr.score)))
+                  )
+              }
+>>>>>>> d47c5df2 (test: add comprehensive tests for async vectorstore module)
           case None =>
             Future.successful(Right(candidates.take(topK)))
         }
     }
-  }
 
   def searchVectorOnly(
     queryEmbedding: Array[Float],
     topK: Int = 10,
     filter: Option[MetadataFilter] = None
-  )(implicit ec: ExecutionContext): AsyncResult[Seq[HybridSearchResult]] = {
+  )(implicit ec: ExecutionContext): AsyncResult[Seq[HybridSearchResult]] =
     vectorStore.search(queryEmbedding, topK, filter).map { result =>
       result.map { scoredList =>
         scoredList.map { scored =>
@@ -99,13 +100,12 @@ final class AsyncHybridSearcher private (
         }
       }
     }
-  }
 
   def searchKeywordOnly(
     queryText: String,
     topK: Int = 10,
     filter: Option[MetadataFilter] = None
-  )(implicit ec: ExecutionContext): AsyncResult[Seq[HybridSearchResult]] = {
+  )(implicit ec: ExecutionContext): AsyncResult[Seq[HybridSearchResult]] =
     keywordIndex.searchWithHighlights(queryText, topK, filter = filter).map { result =>
       result.map { keywordList =>
         keywordList.map { ksr =>
@@ -121,7 +121,6 @@ final class AsyncHybridSearcher private (
         }
       }
     }
-  }
 
   private def searchWithRRF(
     queryEmbedding: Array[Float],
@@ -130,30 +129,30 @@ final class AsyncHybridSearcher private (
     k: Int,
     filter: Option[MetadataFilter]
   )(implicit ec: ExecutionContext): AsyncResult[Seq[HybridSearchResult]] = {
-    
+
     // FIRE CONCURRENTLY: The JVM dispatches these to independent threads immediately
-    val vectorFuture = vectorStore.search(queryEmbedding, topK * 2, filter)
+    val vectorFuture  = vectorStore.search(queryEmbedding, topK * 2, filter)
     val keywordFuture = keywordIndex.searchWithHighlights(queryText, topK * 2, filter = filter)
 
     // Await both futures (non-blocking yield)
     for {
       vEither <- vectorFuture
       kEither <- keywordFuture
+    } yield for {
+      vectorResults  <- vEither
+      keywordResults <- kEither
     } yield {
-      for {
-        vectorResults <- vEither
-        keywordResults <- kEither
-      } yield {
-        val vectorMap = vectorResults.zipWithIndex.map { case (sr, idx) => sr.record.id -> (idx + 1, sr) }.toMap
-        val keywordMap = keywordResults.zipWithIndex.map { case (ksr, idx) => ksr.id -> (idx + 1, ksr) }.toMap
+      val vectorMap  = vectorResults.zipWithIndex.map { case (sr, idx) => sr.record.id -> (idx + 1, sr) }.toMap
+      val keywordMap = keywordResults.zipWithIndex.map { case (ksr, idx) => ksr.id -> (idx + 1, ksr) }.toMap
 
-        val allIds = (vectorMap.keySet ++ keywordMap.keySet).toSeq
+      val allIds = (vectorMap.keySet ++ keywordMap.keySet).toSeq
 
-        allIds.map { id =>
-          val vectorContrib = vectorMap.get(id).map { case (rank, _) => 1.0 / (k + rank) }.getOrElse(0.0)
+      allIds
+        .map { id =>
+          val vectorContrib  = vectorMap.get(id).map { case (rank, _) => 1.0 / (k + rank) }.getOrElse(0.0)
           val keywordContrib = keywordMap.get(id).map { case (rank, _) => 1.0 / (k + rank) }.getOrElse(0.0)
-          
-          val vectorData = vectorMap.get(id).map(_._2)
+
+          val vectorData  = vectorMap.get(id).map(_._2)
           val keywordData = keywordMap.get(id).map(_._2)
 
           HybridSearchResult(
@@ -165,8 +164,9 @@ final class AsyncHybridSearcher private (
             metadata = vectorData.map(_.record.metadata).orElse(keywordData.map(_.metadata)).getOrElse(Map.empty),
             highlights = keywordData.map(_.highlights).getOrElse(Seq.empty)
           )
-        }.sortBy(-_.score).take(topK)
-      }
+        }
+        .sortBy(-_.score)
+        .take(topK)
     }
   }
 
@@ -180,37 +180,38 @@ final class AsyncHybridSearcher private (
   )(implicit ec: ExecutionContext): AsyncResult[Seq[HybridSearchResult]] = {
 
     // FIRE CONCURRENTLY
-    val vectorFuture = vectorStore.search(queryEmbedding, topK * 2, filter)
+    val vectorFuture  = vectorStore.search(queryEmbedding, topK * 2, filter)
     val keywordFuture = keywordIndex.searchWithHighlights(queryText, topK * 2, filter = filter)
 
     for {
       vEither <- vectorFuture
       kEither <- keywordFuture
+    } yield for {
+      vectorResults  <- vEither
+      keywordResults <- kEither
     } yield {
-      for {
-        vectorResults <- vEither
-        keywordResults <- kEither
-      } yield {
-        val vectorScores = vectorResults.map(_.score)
-        val (vectorMin, vectorMax) = if (vectorScores.isEmpty) (0.0, 1.0) else (vectorScores.min, vectorScores.max)
+      val vectorScores           = vectorResults.map(_.score)
+      val (vectorMin, vectorMax) = if (vectorScores.isEmpty) (0.0, 1.0) else (vectorScores.min, vectorScores.max)
 
-        val keywordScores = keywordResults.map(_.score)
-        val (keywordMin, keywordMax) = if (keywordScores.isEmpty) (0.0, 1.0) else (keywordScores.min, keywordScores.max)
+      val keywordScores            = keywordResults.map(_.score)
+      val (keywordMin, keywordMax) = if (keywordScores.isEmpty) (0.0, 1.0) else (keywordScores.min, keywordScores.max)
 
-        def normalizeVector(s: Double) = if (vectorMax == vectorMin) 1.0 else (s - vectorMin) / (vectorMax - vectorMin)
-        def normalizeKeyword(s: Double) = if (keywordMax == keywordMin) 1.0 else (s - keywordMin) / (keywordMax - keywordMin)
+      def normalizeVector(s: Double) = if (vectorMax == vectorMin) 1.0 else (s - vectorMin) / (vectorMax - vectorMin)
+      def normalizeKeyword(s: Double) =
+        if (keywordMax == keywordMin) 1.0 else (s - keywordMin) / (keywordMax - keywordMin)
 
-        val vectorMap = vectorResults.map(sr => sr.record.id -> sr).toMap
-        val keywordMap = keywordResults.map(ksr => ksr.id -> ksr).toMap
+      val vectorMap  = vectorResults.map(sr => sr.record.id -> sr).toMap
+      val keywordMap = keywordResults.map(ksr => ksr.id -> ksr).toMap
 
-        val allIds = (vectorMap.keySet ++ keywordMap.keySet).toSeq
-        val totalWeight = vectorWeight + keywordWeight
+      val allIds      = (vectorMap.keySet ++ keywordMap.keySet).toSeq
+      val totalWeight = vectorWeight + keywordWeight
 
-        allIds.map { id =>
+      allIds
+        .map { id =>
           val nv = vectorMap.get(id).map(sr => normalizeVector(sr.score)).getOrElse(0.0)
           val nk = keywordMap.get(id).map(ksr => normalizeKeyword(ksr.score)).getOrElse(0.0)
 
-          val vectorData = vectorMap.get(id)
+          val vectorData  = vectorMap.get(id)
           val keywordData = keywordMap.get(id)
 
           HybridSearchResult(
@@ -222,8 +223,9 @@ final class AsyncHybridSearcher private (
             metadata = vectorData.map(_.record.metadata).orElse(keywordData.map(_.metadata)).getOrElse(Map.empty),
             highlights = keywordData.map(_.highlights).getOrElse(Seq.empty)
           )
-        }.sortBy(-_.score).take(topK)
-      }
+        }
+        .sortBy(-_.score)
+        .take(topK)
     }
   }
 
@@ -240,11 +242,10 @@ object AsyncHybridSearcher {
     defaultStrategy: FusionStrategy = FusionStrategy.default
   ): AsyncHybridSearcher = new AsyncHybridSearcher(vectorStore, keywordIndex, defaultStrategy)
 
-  def apply(syncSearcher: HybridSearcher): AsyncHybridSearcher = {
+  def apply(syncSearcher: HybridSearcher): AsyncHybridSearcher =
     new AsyncHybridSearcher(
       AsyncVectorStore(syncSearcher.vectorStore),
       AsyncKeywordIndex(syncSearcher.keywordIndex),
       syncSearcher.defaultStrategy
     )
-  }
 }
