@@ -1,6 +1,8 @@
 package org.llm4s.rag
 
 import org.llm4s.chunking.{ ChunkerFactory, ChunkingConfig }
+import org.llm4s.knowledgegraph.graphrag.GraphRAGConfig
+import org.llm4s.knowledgegraph.storage.GraphStore
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.rag.loader.{ DirectoryLoader, DocumentLoader, LoadingConfig }
 import org.llm4s.rag.permissions.SearchIndex
@@ -69,7 +71,10 @@ final case class RAGConfig(
   // Permission-based search index (for enterprise RAG)
   searchIndex: Option[SearchIndex] = None,
   // Pre-retrieval query transforms
-  queryTransformers: Seq[QueryTransformer] = Seq.empty
+  queryTransformers: Seq[QueryTransformer] = Seq.empty,
+  // GraphRAG integration
+  graphStore: Option[GraphStore] = None,
+  graphRAGConfig: GraphRAGConfig = GraphRAGConfig()
 ) {
 
   // ========== Embedding Configuration ==========
@@ -408,6 +413,23 @@ final case class RAGConfig(
 
   /** Check if permission-based search is enabled */
   def hasPermissions: Boolean = searchIndex.isDefined
+
+  // ========== GraphRAG Configuration ==========
+
+  /**
+   * Enable GraphRAG by attaching a GraphStore.
+   *
+   * GraphRAG queries require an LLM client for summary generation and synthesis.
+   */
+  def withGraphStore(store: GraphStore): RAGConfig =
+    copy(graphStore = Some(store))
+
+  /** Override GraphRAG tuning parameters. */
+  def withGraphRAG(config: GraphRAGConfig): RAGConfig =
+    copy(graphRAGConfig = config)
+
+  /** Check if GraphRAG is enabled. */
+  def hasGraphRAG: Boolean = graphStore.isDefined
 }
 
 object RAGConfig {

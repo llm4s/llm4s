@@ -72,7 +72,10 @@ class SpeechIntegrationTest extends AnyFunSuite with Matchers {
   }
 
   test("Tacotron2TextToSpeech should handle voice options") {
-    assume(PlatformCommands.isCommandAvailable("python3"), "python3 required for TTS mock")
+    assume(
+      PlatformCommands.pythonInterpreter.isDefined,
+      "No Python interpreter (python3/python/py) found — skipping TTS mock test"
+    )
     // mockWavWriter writes a minimal valid WAV to --out so the full pipeline succeeds
     val tts = new Tacotron2TextToSpeech(PlatformCommands.mockWavWriter)
     val options = TTSOptions(
