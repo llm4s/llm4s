@@ -235,10 +235,11 @@ object Llm4sConfig {
    *         when `EMBEDDING_MODEL` is absent or unrecognised.
    */
   def loadTextEmbeddingModel(): Result[TextEmbeddingModelSettings] =
-    org.llm4s.config.EmbeddingsConfigLoader.loadProvider(ConfigSource.default).map { case (provider, cfg) =>
-      val p    = provider.toLowerCase
-      val dims = ModelDimensionRegistry.getDimension(p, cfg.model)
-      TextEmbeddingModelSettings(provider = p, modelName = cfg.model, dimensions = dims)
+    org.llm4s.config.EmbeddingsConfigLoader.loadProvider(ConfigSource.default).flatMap { case (provider, cfg) =>
+      val p = provider.toLowerCase
+      ModelDimensionRegistry.getDimension(p, cfg.model).map { dims =>
+        TextEmbeddingModelSettings(provider = p, modelName = cfg.model, dimensions = dims)
+      }
     }
 
   /** Alias for [[loadTextEmbeddingModel]]. */

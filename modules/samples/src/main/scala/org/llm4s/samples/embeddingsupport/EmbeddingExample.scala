@@ -183,8 +183,13 @@ object EmbeddingExample {
     ui: EmbeddingUiSettings
   ): Option[Seq[Double]] = {
     if (query == null || query.trim.isEmpty) return None
-    val dims = org.llm4s.llmconnect.config.ModelDimensionRegistry.getDimension(provider.toLowerCase, modelName)
-    val req  = EmbeddingRequest(Seq(query), org.llm4s.llmconnect.config.EmbeddingModelConfig(modelName, dims))
+    val dims = org.llm4s.llmconnect.config.ModelDimensionRegistry.getDimension(provider.toLowerCase, modelName) match {
+      case Right(d) => d
+      case Left(err) =>
+        println(yellow(s"[WARN] Could not determine dimensions: ${err.formatted}")(ui))
+        return None
+    }
+    val req = EmbeddingRequest(Seq(query), org.llm4s.llmconnect.config.EmbeddingModelConfig(modelName, dims))
     client.embed(req) match {
       case Right(resp) if resp.embeddings.nonEmpty =>
         Some(l2Normalize(resp.embeddings.head))

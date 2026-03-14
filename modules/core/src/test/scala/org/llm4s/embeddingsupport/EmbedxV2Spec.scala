@@ -224,8 +224,14 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
     val audModel = ModelSelector.selectModel(Audio, localModels).fold(err => fail(err.formatted), identity)
     val vidModel = ModelSelector.selectModel(Video, localModels).fold(err => fail(err.formatted), identity)
 
-    imgModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", imgModel.name)
-    audModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", audModel.name)
-    vidModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", vidModel.name)
+    imgModel.dimensions shouldBe ModelDimensionRegistry
+      .getDimension("local", imgModel.name)
+      .fold(err => fail(err.formatted), identity)
+    audModel.dimensions shouldBe ModelDimensionRegistry
+      .getDimension("local", audModel.name)
+      .fold(err => fail(err.formatted), identity)
+    vidModel.dimensions shouldBe ModelDimensionRegistry
+      .getDimension("local", vidModel.name)
+      .fold(err => fail(err.formatted), identity)
   }
 }

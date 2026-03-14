@@ -116,76 +116,76 @@ class StreamableHTTPTransportImpl(
       )
 
       logger.debug(s"StreamableHTTPTransport($name) received HTTP response: status=${response.statusCode}")
-
-      // Handle session management during initialization according to MCP spec : the server may or may not include a session id
-      if (request.method == "initialize" && response.statusCode >= 200 && response.statusCode < 300) {
-        // Look for mcp-session-id header in response (lowercase per spec)
-        val sessionIdOpt = response.headers.get("mcp-session-id").flatMap(_.headOption)
-
-        sessionIdOpt.foreach { sessionId =>
-          val trimmed = sessionId.trim
-          if (trimmed.nonEmpty) {
-            mcpSessionId = Some(trimmed)
-            logger.info(s"StreamableHTTPTransport($name) established MCP session: $trimmed")
-          }
-        }
-
-        if (sessionIdOpt.isEmpty) {
-          logger.debug(s"StreamableHTTPTransport($name) no session management (server chose not to use sessions)")
-        }
-      }
-
-      // Handle session expiration (404 with existing session)
-      if (response.statusCode == 404 && mcpSessionId.isDefined) {
-        logger.warn(s"StreamableHTTPTransport($name) session expired (404), clearing session")
-        mcpSessionId = None
-        throw new RuntimeException("MCP session expired, client should reinitialize")
-      }
-
-      // Handle 405 Method Not Allowed (server doesn't support Streamable HTTP)
-      if (response.statusCode == 405) {
-        throw new RuntimeException("Server does not support Streamable HTTP transport (405 Method Not Allowed)")
-      }
-
-      // Handle other HTTP errors
-      if (response.statusCode >= 400) {
-        throw new RuntimeException(
-          s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
-        )
-      }
-
-      // Determine response type based on content-type header
-      val responseBody = response.body
-      val contentType  = response.headers.get("content-type").flatMap(_.headOption).map(_.toLowerCase)
-      val isSSE        = contentType.exists(_.contains("text/event-stream"))
-
-      val jsonResponse = if (isSSE) {
-        // Server chose to respond with SSE stream
-        logger.debug(s"StreamableHTTPTransport($name) received SSE stream response")
-        parseSSEResponse(responseBody)
-      } else {
-        // Standard JSON response
-        logger.debug(s"StreamableHTTPTransport($name) received JSON response")
-        read[JsonRpcResponse](responseBody)
-      }
-
-      logger.debug(s"StreamableHTTPTransport($name) parsed JSON response: id=${jsonResponse.id}")
-      jsonResponse
+      response
     } match {
-      case Success(response) =>
-        response.error match {
-          case Some(error) =>
-            logger.error(
-              s"StreamableHTTPTransport($name) JSON-RPC error from $url: code=${error.code}, message=${error.message}"
-            )
-            Left(s"JSON-RPC Error ${error.code}: ${error.message}")
-          case None =>
-            logger.debug(s"StreamableHTTPTransport($name) request successful: id=${response.id}")
-            Right(response)
-        }
       case Failure(exception) =>
         logger.error(s"StreamableHTTPTransport($name) transport error for $url: ${exception.getMessage}", exception)
         Left(s"Transport error: ${exception.getMessage}")
+      case Success(response) =>
+        // Handle session management during initialization according to MCP spec : the server may or may not include a session id
+        if (request.method == "initialize" && response.statusCode >= 200 && response.statusCode < 300) {
+          // Look for mcp-session-id header in response (lowercase per spec)
+          val sessionIdOpt = response.headers.get("mcp-session-id").flatMap(_.headOption)
+
+          sessionIdOpt.foreach { sessionId =>
+            val trimmed = sessionId.trim
+            if (trimmed.nonEmpty) {
+              mcpSessionId = Some(trimmed)
+              logger.info(s"StreamableHTTPTransport($name) established MCP session: $trimmed")
+            }
+          }
+
+          if (sessionIdOpt.isEmpty) {
+            logger.debug(s"StreamableHTTPTransport($name) no session management (server chose not to use sessions)")
+          }
+        }
+
+        // Handle session expiration (404 with existing session)
+        if (response.statusCode == 404 && mcpSessionId.isDefined) {
+          logger.warn(s"StreamableHTTPTransport($name) session expired (404), clearing session")
+          mcpSessionId = None
+          Left("Transport error: MCP session expired, client should reinitialize")
+        } else if (response.statusCode == 405) {
+          // Handle 405 Method Not Allowed (server doesn't support Streamable HTTP)
+          Left("Transport error: Server does not support Streamable HTTP transport (405 Method Not Allowed)")
+        } else if (response.statusCode >= 400) {
+          // Handle other HTTP errors
+          Left(
+            s"Transport error: HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
+          )
+        } else {
+          // Determine response type based on content-type header
+          val responseBody = response.body
+          val contentType  = response.headers.get("content-type").flatMap(_.headOption).map(_.toLowerCase)
+          val isSSE        = contentType.exists(_.contains("text/event-stream"))
+
+          val jsonResponseResult = if (isSSE) {
+            // Server chose to respond with SSE stream
+            logger.debug(s"StreamableHTTPTransport($name) received SSE stream response")
+            parseSSEResponse(responseBody)
+          } else {
+            // Standard JSON response
+            logger.debug(s"StreamableHTTPTransport($name) received JSON response")
+            Try(read[JsonRpcResponse](responseBody)) match {
+              case Success(r) => Right(r)
+              case Failure(e) => Left(s"Transport error: ${e.getMessage}")
+            }
+          }
+
+          jsonResponseResult.flatMap { jsonResponse =>
+            logger.debug(s"StreamableHTTPTransport($name) parsed JSON response: id=${jsonResponse.id}")
+            jsonResponse.error match {
+              case Some(error) =>
+                logger.error(
+                  s"StreamableHTTPTransport($name) JSON-RPC error from $url: code=${error.code}, message=${error.message}"
+                )
+                Left(s"JSON-RPC Error ${error.code}: ${error.message}")
+              case None =>
+                logger.debug(s"StreamableHTTPTransport($name) request successful: id=${jsonResponse.id}")
+                Right(jsonResponse)
+            }
+          }
+        }
     }
   }
 
@@ -210,7 +210,7 @@ class StreamableHTTPTransportImpl(
     mcpSessionId.fold(headersWithProtocol)(sessionId => headersWithProtocol + ("mcp-session-id" -> sessionId))
   }
 
-  private def parseSSEResponse(sseBody: String): JsonRpcResponse = {
+  private def parseSSEResponse(sseBody: String): Either[String, JsonRpcResponse] = {
     // Parse Server-Sent Events format according to W3C SSE specification
     // SSE format: event: <type>\ndata: <content>\nid: <id>\n\n
     val lines = sseBody.split("\n")
@@ -286,10 +286,12 @@ class StreamableHTTPTransportImpl(
     }
 
     // Return the first valid JSON-RPC response
-    jsonResponses.headOption.getOrElse {
-      throw new RuntimeException(
-        s"No valid JSON-RPC response found in SSE stream. Found ${events.size} events, none contained valid JSON-RPC responses."
-      )
+    jsonResponses.headOption match {
+      case Some(response) => Right(response)
+      case None =>
+        Left(
+          s"Transport error: No valid JSON-RPC response found in SSE stream. Found ${events.size} events, none contained valid JSON-RPC responses."
+        )
     }
   }
 
@@ -315,23 +317,24 @@ class StreamableHTTPTransportImpl(
         s"StreamableHTTPTransport($name) received HTTP response for notification: status=${response.statusCode}"
       )
 
-      // Handle HTTP errors (notifications still use HTTP)
-      if (response.statusCode >= 400) {
-        throw new RuntimeException(
-          s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
-        )
-      }
-
-      // For notifications, we don't parse the response body since no response is expected
-      logger.debug(s"StreamableHTTPTransport($name) notification sent successfully")
-      ()
+      response
     } match {
-      case Success(_) =>
-        logger.debug(s"StreamableHTTPTransport($name) notification successful")
-        Right(())
       case Failure(exception) =>
         logger.error(s"StreamableHTTPTransport($name) notification error for $url: ${exception.getMessage}", exception)
         Left(s"Notification error: ${exception.getMessage}")
+      case Success(response) =>
+        // Handle HTTP errors (notifications still use HTTP)
+        if (response.statusCode >= 400) {
+          val errorMsg =
+            s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
+          logger.error(s"StreamableHTTPTransport($name) notification error for $url: $errorMsg")
+          Left(s"Notification error: $errorMsg")
+        } else {
+          // For notifications, we don't parse the response body since no response is expected
+          logger.debug(s"StreamableHTTPTransport($name) notification sent successfully")
+          logger.debug(s"StreamableHTTPTransport($name) notification successful")
+          Right(())
+        }
     }
   }
 
@@ -411,69 +414,73 @@ class SSETransportImpl(
       )
 
       logger.debug(s"SSETransport($name) received HTTP response: status=${response.statusCode}")
-
-      // Handle session management during initialization
-      if (request.method == "initialize" && response.statusCode >= 200 && response.statusCode < 300) {
-        // Look for mcp-session-id header in response (lowercase per spec)
-        val sessionIdOpt = response.headers.get("mcp-session-id").flatMap(_.headOption)
-
-        sessionIdOpt.foreach { sessionId =>
-          val trimmed = sessionId.trim
-          if (trimmed.nonEmpty) {
-            mcpSessionId = Some(trimmed)
-            logger.info(s"SSETransport($name) established MCP session: $trimmed")
-          }
-        }
-
-        if (sessionIdOpt.isEmpty) {
-          logger.debug(s"SSETransport($name) no session management (server chose not to use sessions)")
-        }
-      }
-
-      // Handle session expiration (404 with existing session)
-      if (response.statusCode == 404 && mcpSessionId.isDefined) {
-        logger.warn(s"SSETransport($name) session expired (404), clearing session")
-        mcpSessionId = None
-        throw new RuntimeException("MCP session expired, client should reinitialize")
-      }
-
-      // Handle other HTTP errors
-      if (response.statusCode >= 400) {
-        throw new RuntimeException(
-          s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
-        )
-      }
-
-      // Determine response type based on content-type header
-      val responseBody = response.body
-      val contentType  = response.headers.get("content-type").flatMap(_.headOption).map(_.toLowerCase)
-      val isSSE        = contentType.exists(_.contains("text/event-stream"))
-
-      val jsonResponse = if (isSSE) {
-        // Server responded with SSE stream
-        logger.debug(s"SSETransport($name) received SSE stream response")
-        parseSSEResponse(responseBody)
-      } else {
-        // Standard JSON response
-        logger.debug(s"SSETransport($name) received JSON response")
-        read[JsonRpcResponse](responseBody)
-      }
-
-      logger.debug(s"SSETransport($name) parsed JSON response: id=${jsonResponse.id}")
-      jsonResponse
+      response
     } match {
-      case Success(response) =>
-        response.error match {
-          case Some(error) =>
-            logger.error(s"SSETransport($name) JSON-RPC error from $url: code=${error.code}, message=${error.message}")
-            Left(s"JSON-RPC Error ${error.code}: ${error.message}")
-          case None =>
-            logger.debug(s"SSETransport($name) request successful: id=${response.id}")
-            Right(response)
-        }
       case Failure(exception) =>
         logger.error(s"SSETransport($name) transport error for $url: ${exception.getMessage}", exception)
         Left(s"Transport error: ${exception.getMessage}")
+      case Success(response) =>
+        // Handle session management during initialization
+        if (request.method == "initialize" && response.statusCode >= 200 && response.statusCode < 300) {
+          // Look for mcp-session-id header in response (lowercase per spec)
+          val sessionIdOpt = response.headers.get("mcp-session-id").flatMap(_.headOption)
+
+          sessionIdOpt.foreach { sessionId =>
+            val trimmed = sessionId.trim
+            if (trimmed.nonEmpty) {
+              mcpSessionId = Some(trimmed)
+              logger.info(s"SSETransport($name) established MCP session: $trimmed")
+            }
+          }
+
+          if (sessionIdOpt.isEmpty) {
+            logger.debug(s"SSETransport($name) no session management (server chose not to use sessions)")
+          }
+        }
+
+        // Handle session expiration (404 with existing session)
+        if (response.statusCode == 404 && mcpSessionId.isDefined) {
+          logger.warn(s"SSETransport($name) session expired (404), clearing session")
+          mcpSessionId = None
+          Left("Transport error: MCP session expired, client should reinitialize")
+        } else if (response.statusCode >= 400) {
+          // Handle other HTTP errors
+          Left(
+            s"Transport error: HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
+          )
+        } else {
+          // Determine response type based on content-type header
+          val responseBody = response.body
+          val contentType  = response.headers.get("content-type").flatMap(_.headOption).map(_.toLowerCase)
+          val isSSE        = contentType.exists(_.contains("text/event-stream"))
+
+          val jsonResponseResult = if (isSSE) {
+            // Server responded with SSE stream
+            logger.debug(s"SSETransport($name) received SSE stream response")
+            parseSSEResponse(responseBody)
+          } else {
+            // Standard JSON response
+            logger.debug(s"SSETransport($name) received JSON response")
+            Try(read[JsonRpcResponse](responseBody)) match {
+              case Success(r) => Right(r)
+              case Failure(e) => Left(s"Transport error: ${e.getMessage}")
+            }
+          }
+
+          jsonResponseResult.flatMap { jsonResponse =>
+            logger.debug(s"SSETransport($name) parsed JSON response: id=${jsonResponse.id}")
+            jsonResponse.error match {
+              case Some(error) =>
+                logger.error(
+                  s"SSETransport($name) JSON-RPC error from $url: code=${error.code}, message=${error.message}"
+                )
+                Left(s"JSON-RPC Error ${error.code}: ${error.message}")
+              case None =>
+                logger.debug(s"SSETransport($name) request successful: id=${jsonResponse.id}")
+                Right(jsonResponse)
+            }
+          }
+        }
     }
   }
 
@@ -498,7 +505,7 @@ class SSETransportImpl(
     mcpSessionId.fold(headersWithProtocol)(sessionId => headersWithProtocol + ("mcp-session-id" -> sessionId))
   }
 
-  private def parseSSEResponse(sseBody: String): JsonRpcResponse = {
+  private def parseSSEResponse(sseBody: String): Either[String, JsonRpcResponse] = {
     // Parse Server-Sent Events format according to MCP spec
     val lines = sseBody.split("\n")
 
@@ -519,8 +526,9 @@ class SSETransportImpl(
       }
 
     // Return the first valid JSON-RPC response
-    jsonResponses.headOption.getOrElse {
-      throw new RuntimeException("No valid JSON-RPC response found in SSE stream")
+    jsonResponses.headOption match {
+      case Some(response) => Right(response)
+      case None           => Left("Transport error: No valid JSON-RPC response found in SSE stream")
     }
   }
 
@@ -542,24 +550,24 @@ class SSETransportImpl(
       )
 
       logger.debug(s"SSETransport($name) received HTTP response for notification: status=${response.statusCode}")
-
-      // Handle HTTP errors
-      if (response.statusCode >= 400) {
-        throw new RuntimeException(
-          s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
-        )
-      }
-
-      // For notifications, we don't parse the response body since no response is expected
-      logger.debug(s"SSETransport($name) notification sent successfully")
-      ()
+      response
     } match {
-      case Success(_) =>
-        logger.debug(s"SSETransport($name) notification successful")
-        Right(())
       case Failure(exception) =>
         logger.error(s"SSETransport($name) notification error for $url: ${exception.getMessage}", exception)
         Left(s"Notification error: ${exception.getMessage}")
+      case Success(response) =>
+        // Handle HTTP errors
+        if (response.statusCode >= 400) {
+          val errorMsg =
+            s"HTTP error ${response.statusCode}: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
+          logger.error(s"SSETransport($name) notification error for $url: $errorMsg")
+          Left(s"Notification error: $errorMsg")
+        } else {
+          // For notifications, we don't parse the response body since no response is expected
+          logger.debug(s"SSETransport($name) notification sent successfully")
+          logger.debug(s"SSETransport($name) notification successful")
+          Right(())
+        }
     }
   }
 
@@ -685,25 +693,26 @@ class StdioTransportImpl(
       )
 
       process = Some(newProcess)
-
-      // Wait for server to be ready (check if it's responsive)
-      waitForServerReady(newProcess) match {
-        case Right(_) =>
-          logger.info(s"StdioTransport($name) process started and ready")
-          // Start the background reader thread
-          startReaderThread()
-          newProcess
-        case Left(error) =>
-          // Clean up failed process
-          cleanupProcess()
-          throw new RuntimeException(s"Server startup failed: $error")
-      }
+      newProcess
     } match {
-      case Success(p) => Right(p)
       case Failure(e) =>
         cleanupProcess()
         logger.error(s"StdioTransport($name) failed to start process: ${e.getMessage}", e)
         Left(s"Failed to start MCP server process: ${e.getMessage}")
+      case Success(newProcess) =>
+        // Wait for server to be ready (check if it's responsive)
+        waitForServerReady(newProcess) match {
+          case Right(_) =>
+            logger.info(s"StdioTransport($name) process started and ready")
+            // Start the background reader thread
+            startReaderThread()
+            Right(newProcess)
+          case Left(error) =>
+            // Clean up failed process
+            cleanupProcess()
+            logger.error(s"StdioTransport($name) failed to start process: Server startup failed: $error")
+            Left(s"Failed to start MCP server process: Server startup failed: $error")
+        }
     }
   }
 
@@ -861,69 +870,74 @@ class StdioTransportImpl(
 
           try {
             // Acquire write lock to ensure atomic request transmission
-            writeLock.lock()
-            try {
-              // Read any pending stderr for diagnostics
-              readAvailableStderr()
+            val writeError: Option[String] = {
+              writeLock.lock()
+              try {
+                // Read any pending stderr for diagnostics
+                readAvailableStderr()
 
-              val requestJson = write(request)
-              logger.info(s"StdioTransport($name) writing to stdin: $requestJson")
+                val requestJson = write(request)
+                logger.info(s"StdioTransport($name) writing to stdin: $requestJson")
 
-              // Write request as line-delimited JSON (one complete JSON object per line)
-              writer.println(requestJson)
-              writer.flush() // Ensure the request is immediately sent to the server
+                // Write request as line-delimited JSON (one complete JSON object per line)
+                writer.println(requestJson)
+                writer.flush() // Ensure the request is immediately sent to the server
 
-              if (writer.checkError()) {
-                pendingRequests.remove(request.id)
-                throw new RuntimeException("Failed to write to process stdin (broken pipe)")
-              }
-            } finally writeLock.unlock()
-
-            // Wait for response with timeout (blocking on the future)
-            Try {
-              responseFuture.get(RESPONSE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            } match {
-              case Success(responseLine) =>
-                if (responseLine.isEmpty) {
-                  Left(s"No response from MCP server for request ${request.id}")
-                } else {
-                  logger.info(s"StdioTransport($name) received from stdout: $responseLine")
-
-                  // Parse JSON response
-                  Try(read[JsonRpcResponse](responseLine)) match {
-                    case Success(response) =>
-                      response.error match {
-                        case Some(error) =>
-                          logger.error(
-                            s"StdioTransport($name) JSON-RPC error: code=${error.code}, message=${error.message}"
-                          )
-                          Left(s"JSON-RPC Error ${error.code}: ${error.message}")
-                        case None =>
-                          logger.debug(s"StdioTransport($name) request successful: id=${response.id}")
-                          Right(response)
-                      }
-                    case Failure(parseError) =>
-                      Left(s"Failed to parse response: ${parseError.getMessage}")
-                  }
-                }
-              case Failure(_: java.util.concurrent.TimeoutException) =>
-                pendingRequests.remove(request.id)
-                val stderrOutput = readAvailableStderr()
-                val errorMsg =
-                  s"Timeout waiting for response to request ${request.id} after ${RESPONSE_TIMEOUT_MS}ms. Server stderr: $stderrOutput"
-                logger.error(s"StdioTransport($name) $errorMsg")
-                Left(s"Stdio transport error: $errorMsg")
-              case Failure(e) =>
-                pendingRequests.remove(request.id)
-                val stderrOutput = readAvailableStderr()
-                val errorMsg = if (stderrOutput.nonEmpty) {
-                  s"${e.getMessage}. Server stderr: $stderrOutput"
-                } else {
-                  e.getMessage
-                }
-                logger.error(s"StdioTransport($name) transport error: $errorMsg", e)
-                Left(s"Stdio transport error: $errorMsg")
+                if (writer.checkError()) {
+                  pendingRequests.remove(request.id)
+                  Some("Stdio transport error: Failed to write to process stdin (broken pipe)")
+                } else None
+              } finally writeLock.unlock()
             }
+
+            if (writeError.isDefined) Left(writeError.get)
+            else {
+              // Wait for response with timeout (blocking on the future)
+              Try {
+                responseFuture.get(RESPONSE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+              } match {
+                case Success(responseLine) =>
+                  if (responseLine.isEmpty) {
+                    Left(s"No response from MCP server for request ${request.id}")
+                  } else {
+                    logger.info(s"StdioTransport($name) received from stdout: $responseLine")
+
+                    // Parse JSON response
+                    Try(read[JsonRpcResponse](responseLine)) match {
+                      case Success(response) =>
+                        response.error match {
+                          case Some(error) =>
+                            logger.error(
+                              s"StdioTransport($name) JSON-RPC error: code=${error.code}, message=${error.message}"
+                            )
+                            Left(s"JSON-RPC Error ${error.code}: ${error.message}")
+                          case None =>
+                            logger.debug(s"StdioTransport($name) request successful: id=${response.id}")
+                            Right(response)
+                        }
+                      case Failure(parseError) =>
+                        Left(s"Failed to parse response: ${parseError.getMessage}")
+                    }
+                  }
+                case Failure(_: java.util.concurrent.TimeoutException) =>
+                  pendingRequests.remove(request.id)
+                  val stderrOutput = readAvailableStderr()
+                  val errorMsg =
+                    s"Timeout waiting for response to request ${request.id} after ${RESPONSE_TIMEOUT_MS}ms. Server stderr: $stderrOutput"
+                  logger.error(s"StdioTransport($name) $errorMsg")
+                  Left(s"Stdio transport error: $errorMsg")
+                case Failure(e) =>
+                  pendingRequests.remove(request.id)
+                  val stderrOutput = readAvailableStderr()
+                  val errorMsg = if (stderrOutput.nonEmpty) {
+                    s"${e.getMessage}. Server stderr: $stderrOutput"
+                  } else {
+                    e.getMessage
+                  }
+                  logger.error(s"StdioTransport($name) transport error: $errorMsg", e)
+                  Left(s"Stdio transport error: $errorMsg")
+              }
+            } // end else
           } catch {
             case e: Exception =>
               pendingRequests.remove(request.id)
@@ -1026,17 +1040,23 @@ class StdioTransportImpl(
               writer.flush() // Ensure the notification is immediately sent to the server
 
               if (writer.checkError()) {
-                throw new RuntimeException("Failed to write notification to process stdin (broken pipe)")
+                // For notifications, we don't wait for a response - just return success
+                logger.debug(s"StdioTransport($name) notification sent successfully")
+                false // indicates write error
+              } else {
+                logger.debug(s"StdioTransport($name) notification sent successfully")
+                true // indicates success
               }
-
-              // For notifications, we don't wait for a response - just return success
-              logger.debug(s"StdioTransport($name) notification sent successfully")
-              ()
             } finally writeLock.unlock()
           } match {
-            case Success(_) =>
+            case Success(true) =>
               logger.debug(s"StdioTransport($name) notification successful")
               Right(())
+            case Success(false) =>
+              val msg =
+                "Stdio notification error: Failed to write notification to process stdin (broken pipe)"
+              logger.error(s"StdioTransport($name) $msg")
+              Left(msg)
             case Failure(exception) =>
               // Read stderr for additional context
               val stderrOutput = readAvailableStderr()

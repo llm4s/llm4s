@@ -88,7 +88,7 @@ object DocumentQAExample extends App {
       Llm4sConfig
         .embeddings()
         .flatMap { case (provider, cfg) =>
-          val dims     = scala.util.Try(ModelDimensionRegistry.getDimension(provider, cfg.model)).getOrElse(1536)
+          val dims     = ModelDimensionRegistry.getDimension(provider, cfg.model).getOrElse(1536)
           val modelCfg = EmbeddingModelConfig(cfg.model, dims)
           EmbeddingClient.from(provider, cfg).map(client => LLMEmbeddingService(client, modelCfg))
         } match {

@@ -291,11 +291,12 @@ class AnthropicStreamingHandler extends BaseStreamingResponseHandler {
  */
 object StreamingResponseHandler {
 
-  def forProvider(provider: String): StreamingResponseHandler =
+  def forProvider(provider: String): Result[StreamingResponseHandler] =
     provider.toLowerCase match {
-      case "openai" | "azure" => new OpenAIStreamingHandler()
-      case "anthropic"        => new AnthropicStreamingHandler()
-      case "openrouter"       => new OpenAIStreamingHandler() // OpenRouter uses OpenAI format
-      case _                  => throw new IllegalArgumentException(s"Unsupported streaming provider: $provider")
+      case "openai" | "azure" => Right(new OpenAIStreamingHandler())
+      case "anthropic"        => Right(new AnthropicStreamingHandler())
+      case "openrouter"       => Right(new OpenAIStreamingHandler()) // OpenRouter uses OpenAI format
+      case _ =>
+        Left(ServiceError(500, "streaming", s"Unsupported streaming provider: $provider"))
     }
 }

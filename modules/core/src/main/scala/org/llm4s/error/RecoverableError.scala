@@ -18,7 +18,7 @@ package org.llm4s.error
  * @see [[NonRecoverableError]] for errors that cannot be recovered
  * @see [[ErrorRecovery]] for retry utilities
  */
-protected trait RecoverableError extends LLMError {
+trait RecoverableError extends LLMError {
 
   /** Suggested delay in milliseconds before retrying. */
   def retryDelay: Option[Long] = None

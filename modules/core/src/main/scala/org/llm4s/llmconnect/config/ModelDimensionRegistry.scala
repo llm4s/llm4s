@@ -1,5 +1,8 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.error.ConfigurationError
+import org.llm4s.types.Result
+
 object ModelDimensionRegistry {
 
   /**
@@ -32,12 +35,12 @@ object ModelDimensionRegistry {
     )
   )
 
-  def getDimension(provider: String, model: String): Int =
+  def getDimension(provider: String, model: String): Result[Int] =
     dimensions
       .getOrElse(provider.toLowerCase, Map.empty)
-      .getOrElse(
-        model,
-        throw new IllegalArgumentException(
+      .get(model)
+      .toRight(
+        ConfigurationError(
           s"[ModelDimensionRegistry] Unknown model '$model' for provider '$provider'"
         )
       )

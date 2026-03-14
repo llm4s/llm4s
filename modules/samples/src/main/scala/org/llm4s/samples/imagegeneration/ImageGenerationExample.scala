@@ -1,5 +1,6 @@
 package org.llm4s.samples.imagegeneration
 
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.imagegeneration._
 import org.slf4j.LoggerFactory
 import java.nio.file.Paths
@@ -167,13 +168,12 @@ object ImageGenerationExample {
   def openAIGptImageExample(): Unit = {
     logger.info("\n--- OpenAI GPT Image Example (Opt-In) ---")
 
-    val maybeApiKey = sys.env.get("OPENAI_API_KEY")
-    maybeApiKey match {
-      case None =>
-        logger.info("Skipping OpenAI GPT Image example (OPENAI_API_KEY not set)")
-      case Some(apiKey) =>
+    Llm4sConfig.provider() match {
+      case Left(_) =>
+        logger.info("Skipping OpenAI GPT Image example (provider config not available)")
+      case Right(providerCfg: org.llm4s.llmconnect.config.OpenAIConfig) =>
         val config = OpenAIConfig(
-          apiKey = apiKey,
+          apiKey = providerCfg.apiKey,
           model = "gpt-image-1.5"
         )
         val options = ImageGenerationOptions(
@@ -196,6 +196,8 @@ object ImageGenerationExample {
           case Left(error) =>
             logger.info(s"OpenAI generation failed: ${error.message}")
         }
+      case Right(_) =>
+        logger.info("Skipping OpenAI GPT Image example (configured provider is not OpenAI)")
     }
   }
 }

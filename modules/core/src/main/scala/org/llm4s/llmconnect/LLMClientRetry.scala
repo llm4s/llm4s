@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect
 
-import org.llm4s.error.{ LLMError, RateLimitError, ServiceError, SimpleError, ValidationError }
+import org.llm4s.error.{ LLMError, RateLimitError, RecoverableError, ServiceError, SimpleError, ValidationError }
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 
@@ -144,8 +144,9 @@ object LLMClientRetry {
     e.httpStatus >= 500 || e.httpStatus == 429 || e.httpStatus == 408
 
   private def isRetryable(e: LLMError): Boolean = e match {
-    case s: ServiceError => isRetryableServiceError(s)
-    case other           => LLMError.isRecoverable(other)
+    case s: ServiceError     => isRetryableServiceError(s)
+    case _: RecoverableError => true
+    case _                   => false
   }
 
   /** Validate maxAttempts and baseDelay; return ValidationError if invalid so Result contract is preserved. */

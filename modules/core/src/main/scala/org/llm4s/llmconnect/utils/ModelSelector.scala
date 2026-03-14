@@ -27,18 +27,21 @@ object ModelSelector {
         )
       case Image =>
         val name = localModels.imageModel
-        val dim  = ModelDimensionRegistry.getDimension("local", name)
-        logger.info(s"[ModelSelector] Image model: $name ($dim dims)")
-        Right(EmbeddingModelConfig(name, dim))
+        ModelDimensionRegistry.getDimension("local", name).map { dim =>
+          logger.info(s"[ModelSelector] Image model: $name ($dim dims)")
+          EmbeddingModelConfig(name, dim)
+        }
       case Audio =>
         val name = localModels.audioModel
-        val dim  = ModelDimensionRegistry.getDimension("local", name)
-        logger.info(s"[ModelSelector] Audio model: $name ($dim dims)")
-        Right(EmbeddingModelConfig(name, dim))
+        ModelDimensionRegistry.getDimension("local", name).map { dim =>
+          logger.info(s"[ModelSelector] Audio model: $name ($dim dims)")
+          EmbeddingModelConfig(name, dim)
+        }
       case Video =>
         val name = localModels.videoModel
-        val dim  = ModelDimensionRegistry.getDimension("local", name)
-        logger.info(s"[ModelSelector] Video model: $name ($dim dims)")
-        Right(EmbeddingModelConfig(name, dim))
+        ModelDimensionRegistry.getDimension("local", name).map { dim =>
+          logger.info(s"[ModelSelector] Video model: $name ($dim dims)")
+          EmbeddingModelConfig(name, dim)
+        }
     }
 }
