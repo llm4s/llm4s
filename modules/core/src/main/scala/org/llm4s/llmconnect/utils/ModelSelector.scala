@@ -6,16 +6,27 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
+/**
+ * Selects an embedding model configuration based on input modality.
+ *
+ * Text modality selection is intentionally disallowed here; callers should
+ * load text embedding models through their typed config layer. Image, audio,
+ * and video modalities are resolved from the supplied [[LocalEmbeddingModels]] config.
+ */
 object ModelSelector {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
   /**
-   * Select a local model by modality.
-   * - Text: configuration-driven; callers should select a text model explicitly via their typed config loader.
-   * - Image/Audio/Video: use the passed local-model configuration.
+   * Select a local embedding model by modality.
    *
-   * This keeps ModelSelector config-agnostic: it does not read env/system/HOCON directly.
+   * Text modality returns an error since text model selection is configuration-driven.
+   * Image, audio, and video modalities resolve against the supplied local-model configuration
+   * and look up dimensions from the [[ModelDimensionRegistry]].
+   *
+   * @param modality the input modality to select a model for
+   * @param localModels local model configuration containing model names per modality
+   * @return the resolved [[EmbeddingModelConfig]] or an error
    */
   def selectModel(modality: Modality, localModels: LocalEmbeddingModels): Result[EmbeddingModelConfig] =
     modality match {

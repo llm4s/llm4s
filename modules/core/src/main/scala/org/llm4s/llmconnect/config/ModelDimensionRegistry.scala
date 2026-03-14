@@ -3,6 +3,14 @@ package org.llm4s.llmconnect.config
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
 
+/**
+ * Lookup service for embedding model vector dimensions.
+ *
+ * Provides a single, authoritative mapping from (provider, model) pairs to
+ * the dimensionality of the vectors they produce. All configuration and
+ * encoding code should resolve dimensions through this registry to avoid
+ * duplicated or inconsistent dimension constants.
+ */
 object ModelDimensionRegistry {
 
   /**
