@@ -639,49 +639,12 @@ class WorkspaceAgentInterfaceImpl(
       val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
 
       if (!completed) {
-        // Attempt graceful termination first
         process.destroy()
-<<<<<<< new-branch
-
-        // Wait briefly for graceful termination (3 seconds)
-        val gracefulTerminationTimeoutMs = 3000L
-        val terminationStart             = System.currentTimeMillis()
-        while (process.isAlive() && System.currentTimeMillis() - terminationStart < gracefulTerminationTimeoutMs)
-          Thread.sleep(100)
-
-        // If still alive, force kill the process using ProcessHandle API
-        if (process.isAlive()) {
-          Try {
-            // Get the underlying Java Process and use ProcessHandle for force kill
-            val processField = process.getClass.getDeclaredField("p")
-            processField.setAccessible(true)
-            val javaProcess   = processField.get(process).asInstanceOf[java.lang.Process]
-            val pid           = javaProcess.pid()
-            val processHandle = java.lang.ProcessHandle.of(pid)
-            if (processHandle.isPresent) {
-              processHandle.get().destroyForcibly()
-            }
-          }.recover { case _: Exception =>
-            // Fallback: try to call destroyForcibly via reflection if ProcessHandle approach fails
-            Try {
-              process.getClass.getMethod("destroyForcibly").invoke(process)
-            }
-          }
-
-          // Wait briefly for forced termination (2 seconds)
-          val forceTerminationTimeoutMs = 2000L
-          val forceStart                = System.currentTimeMillis()
-          while (process.isAlive() && System.currentTimeMillis() - forceStart < forceTerminationTimeoutMs)
-            Thread.sleep(100)
-        }
-
-=======
         // Wait up to 2 seconds for graceful termination before escalating
         if (!process.waitFor(2, TimeUnit.SECONDS)) {
           process.destroyForcibly()
           process.waitFor(3, TimeUnit.SECONDS)
         }
->>>>>>> main
         throw new WorkspaceAgentException(
           s"Command execution timed out after ${timeoutMs}ms",
           "TIMEOUT",
