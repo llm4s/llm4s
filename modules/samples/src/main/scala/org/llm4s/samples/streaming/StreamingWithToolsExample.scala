@@ -59,12 +59,11 @@ object StreamingWithToolsExample extends App {
       .`object`[TimeInput]("Time query")
       .withOptionalField("timezone", Schema.string("Timezone name, e.g. Europe/London"))
   ).withHandler { extractor =>
-    extractor.getOptString("timezone").map { tzOpt =>
-      val zoneId   = tzOpt.getOrElse(java.time.ZoneId.systemDefault().getId)
-      val now      = java.time.ZonedDateTime.now(java.time.ZoneId.of(zoneId))
-      val formatted = now.toString
-      TimeOutput(formatted, zoneId)
-    }
+    val tzOpt     = extractor.getString("timezone").toOption
+    val zoneId    = tzOpt.getOrElse(java.time.ZoneId.systemDefault().getId)
+    val now       = java.time.ZonedDateTime.now(java.time.ZoneId.of(zoneId))
+    val formatted = now.toString
+    Right(TimeOutput(formatted, zoneId))
   }.buildSafe()
 
   // Stream all important agent events so users can see progress
@@ -113,9 +112,9 @@ object StreamingWithToolsExample extends App {
   }
 
   val result = for {
-    timeTool   <- timeToolResult
-    provider   <- Llm4sConfig.provider()
-    client     <- LLMConnect.getClient(provider)
+    timeTool <- timeToolResult
+    provider <- Llm4sConfig.provider()
+    client   <- LLMConnect.getClient(provider)
     agent = new Agent(client)
     tools = new ToolRegistry(Seq(timeTool))
 
@@ -135,7 +134,5 @@ object StreamingWithToolsExample extends App {
 
     case Left(error) =>
       logger.error("Error: {}", error.message)
-      System.exit(1)
   }
 }
-
