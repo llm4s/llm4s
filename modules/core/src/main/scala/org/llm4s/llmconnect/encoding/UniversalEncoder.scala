@@ -205,19 +205,32 @@ object UniversalEncoder {
   ): Result[Seq[EmbeddingVector]] = {
     val modelResult = ModelSelector.selectModel(modality, localModels)
 
-    if (!experimentalStubsEnabled) {
-      val sizeMB = maxMediaFileSize / (1024 * 1024)
-      if (file.length() > maxMediaFileSize) {
-        return Left(
-          EmbeddingError(None, s"Media file exceeds maximum size of ${sizeMB}MB: ${file.getName}", "encoder")
+    if (experimentalStubsEnabled) {
+      modelResult.map { model =>
+        val dim     = model.dimensions
+        val safeDim = math.min(dim, MAX_STUB_DIMENSION)
+        val seed    = stableSeed(file) ^ seedXor
+        val raw     = fillDeterministic(safeDim, seed)
+        Seq(
+          EmbeddingVector(
+            id = file.getName,
+            modality = modality,
+            model = model.name,
+            dim = safeDim,
+            values = l2(raw),
+            meta = Map("mime" -> mime, "experimental" -> "true", "provider" -> "local-experimental")
+          )
         )
       }
-      return modelResult.flatMap { model =>
-        readBounded(file, maxMediaFileSize).left
-          .map(e =>
-            EmbeddingError(None, s"Failed to read ${modality.toString.toLowerCase} file: ${e.getMessage}", "encoder")
-          )
-          .flatMap { bytes =>
+    } else {
+      val sizeMB = maxMediaFileSize / (1024 * 1024)
+      if (file.length() > maxMediaFileSize) {
+        Left(
+          EmbeddingError(None, s"Media file exceeds maximum size of ${sizeMB}MB: ${file.getName}", "encoder")
+        )
+      } else {
+        modelResult.flatMap { model =>
+          readBounded(file, maxMediaFileSize).flatMap { bytes =>
             val req = MultimediaEmbeddingRequest(
               inputs = Seq(RawMediaInput(bytes, mime)),
               model = model,
@@ -239,28 +252,12 @@ object UniversalEncoder {
               }
             }
           }
+        }
       }
-    }
-
-    modelResult.map { model =>
-      val dim     = model.dimensions
-      val safeDim = math.min(dim, MAX_STUB_DIMENSION)
-      val seed    = stableSeed(file) ^ seedXor
-      val raw     = fillDeterministic(safeDim, seed)
-      Seq(
-        EmbeddingVector(
-          id = file.getName,
-          modality = modality,
-          model = model.name,
-          dim = safeDim,
-          values = l2(raw),
-          meta = Map("mime" -> mime, "experimental" -> "true", "provider" -> "local-experimental")
-        )
-      )
     }
   }
 
-  private def readBounded(file: File, limit: Long): Either[Throwable, Array[Byte]] =
+  private def readBounded(file: File, limit: Long): Result[Array[Byte]] =
     Try {
       val is  = new BufferedInputStream(Files.newInputStream(file.toPath))
       val out = new ByteArrayOutputStream(math.min(file.length(), limit).toInt)
@@ -277,7 +274,7 @@ object UniversalEncoder {
         }
         out.toByteArray
       } finally is.close()
-    }.toEither
+    }.toEither.left.map(e => EmbeddingError(None, s"Failed to read media file: ${e.getMessage}", "encoder"))
 
   private def l2(v: Array[Float]): Array[Float] = {
     val n = math.sqrt(v.foldLeft(0.0)((s, x) => s + x * x)).toFloat
