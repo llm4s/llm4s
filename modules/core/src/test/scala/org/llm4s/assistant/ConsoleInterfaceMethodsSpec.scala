@@ -2,13 +2,23 @@ package org.llm4s.assistant
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterAll
 import org.llm4s.agent.Agent
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ DirectoryPath, Result }
 
-class ConsoleInterfaceMethodsSpec extends AnyFlatSpec with Matchers {
+import java.nio.file.Files
+
+class ConsoleInterfaceMethodsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
+
+  private val tempDir = Files.createTempDirectory("console-test-sessions")
+
+  override def afterAll(): Unit = {
+    Files.list(tempDir).forEach(Files.deleteIfExists(_))
+    Files.deleteIfExists(tempDir)
+  }
 
   private val dummyClient: LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
@@ -34,7 +44,7 @@ class ConsoleInterfaceMethodsSpec extends AnyFlatSpec with Matchers {
 
   private def makeConsole(tools: ToolRegistry = emptyTools): ConsoleInterface = {
     val agent          = new Agent(dummyClient)
-    val sessionManager = new SessionManager(DirectoryPath("/tmp/test-sessions"), agent)
+    val sessionManager = new SessionManager(DirectoryPath(tempDir.toString), agent)
     new ConsoleInterface(tools, sessionManager)
   }
 

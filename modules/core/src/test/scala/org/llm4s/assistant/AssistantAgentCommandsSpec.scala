@@ -2,17 +2,26 @@ package org.llm4s.assistant
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.BeforeAndAfterAll
 import org.llm4s.agent.{ AgentState, AgentStatus }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ SessionId, DirectoryPath, Result }
 
+import java.nio.file.Files
 import java.util.UUID
 
-class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers {
+class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
+  private val tempDir    = Files.createTempDirectory("assistant-test-sessions")
   private val emptyTools = ToolRegistry.empty
+
+  override def afterAll(): Unit = {
+    // Clean up temp directory
+    Files.list(tempDir).forEach(Files.deleteIfExists(_))
+    Files.deleteIfExists(tempDir)
+  }
 
   private def mockClient(response: String = "Hello!"): LLMClient = new LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =
@@ -34,11 +43,11 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers {
     override def getReserveCompletion(): Int = 512
   }
 
-  private def emptySessionState(dir: String = "/tmp/test-assistant-sessions"): SessionState =
+  private def emptySessionState(): SessionState =
     SessionState(
       agentState = None,
       sessionId = SessionId(UUID.randomUUID().toString),
-      sessionDir = DirectoryPath(dir)
+      sessionDir = DirectoryPath(tempDir.toString)
     )
 
   private def sessionStateWithMessages(
@@ -55,7 +64,7 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers {
   }
 
   private def assistantAgent(client: LLMClient = mockClient()): AssistantAgent =
-    new AssistantAgent(client, emptyTools, "/tmp/test-assistant-sessions")
+    new AssistantAgent(client, emptyTools, tempDir.toString)
 
   // ========== processInput with commands ==========
 
