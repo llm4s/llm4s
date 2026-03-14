@@ -301,9 +301,9 @@ private[llm4s] class JdkHttpClient extends Llm4sHttpClient {
     else {
       val separator = if (url.contains("?")) "&" else "?"
       val queryParts = params.map { case (k, v) =>
-        URLEncoder.encode(k, "UTF-8") + "=" + URLEncoder.encode(v, "UTF-8")
+        s"${URLEncoder.encode(k, "UTF-8")}=${URLEncoder.encode(v, "UTF-8")}"
       }
-      url + separator + queryParts.mkString("&")
+      s"$url$separator${queryParts.mkString("&")}"
     }
 
   private def buildMultipartBody(parts: Seq[MultipartPart], boundary: String): Array[Byte] = {

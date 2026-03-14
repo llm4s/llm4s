@@ -150,7 +150,7 @@ class Agent(client: LLMClient) {
         case Left(error) =>
           error match {
             case UnknownError(msg, cause) =>
-              logger.debug("Tracing failed: " + msg, cause)
+              logger.debug(s"Tracing failed: $msg", cause)
             case _ =>
               logger.debug("Tracing failed: {}", error)
           }
@@ -293,7 +293,7 @@ class Agent(client: LLMClient) {
                 "[DEBUG] Response type: {}",
                 if (completion.message.toolCalls.isEmpty) "text" else "tool_calls"
               )
-              if (completion.message.content != null && completion.message.content.nonEmpty) {
+              if (Option(completion.message.content).exists(_.nonEmpty)) {
                 logger.info("[DEBUG] Response content: {}", completion.message.content)
               }
               if (completion.message.toolCalls.nonEmpty) {

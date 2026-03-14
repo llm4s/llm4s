@@ -34,7 +34,7 @@ object OllamaEmbeddingProvider {
           .map(Left(_))
           .getOrElse(Left(EmbeddingError(code = Some("500"), message = "Unknown error", provider = "ollama")))
       } else {
-        val embeddings = vectors.map(_.toOption.get)
+        val embeddings = vectors.collect { case Right(v) => v }
         val metadata   = Map("provider" -> "ollama", "model" -> model, "count" -> input.size.toString)
         Right(EmbeddingResponse(embeddings = embeddings, metadata = metadata))
       }

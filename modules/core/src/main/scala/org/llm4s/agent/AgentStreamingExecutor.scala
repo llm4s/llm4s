@@ -62,7 +62,7 @@ final private[agent] class AgentStreamingExecutor(
         case Left(error) =>
           error match {
             case UnknownError(msg, cause) =>
-              logger.debug("Tracing failed: " + msg, cause)
+              logger.debug(s"Tracing failed: $msg", cause)
             case _ =>
               logger.debug("Tracing failed: {}", error)
           }

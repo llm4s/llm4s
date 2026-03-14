@@ -112,8 +112,8 @@ object HtmlContentExtractor {
     if (titleTag.nonEmpty) return titleTag
 
     // Fall back to first <h1>
-    val h1 = doc.select("h1").first()
-    if (h1 != null) return h1.text()
+    val h1 = Option(doc.select("h1").first())
+    if (h1.isDefined) return h1.get.text()
 
     // Fall back to og:title
     val ogTitle = doc.select("meta[property=og:title]").attr("content")
@@ -155,11 +155,7 @@ object HtmlContentExtractor {
     val mainContent = findMainContent(doc)
 
     // Get text, preserving some structure
-    val text = if (mainContent != null) {
-      formatElement(mainContent)
-    } else {
-      formatElement(doc.body())
-    }
+    val text = Option(mainContent).map(formatElement).getOrElse(formatElement(doc.body()))
 
     // Clean up whitespace
     text

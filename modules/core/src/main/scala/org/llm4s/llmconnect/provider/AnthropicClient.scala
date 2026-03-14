@@ -473,11 +473,13 @@ curl https://api.anthropic.com/v1/messages \
 
     val cachedTokens: Option[Int] =
       Option(usage.cacheReadInputTokens())
-        .flatMap(opt => if (opt.isPresent) Some(opt.get().toInt) else None)
+        .filter(_.isPresent)
+        .map(_.get().toInt)
 
     val cacheCreationTokens: Option[Int] =
       Option(usage.cacheCreationInputTokens())
-        .flatMap(opt => if (opt.isPresent) Some(opt.get().toInt) else None)
+        .filter(_.isPresent)
+        .map(_.get().toInt)
 
     val tokenUsage = TokenUsage(
       promptTokens = usage.inputTokens().toInt,
