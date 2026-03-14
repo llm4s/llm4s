@@ -253,7 +253,8 @@ lazy val samples = (project in file("modules//samples"))
     coverageEnabled := false,
     libraryDependencies += Deps.cask,
     Compile / mainClass := Some("org.llm4s.samples.deploy.SafeDeploymentService"),
-    Universal / name := "safe-deployment-service"
+    Universal / name := "safe-deployment-service",
+    executableScriptName := "safe-deployment-service"
   )
 
 lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))

@@ -14,11 +14,16 @@ RUN apt-get update && apt-get install -y curl gnupg apt-transport-https ca-certi
 
 COPY . .
 ENV SBT_OPTS="-Xmx2g -Xms512m -Dsbt.ci=true"
-RUN sbt -batch "samples/stage"
+RUN sbt -batch "samples/stage" \
+    && ls -la /app/modules/samples/target/universal/stage/ \
+    && ls -la /app/modules/samples/target/universal/stage/bin/ \
+    && test -f /app/modules/samples/target/universal/stage/bin/safe-deployment-service || test -f /app/modules/samples/target/universal/stage/bin/samples || (echo "No start script in bin/"; exit 1)
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
 COPY --from=builder /app/modules/samples/target/universal/stage ./
 EXPOSE 8080
 ENV PORT=8080
-CMD ["/app/bin/safe-deployment-service"]
+RUN chmod +x bin/* 2>/dev/null || true
+# Script name is set by executableScriptName (safe-deployment-service) or defaults to project name (samples)
+CMD ["sh", "-c", "cd /app && (test -x bin/safe-deployment-service && exec ./bin/safe-deployment-service) || exec ./bin/samples"]
