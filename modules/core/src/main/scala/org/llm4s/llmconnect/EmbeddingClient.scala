@@ -60,6 +60,47 @@ class EmbeddingClient(
     result
   }
 
+  /** Multimodal embeddings via the configured HTTP provider. */
+  def embedMultimodal(
+    request: org.llm4s.llmconnect.model.MultimediaEmbeddingRequest
+  ): Result[EmbeddingResponse] = {
+    logger.debug(
+      s"[EmbeddingClient] Multimodal embedding with model=${request.model.name}, modality=${request.modality}"
+    )
+
+    val result = provider.embedMultimodal(request)
+
+    // Emit trace events if tracing is enabled and we got a response with usage
+    result.foreach { response =>
+      tracer.foreach { t =>
+        response.usage.foreach { usage =>
+          // Emit embedding usage event
+          t.traceEmbeddingUsage(
+            usage = usage,
+            model = request.model.name,
+            operation = operation,
+            inputCount = request.inputs.size
+          )
+
+          // Try to calculate and emit cost
+          ModelRegistry.lookup(request.model.name).foreach { meta =>
+            meta.pricing.estimateCost(usage.promptTokens, 0).foreach { cost =>
+              t.traceCost(
+                costUsd = cost,
+                model = request.model.name,
+                operation = operation,
+                tokenCount = usage.totalTokens,
+                costType = "embedding"
+              )
+            }
+          }
+        }
+      }
+    }
+
+    result
+  }
+
   /** Create a new client with tracing enabled. */
   def withTracing(tracer: Tracing): EmbeddingClient =
     new EmbeddingClient(provider, Some(tracer), operation)
@@ -74,9 +115,11 @@ class EmbeddingClient(
     textModel: EmbeddingModelConfig,
     chunking: UniversalEncoder.TextChunkingConfig,
     experimentalStubsEnabled: Boolean,
-    localModels: LocalEmbeddingModels
+    localModels: LocalEmbeddingModels,
+    maxMediaFileSize: Long = UniversalEncoder.DEFAULT_MAX_MEDIA_FILE_SIZE
   ): Result[Seq[EmbeddingVector]] =
-    UniversalEncoder.encodeFromPath(path, this, textModel, chunking, experimentalStubsEnabled, localModels)
+    UniversalEncoder
+      .encodeFromPath(path, this, textModel, chunking, experimentalStubsEnabled, localModels, maxMediaFileSize)
 }
 
 object EmbeddingClient {

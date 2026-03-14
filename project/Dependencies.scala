@@ -41,6 +41,9 @@ object Versions {
 
   // Prometheus (1.x stable)
   val prometheus = "1.4.3"
+
+  // Neo4j
+  val neo4j = "5.27.0"
 }
 
 object Deps {
@@ -86,6 +89,12 @@ object Deps {
   // Prometheus metrics
   val prometheusCore = "io.prometheus" % "prometheus-metrics-core" % Versions.prometheus
   val prometheusHttp = "io.prometheus" % "prometheus-metrics-exporter-httpserver" % Versions.prometheus
+
+  // Neo4j
+  val neo4jDriver = "org.neo4j.driver" % "neo4j-java-driver" % Versions.neo4j
+  // Note: neo4j-harness is not included as a dependency because neo4j-harness 5.26.x
+  // has a hard-coded incompatibility with Netty 4.1.115.Final on modern JVMs.
+  // Integration tests use a real Neo4j instance via Neo4jGraphStore.local().
 }
 
 object Common {

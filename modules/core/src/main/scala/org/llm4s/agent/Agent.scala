@@ -39,11 +39,14 @@ private[agent] object HandoffResult {
  *                     transition, tool argument, and LLM response via SLF4J.
  * @param traceLogPath Path to write a markdown execution trace after each step;
  *                     useful for post-run inspection without a full tracing backend.
+ * @param toolExecutionConfig Optional per-tool timeout and retry; when None, tools run
+ *                            with no timeout and no retry (default).
  */
 case class AgentContext(
   tracing: Option[Tracing] = None,
   debug: Boolean = false,
-  traceLogPath: Option[String] = None
+  traceLogPath: Option[String] = None,
+  toolExecutionConfig: Option[org.llm4s.toolapi.ToolExecutionConfig] = None
 )
 
 object AgentContext {

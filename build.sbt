@@ -123,7 +123,7 @@ lazy val commonSettings = Seq(
 
 // ---- projects ----
 lazy val llm4s = (project in file("."))
-  .aggregate(core, samples, workspaceShared, workspaceRunner, workspaceClient, workspaceSamples, traceOpentelemetry)
+  .aggregate(core, samples, workspaceShared, workspaceRunner, workspaceClient, workspaceSamples, traceOpentelemetry, knowledgegraphNeo4j)
   .settings(
     publish / skip := true
   )
@@ -271,4 +271,20 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
       Deps.opentelemetrySdk,
       Deps.opentelemetryExporterOtlp
     )
+  )
+
+lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
+  .dependsOn(core)
+  .settings(
+    name             := "llm4s-knowledgegraph-neo4j",
+    commonSettings,
+    Test / fork      := true,
+    libraryDependencies ++= Seq(
+      Deps.neo4jDriver,
+      Deps.scalatest % Test
+    ),
+    // Enforce ≥80% statement coverage when running with `sbt coverage test`
+    // (requires Neo4j on bolt://localhost:7687 — tests auto-skip without it)
+    coverageMinimumStmtTotal := 80,
+    coverageFailOnMinimum    := false // don't fail CI when Neo4j is absent
   )

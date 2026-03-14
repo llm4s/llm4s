@@ -8,6 +8,8 @@ import com.anthropic.models.messages.{
   ThinkingConfigEnabled,
   Tool
 }
+
+import scala.collection.mutable
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
@@ -201,6 +203,7 @@ curl https://api.anthropic.com/v1/messages \
         // Create accumulator for building the final completion
         val accumulator                      = StreamingAccumulator.create()
         var currentMessageId: Option[String] = None
+        val blockIndexToToolId               = mutable.Map.empty[Long, String]
 
         // Process the stream
         val attempt = Try {
@@ -261,6 +264,24 @@ curl https://api.anthropic.com/v1/messages \
                     }
                   }
                 }
+
+                // Handle input_json_delta for tool call arguments
+                Try(delta.inputJson()).foreach { inputJsonOpt =>
+                  if (inputJsonOpt != null && inputJsonOpt.isPresent) {
+                    val fragment   = inputJsonOpt.get().partialJson()
+                    val toolCallId = blockIndexToToolId.getOrElse(contentDelta.index(), "")
+                    if (fragment != null && fragment.nonEmpty && toolCallId.nonEmpty) {
+                      val chunk = StreamedChunk(
+                        id = currentMessageId.getOrElse(""),
+                        content = None,
+                        toolCall = Some(ToolCall(id = toolCallId, name = "", arguments = ujson.Str(fragment))),
+                        finishReason = None
+                      )
+                      accumulator.addChunk(chunk)
+                      onChunk(chunk)
+                    }
+                  }
+                }
               }
 
               val contentStartOpt = event.contentBlockStart()
@@ -269,6 +290,7 @@ curl https://api.anthropic.com/v1/messages \
                 val block        = contentStart.contentBlock()
                 if (block.isToolUse) {
                   val toolUse = block.asToolUse()
+                  blockIndexToToolId(contentStart.index()) = toolUse.id()
                   val chunk = StreamedChunk(
                     id = currentMessageId.getOrElse(""),
                     content = None,

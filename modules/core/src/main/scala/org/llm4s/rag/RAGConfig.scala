@@ -1,11 +1,14 @@
 package org.llm4s.rag
 
 import org.llm4s.chunking.{ ChunkerFactory, ChunkingConfig }
+import org.llm4s.knowledgegraph.graphrag.GraphRAGConfig
+import org.llm4s.knowledgegraph.storage.GraphStore
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.rag.loader.{ DirectoryLoader, DocumentLoader, LoadingConfig }
 import org.llm4s.rag.permissions.SearchIndex
 import org.llm4s.trace.Tracing
 import org.llm4s.vectorstore.FusionStrategy
+import org.llm4s.rag.transform.QueryTransformer
 
 /**
  * Configuration for RAG pipeline.
@@ -66,7 +69,12 @@ final case class RAGConfig(
   documentLoaders: Seq[DocumentLoader] = Seq.empty,
   loadingConfig: LoadingConfig = LoadingConfig.default,
   // Permission-based search index (for enterprise RAG)
-  searchIndex: Option[SearchIndex] = None
+  searchIndex: Option[SearchIndex] = None,
+  // Pre-retrieval query transforms
+  queryTransformers: Seq[QueryTransformer] = Seq.empty,
+  // GraphRAG integration
+  graphStore: Option[GraphStore] = None,
+  graphRAGConfig: GraphRAGConfig = GraphRAGConfig()
 ) {
 
   // ========== Embedding Configuration ==========
@@ -263,6 +271,27 @@ final case class RAGConfig(
   def withTracing(tracer: Tracing): RAGConfig =
     copy(tracer = Some(tracer))
 
+  // ========== Pre-Retrieval Query Transform Configuration ==========
+
+  /**
+   * Add a query transformer for pre-retrieval processing.
+   *
+   * Transforms are applied sequentially before embedding.
+   * Multiple transforms can be chained.
+   *
+   * @param transformer The query transformer to add
+   */
+  def withQueryTransformer(transformer: QueryTransformer): RAGConfig =
+    copy(queryTransformers = queryTransformers :+ transformer)
+
+  /**
+   * Set all query transformers, replacing any existing ones.
+   *
+   * @param transformers The complete list of transformers
+   */
+  def withQueryTransformers(transformers: Seq[QueryTransformer]): RAGConfig =
+    copy(queryTransformers = transformers)
+
   // ========== Document Loading Configuration ==========
 
   /**
@@ -384,6 +413,23 @@ final case class RAGConfig(
 
   /** Check if permission-based search is enabled */
   def hasPermissions: Boolean = searchIndex.isDefined
+
+  // ========== GraphRAG Configuration ==========
+
+  /**
+   * Enable GraphRAG by attaching a GraphStore.
+   *
+   * GraphRAG queries require an LLM client for summary generation and synthesis.
+   */
+  def withGraphStore(store: GraphStore): RAGConfig =
+    copy(graphStore = Some(store))
+
+  /** Override GraphRAG tuning parameters. */
+  def withGraphRAG(config: GraphRAGConfig): RAGConfig =
+    copy(graphRAGConfig = config)
+
+  /** Check if GraphRAG is enabled. */
+  def hasGraphRAG: Boolean = graphStore.isDefined
 }
 
 object RAGConfig {

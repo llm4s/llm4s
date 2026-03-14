@@ -72,6 +72,60 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
       .buildSafe()
   }
 
+  /** Tool that sleeps for a given number of milliseconds then returns. Used for timeout tests. */
+  def createSleepTool(): Result[ToolFunction[Map[String, Any], MathResult]] = {
+    val schema = Schema
+      .`object`[Map[String, Any]]("Sleep parameters")
+      .withProperty(Schema.property("ms", Schema.integer("Milliseconds to sleep")))
+
+    ToolBuilder[Map[String, Any], MathResult](
+      "sleep",
+      "Sleeps for given ms",
+      schema
+    ).withHandler { extractor =>
+      for {
+        ms <- extractor.getInt("ms")
+      } yield {
+        Thread.sleep(ms.toLong)
+        MathResult(0.0)
+      }
+    }.buildSafe()
+  }
+
+  /** Tool that fails with IOException the first N times then succeeds. Used for retry tests. */
+  def createFlakyTool(failCount: Int): Result[ToolFunction[Map[String, Any], MathResult]] = {
+    val schema = Schema
+      .`object`[Map[String, Any]]("Flaky parameters")
+      .withProperty(Schema.property("x", Schema.number("Value")))
+    val counter = new java.util.concurrent.atomic.AtomicInteger(0)
+    ToolBuilder[Map[String, Any], MathResult](
+      "flaky",
+      "Fails N times then succeeds",
+      schema
+    ).withHandler { extractor =>
+      for {
+        x <- extractor.getDouble("x")
+      } yield {
+        if (counter.getAndIncrement() < failCount) {
+          throw new java.io.IOException("transient failure")
+        }
+        MathResult(x)
+      }
+    }.buildSafe()
+  }
+
+  /** Tool that always returns Left (handler error). Not retryable. */
+  def createFailingTool(): Result[ToolFunction[Map[String, Any], MathResult]] = {
+    val schema = Schema
+      .`object`[Map[String, Any]]("Fail parameters")
+      .withProperty(Schema.property("x", Schema.number("Value")))
+    ToolBuilder[Map[String, Any], MathResult](
+      "fail",
+      "Always fails",
+      schema
+    ).withHandler(_ => Left("validation error")).buildSafe()
+  }
+
   // ============ ToolRegistry.empty ============
 
   "ToolRegistry.empty" should "create an empty registry" in {
@@ -303,6 +357,107 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
         val results       = Await.result(futureResults, 5.seconds)
         results shouldBe empty
       }
+    )
+  }
+
+  // ============ Timeout and Retry ============
+
+  "ToolRegistry.execute with timeout" should "return timeout error when tool sleeps longer than timeout" in {
+    createSleepTool().fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      sleepTool => {
+        val registry = new ToolRegistry(Seq(sleepTool))
+        val config   = ToolExecutionConfig(timeout = Some(100.millis))
+        val request  = ToolCallRequest("sleep", ujson.Obj("ms" -> 500))
+        val result   = registry.execute(request, config)
+        result.isLeft shouldBe true
+        result.left.toOption.get shouldBe a[ToolCallError.Timeout]
+        result.left.toOption.get.getMessage should include("timed out")
+        result.left.toOption.get.getMessage should include("sleep")
+      }
+    )
+  }
+
+  it should "succeed when tool completes within timeout" in {
+    createSleepTool().fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      sleepTool => {
+        val registry = new ToolRegistry(Seq(sleepTool))
+        val config   = ToolExecutionConfig(timeout = Some(2.seconds))
+        val request  = ToolCallRequest("sleep", ujson.Obj("ms" -> 50))
+        val result   = registry.execute(request, config)
+        result.isRight shouldBe true
+      }
+    )
+  }
+
+  "ToolRegistry.execute with retry" should "succeed after retries when tool fails then succeeds" in {
+    createFlakyTool(2).fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      flakyTool => {
+        val registry = new ToolRegistry(Seq(flakyTool))
+        val config = ToolExecutionConfig(
+          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 10.millis, backoffFactor = 1.5))
+        )
+        val request = ToolCallRequest("flaky", ujson.Obj("x" -> 42.0))
+        val result  = registry.execute(request, config)
+        result.isRight shouldBe true
+        result.toOption.get("result").num shouldBe 42.0
+      }
+    )
+  }
+
+  it should "return failure when retry disabled and tool fails once" in {
+    createFlakyTool(1).fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      flakyTool => {
+        val registry = new ToolRegistry(Seq(flakyTool))
+        val config   = ToolExecutionConfig() // no retry
+        val request  = ToolCallRequest("flaky", ujson.Obj("x" -> 1.0))
+        val result   = registry.execute(request, config)
+        result.isLeft shouldBe true
+      }
+    )
+  }
+
+  it should "not retry on non-retryable error (e.g. handler error)" in {
+    createFailingTool().fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      failTool => {
+        val registry = new ToolRegistry(Seq(failTool))
+        val config = ToolExecutionConfig(
+          retryPolicy = Some(ToolRetryPolicy(maxAttempts = 3, baseDelay = 10.millis))
+        )
+        val request = ToolCallRequest("fail", ujson.Obj("x" -> 1.0))
+        val result  = registry.execute(request, config)
+        result.isLeft shouldBe true
+        result.left.toOption.get shouldBe a[ToolCallError.HandlerError]
+      }
+    )
+  }
+
+  "ToolRegistry.executeAll with timeout" should "complete batch when one tool times out and others succeed" in {
+    createAddTool().fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      addTool =>
+        createSleepTool().fold(
+          e2 => fail(s"Sleep tool failed: ${e2.formatted}"),
+          sleepTool => {
+            val registry = new ToolRegistry(Seq(addTool, sleepTool))
+            val config   = ToolExecutionConfig(timeout = Some(150.millis))
+            val requests = Seq(
+              ToolCallRequest("add", ujson.Obj("a" -> 1, "b" -> 2)),
+              ToolCallRequest("sleep", ujson.Obj("ms" -> 5000)),
+              ToolCallRequest("add", ujson.Obj("a" -> 3, "b" -> 4))
+            )
+            val futureResults = registry.executeAll(requests, ToolExecutionStrategy.Parallel, config)
+            val results       = Await.result(futureResults, 10.seconds)
+            results should have size 3
+            results(0).map(_("result").num) shouldBe Right(3.0)
+            results(1).left.toOption.get shouldBe a[ToolCallError.Timeout]
+            results(2).map(_("result").num) shouldBe Right(7.0)
+          }
+        )
     )
   }
 

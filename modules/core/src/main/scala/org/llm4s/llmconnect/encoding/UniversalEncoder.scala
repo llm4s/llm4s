@@ -9,11 +9,14 @@ import org.llm4s.llmconnect.utils.{ ChunkingUtils, ModelSelector }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
-import java.io.File
-import java.nio.file.Path
+import java.io.{ BufferedInputStream, ByteArrayOutputStream, File }
+import java.nio.file.{ Files, Path }
 import scala.util.Try
 
 /**
+ * UniversalEncoder handles extracting content from various file types and passing
+ * it to the appropriate embedding models.
+ *
  * Encodes files of arbitrary MIME types into embedding vector sequences.
  *
  * MIME type is detected automatically via Apache Tika. Dispatch then
@@ -21,14 +24,15 @@ import scala.util.Try
  *
  *  - **Text-like files** (plain text, HTML, PDF, source code, …): text is
  *    extracted by `UniversalExtractor`, optionally chunked, then embedded
- *    via the supplied `EmbeddingClient`. Real embeddings are produced.
+ *    via the supplied `EmbeddingClient`. Real embeddings are always produced.
  *
- *  - **Image / Audio / Video**: only available when `experimentalStubsEnabled`
- *    is `true`. When disabled, these modalities return a `Left` with error
- *    code `501`. When enabled, a deterministic L2-normalised vector is
- *    returned instead of a real embedding; the vector is seeded from the
- *    file name, size, and last-modified time, so the same file always
- *    produces the same stub vector.
+ *  - **Image / Audio / Video**: behaviour depends on `experimentalStubsEnabled`.
+ *    When `false`, the file bytes are read (bounded by `maxMediaFileSize`)
+ *    and forwarded to `client.embedMultimodal()` to obtain real provider
+ *    embeddings. When `true`, a deterministic L2-normalised stub vector is
+ *    returned instead; the vector is seeded from the file name, size, and
+ *    last-modified time, so the same file always produces the same stub
+ *    vector.
  *
  * == Stub dimensions ==
  *
@@ -45,8 +49,11 @@ object UniversalEncoder {
   private val logger = LoggerFactory.getLogger(getClass)
   private val tika   = new Tika()
 
-  // Maximum dimension size for stub embeddings to prevent OOM in tests
   private val MAX_STUB_DIMENSION = 8192
+
+  val DEFAULT_MAX_MEDIA_FILE_SIZE: Long = 50L * 1024 * 1024
+
+  private val READ_BUFFER_SIZE = 8192
 
   /**
    * Controls how extracted text is split before embedding.
@@ -62,15 +69,19 @@ object UniversalEncoder {
    * Encodes the file at `path` into one or more embedding vectors.
    *
    * @param path                     Path to the file to encode; must exist and be a regular file.
-   * @param client                   Embedding client used for text files; not called for image/audio/video stubs.
+   * @param client                   Embedding client used for text files and for multimodal files
+   *                                 when `experimentalStubsEnabled` is `false`.
    * @param textModel                Model configuration (name + dimensions) forwarded to `client`.
    * @param chunking                 Text chunking settings; if `enabled`, the extracted text is split before embedding.
-   * @param experimentalStubsEnabled When `false`, image/audio/video files return `Left(EmbeddingError)` with code
-   *                                 `501`. When `true`, deterministic stub vectors are returned for those modalities.
-   * @param localModels              Model configurations for image, audio, and video stubs.
-   * @return `Right(vectors)` — one vector per text chunk, or one stub vector for non-text files.
+   * @param experimentalStubsEnabled When `false`, image/audio/video files are read and forwarded to
+   *                                 `client.embedMultimodal()` for real provider embeddings.
+   *                                 When `true`, deterministic stub vectors are returned.
+   * @param localModels              Model configurations for image, audio, and video.
+   * @param maxMediaFileSize         Maximum allowed media file size in bytes. Files exceeding this
+   *                                 limit are rejected with an error. Defaults to 50 MB.
+   * @return `Right(vectors)` — one vector per text chunk, or one vector per non-text file.
    *         `Left(EmbeddingError)` when the file does not exist, the MIME type is unsupported,
-   *         or stub generation is disabled.
+   *         or the media file exceeds `maxMediaFileSize`.
    */
   def encodeFromPath(
     path: Path,
@@ -78,7 +89,8 @@ object UniversalEncoder {
     textModel: org.llm4s.llmconnect.config.EmbeddingModelConfig,
     chunking: TextChunkingConfig,
     experimentalStubsEnabled: Boolean,
-    localModels: LocalEmbeddingModels
+    localModels: LocalEmbeddingModels,
+    maxMediaFileSize: Long = DEFAULT_MAX_MEDIA_FILE_SIZE
   ): Result[Seq[EmbeddingVector]] = {
     val f = path.toFile
     if (!f.exists() || !f.isFile) return Left(EmbeddingError(None, s"File not found: $path", "extractor"))
@@ -86,15 +98,16 @@ object UniversalEncoder {
     val mime = Try(tika.detect(f)).getOrElse("application/octet-stream")
     logger.debug(s"[UniversalEncoder] MIME detected: $mime")
 
-    // Reuse canonical MIME logic from UniversalExtractor (no duplication).
     if (UniversalExtractor.isTextLike(mime)) encodeTextFile(f, mime, client, textModel, chunking)
-    else if (mime.startsWith("image/")) encodeImageFile(f, mime, experimentalStubsEnabled, localModels)
-    else if (mime.startsWith("audio/")) encodeAudioFile(f, mime, experimentalStubsEnabled, localModels)
-    else if (mime.startsWith("video/")) encodeVideoFile(f, mime, experimentalStubsEnabled, localModels)
+    else if (mime.startsWith("image/"))
+      encodeImageFile(f, mime, experimentalStubsEnabled, localModels, client, maxMediaFileSize)
+    else if (mime.startsWith("audio/"))
+      encodeAudioFile(f, mime, experimentalStubsEnabled, localModels, client, maxMediaFileSize)
+    else if (mime.startsWith("video/"))
+      encodeVideoFile(f, mime, experimentalStubsEnabled, localModels, client, maxMediaFileSize)
     else Left(EmbeddingError(None, s"Unsupported MIME for encoding: $mime", "encoder"))
   }
 
-  // ---------------- TEXT ----------------
   private def encodeTextFile(
     file: File,
     mime: String,
@@ -132,100 +145,137 @@ object UniversalEncoder {
         }
     }
 
-  private def notImpl(mod: String) =
-    Left(
-      EmbeddingError(
-        code = Some("501"),
-        message = s"$mod embeddings not implemented. Set ENABLE_EXPERIMENTAL_STUBS=true to enable demo stubs.",
-        provider = "encoder"
-      )
-    )
-
-  // ---------------- IMAGE (stub gated behind demo flag) ----------------
   private def encodeImageFile(
     file: File,
     mime: String,
     experimentalStubsEnabled: Boolean,
-    localModels: LocalEmbeddingModels
-  ): Result[Seq[EmbeddingVector]] = {
-    if (!experimentalStubsEnabled) return notImpl("Image")
-    val modelResult = ModelSelector.selectModel(Image, localModels)
-    modelResult.map { model =>
-      val dim = model.dimensions
-      // Limit dimension to prevent OOM in tests (max 8K dimensions)
-      val safeDim = math.min(dim, MAX_STUB_DIMENSION)
-      val seed    = stableSeed(file)
-      val raw     = fillDeterministic(safeDim, seed)
-      Seq(
-        EmbeddingVector(
-          id = file.getName,
-          modality = Image,
-          model = model.name,
-          dim = safeDim,
-          values = l2(raw),
-          meta = Map("mime" -> mime, "experimental" -> "true", "provider" -> "local-experimental")
-        )
-      )
-    }
-  }
+    localModels: LocalEmbeddingModels,
+    client: EmbeddingClient,
+    maxMediaFileSize: Long
+  ): Result[Seq[EmbeddingVector]] =
+    encodeMediaFile(file, mime, Image, experimentalStubsEnabled, localModels, client, 0L, maxMediaFileSize)
 
-  // ---------------- AUDIO (stub gated behind demo flag) ----------------
   private def encodeAudioFile(
     file: File,
     mime: String,
     experimentalStubsEnabled: Boolean,
-    localModels: LocalEmbeddingModels
-  ): Result[Seq[EmbeddingVector]] = {
-    if (!experimentalStubsEnabled) return notImpl("Audio")
-    val modelResult = ModelSelector.selectModel(Audio, localModels)
-    modelResult.map { model =>
-      val dim = model.dimensions
-      // Limit dimension to prevent OOM in tests (max 8K dimensions)
-      val safeDim = math.min(dim, MAX_STUB_DIMENSION)
-      val seed    = stableSeed(file) ^ 0x9e3779b97f4a7c15L
-      val raw     = fillDeterministic(safeDim, seed)
-      Seq(
-        EmbeddingVector(
-          id = file.getName,
-          modality = Audio,
-          model = model.name,
-          dim = safeDim,
-          values = l2(raw),
-          meta = Map("mime" -> mime, "experimental" -> "true", "provider" -> "local-experimental")
-        )
-      )
-    }
-  }
+    localModels: LocalEmbeddingModels,
+    client: EmbeddingClient,
+    maxMediaFileSize: Long
+  ): Result[Seq[EmbeddingVector]] =
+    encodeMediaFile(
+      file,
+      mime,
+      Audio,
+      experimentalStubsEnabled,
+      localModels,
+      client,
+      0x9e3779b97f4a7c15L,
+      maxMediaFileSize
+    )
 
-  // ---------------- VIDEO (stub gated behind demo flag) ----------------
   private def encodeVideoFile(
     file: File,
     mime: String,
     experimentalStubsEnabled: Boolean,
-    localModels: LocalEmbeddingModels
+    localModels: LocalEmbeddingModels,
+    client: EmbeddingClient,
+    maxMediaFileSize: Long
+  ): Result[Seq[EmbeddingVector]] =
+    encodeMediaFile(
+      file,
+      mime,
+      Video,
+      experimentalStubsEnabled,
+      localModels,
+      client,
+      0xc2b2ae3d27d4eb4fL,
+      maxMediaFileSize
+    )
+
+  private def encodeMediaFile(
+    file: File,
+    mime: String,
+    modality: Modality,
+    experimentalStubsEnabled: Boolean,
+    localModels: LocalEmbeddingModels,
+    client: EmbeddingClient,
+    seedXor: Long,
+    maxMediaFileSize: Long
   ): Result[Seq[EmbeddingVector]] = {
-    if (!experimentalStubsEnabled) return notImpl("Video")
-    val modelResult = ModelSelector.selectModel(Video, localModels)
-    modelResult.map { model =>
-      val dim = model.dimensions
-      // Limit dimension to prevent OOM in tests (max 8K dimensions)
-      val safeDim = math.min(dim, MAX_STUB_DIMENSION)
-      val seed    = stableSeed(file) ^ 0xc2b2ae3d27d4eb4fL
-      val raw     = fillDeterministic(safeDim, seed)
-      Seq(
-        EmbeddingVector(
-          id = file.getName,
-          modality = Video,
-          model = model.name,
-          dim = safeDim,
-          values = l2(raw),
-          meta = Map("mime" -> mime, "experimental" -> "true", "provider" -> "local-experimental")
+    val modelResult = ModelSelector.selectModel(modality, localModels)
+
+    if (experimentalStubsEnabled) {
+      modelResult.map { model =>
+        val dim     = model.dimensions
+        val safeDim = math.min(dim, MAX_STUB_DIMENSION)
+        val seed    = stableSeed(file) ^ seedXor
+        val raw     = fillDeterministic(safeDim, seed)
+        Seq(
+          EmbeddingVector(
+            id = file.getName,
+            modality = modality,
+            model = model.name,
+            dim = safeDim,
+            values = l2(raw),
+            meta = Map("mime" -> mime, "experimental" -> "true", "provider" -> "local-experimental")
+          )
         )
-      )
+      }
+    } else {
+      val sizeMB = maxMediaFileSize / (1024 * 1024)
+      if (file.length() > maxMediaFileSize) {
+        Left(
+          EmbeddingError(None, s"Media file exceeds maximum size of ${sizeMB}MB: ${file.getName}", "encoder")
+        )
+      } else {
+        modelResult.flatMap { model =>
+          readBounded(file, maxMediaFileSize).flatMap { bytes =>
+            val req = MultimediaEmbeddingRequest(
+              inputs = Seq(RawMediaInput(bytes, mime)),
+              model = model,
+              modality = modality,
+              meta = Map("mime" -> mime, "file" -> file.getName)
+            )
+            client.embedMultimodal(req).map { resp =>
+              val dim    = model.dimensions
+              val prefix = modality.toString.toLowerCase
+              resp.embeddings.zipWithIndex.map { case (vec, i) =>
+                EmbeddingVector(
+                  id = s"${file.getName}#${prefix}_$i",
+                  modality = modality,
+                  model = model.name,
+                  dim = dim,
+                  values = l2(vec.map(_.toFloat).toArray),
+                  meta = resp.metadata ++ Map("mime" -> mime)
+                )
+              }
+            }
+          }
+        }
+      }
     }
   }
 
-  // ---------------- helpers ----------------
+  private def readBounded(file: File, limit: Long): Result[Array[Byte]] =
+    Try {
+      val is  = new BufferedInputStream(Files.newInputStream(file.toPath))
+      val out = new ByteArrayOutputStream(math.min(file.length(), limit).toInt)
+      try {
+        val buf       = new Array[Byte](READ_BUFFER_SIZE)
+        var totalRead = 0L
+        var n         = is.read(buf)
+        while (n != -1) {
+          totalRead += n
+          if (totalRead > limit)
+            throw new IllegalArgumentException(s"File exceeds ${limit / (1024 * 1024)}MB limit during read")
+          out.write(buf, 0, n)
+          n = is.read(buf)
+        }
+        out.toByteArray
+      } finally is.close()
+    }.toEither.left.map(e => EmbeddingError(None, s"Failed to read media file: ${e.getMessage}", "encoder"))
+
   private def l2(v: Array[Float]): Array[Float] = {
     val n = math.sqrt(v.foldLeft(0.0)((s, x) => s + x * x)).toFloat
     if (n <= 1e-6f) v else v.map(_ / n)
@@ -236,8 +286,7 @@ object UniversalEncoder {
     val s1 = file.getName.hashCode.toLong
     val s2 = file.length()
     val s3 = file.lastModified()
-    // mix
-    var x = s1 ^ (s2 << 1) ^ (s3 << 3)
+    var x  = s1 ^ (s2 << 1) ^ (s3 << 3)
     x ^= (x >>> 33); x *= 0xff51afd7ed558ccdL
     x ^= (x >>> 33); x *= 0xc4ceb9fe1a85ec53L
     x ^ (x >>> 33)

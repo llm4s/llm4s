@@ -1,11 +1,12 @@
 package org.llm4s.toolapi
 
-import org.llm4s.core.safety.Safety
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
 
-import scala.concurrent.{ ExecutionContext, Future, blocking }
+import scala.concurrent.{ Await, ExecutionContext, Future, Promise, blocking }
+import scala.concurrent.duration._
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.{ Executors, ScheduledExecutorService, TimeUnit }
 import scala.util.control.NonFatal
 
 /**
@@ -57,32 +58,118 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
   /**
    * Executes a tool call synchronously, wrapping any thrown exception.
    *
-   * Delegates to [[org.llm4s.core.safety.Safety.safely]] so that exceptions
-   * thrown inside the tool implementation are caught and converted to
-   * `ToolCallError.ExecutionError` rather than propagating to the caller.
-   * This means callers always receive a typed `Either` and never need to
-   * guard against unexpected exceptions from tool code.
+   * We use `Try` here (rather than `org.llm4s.core.safety.Safety.safely`) so that tool
+   * execution remains independent of the Safety API and returns `Either` for direct use
+   * by retry/timeout logic. Safety is still used elsewhere in the codebase (e.g. tracing,
+   * agent entry points).
    *
-   * Tool-returned `Left` values are propagated unchanged via `.flatten`, so
-   * callers may receive any `ToolCallError` subtype that the tool itself
-   * produces (not only `ExecutionError`).
+   * Exceptions thrown inside the tool implementation are caught and converted to
+   * `ToolCallError.ExecutionError` with the original throwable preserved (so
+   * retry logic can treat e.g. IOException as retryable). Callers always receive
+   * a typed `Either` and never need to guard against unexpected exceptions from tool code.
+   *
+   * Tool-returned `Left` values are propagated unchanged, so callers may receive
+   * any `ToolCallError` subtype that the tool itself produces (not only `ExecutionError`).
    *
    * @param request The tool name and pre-parsed JSON arguments.
    * @return `Right(result)` on success; `Left(ToolCallError.UnknownFunction)`
    *         when no tool with the given name is registered;
    *         `Left(ToolCallError.ExecutionError)` when the tool throws an
-   *         exception (caught by `Safety.safely`); or `Left(error)` with the
-   *         tool's own `ToolCallError` when the tool returns a `Left` directly.
+   *         exception; or `Left(error)` with the tool's own `ToolCallError` when
+   *         the tool returns a `Left` directly.
    */
   def execute(request: ToolCallRequest): Either[ToolCallError, ujson.Value] =
+    runOneAttempt(request)
+
+  /**
+   * Executes a tool call with optional per-tool timeout and retry.
+   *
+   * When `config` is default (no timeout, no retry), behavior is identical to [[execute(request)]].
+   *
+   * @param request The tool call request
+   * @param config  Optional timeout and retry policy
+   * @param ec      ExecutionContext required when timeout or retry is used
+   */
+  def execute(
+    request: ToolCallRequest,
+    config: ToolExecutionConfig
+  )(implicit ec: ExecutionContext): Either[ToolCallError, ujson.Value] = {
+    val noTimeout = config.timeout.isEmpty
+    val noRetry   = config.retryPolicy.isEmpty
+    if (noTimeout && noRetry) {
+      runOneAttempt(request)
+    } else {
+      runWithRetry(request, config)
+    }
+  }
+
+  /** Single attempt: find tool and run it (no timeout, no retry). */
+  private def runOneAttempt(request: ToolCallRequest): Either[ToolCallError, ujson.Value] =
     tools.find(_.name == request.functionName) match {
       case Some(tool) =>
-        Safety
-          .safely(tool.execute(request.arguments))
-          .left
-          .map(err => ToolCallError.ExecutionError(request.functionName, new Exception(err.message)))
-          .flatten
+        scala.util.Try(tool.execute(request.arguments)) match {
+          case scala.util.Success(Right(v)) => Right(v)
+          case scala.util.Success(Left(e))  => Left(e)
+          case scala.util.Failure(t)        => Left(ToolCallError.ExecutionError(request.functionName, t))
+        }
       case None => Left(ToolCallError.UnknownFunction(request.functionName))
+    }
+
+  private def runWithRetry(
+    request: ToolCallRequest,
+    config: ToolExecutionConfig
+  )(implicit ec: ExecutionContext): Either[ToolCallError, ujson.Value] =
+    config.retryPolicy match {
+      case None =>
+        runOneAttemptWithTimeout(request, config.timeout)
+      case Some(policy) =>
+        var attempt                                        = 0
+        var lastResult: Either[ToolCallError, ujson.Value] = null
+        while (attempt < policy.maxAttempts) {
+          lastResult = runOneAttemptWithTimeout(request, config.timeout)
+          lastResult match {
+            case Right(_) => return lastResult
+            case Left(err) if ToolCallError.isRetryable(err) && attempt + 1 < policy.maxAttempts =>
+              attempt += 1
+              // Exponential backoff: delay = baseDelay * backoffFactor^(attempt-1)
+              // attempt 1 -> baseDelay, attempt 2 -> baseDelay * factor, attempt 3 -> baseDelay * factor^2, ...
+              val delayMs =
+                (policy.baseDelay.toMillis * math.pow(policy.backoffFactor, (attempt - 1).toDouble)).toLong
+              if (delayMs > 0) {
+                blocking {
+                  Thread.sleep(delayMs)
+                }
+              }
+            case _ => return lastResult
+          }
+        }
+        lastResult
+    }
+
+  private def runOneAttemptWithTimeout(
+    request: ToolCallRequest,
+    timeoutOpt: Option[FiniteDuration]
+  )(implicit ec: ExecutionContext): Either[ToolCallError, ujson.Value] =
+    timeoutOpt match {
+      case None =>
+        runOneAttempt(request)
+      case Some(duration) =>
+        val promise = Promise[Either[ToolCallError, ujson.Value]]()
+        val timeoutError =
+          Left(ToolCallError.Timeout(request.functionName, duration)): Either[ToolCallError, ujson.Value]
+        val runFuture = Future(blocking(runOneAttempt(request)))
+        val scheduled = ToolRegistry.timeoutScheduler.schedule(
+          new Runnable {
+            override def run(): Unit = promise.trySuccess(timeoutError)
+          },
+          duration.length,
+          duration.unit
+        )
+        runFuture.onComplete { result =>
+          scheduled.cancel(false)
+          promise.tryComplete(result)
+        }
+        Await.result(promise.future, duration + 1.second)
     }
 
   /**
@@ -99,7 +186,20 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
   def executeAsync(request: ToolCallRequest)(implicit
     ec: ExecutionContext
   ): Future[Either[ToolCallError, ujson.Value]] =
-    Future(blocking(execute(request)))
+    executeAsync(request, ToolExecutionConfig())
+
+  /**
+   * Execute a tool call asynchronously with optional timeout and retry.
+   *
+   * @param request The tool call request
+   * @param config  Optional timeout and retry policy
+   * @param ec      ExecutionContext for async execution
+   */
+  def executeAsync(
+    request: ToolCallRequest,
+    config: ToolExecutionConfig
+  )(implicit ec: ExecutionContext): Future[Either[ToolCallError, ujson.Value]] =
+    Future(blocking(execute(request, config)))
 
   /**
    * Execute multiple tool calls with a configurable strategy.
@@ -111,36 +211,39 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
    */
   def executeAll(
     requests: Seq[ToolCallRequest],
-    strategy: ToolExecutionStrategy = ToolExecutionStrategy.default
+    strategy: ToolExecutionStrategy = ToolExecutionStrategy.default,
+    config: ToolExecutionConfig = ToolExecutionConfig()
   )(implicit ec: ExecutionContext): Future[Seq[Either[ToolCallError, ujson.Value]]] =
     strategy match {
       case ToolExecutionStrategy.Sequential =>
-        executeSequential(requests)
+        executeSequential(requests, config)
 
       case ToolExecutionStrategy.Parallel =>
-        executeParallel(requests)
+        executeParallel(requests, config)
 
       case ToolExecutionStrategy.ParallelWithLimit(maxConcurrency) =>
-        executeWithLimit(requests, maxConcurrency)
+        executeWithLimit(requests, maxConcurrency, config)
     }
 
   /**
    * Execute requests sequentially (one at a time).
    */
   private def executeSequential(
-    requests: Seq[ToolCallRequest]
+    requests: Seq[ToolCallRequest],
+    config: ToolExecutionConfig
   )(implicit ec: ExecutionContext): Future[Seq[Either[ToolCallError, ujson.Value]]] =
     requests.foldLeft(Future.successful(Seq.empty[Either[ToolCallError, ujson.Value]])) { (accFuture, request) =>
-      accFuture.flatMap(acc => executeAsync(request).map(result => acc :+ result))
+      accFuture.flatMap(acc => executeAsync(request, config).map(result => acc :+ result))
     }
 
   /**
    * Execute all requests in parallel.
    */
   private def executeParallel(
-    requests: Seq[ToolCallRequest]
+    requests: Seq[ToolCallRequest],
+    config: ToolExecutionConfig
   )(implicit ec: ExecutionContext): Future[Seq[Either[ToolCallError, ujson.Value]]] =
-    Future.traverse(requests)(executeAsync)
+    Future.traverse(requests)(req => executeAsync(req, config))
 
   /**
    * Execute requests in parallel with a concurrency limit using a sliding window.
@@ -148,7 +251,8 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
    */
   private def executeWithLimit(
     requests: Seq[ToolCallRequest],
-    maxConcurrency: Int
+    maxConcurrency: Int,
+    config: ToolExecutionConfig
   )(implicit ec: ExecutionContext): Future[Seq[Either[ToolCallError, ujson.Value]]] =
     if (requests.isEmpty) {
       Future.successful(Seq.empty)
@@ -164,7 +268,7 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
           Future.successful(())
         } else {
           val request = tasks(idx)
-          executeAsync(request)
+          executeAsync(request, config)
             .recover { case NonFatal(ex) =>
               Left(ToolCallError.ExecutionError(request.functionName, new Exception(ex.getMessage)))
             }
@@ -231,6 +335,28 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
 }
 
 object ToolRegistry {
+
+  /** Shared scheduler for per-tool timeouts. Single thread, no thread per tool call. */
+  private[toolapi] lazy val timeoutScheduler: ScheduledExecutorService = {
+    val executor = Executors.newSingleThreadScheduledExecutor { (r: Runnable) =>
+      val t = new Thread(r, "tool-registry-timeout")
+      t.setDaemon(true)
+      t
+    }
+    sys.addShutdownHook {
+      executor.shutdown()
+      try
+        if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+          executor.shutdownNow()
+        }
+      catch {
+        case _: InterruptedException =>
+          executor.shutdownNow()
+          Thread.currentThread().interrupt()
+      }
+    }
+    executor
+  }
 
   /**
    * Creates an empty tool registry with no tools

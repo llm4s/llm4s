@@ -182,6 +182,8 @@ class AnthropicStreamingHandler extends BaseStreamingResponseHandler {
 
   private val sseParser                        = SSEParser.createStreamingParser()
   private var currentMessageId: Option[String] = None
+  private val blockIndexToToolId: scala.collection.mutable.Map[Long, String] =
+    scala.collection.mutable.Map.empty
 
   override def processChunk(chunk: String): Result[Option[StreamedChunk]] =
     scala.util
@@ -196,6 +198,29 @@ class AnthropicStreamingHandler extends BaseStreamingResponseHandler {
                 event.data.foreach { data =>
                   Try(ujson.read(data)).toOption.foreach { json =>
                     currentMessageId = json.obj.get("message").flatMap(_("id").strOpt)
+                  }
+                }
+              case Some("content_block_start") =>
+                event.data.foreach { data =>
+                  Try(ujson.read(data)).toOption.foreach { json =>
+                    val blockIndex =
+                      json.obj.get("index").flatMap(_.numOpt).map(_.toLong).getOrElse(0L)
+                    for {
+                      cb       <- json.obj.get("content_block")
+                      cbType   <- cb.obj.get("type").flatMap(_.strOpt) if cbType == "tool_use"
+                      toolId   <- cb.obj.get("id").flatMap(_.strOpt)
+                      toolName <- cb.obj.get("name").flatMap(_.strOpt)
+                    } {
+                      blockIndexToToolId(blockIndex) = toolId
+                      val c = StreamedChunk(
+                        id = currentMessageId.getOrElse(""),
+                        content = None,
+                        toolCall = Some(ToolCall(id = toolId, name = toolName, arguments = ujson.Obj())),
+                        finishReason = None
+                      )
+                      accumulator.addChunk(c)
+                      latestChunk = Some(c)
+                    }
                   }
                 }
               case Some("content_block_delta") =>
@@ -239,9 +264,21 @@ class AnthropicStreamingHandler extends BaseStreamingResponseHandler {
           )
 
         case "input_json_delta" =>
-          // Handle tool use deltas
-          // This would accumulate JSON for tool calls
-          None // Simplified for now
+          val fragment =
+            delta.obj.get("partial_json").flatMap(_.strOpt).getOrElse("")
+          val blockIndex =
+            json.obj.get("index").flatMap(_.numOpt).map(_.toLong).getOrElse(0L)
+          val toolCallId = blockIndexToToolId.getOrElse(blockIndex, "")
+          if (fragment.nonEmpty && toolCallId.nonEmpty)
+            Some(
+              StreamedChunk(
+                id = currentMessageId.getOrElse(""),
+                content = None,
+                toolCall = Some(ToolCall(id = toolCallId, name = "", arguments = ujson.Str(fragment))),
+                finishReason = None
+              )
+            )
+          else None
 
         case _ =>
           None

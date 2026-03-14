@@ -18,6 +18,10 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
   private val isWindowsHost = System.getProperty("os.name").startsWith("Windows")
   val interface             = new WorkspaceAgentInterfaceImpl(workspacePath, isWindowsHost)
 
+  /** Creates a fresh interface with the given sandbox config for isolation. */
+  private def newInterface(config: WorkspaceSandboxConfig) =
+    new WorkspaceAgentInterfaceImpl(workspacePath, isWindowsHost, Some(config))
+
   // Create some test files
   val testFile1 = tempDir.resolve("test1.txt")
   val testFile2 = tempDir.resolve("test2.txt")
@@ -175,24 +179,88 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
   }
 
   it should "execute commands" in {
-    // This test is platform-dependent, so we'll use a simple command
-    val testCommand = if (System.getProperty("os.name").startsWith("Windows")) {
-      "echo test command"
-    } else {
-      "echo 'test command'"
-    }
-    val response = interface.executeCommand(testCommand)
+    // Use 'git --version': a real cross-platform executable that is in
+    // AllowedExecutables and does not rely on shell built-ins.
+    val response = interface.executeCommand("git --version")
     response.exitCode shouldBe 0
-    response.stdout should include("test command")
+    response.stdout should include("git")
+  }
+
+  it should "execute built-in echo command on Windows via cmd.exe /c" in {
+    // On Windows, echo is a cmd.exe built-in. WorkspaceAgentInterfaceImpl should
+    // detect this and prepend "cmd.exe /c" automatically.
+    // On Unix, echo is a real executable on PATH and works directly.
+    val response = interface.executeCommand("echo hello world")
+    response.exitCode shouldBe 0
+    response.stdout should include("hello world")
+  }
+
+  it should "block shell metacharacters before execution, not merely treat them as literal args" in {
+    // Previously this test verified that 'git --version ; echo INJECTED' ran
+    // git with ';' and 'echo' as literal args.  With the FORBIDDEN_CHARACTERS
+    // layer the command is now rejected outright before any process is
+    // launched – a strictly stronger guarantee.
+    val ex = the[WorkspaceAgentException] thrownBy
+      interface.executeCommand("git --version ; echo INJECTED")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include(";")
+  }
+
+  it should "reject executeCommand for executables not in the allowlist" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("curl https://evil.example")
+    ex.code shouldBe "EXECUTABLE_NOT_ALLOWED"
+    ex.error should include("curl")
+  }
+
+  it should "reject executeCommand for executables specified with a path separator" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("/usr/bin/ls -la")
+    ex.code shouldBe "EXECUTABLE_PATH_NOT_ALLOWED"
+    ex.error should include("/usr/bin/ls")
+  }
+
+  it should "treat an unclosed double-quote as consuming the rest of the string into the token" in {
+    // "git --version" with an unclosed leading quote on the flag:
+    // tokenizeCommand("git \"--version") => Seq("git", "--version")
+    // git receives "--version" as a literal arg and succeeds normally.
+    val response = interface.executeCommand("git \"--version")
+    response.exitCode shouldBe 0
+    response.stdout should include("git")
+  }
+
+  it should "treat an unclosed single-quote as consuming the rest of the string into the token" in {
+    // tokenizeCommand("git '--version") => Seq("git", "--version")
+    val response = interface.executeCommand("git '--version")
+    response.exitCode shouldBe 0
+    response.stdout should include("git")
+  }
+
+  it should "block echo hello & whoami due to forbidden character '&'" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("echo hello & whoami")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include("&")
+  }
+
+  it should "block git --version ; echo pwned due to forbidden character ';'" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("git --version ; echo pwned")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include(";")
+  }
+
+  it should "block commands containing pipe character '|'" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("echo foo | grep foo")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include("|")
+  }
+
+  it should "block commands containing percent expansion '%'" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("echo %PATH%")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include("%")
   }
 
   it should "reject executeCommand when sandbox has shellAllowed=false" in {
-    val lockedInterface = new WorkspaceAgentInterfaceImpl(
-      workspacePath,
-      isWindowsHost,
-      Some(WorkspaceSandboxConfig.LockedDown)
-    )
-    val ex = the[WorkspaceAgentException] thrownBy lockedInterface.executeCommand("echo hello")
+    val ex = the[WorkspaceAgentException] thrownBy
+      newInterface(WorkspaceSandboxConfig.LockedDown).executeCommand("echo hello")
     ex.code shouldBe "SHELL_DISABLED"
     ex.error should include("shellAllowed")
   }
@@ -202,7 +270,8 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
     // The fix should escalate to destroyForcibly after destroy() fails
     if (!isWindowsHost) {
       val shortTimeoutConfig = WorkspaceSandboxConfig(
-        defaultCommandTimeoutSeconds = 1
+        defaultCommandTimeoutSeconds = 1,
+        allowedCommands = WorkspaceSandboxConfig.ReadOnlyCommands + "sleep"
       )
       val timedInterface = new WorkspaceAgentInterfaceImpl(
         workspacePath,
@@ -215,6 +284,43 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
       }
       ex.code shouldBe "TIMEOUT"
       ex.error should include("timed out")
+    }
+  }
+
+  it should "reject destructive commands under a read-only sandbox configuration" in {
+    // ReadOnlyCommands excludes write-capable commands like 'rm'. Verify that
+    // 'rm test.txt' is blocked at the allowlist check with EXECUTABLE_NOT_ALLOWED.
+    val ex = the[WorkspaceAgentException] thrownBy
+      newInterface(WorkspaceSandboxConfig(allowedCommands = WorkspaceSandboxConfig.ReadOnlyCommands))
+        .executeCommand("rm test.txt")
+    ex.code shouldBe "EXECUTABLE_NOT_ALLOWED"
+    ex.error should include("rm")
+  }
+
+  it should "reject destructive commands under default sandbox policy" in {
+    // WorkspaceSandboxConfig() defaults to shellAllowed=true and ReadOnlyCommands.
+    val ex = the[WorkspaceAgentException] thrownBy
+      newInterface(WorkspaceSandboxConfig())
+        .executeCommand("rm test.txt")
+    ex.code shouldBe "EXECUTABLE_NOT_ALLOWED"
+    ex.error should include("rm")
+  }
+
+  it should "allow write commands under a read-write sandbox configuration" in {
+    // ReadWriteCommands must pass the allowlist gate for write-capable commands.
+    // The command may fail at the OS level but must NOT throw EXECUTABLE_NOT_ALLOWED.
+    val cmd =
+      if (isWindowsHost) "mkdir test-write-sandbox-check"
+      else "rm nonexistent-file-12345.txt"
+    try {
+      newInterface(WorkspaceSandboxConfig(allowedCommands = WorkspaceSandboxConfig.ReadWriteCommands))
+        .executeCommand(cmd)
+      succeed
+    } catch {
+      case e: WorkspaceAgentException if e.code == "EXECUTABLE_NOT_ALLOWED" =>
+        fail(s"Write command was incorrectly rejected by the allowlist: ${e.error}")
+      case _: WorkspaceAgentException =>
+        succeed // EXECUTION_FAILED / TIMEOUT means allowlist check passed
     }
   }
 

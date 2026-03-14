@@ -7,17 +7,20 @@ import java.nio.charset.{ Charset, StandardCharsets }
 import java.nio.file.{ Files, Path, Paths, StandardOpenOption }
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
+import scala.collection.mutable.ListBuffer
 import scala.io.Source
 import scala.jdk.CollectionConverters._
 import scala.util.{ Failure, Success, Try, Using }
-import java.util.concurrent.TimeUnit
 
 /**
  * Implementation of WorkspaceAgentInterface that operates on a local filesystem workspace.
  *
  * @param workspaceRoot The root directory of the workspace
- * @param isWindows     True if the host OS is Windows (used for shell command selection)
+ * @param isWindows     True if the host OS is Windows.  Used to route built-in commands
+ *                      (e.g. `echo`, `dir`) through `cmd.exe /c` because those names have
+ *                      no standalone `.exe` on Windows.
  * @param sandboxConfig Optional sandbox config; if None, uses [[WorkspaceSandboxConfig.Permissive]]
  */
 class WorkspaceAgentInterfaceImpl(
@@ -34,6 +37,18 @@ class WorkspaceAgentInterfaceImpl(
     if (config.excludePatterns.nonEmpty) config.excludePatterns
     else WorkspaceSandboxConfig.DefaultExclusions
 
+  // Computed once at construction: allowlist entries are lowercased on Windows so
+  // that execLower (which is also lowercased on Windows) matches correctly even
+  // when a caller-supplied config contains mixed-case entries like Set("GIT").
+  private val allowedCommandsNormalized: Set[String] =
+    if (isWindows) config.allowedCommands.map(_.toLowerCase)
+    else config.allowedCommands
+
+  // Pre-formatted for use in EXECUTABLE_NOT_ALLOWED error messages; computed
+  // once so we don't sort and join the set on every rejected command.
+  private val allowedCommandsString: String =
+    allowedCommandsNormalized.toSeq.sorted.mkString(", ")
+
   /**
    * Resolves a relative path against the workspace root, ensuring it doesn't escape the workspace.
    *
@@ -45,7 +60,11 @@ class WorkspaceAgentInterfaceImpl(
     val normalized = rootPath.resolve(relativePath).normalize()
 
     if (!normalized.startsWith(rootPath)) {
-      throw new IllegalArgumentException(s"Path '$relativePath' attempts to escape the workspace")
+      throw new WorkspaceAgentException(
+        s"Path '$relativePath' attempts to escape the workspace",
+        "PATH_ESCAPE_ATTEMPT",
+        None
+      )
     }
 
     normalized
@@ -503,7 +522,7 @@ class WorkspaceAgentInterfaceImpl(
     }
 
     // Search in files
-    var matches      = List.empty[SearchMatch]
+    val matches      = ListBuffer.empty[SearchMatch]
     var totalMatches = 0
     var done         = false // used to break out once we've observed one match past the cap
 
@@ -526,7 +545,7 @@ class WorkspaceAgentInterfaceImpl(
               val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex)
               val afterContext  = lines.slice(lineIndex + 1, math.min(lines.size, lineIndex + context + 1))
 
-              matches = matches :+ SearchMatch(
+              matches += SearchMatch(
                 path = relativePath,
                 line = lineNumber,
                 matchText = line,
@@ -546,14 +565,136 @@ class WorkspaceAgentInterfaceImpl(
 
     SearchFilesResponse(
       commandId = "local",
-      matches = matches,
+      matches = matches.toList,
       isTruncated = totalMatches > matches.size,
       totalMatches = totalMatches
     )
   }
 
   /**
-   * Execute a shell command in the workspace.
+   * Windows `cmd.exe` built-in commands that have no standalone `.exe` on PATH.
+   * When [[isWindows]] is `true` and the first argv token is one of these, we
+   * prepend `Seq("cmd.exe", "/c")` so the OS can locate the command.  The rest
+   * of the argument vector remains tokenized (not a raw string), so injection
+   * via `;` is harmless (cmd.exe does not treat `;` as a separator), though we
+   * note that `&&`, `||`, `|`, and `&` are still interpreted by cmd.exe when
+   * present as unquoted tokens.
+   */
+  // All entries are explicitly lowercased so that future contributors cannot
+  // accidentally add mixed-case entries that would break execLower comparisons.
+  private val WindowsBuiltins: Set[String] = Set(
+    "echo",
+    "dir",
+    "type",
+    "copy",
+    "move",
+    "del",
+    "ren",
+    "md",
+    "rd",
+    "set",
+    "cls",
+    "ver",
+    "vol",
+    "date",
+    "time",
+    "pause",
+    "call"
+  ).map(_.toLowerCase)
+
+  /**
+   * Shell metacharacters that must be rejected in every argument token, even
+   * after tokenization.  These characters can still trigger command chaining
+   * or redirection when the final argv is handed to `cmd.exe /c` (Windows
+   * built-ins) or to a shell that is invoked indirectly.
+   *
+   *  - `&`, `|`           – command chaining / piping
+   *  - `<`, `>`           – I/O redirection
+   *  - `^`                – cmd.exe escape / line continuation
+   *  - `;`                – command separator (sh) / ignored but confusing (cmd)
+   *  - `` ` ``            – shell command substitution (bash/sh)
+   *  - `$`                – shell variable expansion (bash/sh)
+   *  - `%`                – cmd.exe environment variable expansion (e.g. `%PATH%`)
+   */
+  private val ForbiddenArgChars: Set[Char] = Set('&', '|', '<', '>', '^', ';', '`', '$', '%')
+
+  /**
+   * Tokenize a command string into an argument vector respecting single- and
+   * double-quoted spans.  Quoted whitespace is preserved; quotes are consumed.
+   *
+   * Unclosed quotes: if an opening `'` or `"` has no matching closing quote,
+   * the rest of the string is treated as part of that token (i.e. the missing
+   * closing quote is implicitly assumed at end-of-input).  This mirrors the
+   * behaviour of most Unix shells and avoids silently discarding content.
+   *
+   * This deliberately does NOT support shell variable expansion, globbing, or
+   * any other shell meta-syntax – that is the whole point of the fix.
+   */
+  private def tokenizeCommand(command: String): Seq[String] = {
+    val tokens  = Seq.newBuilder[String]
+    val current = new StringBuilder
+    var i       = 0
+
+    /**
+     * Advance i past the quoted span, appending characters to `current`.
+     *  Stops at the matching `closeChar` or at end-of-string, whichever
+     *  comes first (unclosed-quote policy: consume to end-of-input).
+     */
+    def consumeQuotedSpan(closeChar: Char): Unit = {
+      i += 1 // skip the opening quote character
+      while (i < command.length && command(i) != closeChar) {
+        current.append(command(i))
+        i += 1
+      }
+      // If we stopped on the closing quote, the outer loop's i += 1 will
+      // advance past it.  If we hit end-of-string (i == command.length),
+      // the outer loop condition will fail on the next iteration.
+    }
+
+    while (i < command.length) {
+      command(i) match {
+        case '"'                            => consumeQuotedSpan('"')
+        case '\''                           => consumeQuotedSpan('\'')
+        case '\\' if i + 1 < command.length =>
+          // Backslash outside quotes: consume the next character literally.
+          // e.g. `ls file\ name.txt` → Seq("ls", "file name.txt")
+          i += 1
+          current.append(command(i))
+        case ' ' | '\t' =>
+          if (current.nonEmpty) {
+            tokens += current.toString()
+            current.clear()
+          }
+        case c => current.append(c)
+      }
+      i += 1
+    }
+    if (current.nonEmpty) tokens += current.toString()
+    tokens.result()
+  }
+
+  /**
+   * Execute a command in the workspace using direct argument-vector execution
+   * (no shell interpolation).  The first token of the command must appear in
+   * `config.allowedCommands` (see [[WorkspaceSandboxConfig.allowedCommands]]);
+   * absolute/relative paths to executables are rejected so the lookup always
+   * goes through PATH.
+   *
+   * Validation layers (applied in order):
+   *  1. `SHELL_DISABLED`              – sandbox config prohibits execution
+   *  2. `EMPTY_COMMAND`               – tokenized argv is empty
+   *  3. `EXECUTABLE_PATH_NOT_ALLOWED` – first token contains `/` or `\`
+   *  4. `EXECUTABLE_NOT_ALLOWED`      – first token not in `config.allowedCommands`
+   *  5. `FORBIDDEN_CHARACTERS`        – any token contains a character from
+   *                                      [[ForbiddenArgChars]] (`&`, `|`, `<`,
+   *                                      `>`, `^`, `;`, `` ` ``, `$`, `%`)
+   *
+   * On Windows, if the first token is a [[WindowsBuiltins]] built-in that has
+   * no standalone `.exe`, `cmd.exe /c` is prepended to the already-tokenized
+   * vector so each argument is still passed as a distinct string (not a raw
+   * command string).  The forbidden-character check runs before this routing
+   * step, so no dangerous token ever reaches cmd.exe.
+   *
    * When sandbox config has shellAllowed=false, throws WorkspaceAgentException.
    */
   override def executeCommand(
@@ -585,11 +726,79 @@ class WorkspaceAgentInterfaceImpl(
     val timeoutMs = (timeoutSeconds.getOrElse(config.defaultCommandTimeoutSeconds) * 1000).toLong
     val env       = environment.getOrElse(Map.empty)
 
-    val builder = if (isWindows) {
-      new java.lang.ProcessBuilder("cmd.exe", "/c", command)
-    } else {
-      new java.lang.ProcessBuilder("sh", "-c", command)
+    // --- Security fix (Issue #787): direct argument-vector execution ----------
+    // Tokenize without involving any shell so metacharacters are inert.
+    val argv = tokenizeCommand(command)
+
+    if (argv.isEmpty) {
+      throw new WorkspaceAgentException(
+        "Command string is empty",
+        "EMPTY_COMMAND",
+        None
+      )
     }
+
+    val executable = argv.head
+
+    // Reject any executable that contains a path separator; callers must use
+    // a bare name so the OS resolves it through PATH rather than a crafted path.
+    if (executable.contains("/") || executable.contains("\\")) {
+      throw new WorkspaceAgentException(
+        s"Executable paths are not allowed ('$executable'). Use a bare command name.",
+        "EXECUTABLE_PATH_NOT_ALLOWED",
+        None
+      )
+    }
+
+    // On Windows, command names are case-insensitive (e.g. GIT == git).
+    val execLower = if (isWindows) executable.toLowerCase else executable
+
+    if (!allowedCommandsNormalized.contains(execLower)) {
+      throw new WorkspaceAgentException(
+        s"Executable '$executable' is not in the allowed list. " +
+          s"Permitted executables: $allowedCommandsString",
+        "EXECUTABLE_NOT_ALLOWED",
+        None
+      )
+    }
+
+    // Layer 5: reject any token that carries a shell metacharacter.
+    // This is the critical defence for the Windows cmd.exe /c code path:
+    // even though each token is a separate argv entry, cmd.exe still
+    // interprets &, |, <, >, ^, and ; when it reconstructs the command line.
+    argv.find(token => token.exists(ForbiddenArgChars.contains)).foreach { badToken =>
+      badToken.find(ForbiddenArgChars.contains) match {
+        case Some(badChar) =>
+          throw new WorkspaceAgentException(
+            s"Argument '$badToken' contains the forbidden character '$badChar'. " +
+              s"Shell metacharacters are not allowed for security reasons. " +
+              s"Forbidden characters: ${ForbiddenArgChars.toSeq.sorted.mkString("'", "', '", "'")}.",
+            "FORBIDDEN_CHARACTERS",
+            None
+          )
+        case None =>
+      }
+    }
+
+    // On Windows, built-in commands (echo, dir, type, …) live inside cmd.exe
+    // and cannot be launched as standalone processes.  We prepend "cmd.exe /c"
+    // to the *already-tokenized* vector so each argument is still a separate
+    // string – cmd.exe receives them as distinct argv entries rather than as a
+    // raw command string, which means metacharacters like ';' are inert.
+    // Note: cmd.exe does still interpret '&&', '||', '|', and '&' as operators
+    // when they appear as unquoted tokens; callers should avoid passing these
+    // in arguments to built-in commands.
+    val finalArgv: Seq[String] =
+      if (isWindows && WindowsBuiltins.contains(execLower))
+        Seq("cmd.exe", "/c") ++ argv
+      else
+        argv
+    // --------------------------------------------------------------------------
+
+    // Use java.lang.ProcessBuilder with the tokenized argv directly – no shell
+    // wrapper.  This preserves the destroyForcibly() and waitFor(timeout) APIs
+    // introduced in #830 for reliable timeout handling.
+    val builder = new java.lang.ProcessBuilder(finalArgv.asJava)
     builder.directory(workDir)
     env.foreach { case (k, v) => builder.environment().put(k, v) }
 
