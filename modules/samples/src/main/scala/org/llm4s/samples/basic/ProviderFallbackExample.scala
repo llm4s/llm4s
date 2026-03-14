@@ -1,5 +1,6 @@
 package org.llm4s.samples.basic
 
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect._
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.config._
@@ -9,26 +10,22 @@ import org.slf4j.LoggerFactory
  * Provider fallback example demonstrating multi-provider support in LLM4S.
  *
  * This example shows:
- * - Configuring multiple LLM providers in code
+ * - Loading configuration via Llm4sConfig.provider()
  * - Attempting a request across providers using fallback logic
  * - Running the same prompt across providers without changing application code
  * - Using the first provider that successfully generates a response
  *
  * == Quick Start ==
  *
- * 1. This example demonstrates provider fallback using providers
- *    configured directly in `providerConfigs`. Providers are tried
- *    in the order listed there (not via `LLM_MODEL`).
- *
- * 2. (Optional) Set API keys for cloud providers:
+ * 1. Set `LLM_MODEL` and the corresponding API key for your primary provider:
  *    {{{
+ *    export LLM_MODEL=openai/gpt-4o-mini
  *    export OPENAI_API_KEY=sk-...
- *    export ANTHROPIC_API_KEY=sk-ant-...
  *    }}}
  *
- *    If API keys are not provided, LLM4S will automatically
- *    fall back to the next available provider (e.g. Ollama).
- *    Ensure that ollama is running locally if you intend to use it.
+ *    If the primary provider fails, the example falls back to a local
+ *    Ollama instance. Ensure that ollama is running locally if you intend
+ *    to use it as a fallback.
  *
  * 3. Run the example:
  *    {{{
@@ -50,28 +47,18 @@ object ProviderFallbackExample extends App {
 
   val logger = LoggerFactory.getLogger(this.getClass)
 
-  val providerConfigs = List(
-    (
-      "OpenAI",
-      OpenAIConfig(
-        apiKey = sys.env.getOrElse("OPENAI_API_KEY", ""),
-        model = "gpt-4o-mini",
-        organization = None,
-        baseUrl = "https://api.openai.com/v1",
-        contextWindow = 128000,
-        reserveCompletion = 4096
-      )
-    ),
-    (
-      "Anthropic",
-      AnthropicConfig(
-        apiKey = sys.env.getOrElse("ANTHROPIC_API_KEY", ""),
-        model = "claude-3-5-haiku",
-        baseUrl = "https://api.anthropic.com/v1",
-        contextWindow = 200000,
-        reserveCompletion = 4096
-      )
-    ),
+  // Build a list of candidate providers:
+  //   1. The provider configured via Llm4sConfig (LLM_MODEL env var)
+  //   2. A local Ollama fallback that requires no API key
+  val configuredProvider: List[(String, ProviderConfig)] =
+    Llm4sConfig.provider() match {
+      case Right(cfg) => List("Configured" -> cfg)
+      case Left(err) =>
+        logger.info(s"No primary provider configured: ${err.formatted}")
+        Nil
+    }
+
+  val ollamaFallback: List[(String, ProviderConfig)] = List(
     (
       "Ollama",
       OllamaConfig(
@@ -82,6 +69,9 @@ object ProviderFallbackExample extends App {
       )
     )
   )
+
+  val providerConfigs: List[(String, ProviderConfig)] =
+    configuredProvider ++ ollamaFallback
 
   val providers: Seq[(String, LLMClient)] =
     providerConfigs.flatMap { case (name, config) =>

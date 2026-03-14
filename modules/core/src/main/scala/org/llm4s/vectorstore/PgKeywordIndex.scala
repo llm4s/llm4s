@@ -1,7 +1,7 @@
 package org.llm4s.vectorstore
 
 import org.llm4s.types.Result
-import org.llm4s.error.ProcessingError
+import org.llm4s.error.{ LLMError, ProcessingError }
 import org.llm4s.util.SqlIdentifier
 
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
@@ -115,13 +115,16 @@ final class PgKeywordIndex private (
             case scala.util.Success(_) =>
               conn.commit()
               conn.setAutoCommit(true)
+              Right(())
             case scala.util.Failure(e) =>
               conn.rollback()
               conn.setAutoCommit(true)
-              throw e
+              Left(ProcessingError("pg-keyword-index", s"Index batch failed: ${e.getMessage}"))
           }
         }
-      }.toEither.left.map(e => ProcessingError("pg-keyword-index", s"Index batch failed: ${e.getMessage}"))
+      }.toEither.left
+        .map[LLMError](e => ProcessingError("pg-keyword-index", s"Index batch failed: ${e.getMessage}"))
+        .flatMap(identity)
 
   override def search(
     query: String,
@@ -330,17 +333,8 @@ final class PgKeywordIndex private (
   // Helper Methods
   // ============================================================
 
-  private def withConnection[A](f: Connection => A): A = {
-    val conn = dataSource.getConnection
-    Try(f(conn)) match {
-      case scala.util.Success(result) =>
-        conn.close()
-        result
-      case scala.util.Failure(e) =>
-        conn.close()
-        throw e
-    }
-  }
+  private def withConnection[A](f: Connection => A): A =
+    Using.resource(dataSource.getConnection)(f)
 
   private def collectResults(rs: ResultSet, includeHighlights: Boolean): Seq[KeywordSearchResult] = {
     val builder = ArrayBuffer.empty[KeywordSearchResult]

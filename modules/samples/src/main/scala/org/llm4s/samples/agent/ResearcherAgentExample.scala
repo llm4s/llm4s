@@ -2,13 +2,13 @@ package org.llm4s.samples.agent
 
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
-import com.typesafe.config.ConfigFactory
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.builtin.search.{ BraveSearchTool, SafeSearch }
 import org.llm4s.toolapi.builtin.search.BraveSearchCategory
 import org.llm4s.toolapi.builtin.search.BraveSearchConfig
 import org.slf4j.LoggerFactory
+import pureconfig.ConfigSource
 
 /**
  * Researcher Agent Example - Demonstrates all four Brave Search tools in an intelligent research workflow.
@@ -33,8 +33,10 @@ object ResearcherAgentExample {
   private val logger = LoggerFactory.getLogger(getClass)
 
   def main(args: Array[String]): Unit = {
-    val config        = ConfigFactory.load()
-    val researchTopic = config.getString("llm4s.samples.agent.research-topic")
+    val researchTopic = ConfigSource.default
+      .at("llm4s.samples.agent.research-topic")
+      .load[String]
+      .getOrElse("artificial intelligence")
     logger.info("🔬 === Researcher Agent Example ===\n")
     logger.info("Research Topic: {}", researchTopic)
     logger.info("=" * 70)

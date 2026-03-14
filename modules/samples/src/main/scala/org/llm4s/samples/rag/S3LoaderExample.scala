@@ -26,8 +26,9 @@ import scala.util.chaining._
  */
 object S3LoaderExample {
   private val logger = LoggerFactory.getLogger(getClass)
+  // S3/AWS config has no Llm4sConfig equivalent; sys.props/sys.env is acceptable here // scalafix:ok
   private def env(key: String): Option[String] =
-    sys.props.get(key).orElse(sys.env.get(key))
+    sys.props.get(key).orElse(sys.env.get(key)) // scalafix:ok NoSysEnv
   def main(args: Array[String]): Unit = {
     logger.info("=" * 60)
     logger.info("S3 Document Loader Example")
@@ -139,8 +140,9 @@ object S3LoaderExample {
  */
 object S3LoaderAdvancedExample {
   private val logger = LoggerFactory.getLogger(getClass)
+  // S3/AWS config has no Llm4sConfig equivalent; sys.props/sys.env is acceptable here // scalafix:ok
   private def env(key: String): Option[String] =
-    sys.props.get(key).orElse(sys.env.get(key))
+    sys.props.get(key).orElse(sys.env.get(key)) // scalafix:ok NoSysEnv
   def main(args: Array[String]): Unit = {
     logger.info("=" * 60)
     logger.info("S3 Document Loader - Advanced Configuration")

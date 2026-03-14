@@ -169,13 +169,16 @@ final class PgVectorStore private (
             case scala.util.Success(_) =>
               conn.commit()
               conn.setAutoCommit(true)
+              Right(())
             case scala.util.Failure(e) =>
               conn.rollback()
               conn.setAutoCommit(true)
-              throw e
+              Left(ProcessingError("pgvector-store", s"Failed to upsert batch: ${e.getMessage}"))
           }
         }
-      }.toEither.left.map(e => ProcessingError("pgvector-store", s"Failed to upsert batch: ${e.getMessage}"))
+      }.toEither.left
+        .map[LLMError](e => ProcessingError("pgvector-store", s"Failed to upsert batch: ${e.getMessage}"))
+        .flatMap(identity)
 
   /**
    * Search for the most similar vectors.
@@ -448,17 +451,8 @@ final class PgVectorStore private (
   // Helper Methods
   // ============================================================
 
-  private def withConnection[A](f: Connection => A): A = {
-    val conn = dataSource.getConnection
-    Try(f(conn)) match {
-      case scala.util.Success(result) =>
-        conn.close()
-        result
-      case scala.util.Failure(e) =>
-        conn.close()
-        throw e
-    }
-  }
+  private def withConnection[A](f: Connection => A): A =
+    Using.resource(dataSource.getConnection)(f)
 
   private def rowToRecord(rs: ResultSet): Result[VectorRecord] = {
     val embeddingStr = rs.getString("embedding")
