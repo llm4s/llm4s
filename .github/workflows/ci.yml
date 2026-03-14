@@ -16,6 +16,30 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Policy-as-code: validate provider/model config against preset (no secrets required)
+  config-policy-check:
+    name: Config Policy Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Run config policy check (dev example)
+        env:
+          LLM_MODEL: ollama/llama3
+          OLLAMA_BASE_URL: http://localhost:11434
+        run: sbt "configPolicy/runMain org.llm4s.configpolicy.CheckPolicies --env=dev"
+
   # Quick checks that should fail fast
   quick-checks:
     name: Quick Checks

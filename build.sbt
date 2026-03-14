@@ -123,7 +123,16 @@ lazy val commonSettings = Seq(
 
 // ---- projects ----
 lazy val llm4s = (project in file("."))
-  .aggregate(core, samples, workspaceShared, workspaceRunner, workspaceClient, workspaceSamples, traceOpentelemetry)
+  .aggregate(
+    core,
+    samples,
+    configPolicy,
+    workspaceShared,
+    workspaceRunner,
+    workspaceClient,
+    workspaceSamples,
+    traceOpentelemetry
+  )
   .settings(
     publish / skip := true
   )
@@ -255,6 +264,17 @@ lazy val samples = (project in file("modules//samples"))
     Compile / mainClass := Some("org.llm4s.samples.deploy.SafeDeploymentService"),
     Universal / name := "safe-deployment-service",
     executableScriptName := "safe-deployment-service"
+  )
+
+lazy val configPolicy = (project in file("modules/config-policy"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-config-policy",
+    commonSettings,
+    publish / skip := true,
+    coverageEnabled := false,
+    Compile / mainClass := Some("org.llm4s.configpolicy.CheckPolicies"),
+    libraryDependencies += Deps.pureConfig
   )
 
 lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))
