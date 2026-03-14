@@ -75,7 +75,6 @@ final class AsyncHybridSearcher private (
                     response.results.flatMap(rr => candidates.lift(rr.index).map(_.copy(score = rr.score)))
                   )
               }
->>>>>>> d47c5df2 (test: add comprehensive tests for async vectorstore module)
           case None =>
             Future.successful(Right(candidates.take(topK)))
         }

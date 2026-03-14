@@ -1,7 +1,7 @@
 package org.llm4s.vectorstore
 
-import org.llm4s.types.{AsyncResult, Result}
-import scala.concurrent.{ExecutionContext, Future}
+import org.llm4s.types.{ AsyncResult, Result }
+import scala.concurrent.{ ExecutionContext, Future }
 
 /**
  * Asynchronous, non-blocking interface for KeywordIndex search capabilities.
@@ -46,7 +46,7 @@ trait AsyncKeywordIndex {
 
 /**
  * Concrete asynchronous wrapper for a synchronous KeywordIndex.
- * Isolates blocking database lookup operations onto an ExecutionContext 
+ * Isolates blocking database lookup operations onto an ExecutionContext
  * dedicated to IO.
  */
 final class AsyncKeywordIndexWrapper(
@@ -95,14 +95,13 @@ final class AsyncKeywordIndexWrapper(
   override def stats()(implicit ec: ExecutionContext): AsyncResult[KeywordIndexStats] =
     Future(syncStore.stats())
 
-  override def update(doc: KeywordDocument)(implicit ec: ExecutionContext): AsyncResult[Unit] = {
+  override def update(doc: KeywordDocument)(implicit ec: ExecutionContext): AsyncResult[Unit] =
     Future {
       for {
         _ <- syncStore.delete(doc.id)
         _ <- syncStore.index(doc)
       } yield ()
     }
-  }
 
   override def close(): Unit = syncStore.close()
 }
@@ -110,7 +109,7 @@ final class AsyncKeywordIndexWrapper(
 object AsyncKeywordIndex {
   def apply(syncStore: KeywordIndex): AsyncKeywordIndex =
     new AsyncKeywordIndexWrapper(syncStore)
-    
+
   def inMemory(): Result[AsyncKeywordIndex] =
     KeywordIndex.inMemory().map(new AsyncKeywordIndexWrapper(_))
 }

@@ -50,6 +50,7 @@ trait AsyncVectorStore {
 }
 
 object AsyncVectorStore {
+
   /**
    * Create an AsyncVectorStore wrapping an existing VectorStore instance.
    * This uses AsyncPgVectorStore internally as the default async wrapper implementation.

@@ -1,14 +1,14 @@
 package org.llm4s.vectorstore
 
-import org.llm4s.types.{AsyncResult, Result}
-import scala.concurrent.{ExecutionContext, Future}
+import org.llm4s.types.{ AsyncResult, Result }
+import scala.concurrent.{ ExecutionContext, Future }
 
 /**
  * Asynchronous wrapper for `PgVectorStore`.
  *
  * This implementation shifts all synchronous, thread-blocking JDBC network I/O
  * (from `PgVectorStore`) onto the user-provided `ExecutionContext`. In a production
- * environment, this ExecutionContext should be backed by a bounded blocking 
+ * environment, this ExecutionContext should be backed by a bounded blocking
  * thread pool (e.g., `ExecutionContext.fromExecutor(Executors.newFixedThreadPool(...))`),
  * preventing standard compute thread starvation during high-concurrency RAG operations.
  */
