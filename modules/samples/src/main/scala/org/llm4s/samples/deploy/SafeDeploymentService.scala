@@ -35,29 +35,24 @@ object SafeDeploymentService extends cask.MainRoutes {
   override def host: String = "0.0.0.0"
 
   @cask.get("/health")
-  def health(): cask.Response =
-    cask.Response(
-      write(ujson.Obj("status" -> "up")),
-      statusCode = 200,
-      headers = Seq("Content-Type" -> "application/json")
-    )
+  def health(): String =
+    write(ujson.Obj("status" -> "up"))
 
   @cask.get("/llm-check")
-  def llmCheck(): cask.Response = {
-    val (status, code, llmConfigured) = Llm4sConfig.provider() match {
+  def llmCheck(): String = {
+    val (status, llmConfigured) = Llm4sConfig.provider() match {
       case Right(providerCfg) =>
         LLMConnect.getClient(providerCfg) match {
           case Right(_) =>
             logger.debug("LLM client obtained for llm-check")
-            ("ok", 200, true)
+            ("ok", true)
           case Left(_) =>
-            ("degraded", 200, false)
+            ("degraded", false)
         }
       case Left(_) =>
-        ("ok", 200, false)
+        ("ok", false)
     }
-    val body = write(ujson.Obj("status" -> status, "llm_configured" -> llmConfigured))
-    cask.Response(body, statusCode = code, headers = Seq("Content-Type" -> "application/json"))
+    write(ujson.Obj("status" -> status, "llm_configured" -> llmConfigured))
   }
 
   @cask.get("/")

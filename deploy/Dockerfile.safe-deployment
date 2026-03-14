@@ -6,7 +6,8 @@ WORKDIR /app
 COPY project project
 COPY modules modules
 COPY build.sbt ./
-RUN sbt "samples/stage"
+ENV SBT_OPTS="-Xmx2g -Xms512m"
+RUN sbt -batch "samples/stage"
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app
