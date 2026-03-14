@@ -288,37 +288,3 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
     coverageMinimumStmtTotal := 80,
     coverageFailOnMinimum    := false // don't fail CI when Neo4j is absent
   )
-
-lazy val crossTestScala2 = (project in file("modules/crossTest/scala2"))
-  .dependsOn(core)
-  .settings(
-    name         := "crosstest-scala2",
-    scalaVersion := scala213,
-    Test / fork  := true,
-    resolvers   += Resolver.mavenLocal,
-    resolvers   += Resolver.defaultLocal,
-    scalacOptions ++= scala2CompilerOptions,
-    libraryDependencies ++= Seq(
-      Deps.scalatest % Test,
-      Deps.ujson
-    ),
-    excludeDependencies ++= Seq(
-      ExclusionRule(organization = "com.lihaoyi", name = "geny_3"),
-      ExclusionRule(organization = "com.lihaoyi", name = "ujson_3"),
-      ExclusionRule(organization = "com.lihaoyi", name = "upickle-core_3")
-    )
-  )
-
-lazy val crossTestScala3 = (project in file("modules/crossTest/scala3"))
-  .dependsOn(core)
-  .settings(
-    name         := "crosstest-scala3",
-    scalaVersion := scala3,
-    Test / fork  := true,
-    resolvers   += Resolver.mavenLocal,
-    resolvers   += Resolver.defaultLocal,
-    scalacOptions ++= scala3CompilerOptions,
-    libraryDependencies ++= Seq(
-      Deps.scalatest % Test
-    )
-  )

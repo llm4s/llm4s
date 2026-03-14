@@ -2,6 +2,8 @@
 
 Neo4j adapter for the `GraphStore` trait. Lets you use a Neo4j graph database as the backing store for llm4s Knowledge Graph operations.
 
+**Requires Neo4j 5.9 or later** (parameterized variable-length path bounds used in traversal queries).
+
 ## Quick Start
 
 Add to your `build.sbt`:
