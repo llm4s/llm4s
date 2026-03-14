@@ -1,0 +1,10 @@
+# Kustomize base for LLM4S Safe Deployment Service (issue #846).
+# Use overlays: dev, staging, prod (e.g. kustomize build deploy/overlays/dev).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - deployment.yaml
+  - service.yaml
+commonLabels:
+  app.kubernetes.io/name: llm4s-safe-deployment
+  app.kubernetes.io/part-of: llm4s
