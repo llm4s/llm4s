@@ -16,7 +16,10 @@ class ConsoleInterfaceMethodsSpec extends AnyFlatSpec with Matchers with BeforeA
   private val tempDir = Files.createTempDirectory("console-test-sessions")
 
   override def afterAll(): Unit = {
-    Files.list(tempDir).forEach(Files.deleteIfExists(_))
+    // Close the stream to release directory handle
+    val stream = Files.list(tempDir)
+    try stream.forEach(Files.deleteIfExists(_))
+    finally stream.close()
     Files.deleteIfExists(tempDir)
   }
 

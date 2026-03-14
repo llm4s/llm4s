@@ -18,8 +18,10 @@ class AssistantAgentCommandsSpec extends AnyFlatSpec with Matchers with BeforeAn
   private val emptyTools = ToolRegistry.empty
 
   override def afterAll(): Unit = {
-    // Clean up temp directory
-    Files.list(tempDir).forEach(Files.deleteIfExists(_))
+    // Clean up temp directory - close the stream to release directory handle
+    val stream = Files.list(tempDir)
+    try stream.forEach(Files.deleteIfExists(_))
+    finally stream.close()
     Files.deleteIfExists(tempDir)
   }
 
