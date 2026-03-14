@@ -3,10 +3,8 @@
 
 FROM eclipse-temurin:21-jdk AS builder
 WORKDIR /app
-COPY project project
-COPY modules modules
-COPY build.sbt ./
-ENV SBT_OPTS="-Xmx2g -Xms512m"
+COPY . .
+ENV SBT_OPTS="-Xmx2g -Xms512m -Dsbt.ci=true"
 RUN sbt -batch "samples/stage"
 
 FROM eclipse-temurin:21-jre

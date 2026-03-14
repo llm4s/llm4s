@@ -31,7 +31,8 @@ object SafeDeploymentService extends cask.MainRoutes {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
-  override def port: Int = sys.env.get("PORT").flatMap(s => scala.util.Try(s.toInt).toOption).getOrElse(8080)
+  override def port: Int =
+    sys.env.get("PORT").flatMap(s => scala.util.Try(s.toInt).toOption).getOrElse(8080)
   override def host: String = "0.0.0.0"
 
   @cask.get("/health")

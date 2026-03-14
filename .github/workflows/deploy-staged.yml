@@ -103,12 +103,13 @@ jobs:
       - name: Run container and smoke test
         run: |
           docker run -d --name app -p 8080:8080 ${{ env.SMOKE_IMAGE }}
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if curl -sf http://localhost:8080/health; then break; fi
-            if [ "$i" -eq 10 ]; then exit 1; fi
+          echo "Waiting for service to be ready..."
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8080/health > /dev/null; then echo "Health OK"; break; fi
+            if [ "$i" -eq 30 ]; then echo "Health check timeout"; docker logs app; exit 1; fi
             sleep 2
           done
-          curl -sf http://localhost:8080/llm-check
+          curl -sf http://127.0.0.1:8080/llm-check
           docker stop app
 
   # Deploy jobs run when repo variable ENABLE_KUBE_DEPLOY is 'true' and KUBE_CONFIG secret is set.
