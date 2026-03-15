@@ -9,6 +9,11 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
 
   behavior.of("CostEstimator")
 
+  private def assertBigDecimalClose(actual: Double, expected: BigDecimal, tolerance: BigDecimal): Unit = {
+    val actualBd = BigDecimal.decimal(actual)
+    (actualBd - expected).abs should be <= tolerance
+  }
+
   val sampleUsage = TokenUsage(
     promptTokens = 100,
     completionTokens = 50,
@@ -82,6 +87,200 @@ class CostEstimatorSpec extends AnyFlatSpec with Matchers {
 
     // 100 * 0.00001 + 50 * 0.00002 = 0.002
     cost shouldBe 0.002 +- 0.0001
+  }
+
+  it should "preserve legacy behavior when cache breakdown is absent" in {
+    val pricing = ModelPricing(
+      inputCostPerToken = Some(0.01),
+      outputCostPerToken = Some(0.02),
+      cacheReadInputTokenCost = Some(0.005),
+      cacheCreationInputTokenCost = Some(0.007)
+    )
+
+    val metadata = ModelMetadata(
+      modelId = "test-model",
+      provider = "test-provider",
+      mode = ModelMode.Chat,
+      maxInputTokens = Some(4096),
+      maxOutputTokens = Some(4096),
+      inputCostPerToken = pricing.inputCostPerToken,
+      outputCostPerToken = pricing.outputCostPerToken,
+      capabilities = ModelCapabilities(),
+      pricing = pricing,
+      deprecationDate = None
+    )
+
+    val usage = TokenUsage(
+      promptTokens = 100,
+      completionTokens = 50,
+      totalTokens = 150
+    )
+
+    val cost = CostEstimator.estimateFromMetadata(Some(metadata), usage)
+    cost shouldBe defined
+
+    val expected = BigDecimal(100) * BigDecimal("0.01") + BigDecimal(50) * BigDecimal("0.02")
+    assertBigDecimalClose(cost.get, expected, tolerance = BigDecimal("0.000000001"))
+  }
+
+  it should "price cache read tokens separately" in {
+    val pricing = ModelPricing(
+      inputCostPerToken = Some(0.01),
+      outputCostPerToken = Some(0.02),
+      cacheReadInputTokenCost = Some(0.005),
+      cacheCreationInputTokenCost = Some(0.007)
+    )
+
+    val metadata = ModelMetadata(
+      modelId = "test-model",
+      provider = "test-provider",
+      mode = ModelMode.Chat,
+      maxInputTokens = Some(4096),
+      maxOutputTokens = Some(4096),
+      inputCostPerToken = pricing.inputCostPerToken,
+      outputCostPerToken = pricing.outputCostPerToken,
+      capabilities = ModelCapabilities(),
+      pricing = pricing,
+      deprecationDate = None
+    )
+
+    val usage = TokenUsage(
+      promptTokens = 100,
+      completionTokens = 50,
+      totalTokens = 150,
+      cachedTokens = Some(30)
+    )
+
+    val cost = CostEstimator.estimateFromMetadata(Some(metadata), usage)
+    cost shouldBe defined
+
+    val expected =
+      BigDecimal(70) * BigDecimal("0.01") +
+        BigDecimal(30) * BigDecimal("0.005") +
+        BigDecimal(50) * BigDecimal("0.02")
+
+    assertBigDecimalClose(cost.get, expected, tolerance = BigDecimal("0.000000001"))
+  }
+
+  it should "price cache creation tokens separately" in {
+    val pricing = ModelPricing(
+      inputCostPerToken = Some(0.01),
+      outputCostPerToken = Some(0.02),
+      cacheReadInputTokenCost = Some(0.005),
+      cacheCreationInputTokenCost = Some(0.007)
+    )
+
+    val metadata = ModelMetadata(
+      modelId = "test-model",
+      provider = "test-provider",
+      mode = ModelMode.Chat,
+      maxInputTokens = Some(4096),
+      maxOutputTokens = Some(4096),
+      inputCostPerToken = pricing.inputCostPerToken,
+      outputCostPerToken = pricing.outputCostPerToken,
+      capabilities = ModelCapabilities(),
+      pricing = pricing,
+      deprecationDate = None
+    )
+
+    val usage = TokenUsage(
+      promptTokens = 100,
+      completionTokens = 50,
+      totalTokens = 150,
+      cacheCreationTokens = Some(20)
+    )
+
+    val cost = CostEstimator.estimateFromMetadata(Some(metadata), usage)
+    cost shouldBe defined
+
+    val expected =
+      BigDecimal(80) * BigDecimal("0.01") +
+        BigDecimal(20) * BigDecimal("0.007") +
+        BigDecimal(50) * BigDecimal("0.02")
+
+    assertBigDecimalClose(cost.get, expected, tolerance = BigDecimal("0.000000001"))
+  }
+
+  it should "price cache read and cache creation tokens separately when both are present" in {
+    val pricing = ModelPricing(
+      inputCostPerToken = Some(0.01),
+      outputCostPerToken = Some(0.02),
+      cacheReadInputTokenCost = Some(0.005),
+      cacheCreationInputTokenCost = Some(0.007)
+    )
+
+    val metadata = ModelMetadata(
+      modelId = "test-model",
+      provider = "test-provider",
+      mode = ModelMode.Chat,
+      maxInputTokens = Some(4096),
+      maxOutputTokens = Some(4096),
+      inputCostPerToken = pricing.inputCostPerToken,
+      outputCostPerToken = pricing.outputCostPerToken,
+      capabilities = ModelCapabilities(),
+      pricing = pricing,
+      deprecationDate = None
+    )
+
+    val usage = TokenUsage(
+      promptTokens = 100,
+      completionTokens = 50,
+      totalTokens = 150,
+      cachedTokens = Some(20),
+      cacheCreationTokens = Some(10)
+    )
+
+    val cost = CostEstimator.estimateFromMetadata(Some(metadata), usage)
+    cost shouldBe defined
+
+    val expected =
+      BigDecimal(70) * BigDecimal("0.01") +
+        BigDecimal(20) * BigDecimal("0.005") +
+        BigDecimal(10) * BigDecimal("0.007") +
+        BigDecimal(50) * BigDecimal("0.02")
+
+    assertBigDecimalClose(cost.get, expected, tolerance = BigDecimal("0.000000001"))
+  }
+
+  it should "clamp normal input tokens to zero when cache token totals exceed prompt tokens" in {
+    val pricing = ModelPricing(
+      inputCostPerToken = Some(0.01),
+      outputCostPerToken = Some(0.02),
+      cacheReadInputTokenCost = Some(0.005),
+      cacheCreationInputTokenCost = Some(0.007)
+    )
+
+    val metadata = ModelMetadata(
+      modelId = "test-model",
+      provider = "test-provider",
+      mode = ModelMode.Chat,
+      maxInputTokens = Some(4096),
+      maxOutputTokens = Some(4096),
+      inputCostPerToken = pricing.inputCostPerToken,
+      outputCostPerToken = pricing.outputCostPerToken,
+      capabilities = ModelCapabilities(),
+      pricing = pricing,
+      deprecationDate = None
+    )
+
+    val usage = TokenUsage(
+      promptTokens = 50,
+      completionTokens = 50,
+      totalTokens = 100,
+      cachedTokens = Some(40),
+      cacheCreationTokens = Some(30)
+    )
+
+    val cost = CostEstimator.estimateFromMetadata(Some(metadata), usage)
+    cost shouldBe defined
+
+    val expected =
+      BigDecimal(0) * BigDecimal("0.01") +
+        BigDecimal(40) * BigDecimal("0.005") +
+        BigDecimal(30) * BigDecimal("0.007") +
+        BigDecimal(50) * BigDecimal("0.02")
+
+    assertBigDecimalClose(cost.get, expected, tolerance = BigDecimal("0.000000001"))
   }
 
   it should "bill reasoning tokens separately without double counting" in {

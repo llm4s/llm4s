@@ -12,7 +12,7 @@
 - [ ] I have read the [Contributing Guide](https://llm4s.org/reference/contributing)
 - [ ] PR is small and focused — one change, one reason
 - [ ] `sbt scalafmtAll` — code is formatted
-- [ ] `sbt +test` — tests pass on both Scala 2.13 and 3.x
+- [ ] `sbt test` — tests pass on Scala 3
 - [ ] New code includes tests
 - [ ] No unrelated changes included (branched from `main`, not from another PR)
 - [ ] Commit messages explain the "why"

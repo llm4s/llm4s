@@ -110,6 +110,55 @@ object MetricsCollector {
    * No-op implementation that does nothing.
    * Use as default when metrics are disabled.
    */
+  /**
+   * Combine multiple collectors into one that fans out every call to all of them.
+   *
+   * Useful for running a [[CostTracker]] alongside [[PrometheusMetrics]]:
+   * {{{
+   * val combined = MetricsCollector.compose(prometheusMetrics, costTracker)
+   * val client = LLMConnect.getClient(config, combined)
+   * }}}
+   */
+  def compose(collectors: MetricsCollector*): MetricsCollector = new MetricsCollector {
+    private def safeForEach(f: MetricsCollector => Unit): Unit =
+      collectors.foreach(c => scala.util.Try(f(c)))
+
+    override def observeRequest(
+      provider: String,
+      model: String,
+      outcome: Outcome,
+      duration: FiniteDuration
+    ): Unit = safeForEach(_.observeRequest(provider, model, outcome, duration))
+
+    override def addTokens(
+      provider: String,
+      model: String,
+      inputTokens: Long,
+      outputTokens: Long
+    ): Unit = safeForEach(_.addTokens(provider, model, inputTokens, outputTokens))
+
+    override def recordCost(
+      provider: String,
+      model: String,
+      costUsd: Double
+    ): Unit = safeForEach(_.recordCost(provider, model, costUsd))
+
+    override def recordRetryAttempt(
+      provider: String,
+      attemptNumber: Int
+    ): Unit = safeForEach(_.recordRetryAttempt(provider, attemptNumber))
+
+    override def recordCircuitBreakerTransition(
+      provider: String,
+      newState: String
+    ): Unit = safeForEach(_.recordCircuitBreakerTransition(provider, newState))
+
+    override def recordError(
+      errorKind: ErrorKind,
+      provider: String
+    ): Unit = safeForEach(_.recordError(errorKind, provider))
+  }
+
   val noop: MetricsCollector = new MetricsCollector {
     override def observeRequest(
       provider: String,

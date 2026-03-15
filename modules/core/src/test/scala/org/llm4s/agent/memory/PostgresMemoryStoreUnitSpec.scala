@@ -6,6 +6,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.agent.memory.PostgresMemoryStore.SqlParam._
 import org.llm4s.error.{ NotFoundError, OptimisticLockFailure }
+import org.llm4s.vectorstore.PostgresVectorHelpers
 
 import java.sql.{ Connection, PreparedStatement, ResultSet, SQLException, Timestamp }
 import java.time.Instant
@@ -73,36 +74,39 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
 
   // SQL Filter Tests
   it should "generate SQL for ByType filter" in {
-    val result = PostgresMemoryStore.filterToSql(
-      MemoryFilter.ByType(MemoryType.Task)
-    )
-
-    result.isRight shouldBe true
-    val (sql, params) = result.toOption.get
-
-    sql shouldBe "memory_type = ?"
-    params shouldBe Seq(PString("task"))
+    PostgresMemoryStore
+      .filterToSql(MemoryFilter.ByType(MemoryType.Task))
+      .fold(
+        e => fail(e.message),
+        { case (sql, params) =>
+          sql shouldBe "memory_type = ?"
+          params shouldBe Seq(PString("task"))
+        }
+      )
   }
 
   it should "generate SQL for ByTypes filter with deterministic order" in {
-    val result = PostgresMemoryStore.filterToSql(
-      MemoryFilter.ByTypes(Set(MemoryType.Task, MemoryType.Conversation))
-    )
-    result.isRight shouldBe true
-    val (sql, params) = result.toOption.get
-
-    sql shouldBe "memory_type IN (?,?)"
-    params shouldBe Seq(PString("conversation"), PString("task"))
+    PostgresMemoryStore
+      .filterToSql(MemoryFilter.ByTypes(Set(MemoryType.Task, MemoryType.Conversation)))
+      .fold(
+        e => fail(e.message),
+        { case (sql, params) =>
+          sql shouldBe "memory_type IN (?,?)"
+          params shouldBe Seq(PString("conversation"), PString("task"))
+        }
+      )
   }
 
   it should "generate safe interpolated SQL for ByMetadata filter" in {
-    val result = PostgresMemoryStore.filterToSql(
-      MemoryFilter.ByMetadata("session_id", "123")
-    )
-    result.isRight shouldBe true
-    val (sql, params) = result.toOption.get
-    sql shouldBe "metadata->>'session_id' = ?"
-    params shouldBe Seq(PString("123"))
+    PostgresMemoryStore
+      .filterToSql(MemoryFilter.ByMetadata("session_id", "123"))
+      .fold(
+        e => fail(e.message),
+        { case (sql, params) =>
+          sql shouldBe "metadata->>'session_id' = ?"
+          params shouldBe Seq(PString("123"))
+        }
+      )
   }
 
   it should "reject invalid keys in ByMetadata filter" in {
@@ -115,45 +119,54 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
   }
 
   it should "generate SQL for MinImportance filter" in {
-    val result = PostgresMemoryStore.filterToSql(
-      MemoryFilter.MinImportance(0.8)
-    )
-    result.isRight shouldBe true
-    val (sql, params) = result.toOption.get
-
-    sql shouldBe "importance >= ?"
-    params shouldBe Seq(PDouble(0.8))
+    PostgresMemoryStore
+      .filterToSql(MemoryFilter.MinImportance(0.8))
+      .fold(
+        e => fail(e.message),
+        { case (sql, params) =>
+          sql shouldBe "importance >= ?"
+          params shouldBe Seq(PDouble(0.8))
+        }
+      )
   }
 
   // Embedding Tests
   it should "convert embedding array to vector string" in {
     val vec = Array(0.1f, 0.2f, 0.3f)
-    PostgresMemoryStore.embeddingToString(vec) shouldBe "[0.1,0.2,0.3]"
+    PostgresVectorHelpers.embeddingToString(vec) shouldBe "[0.1,0.2,0.3]"
   }
 
   it should "parse vector string back to array" in {
-    val vec = PostgresMemoryStore.stringToEmbedding("[0.5, 0.6, 0.7]")
-    vec shouldBe Array(0.5f, 0.6f, 0.7f)
+    PostgresVectorHelpers
+      .stringToEmbedding("[0.5, 0.6, 0.7]")
+      .fold(
+        e => fail(e.message),
+        arr => arr shouldBe Array(0.5f, 0.6f, 0.7f)
+      )
   }
 
   it should "handle empty embedding string" in {
-    PostgresMemoryStore.stringToEmbedding("[]") shouldBe Array.empty[Float]
-    PostgresMemoryStore.stringToEmbedding("") shouldBe Array.empty[Float]
-    PostgresMemoryStore.stringToEmbedding(null) shouldBe Array.empty[Float]
+    PostgresVectorHelpers.stringToEmbedding("[]").fold(e => fail(e.message), _ shouldBe Array.empty[Float])
+    PostgresVectorHelpers.stringToEmbedding("").fold(e => fail(e.message), _ shouldBe Array.empty[Float])
+    PostgresVectorHelpers.stringToEmbedding(null).fold(e => fail(e.message), _ shouldBe Array.empty[Float])
   }
 
   it should "handle malformed embedding string gracefully" in {
-    PostgresMemoryStore.stringToEmbedding("[not,valid,floats]") shouldBe Array.empty[Float]
-    PostgresMemoryStore.stringToEmbedding("[1.0,abc,3.0]") shouldBe Array.empty[Float]
-    PostgresMemoryStore.stringToEmbedding("garbage") shouldBe Array.empty[Float]
+    PostgresVectorHelpers.stringToEmbedding("[not,valid,floats]").isLeft shouldBe true
+    PostgresVectorHelpers.stringToEmbedding("[1.0,abc,3.0]").isLeft shouldBe true
+    PostgresVectorHelpers.stringToEmbedding("garbage").isLeft shouldBe true
   }
 
   it should "generate SQL for None filter" in {
-    val result = PostgresMemoryStore.filterToSql(MemoryFilter.None)
-    result.isRight shouldBe true
-    val (sql, params) = result.toOption.get
-    sql shouldBe "FALSE"
-    params shouldBe Seq.empty
+    PostgresMemoryStore
+      .filterToSql(MemoryFilter.None)
+      .fold(
+        e => fail(e.message),
+        { case (sql, params) =>
+          sql shouldBe "FALSE"
+          params shouldBe Seq.empty
+        }
+      )
   }
 
   // Compound Filter Tests
@@ -250,8 +263,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
   it should "store a memory successfully" in {
     setupMockExecution()
     (() => mockStmt.executeUpdate()).expects().returning(1)
-
-    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val mem   = Memory(MemoryId("1"), "test", MemoryType.Task, Map.empty, Instant.now(), None, None)
 
     val result = store.store(mem)
@@ -274,22 +286,25 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
 
     (() => mockRs.close()).expects()
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.get(MemoryId("1"))
 
-    result.isRight shouldBe true
-    result.map { opt =>
-      opt shouldBe defined
-      opt.get.content shouldBe "test content"
-      opt.get.metadata shouldBe Map("key" -> "val")
-    }
+    result.fold(
+      e => fail(e.message),
+      {
+        case Some(m) =>
+          m.content shouldBe "test content"
+          m.metadata shouldBe Map("key" -> "val")
+        case None => fail("Expected Some(memory) but got None")
+      }
+    )
   }
 
   it should "execute store() logic and handle DB failure" in {
     setupMockExecution()
     (() => mockStmt.executeUpdate()).expects().throws(new SQLException("Mock DB Error"))
 
-    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val mem   = Memory(MemoryId("1"), "test", MemoryType.Task, Map.empty, Instant.now(), None, None)
 
     // It runs all the lines inside store()
@@ -301,7 +316,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     setupMockExecution()
     (() => mockStmt.executeQuery()).expects().throws(new SQLException("Mock DB Error"))
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.get(MemoryId("1"))
 
     result.isLeft shouldBe true
@@ -311,7 +326,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     setupMockExecution()
     (() => mockStmt.executeQuery()).expects().throws(new SQLException("Mock DB Error"))
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.recall(MemoryFilter.ByType(MemoryType.Task), 10)
 
     result.isLeft shouldBe true
@@ -321,7 +336,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     setupMockExecution()
     (() => mockStmt.executeUpdate()).expects().throws(new SQLException("Mock DB Error"))
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.delete(MemoryId("1"))
 
     result.isLeft shouldBe true
@@ -331,7 +346,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     setupMockExecution()
     (() => mockStmt.executeQuery()).expects().throws(new SQLException("Mock DB Error"))
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.count(MemoryFilter.All)
 
     result.isLeft shouldBe true
@@ -344,7 +359,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (() => mockStmt.close()).expects()
     (() => mockConn.close()).expects()
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.clear()
 
     result.isLeft shouldBe true
@@ -357,7 +372,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (() => mockStmt.close()).expects()
     (() => mockConn.close()).expects()
 
-    val store = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store = new PostgresMemoryStore(mockDataSource, "test_table", None)
 
     an[SQLException] should be thrownBy store.initializeSchema()
   }
@@ -368,12 +383,14 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (() => mockRs.next()).expects().returning(false)
     (() => mockRs.close()).expects()
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.update(MemoryId("non-existent"), identity)
 
-    result.isLeft shouldBe true
-    result.left.toOption.get shouldBe a[NotFoundError]
-    result.left.toOption.get.message should include("Memory not found")
+    result shouldBe a[Left[_, _]]
+    result.left.foreach { err =>
+      err shouldBe a[NotFoundError]
+      err.message should include("Memory not found")
+    }
   }
 
   it should "perform a versioned update successfully when no concurrent modification occurred" in {
@@ -411,7 +428,7 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (() => mockStmt.close()).expects()
     (() => mockConn.close()).expects()
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.update(MemoryId("mem-cas-1"), _.copy(content = "updated content"))
 
     result.isRight shouldBe true
@@ -452,13 +469,14 @@ class PostgresMemoryStoreUnitSpec extends AnyFlatSpec with Matchers with MockFac
     (() => mockStmt.close()).expects()
     (() => mockConn.close()).expects()
 
-    val store  = new PostgresMemoryStore(mockDataSource, "test_table")
+    val store  = new PostgresMemoryStore(mockDataSource, "test_table", None)
     val result = store.update(MemoryId("mem-cas-2"), _.copy(content = "updated content"))
 
     result.isLeft shouldBe true
-    val error = result.left.toOption.get
-    error shouldBe an[OptimisticLockFailure]
-    error.asInstanceOf[OptimisticLockFailure].memoryId shouldBe "mem-cas-2"
-    error.asInstanceOf[OptimisticLockFailure].attemptedVersion shouldBe 5L
+    result.left.foreach { error =>
+      error shouldBe an[OptimisticLockFailure]
+      error.asInstanceOf[OptimisticLockFailure].memoryId shouldBe "mem-cas-2"
+      error.asInstanceOf[OptimisticLockFailure].attemptedVersion shouldBe 5L
+    }
   }
 }

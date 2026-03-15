@@ -171,7 +171,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       blocking {
         generateImage(prompt, options)
       }
-    }
+    }.recover { case ex => Left(UnknownError(ex)) }
 
   override def generateImagesAsync(
     prompt: String,
@@ -182,7 +182,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       blocking {
         generateImages(prompt, count, options)
       }
-    }
+    }.recover { case ex => Left(UnknownError(ex)) }
 
   override def editImageAsync(
     imagePath: Path,
@@ -194,7 +194,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
       blocking {
         editImage(imagePath, prompt, maskPath, options)
       }
-    }
+    }.recover { case ex => Left(UnknownError(ex)) }
 
   /**
    * Check the health status of the HuggingFace Inference API.

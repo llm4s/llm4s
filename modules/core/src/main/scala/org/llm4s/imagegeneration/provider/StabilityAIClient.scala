@@ -103,7 +103,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
       blocking {
         generateImage(prompt, options)
       }
-    }
+    }.recover { case ex => Left(UnknownError(ex)) }
 
   /**
    * Generate multiple images asynchronously
@@ -117,7 +117,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
       blocking {
         generateImages(prompt, count, options)
       }
-    }
+    }.recover { case ex => Left(UnknownError(ex)) }
 
   /**
    * Edit an existing image asynchronously
@@ -132,7 +132,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
       blocking {
         editImage(imagePath, prompt, maskPath, options)
       }
-    }
+    }.recover { case ex => Left(UnknownError(ex)) }
 
   /**
    * Check the health/status of the Stability AI API service.

@@ -13,8 +13,20 @@ import java.time.Duration
 import scala.util.Try
 import scala.util.control.NonFatal
 
+/**
+ * Embedding provider implementation for Ollama, a local model inference server.
+ *
+ * Generates text embeddings by calling the Ollama `/api/embeddings` HTTP endpoint.
+ * Each input text is embedded individually (one HTTP request per text) because the
+ * Ollama embedding API accepts a single prompt per call. Results are collected and
+ * returned as an [[org.llm4s.llmconnect.model.EmbeddingResponse]].
+ *
+ * No API key is required when Ollama runs locally, though one can be supplied for
+ * remote or authenticated deployments.
+ */
 object OllamaEmbeddingProvider {
 
+  /** Creates an [[EmbeddingProvider]] backed by Ollama using the given configuration. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider = new EmbeddingProvider {
     private val httpClient = HttpClient.newHttpClient()
     private val logger     = LoggerFactory.getLogger(getClass)
@@ -34,7 +46,7 @@ object OllamaEmbeddingProvider {
           .map(Left(_))
           .getOrElse(Left(EmbeddingError(code = Some("500"), message = "Unknown error", provider = "ollama")))
       } else {
-        val embeddings = vectors.map(_.toOption.get)
+        val embeddings = vectors.collect { case Right(v) => v }
         val metadata   = Map("provider" -> "ollama", "model" -> model, "count" -> input.size.toString)
         Right(EmbeddingResponse(embeddings = embeddings, metadata = metadata))
       }

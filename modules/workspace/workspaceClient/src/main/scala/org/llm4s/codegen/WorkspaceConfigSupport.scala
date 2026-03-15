@@ -37,9 +37,11 @@ object WorkspaceConfigSupport {
   /**
    * Load sandbox config from llm4s.workspace.sandbox.profile or use default.
    * Validates config; returns Left on validation failure.
+   *
+   * @param source PureConfig source; defaults to `ConfigSource.default`.
    */
-  def loadSandboxConfig(): Result[WorkspaceSandboxConfig] = {
-    val profileOpt = ConfigSource.default.at("llm4s.workspace.sandbox.profile").load[String].toOption
+  def loadSandboxConfig(source: ConfigSource = ConfigSource.default): Result[WorkspaceSandboxConfig] = {
+    val profileOpt = source.at("llm4s.workspace.sandbox.profile").load[String].toOption
 
     val baseConfig: Result[WorkspaceSandboxConfig] =
       profileOpt match {
@@ -64,8 +66,11 @@ object WorkspaceConfigSupport {
     }
   }
 
-  def load(): Result[WorkspaceSettings] = {
-    val rootEither = ConfigSource.default.at("llm4s").load[WorkspaceRoot]
+  /**
+   * @param source PureConfig source; defaults to `ConfigSource.default`.
+   */
+  def load(source: ConfigSource = ConfigSource.default): Result[WorkspaceSettings] = {
+    val rootEither = source.at("llm4s").load[WorkspaceRoot]
 
     rootEither.left
       .map { failures =>

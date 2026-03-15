@@ -1,5 +1,6 @@
 package org.llm4s.samples.cache
 
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.caching.{ CacheConfig, CachingLLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
@@ -28,11 +29,14 @@ object SemanticCachingSample extends App {
   private val logger = LoggerFactory.getLogger(getClass)
 
   def runDemo(): Unit = {
-    // Check for API key
-    val apiKey = sys.env.get("OPENAI_API_KEY") match {
-      case Some(key) => key
-      case None =>
-        logger.error("OPENAI_API_KEY environment variable not set")
+    // Load provider config via Llm4sConfig and extract OpenAI API key
+    val apiKey = Llm4sConfig.provider() match {
+      case Right(cfg: OpenAIConfig) => cfg.apiKey
+      case Right(_) =>
+        logger.error("This sample requires an OpenAI provider (set LLM_MODEL=openai/<model>)")
+        return
+      case Left(err) =>
+        logger.error("Failed to load provider config: {}", err.formatted)
         return
     }
 

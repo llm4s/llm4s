@@ -8,6 +8,15 @@ import org.slf4j.LoggerFactory
 /**
  * Configuration for multi-document graph extraction.
  *
+ * @example
+ * {{{
+ * val config = ExtractionConfig(
+ *   schema = Some(ExtractionSchema.simple(Seq("Person", "Org"), Seq("WORKS_FOR"))),
+ *   enableCoreference = true,
+ *   enableEntityLinking = true
+ * )
+ * }}}
+ *
  * @param schema Optional schema to constrain extraction. When absent, free-form extraction is used.
  * @param enableCoreference Whether to run coreference resolution on each document before extraction
  * @param enableEntityLinking Whether to run entity linking (deduplication) after merging documents
@@ -29,6 +38,18 @@ case class ExtractionConfig(
  *
  * Supports incremental building: pass an existing `SourceTrackedGraph` to add new documents
  * without re-extracting from previously processed ones.
+ *
+ * @example
+ * {{{
+ * val builder = new MultiDocumentGraphBuilder(llmClient, ExtractionConfig(
+ *   schema = Some(ExtractionSchema.simple(Seq("Person", "Org"), Seq("WORKS_FOR")))
+ * ))
+ * val docs = Seq(
+ *   ("Alice works at Acme.", DocumentSource("doc1", "Report 1")),
+ *   ("Bob works at Acme.", DocumentSource("doc2", "Report 2"))
+ * )
+ * val result = builder.extractDocuments(docs)
+ * }}}
  *
  * @param llmClient The LLM client used by all pipeline components
  * @param config Configuration controlling which pipeline stages are enabled

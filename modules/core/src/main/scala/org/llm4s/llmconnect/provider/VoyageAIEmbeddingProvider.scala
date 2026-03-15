@@ -10,8 +10,20 @@ import ujson.{ Arr, Obj }
 import scala.util.Try
 import scala.util.control.NonFatal
 
+/**
+ * Embedding provider implementation for the Voyage AI embedding API.
+ *
+ * Generates text embeddings by posting batched input to the Voyage AI
+ * `/v1/embeddings` endpoint. Unlike Ollama, Voyage accepts multiple inputs
+ * in a single request, so all texts are sent in one HTTP call.
+ *
+ * Requires a valid Voyage AI API key in the provider configuration.
+ *
+ * @see [[EmbeddingProvider]] for the common embedding interface
+ */
 object VoyageAIEmbeddingProvider {
 
+  /** Creates an [[EmbeddingProvider]] backed by Voyage AI using the given configuration. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =
     create(cfg, Llm4sHttpClient.create())
 

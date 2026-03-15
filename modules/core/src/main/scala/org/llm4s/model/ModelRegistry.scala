@@ -339,16 +339,18 @@ object ModelRegistry {
     }
   }
 
-  private def loadEmbeddedMetadata(): Result[Map[String, ModelMetadata]] =
-    Try {
-      val stream = getClass.getResourceAsStream(EmbeddedMetadataPath)
-      if (stream == null) {
-        throw new IllegalStateException(s"Embedded metadata not found: $EmbeddedMetadataPath")
-      }
-      Using.resource(Source.fromInputStream(stream))(source => source.mkString)
-    }.toEither.left
-      .map(e => ConfigurationError(s"Failed to load embedded metadata: ${e.getMessage}"))
-      .flatMap(parseMetadataJson)
+  private def loadEmbeddedMetadata(): Result[Map[String, ModelMetadata]] = {
+    val stream = getClass.getResourceAsStream(EmbeddedMetadataPath)
+    if (stream == null) {
+      Left(ConfigurationError(s"Embedded metadata not found: $EmbeddedMetadataPath"))
+    } else {
+      Try {
+        Using.resource(Source.fromInputStream(stream))(source => source.mkString)
+      }.toEither.left
+        .map(e => ConfigurationError(s"Failed to load embedded metadata: ${e.getMessage}"))
+        .flatMap(parseMetadataJson)
+    }
+  }
 
   private def parseMetadataJson(content: String): Result[Map[String, ModelMetadata]] =
     Try {

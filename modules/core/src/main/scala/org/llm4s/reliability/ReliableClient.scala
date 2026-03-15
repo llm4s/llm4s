@@ -31,8 +31,18 @@ final class ReliableClient(
   underlying: LLMClient,
   providerName: String,
   config: ReliabilityConfig,
-  collector: Option[MetricsCollector] = None
+  collector: Option[MetricsCollector] = None,
+  clock: () => Long = () => System.currentTimeMillis()
 ) extends LLMClient {
+
+  /** Binary-compatible auxiliary constructor matching the pre-clock 4-param signature. */
+  def this(
+    underlying: LLMClient,
+    providerName: String,
+    config: ReliabilityConfig,
+    collector: Option[MetricsCollector]
+  ) =
+    this(underlying, providerName, config, collector, () => System.currentTimeMillis())
 
   // Circuit breaker state (thread-safe via atomic references)
   private val circuitState    = new AtomicReference[CircuitState](CircuitState.Closed)
@@ -105,12 +115,12 @@ final class ReliableClient(
    * Single retry loop that checks deadline before each attempt.
    */
   private def executeWithDeadlineAndRetry[A](operation: () => Result[A], deadline: Duration): Result[A] = {
-    val startTime  = System.currentTimeMillis()
+    val startTime  = clock()
     val deadlineMs = startTime + deadline.toMillis
 
     @tailrec
     def loop(attemptNumber: Int, lastError: Option[LLMError]): Result[A] = {
-      val remainingTime = deadlineMs - System.currentTimeMillis()
+      val remainingTime = deadlineMs - clock()
 
       // Check if deadline already exceeded
       if (remainingTime <= 0) {
@@ -153,7 +163,7 @@ final class ReliableClient(
 
           // Calculate delay and check if we have time (recompute after operation to avoid stale value)
           val delay               = config.retryPolicy.delayFor(attemptNumber, error)
-          val remainingAfterDelay = (deadlineMs - System.currentTimeMillis()) - delay.toMillis
+          val remainingAfterDelay = (deadlineMs - clock()) - delay.toMillis
 
           if (remainingAfterDelay <= 0) {
             // Not enough time for retry
@@ -260,7 +270,7 @@ final class ReliableClient(
         Right(())
 
       case CircuitState.Open =>
-        val now = System.currentTimeMillis()
+        val now = clock()
         if ((now - lastFailureTime.get()) > config.circuitBreaker.recoveryTimeout.toMillis) {
           // Transition to half-open
           if (circuitState.compareAndSet(CircuitState.Open, CircuitState.HalfOpen)) {
@@ -327,7 +337,7 @@ final class ReliableClient(
    * Handle failed operation.
    */
   private def onFailure(): Unit = {
-    lastFailureTime.set(System.currentTimeMillis())
+    lastFailureTime.set(clock())
 
     circuitState.get() match {
       case CircuitState.Closed =>

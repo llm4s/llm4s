@@ -2,6 +2,12 @@ package org.llm4s.llmconnect.utils
 
 import scala.collection.mutable.ListBuffer
 
+/**
+ * Utilities for splitting text, audio, and video data into fixed-size overlapping chunks.
+ *
+ * Each chunking method produces a sequence of windows with configurable size and overlap,
+ * suitable for embedding pipelines and multimodal processing.
+ */
 object ChunkingUtils {
 
   // ------------------------------ TEXT CHUNKING ------------------------------

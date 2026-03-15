@@ -131,6 +131,60 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     result.left.toOption.get shouldBe a[org.llm4s.error.ServiceError]
   }
 
+  it should "include responseMimeType and no responseSchema when ResponseFormat.Json is set" in {
+    var capturedBody: String = ""
+    val mockHttp             = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).onCall { (_: String, _: Map[String, String], body: String, _: Int) =>
+      capturedBody = body
+      httpOk(successBody)
+    }
+
+    val client  = mkClient(mockHttp)
+    val options = CompletionOptions().withResponseFormat(ResponseFormat.Json)
+    val result  = client.complete(conversation("Hi"), options)
+
+    result.isRight shouldBe true
+    val request = ujson.read(capturedBody)
+    request("generationConfig")("responseMimeType").str shouldBe "application/json"
+    request("generationConfig").obj.contains("responseSchema") shouldBe false
+  }
+
+  it should "include responseMimeType and responseSchema when ResponseFormat.JsonSchema is set" in {
+    var capturedBody: String = ""
+    val mockHttp             = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).onCall { (_: String, _: Map[String, String], body: String, _: Int) =>
+      capturedBody = body
+      httpOk(successBody)
+    }
+
+    val schema  = ujson.Obj("type" -> "object", "properties" -> ujson.Obj("name" -> ujson.Obj("type" -> "string")))
+    val client  = mkClient(mockHttp)
+    val options = CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))
+    val result  = client.complete(conversation("Hi"), options)
+
+    result.isRight shouldBe true
+    val request = ujson.read(capturedBody)
+    request("generationConfig")("responseMimeType").str shouldBe "application/json"
+    request("generationConfig")("responseSchema") shouldBe schema
+  }
+
+  it should "omit responseMimeType and responseSchema when responseFormat is not set" in {
+    var capturedBody: String = ""
+    val mockHttp             = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).onCall { (_: String, _: Map[String, String], body: String, _: Int) =>
+      capturedBody = body
+      httpOk(successBody)
+    }
+
+    val client = mkClient(mockHttp)
+    val result = client.complete(conversation("Hi"), CompletionOptions())
+
+    result.isRight shouldBe true
+    val request = ujson.read(capturedBody)
+    request("generationConfig").obj.contains("responseMimeType") shouldBe false
+    request("generationConfig").obj.contains("responseSchema") shouldBe false
+  }
+
   // ============================================================
   // streamComplete() tests
   // ============================================================

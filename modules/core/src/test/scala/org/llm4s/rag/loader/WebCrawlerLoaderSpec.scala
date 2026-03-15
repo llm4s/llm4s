@@ -12,6 +12,10 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
     RobotsTxtParser.clearCache()
   }
 
+  // ==========================================================================
+  // Creation
+  // ==========================================================================
+
   "WebCrawlerLoader" should "be created with a single seed URL" in {
     val loader = WebCrawlerLoader("http://example.com")
 
@@ -25,6 +29,10 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
     loader.seedUrls should have size 3
     loader.description should include("3 seeds")
   }
+
+  // ==========================================================================
+  // Fluent Configuration
+  // ==========================================================================
 
   it should "support fluent configuration" in {
     val loader = WebCrawlerLoader("http://example.com")
@@ -60,6 +68,31 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
     loader.seedUrls should have size 4
   }
 
+  it should "set timeout" in {
+    val loader = WebCrawlerLoader("http://example.com")
+      .withTimeout(5000)
+
+    loader.config.timeoutMs shouldBe 5000
+  }
+
+  it should "set query params inclusion" in {
+    val loader = WebCrawlerLoader("http://example.com")
+      .withQueryParams(true)
+
+    loader.config.includeQueryParams shouldBe true
+  }
+
+  it should "set max queue size" in {
+    val loader = WebCrawlerLoader("http://example.com")
+      .withMaxQueueSize(500)
+
+    loader.config.maxQueueSize shouldBe 500
+  }
+
+  // ==========================================================================
+  // estimatedCount and description
+  // ==========================================================================
+
   it should "report estimatedCount as None" in {
     val loader = WebCrawlerLoader("http://example.com")
     loader.estimatedCount shouldBe None
@@ -73,6 +106,10 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
     loader.description should include("1 seeds")
     loader.description should include("depth=5")
   }
+
+  // ==========================================================================
+  // Factory Methods
+  // ==========================================================================
 
   "WebCrawlerLoader.forDocs" should "use polite configuration" in {
     val loader = WebCrawlerLoader.forDocs("http://docs.example.com")
@@ -89,6 +126,10 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
     loader.config.maxDepth shouldBe 0
     loader.config.maxPages shouldBe 1
   }
+
+  // ==========================================================================
+  // Combinators
+  // ==========================================================================
 
   "WebCrawlerLoader" should "be combinable with other loaders" in {
     val crawlerLoader = WebCrawlerLoader("http://example.com")
@@ -107,6 +148,10 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
     loader.description should include("WebCrawlerLoader")
   }
 
+  // ==========================================================================
+  // SSRF Protection
+  // ==========================================================================
+
   it should "reject blocked URLs before making requests" in {
     val config = CrawlerConfig.singlePage.withRobotsTxt(false)
     val loader = WebCrawlerLoader(Seq("http://169.254.169.254/latest/meta-data/"), config)
@@ -119,5 +164,43 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
         error.message should include("blocked range")
       case _ => fail("Expected a failure for blocked URL")
     }
+  }
+
+  // ==========================================================================
+  // CrawlerConfig presets
+  // ==========================================================================
+
+  "CrawlerConfig.default" should "have standard defaults" in {
+    val config = CrawlerConfig.default
+
+    config.maxDepth shouldBe 3
+    config.maxPages shouldBe 1000
+    config.delayMs shouldBe 500
+    config.respectRobotsTxt shouldBe true
+    config.sameDomainOnly shouldBe true
+    config.maxQueueSize shouldBe 10000
+    config.includeQueryParams shouldBe false
+  }
+
+  "CrawlerConfig.fast" should "use aggressive settings" in {
+    val config = CrawlerConfig.fast
+
+    config.maxDepth shouldBe 5
+    config.maxPages shouldBe 5000
+    config.delayMs shouldBe 100
+  }
+
+  "CrawlerConfig" should "support fluent user agent configuration" in {
+    val config = CrawlerConfig.default
+      .withUserAgent("MyBot/2.0")
+
+    config.userAgent shouldBe "MyBot/2.0"
+  }
+
+  it should "support fluent content types configuration" in {
+    val config = CrawlerConfig.default
+      .withContentTypes(Set("text/html"))
+
+    config.acceptContentTypes shouldBe Set("text/html")
   }
 }

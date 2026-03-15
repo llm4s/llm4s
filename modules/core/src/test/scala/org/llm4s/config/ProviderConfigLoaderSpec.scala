@@ -629,6 +629,206 @@ class ProviderConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValu
   }
 
   // --------------------------------------------------------------------------
+  // DeepSeek Provider Tests
+  // --------------------------------------------------------------------------
+
+  "ProviderConfigLoader for DeepSeek" should {
+
+    "successfully load valid DeepSeek config" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "deepseek/deepseek-chat" }
+          |  deepseek {
+          |    apiKey = "ds-test-key-123"
+          |    baseUrl = "https://api.deepseek.com"
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isRight shouldBe true
+      val cfg = result.value
+      cfg shouldBe a[DeepSeekConfig]
+      val deepseek = cfg.asInstanceOf[DeepSeekConfig]
+      deepseek.model shouldBe "deepseek-chat"
+      deepseek.apiKey shouldBe "ds-test-key-123"
+      deepseek.baseUrl shouldBe "https://api.deepseek.com"
+    }
+
+    "use default base URL when not provided" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "deepseek/deepseek-chat" }
+          |  deepseek {
+          |    apiKey = "ds-test-key"
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isRight shouldBe true
+      val cfg = result.value.asInstanceOf[DeepSeekConfig]
+      cfg.baseUrl shouldBe DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL
+    }
+
+    "fail with clear error when DeepSeek API key is missing" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "deepseek/deepseek-chat" }
+          |  deepseek {
+          |    baseUrl = "https://api.deepseek.com"
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isLeft shouldBe true
+      val error = result.left.value
+      error shouldBe a[ConfigurationError]
+      error.message should include("Missing DeepSeek API key")
+      error.message should include("DEEPSEEK_API_KEY")
+    }
+
+    "fail when deepseek section is completely missing" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "deepseek/deepseek-chat" }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isLeft shouldBe true
+      result.left.value.message should include("DeepSeek provider selected")
+      result.left.value.message should include("llm4s.deepseek section is missing")
+    }
+
+    "fail when DeepSeek API key is empty/whitespace" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "deepseek/deepseek-chat" }
+          |  deepseek {
+          |    apiKey = "   "
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isLeft shouldBe true
+      result.left.value.message should include("Missing DeepSeek API key")
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Mistral Provider Tests
+  // --------------------------------------------------------------------------
+
+  "ProviderConfigLoader for Mistral" should {
+
+    "successfully load valid Mistral config" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "mistral/mistral-large-latest" }
+          |  mistral {
+          |    apiKey = "mistral-test-key-123"
+          |    baseUrl = "https://api.mistral.ai"
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isRight shouldBe true
+      val cfg = result.value
+      cfg shouldBe a[MistralConfig]
+      val mistral = cfg.asInstanceOf[MistralConfig]
+      mistral.model shouldBe "mistral-large-latest"
+      mistral.apiKey shouldBe "mistral-test-key-123"
+      mistral.baseUrl shouldBe "https://api.mistral.ai"
+    }
+
+    "use default base URL when not provided" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "mistral/mistral-large-latest" }
+          |  mistral {
+          |    apiKey = "mistral-test-key"
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isRight shouldBe true
+      val cfg = result.value.asInstanceOf[MistralConfig]
+      cfg.baseUrl shouldBe MistralConfig.DEFAULT_BASE_URL
+    }
+
+    "fail with clear error when Mistral API key is missing" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "mistral/mistral-large-latest" }
+          |  mistral {
+          |    baseUrl = "https://api.mistral.ai"
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isLeft shouldBe true
+      val error = result.left.value
+      error shouldBe a[ConfigurationError]
+      error.message should include("Missing Mistral API key")
+      error.message should include("MISTRAL_API_KEY")
+    }
+
+    "fail when mistral section is completely missing" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "mistral/mistral-large-latest" }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isLeft shouldBe true
+      result.left.value.message should include("Mistral provider selected")
+      result.left.value.message should include("llm4s.mistral section is missing")
+    }
+
+    "fail when Mistral API key is empty/whitespace" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "mistral/mistral-large-latest" }
+          |  mistral {
+          |    apiKey = "   "
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isLeft shouldBe true
+      result.left.value.message should include("Missing Mistral API key")
+    }
+  }
+
+  // --------------------------------------------------------------------------
   // Model Spec Validation Tests
   // --------------------------------------------------------------------------
 
@@ -724,6 +924,78 @@ class ProviderConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValu
       result.isRight shouldBe true
       val cfg = result.value.asInstanceOf[OpenAIConfig]
       cfg.model shouldBe "gpt-4o"
+    }
+
+    "handle case-insensitive provider prefix" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "OpenAI/gpt-4o" }
+          |  openai {
+          |    apiKey = "sk-test"
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isRight shouldBe true
+      result.value shouldBe a[OpenAIConfig]
+      result.value.asInstanceOf[OpenAIConfig].model shouldBe "gpt-4o"
+    }
+
+    "preserve model name with colons (fine-tuned models)" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "openai/ft:gpt-4o:my-org:my-id" }
+          |  openai {
+          |    apiKey = "sk-test"
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isRight shouldBe true
+      val cfg = result.value.asInstanceOf[OpenAIConfig]
+      cfg.model shouldBe "ft:gpt-4o:my-org:my-id"
+    }
+
+    "infer OpenAI when model has no slash and no OpenRouter baseUrl" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "gpt-4o" }
+          |  openai {
+          |    apiKey = "sk-test"
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isRight shouldBe true
+      result.value shouldBe a[OpenAIConfig]
+      result.value.asInstanceOf[OpenAIConfig].model shouldBe "gpt-4o"
+    }
+
+    "handle mixed-case Anthropic prefix" in {
+      val hocon =
+        """
+          |llm4s {
+          |  llm { model = "ANTHROPIC/claude-3-opus" }
+          |  anthropic {
+          |    apiKey = "sk-ant-test"
+          |  }
+          |}
+          |""".stripMargin
+
+      val result = ProviderConfigLoader.load(ConfigSource.string(hocon))
+
+      result.isRight shouldBe true
+      result.value shouldBe a[AnthropicConfig]
+      result.value.asInstanceOf[AnthropicConfig].model shouldBe "claude-3-opus"
     }
   }
 

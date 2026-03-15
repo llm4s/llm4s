@@ -9,6 +9,17 @@ import org.llm4s.knowledgegraph.{ Edge, Graph }
  * sets, and reports specific constraint violations such as relationship endpoint type
  * mismatches.
  *
+ * @example
+ * {{{
+ * val schema = ExtractionSchema.simple(
+ *   entityTypes = Seq("Person", "Organization"),
+ *   relationshipTypes = Seq("WORKS_FOR")
+ * )
+ * val validator = new SchemaValidator(schema)
+ * val result = validator.validate(extractedGraph)
+ * if (result.isFullyValid) println("Graph conforms to schema")
+ * }}}
+ *
  * @param schema The extraction schema to validate against
  */
 class SchemaValidator(schema: ExtractionSchema) {

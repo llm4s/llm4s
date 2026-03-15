@@ -5,14 +5,18 @@ import org.slf4j.MDC
 import scala.concurrent.{ ExecutionContext, Future }
 
 /**
- * Thread-safe MDC context management for async operations.
- * Preserves MDC context across thread boundaries.
- * This file needs try-finally to ensure MDC context is restored.
+ * Thread-safe MDC (Mapped Diagnostic Context) management for async operations.
+ *
+ * SLF4J MDC is thread-local, so context is lost when work moves across threads.
+ * This utility captures, restores, and propagates MDC state to ensure consistent
+ * logging context in Future-based and ExecutionContext-based pipelines.
  */
 object MDCContext {
 
   /**
-   * Capture current MDC context
+   * Capture the current thread's MDC context as an immutable map.
+   *
+   * @return a snapshot of all MDC key-value pairs, or an empty map if none are set
    */
   def capture(): Map[String, String] = {
     val context = MDC.getCopyOfContextMap()
@@ -25,7 +29,9 @@ object MDCContext {
   }
 
   /**
-   * Set MDC context from captured map
+   * Replace the current thread's MDC context with the given map.
+   *
+   * @param context the MDC key-value pairs to install
    */
   def set(context: Map[String, String]): Unit = {
     MDC.clear()
@@ -35,7 +41,11 @@ object MDCContext {
   }
 
   /**
-   * Run a block with specific MDC context
+   * Execute a block with the given MDC context, restoring the previous context afterward.
+   *
+   * @param context MDC key-value pairs to set during execution
+   * @param block the code to execute
+   * @return the result of `block`
    */
   def withContext[T](context: Map[String, String])(block: => T): T = {
     val previousContext = capture()
@@ -46,7 +56,12 @@ object MDCContext {
   }
 
   /**
-   * Run a block with additional MDC values
+   * Execute a block with additional MDC values merged into the current context.
+   * The previous context is restored afterward.
+   *
+   * @param values key-value pairs to add to the current MDC
+   * @param block the code to execute
+   * @return the result of `block`
    */
   def withValues[T](values: (String, String)*)(block: => T): T = {
     val previousContext = capture()
@@ -59,7 +74,11 @@ object MDCContext {
   }
 
   /**
-   * Create an ExecutionContext that preserves MDC context
+   * Wrap an [[ExecutionContext]] so that MDC context is captured at submission time
+   * and restored on the executing thread before each runnable runs.
+   *
+   * @param underlying the execution context to wrap
+   * @return an MDC-preserving execution context
    */
   def preservingExecutionContext(underlying: ExecutionContext): ExecutionContext = new ExecutionContext {
     def execute(runnable: Runnable): Unit = {
@@ -73,7 +92,11 @@ object MDCContext {
   }
 
   /**
-   * Wrap a Future to preserve MDC context
+   * Map over a Future while preserving the caller's MDC context on the callback thread.
+   *
+   * @param future the future to wrap
+   * @param ec implicit execution context for the map callback
+   * @return a future whose map callback runs with the caller's MDC context
    */
   def preservingFuture[T](future: Future[T])(implicit ec: ExecutionContext): Future[T] = {
     val capturedContext = capture()
@@ -81,7 +104,9 @@ object MDCContext {
   }
 
   /**
-   * Clean up MDC values after an operation
+   * Remove specific keys from the current thread's MDC.
+   *
+   * @param keys the MDC keys to remove
    */
   def cleanup(keys: String*): Unit =
     keys.foreach(MDC.remove)

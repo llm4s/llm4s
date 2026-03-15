@@ -6,6 +6,19 @@ import org.llm4s.trace.TracingMode
 import org.llm4s.types.Result
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 
+/**
+ * Internal loader that builds [[org.llm4s.llmconnect.config.TracingSettings]]
+ * from a PureConfig [[pureconfig.ConfigSource]].
+ *
+ * Reads `llm4s.tracing.mode` to select the tracing backend (`langfuse`,
+ * `opentelemetry`, `console`, or `none`), then populates the corresponding
+ * backend configuration (Langfuse keys/URL, OpenTelemetry endpoint, etc.).
+ * When variables are absent, sensible defaults are applied (e.g. console
+ * mode, localhost OTLP endpoint).
+ *
+ * This object is package-private; callers should use [[Llm4sConfig.tracing]]
+ * instead.
+ */
 private[config] object TracingConfigLoader {
 
   final private case class LangfuseSection(
@@ -43,6 +56,19 @@ private[config] object TracingConfigLoader {
   implicit private val tracingRootReader: PureConfigReader[TracingRoot] =
     PureConfigReader.forProduct1("tracing")(TracingRoot.apply)
 
+  /**
+   * Loads tracing settings from `source`.
+   *
+   * Reads the `llm4s.tracing` config tree, determines the active
+   * [[org.llm4s.trace.TracingMode]], and assembles Langfuse and
+   * OpenTelemetry sub-configurations with defaults for any missing values.
+   *
+   * @param source PureConfig source to read from; use `ConfigSource.default`
+   *               in production to read environment variables and
+   *               `application.conf`.
+   * @return the tracing settings, or a [[org.llm4s.error.ConfigurationError]]
+   *         when the config tree cannot be parsed.
+   */
   def load(source: ConfigSource): Result[TracingSettings] = {
     val rootEither = source.at("llm4s").load[TracingRoot]
 

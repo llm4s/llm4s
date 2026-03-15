@@ -58,7 +58,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 
   // ============ Request Body Creation Tests ============
 
-  "ZaiClientTestHelper.createRequestBody" should "create valid request body for user message" in {
+  it should "create valid request body for user message" in {
     val helper       = new ZaiClientTestHelper(testConfig)
     val conversation = Conversation(Seq(UserMessage("Hello, world!")))
     val options      = CompletionOptions()
@@ -70,6 +70,24 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
     requestBody("messages")(0)("role").str shouldBe "user"
     requestBody("messages")(0)("content")(0)("type").str shouldBe "text"
     requestBody("messages")(0)("content")(0)("text").str shouldBe "Hello, world!"
+  }
+
+  it should "include response_format when ResponseFormat.Json is set" in {
+    val helper       = new ZaiClientTestHelper(testConfig)
+    val conversation = Conversation(Seq(UserMessage("Hi")))
+    val options      = CompletionOptions().withResponseFormat(ResponseFormat.Json)
+    val requestBody  = helper.testCreateRequestBody(conversation, options)
+
+    (requestBody.obj should contain).key("response_format")
+    requestBody("response_format")("type").str shouldBe "json_object"
+  }
+
+  it should "omit response_format when responseFormat is not set" in {
+    val helper       = new ZaiClientTestHelper(testConfig)
+    val conversation = Conversation(Seq(UserMessage("Hi")))
+    val requestBody  = helper.testCreateRequestBody(conversation, CompletionOptions())
+
+    requestBody.obj should not contain key("response_format")
   }
 
   it should "create valid request body for system message" in {

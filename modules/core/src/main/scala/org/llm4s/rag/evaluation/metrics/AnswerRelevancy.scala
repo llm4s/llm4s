@@ -139,7 +139,12 @@ Respond with ONLY a JSON array of strings:"""
    */
   private def embedText(text: String): Result[Seq[Double]] = {
     val request = EmbeddingRequest(input = Seq(text), model = modelConfig)
-    embeddingClient.embed(request).map(response => response.embeddings.headOption.getOrElse(Seq.empty))
+    embeddingClient
+      .embed(request)
+      .flatMap(response =>
+        response.embeddings.headOption
+          .toRight(org.llm4s.error.ProcessingError("embedText", "Embedding provider returned empty embeddings list"))
+      )
   }
 
   /**
