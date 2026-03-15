@@ -1,6 +1,9 @@
 package org.llm4s.rag
 
 import org.llm4s.error.{ ConfigurationError, ProcessingError }
+import org.llm4s.knowledgegraph.graphrag.{ GraphRAGConfig, GraphRAGMode }
+import org.llm4s.knowledgegraph.storage.InMemoryGraphStore
+import org.llm4s.knowledgegraph.{ Edge, Node }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model._
@@ -285,6 +288,36 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
     }
   }
 
+  /**
+   * Mock EmbeddingProvider that returns empty embeddings list.
+   * Used to test empty embeddings error handling.
+   */
+  class EmptyEmbeddingProvider extends EmbeddingProvider {
+    override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =
+      Right(
+        EmbeddingResponse(
+          embeddings = Seq.empty,
+          usage = Some(EmbeddingUsage(0, 0))
+        )
+      )
+  }
+
+  /**
+   * Mock EmbeddingProvider that returns mismatched embeddings count.
+   * Used to test cardinality validation.
+   */
+  class MismatchedEmbeddingProvider(returnCount: Int) extends EmbeddingProvider {
+    override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
+      val embeddings = (0 until returnCount).map(i => (0 until 3).map(j => ((i + j) % 100) / 100.0).toSeq)
+      Right(
+        EmbeddingResponse(
+          embeddings = embeddings,
+          usage = Some(EmbeddingUsage(request.input.map(_.length).sum, request.input.map(_.length).sum))
+        )
+      )
+    }
+  }
+
   // ==========================================================================
   // Test Fixtures
   // ==========================================================================
@@ -339,6 +372,19 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
     val file = new File(tempDir, name)
     Files.write(file.toPath, content.getBytes)
     file
+  }
+
+  private def createSeededGraphStore(): InMemoryGraphStore = {
+    val store = new InMemoryGraphStore()
+    val nodes = Seq(
+      Node("alice", "Person", Map("name" -> ujson.Str("Alice"), "source" -> ujson.Str("doc1"))),
+      Node("bob", "Person", Map("name" -> ujson.Str("Bob"), "source" -> ujson.Str("doc1"))),
+      Node("company", "Org", Map("name" -> ujson.Str("Acme Corp"), "source" -> ujson.Str("doc1")))
+    )
+    nodes.foreach(node => store.upsertNode(node).isRight shouldBe true)
+    store.upsertEdge(Edge("alice", "bob", "KNOWS")).isRight shouldBe true
+    store.upsertEdge(Edge("alice", "company", "WORKS_AT")).isRight shouldBe true
+    store
   }
 
   // ==========================================================================
@@ -565,6 +611,74 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
     results.size should be <= 3
   }
 
+  // ==========================================================================
+  // Embedding Batch Tests
+  // ==========================================================================
+
+  "RAG.embedBatch" should "return EmbeddingError when provider returns empty embeddings list" in {
+    val emptyProvider   = new EmptyEmbeddingProvider()
+    val embeddingClient = new EmbeddingClient(emptyProvider)
+
+    val config = RAGConfig.default
+    val rag    = RAG.buildWithClient(config, embeddingClient).toOption.get
+
+    // embedBatch is private, so we test it through ingestText with a provider that returns empty
+    val result = rag.ingestText("Test content", "doc1")
+
+    result.fold(
+      {
+        case embErr: EmbeddingError =>
+          embErr.message should include("empty embeddings")
+          embErr.provider should not be "unknown"
+          embErr.provider shouldBe "text-embedding-3-small"
+        case other =>
+          fail(s"Expected EmbeddingError but got: ${other.getClass.getSimpleName}: ${other.message}")
+      },
+      _ => fail("Expected EmbeddingError for empty embeddings")
+    )
+  }
+
+  it should "return EmbeddingError when embeddings count doesn't match batch size" in {
+    val mismatchedProvider = new MismatchedEmbeddingProvider(returnCount = 1)
+    val embeddingClient    = new EmbeddingClient(mismatchedProvider)
+
+    val config = RAGConfig.default
+    val rag    = RAG.buildWithClient(config, embeddingClient).toOption.get
+
+    // Try to ingest multiple chunks but provider only returns 1 embedding
+    val result = rag.ingestChunks(
+      "doc1",
+      Seq("Chunk 1", "Chunk 2")
+    )
+
+    result.fold(
+      {
+        case embErr: EmbeddingError =>
+          embErr.message should include("2 texts")
+          embErr.message should include("1 embedding")
+          embErr.provider should not be "unknown"
+          embErr.provider shouldBe "text-embedding-3-small"
+        case other =>
+          fail(s"Expected EmbeddingError but got: ${other.getClass.getSimpleName}: ${other.message}")
+      },
+      _ => fail("Expected EmbeddingError for mismatched embeddings count")
+    )
+  }
+
+  it should "succeed when embeddings count matches batch size" in {
+    val rag = createMockRAG().toOption.get
+
+    val result = rag.ingestChunks(
+      "doc1",
+      Seq("Chunk 1", "Chunk 2", "Chunk 3")
+    )
+
+    result.fold(
+      error => fail(s"Expected success but got error: ${error.message}"),
+      count => count shouldBe 3
+    )
+  }
+
   "RAG.queryWithAnswer" should "fail without LLM client" in {
     val rag = createMockRAG(withLLM = false).toOption.get
     rag.ingestText("Some content", "doc1")
@@ -761,6 +875,90 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
   }
 
   // ==========================================================================
+  // GraphRAG API Tests
+  // ==========================================================================
+
+  "RAG.hasGraphRAG" should "return false when GraphStore is not configured" in {
+    val rag = createMockRAG(withLLM = true).toOption.get
+    rag.hasGraphRAG shouldBe false
+  }
+
+  "RAG.build" should "fail when GraphStore is configured without LLM client" in {
+    val config = RAGConfig.default.withGraphStore(createSeededGraphStore())
+    val result = createMockRAG(withLLM = false, config = config)
+
+    result.isLeft shouldBe true
+    result.left.toOption.get shouldBe a[ConfigurationError]
+  }
+
+  "RAG.queryWithGraphRAG" should "route through GraphRAG when configured" in {
+    val graphStore = createSeededGraphStore()
+    val config = RAGConfig.default
+      .withGraphStore(graphStore)
+      .withGraphRAG(GraphRAGConfig(localTraversalDepth = 1, globalTopCommunities = 2))
+
+    mockLLMClient.responseOverride = Some("graph answer")
+    val rag = createMockRAG(withLLM = true, config = config).toOption.get
+
+    val result = rag.queryWithGraphRAGMode("What does Alice do?", GraphRAGMode.Local)
+    result.isRight shouldBe true
+    result.toOption.get.mode shouldBe GraphRAGMode.Local
+    result.toOption.get.answer shouldBe "graph answer"
+    rag.hasGraphRAG shouldBe true
+  }
+
+  it should "route first and avoid vector retrieval for global mode" in {
+    val graphStore = createSeededGraphStore()
+    val config = RAGConfig.default
+      .withGraphStore(graphStore)
+      .withGraphRAG(GraphRAGConfig(globalTopCommunities = 2))
+
+    mockLLMClient.responseOverride = Some("global graph answer")
+    val rag = createMockRAG(withLLM = true, config = config).toOption.get
+
+    val result = rag.queryWithGraphRAG("Give an overall summary of themes")
+    result.isRight shouldBe true
+    result.toOption.get.mode shouldBe GraphRAGMode.Global
+    result.toOption.get.answer shouldBe "global graph answer"
+    mockEmbeddingProvider.embedCalls shouldBe 0
+  }
+
+  it should "fail when GraphRAG is not configured" in {
+    val rag = createMockRAG(withLLM = true).toOption.get
+
+    val result = rag.queryWithGraphRAG("What does Alice do?")
+    result.isLeft shouldBe true
+    result.left.toOption.get shouldBe a[ConfigurationError]
+  }
+
+  "RAG.queryWithGraphRAGMode" should "fail when GraphRAG is not configured" in {
+    val rag = createMockRAG(withLLM = true).toOption.get
+
+    val result = rag.queryWithGraphRAGMode("What does Alice do?", GraphRAGMode.Local)
+    result.isLeft shouldBe true
+    result.left.toOption.get shouldBe a[ConfigurationError]
+  }
+
+  it should "execute vector retrieval only for hybrid mode" in {
+    val graphStore = createSeededGraphStore()
+    val config = RAGConfig.default
+      .withGraphStore(graphStore)
+      .withGraphRAG(GraphRAGConfig(localTraversalDepth = 1, globalTopCommunities = 2))
+
+    mockLLMClient.responseOverride = Some("hybrid graph answer")
+    val rag = createMockRAG(withLLM = true, config = config).toOption.get
+
+    rag.ingestText("Alice works with Bob at Acme Corp.", "doc1").isRight shouldBe true
+    mockEmbeddingProvider.reset()
+
+    val result = rag.queryWithGraphRAGMode("Who is connected to Alice?", GraphRAGMode.Hybrid)
+    result.isRight shouldBe true
+    result.toOption.get.mode shouldBe GraphRAGMode.Hybrid
+    result.toOption.get.answer shouldBe "hybrid graph answer"
+    mockEmbeddingProvider.embedCalls should be > 0
+  }
+
+  // ==========================================================================
   // Configuration Tests
   // ==========================================================================
 
@@ -770,6 +968,29 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
 
     rag.config.topK shouldBe 10
     rag.config.systemPrompt shouldBe Some("Custom prompt")
+  }
+
+  // ==========================================================================
+  // RAG.embedQuery empty-embedding path Tests
+  // ==========================================================================
+
+  "RAG.query" should "return EmbeddingError when the embedding provider returns an empty list" in {
+    val emptyEmbeddingClient = new EmbeddingClient(new EmptyEmbeddingProvider)
+    val result = RAG
+      .buildWithClient(RAGConfig.default, emptyEmbeddingClient)
+      .flatMap(_.query("what is Scala?"))
+
+    result.fold(
+      {
+        case embErr: EmbeddingError =>
+          embErr.message should include("empty embeddings")
+          embErr.provider should not be "unknown"
+          embErr.provider shouldBe "text-embedding-3-small"
+        case other =>
+          fail(s"Expected EmbeddingError but got: ${other.getClass.getSimpleName}: ${other.message}")
+      },
+      _ => fail("Expected Left(EmbeddingError) but got Right")
+    )
   }
 
   // ==========================================================================

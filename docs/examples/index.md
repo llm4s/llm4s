@@ -23,6 +23,7 @@ Explore **70 working examples** covering all LLM4S features.
 
 | Category | Count | Description |
 |----------|-------|-------------|
+| [Playground](#playground) | 1 | Offline demo — no API key needed |
 | [Basic Examples](#basic-examples) | 9 | Getting started, streaming, tracing |
 | [Agent Examples](#agent-examples) | 8 | Multi-turn agents, persistence, async tools |
 | [Tool Examples](#tool-examples) | 7 | Tool calling, built-in tools, parallel execution |
@@ -37,6 +38,38 @@ Explore **70 working examples** covering all LLM4S features.
 | [MCP Examples](#mcp-examples) | 3 | Model Context Protocol |
 | [Model Examples](#model-examples) | 1 | Model metadata and capabilities |
 | [Other Examples](#other-examples) | 8 | Speech, actions, utilities |
+
+---
+
+## Playground
+
+**Location:** `modules/samples/src/main/scala/org/llm4s/samples/playground/`
+
+### CliPlaygroundDemo {#cli-playground-demo}
+
+**File:** [`CliPlaygroundDemo.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/playground/CliPlaygroundDemo.scala)
+
+Fully offline playground demo — no API key or network access required.
+Replays 6 pre-recorded scenarios with ANSI-coloured output, then drops into an
+interactive prompt loop so you can type your own queries and see simulated traced
+responses in real time.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.playground.CliPlaygroundDemo"
+```
+
+**What it demonstrates:**
+- Simple text completion
+- Multi-turn conversation
+- Tool calling
+- Agent pipeline (multi-step orchestration)
+- Error handling and recovery
+- Token usage awareness
+- Interactive REPL-style prompt loop (Scenario 7)
+
+**Perfect for:** First-time users and workshop attendees exploring LLM4S before wiring up a real provider
+
+[View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/playground/CliPlaygroundDemo.scala)
 
 ---
 
@@ -224,6 +257,23 @@ sbt "samples/runMain org.llm4s.samples.basic.AgentLLMCallingExample"
 - Agent state tracking
 
 ---
+### ProviderFallbackExample
+
+**File:** [`ProviderFallbackExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/basic/ProviderFallbackExample.scala)
+
+LLM calls with automatic provider fallback for reliability.
+
+```bash
+sbt "samples/runMain org.llm4s.samples.basic.ProviderFallbackExample"
+```
+**What it demonstrates:**
+- Multiple provider configurations
+- Automatic fallback on failure
+- Enhanced reliability
+
+---
+
+
 
 ## Agent Examples
 
@@ -425,24 +475,6 @@ val weatherTool = ToolFunction(
 ```
 
 [View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/toolapi/WeatherToolExample.scala)
-
----
-
-### LLMWeatherExample {#llm-weather}
-
-**File:** [`LLMWeatherExample.scala`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/toolapi/LLMWeatherExample.scala)
-
-Using tools with LLM calls - agent automatically calls tools.
-
-```bash
-sbt "samples/runMain org.llm4s.samples.toolapi.LLMWeatherExample"
-```
-
-**What it demonstrates:**
-- LLM tool calling
-- Automatic tool selection
-- Tool result integration
-- Natural language to tool execution
 
 ---
 
@@ -1146,7 +1178,7 @@ All examples are in the [samples directory](https://github.com/llm4s/llm4s/tree/
 
 ## Next Steps
 
-- **[User Guide](/guide/basic-usage)** - Learn concepts in depth
+- **[User Guide](../guide/basic-usage)** - Learn concepts in depth
 - **[API Reference](/api/llm-client)** - Detailed API documentation
 - **[Discord Community](https://discord.gg/4uvTPn6qww)** - Get help and share projects
 

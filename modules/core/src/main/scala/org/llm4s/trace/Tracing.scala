@@ -53,7 +53,15 @@ trait Tracing {
   def traceCompletion(completion: Completion, model: String): Result[Unit]
   def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit]
 
-  // Convenience methods that delegate to traceEvent
+  /**
+   * Emits a named `CustomEvent` with no additional data payload.
+   *
+   * Wraps the string in a `TraceEvent.CustomEvent` with an empty JSON object
+   * as its data field before delegating to `traceEvent(TraceEvent)`.
+   * Use the typed overload for events that carry structured data.
+   *
+   * @param event Human-readable event name forwarded as `CustomEvent.name`
+   */
   final def traceEvent(event: String): Result[Unit] = {
     val customEvent = TraceEvent.CustomEvent(event, ujson.Obj())
     this.traceEvent(customEvent)
@@ -125,6 +133,12 @@ trait Tracing {
     )
     this.traceEvent(event)
   }
+
+  /**
+   * Shutdown the tracing backend.
+   * Alias for close() to maintain terminology consistency.
+   */
+  def shutdown(): Unit = {}
 }
 
 /**
@@ -177,7 +191,14 @@ trait TracingComposer {
 
 object TracingComposer extends TracingComposer
 
-/** Internal composite tracing implementation. */
+/**
+ * Fans a single event out to multiple [[Tracing]] backends.
+ *
+ * `traceEvent` returns `Right(())` as long as at least one backend succeeds.
+ * Only when every backend returns a `Left` does this implementation propagate
+ * a failure (the first error in the list).  Use this soft-failure behaviour to
+ * prevent a single broken backend from silencing all observability.
+ */
 private class CompositeTracing(tracers: Vector[Tracing]) extends Tracing {
   def traceEvent(event: TraceEvent): Result[Unit] = {
     val results = tracers.map(_.traceEvent(event))
@@ -218,6 +239,8 @@ private class CompositeTracing(tracers: Vector[Tracing]) extends Tracing {
     val event = TraceEvent.TokenUsageRecorded(usage, model, operation)
     traceEvent(event)
   }
+
+  override def shutdown(): Unit = tracers.foreach(_.shutdown())
 }
 
 private class FilteredTracing(underlying: Tracing, predicate: TraceEvent => Boolean) extends Tracing {
@@ -232,6 +255,8 @@ private class FilteredTracing(underlying: Tracing, predicate: TraceEvent => Bool
     underlying.traceCompletion(completion, model)
   def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
     underlying.traceTokenUsage(usage, model, operation)
+
+  override def shutdown(): Unit = underlying.shutdown()
 }
 
 private class TransformedTracing(underlying: Tracing, transform: TraceEvent => TraceEvent) extends Tracing {
@@ -246,23 +271,45 @@ private class TransformedTracing(underlying: Tracing, transform: TraceEvent => T
     underlying.traceCompletion(completion, model)
   def traceTokenUsage(usage: TokenUsage, model: String, operation: String): Result[Unit] =
     underlying.traceTokenUsage(usage, model, operation)
+
+  override def shutdown(): Unit = underlying.shutdown()
 }
 
 /**
- * Type-safe tracing modes
+ * Enumerates the available tracing backends.
+ *
+ * Instances are created by [[Tracing.create]] based on the `TracingSettings`
+ * provided at startup.  The `TRACING_MODE` environment variable is the
+ * standard way to select a mode; see `Llm4sConfig` for loading details.
  */
 sealed trait TracingMode extends Product with Serializable
 
 object TracingMode {
-  case object Langfuse extends TracingMode
-  case object Console  extends TracingMode
-  case object NoOp     extends TracingMode
+  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
+  case object Langfuse      extends TracingMode
+  case object Console       extends TracingMode
+  case object OpenTelemetry extends TracingMode
+  case object NoOp          extends TracingMode
+
+  /**
+   * Parses a mode string into a `TracingMode`, case-insensitively.
+   *
+   * Accepts `"langfuse"`, `"console"`, `"print"`, `"opentelemetry"`, `"otel"`,
+   * `"noop"`, and `"none"`.  Any other value logs a warning and returns `NoOp`
+   * rather than throwing.
+   *
+   * @param mode mode string, typically the value of the `TRACING_MODE` environment variable
+   * @return the matching `TracingMode`, or `NoOp` for unrecognised values
+   */
   def fromString(mode: String): TracingMode = mode.toLowerCase match {
-    case "langfuse"          => Langfuse
-    case "console" | "print" => Console
-    case "noop" | "none"     => NoOp
-    case _                   => NoOp
+    case "langfuse"               => Langfuse
+    case "console" | "print"      => Console
+    case "opentelemetry" | "otel" => OpenTelemetry
+    case "noop" | "none"          => NoOp
+    case other =>
+      logger.warn(s"Unknown tracing mode '$other', falling back to NoOp")
+      NoOp
   }
 }
 
@@ -302,6 +349,29 @@ object Tracing {
         lf.version
       )
     case TracingMode.Console => new ConsoleTracing()
-    case TracingMode.NoOp    => new NoOpTracing()
+    case TracingMode.OpenTelemetry =>
+      val ot = settings.openTelemetry
+      try {
+        val clazz = Class.forName("org.llm4s.trace.OpenTelemetryTracing")
+        val ctor  = clazz.getConstructor(classOf[String], classOf[String], classOf[Map[String, String]])
+        ctor.newInstance(ot.serviceName, ot.endpoint, ot.headers).asInstanceOf[Tracing]
+      } catch {
+        case _: ClassNotFoundException | _: NoClassDefFoundError =>
+          val logger = org.slf4j.LoggerFactory.getLogger(getClass)
+          logger.error(
+            "OpenTelemetry tracing configured but 'trace-opentelemetry' module not found on classpath. " +
+              "Please add 'org.llm4s' %% 'llm4s-trace-opentelemetry' dependency. Falling back to NoOpTracing."
+          )
+          new NoOpTracing()
+        case e: Throwable if Option(e.getClass.getSimpleName).contains("InvocationTargetException") =>
+          val logger = org.slf4j.LoggerFactory.getLogger(getClass)
+          logger.error("OpenTelemetry tracing initialization failed", e.getCause)
+          new NoOpTracing()
+        case e: Throwable =>
+          val logger = org.slf4j.LoggerFactory.getLogger(getClass)
+          logger.error("Failed to initialize OpenTelemetry tracing. Falling back to NoOpTracing.", e)
+          new NoOpTracing()
+      }
+    case TracingMode.NoOp => new NoOpTracing()
   }
 }

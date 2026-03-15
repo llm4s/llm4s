@@ -174,6 +174,7 @@ object SearchIndex {
    * @param user Database user
    * @param password Database password
    * @param vectorTableName Name of the vectors table
+   * @param keywordTableName Name of the keyword index table
    * @param maxPoolSize Maximum connection pool size
    */
   final case class PgConfig(
@@ -183,6 +184,7 @@ object SearchIndex {
     user: String = "postgres",
     password: String = "",
     vectorTableName: String = "vectors",
+    keywordTableName: String = "documents",
     maxPoolSize: Int = 10
   ) {
     def jdbcUrl: String = s"jdbc:postgresql://$host:$port/$database"

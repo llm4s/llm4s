@@ -1,6 +1,6 @@
 package org.llm4s.samples.agent
 
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentContext }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole.Assistant
@@ -37,10 +37,11 @@ object MCPAgentExample {
     val agentState = for {
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
+      weatherTool <- WeatherTool.toolSafe
       agent = new Agent(client)
       query = "Convert 100 USD to EUR and then check the weather in Paris"
       _     = logger.info(s"🎯 Running agent query: $query")
-      agentState <- Using.resource(new MCPToolRegistry(Seq(serverConfig), Seq(WeatherTool.tool), 10.minutes)) {
+      agentState <- Using.resource(new MCPToolRegistry(Seq(serverConfig), Seq(weatherTool), 10.minutes)) {
         mcpRegistry =>
           val allTools = mcpRegistry.getAllTools
           logger.info(s"📦 Available tools (${allTools.size} total):")
@@ -51,14 +52,8 @@ object MCPAgentExample {
           agent.run(
             query = query,
             tools = mcpRegistry,
-            inputGuardrails = Seq.empty,
-            outputGuardrails = Seq.empty,
-            handoffs = Seq.empty,
             maxSteps = Some(5),
-            traceLogPath = Some(".log/mcp-agent-example.md"),
-            systemPromptAddition = None,
-            completionOptions = org.llm4s.llmconnect.model.CompletionOptions(),
-            debug = false
+            context = AgentContext(traceLogPath = Some(".log/mcp-agent-example.md"))
           )
       }
     } yield agentState

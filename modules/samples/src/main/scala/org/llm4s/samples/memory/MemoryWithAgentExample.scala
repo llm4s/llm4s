@@ -75,13 +75,19 @@ object MemoryWithAgentExample {
       _ = logger.info("-" * 40)
 
       userContext <- m5.getUserContext(Some("current-user")).tap {
-        case Right(ctx) => logger.info("User context:\n{}", ctx)
-        case Left(e)    => logger.error("Failed to get user context: {}", e.message)
+        case Right(ctx) =>
+          val redacted = SensitiveDataRedactor.redact(ctx)
+          val preview  = if (redacted.length > 200) redacted.take(200) + "... [truncated]" else redacted
+          logger.info("User context (preview, redacted):\n{}", preview)
+        case Left(e) => logger.error("Failed to get user context: {}", e.message)
       }
 
       relevantContext <- m5.getRelevantContext("help me with error handling", 500).tap {
-        case Right(ctx) => logger.info("Relevant knowledge:\n{}", ctx)
-        case Left(e)    => logger.error("Failed to get relevant context: {}", e.message)
+        case Right(ctx) =>
+          val redacted = SensitiveDataRedactor.redact(ctx)
+          val preview  = if (redacted.length > 300) redacted.take(300) + "... [truncated]" else redacted
+          logger.info("Relevant knowledge (preview, redacted):\n{}", preview)
+        case Left(e) => logger.error("Failed to get relevant context: {}", e.message)
       }
 
       // Build the system prompt with memory context

@@ -76,10 +76,11 @@ object AssistantAgentExample {
         ),
         timeout = 60.seconds
       )
+      weatherTool <- WeatherTool.toolSafe
       _ = Using.resource(
         new MCPToolRegistry(
           Seq(playwrightServerConfig, emailServerConfig),
-          Seq(WeatherTool.tool),
+          Seq(weatherTool),
           cacheTTL = 10.minutes
         )
       ) { tools =>

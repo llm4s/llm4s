@@ -48,8 +48,7 @@ class TypeclassSpec extends AnyFlatSpec with Matchers {
   "LLMCapable[String]" should "convert string to conversation" in {
     val result = LLMCapable.stringLLMCapable.toConversation("Hello")
 
-    result.isRight shouldBe true
-    val conv = result.toOption.get
+    val conv = result.getOrElse(fail("Expected successful conversion"))
     conv.messages should have size 1
     conv.messages.head shouldBe a[UserMessage]
     conv.messages.head.content shouldBe "Hello"
@@ -67,8 +66,7 @@ class TypeclassSpec extends AnyFlatSpec with Matchers {
     )
 
     val result = LLMCapable.stringLLMCapable.fromCompletion(completion)
-    result.isRight shouldBe true
-    result.toOption.get shouldBe "Response text"
+    result.getOrElse(fail("Expected successful extraction")) shouldBe "Response text"
   }
 
   it should "validate non-empty strings" in {
@@ -89,8 +87,7 @@ class TypeclassSpec extends AnyFlatSpec with Matchers {
     val conv   = Conversation(Seq(UserMessage("Test")))
     val result = LLMCapable.conversationLLMCapable.toConversation(conv)
 
-    result.isRight shouldBe true
-    result.toOption.get shouldBe conv
+    result.getOrElse(fail("Expected successful passthrough")) shouldBe conv
   }
 
   it should "extract conversation from completion" in {
@@ -105,8 +102,7 @@ class TypeclassSpec extends AnyFlatSpec with Matchers {
     )
 
     val result = LLMCapable.conversationLLMCapable.fromCompletion(completion)
-    result.isRight shouldBe true
-    val conv = result.toOption.get
+    val conv   = result.getOrElse(fail("Expected successful extraction"))
     conv.messages should have size 1
     conv.messages.head shouldBe a[AssistantMessage]
   }
@@ -131,8 +127,8 @@ class TypeclassSpec extends AnyFlatSpec with Matchers {
     import LLMCapable._
 
     val result = "Hello world".toLLMConversation
-    result.isRight shouldBe true
-    result.toOption.get.messages.head.content shouldBe "Hello world"
+    val conv   = result.getOrElse(fail("Expected successful conversion"))
+    conv.messages.head.content shouldBe "Hello world"
   }
 
   "LLMCapableOps.validateForLLM" should "use implicit instance" in {
@@ -173,8 +169,7 @@ class TypeclassSpec extends AnyFlatSpec with Matchers {
     val q      = Question("What is Scala?", Some("Programming languages"))
     val result = q.toLLMConversation
 
-    result.isRight shouldBe true
-    val conv = result.toOption.get
+    val conv = result.getOrElse(fail("Expected successful conversion"))
     conv.messages.head.content should include("Context:")
     conv.messages.head.content should include("What is Scala?")
   }

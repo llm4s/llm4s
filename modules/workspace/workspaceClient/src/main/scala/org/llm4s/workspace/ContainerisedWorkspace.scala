@@ -2,6 +2,7 @@ package org.llm4s.workspace
 
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.shared._
 import org.slf4j.LoggerFactory
 import upickle.default._
@@ -12,6 +13,10 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicReference }
 import java.util.concurrent.{ CompletableFuture, ConcurrentHashMap, Executors, ScheduledExecutorService, TimeUnit }
 import scala.jdk.CollectionConverters._
 import scala.util.{ Failure, Success, Try }
+import scala.util.Using
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.{ Future, Await }
+import scala.concurrent.duration._
 
 /**
  * WebSocket-based implementation of ContainerisedWorkspace that communicates with
@@ -41,9 +46,9 @@ class ContainerisedWorkspace(
   private val ResponseTimeoutBufferSec = 5
 
   // State tracking
-  private val containerRunning                            = new AtomicBoolean(false)
-  private val wsConnected                                 = new AtomicBoolean(false)
-  private val heartbeatExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
+  private val containerRunning  = new AtomicBoolean(false)
+  private val wsConnected       = new AtomicBoolean(false)
+  private val heartbeatExecutor = new AtomicReference[ScheduledExecutorService]()
 
   // WebSocket client and response handling
   private val wsClient          = new AtomicReference[WebSocketClient]()
@@ -170,17 +175,26 @@ class ContainerisedWorkspace(
         s"$workspaceDir:/workspace",
         imageName
       )
-      val process  = pb.start()
+      val process = pb.start()
+
+      // Capture stdout and stderr while process is running(before waitFor)
+      val stdoutF = Future {
+        Using.resource(new BufferedReader(new InputStreamReader(process.getInputStream))) { reader =>
+          Iterator.continually(reader.readLine()).takeWhile(_ != null).mkString("\n")
+        }
+      }
+
+      val stderrF = Future {
+        Using.resource(new BufferedReader(new InputStreamReader(process.getErrorStream))) { reader =>
+          Iterator.continually(reader.readLine()).takeWhile(_ != null).mkString("\n")
+        }
+      }
+
       val exitCode = process.waitFor()
+      val stdout   = Await.result(stdoutF, 30.seconds)
+      val stderr   = Await.result(stderrF, 30.seconds)
 
-      // Capture and log stdout
-      val stdoutReader = new BufferedReader(new InputStreamReader(process.getInputStream))
-      val stdout       = Iterator.continually(stdoutReader.readLine()).takeWhile(_ != null).mkString("\n")
       if (stdout.nonEmpty) logger.info(s"Docker stdout: $stdout")
-
-      // Capture and log stderr
-      val stderrReader = new BufferedReader(new InputStreamReader(process.getErrorStream))
-      val stderr       = Iterator.continually(stderrReader.readLine()).takeWhile(_ != null).mkString("\n")
       if (stderr.nonEmpty) logger.warn(s"Docker stderr: $stderr")
 
       (exitCode, stdout, stderr)
@@ -214,11 +228,12 @@ class ContainerisedWorkspace(
   private def waitForContainerStartupAndConnect(): Boolean = {
     logger.info("Waiting for container service to be ready and establishing WebSocket connection...")
 
-    var attempts = 0
+    val httpClient = Llm4sHttpClient.create()
+    var attempts   = 0
     while (attempts < MaxStartupAttempts) {
       val ok = scala.util
         .Try {
-          val httpResponse = requests.get(s"http://localhost:$hostPort/", readTimeout = 1000, connectTimeout = 1000)
+          val httpResponse = httpClient.get(s"http://localhost:$hostPort/", timeout = 1000)
           httpResponse.statusCode == 200 && connectWebSocket()
         }
         .getOrElse(false)
@@ -249,7 +264,9 @@ class ContainerisedWorkspace(
   private def startHeartbeatTask(): Unit = {
     logger.info("Starting heartbeat task")
 
-    heartbeatExecutor.scheduleAtFixedRate(
+    val executor = Executors.newSingleThreadScheduledExecutor()
+    heartbeatExecutor.set(executor)
+    executor.scheduleAtFixedRate(
       () =>
         if (containerRunning.get() && wsConnected.get()) {
           val hb = Try(sendHeartbeat())
@@ -295,24 +312,32 @@ class ContainerisedWorkspace(
     }
 
     // Shutdown heartbeat task
-    heartbeatExecutor.shutdown()
-    val term = Try(heartbeatExecutor.awaitTermination(3, TimeUnit.SECONDS)).getOrElse(false)
-    if (!term) heartbeatExecutor.shutdownNow()
+    Option(heartbeatExecutor.getAndSet(null)).foreach { executor =>
+      executor.shutdown()
+      val term = Try(executor.awaitTermination(3, TimeUnit.SECONDS)).getOrElse(false)
+      if (!term) executor.shutdownNow()
+    }
 
     // Execute stop and remove as separate commands
     val stopResult = Try {
-      val process  = Runtime.getRuntime.exec(Array("docker", "stop", containerName))
+      val process = Runtime.getRuntime.exec(Array("docker", "stop", containerName))
+
+      val stderr =
+        Using(scala.io.Source.fromInputStream(process.getErrorStream))(source => source.mkString.trim).getOrElse("")
+
       val exitCode = process.waitFor()
-      val stderr   = scala.io.Source.fromInputStream(process.getErrorStream).mkString.trim
       (exitCode, stderr)
     }
 
     val rmResult = stopResult match {
       case Success((0, _)) =>
         Try {
-          val process  = Runtime.getRuntime.exec(Array("docker", "rm", containerName))
+          val process = Runtime.getRuntime.exec(Array("docker", "rm", containerName))
+
+          val stderr = Using(scala.io.Source.fromInputStream(process.getErrorStream))(source => source.mkString.trim)
+            .getOrElse("")
+
           val exitCode = process.waitFor()
-          val stderr   = scala.io.Source.fromInputStream(process.getErrorStream).mkString.trim
           (exitCode, stderr)
         }
       case Success((_, stderr)) =>

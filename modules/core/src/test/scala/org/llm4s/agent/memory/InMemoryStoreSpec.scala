@@ -1,5 +1,6 @@
 package org.llm4s.agent.memory
 
+import org.llm4s.error.ValidationError
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -131,13 +132,12 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
       scored <- store.search("Scala JVM", topK = 10)
     } yield scored
 
-    result.isRight shouldBe true
-    val scored = result.toOption.get
+    val scored = result.getOrElse(fail("Expected Right"))
     scored.size shouldBe 3
 
     // "Scala also runs on the JVM" should score highest (matches both terms)
-    scored.head.memory.content should include("Scala")
-    scored.head.memory.content should include("JVM")
+    scored(0).memory.content should include("Scala")
+    scored(0).memory.content should include("JVM")
   }
 
   it should "return empty results for blank search queries" in {
@@ -150,6 +150,118 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
     } yield scored
 
     result shouldBe Right(Seq.empty)
+  }
+
+  it should "rank memories by cosine similarity using direct search with query embedding" in {
+    val mem1 = createMemory("Apple").withEmbedding(Array[Float](1f, 0f, 0f))
+    val mem2 = createMemory("Banana").withEmbedding(Array[Float](0f, 1f, 0f))
+    val mem3 = createMemory("Orange").withEmbedding(Array[Float](-1f, 0f, 0f))
+
+    val result = for {
+      store  <- InMemoryStore.withMemories(Seq(mem1, mem2, mem3))
+      scored <- store.search("fruit", Array[Float](1f, 0f, 0f), topK = 10, MemoryFilter.All)
+    } yield scored
+
+    val scored = result.getOrElse(fail("Expected Right"))
+    scored.map(_.memory.content) shouldBe Seq("Apple", "Banana", "Orange")
+    scored(0).score shouldBe 1.0 +- 1e-6
+    scored(1).score shouldBe 0.5 +- 1e-6
+    scored(2).score shouldBe 0.0 +- 1e-6
+  }
+
+  it should "fallback to keyword search on dimension mismatch in direct search" in {
+    val mem = createMemory("Scala language").withEmbedding(Array[Float](1f, 0f))
+
+    val result = for {
+      store <- InMemoryStore.withMemories(Seq(mem))
+      // Query embedding has 3 dimensions, memory has 2
+      scored <- store.search("Scala", Array[Float](1f, 1f, 1f), topK = 10, MemoryFilter.All)
+    } yield scored
+
+    val scored = result.getOrElse(fail("Expected Right"))
+    scored.size shouldBe 1
+    scored(0).memory.content should include("Scala")
+  }
+
+  it should "fallback to keyword search if vectors contain non-finite values in direct search" in {
+    val normalMem = createMemory("Normal keyword").withEmbedding(Array[Float](1f, 0f))
+    val nanMem    = createMemory("NaN text").withEmbedding(Array[Float](Float.NaN, 0f))
+
+    val result1 = for {
+      store  <- InMemoryStore.withMemories(Seq(normalMem, nanMem))
+      scored <- store.search("keyword", Array[Float](Float.NaN, 0f), topK = 10, MemoryFilter.All)
+    } yield scored
+
+    result1.getOrElse(fail("Expected Right")).map(_.memory.content) shouldBe Seq("Normal keyword")
+
+    val result2 = for {
+      store  <- InMemoryStore.withMemories(Seq(nanMem))
+      scored <- store.search("text", Array[Float](1f, 0f), topK = 10, MemoryFilter.All)
+    } yield scored
+
+    result2.getOrElse(fail("Expected Right")).map(_.memory.content) shouldBe Seq("NaN text")
+  }
+
+  it should "return empty results when direct search called with empty embedding array" in {
+    val mem = createMemory("Test").withEmbedding(Array[Float](1f, 0f))
+
+    val result = for {
+      store <- InMemoryStore.withMemories(Seq(mem))
+      // Empty string query or empty embedding array both return empty immediately
+      scored <- store.search("query", Array.emptyFloatArray, topK = 10, MemoryFilter.All)
+    } yield scored
+
+    result shouldBe Right(Seq.empty)
+  }
+
+  it should "only rank embedded memories when performing direct vector search" in {
+    val mem1 = createMemory("Embedded Apple").withEmbedding(Array[Float](1f, 0f, 0f))
+    val mem2 = createMemory("No embedding")
+
+    val result = for {
+      store  <- InMemoryStore.withMemories(Seq(mem1, mem2))
+      scored <- store.search("search", Array[Float](1f, 0f, 0f), topK = 10, MemoryFilter.All)
+    } yield scored
+
+    val scored = result.getOrElse(fail("Expected Right"))
+    scored.size shouldBe 1
+    scored(0).memory.content shouldBe "Embedded Apple"
+    scored(0).score shouldBe 1.0 +- 1e-6
+  }
+
+  it should "use embedding similarity search when embeddings and embedding service are available" in {
+    val service = new EmbeddingService {
+      override def embed(text: String) =
+        text match {
+          case "query" => Right(Array[Float](1f, 0f, 0f))
+          case other   => Left(ValidationError(s"Unknown text: $other", "text"))
+        }
+
+      override def embedBatch(texts: Seq[String]) =
+        Right(texts.map(t => embed(t).getOrElse(Array.emptyFloatArray)))
+
+      override def dimensions: Int = 3
+    }
+
+    val memoryA = createMemory("A").withEmbedding(Array[Float](1f, 0f, 0f))
+    val memoryB = createMemory("B").withEmbedding(Array[Float](0f, 1f, 0f))
+    val memoryC = createMemory("C").withEmbedding(Array[Float](-1f, 0f, 0f))
+
+    val result = for {
+      s1     <- InMemoryStore.withEmbeddingService(service).store(memoryA)
+      s2     <- s1.store(memoryB)
+      s3     <- s2.store(memoryC)
+      scored <- s3.search("query", topK = 10)
+    } yield scored
+
+    val scored = result.getOrElse(fail("Expected Right"))
+
+    // Keyword search would return empty here ("query" doesn't appear in any memory),
+    // so non-empty results confirm the embedding path is being used.
+    scored.map(_.memory.content) shouldBe Seq("A", "B", "C")
+    scored(0).score shouldBe 1.0 +- 1e-6
+    scored(1).score shouldBe 0.5 +- 1e-6
+    scored(2).score shouldBe 0.0 +- 1e-6
   }
 
   it should "return recent memories in descending order" in {
@@ -273,5 +385,87 @@ class InMemoryStoreSpec extends AnyFlatSpec with Matchers {
 
     result.map(_.size) shouldBe Right(1)
     result.map(_.head.content) shouldBe Right("High importance")
+  }
+
+  it should "reject ID changes in update function" in {
+    val original = createMemory("Original")
+    val newId    = MemoryId.generate()
+
+    val result = for {
+      store   <- InMemoryStore.empty.store(original)
+      updated <- store.update(original.id, _.copy(id = newId))
+    } yield updated
+
+    result match {
+      case Left(err: ValidationError) => err.formatted should include("ID")
+      case Left(other)                => fail(s"Expected ValidationError but got ${other.getClass.getSimpleName}")
+      case Right(_)                   => fail("Expected Left but got Right")
+    }
+  }
+
+  it should "handle NaN embeddings without throwing" in {
+    val service = new EmbeddingService {
+      override def embed(text: String)            = Right(Array[Float](1f, 0f, 0f))
+      override def embedBatch(texts: Seq[String]) = Right(texts.map(_ => embed("").getOrElse(Array.emptyFloatArray)))
+      override def dimensions: Int                = 3
+    }
+
+    // Store a memory with NaN in the embedding
+    val memoryWithNaN = createMemory("Test").withEmbedding(Array[Float](Float.NaN, 0f, 0f))
+    val normalMemory  = createMemory("Normal").withEmbedding(Array[Float](1f, 0f, 0f))
+
+    val result = for {
+      s1     <- InMemoryStore.withEmbeddingService(service).store(memoryWithNaN)
+      s2     <- s1.store(normalMemory)
+      scored <- s2.search("query", topK = 10)
+    } yield scored
+
+    // Should not throw, should return only valid memories
+    val scored = result.getOrElse(fail("Expected Right"))
+    // The NaN memory should be skipped, only normal memory returned
+    scored.map(_.memory.content) shouldBe Seq("Normal")
+  }
+
+  it should "handle Infinity embeddings without throwing" in {
+    val service = new EmbeddingService {
+      override def embed(text: String)            = Right(Array[Float](1f, 0f, 0f))
+      override def embedBatch(texts: Seq[String]) = Right(texts.map(_ => embed("").getOrElse(Array.emptyFloatArray)))
+      override def dimensions: Int                = 3
+    }
+
+    val memoryWithInf = createMemory("Test").withEmbedding(Array[Float](Float.PositiveInfinity, 0f, 0f))
+    val normalMemory  = createMemory("Normal").withEmbedding(Array[Float](1f, 0f, 0f))
+
+    val result = for {
+      s1     <- InMemoryStore.withEmbeddingService(service).store(memoryWithInf)
+      s2     <- s1.store(normalMemory)
+      scored <- s2.search("query", topK = 10)
+    } yield scored
+
+    val scored = result.getOrElse(fail("Expected Right"))
+    scored.map(_.memory.content) shouldBe Seq("Normal")
+  }
+
+  it should "fall back to keyword search when embedding fails" in {
+    val failingService = new EmbeddingService {
+      override def embed(text: String)            = Left(ValidationError("embedding-failed", "Test failure"))
+      override def embedBatch(texts: Seq[String]) = Left(ValidationError("embedding-failed", "Test failure"))
+      override def dimensions: Int                = 3
+    }
+
+    val memory1 = createMemory("Scala programming").withEmbedding(Array[Float](1f, 0f, 0f))
+    val memory2 = createMemory("Java development").withEmbedding(Array[Float](0f, 1f, 0f))
+
+    val result = for {
+      s1     <- InMemoryStore.withEmbeddingService(failingService).store(memory1)
+      s2     <- s1.store(memory2)
+      scored <- s2.search("Scala", topK = 10)
+    } yield scored
+
+    // Should succeed with keyword search fallback
+    val scored = result.getOrElse(fail("Expected Right"))
+    scored.nonEmpty shouldBe true
+    // First result should contain "Scala" (keyword match)
+    scored(0).memory.content should include("Scala")
   }
 }

@@ -1,5 +1,6 @@
 package org.llm4s.samples.imagegeneration
 
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.imagegeneration._
 import org.slf4j.LoggerFactory
 import java.nio.file.Paths
@@ -30,6 +31,12 @@ object ImageGenerationExample {
 
     // Example 4: Error handling
     errorHandlingExample()
+
+    // Example 5: Image editing / inpainting
+    imageEditingExample()
+
+    // Example 6: GPT Image models (opt-in via explicit model)
+    openAIGptImageExample()
   }
 
   def basicExample(): Unit = {
@@ -128,6 +135,69 @@ object ImageGenerationExample {
         logger.info(s"Service status: ${status.status} - ${status.message}")
       case Left(error) =>
         logger.info(s"Health check failed as expected: ${error.message}")
+    }
+  }
+
+  def imageEditingExample(): Unit = {
+    logger.info("\n--- Image Editing Example ---")
+
+    val sourceImage = Paths.get("input.png")
+    val maskImage   = Paths.get("mask.png")
+    val config      = StableDiffusionConfig()
+
+    ImageGeneration.editImage(
+      imagePath = sourceImage,
+      prompt = "replace the sky with a dramatic sunset",
+      maskPath = Some(maskImage),
+      config = config,
+      options = ImageEditOptions(
+        size = Some(ImageSize.Square512),
+        n = 1
+      )
+    ) match {
+      case Right(editedImages) if editedImages.nonEmpty =>
+        val output = Paths.get("edited_output.png")
+        editedImages.head.saveToFile(output).foreach(_ => logger.info(s"Edited image saved to: $output"))
+      case Right(_) =>
+        logger.info("Image editing returned no images")
+      case Left(error) =>
+        logger.info(s"Image editing failed (expected if input files are missing): ${error.message}")
+    }
+  }
+
+  def openAIGptImageExample(): Unit = {
+    logger.info("\n--- OpenAI GPT Image Example (Opt-In) ---")
+
+    Llm4sConfig.provider() match {
+      case Left(_) =>
+        logger.info("Skipping OpenAI GPT Image example (provider config not available)")
+      case Right(providerCfg: org.llm4s.llmconnect.config.OpenAIConfig) =>
+        val config = OpenAIConfig(
+          apiKey = providerCfg.apiKey,
+          model = "gpt-image-1.5"
+        )
+        val options = ImageGenerationOptions(
+          size = ImageSize.Auto,
+          responseFormat = Some("url"),
+          outputFormat = Some("png"),
+          background = Some("auto"),
+          outputCompression = Some(80)
+        )
+
+        ImageGeneration.generateImage(
+          prompt = "A studio product photo of a glass bottle with soft daylight",
+          config = config,
+          options = options
+        ) match {
+          case Right(image) =>
+            logger.info(
+              s"OpenAI image generated. URL: ${image.url.getOrElse("n/a")}, format: ${image.format.extension}"
+            )
+          case Left(error) =>
+            logger.info(s"OpenAI generation failed: ${error.message}")
+        }
+      case Right(_) =>
+        logger.info("Skipping OpenAI GPT Image example (configured provider is not OpenAI)")
     }
   }
 }

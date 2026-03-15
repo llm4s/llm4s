@@ -171,23 +171,30 @@ For streaming responses:
 
 ## 8. Running Tests Locally
 
-Common commands:
+The project provides a handful of sbt commands that contributors use frequently. The table below summarizes the most common ones and when to use them.
+
+| Task                       | Command                     | When to use it                                                 |
+|----------------------------|-----------------------------|----------------------------------------------------------------|
+| Compile (current version)  | `sbt compile`               | Quick compile during development or before starting tests      |
+| Cross‑compile              | `sbt +compile`              | Verify code compiles against *both* supported Scala versions   |
+| Run tests for a module     | `sbt core/test`             | Execute tests only in a specific sub‑module, e.g. `core`       |
+| Run all tests              | `sbt test`                  | Default; runs tests for the current Scala version              |
+| Cross‑version tests        | `sbt +test`                 | Ensure tests pass under both Scala 2.13 and Scala 3            |
+| Full CI‑like pipeline      | `sbt buildAll`              | Compiles, tests, and packages every module across versions     |
+| Format code                | `sbt scalafmtAll`           | Apply project‑wide formatting (required before PRs)            |
+
+### Using the table
+
+* **Single-module work:** run `sbt <module>/test` while iterating on that code.
+* **Scala compatibility:** always `+compile` or `+test` before opening a PR.
+* **CI sanity check:** `buildAll` mirrors the CI job and is handy when touching many modules.
+* **Formatting:** `scalafmtAll` is cheap and keeps your changes tidy; the pre‑commit hook runs it automatically.
+
+The following commands are still handy in day‑to‑day development:
 
 ```bash
-sbt test           # Run tests for default Scala version
-sbt +test          # Run tests for all Scala versions (2.13 and 3.x)
-```
-
-To run a specific suite:
-
-```bash
-sbt "testOnly *MySpec"
-```
-
-To run tests continuously:
-
-```bash
-sbt ~test
+sbt "testOnly *MySpec"   # run one suite
+sbt ~test                # continuous feedback as you code
 ```
 
 > **Cross-compilation note:** LLM4S supports Scala 2.13 and 3.x. Before submitting a PR, run `sbt +test` to ensure compatibility across both versions.

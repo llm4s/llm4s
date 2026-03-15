@@ -110,16 +110,18 @@ class ContextWindowConfigSpec extends AnyFlatSpec with Matchers {
 
   "PruningStrategy" should "be pattern matchable" in {
     def describe(strategy: PruningStrategy): String = strategy match {
-      case PruningStrategy.OldestFirst        => "oldest-first"
-      case PruningStrategy.MiddleOut          => "middle-out"
-      case PruningStrategy.RecentTurnsOnly(n) => s"recent-$n-turns"
-      case PruningStrategy.Custom(_)          => "custom"
+      case PruningStrategy.OldestFirst          => "oldest-first"
+      case PruningStrategy.MiddleOut            => "middle-out"
+      case PruningStrategy.RecentTurnsOnly(n)   => s"recent-$n-turns"
+      case PruningStrategy.Custom(_)            => "custom"
+      case _: PruningStrategy.AdaptiveWindowing => "adaptive"
     }
 
     describe(PruningStrategy.OldestFirst) shouldBe "oldest-first"
     describe(PruningStrategy.MiddleOut) shouldBe "middle-out"
     describe(PruningStrategy.RecentTurnsOnly(3)) shouldBe "recent-3-turns"
     describe(PruningStrategy.Custom(_ => Seq.empty)) shouldBe "custom"
+    describe(PruningStrategy.AdaptiveWindowing(100_000)) shouldBe "adaptive"
   }
 
   // ==========================================================================

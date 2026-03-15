@@ -49,6 +49,33 @@ object PlatformCommands {
     if (isWindows) Seq("cmd", "/c", "type") else Seq("cat")
 
   /**
+   * Returns the name of the first available Python interpreter on this machine
+   * (tries python3, python, then py), or None if none can be found.
+   */
+  def pythonInterpreter: Option[String] =
+    Seq("python3", "python", "py").find(isCommandAvailable)
+
+  /**
+   * Get a command that writes a minimal valid WAV file to the path given by the --out argument.
+   * Uses the first available Python interpreter (python3, python, or py).
+   * Returns a command using that interpreter, or falls back to python3 if none detected
+   * (in which case tests guarded by pythonInterpreter.isDefined will be skipped first).
+   */
+  def mockWavWriter: Seq[String] = {
+    val script =
+      """import sys, struct
+        |args = sys.argv[1:]
+        |path = next((args[i+1] for i, a in enumerate(args) if a == '--out'), None)
+        |if path:
+        |    with open(path, 'wb') as f:
+        |        f.write(b'RIFF' + struct.pack('<I', 36) + b'WAVEfmt ' +
+        |                struct.pack('<IHHIIHH', 16, 1, 1, 22050, 44100, 2, 16) +
+        |                b'data' + struct.pack('<I', 0))
+        """.stripMargin.trim
+    Seq(pythonInterpreter.getOrElse("python3"), "-c", script)
+  }
+
+  /**
    * Check if a command is available on the current platform.
    */
   def isCommandAvailable(command: String): Boolean = {

@@ -3,6 +3,7 @@ package org.llm4s.model
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import scala.concurrent.ExecutionContext.Implicits.global
 
 class ModelRegistrySpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
@@ -297,4 +298,64 @@ class ModelRegistrySpec extends AnyFlatSpec with Matchers with BeforeAndAfterEac
     metadata.provider shouldBe "custom"
     metadata.maxInputTokens shouldBe Some(50000)
   }
+
+  it should "handle malformed JSON from URL" in {
+    ModelRegistry.initialize()
+
+    val badJson = "{ invalid json }"
+    val dataUrl =
+      "data:application/json," + java.net.URLEncoder.encode(badJson, "UTF-8")
+
+    val result = ModelRegistry.updateFromUrl(dataUrl)
+
+    result.isLeft shouldBe true
+  }
+
+  it should "preserve existing cache when update fails" in {
+    ModelRegistry.initialize()
+
+    val before = ModelRegistry.lookup("gpt-4o")
+    before.isRight shouldBe true
+
+    val badJson = "{ broken"
+    val dataUrl =
+      "data:application/json," + java.net.URLEncoder.encode(badJson, "UTF-8")
+
+    ModelRegistry.updateFromUrl(dataUrl)
+
+    val after = ModelRegistry.lookup("gpt-4o")
+    after.isRight shouldBe true
+  }
+
+  it should "handle concurrent update calls safely" in {
+    ModelRegistry.initialize()
+
+    val json =
+      """{
+      "parallel-model": {
+        "litellm_provider": "custom",
+        "mode": "chat",
+        "max_input_tokens": 1000,
+        "max_output_tokens": 500
+      }
+    }"""
+
+    val dataUrl =
+      "data:application/json," + java.net.URLEncoder.encode(json, "UTF-8")
+
+    val futures = (1 to 5).map { _ =>
+      scala.concurrent.Future {
+        ModelRegistry.updateFromUrl(dataUrl)
+      }
+    }
+
+    scala.concurrent.Await.result(
+      scala.concurrent.Future.sequence(futures),
+      scala.concurrent.duration.Duration.Inf
+    )
+
+    val result = ModelRegistry.lookup("gpt-4o")
+    result.isRight shouldBe true
+  }
+
 }

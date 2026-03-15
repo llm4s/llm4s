@@ -72,7 +72,12 @@ class SpeechIntegrationTest extends AnyFunSuite with Matchers {
   }
 
   test("Tacotron2TextToSpeech should handle voice options") {
-    val tts = new Tacotron2TextToSpeech(PlatformCommands.echo)
+    assume(
+      PlatformCommands.pythonInterpreter.isDefined,
+      "No Python interpreter (python3/python/py) found — skipping TTS mock test"
+    )
+    // mockWavWriter writes a minimal valid WAV to --out so the full pipeline succeeds
+    val tts = new Tacotron2TextToSpeech(PlatformCommands.mockWavWriter)
     val options = TTSOptions(
       voice = Some("en-female"),
       language = Some("en"),

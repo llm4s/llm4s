@@ -25,7 +25,8 @@ object MultiTurnConversationExample {
     val result = for {
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
-      tools = new ToolRegistry(Seq(WeatherTool.tool))
+      weatherTool <- WeatherTool.toolSafe
+      tools = new ToolRegistry(Seq(weatherTool))
       agent = new Agent(client)
 
       _ = logger.info("Turn 1: Asking about Paris weather")

@@ -1,6 +1,8 @@
 package org.llm4s.rag
 
 import org.llm4s.chunking.ChunkerFactory
+import org.llm4s.knowledgegraph.graphrag.GraphRAGConfig
+import org.llm4s.knowledgegraph.storage.InMemoryGraphStore
 import org.llm4s.llmconnect.model.TokenUsage
 import org.llm4s.vectorstore.FusionStrategy
 import org.scalatest.flatspec.AnyFlatSpec
@@ -186,6 +188,19 @@ class RAGSpec extends AnyFlatSpec with Matchers {
 
     config.systemPrompt shouldBe Some("Custom prompt")
     config.topK shouldBe 10
+  }
+
+  it should "support GraphRAG configuration" in {
+    val store  = new InMemoryGraphStore()
+    val config = RAGConfig().withGraphStore(store).withGraphRAG(GraphRAGConfig(localTraversalDepth = 3))
+
+    config.graphStore shouldBe Some(store)
+    config.graphRAGConfig.localTraversalDepth shouldBe 3
+    config.hasGraphRAG shouldBe true
+  }
+
+  it should "report GraphRAG disabled by default" in {
+    RAGConfig().hasGraphRAG shouldBe false
   }
 
   "RAGConfig.default" should "equal empty RAGConfig" in {

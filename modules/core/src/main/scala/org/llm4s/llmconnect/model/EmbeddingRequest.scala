@@ -59,3 +59,11 @@ final case class VideoInput(
 ) extends MMInput {
   override def bytesApprox: Long = frames.foldLeft(0L)(_ + _.length)
 }
+
+/** Raw, unparsed bytes representing the media object. Provided for generic multimodal HTTP providers. */
+final case class RawMediaInput(
+  data: Array[Byte],
+  mime: String
+) extends MMInput {
+  override def bytesApprox: Long = data.length.toLong
+}

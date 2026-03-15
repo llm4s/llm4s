@@ -33,7 +33,7 @@ Show your support and stay updated:
 
 ### Contribute
 
-We welcome contributions! Ways to contribute:
+We welcome contributions! **Please read the [Contributing Guide](/reference/contributing) before opening your first PR.** It covers project conventions, PR requirements, and what we expect from contributors.
 
 - **Report Bugs** - [Open an issue](https://github.com/llm4s/llm4s/issues/new)
 - **Suggest Features** - Share your ideas
@@ -41,7 +41,7 @@ We welcome contributions! Ways to contribute:
 - **Improve Docs** - Help others learn
 - **Share Examples** - Show how you use LLM4S
 
-[Contributing Guide →](/reference/contributing)
+[Contributing Guide →](/reference/contributing){: .btn .btn-primary }
 
 ### Issue Tracker
 
@@ -93,6 +93,19 @@ LLM4S participated in Google Summer of Code 2025:
 ---
 
 ## 📚 Learning Resources
+
+### Learn About LLMs
+
+New to Large Language Models? These free courses cover the fundamentals:
+
+- **[API Fundamentals](https://github.com/anthropics/courses/tree/master/anthropic_api_fundamentals)** — Anthropic course covering SDK basics, model parameters, multimodal prompts, and streaming.
+- **[Prompt Engineering Interactive Tutorial](https://github.com/anthropics/courses/tree/master/prompt_engineering_interactive_tutorial)** — 9-chapter hands-on tutorial covering core prompt engineering techniques with exercises.
+- **[Real World Prompting](https://github.com/anthropics/courses/tree/master/real_world_prompting)** — Applying prompt techniques to complex, real-world application scenarios.
+- **[Prompt Evaluations](https://github.com/anthropics/courses/tree/master/prompt_evaluations)** — Measuring, testing, and improving prompt quality in production systems.
+- **[Tool Use Course](https://github.com/anthropics/courses/tree/master/tool_use)** — Tool-calling patterns and best practices (directly relevant to the LLM4S tool API).
+- **[ChatGPT Prompt Engineering for Developers](https://www.deeplearning.ai/short-courses/chatgpt-prompt-engineering-for-developers/)** — Free DeepLearning.AI course by Andrew Ng and Isa Fulford covering LLM fundamentals and practical prompt patterns.
+- **[Prompt Engineering Guide](https://www.promptingguide.ai/)** — Comprehensive reference for prompt engineering techniques, from zero-shot to chain-of-thought, including recent research.
+
 
 ### Documentation
 
@@ -193,28 +206,23 @@ Get notified of new releases:
 
 ---
 
-## 🎓 Become a Contributor
+## Become a Contributor
 
-### Good First Issues
+### Start Here
 
-New to contributing? Look for issues labeled:
-
-- [`good first issue`](https://github.com/llm4s/llm4s/labels/good%20first%20issue)
-- [`help wanted`](https://github.com/llm4s/llm4s/labels/help%20wanted)
-- [`documentation`](https://github.com/llm4s/llm4s/labels/documentation)
+1. **Read the [Contributing Guide](/reference/contributing)** — covers PR requirements, code standards, and the submission process
+2. **Pick a [`good first issue`](https://github.com/llm4s/llm4s/labels/good%20first%20issue)** — start small, build trust
+3. **Comment on the issue** before starting work — avoids duplicate effort
 
 ### Contribution Areas
 
-Ways to contribute:
+- **Tests** - Increase test coverage (great first contribution)
+- **Documentation** - Fix errors, improve guides
+- **Bug Fixes** - Fix reported issues
+- **Features** - After 1-2 merged PRs, take on features
+- **Examples** - Add sample applications
 
-- 📝 **Documentation** - Improve guides and examples
-- 🐛 **Bug Fixes** - Fix reported issues
-- ✨ **Features** - Implement new capabilities
-- 🧪 **Tests** - Increase test coverage
-- 📊 **Examples** - Add sample applications
-- 🎨 **Website** - Improve this documentation site
-
-[Contributing Guide →](/reference/contributing)
+[Contributing Guide →](/reference/contributing){: .btn .btn-primary }
 
 ---
 
@@ -246,7 +254,7 @@ We are committed to providing a welcoming and inclusive community. Please read o
 ## Questions?
 
 - 💬 **Discord**: [Ask in Discord](https://discord.gg/4uvTPn6qww)
-- 📖 **Docs**: [Browse documentation](/guide/basic-usage)
+- 📖 **Docs**: [Browse documentation](../guide/basic-usage)
 - 🐛 **Issues**: [GitHub Issues](https://github.com/llm4s/llm4s/issues)
 
 **Join us in building the future of LLM applications in Scala!** 🚀

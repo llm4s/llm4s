@@ -14,11 +14,20 @@ import scala.concurrent.duration.{ Duration, DurationInt, DurationLong }
  */
 object ErrorRecovery {
 
+  /** Binary-compatible overload — delegates to the full version with Thread.sleep. */
+  def recoverWithBackoff[A](
+    operation: () => Result[A],
+    maxAttempts: Int,
+    baseDelay: Duration
+  ): Result[A] =
+    recoverWithBackoff(operation, maxAttempts, baseDelay, Thread.sleep)
+
   /** Intelligent error recovery with exponential backoff */
   def recoverWithBackoff[A](
     operation: () => Result[A],
     maxAttempts: Int = 3,
-    baseDelay: Duration = 1.second
+    baseDelay: Duration = 1.second,
+    sleepFn: Long => Unit = Thread.sleep
   ): Result[A] = {
 
     @tailrec
@@ -32,15 +41,15 @@ object ErrorRecovery {
           error match {
             case re: RateLimitError =>
               val delay = re.retryDelay.map(_.millis).getOrElse(baseDelay * Math.pow(2, attemptNumber).doubleValue)
-              Thread.sleep(delay.toMillis)
+              sleepFn(delay.toMillis)
               attempt(attemptNumber + 1)
 
             case _: ServiceError with RecoverableError =>
-              Thread.sleep(baseDelay.toMillis * attemptNumber)
+              sleepFn(baseDelay.toMillis * attemptNumber)
               attempt(attemptNumber + 1)
 
             case _: TimeoutError =>
-              Thread.sleep(baseDelay.toMillis)
+              sleepFn(baseDelay.toMillis)
               attempt(attemptNumber + 1)
 
             case _ => Left(error) // Non-recoverable
@@ -62,50 +71,64 @@ object ErrorRecovery {
   /** Circuit breaker pattern for service resilience */
   class CircuitBreaker[A](
     failureThreshold: Int = 5,
-    recoveryTimeout: Duration = 30.seconds
+    recoveryTimeout: Duration = 30.seconds,
+    clock: () => Long = () => System.currentTimeMillis()
   ) {
 
-    @volatile private var state: CircuitState           = Closed
-    @volatile private var failures                      = 0
-    @volatile private var lastFailureTime: Option[Long] = None
+    // All fields are accessed only inside `synchronized` blocks.
+    private var state: CircuitState           = Closed
+    private var failures: Int                 = 0
+    private var lastFailureTime: Option[Long] = None
 
-    def execute(operation: () => Result[A]): Result[A] =
+    // Atomically decide what to do and, when transitioning Open→HalfOpen, claim
+    // the exclusive probe slot.  Returns the state we committed to running as,
+    // or None if the call should be fast-rejected.
+    private def acquireSlot(): Option[CircuitState] = synchronized {
       state match {
+        case Closed => Some(Closed)
+        // A probe is already in flight; reject to avoid multiple concurrent probes.
+        case HalfOpen => None
+        case Open =>
+          val now = clock()
+          lastFailureTime match {
+            case Some(t) if (now - t) > recoveryTimeout.toMillis =>
+              state = HalfOpen // exactly one thread wins this assignment
+              Some(HalfOpen)
+            case _ => None
+          }
+      }
+    }
+
+    // Atomically record the outcome of an operation that ran under `entryState`.
+    private def recordResult(entryState: CircuitState, result: Result[A]): Unit = synchronized {
+      entryState match {
+        case HalfOpen =>
+          result match {
+            case Right(_) => state = Closed; failures = 0
+            case Left(_)  => state = Open; lastFailureTime = Some(clock())
+          }
         case Closed =>
-          operation() match {
-            case success @ Right(_) =>
-              failures = 0
-              success
-            case failure @ Left(_) =>
+          result match {
+            case Right(_) => failures = 0
+            case Left(_) =>
               failures += 1
               if (failures >= failureThreshold) {
                 state = Open
-                lastFailureTime = Some(System.currentTimeMillis())
+                lastFailureTime = Some(clock())
               }
-              failure
           }
+        case Open => // shouldn't occur; leave state unchanged
+      }
+    }
 
-        case Open =>
-          val now = System.currentTimeMillis()
-          lastFailureTime match {
-            case Some(lastFailure) if (now - lastFailure) > recoveryTimeout.toMillis =>
-              state = HalfOpen
-              execute(operation)
-            case _ =>
-              Result.failure(ServiceError(503, "circuit-breaker", "Circuit breaker is open - service unavailable"))
-          }
-
-        case HalfOpen =>
-          operation() match {
-            case success @ Right(_) =>
-              state = Closed
-              failures = 0
-              success
-            case failure =>
-              state = Open
-              lastFailureTime = Some(System.currentTimeMillis())
-              failure
-          }
+    def execute(operation: () => Result[A]): Result[A] =
+      acquireSlot() match {
+        case None =>
+          Result.failure(ServiceError(503, "circuit-breaker", "Circuit breaker is open - service unavailable"))
+        case Some(entryState) =>
+          val result = operation()
+          recordResult(entryState, result)
+          result
       }
   }
 

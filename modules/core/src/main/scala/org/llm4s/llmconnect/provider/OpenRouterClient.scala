@@ -1,13 +1,12 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.serialization.OpenRouterToolCallDeserializer
-import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
+import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
 import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
@@ -17,68 +16,105 @@ import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import scala.util.Try
 
+/**
+ * [[LLMClient]] implementation for the OpenRouter unified model gateway.
+ *
+ * Sends requests to the OpenRouter REST API using the OpenAI-compatible
+ * `/chat/completions` endpoint. Accepts `OpenAIConfig` — there is no
+ * separate `OpenRouterConfig`; `LLMConnect` detects OpenRouter by checking
+ * whether `baseUrl` contains `"openrouter.ai"` and routes accordingly.
+ *
+ * == Required headers ==
+ *
+ * OpenRouter's usage policy requires two additional headers on every
+ * request. This client sends them automatically:
+ *  - `HTTP-Referer: https://github.com/llm4s/llm4s`
+ *  - `X-Title: LLM4S`
+ *
+ * == Reasoning / extended thinking ==
+ *
+ * Model type is detected by substring matching on the lower-cased model name:
+ *  - Names containing `"claude"` or `"anthropic"` → Anthropic-style
+ *    `thinking` object (`type: "enabled"`, `budget_tokens`).
+ *  - Names containing `"o1"`, `"o3"`, or `"o4"` → OpenAI-style
+ *    `reasoning_effort` string parameter.
+ *  - All other models → reasoning configuration is silently omitted.
+ *
+ * The thinking budget is clamped to `[1024, maxTokens - 1]` for Anthropic
+ * models, matching the Anthropic API constraint.
+ *
+ * == Thinking content ==
+ *
+ * Extended thinking text is extracted from whichever field the model
+ * populates: `message.thinking`, `message.reasoning`, or
+ * `choice.thinking` (checked in that order).
+ *
+ * @param config  `OpenAIConfig` whose `baseUrl` must contain `"openrouter.ai"`;
+ *                carries the API key and model name.
+ * @param metrics Receives per-call latency and token-usage events.
+ *                Defaults to `MetricsCollector.noop`.
+ */
 class OpenRouterClient(
   config: OpenAIConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-) extends LLMClient
-    with MetricsRecording {
+) extends BaseLifecycleLLMClient {
   private val httpClient = HttpClient.newHttpClient()
+
+  protected def clientDescription: String = s"OpenRouter client for model ${config.model}"
+  protected def providerName: String      = "openrouter"
+  protected def modelName: String         = config.model
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics("openrouter", config.model) {
-    // Convert conversation to OpenRouter format
-    val requestBody = createRequestBody(conversation, options)
+  ): Result[Completion] = completeWithMetrics {
+    // Wrap entire body in Try so createRequestBody returns Left(error)
+    // instead of throwing RuntimeException.
+    Try {
+      createRequestBody(conversation, options)
+    }.toEither.left.map(_.toLLMError).flatMap { requestBody =>
+      val attempt =
+        Try {
+          val request = HttpRequest
+            .newBuilder()
+            .uri(URI.create(s"${config.baseUrl}/chat/completions"))
+            .header("Content-Type", "application/json")
+            .header("Authorization", s"Bearer ${config.apiKey}")
+            .header("HTTP-Referer", "https://github.com/llm4s/llm4s") // Required by OpenRouter
+            .header("X-Title", "LLM4S")                               // Required by OpenRouter
+            .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
+            .build()
 
-    // Make API call safely (no try/catch)
-    val attempt =
-      Try {
-        val request = HttpRequest
-          .newBuilder()
-          .uri(URI.create(s"${config.baseUrl}/chat/completions"))
-          .header("Content-Type", "application/json")
-          .header("Authorization", s"Bearer ${config.apiKey}")
-          .header("HTTP-Referer", "https://github.com/llm4s/llm4s") // Required by OpenRouter
-          .header("X-Title", "LLM4S")                               // Required by OpenRouter
-          .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
-          .build()
+          httpClient.send(request, HttpResponse.BodyHandlers.ofString())
+        }.toEither.left
+          .map(_.toLLMError)
 
-        httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-      }.toEither.left
-        .map(_.toLLMError)
-
-    attempt.flatMap { response =>
-      // Handle response status
-      response.statusCode() match {
-        case 200 =>
-          val responseJson = ujson.read(response.body())
-          Right(parseCompletion(responseJson))
-        case 401    => Left(AuthenticationError("openrouter", "Invalid API key"))
-        case 429    => Left(RateLimitError("openrouter"))
-        case status => Left(ServiceError(status, "openrouter", s"OpenRouter API error: ${response.body()}"))
+      attempt.flatMap { response =>
+        if (response.statusCode() >= 200 && response.statusCode() < 300) {
+          Try(ujson.read(response.body())).toEither.left.map(_.toLLMError).flatMap { responseJson =>
+            Try(parseCompletion(responseJson)).toEither.left.map(_.toLLMError)
+          }
+        } else {
+          HttpErrorMapper.mapHttpError(response.statusCode(), response.body(), providerName)
+        }
       }
     }
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
-  )
+  }
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics("openrouter", config.model) {
-    val requestBody = createRequestBody(conversation, options)
-    requestBody("stream") = true
-
-    val accumulator = StreamingAccumulator.create()
-
-    val attempt =
-      Try {
+  ): Result[Completion] = completeWithMetrics {
+    // Wrap entire body in Try so createRequestBody and other unprotected
+    // code paths return Left(error) instead of throwing RuntimeException.
+    Try {
+      val requestBody = createRequestBody(conversation, options)
+      requestBody("stream") = true
+      (requestBody, StreamingAccumulator.create())
+    }.toEither.left.map(_.toLLMError).flatMap { case (requestBody, accumulator) =>
+      // Send the HTTP request, converting transport exceptions to Left
+      val responseOrError = Try {
         val request = HttpRequest
           .newBuilder()
           .uri(URI.create(s"${config.baseUrl}/chat/completions"))
@@ -90,54 +126,58 @@ class OpenRouterClient(
           .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
           .build()
 
-        val response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
+        httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
+      }.toEither.left.map(_.toLLMError)
 
-        if (response.statusCode() != 200) {
-          val errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
-          response.statusCode() match {
-            case 401 => throw new RuntimeException(AuthenticationError("openrouter", "Invalid API key").formatted)
-            case 429 => throw new RuntimeException(RateLimitError("openrouter").formatted)
-            case status =>
-              throw new RuntimeException(
-                s"${ServiceError(status, "openrouter", s"OpenRouter API error: $errorBody").formatted}"
-              )
-          }
+      // Check HTTP status, returning typed errors for known failure codes
+      val streamOrError = responseOrError.flatMap { response =>
+        if (response.statusCode() == 200) {
+          Right(response)
+        } else {
+          val errorBody = Try(new String(response.body().readAllBytes(), StandardCharsets.UTF_8))
+            .getOrElse("<error body unreadable>")
+          HttpErrorMapper.mapHttpError(response.statusCode(), errorBody, providerName)
         }
+      }
 
-        val sseParser = SSEParser.createStreamingParser()
-        val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
-        val loopTry = Try {
-          var line: String = null
-          while ({ line = reader.readLine(); line != null }) {
-            sseParser.addChunk(line + "\n")
-            while (sseParser.hasEvents)
-              sseParser.nextEvent().foreach { event =>
-                event.data.foreach { data =>
-                  if (data != "[DONE]") {
-                    val json   = ujson.read(data)
-                    val chunks = parseStreamingChunks(json)
-                    chunks.foreach { c =>
-                      accumulator.addChunk(c)
-                      onChunk(c)
+      // Process the SSE stream, converting any I/O exceptions to Left
+      val attempt = streamOrError.flatMap { response =>
+        Try {
+          val sseParser = SSEParser.createStreamingParser()
+          val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
+          try {
+            var line: String = null
+            while ({ line = reader.readLine(); line != null }) {
+              sseParser.addChunk(line + "\n")
+              while (sseParser.hasEvents)
+                sseParser.nextEvent().foreach { event =>
+                  event.data.foreach { data =>
+                    if (data != "[DONE]") {
+                      val json   = ujson.read(data)
+                      val chunks = parseStreamingChunks(json)
+                      chunks.foreach { c =>
+                        accumulator.addChunk(c)
+                        onChunk(c)
+                      }
                     }
                   }
                 }
-              }
+            }
+          } finally {
+            Try(reader.close())
+            Try(response.body().close())
           }
-        }
-        Try(reader.close()); Try(response.body().close())
-        loopTry.get
-      }.toEither.left
-        .map(_.toLLMError)
-
-    attempt.flatMap(_ => accumulator.toCompletion)
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens.toInt, usage.completionTokens.toInt)
+        }.toEither.left.map(_.toLLMError)
       }
-  )
+
+      attempt.flatMap(_ =>
+        accumulator.toCompletion.map { c =>
+          val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+          c.copy(model = config.model, estimatedCost = cost)
+        }
+      )
+    }
+  }
 
   private def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
     val choices = json("choices").arr
@@ -161,7 +201,7 @@ class OpenRouterClient(
           ToolCall(
             id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
             name = function.obj.get("name").flatMap(_.strOpt).getOrElse(""),
-            arguments = parseStreamingArguments(rawArgs)
+            arguments = StreamingToolArgumentParser.parse(rawArgs)
           )
       }
 
@@ -200,10 +240,10 @@ class OpenRouterClient(
     }
   }
 
-  private def parseStreamingArguments(raw: String): ujson.Value =
-    if (raw.isEmpty) ujson.Null else scala.util.Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
-
-  private def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
+  /**
+   * Test-visible seam for request serialization; intentionally scoped to provider package to avoid broader API surface.
+   */
+  protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val messages = conversation.messages.map {
       case UserMessage(content) =>
         ujson.Obj("role" -> "user", "content" -> content)
@@ -224,7 +264,7 @@ class OpenRouterClient(
           })
         }
         base
-      case ToolMessage(toolCallId, content) =>
+      case ToolMessage(content, toolCallId) =>
         ujson.Obj(
           "role"         -> "tool",
           "tool_call_id" -> toolCallId,
@@ -248,6 +288,10 @@ class OpenRouterClient(
       base("tools") = toolRegistry.getOpenAITools()
     }
 
+    options.responseFormat.foreach { fmt =>
+      ResponseFormatMapper.toOpenAIResponseFormat(fmt).foreach(rf => base("response_format") = rf)
+    }
+
     // Add reasoning configuration based on model type
     addReasoningConfig(base, options)
 
@@ -255,11 +299,11 @@ class OpenRouterClient(
   }
 
   /**
-   * Add reasoning configuration to the request based on model type.
+   * Appends provider-specific reasoning fields to `base` when reasoning is enabled.
    *
-   * OpenRouter supports different reasoning modes:
-   * - For Anthropic Claude models: Uses `thinking` object with `type` and `budget_tokens`
-   * - For OpenAI o1/o3 models: Uses `reasoning_effort` parameter
+   * Model type is detected by substring matching on the lower-cased model name.
+   * Anthropic models receive a `thinking` object; OpenAI o1/o3/o4 models receive
+   * `reasoning_effort`; all others are left unchanged (reasoning silently ignored).
    */
   private def addReasoningConfig(base: ujson.Obj, options: CompletionOptions): Unit = {
     val modelLower = config.model.toLowerCase
@@ -343,29 +387,50 @@ class OpenRouterClient(
       }
     }
 
+    // Estimate cost using CostEstimator
+    val modelId = json("model").str
+    val cost    = usage.flatMap(u => CostEstimator.estimate(config.model, u))
+
     Completion(
       id = json("id").str,
       created = json("created").num.toLong,
       content = message.obj.get("content").flatMap(_.strOpt).getOrElse(""),
-      model = json("model").str,
+      model = modelId,
       message = AssistantMessage(
         contentOpt = message.obj.get("content").flatMap(_.strOpt),
         toolCalls = toolCalls.toList
       ),
       toolCalls = toolCalls.toList,
       usage = usage,
-      thinking = thinking
+      thinking = thinking,
+      estimatedCost = cost
     )
   }
 
   override def getContextWindow(): Int = config.contextWindow
 
   override def getReserveCompletion(): Int = config.reserveCompletion
+
+  override protected def releaseResources(): Unit =
+    (httpClient: Any) match {
+      case c: AutoCloseable => c.close()
+      case _                => ()
+    }
 }
 
 object OpenRouterClient {
   import org.llm4s.types.TryOps
 
+  /**
+   * Constructs an [[OpenRouterClient]], wrapping any construction-time
+   * exception in a `Left`.
+   *
+   * @param config  `OpenAIConfig` with the OpenRouter API key, model, and
+   *                a `baseUrl` that contains `"openrouter.ai"`.
+   * @param metrics Receives per-call latency and token-usage events.
+   *                Defaults to `MetricsCollector.noop`.
+   * @return `Right(client)` on success; `Left(LLMError)` if construction fails.
+   */
   def apply(
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop

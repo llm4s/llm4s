@@ -69,6 +69,39 @@ trait MetricsCollector {
     model: String,
     costUsd: Double
   ): Unit
+
+  /**
+   * Record a retry attempt for reliability tracking.
+   *
+   * @param provider Provider name
+   * @param attemptNumber Which retry attempt (1 = first retry, 2 = second, etc.)
+   */
+  def recordRetryAttempt(
+    provider: String,
+    attemptNumber: Int
+  ): Unit = () // Default no-op
+
+  /**
+   * Record circuit breaker state transition.
+   *
+   * @param provider Provider name
+   * @param newState New circuit breaker state ("open", "closed", "half-open")
+   */
+  def recordCircuitBreakerTransition(
+    provider: String,
+    newState: String
+  ): Unit = () // Default no-op
+
+  /**
+   * Record a generic error for metrics (when full request tracking not applicable).
+   *
+   * @param errorKind Type of error
+   * @param provider Provider name
+   */
+  def recordError(
+    errorKind: ErrorKind,
+    provider: String
+  ): Unit = () // Default no-op
 }
 
 object MetricsCollector {
@@ -77,6 +110,55 @@ object MetricsCollector {
    * No-op implementation that does nothing.
    * Use as default when metrics are disabled.
    */
+  /**
+   * Combine multiple collectors into one that fans out every call to all of them.
+   *
+   * Useful for running a [[CostTracker]] alongside [[PrometheusMetrics]]:
+   * {{{
+   * val combined = MetricsCollector.compose(prometheusMetrics, costTracker)
+   * val client = LLMConnect.getClient(config, combined)
+   * }}}
+   */
+  def compose(collectors: MetricsCollector*): MetricsCollector = new MetricsCollector {
+    private def safeForEach(f: MetricsCollector => Unit): Unit =
+      collectors.foreach(c => scala.util.Try(f(c)))
+
+    override def observeRequest(
+      provider: String,
+      model: String,
+      outcome: Outcome,
+      duration: FiniteDuration
+    ): Unit = safeForEach(_.observeRequest(provider, model, outcome, duration))
+
+    override def addTokens(
+      provider: String,
+      model: String,
+      inputTokens: Long,
+      outputTokens: Long
+    ): Unit = safeForEach(_.addTokens(provider, model, inputTokens, outputTokens))
+
+    override def recordCost(
+      provider: String,
+      model: String,
+      costUsd: Double
+    ): Unit = safeForEach(_.recordCost(provider, model, costUsd))
+
+    override def recordRetryAttempt(
+      provider: String,
+      attemptNumber: Int
+    ): Unit = safeForEach(_.recordRetryAttempt(provider, attemptNumber))
+
+    override def recordCircuitBreakerTransition(
+      provider: String,
+      newState: String
+    ): Unit = safeForEach(_.recordCircuitBreakerTransition(provider, newState))
+
+    override def recordError(
+      errorKind: ErrorKind,
+      provider: String
+    ): Unit = safeForEach(_.recordError(errorKind, provider))
+  }
+
   val noop: MetricsCollector = new MetricsCollector {
     override def observeRequest(
       provider: String,
@@ -132,6 +214,8 @@ object ErrorKind {
   case object Authentication extends ErrorKind
   case object Network        extends ErrorKind
   case object Validation     extends ErrorKind
+  case object ServiceError   extends ErrorKind
+  case object ExecutionError extends ErrorKind
   case object Unknown        extends ErrorKind
 
   /**
@@ -148,6 +232,9 @@ object ErrorKind {
       case _: org.llm4s.error.NetworkError        => Network
       case _: org.llm4s.error.ValidationError     => Validation
       case _: org.llm4s.error.InvalidInputError   => Validation
+      case _: org.llm4s.error.ServiceError        => ServiceError
+      case _: org.llm4s.error.ExecutionError      => ExecutionError
+      case _: org.llm4s.error.ConfigurationError  => Validation
       case _                                      => Unknown
     }
 }

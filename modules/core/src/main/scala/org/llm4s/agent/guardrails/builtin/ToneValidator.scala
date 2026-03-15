@@ -6,19 +6,35 @@ import org.llm4s.types.Result
 
 /**
  * Tone categories for content validation.
+ *
+ * Represents the detected or expected tone of text content.
+ * Used by [[ToneValidator]] to enforce tone requirements on LLM output.
  */
 sealed trait Tone {
   def name: String
 }
 
 object Tone {
-  case object Professional extends Tone { val name = "Professional" }
-  case object Casual       extends Tone { val name = "Casual"       }
-  case object Friendly     extends Tone { val name = "Friendly"     }
-  case object Formal       extends Tone { val name = "Formal"       }
-  case object Excited      extends Tone { val name = "Excited"      }
-  case object Neutral      extends Tone { val name = "Neutral"      }
 
+  /** Business-appropriate language (e.g. "please", "thank you", "regards"). */
+  case object Professional extends Tone { val name = "Professional" }
+
+  /** Informal, relaxed language (e.g. "hey", "cool", "awesome"). */
+  case object Casual extends Tone { val name = "Casual" }
+
+  /** Warm, approachable language (e.g. "hi", "hello", "thanks"). */
+  case object Friendly extends Tone { val name = "Friendly" }
+
+  /** Academic or official language (e.g. "furthermore", "moreover", "consequently"). */
+  case object Formal extends Tone { val name = "Formal" }
+
+  /** Enthusiastic language with exclamation marks and short sentences. */
+  case object Excited extends Tone { val name = "Excited" }
+
+  /** Default tone when no specific indicators are detected. */
+  case object Neutral extends Tone { val name = "Neutral" }
+
+  /** All available tone categories. */
   val all: Set[Tone] = Set(Professional, Casual, Friendly, Formal, Excited, Neutral)
 }
 

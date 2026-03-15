@@ -347,6 +347,7 @@ object WebSocketMessage {
     macroRW[StreamingOutputMessage],
     macroRW[CommandStartedMessage],
     macroRW[CommandCompletedMessage],
+    macroRW[CancelCommandMessage],
     macroRW[ErrorMessage]
   )
 }
@@ -415,6 +416,15 @@ case class CommandCompletedMessage(
 
 object CommandCompletedMessage {
   implicit val rw: ReadWriter[CommandCompletedMessage] = macroRW
+}
+
+// Cancellation message for terminating running commands
+case class CancelCommandMessage(
+  commandId: String
+) extends WebSocketMessage
+
+object CancelCommandMessage {
+  implicit val rw: ReadWriter[CancelCommandMessage] = macroRW
 }
 
 // Generic error message

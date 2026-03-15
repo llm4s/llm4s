@@ -1,7 +1,10 @@
 package org.llm4s.toolapi
 
 /**
- * Structured error information for tool parameter validation
+ * Structured error information for tool parameter validation.
+ *
+ * Represents specific validation failures when parsing tool call arguments,
+ * including missing parameters, type mismatches, null values, and invalid nesting.
  */
 sealed trait ToolParameterError {
   def parameterName: String
@@ -11,7 +14,11 @@ sealed trait ToolParameterError {
 object ToolParameterError {
 
   /**
-   * A required parameter is completely missing from the arguments
+   * A required parameter is completely missing from the arguments.
+   *
+   * @param parameterName name of the missing parameter
+   * @param expectedType the expected type of the parameter
+   * @param availableParameters list of parameter names that were provided (hint for self-correction)
    */
   case class MissingParameter(
     parameterName: String,
@@ -27,7 +34,10 @@ object ToolParameterError {
   }
 
   /**
-   * A required parameter is present but has a null value
+   * A required parameter is present but has a null value.
+   *
+   * @param parameterName name of the null parameter
+   * @param expectedType the expected non-null type
    */
   case class NullParameter(
     parameterName: String,
@@ -38,7 +48,11 @@ object ToolParameterError {
   }
 
   /**
-   * A parameter has the wrong type
+   * A parameter has the wrong type.
+   *
+   * @param parameterName name of the mistyped parameter
+   * @param expectedType the type that was expected
+   * @param actualType the type that was received
    */
   case class TypeMismatch(
     parameterName: String,
@@ -50,7 +64,11 @@ object ToolParameterError {
   }
 
   /**
-   * Cannot access a nested property because parent is not an object
+   * Cannot access a nested property because parent is not an object.
+   *
+   * @param parameterName name of the parameter being accessed
+   * @param parentPath JSON path to the parent element
+   * @param parentType actual type of the parent element (e.g. "string", "array")
    */
   case class InvalidNesting(
     parameterName: String,
@@ -62,7 +80,9 @@ object ToolParameterError {
   }
 
   /**
-   * Multiple parameter errors
+   * Aggregation of multiple parameter errors from a single tool call.
+   *
+   * @param errors the individual parameter errors
    */
   case class MultipleErrors(
     errors: List[ToolParameterError]
@@ -78,7 +98,10 @@ object ToolParameterError {
 }
 
 /**
- * Enhanced tool call errors with consistent formatting
+ * Enhanced tool call errors with consistent formatting.
+ *
+ * Covers the full lifecycle of a tool invocation: unknown function, null arguments,
+ * invalid arguments, handler errors, and execution exceptions.
  */
 sealed trait ToolCallError {
   def toolName: String
@@ -87,6 +110,22 @@ sealed trait ToolCallError {
 }
 
 object ToolCallError {
+
+  /**
+   * Whether this error is considered retryable (e.g. timeout, transient execution failure).
+   * UnknownFunction, NullArguments, InvalidArguments, HandlerError are not retryable.
+   * ExecutionError is retryable when the cause is IOException or TimeoutException (transient).
+   */
+  def isRetryable(error: ToolCallError): Boolean = error match {
+    case _: UnknownFunction | _: NullArguments | _: InvalidArguments | _: HandlerError =>
+      false
+    case _: Timeout =>
+      true
+    case ExecutionError(_, cause) =>
+      import java.io.IOException
+      import java.util.concurrent.TimeoutException
+      cause.isInstanceOf[IOException] || cause.isInstanceOf[TimeoutException]
+  }
 
   /**
    * Tool function doesn't exist
@@ -137,5 +176,157 @@ object ToolCallError {
     error: String
   ) extends ToolCallError {
     def getMessage: String = s"failed with error: $error"
+  }
+
+  /**
+   * Tool execution did not complete within the configured timeout.
+   *
+   * @param toolName  Name of the tool that timed out
+   * @param duration Timeout duration that was exceeded
+   */
+  case class Timeout(
+    toolName: String,
+    duration: scala.concurrent.duration.FiniteDuration
+  ) extends ToolCallError {
+    def getMessage: String = s"$toolName timed out after $duration"
+  }
+}
+
+/**
+ * JSON serialization helpers for structured tool error payloads.
+ *
+ * Converts ToolCallError and ToolParameterError instances to machine-readable JSON
+ * format for ToolMessage.content, enabling LLMs and consumers to programmatically
+ * parse validation errors and self-correct tool arguments.
+ *
+ * Output schema:
+ * {{{
+ * {
+ *   "isError": true,
+ *   "toolName": "<string>",
+ *   "errorType": "<unknown_function|null_arguments|invalid_arguments|handler_error|execution_error>",
+ *   "message": "<human readable summary>",
+ *   "parameterErrors": [   // optional: only present for invalid_arguments
+ *     {
+ *       "parameterName": "<string>",
+ *       "kind": "<missing_parameter|null_parameter|type_mismatch|invalid_nesting>",
+ *       "expectedType": "<string|null>",
+ *       "receivedType": "<string|null>",
+ *       "availableParameters": ["<string>", ...]  // optional hint
+ *     }
+ *   ],
+ *   "error": "<legacy error string for older consumers>"
+ * }
+ * }}}
+ */
+object ToolCallErrorJson {
+
+  /**
+   * Convert a ToolParameterError to structured JSON for parameterErrors array
+   */
+  def parameterErrorToJson(error: ToolParameterError): ujson.Obj = error match {
+    case ToolParameterError.MissingParameter(name, expectedType, available) =>
+      val obj = ujson.Obj(
+        "parameterName" -> name,
+        "kind"          -> "missing_parameter",
+        "expectedType"  -> expectedType,
+        "receivedType"  -> ujson.Null
+      )
+      if (available.nonEmpty) obj("availableParameters") = ujson.Arr.from(available.map(ujson.Str(_)))
+      obj
+
+    case ToolParameterError.NullParameter(name, expectedType) =>
+      ujson.Obj(
+        "parameterName" -> name,
+        "kind"          -> "null_parameter",
+        "expectedType"  -> expectedType,
+        "receivedType"  -> "null"
+      )
+
+    case ToolParameterError.TypeMismatch(name, expectedType, actualType) =>
+      ujson.Obj(
+        "parameterName" -> name,
+        "kind"          -> "type_mismatch",
+        "expectedType"  -> expectedType,
+        "receivedType"  -> actualType
+      )
+
+    case ToolParameterError.InvalidNesting(name, parentPath, parentType) =>
+      ujson.Obj(
+        "parameterName" -> name,
+        "kind"          -> "invalid_nesting",
+        "expectedType"  -> "object",
+        "receivedType"  -> parentType,
+        "parentPath"    -> parentPath
+      )
+
+    case ToolParameterError.MultipleErrors(errors) =>
+      // This case shouldn't occur in parameterErrors array (flattened by caller)
+      // but handle gracefully
+      ujson.Obj(
+        "parameterName" -> errors.map(_.parameterName).mkString(", "),
+        "kind"          -> "multiple_errors"
+      )
+  }
+
+  /**
+   * Flatten MultipleErrors into a list of individual errors
+   */
+  def flattenErrors(errors: List[ToolParameterError]): List[ToolParameterError] =
+    errors.flatMap {
+      case ToolParameterError.MultipleErrors(nested) => flattenErrors(nested)
+      case single                                    => List(single)
+    }
+
+  /**
+   * Convert a ToolCallError to structured JSON for ToolMessage.content.
+   *
+   * Always includes the legacy "error" field for backward compatibility
+   * with older consumers that expect the escaped string format.
+   *
+   * @param error The tool call error to serialize
+   * @return ujson.Obj containing structured error information
+   */
+  def toJson(error: ToolCallError): ujson.Obj = {
+    val legacyError = error.getFormattedMessage
+
+    val base = ujson.Obj(
+      "isError"  -> true,
+      "toolName" -> error.toolName,
+      "message"  -> error.getMessage,
+      "error"    -> legacyError // Legacy field for backward compatibility
+    )
+
+    error match {
+      case ToolCallError.UnknownFunction(_) =>
+        base("errorType") = "unknown_function"
+        base
+
+      case ToolCallError.NullArguments(_) =>
+        base("errorType") = "null_arguments"
+        base
+
+      case ToolCallError.InvalidArguments(_, parameterErrors) =>
+        base("errorType") = "invalid_arguments"
+        val flattened = flattenErrors(parameterErrors)
+        base("parameterErrors") = ujson.Arr.from(flattened.map(parameterErrorToJson))
+        base
+
+      case ToolCallError.HandlerError(_, _) =>
+        base("errorType") = "handler_error"
+        base
+
+      case ToolCallError.ExecutionError(_, cause) =>
+        base("errorType") = "execution_error"
+        // Optionally include exception class name for debugging (safe, no stack trace)
+        base("exceptionType") = cause.getClass.getSimpleName
+        base
+
+      case ToolCallError.Timeout(_, duration) =>
+        base("errorType") = "timeout"
+        base("code") = "timeout"
+        base("duration") = duration.toString
+        base
+    }
   }
 }

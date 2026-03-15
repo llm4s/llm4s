@@ -13,6 +13,8 @@ package org.llm4s.llmconnect.model
  * @param usage Optional token usage statistics for the completion.
  * @param thinking Optional thinking/reasoning content from extended thinking models.
  *                 Present when using reasoning modes with Claude or o1/o3 models.
+ * @param estimatedCost Optional estimated cost of this completion in USD.
+ *                      Computed from token usage and model pricing when available.
  */
 case class Completion(
   id: String,
@@ -22,7 +24,8 @@ case class Completion(
   message: AssistantMessage,
   toolCalls: List[ToolCall] = List.empty,
   usage: Option[TokenUsage] = None,
-  thinking: Option[String] = None
+  thinking: Option[String] = None,
+  estimatedCost: Option[Double] = None
 ) {
 
   /**
@@ -61,12 +64,19 @@ case class Completion(
  * @param thinkingTokens Optional number of tokens used for thinking/reasoning.
  *                       Present when using reasoning modes with Claude or o1/o3 models.
  *                       These tokens count toward billing but are separate from completion tokens.
+ * @param cachedTokens Optional number of tokens served from the provider's prompt cache (cache read).
+ *                     When present, these tokens are billed at the cheaper cache-read rate.
+ * @param cacheCreationTokens Optional number of tokens written into the provider's prompt cache.
+ *                            When present, these tokens are billed at the cache-creation rate,
+ *                            which is typically higher than the normal input rate.
  */
 case class TokenUsage(
   promptTokens: Int,
   completionTokens: Int,
   totalTokens: Int,
-  thinkingTokens: Option[Int] = None
+  thinkingTokens: Option[Int] = None,
+  cachedTokens: Option[Int] = None,
+  cacheCreationTokens: Option[Int] = None
 ) {
 
   /**

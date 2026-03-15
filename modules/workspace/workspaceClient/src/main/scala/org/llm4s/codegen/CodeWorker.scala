@@ -1,6 +1,6 @@
 package org.llm4s.codegen
 
-import org.llm4s.agent.{ Agent, AgentState, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentContext, AgentState, AgentStatus }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.toolapi._
 import org.llm4s.workspace.ContainerisedWorkspace
@@ -20,8 +20,9 @@ class CodeWorker(sourceDirectory: String, imageName: String, hostPort: Int, clie
   private val workspace = new ContainerisedWorkspace(sourceDirectory, imageName, hostPort)
 
   // Custom tool definitions for working with code
-  private val workspaceTools = WorkspaceTools.createDefaultWorkspaceTools(workspace)
-  private val toolRegistry   = new ToolRegistry(workspaceTools)
+  private val toolRegistryResult: Result[ToolRegistry] = for {
+    tools <- WorkspaceTools.createDefaultWorkspaceTools(workspace)
+  } yield new ToolRegistry(tools)
 
   /**
    * Initialize the workspace and prepare for code tasks
@@ -56,18 +57,15 @@ class CodeWorker(sourceDirectory: String, imageName: String, hostPort: Int, clie
 
     // Run the agent to completion or until step limit is reached
     val agent = new Agent(client)
-    val result = agent.run(
-      query = task,
-      tools = toolRegistry,
-      inputGuardrails = Seq.empty,
-      outputGuardrails = Seq.empty,
-      handoffs = Seq.empty,
-      maxSteps = maxSteps,
-      traceLogPath = traceLogPath,
-      systemPromptAddition = None,
-      completionOptions = org.llm4s.llmconnect.model.CompletionOptions(),
-      debug = false
-    )
+    val result = for {
+      toolRegistry <- toolRegistryResult
+      state <- agent.run(
+        query = task,
+        tools = toolRegistry,
+        maxSteps = maxSteps,
+        context = AgentContext(traceLogPath = traceLogPath)
+      )
+    } yield state
 
     result match {
       case Right(finalState) =>

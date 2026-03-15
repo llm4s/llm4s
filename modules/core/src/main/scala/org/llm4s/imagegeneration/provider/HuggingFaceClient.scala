@@ -3,8 +3,10 @@ package org.llm4s.imagegeneration.provider
 import org.llm4s.imagegeneration._
 
 import java.time.Instant
+import java.nio.file.Path
 import java.util.Base64
 import scala.util.Try
+import scala.concurrent.{ Future, ExecutionContext, blocking }
 
 /**
  * HuggingFace Inference API client for image generation.
@@ -29,7 +31,7 @@ import scala.util.Try
  * }
  * }}}
  */
-class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) extends ImageGenerationClient {
+class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) extends ImageGenerationClient {
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
@@ -67,17 +69,19 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
     Either.cond(count > 0 && count <= 4, count, ValidationError("Count must be between 1 and 4 for HuggingFace"))
 
   /**
-   * Converts the byte content of an HTTP response into a Base64-encoded string.
-   * If an error occurs during the conversion process, it wraps the exception
-   * into an `ImageGenerationError`.
+   * Base64-encodes raw image bytes received directly from the HTTP layer.
    *
-   * @param response The HTTP response containing the byte data to convert.
+   * Takes the exact wire bytes so no charset round-trip occurs. The previous
+   * approach (`response.body.getBytes(ISO_8859_1)`) was lossy: `BodyHandlers.ofString`
+   * decoded bytes as UTF-8, replacing invalid sequences with U+FFFD, which
+   * ISO_8859_1 then mapped to `?` (0x3F), corrupting binary image data.
+   *
+   * @param imageBytes Raw bytes from the HTTP response body.
    * @return Either an `ImageGenerationError` in case of a failure or
    *         the resulting Base64-encoded string on success.
    */
-  def convertToBase64(response: requests.Response): Either[ImageGenerationError, String] = Try {
-    val imageData = response.bytes
-    Base64.getEncoder.encodeToString(imageData)
+  def convertToBase64(imageBytes: Array[Byte]): Either[ImageGenerationError, String] = Try {
+    Base64.getEncoder.encodeToString(imageBytes)
   }.toEither.left.map(exception => ServiceError(exception.getMessage, 500))
 
   /**
@@ -136,8 +140,8 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
       prompt     <- validatePrompt(prompt)
       count      <- validateCount(count)
       payload    <- buildPayload(prompt, options)
-      response   <- makeHttpRequest(payload)
-      base64Data <- convertToBase64(response)
+      rawBytes   <- makeHttpRequest(payload)
+      base64Data <- convertToBase64(rawBytes)
       images     <- generateAllImages(prompt, count, options, base64Data)
     } yield images
 
@@ -147,20 +151,65 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
   }
 
   /**
+   * Edit an existing image based on a prompt and optional mask.
+   *
+   * Not currently supported for HuggingFace provider.
+   */
+  override def editImage(
+    imagePath: Path,
+    prompt: String,
+    maskPath: Option[Path] = None,
+    options: ImageEditOptions = ImageEditOptions()
+  ): Either[ImageGenerationError, Seq[GeneratedImage]] =
+    Left(UnsupportedOperation("Image editing is not yet supported for HuggingFace provider"))
+
+  override def generateImageAsync(
+    prompt: String,
+    options: ImageGenerationOptions = ImageGenerationOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, GeneratedImage]] =
+    Future {
+      blocking {
+        generateImage(prompt, options)
+      }
+    }.recover { case ex => Left(UnknownError(ex)) }
+
+  override def generateImagesAsync(
+    prompt: String,
+    count: Int,
+    options: ImageGenerationOptions = ImageGenerationOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    Future {
+      blocking {
+        generateImages(prompt, count, options)
+      }
+    }.recover { case ex => Left(UnknownError(ex)) }
+
+  override def editImageAsync(
+    imagePath: Path,
+    prompt: String,
+    maskPath: Option[Path] = None,
+    options: ImageEditOptions = ImageEditOptions()
+  )(implicit ec: ExecutionContext): Future[Either[ImageGenerationError, Seq[GeneratedImage]]] =
+    Future {
+      blocking {
+        editImage(imagePath, prompt, maskPath, options)
+      }
+    }.recover { case ex => Left(UnknownError(ex)) }
+
+  /**
    * Check the health status of the HuggingFace Inference API.
    *
    * @return Either an error or the current service status
    */
-  override def health(): Either[ImageGenerationError, ServiceStatus] =
-    scala.util
-      .Try {
-        val testUrl = s"https://api-inference.huggingface.co/models/${config.model}"
-        val headers = Map(
-          "Authorization" -> s"Bearer ${config.apiKey}",
-          "Content-Type"  -> "application/json"
-        )
-        requests.get(testUrl, headers = headers, readTimeout = 10000)
-      }
+  override def health(): Either[ImageGenerationError, ServiceStatus] = {
+    val testUrl = s"https://api-inference.huggingface.co/models/${config.model}"
+    val headers = Map(
+      "Authorization" -> s"Bearer ${config.apiKey}",
+      "Content-Type"  -> "application/json"
+    )
+
+    httpClient
+      .get(testUrl, headers, 10000)
       .toEither
       .left
       .map(e => ServiceError(s"Health check failed: ${e.getMessage}", 0))
@@ -169,6 +218,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
           ServiceStatus(HealthStatus.Healthy, "HuggingFace Inference API is responding")
         else ServiceStatus(HealthStatus.Degraded, s"Service returned status code: ${response.statusCode}")
       }
+  }
 
   /**
    * Serializes a `HuggingClientPayload` object into a JSON string.
@@ -197,19 +247,34 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: BaseHttpClient) e
   }.toEither.left.map(exception => ServiceError(exception.getMessage, 500))
 
   /**
-   * Makes an HTTP POST request to the HuggingFace Inference API to send a payload and retrieve a response.
+   * Makes an HTTP POST request to the HuggingFace Inference API and returns the raw response bytes.
+   *
+   * Uses `postRaw` so the binary image payload is never decoded through a charset,
+   * preventing the corruption that occurred when `BodyHandlers.ofString` decoded bytes
+   * as UTF-8 and they were then re-encoded with ISO_8859_1.
    *
    * @param payload The JSON payload to send with the HTTP request.
-   * @return Either an ImageGenerationError if the request fails or a successful `requests.Response` object.
+   * @return Either an ImageGenerationError if the request fails, or the raw image bytes on success.
    */
-  def makeHttpRequest(payload: String): Either[ImageGenerationError, requests.Response] = {
-    val result = Try(httpClient.post(payload)).toEither.left.map(exception => ServiceError(exception.getMessage, 500))
-    result.flatMap { response =>
-      if (response.statusCode == 200) {
-        Right(response)
-      } else {
-        Left(ServiceError(response.text(), 500))
+  def makeHttpRequest(payload: String): Either[ImageGenerationError, Array[Byte]] = {
+    val url = s"https://api-inference.huggingface.co/models/${config.model}"
+    val headers = Map(
+      "Authorization" -> s"Bearer ${config.apiKey}",
+      "Content-Type"  -> "application/json"
+    )
+
+    httpClient
+      .postRaw(url, headers, payload, config.timeout)
+      .toEither
+      .left
+      .map(exception => ServiceError(exception.getMessage, 500))
+      .flatMap { response =>
+        response.statusCode match {
+          case 200 => Right(response.body)
+          case 401 => Left(AuthenticationError("Unauthorized"))
+          case 429 => Left(RateLimitError("Rate limit"))
+          case _   => Left(ServiceError(new String(response.body, java.nio.charset.StandardCharsets.UTF_8), 500))
+        }
       }
-    }
   }
 }

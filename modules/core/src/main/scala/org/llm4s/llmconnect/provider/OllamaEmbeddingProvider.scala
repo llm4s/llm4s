@@ -2,17 +2,34 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse }
+import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
-import sttp.client4._
 import ujson.{ Obj, read }
 
+import java.net.URI
+import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
+import java.nio.charset.StandardCharsets
+import java.time.Duration
 import scala.util.Try
+import scala.util.control.NonFatal
 
+/**
+ * Embedding provider implementation for Ollama, a local model inference server.
+ *
+ * Generates text embeddings by calling the Ollama `/api/embeddings` HTTP endpoint.
+ * Each input text is embedded individually (one HTTP request per text) because the
+ * Ollama embedding API accepts a single prompt per call. Results are collected and
+ * returned as an [[org.llm4s.llmconnect.model.EmbeddingResponse]].
+ *
+ * No API key is required when Ollama runs locally, though one can be supplied for
+ * remote or authenticated deployments.
+ */
 object OllamaEmbeddingProvider {
 
+  /** Creates an [[EmbeddingProvider]] backed by Ollama using the given configuration. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider = new EmbeddingProvider {
-    private val backend = DefaultSyncBackend()
-    private val logger  = LoggerFactory.getLogger(getClass)
+    private val httpClient = HttpClient.newHttpClient()
+    private val logger     = LoggerFactory.getLogger(getClass)
 
     override def embed(request: EmbeddingRequest): Either[EmbeddingError, EmbeddingResponse] = {
       val model = request.model.name
@@ -29,7 +46,7 @@ object OllamaEmbeddingProvider {
           .map(Left(_))
           .getOrElse(Left(EmbeddingError(code = Some("500"), message = "Unknown error", provider = "ollama")))
       } else {
-        val embeddings = vectors.map(_.toOption.get)
+        val embeddings = vectors.collect { case Right(v) => v }
         val metadata   = Map("provider" -> "ollama", "model" -> model, "count" -> input.size.toString)
         Right(EmbeddingResponse(embeddings = embeddings, metadata = metadata))
       }
@@ -45,48 +62,54 @@ object OllamaEmbeddingProvider {
         "prompt" -> text
       )
 
-      val url = uri"${cfg.baseUrl}/api/embeddings"
+      val url = s"${cfg.baseUrl}/api/embeddings"
 
       logger.debug(s"[OllamaEmbeddingProvider] POST $url model=$model text_length=${text.length}")
 
-      val respEither: Either[EmbeddingError, Response[Either[String, String]]] =
-        Try {
-          val req = basicRequest
-            .post(url)
-            .header("Content-Type", "application/json")
-            .body(payload.render())
+      val builder = HttpRequest
+        .newBuilder()
+        .uri(URI.create(url))
+        .header("Content-Type", "application/json")
+        .timeout(Duration.ofMinutes(2))
+        .POST(HttpRequest.BodyPublishers.ofString(payload.render()))
 
-          val reqWithAuth = if (cfg.apiKey.nonEmpty && cfg.apiKey != "not-required") {
-            req.header("Authorization", s"Bearer ${cfg.apiKey}")
-          } else {
-            req
-          }
+      if (cfg.apiKey.nonEmpty && cfg.apiKey != "not-required") {
+        builder.header("Authorization", s"Bearer ${cfg.apiKey}")
+      }
 
-          reqWithAuth.send(backend)
-        }.toEither.left
-          .map(e =>
-            EmbeddingError(code = Some("502"), message = s"HTTP request failed: ${e.getMessage}", provider = "ollama")
-          )
+      val httpRequest = builder.build()
+
+      val respEither: Either[EmbeddingError, HttpResponse[String]] =
+        try Right(httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)))
+        catch {
+          case e: InterruptedException =>
+            Thread.currentThread().interrupt()
+            Left(
+              EmbeddingError(code = None, message = s"HTTP request interrupted: ${e.getMessage}", provider = "ollama")
+            )
+          case NonFatal(e) =>
+            Left(EmbeddingError(code = None, message = s"HTTP request failed: ${e.getMessage}", provider = "ollama"))
+        }
 
       respEither.flatMap { response =>
-        response.body match {
-          case Right(body) =>
+        response.statusCode() match {
+          case 200 =>
             Try {
-              val json   = read(body)
+              val json   = read(response.body())
               val vector = json("embedding").arr.map(_.num).toVector
               vector
             }.toEither.left
               .map { ex =>
                 logger.error(s"[OllamaEmbeddingProvider] Parse error: ${ex.getMessage}")
-                EmbeddingError(code = Some("502"), message = s"Parsing error: ${ex.getMessage}", provider = "ollama")
+                EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "ollama")
               }
-
-          case Left(errorMsg) =>
-            logger.error(s"[OllamaEmbeddingProvider] HTTP error: $errorMsg")
+          case status =>
+            val body = Redaction.truncateForLog(response.body())
+            logger.error(s"[OllamaEmbeddingProvider] HTTP error: $body")
             Left(
               EmbeddingError(
-                code = Some("502"),
-                message = errorMsg,
+                code = Some(status.toString),
+                message = body,
                 provider = "ollama"
               )
             )

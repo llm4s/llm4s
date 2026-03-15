@@ -60,7 +60,7 @@ object TokenWindow {
   ): TokenUsageInfo = {
     val currentTokens  = tokenCounter.countConversation(conversation)
     val withinBudget   = currentTokens <= budget
-    val utilizationPct = (currentTokens.toDouble / budget * 100).round.toInt
+    val utilizationPct = if (budget > 0) (currentTokens.toDouble / budget * 100).round.toInt else 0
 
     TokenUsageInfo(currentTokens, budget, withinBudget, utilizationPct)
   }

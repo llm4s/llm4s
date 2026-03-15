@@ -34,33 +34,28 @@ object BuiltinToolsAgentExample {
   def main(args: Array[String]): Unit = {
     logger.info("=== Built-in Tools Agent Example ===\n")
 
-    // Create LLM client from typed configuration
-    val clientResult = for {
+    val homeDir = System.getProperty("user.home")
+    val fileConfig = FileConfig(
+      allowedPaths = Some(Seq(homeDir, "/tmp")),
+      blockedPaths = Seq("/etc", "/var", "/sys", "/proc")
+    )
+
+    val result = for {
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
-    } yield client
+      tools <- BuiltinTools.customSafe(
+        fileConfig = Some(fileConfig),
+        shellConfig = Some(ShellConfig.readOnly())
+      )
+    } yield (client, tools)
 
-    clientResult match {
+    result match {
       case Left(error) =>
-        logger.error("Failed to create LLM client: {}", error)
+        logger.error("Failed to initialise agent: {}", error.formatted)
         logger.error("Make sure LLM_MODEL and appropriate API key are set")
-        return
 
-      case Right(client) =>
+      case Right((client, tools)) =>
         logger.info("LLM client created successfully")
-
-        // Configure built-in tools for the agent
-        val homeDir = System.getProperty("user.home")
-        val fileConfig = FileConfig(
-          allowedPaths = Some(Seq(homeDir, "/tmp")),
-          blockedPaths = Seq("/etc", "/var", "/sys", "/proc")
-        )
-
-        val tools = BuiltinTools.custom(
-          fileConfig = Some(fileConfig),
-          shellConfig = Some(ShellConfig.readOnly())
-        )
-
         logger.info("Available tools: {}", tools.map(_.name).mkString(", "))
 
         val registry = new ToolRegistry(tools)

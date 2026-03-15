@@ -2,6 +2,7 @@ package org.llm4s.rag
 
 import org.llm4s.chunking.{ ChunkerFactory, DocumentChunk, DocumentChunker }
 import org.llm4s.error.{ ConfigurationError, ProcessingError }
+import org.llm4s.knowledgegraph.graphrag.{ GraphRAG, GraphRAGAnswer, GraphRAGMode }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.extractors.UniversalExtractor
@@ -9,6 +10,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.rag.extract.DefaultDocumentExtractor
 import org.llm4s.rag.loader._
 import org.llm4s.rag.permissions._
+import org.llm4s.rag.transform.QueryTransformer
 import org.llm4s.reranker.{ RerankProviderConfig, Reranker, RerankerFactory }
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
@@ -60,7 +62,8 @@ final class RAG private (
   private val reranker: Option[Reranker],
   private val llmClient: Option[LLMClient],
   private val tracer: Option[Tracing],
-  private val registry: DocumentRegistry
+  private val registry: DocumentRegistry,
+  private val graphRAG: Option[GraphRAG]
 ) extends Closeable {
 
   // Statistics tracking
@@ -434,6 +437,8 @@ final class RAG private (
             case LoadResult.Skipped(_, _) =>
               ("skipped", None)
           }
+        }.recover { case ex =>
+          ("failed", Some(("unknown", org.llm4s.error.ThrowableOps.RichThrowable(ex).toLLMError)))
         }
       }
 
@@ -523,6 +528,10 @@ final class RAG private (
               None
           }
         }
+      }.recover { case _ =>
+        // On error, treat as unchanged so the document stays in seenIds
+        // and is not incorrectly deleted during the deletion step.
+        Some(ProcessDoc(doc, UnchangedDoc))
       }
     }
 
@@ -599,7 +608,7 @@ final class RAG private (
         _     <- clear()
         stats <- ingest(loader)
       } yield SyncStats(added = stats.successful, updated = 0, deleted = 0, unchanged = 0)
-    }
+    }.recover { case ex => Left(org.llm4s.error.ThrowableOps.RichThrowable(ex).toLLMError) }
 
   private def ingestDocument(doc: Document): Result[Int] = {
     // Choose chunker based on hints if configured
@@ -643,6 +652,10 @@ final class RAG private (
   /**
    * Search for relevant chunks.
    *
+   * If query transformers are configured, they are applied sequentially
+   * to the query before embedding. The transformed query is used for
+   * both vector search and keyword search.
+   *
    * @param query The search query
    * @param topK Override default topK (optional)
    * @return Ranked search results
@@ -651,8 +664,9 @@ final class RAG private (
     val k = topK.getOrElse(config.topK)
 
     for {
-      queryEmbedding <- embedQuery(query)
-      results        <- searchWithStrategy(queryEmbedding, query, k)
+      transformedQuery <- applyQueryTransforms(query)
+      queryEmbedding   <- embedQuery(transformedQuery)
+      results          <- searchWithStrategy(queryEmbedding, transformedQuery, k)
     } yield results.map(toSearchResult)
   }
 
@@ -679,6 +693,79 @@ final class RAG private (
           answer        <- generateAnswer(client, question, searchResults)
         } yield answer
     }
+
+  /**
+   * Query through GraphRAG using router-selected mode.
+   *
+   * The router decides Global/Local/Hybrid first.
+   * Vector retrieval is only executed when Hybrid is selected.
+   */
+  def queryWithGraphRAG(question: String, topK: Option[Int] = None): Result[GraphRAGAnswer] =
+    graphRAG match {
+      case None =>
+        Left(
+          ConfigurationError(
+            "GraphRAG not configured. Use .withGraphStore(graphStore) and .withLLM(client) when building RAG."
+          )
+        )
+      case Some(engine) =>
+        for {
+          routed <- engine.route(question)
+          answer <- queryWithGraphRAGMode(question, routed, topK)
+        } yield answer
+    }
+
+  /**
+   * Query GraphRAG in a specific mode.
+   */
+  def queryWithGraphRAGMode(question: String, mode: GraphRAGMode, topK: Option[Int] = None): Result[GraphRAGAnswer] =
+    graphRAG match {
+      case None =>
+        Left(
+          ConfigurationError(
+            "GraphRAG not configured. Use .withGraphStore(graphStore) and .withLLM(client) when building RAG."
+          )
+        )
+      case Some(engine) =>
+        mode match {
+          case GraphRAGMode.Global =>
+            engine.globalSearch(question, config.graphRAGConfig.globalTopCommunities).map { res =>
+              GraphRAGAnswer(
+                query = question,
+                mode = GraphRAGMode.Global,
+                answer = res.answer,
+                communityIds = res.rankedCommunities.map(_._1.id),
+                nodeIds = Seq.empty
+              )
+            }
+          case GraphRAGMode.Local =>
+            engine.localSearch(question, config.graphRAGConfig.localTraversalDepth).map { res =>
+              GraphRAGAnswer(
+                query = question,
+                mode = GraphRAGMode.Local,
+                answer = res.answer,
+                communityIds = res.supportingCommunities.map(_.id),
+                nodeIds = res.visitedNodeIds
+              )
+            }
+          case GraphRAGMode.Hybrid =>
+            val k = topK.getOrElse(config.topK)
+            for {
+              queryEmbedding <- embedQuery(question)
+              vectorResults  <- searchWithStrategy(queryEmbedding, question, k)
+              hybrid         <- engine.hybridSearch(question, vectorResults, config.graphRAGConfig.localTraversalDepth)
+            } yield GraphRAGAnswer(
+              query = question,
+              mode = GraphRAGMode.Hybrid,
+              answer = hybrid.answer,
+              communityIds = Seq.empty,
+              nodeIds = hybrid.hits.map(_.node.id)
+            )
+        }
+    }
+
+  /** Check if GraphRAG is available for this pipeline. */
+  def hasGraphRAG: Boolean = graphRAG.isDefined
 
   // ========== Permission-Aware API ==========
 
@@ -875,6 +962,14 @@ final class RAG private (
 
   // ========== Private Implementation ==========
 
+  /**
+   * Apply configured query transforms sequentially.
+   * Returns the original query unchanged if no transforms are configured.
+   */
+  private def applyQueryTransforms(query: String): Result[String] =
+    if (config.queryTransformers.isEmpty) Right(query)
+    else QueryTransformer.applyChain(query, config.queryTransformers)
+
   private val supportedExtensions = Set(".txt", ".md", ".pdf", ".docx", ".json", ".xml", ".html")
 
   private def ingestDirectory(dir: File, metadata: Map[String, String]): Result[Int] = {
@@ -945,12 +1040,40 @@ final class RAG private (
 
   private def embedQuery(query: String): Result[Array[Float]] = {
     val request = EmbeddingRequest(Seq(query), embeddingModelConfig)
-    tracedEmbeddingClient.embed(request).map(_.embeddings.head.map(_.toFloat).toArray)
+    tracedEmbeddingClient
+      .embed(request)
+      .flatMap(
+        _.embeddings.headOption
+          .toRight(EmbeddingError(None, "Embedding provider returned empty embeddings list", embeddingModelConfig.name))
+          .map(_.map(_.toFloat).toArray)
+      )
   }
 
   private def embedBatch(texts: Seq[String]): Result[Seq[Array[Float]]] = {
     val request = EmbeddingRequest(texts, embeddingModelConfig)
-    tracedEmbeddingClient.embed(request).map(_.embeddings.map(_.map(_.toFloat).toArray))
+    tracedEmbeddingClient.embed(request).flatMap { response =>
+      if (response.embeddings.isEmpty) {
+        Left(
+          EmbeddingError(
+            None,
+            "Embedding provider returned empty embeddings list",
+            embeddingModelConfig.name
+          )
+        )
+      } else if (response.embeddings.length != texts.length) {
+        Left(
+          EmbeddingError(
+            None,
+            s"Embedding provider returned ${response.embeddings.length} ${
+                if (response.embeddings.length == 1) "embedding" else "embeddings"
+              } for batch of ${texts.length} texts",
+            embeddingModelConfig.name
+          )
+        )
+      } else {
+        Right(response.embeddings.map(_.map(_.toFloat).toArray))
+      }
+    }
   }
 
   private def searchWithStrategy(
@@ -1076,6 +1199,7 @@ object RAG {
       hybridSearcher <- createHybridSearcher(config)
       reranker       <- createReranker(config, resolveRerankerConfig)
       registry       <- createRegistry(config)
+      graphRAG       <- createGraphRAG(config)
       rag = new RAG(
         config = config,
         embeddingClient = embeddingClient,
@@ -1085,7 +1209,8 @@ object RAG {
         reranker = reranker,
         llmClient = config.llmClient,
         tracer = config.tracer,
-        registry = registry
+        registry = registry,
+        graphRAG = graphRAG
       )
       // Process any pre-configured document loaders
       _ <-
@@ -1102,6 +1227,22 @@ object RAG {
     // For now, use in-memory registry
     // Future: SQLite registry when vectorStorePath is set
     Right(InMemoryDocumentRegistry())
+
+  private def createGraphRAG(config: RAGConfig): Result[Option[GraphRAG]] =
+    config.graphStore match {
+      case None => Right(None)
+      case Some(store) =>
+        config.llmClient match {
+          case Some(client) =>
+            Right(Some(new GraphRAG(store, client, config.graphRAGConfig)))
+          case None =>
+            Left(
+              ConfigurationError(
+                "GraphRAG requires an LLM client for community summaries. Use .withLLM(client) when GraphStore is configured."
+              )
+            )
+        }
+    }
 
   /**
    * Extension method to build from config.

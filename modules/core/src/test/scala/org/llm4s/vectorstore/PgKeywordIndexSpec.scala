@@ -3,6 +3,7 @@ package org.llm4s.vectorstore
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.BeforeAndAfterEach
+import org.llm4s.error.ProcessingError
 import scala.util.Try
 
 /**
@@ -339,6 +340,30 @@ class PgKeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
   }
 
   "PgKeywordIndex factory" should {
+
+    "reject invalid language from config before datasource creation" in {
+      val config = PgKeywordIndex.Config(
+        host = "invalid-host",
+        port = 5432,
+        database = "invalid-db",
+        user = "user",
+        password = "pass",
+        tableName = "safe_table",
+        language = "english'); DROP TABLE users; --"
+      )
+
+      PgKeywordIndex(config) should matchPattern {
+        case Left(ProcessingError(msg, "pg-keyword-index", _)) if msg.contains("Invalid language") =>
+      }
+    }
+
+    "reject invalid language when using existing datasource factory" in {
+      val result = PgKeywordIndex(null, "safe_table", "english'); DROP TABLE users; --")
+
+      result should matchPattern {
+        case Left(ProcessingError(msg, "pg-keyword-index", _)) if msg.contains("Invalid language") =>
+      }
+    }
 
     "create index from config" in skipIfNoPg {
       // Parse connection details from JDBC URL

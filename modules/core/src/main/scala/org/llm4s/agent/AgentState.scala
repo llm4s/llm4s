@@ -15,6 +15,7 @@ import upickle.default.{ ReadWriter => RW, readwriter }
  * @param systemMessage The system message (injected at API call time, not stored in conversation)
  * @param completionOptions LLM completion options (temperature, maxTokens, etc.)
  * @param availableHandoffs Available handoffs for this agent (used for detecting handoff tool calls)
+ * @param usageSummary Usage summary for this agent run
  */
 case class AgentState(
   conversation: Conversation,
@@ -24,7 +25,8 @@ case class AgentState(
   logs: Seq[String] = Seq.empty,
   systemMessage: Option[SystemMessage] = None,
   completionOptions: CompletionOptions = CompletionOptions(),
-  availableHandoffs: Seq[Handoff] = Seq.empty
+  availableHandoffs: Seq[Handoff] = Seq.empty,
+  usageSummary: UsageSummary = UsageSummary()
 ) {
 
   /**
@@ -153,7 +155,12 @@ object AgentState {
       case (None, Some(maxMessages)) =>
         messages.length > maxMessages
       case (None, None) =>
-        false
+        // When no explicit limits are set, AdaptiveWindowing computes its own limit
+        config.pruningStrategy match {
+          case adaptive: PruningStrategy.AdaptiveWindowing =>
+            messages.map(tokenCounter).sum > adaptive.calculateOptimalWindow
+          case _ => false
+        }
     }
 
     if (!needsPruning) {
@@ -168,6 +175,8 @@ object AgentState {
           pruneRecentTurnsOnly(messages, turns, config)
         case PruningStrategy.Custom(fn) =>
           fn(messages)
+        case adaptive: PruningStrategy.AdaptiveWindowing =>
+          pruneWithAdaptiveWindowing(messages, adaptive, config, tokenCounter)
       }
 
       state.copy(conversation = Conversation(prunedMessages))
@@ -271,6 +280,43 @@ object AgentState {
   }
 
   /**
+   * Prune using adaptive windowing strategy.
+   * Automatically calculates optimal window size based on model context and pricing.
+   */
+  private def pruneWithAdaptiveWindowing(
+    messages: Seq[Message],
+    strategy: PruningStrategy.AdaptiveWindowing,
+    config: ContextWindowConfig,
+    tokenCounter: Message => Int
+  ): Seq[Message] = {
+    // Calculate optimal window using adaptive strategy
+    val optimalTokens = strategy.calculateOptimalWindow
+
+    // Create a modified config with calculated token limit and preserve other settings
+    val adaptiveConfig = config.copy(
+      maxTokens = Some(optimalTokens),
+      maxMessages = None // Use token-based limit, not message count
+    )
+
+    // Apply OldestFirst strategy with the calculated window
+    val pruned = pruneOldestFirst(messages, adaptiveConfig, tokenCounter)
+
+    // Enforce strategy.preserveMinTurns as a floor: always keep at least that
+    // many recent turns (user+assistant pairs) regardless of the token limit.
+    val (systemMsgs, otherMsgs) = messages.partition(_.role == MessageRole.System)
+    val minOtherCount           = math.min(strategy.preserveMinTurns * 2, otherMsgs.length)
+    val prunedOtherCount        = pruned.count(_.role != MessageRole.System)
+
+    if (prunedOtherCount >= minOtherCount) {
+      pruned
+    } else if (config.preserveSystemMessage) {
+      systemMsgs ++ otherMsgs.takeRight(minOtherCount)
+    } else {
+      messages.takeRight(minOtherCount)
+    }
+  }
+
+  /**
    * Serialize agent state to JSON.
    *
    * Note: ToolRegistry is not serialized (contains function references).
@@ -286,7 +332,8 @@ object AgentState {
       "status"            -> writeJs(state.status),
       "logs"              -> ujson.Arr(state.logs.map(ujson.Str.apply): _*),
       "systemMessage"     -> state.systemMessage.map(msg => ujson.Str(msg.content)).getOrElse(ujson.Null),
-      "completionOptions" -> serializeCompletionOptions(state.completionOptions)
+      "completionOptions" -> serializeCompletionOptions(state.completionOptions),
+      "usageSummary"      -> writeJs(state.usageSummary)
       // Note: tools are NOT serialized
     )
 
@@ -356,7 +403,11 @@ object AgentState {
           case ujson.Str(content) => Some(SystemMessage(content))
           case _                  => None
         },
-        completionOptions = deserializeCompletionOptions(json("completionOptions"))
+        completionOptions = deserializeCompletionOptions(json("completionOptions")),
+        usageSummary = json.obj.get("usageSummary") match {
+          case Some(v) => read[UsageSummary](v)
+          case None    => UsageSummary()
+        }
       )
     }.toResult
 

@@ -3,45 +3,51 @@ package org.llm4s.runner
 import org.llm4s.shared._
 
 import java.io.{ BufferedWriter, PrintWriter }
-import java.nio.charset.StandardCharsets
+import java.nio.charset.{ Charset, StandardCharsets }
 import java.nio.file.{ Files, Path, Paths, StandardOpenOption }
 import java.time.Instant
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
+import scala.collection.mutable.ListBuffer
 import scala.io.Source
 import scala.jdk.CollectionConverters._
-import scala.sys.process._
 import scala.util.{ Failure, Success, Try, Using }
 
 /**
  * Implementation of WorkspaceAgentInterface that operates on a local filesystem workspace.
  *
  * @param workspaceRoot The root directory of the workspace
- * @param isWindows     True if the host OS is Windows (used for shell command selection)
+ * @param isWindows     True if the host OS is Windows.  Used to route built-in commands
+ *                      (e.g. `echo`, `dir`) through `cmd.exe /c` because those names have
+ *                      no standalone `.exe` on Windows.
+ * @param sandboxConfig Optional sandbox config; if None, uses [[WorkspaceSandboxConfig.Permissive]]
  */
-class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) extends WorkspaceAgentInterface {
+class WorkspaceAgentInterfaceImpl(
+  workspaceRoot: String,
+  isWindows: Boolean,
+  sandboxConfig: Option[WorkspaceSandboxConfig] = None
+) extends WorkspaceAgentInterface {
 
   private val rootPath = Paths.get(workspaceRoot).toAbsolutePath.normalize()
 
-  // Default workspace limits
-  private val defaultLimits = WorkspaceLimits(
-    maxFileSize = 1048576, // 1MB
-    maxDirectoryEntries = 500,
-    maxSearchResults = 100,
-    maxOutputSize = 1048576 // 1MB
-  )
+  private val config        = sandboxConfig.getOrElse(WorkspaceSandboxConfig.Permissive)
+  private val defaultLimits = config.limits
+  private val defaultExclusions =
+    if (config.excludePatterns.nonEmpty) config.excludePatterns
+    else WorkspaceSandboxConfig.DefaultExclusions
 
-  // Default exclusion patterns
-  private val defaultExclusions = List(
-    "**/node_modules/**",
-    "**/.git/**",
-    "**/dist/**",
-    "**/build/**",
-    "**/.venv/**",
-    "**/target/**",
-    "**/__pycache__/**",
-    "**/vendor/**"
-  )
+  // Computed once at construction: allowlist entries are lowercased on Windows so
+  // that execLower (which is also lowercased on Windows) matches correctly even
+  // when a caller-supplied config contains mixed-case entries like Set("GIT").
+  private val allowedCommandsNormalized: Set[String] =
+    if (isWindows) config.allowedCommands.map(_.toLowerCase)
+    else config.allowedCommands
+
+  // Pre-formatted for use in EXECUTABLE_NOT_ALLOWED error messages; computed
+  // once so we don't sort and join the set on every rejected command.
+  private val allowedCommandsString: String =
+    allowedCommandsNormalized.toSeq.sorted.mkString(", ")
 
   /**
    * Resolves a relative path against the workspace root, ensuring it doesn't escape the workspace.
@@ -54,7 +60,11 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
     val normalized = rootPath.resolve(relativePath).normalize()
 
     if (!normalized.startsWith(rootPath)) {
-      throw new IllegalArgumentException(s"Path '$relativePath' attempts to escape the workspace")
+      throw new WorkspaceAgentException(
+        s"Path '$relativePath' attempts to escape the workspace",
+        "PATH_ESCAPE_ATTEMPT",
+        None
+      )
     }
 
     normalized
@@ -85,20 +95,23 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
    * @param excludePatterns Patterns to exclude
    * @return true if the path should be excluded
    */
-  private def isExcluded(path: String, excludePatterns: List[String]): Boolean =
+  private def isExcluded(path: String, excludePatterns: List[String]): Boolean = {
     // Simple glob matching implementation
     // In a real implementation, use a proper glob library
+    val normalizedPath = path.replace("\\", "/")
     excludePatterns.exists { pattern =>
+      val normalizedPattern = pattern.replace("\\", "/")
       // Use a placeholder to avoid corrupting ** when replacing *
       val placeholder = "\u0000DOUBLESTAR\u0000"
-      val regex = pattern
+      val regex = normalizedPattern
         .replace("**", placeholder) // protect ** first
         .replace(".", "\\.")        // escape dots
         .replace("*", "[^/]+")      // single * matches path segment chars
         .replace(placeholder, ".*") // restore ** as .* to match any path
 
-      path.matches(regex)
+      normalizedPath.matches(regex) || (normalizedPath + "/").matches(regex)
     }
+  }
 
   /**
    * List files and directories in a specified path, optionally recursively.
@@ -509,30 +522,42 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
     }
 
     // Search in files
-    var matches      = List.empty[SearchMatch]
+    val matches      = ListBuffer.empty[SearchMatch]
     var totalMatches = 0
+    var done         = false // used to break out once we've observed one match past the cap
 
-    for (file <- filesToSearch if matches.size < defaultLimits.maxSearchResults) {
+    // stop scanning as soon as we've counted one result beyond the configured
+    // max; that allows us to report `isTruncated` correctly while avoiding a
+    // full workspace sweep. the `totalMatches` value is therefore only guaranteed
+    // to be accurate up to maxSearchResults+1.
+    for (file <- filesToSearch if !done) {
       val relativePath = rootPath.relativize(file).toString
 
       Try(Files.readAllLines(file, StandardCharsets.UTF_8).asScala.toList).toOption.foreach { lines =>
-        for ((line, lineIndex) <- lines.zipWithIndex if matches.size < defaultLimits.maxSearchResults) {
+        for ((line, lineIndex) <- lines.zipWithIndex if !done) {
           val matcher = pattern.matcher(line)
 
           if (matcher.find()) {
             totalMatches += 1
 
-            val lineNumber    = lineIndex + 1
-            val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex)
-            val afterContext  = lines.slice(lineIndex + 1, math.min(lines.size, lineIndex + context + 1))
+            if (matches.size < defaultLimits.maxSearchResults) {
+              val lineNumber    = lineIndex + 1
+              val beforeContext = lines.slice(math.max(0, lineIndex - context), lineIndex)
+              val afterContext  = lines.slice(lineIndex + 1, math.min(lines.size, lineIndex + context + 1))
 
-            matches = matches :+ SearchMatch(
-              path = relativePath,
-              line = lineNumber,
-              matchText = line,
-              contextBefore = beforeContext,
-              contextAfter = afterContext
-            )
+              matches += SearchMatch(
+                path = relativePath,
+                line = lineNumber,
+                matchText = line,
+                contextBefore = beforeContext,
+                contextAfter = afterContext
+              )
+            }
+
+            // once we've seen one hit past the cap we can stop scanning entirely
+            if (totalMatches > defaultLimits.maxSearchResults) {
+              done = true
+            }
           }
         }
       }
@@ -540,14 +565,137 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
 
     SearchFilesResponse(
       commandId = "local",
-      matches = matches,
-      isTruncated = totalMatches > defaultLimits.maxSearchResults,
+      matches = matches.toList,
+      isTruncated = totalMatches > matches.size,
       totalMatches = totalMatches
     )
   }
 
   /**
-   * Execute a shell command in the workspace.
+   * Windows `cmd.exe` built-in commands that have no standalone `.exe` on PATH.
+   * When [[isWindows]] is `true` and the first argv token is one of these, we
+   * prepend `Seq("cmd.exe", "/c")` so the OS can locate the command.  The rest
+   * of the argument vector remains tokenized (not a raw string), so injection
+   * via `;` is harmless (cmd.exe does not treat `;` as a separator), though we
+   * note that `&&`, `||`, `|`, and `&` are still interpreted by cmd.exe when
+   * present as unquoted tokens.
+   */
+  // All entries are explicitly lowercased so that future contributors cannot
+  // accidentally add mixed-case entries that would break execLower comparisons.
+  private val WindowsBuiltins: Set[String] = Set(
+    "echo",
+    "dir",
+    "type",
+    "copy",
+    "move",
+    "del",
+    "ren",
+    "md",
+    "rd",
+    "set",
+    "cls",
+    "ver",
+    "vol",
+    "date",
+    "time",
+    "pause",
+    "call"
+  ).map(_.toLowerCase)
+
+  /**
+   * Shell metacharacters that must be rejected in every argument token, even
+   * after tokenization.  These characters can still trigger command chaining
+   * or redirection when the final argv is handed to `cmd.exe /c` (Windows
+   * built-ins) or to a shell that is invoked indirectly.
+   *
+   *  - `&`, `|`           – command chaining / piping
+   *  - `<`, `>`           – I/O redirection
+   *  - `^`                – cmd.exe escape / line continuation
+   *  - `;`                – command separator (sh) / ignored but confusing (cmd)
+   *  - `` ` ``            – shell command substitution (bash/sh)
+   *  - `$`                – shell variable expansion (bash/sh)
+   *  - `%`                – cmd.exe environment variable expansion (e.g. `%PATH%`)
+   */
+  private val ForbiddenArgChars: Set[Char] = Set('&', '|', '<', '>', '^', ';', '`', '$', '%')
+
+  /**
+   * Tokenize a command string into an argument vector respecting single- and
+   * double-quoted spans.  Quoted whitespace is preserved; quotes are consumed.
+   *
+   * Unclosed quotes: if an opening `'` or `"` has no matching closing quote,
+   * the rest of the string is treated as part of that token (i.e. the missing
+   * closing quote is implicitly assumed at end-of-input).  This mirrors the
+   * behaviour of most Unix shells and avoids silently discarding content.
+   *
+   * This deliberately does NOT support shell variable expansion, globbing, or
+   * any other shell meta-syntax – that is the whole point of the fix.
+   */
+  private def tokenizeCommand(command: String): Seq[String] = {
+    val tokens  = Seq.newBuilder[String]
+    val current = new StringBuilder
+    var i       = 0
+
+    /**
+     * Advance i past the quoted span, appending characters to `current`.
+     *  Stops at the matching `closeChar` or at end-of-string, whichever
+     *  comes first (unclosed-quote policy: consume to end-of-input).
+     */
+    def consumeQuotedSpan(closeChar: Char): Unit = {
+      i += 1 // skip the opening quote character
+      while (i < command.length && command(i) != closeChar) {
+        current.append(command(i))
+        i += 1
+      }
+      // If we stopped on the closing quote, the outer loop's i += 1 will
+      // advance past it.  If we hit end-of-string (i == command.length),
+      // the outer loop condition will fail on the next iteration.
+    }
+
+    while (i < command.length) {
+      command(i) match {
+        case '"'                            => consumeQuotedSpan('"')
+        case '\''                           => consumeQuotedSpan('\'')
+        case '\\' if i + 1 < command.length =>
+          // Backslash outside quotes: consume the next character literally.
+          // e.g. `ls file\ name.txt` → Seq("ls", "file name.txt")
+          i += 1
+          current.append(command(i))
+        case ' ' | '\t' =>
+          if (current.nonEmpty) {
+            tokens += current.toString()
+            current.clear()
+          }
+        case c => current.append(c)
+      }
+      i += 1
+    }
+    if (current.nonEmpty) tokens += current.toString()
+    tokens.result()
+  }
+
+  /**
+   * Execute a command in the workspace using direct argument-vector execution
+   * (no shell interpolation).  The first token of the command must appear in
+   * `config.allowedCommands` (see [[WorkspaceSandboxConfig.allowedCommands]]);
+   * absolute/relative paths to executables are rejected so the lookup always
+   * goes through PATH.
+   *
+   * Validation layers (applied in order):
+   *  1. `SHELL_DISABLED`              – sandbox config prohibits execution
+   *  2. `EMPTY_COMMAND`               – tokenized argv is empty
+   *  3. `EXECUTABLE_PATH_NOT_ALLOWED` – first token contains `/` or `\`
+   *  4. `EXECUTABLE_NOT_ALLOWED`      – first token not in `config.allowedCommands`
+   *  5. `FORBIDDEN_CHARACTERS`        – any token contains a character from
+   *                                      [[ForbiddenArgChars]] (`&`, `|`, `<`,
+   *                                      `>`, `^`, `;`, `` ` ``, `$`, `%`)
+   *
+   * On Windows, if the first token is a [[WindowsBuiltins]] built-in that has
+   * no standalone `.exe`, `cmd.exe /c` is prepended to the already-tokenized
+   * vector so each argument is still passed as a distinct string (not a raw
+   * command string).  The forbidden-character check runs before this routing
+   * step, so no dangerous token ever reaches cmd.exe.
+   *
+   * When sandbox config has shellAllowed=false, throws WorkspaceAgentException.
    */
   override def executeCommand(
     command: String,
@@ -555,6 +703,14 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
     timeoutSeconds: Option[Int] = None,
     environment: Option[Map[String, String]] = None
   ): ExecuteCommandResponse = {
+    if (!config.shellAllowed) {
+      throw new WorkspaceAgentException(
+        "Shell execution is disabled by sandbox config (shellAllowed=false)",
+        "SHELL_DISABLED",
+        None
+      )
+    }
+
     val workDir = workingDirectory
       .map(dir => resolvePath(dir).toFile)
       .getOrElse(rootPath.toFile)
@@ -567,51 +723,147 @@ class WorkspaceAgentInterfaceImpl(workspaceRoot: String, isWindows: Boolean) ext
       )
     }
 
-    val timeoutMs = (timeoutSeconds.getOrElse(30 /* Default 30 seconds */ ) * 1000).toLong
+    val timeoutMs = (timeoutSeconds.getOrElse(config.defaultCommandTimeoutSeconds) * 1000).toLong
     val env       = environment.getOrElse(Map.empty)
 
-    val cmd = if (isWindows) {
-      Seq("cmd.exe", "/c", command)
-    } else {
-      Seq("sh", "-c", command)
+    // --- Security fix (Issue #787): direct argument-vector execution ----------
+    // Tokenize without involving any shell so metacharacters are inert.
+    val argv = tokenizeCommand(command)
+
+    if (argv.isEmpty) {
+      throw new WorkspaceAgentException(
+        "Command string is empty",
+        "EMPTY_COMMAND",
+        None
+      )
     }
-    val processBuilder = Process(
-      command = cmd,
-      cwd = workDir,
-      extraEnv = env.toSeq: _*
-    )
+
+    val executable = argv.head
+
+    // Reject any executable that contains a path separator; callers must use
+    // a bare name so the OS resolves it through PATH rather than a crafted path.
+    if (executable.contains("/") || executable.contains("\\")) {
+      throw new WorkspaceAgentException(
+        s"Executable paths are not allowed ('$executable'). Use a bare command name.",
+        "EXECUTABLE_PATH_NOT_ALLOWED",
+        None
+      )
+    }
+
+    // On Windows, command names are case-insensitive (e.g. GIT == git).
+    val execLower = if (isWindows) executable.toLowerCase else executable
+
+    if (!allowedCommandsNormalized.contains(execLower)) {
+      throw new WorkspaceAgentException(
+        s"Executable '$executable' is not in the allowed list. " +
+          s"Permitted executables: $allowedCommandsString",
+        "EXECUTABLE_NOT_ALLOWED",
+        None
+      )
+    }
+
+    // Layer 5: reject any token that carries a shell metacharacter.
+    // This is the critical defence for the Windows cmd.exe /c code path:
+    // even though each token is a separate argv entry, cmd.exe still
+    // interprets &, |, <, >, ^, and ; when it reconstructs the command line.
+    argv.find(token => token.exists(ForbiddenArgChars.contains)).foreach { badToken =>
+      badToken.find(ForbiddenArgChars.contains) match {
+        case Some(badChar) =>
+          throw new WorkspaceAgentException(
+            s"Argument '$badToken' contains the forbidden character '$badChar'. " +
+              s"Shell metacharacters are not allowed for security reasons. " +
+              s"Forbidden characters: ${ForbiddenArgChars.toSeq.sorted.mkString("'", "', '", "'")}.",
+            "FORBIDDEN_CHARACTERS",
+            None
+          )
+        case None =>
+      }
+    }
+
+    // On Windows, built-in commands (echo, dir, type, …) live inside cmd.exe
+    // and cannot be launched as standalone processes.  We prepend "cmd.exe /c"
+    // to the *already-tokenized* vector so each argument is still a separate
+    // string – cmd.exe receives them as distinct argv entries rather than as a
+    // raw command string, which means metacharacters like ';' are inert.
+    // Note: cmd.exe does still interpret '&&', '||', '|', and '&' as operators
+    // when they appear as unquoted tokens; callers should avoid passing these
+    // in arguments to built-in commands.
+    val finalArgv: Seq[String] =
+      if (isWindows && WindowsBuiltins.contains(execLower))
+        Seq("cmd.exe", "/c") ++ argv
+      else
+        argv
+    // --------------------------------------------------------------------------
+
+    // Use java.lang.ProcessBuilder with the tokenized argv directly – no shell
+    // wrapper.  This preserves the destroyForcibly() and waitFor(timeout) APIs
+    // introduced in #830 for reliable timeout handling.
+    val builder = new java.lang.ProcessBuilder(finalArgv.asJava)
+    builder.directory(workDir)
+    env.foreach { case (k, v) => builder.environment().put(k, v) }
 
     val stdout    = new StringBuilder
     val stderr    = new StringBuilder
     val startTime = System.currentTimeMillis()
 
     val exitCode = Try {
-      val process = processBuilder.run(
-        ProcessLogger(
-          line =>
+      val process = builder.start()
+
+      // Read stdout and stderr in background threads to prevent blocking
+      val stdoutThread = new Thread(() => {
+        val reader = new java.io.BufferedReader(
+          new java.io.InputStreamReader(process.getInputStream, Charset.defaultCharset())
+        )
+        try {
+          var line = reader.readLine()
+          while (line != null) {
             if (stdout.length < defaultLimits.maxOutputSize) {
               stdout.append(line).append("\n")
-            },
-          line =>
+            }
+            line = reader.readLine()
+          }
+        } finally reader.close()
+      })
+
+      val stderrThread = new Thread(() => {
+        val reader = new java.io.BufferedReader(
+          new java.io.InputStreamReader(process.getErrorStream, Charset.defaultCharset())
+        )
+        try {
+          var line = reader.readLine()
+          while (line != null) {
             if (stderr.length < defaultLimits.maxOutputSize) {
               stderr.append(line).append("\n")
             }
-        )
-      )
+            line = reader.readLine()
+          }
+        } finally reader.close()
+      })
 
-      while (process.isAlive() && System.currentTimeMillis() - startTime < timeoutMs)
-        Thread.sleep(100)
+      stdoutThread.setDaemon(true)
+      stderrThread.setDaemon(true)
+      stdoutThread.start()
+      stderrThread.start()
 
-      val completed = !process.isAlive()
+      val completed = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
 
       if (!completed) {
         process.destroy()
+        // Wait up to 2 seconds for graceful termination before escalating
+        if (!process.waitFor(2, TimeUnit.SECONDS)) {
+          process.destroyForcibly()
+          process.waitFor(3, TimeUnit.SECONDS)
+        }
         throw new WorkspaceAgentException(
           s"Command execution timed out after ${timeoutMs}ms",
           "TIMEOUT",
           None
         )
       }
+
+      // Wait for output threads to finish capturing
+      stdoutThread.join(2000)
+      stderrThread.join(2000)
 
       process.exitValue()
     }.recover {

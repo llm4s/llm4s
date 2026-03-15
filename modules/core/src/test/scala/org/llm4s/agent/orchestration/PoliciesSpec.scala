@@ -64,7 +64,7 @@ class PoliciesSpec extends AnyFlatSpec with Matchers with ScalaFutures {
   "Policies.withTimeout" should "timeout slow operations" in {
     val slowAgent = TypedAgent.fromFuture[String, String]("slow") { s =>
       Future {
-        Thread.sleep(500)
+        Thread.sleep(200)
         Right(s"slow: $s")
       }
     }

@@ -3,8 +3,11 @@ package org.llm4s.imagegeneration
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-import java.nio.file.Files
+import java.nio.file.{ Files, Path }
 import java.util.Base64
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Await
+import scala.concurrent.duration.DurationInt
 
 /**
  * Comprehensive test suite for the Image Generation API.
@@ -58,6 +61,21 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       }
     }
 
+    override def editImage(
+      imagePath: Path,
+      prompt: String,
+      maskPath: Option[Path] = None,
+      options: ImageEditOptions = ImageEditOptions()
+    ): Either[ImageGenerationError, Seq[GeneratedImage]] = {
+      if (prompt.trim.isEmpty) {
+        return Left(ValidationError("Prompt cannot be empty"))
+      }
+      if (imagePath.toString.trim.isEmpty) {
+        return Left(ValidationError("Image path cannot be empty"))
+      }
+      generateImage(prompt, ImageGenerationOptions(size = options.size.getOrElse(ImageSize.Square512))).map(Seq(_))
+    }
+
     override def health(): Either[ImageGenerationError, ServiceStatus] =
       Right(
         ServiceStatus(
@@ -69,9 +87,25 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       )
   }
 
+  class DefaultEditBehaviorClient extends ImageGenerationClient {
+    override def generateImage(
+      prompt: String,
+      options: ImageGenerationOptions = ImageGenerationOptions()
+    ): Either[ImageGenerationError, GeneratedImage] =
+      Left(UnsupportedOperation("not used"))
+
+    override def generateImages(
+      prompt: String,
+      count: Int,
+      options: ImageGenerationOptions = ImageGenerationOptions()
+    ): Either[ImageGenerationError, Seq[GeneratedImage]] =
+      Left(UnsupportedOperation("not used"))
+  }
+
   // ===== MODEL UNIT TESTS =====
 
   test("ImageSize provides correct dimensions") {
+    ImageSize.Auto.description shouldBe "auto"
     ImageSize.Square512.width shouldBe 512
     ImageSize.Square512.height shouldBe 512
     ImageSize.Square512.description shouldBe "512x512"
@@ -87,6 +121,9 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
 
     ImageFormat.JPEG.extension shouldBe "jpg"
     ImageFormat.JPEG.mimeType shouldBe "image/jpeg"
+
+    ImageFormat.WEBP.extension shouldBe "webp"
+    ImageFormat.WEBP.mimeType shouldBe "image/webp"
   }
 
   test("ImageGenerationOptions has sensible defaults") {
@@ -98,6 +135,20 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     options.guidanceScale shouldBe 7.5
     options.inferenceSteps shouldBe 20
     options.negativePrompt shouldBe None
+    options.quality shouldBe None
+    options.style shouldBe None
+    options.responseFormat shouldBe None
+    options.outputFormat shouldBe None
+    options.background shouldBe None
+    options.outputCompression shouldBe None
+    options.user shouldBe None
+  }
+
+  test("ImageEditOptions has sensible defaults") {
+    val options = ImageEditOptions()
+    options.size shouldBe None
+    options.n shouldBe 1
+    options.providerOptions shouldBe None
   }
 
   test("GeneratedImage decodes base64 data correctly") {
@@ -147,14 +198,21 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     val config = StableDiffusionConfig()
     val client = ImageGeneration.client(config)
 
-    client shouldBe a[org.llm4s.imagegeneration.provider.StableDiffusionClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.StableDiffusionClient) => }
   }
 
   test("ImageGeneration creates correct client for HuggingFace config") {
     val config = HuggingFaceConfig(apiKey = "test-key")
     val client = ImageGeneration.client(config)
 
-    client shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.HuggingFaceClient) => }
+  }
+
+  test("ImageGeneration creates correct client for OpenAI config") {
+    val config = OpenAIConfig(apiKey = "test-key")
+    val client = ImageGeneration.client(config)
+
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.OpenAIImageClient) => }
   }
 
   test("stableDiffusionClient creates client with correct config") {
@@ -163,13 +221,25 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
       apiKey = Some("test-key")
     )
 
-    client shouldBe a[org.llm4s.imagegeneration.provider.StableDiffusionClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.StableDiffusionClient) => }
   }
 
   test("huggingFaceClient creates client with correct config") {
     val client = ImageGeneration.huggingFaceClient(apiKey = "test-key")
 
-    client shouldBe a[org.llm4s.imagegeneration.provider.HuggingFaceClient]
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.HuggingFaceClient) => }
+  }
+
+  test("openAIClient creates client with correct config") {
+    val client = ImageGeneration.openAIClient(apiKey = "test-key")
+
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.OpenAIImageClient) => }
+  }
+
+  test("openAIClient creates client with default model") {
+    val client = ImageGeneration.openAIClient(apiKey = "test-key")
+
+    client should matchPattern { case Right(_: org.llm4s.imagegeneration.provider.OpenAIImageClient) => }
   }
 
   test("Config objects have correct default values") {
@@ -183,6 +253,11 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     hfConfig.model shouldBe "stabilityai/stable-diffusion-xl-base-1.0"
     hfConfig.timeout shouldBe 120000
     hfConfig.provider shouldBe ImageGenerationProvider.HuggingFace
+
+    val openAIConfig = OpenAIConfig(apiKey = "test-key")
+    openAIConfig.model shouldBe "dall-e-2"
+    openAIConfig.timeout shouldBe 30000
+    openAIConfig.provider shouldBe ImageGenerationProvider.DALLE
   }
 
   test("Config objects can be customized") {
@@ -265,6 +340,25 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     }
   }
 
+  test("Mock client supports edit image flow") {
+    val result = mockClient.editImage(
+      imagePath = Path.of("sample.png"),
+      prompt = "add fog in the background",
+      maskPath = None,
+      options = ImageEditOptions(size = Some(ImageSize.Square1024))
+    )
+
+    result match {
+      case Right(Seq(image)) =>
+        image.prompt shouldBe "add fog in the background"
+        image.size shouldBe ImageSize.Square1024
+      case Left(error) =>
+        fail(s"Expected successful image edit, but got error: $error")
+      case Right(other) =>
+        fail(s"Expected a single image, got ${other.size}")
+    }
+  }
+
   test("Mock client generates multiple images") {
     val result = mockClient.generateImages("Test prompt", 3)
 
@@ -321,6 +415,15 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     serviceError.code shouldBe 500
     validationError.message shouldBe "Invalid prompt"
     unknownError.message shouldBe "Something went wrong"
+  }
+
+  test("ImageGenerationClient default edit methods return unsupported operation") {
+    val client     = new DefaultEditBehaviorClient
+    val editResult = client.editImage(Path.of("sample.png"), "prompt")
+    editResult shouldBe Left(UnsupportedOperation("Image editing is not supported by this provider"))
+
+    val asyncResult = Await.result(client.editImageAsync(Path.of("sample.png"), "prompt"), 5.seconds)
+    asyncResult shouldBe Left(UnsupportedOperation("Async editing is not supported by this provider"))
   }
 
   // ===== INTEGRATION TESTS =====

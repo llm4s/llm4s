@@ -4,7 +4,6 @@ import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ModelDimensionRegistry, ProviderConfig }
 import org.llm4s.rag.evaluation.metrics._
 import org.llm4s.types.Result
-import scala.util.Try
 
 /**
  * Factory for creating RAGAS evaluators and individual metrics.
@@ -40,7 +39,7 @@ object RAGASFactory {
       llmClient <- LLMConnect.getClient(providerCfg)
       (providerName, embeddingConfig) = embedding
       embeddingClient <- EmbeddingClient.from(providerName, embeddingConfig)
-      dims              = Try(ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model)).getOrElse(1536)
+      dims              = ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model).getOrElse(1536)
       embeddingModelCfg = EmbeddingModelConfig(embeddingConfig.model, dims)
     } yield RAGASEvaluator(llmClient, embeddingClient, embeddingModelCfg)
 
@@ -110,7 +109,7 @@ object RAGASFactory {
       llmClient <- LLMConnect.getClient(providerCfg)
       (providerName, embeddingConfig) = embedding
       embeddingClient <- EmbeddingClient.from(providerName, embeddingConfig)
-      dims              = Try(ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model)).getOrElse(1536)
+      dims              = ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model).getOrElse(1536)
       embeddingModelCfg = EmbeddingModelConfig(embeddingConfig.model, dims)
     } yield RAGASEvaluator.basic(llmClient, embeddingClient, embeddingModelCfg)
 

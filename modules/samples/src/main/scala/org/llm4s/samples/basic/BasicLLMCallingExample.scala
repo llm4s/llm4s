@@ -31,6 +31,12 @@ import org.slf4j.LoggerFactory
  *    sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
  *    }}}
  *
+ * Optional:
+ *  - LLM_MAX_TOKENS
+ *      Overrides the provider's default max token limit.
+ *      Must be a positive integer.
+ *      If unset or invalid, provider defaults are used.
+ *
  * == Expected Output ==
  * The LLM will respond with a function to filter even numbers from a list,
  * likely using the `isEven` function from the conversation history.
@@ -42,6 +48,7 @@ import org.slf4j.LoggerFactory
  * - '''Anthropic''': `LLM_MODEL=anthropic/claude-3-5-sonnet-latest`, requires `ANTHROPIC_API_KEY`
  * - '''Azure''': `LLM_MODEL=azure/<deployment>`, requires `AZURE_API_KEY` and `AZURE_API_BASE`
  * - '''Ollama''': `LLM_MODEL=ollama/llama2`, no API key needed (local)
+ * - '''Cohere''': `LLM_MODEL=cohere/command-r`, requires `COHERE_API_KEY`
  *
  * == Troubleshooting ==
  * If you see configuration errors, this example will guide you through
@@ -87,6 +94,7 @@ object BasicLLMCallingExample {
       providerCfg <- Llm4sConfig.provider()
       // Build LLM client from typed provider config
       client <- LLMConnect.getClient(providerCfg)
+
       // Make the completion request
       completion <- client.complete(conversation)
       _ = {
@@ -117,7 +125,6 @@ object BasicLLMCallingExample {
         logger.error("{}", err.formatted)
         logger.info("Tip: Make sure your environment variables or application.conf values are set correctly.")
         logger.info("For more help, see: https://github.com/llm4s/llm4s#getting-started")
-        sys.exit(1)
       },
       identity
     )

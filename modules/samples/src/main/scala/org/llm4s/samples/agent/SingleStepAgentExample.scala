@@ -19,7 +19,8 @@ object SingleStepAgentExample {
     val result = for {
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
-      toolRegistry = new ToolRegistry(Seq(WeatherTool.tool))
+      weatherTool <- WeatherTool.toolSafe
+      toolRegistry = new ToolRegistry(Seq(weatherTool))
       agent        = new Agent(client)
 
       traceLogPath = ".log/single-step-trace.md"
@@ -30,9 +31,8 @@ object SingleStepAgentExample {
 
       _ = logger.info("=== Running Step-by-Step ===")
 
-      initialState = agent
-        .initialize(query, toolRegistry)
-        .tap(s => logger.info("Initial state initialized with {} messages", s.conversation.messages.length))
+      initialState <- agent.initializeSafe(query, toolRegistry)
+      _ = logger.info("Initial state initialized with {} messages", initialState.conversation.messages.length)
 
       _ = agent.writeTraceLog(initialState, traceLogPath)
 

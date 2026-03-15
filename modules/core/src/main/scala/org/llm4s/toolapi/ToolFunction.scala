@@ -1,9 +1,25 @@
 package org.llm4s.toolapi
 
+import org.llm4s.error.ValidationError
+import org.llm4s.types.Result
 import upickle.default._
 
 /**
- * Core model for tool function definitions
+ * A fully-defined, executable tool that can be invoked by an LLM.
+ *
+ * Bundles together a name, a natural-language description (shown to the model),
+ * a [[SchemaDefinition]] that describes the expected JSON parameters, and a
+ * handler function that performs the actual work.
+ *
+ * Prefer constructing instances via [[ToolBuilder]] rather than directly.
+ *
+ * @param name        Unique tool identifier used by the LLM when calling the tool
+ * @param description Natural-language description of what the tool does and when to use it
+ * @param schema      Parameter schema describing the expected JSON arguments
+ * @param handler     Business logic; receives a [[SafeParameterExtractor]] and
+ *                    returns `Right(result)` or `Left(errorMessage)`
+ * @tparam T Phantom type for the parameter schema (unused at runtime)
+ * @tparam R Return type, must have a uPickle `ReadWriter`
  */
 case class ToolFunction[T, R: ReadWriter](
   name: String,
@@ -96,7 +112,18 @@ case class ToolFunction[T, R: ReadWriter](
 }
 
 /**
- * Builder for tool definitions
+ * Builder for [[ToolFunction]] definitions using a fluent API.
+ *
+ * Obtained via the companion [[ToolBuilder]] object:
+ * {{{ToolBuilder[Map[String, Any], MyResult]("my_tool", "Does something", schema)
+ *   .withHandler(extractor => Right(MyResult(...)))
+ *   .buildSafe()
+ * }}}
+ *
+ * @param name        Tool name
+ * @param description Natural-language description for the LLM
+ * @param schema      Parameter schema
+ * @param handler     Optional handler; must be set before calling [[buildSafe]]
  */
 class ToolBuilder[T, R: ReadWriter] private (
   name: String,
@@ -104,9 +131,34 @@ class ToolBuilder[T, R: ReadWriter] private (
   schema: SchemaDefinition[T],
   handler: Option[SafeParameterExtractor => Either[String, R]] = None
 ) {
+
+  /**
+   * Set the handler function for this tool.
+   *
+   * @param handler Function that extracts parameters and executes the tool's logic
+   * @return A new builder with the handler registered
+   */
   def withHandler(handler: SafeParameterExtractor => Either[String, R]): ToolBuilder[T, R] =
     new ToolBuilder(name, description, schema, Some(handler))
 
+  /**
+   * Build the tool function, returning a Result for safe error handling.
+   *
+   * @return Right(ToolFunction) if handler is defined, Left(ValidationError) otherwise
+   */
+  def buildSafe(): Result[ToolFunction[T, R]] = handler match {
+    case Some(h) => Right(ToolFunction(name, description, schema, h))
+    case None    => Left(ValidationError("handler", "must be defined before calling buildSafe()"))
+  }
+
+  /**
+   * Build the tool function, throwing on failure.
+   *
+   * Prefer [[buildSafe]] which returns `Result[ToolFunction]` and avoids throwing.
+   *
+   * @throws java.lang.IllegalStateException if handler is not defined
+   */
+  @deprecated("Use buildSafe() which returns Result[ToolFunction] for safe error handling", "0.2.9")
   def build(): ToolFunction[T, R] = handler match {
     case Some(h) => ToolFunction(name, description, schema, h)
     case None    => throw new IllegalStateException("Handler not defined")
@@ -114,6 +166,14 @@ class ToolBuilder[T, R: ReadWriter] private (
 }
 
 object ToolBuilder {
+
+  /**
+   * Create a new builder for a tool with the given name, description, and schema.
+   *
+   * @param name        Unique tool identifier
+   * @param description Natural-language description shown to the LLM
+   * @param schema      Parameter schema
+   */
   def apply[T, R: ReadWriter](name: String, description: String, schema: SchemaDefinition[T]): ToolBuilder[T, R] =
     new ToolBuilder(name, description, schema)
 }

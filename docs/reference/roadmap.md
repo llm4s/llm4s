@@ -28,11 +28,13 @@ The single source of truth for LLM4S project status and future direction.
 
 | Category | Feature | Status | Documentation |
 |----------|---------|--------|---------------|
-| **LLM Connectivity** | Multi-Provider Support | ✅ Complete | [Providers](/guide/providers) |
-| | OpenAI Integration | ✅ Complete | [Basic Usage](/guide/basic-usage) |
-| | Anthropic Integration | ✅ Complete | [Providers](/guide/providers) |
-| | Azure OpenAI Integration | ✅ Complete | [Providers](/guide/providers) |
-| | Ollama (Local Models) | ✅ Complete | [Providers](/guide/providers) |
+| **LLM Connectivity** | Multi-Provider Support | ✅ Complete | [Providers](../guide/providers) |
+| | OpenAI Integration | ✅ Complete | [Basic Usage](../guide/basic-usage) |
+| | Anthropic Integration | ✅ Complete | [Providers](../guide/providers) |
+| | Google Gemini Integration | ✅ Complete | [Providers](../guide/providers) |
+| | Azure OpenAI Integration | ✅ Complete | [Providers](../guide/providers) |
+| | DeepSeek Integration | ✅ Complete | [Providers](../guide/providers) |
+| | Ollama (Local Models) | ✅ Complete | [Providers](../guide/providers) |
 | | Streaming Responses | ✅ Complete | [Streaming](/guide/streaming) |
 | | Model Metadata API | ✅ Complete | [API Reference](/api/llm-client) |
 | **Content** | Image Generation | ✅ Complete | [Image Generation](/guide/image-generation) |
@@ -45,7 +47,8 @@ The single source of truth for LLM4S project status and future direction.
 | | Workspace Isolation | ✅ Complete | [Workspace](/advanced/workspace) |
 | **Infrastructure** | Type-Safe Configuration | ✅ Complete | [Configuration](/guide/configuration) |
 | | Result-Based Errors | ✅ Complete | [Error Handling](/guide/error-handling) |
-| | Langfuse Observability | ✅ Complete | [Observability](/guide/observability) |
+| | Langfuse Observability | ✅ Complete | [Observability](../guide/observability) |
+| | OpenTelemetry Tracing | ✅ Complete | [Tracing](../guide/observability) |
 | | Cross-Version (2.13/3.x) | ✅ Complete | [Installation](/getting-started/installation) |
 
 ### Agent Framework
@@ -94,14 +97,53 @@ graph TD
 | **Performance** | Predictable behavior under load | 📋 Planned | JMH benchmarks, baselines |
 | **Security** | Prevent data leaks, audit data flows | 📋 Planned | Threat model, dependency scanning |
 | **Documentation** | Clone to working example quickly | 🚧 In Progress | Complete guides, Scaladoc |
-| **Observability** | See what's happening in production | ✅ Complete | Langfuse, structured logging |
+| **Observability** | See what's happening in production | ✅ Complete | Langfuse, OpenTelemetry, structured logging |
 | **Community** | Healthy contributor ecosystem | 🚧 In Progress | 10+ contributors target |
+
+### Additional Completed Features
+
+The following features have been implemented and are production-ready but were not part of the original roadmap:
+
+| Feature | Status | Description | Documentation |
+|---------|--------|-------------|---------------|
+| **Google Gemini Provider** | ✅ Complete | Full integration with Google's Gemini models (2.0-flash, 1.5-pro) | [Providers](../guide/providers) |
+| **DeepSeek Provider** | ✅ Complete | Support for DeepSeek LLM models including reasoning-capable deepseek-reasoner | [Providers](../guide/providers) |
+| **OpenTelemetry Module** | ✅ Complete | Dedicated tracing module with OTLP export support | [Observability](/guide/observability) |
+| **Metrics Collection** | ✅ Complete | Token usage tracking, cost estimation, latency metrics | [API Reference](/api/llm-client) |
+| **Prometheus Metrics** | ✅ Complete | Production-grade metrics with PrometheusMetrics, MetricsCollector, PrometheusEndpoint, health checks | [Metrics Samples](/samples/metrics) |
+| **Context Management System** | ✅ Complete | Multi-layered context compression: LLMCompressor, DeterministicCompressor, ToolOutputCompressor, HistoryCompressor, SemanticBlocks, TokenWindow, ConversationTokenCounter, ContextManager | [Context Samples](/samples/context) |
+| **Assistant API** | ✅ Complete | Interactive assistant framework with AssistantAgent, SessionManager, SessionState, ConsoleInterface | [Assistant Samples](/samples/assistant) |
+| **Image Processing/Vision** | ✅ Complete | Vision capabilities for image understanding with OpenAI Vision and Anthropic Claude Vision support | [Image Processing Examples](/samples/basic) |
+| **Enhanced Error Context** | ✅ Complete | Detailed error messages with provider-specific diagnostics | [Error Handling](/guide/error-handling) |
+| **Tracing Composition** | ✅ Complete | Compose multiple tracing backends (Langfuse + Console + OpenTelemetry) | [Examples](/examples/) |
+| **Agent Context Bundling** | ✅ Complete | Unified AgentContext for cross-cutting concerns | [Agent Framework](/examples/#agent-examples) |
+| **Exa Search Tool** | ✅ Complete | Built-in tool for web search using Exa API | [Built-in Tools](/examples/#tool-examples) |
+| **Voyage AI Embeddings** | ✅ Complete | Support for Voyage AI embedding models (voyage-3, voyage-code-3) | [Embedding Providers](/guide/embeddings) |
+| **Reasoning Modes** | ✅ Complete | Support for reasoning LLMs: OpenAI o1/o3, DeepSeek reasoner with configurable effort levels | [Reasoning Examples](/samples/reasoning) |
+| **Session Serialization** | ✅ Complete | Save and restore agent state including conversation history for long-running workflows | [Agent Persistence](/design/phase-4.3-session-serialization)
 
 ### Known Limitations (v1.0)
 
 - Tool registries are not serialized; tools must be re-attached when restoring `AgentState`
 - Reasoning modes are provider-specific and may not be available on all models
 - Memory stores have size and TTL limits; long-term retention belongs in external systems
+- Hardware design extension is in proposal stage; not yet implemented in production
+
+---
+
+## Ongoing Features in Development
+
+| Feature | Progress | Description | Status |
+|---------|----------|-------------|--------|
+| **MCP Full Implementation** | ~60% | Complete Model Context Protocol implementation with bidirectional communication, server scaffolding, and standardized tool protocols | Active development - client complete, server in progress |
+| **Advanced Embedding Cache** | ~40% | Multi-layer caching for embeddings (in-memory + persistent) to reduce API costs and latency | Design phase - initial prototypes exist |
+| **Prompt Optimization System** | ~30% | A/B testing framework, regression testing, systematic prompt improvement with performance tracking | Planning - initial issue templates created |
+| **RAG Cost Tracking** | ~25% | Per-query cost tracking, embedding drift detection, latency percentiles (p50/p95/p99) | Requirements gathering |
+| **Hardware Design Extension** | ~10% | LLM-powered hardware design toolkit for Chisel/FIRRTL ecosystem with agents for verification, DSE, and documentation | Proposal stage - comprehensive roadmap defined in [llm4s-hardware-design-roadmap.md](/roadmap/llm4s-hardware-design-roadmap) |
+| **Output Grounding System** | ~15% | Claim extraction, fact-checking against RAG sources, hallucination detection, citation verification | Scoping phase |
+| **HITL Evaluation System** | ~20% | Human-in-the-loop feedback collection, rating infrastructure, training signal generation for agent improvement | Architecture design |
+| **BigQuery Observability** | ~10% | Production telemetry export to BigQuery for SQL-based analytics and dashboarding | Requirements  definition |
+| **Vertex AI Provider** | ~15% | Google Cloud Vertex AI integration with ADC authentication, streaming, and tool calling support | Initial exploration |
 
 ---
 

@@ -297,7 +297,7 @@ Explore **69 working examples** covering all features:
 | **Anthropic** | ✅ Complete | Claude 3.5, Claude 3 |
 | **Azure OpenAI** | ✅ Complete | All Azure-hosted models |
 | **Ollama** | ✅ Complete | Llama, Mistral, local models |
-| **Google Gemini** | 🚧 Planned | Coming soon |
+| **Google Gemini** | ✅ Complete | Gemini 2.0, 1.5 Pro/Flash |
 | **Cohere** | 🚧 Planned | Coming soon |
 
 ---

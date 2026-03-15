@@ -1,0 +1,134 @@
+name: Feature Request
+description: Suggest an idea for improving LLM4S
+title: "[FEATURE] "
+labels: ["feature", "triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a feature! Help us understand what you're looking to achieve and why.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: Clearly describe the problem you're trying to solve or the use case you want to enable.
+      placeholder: |
+        Current situation: ...
+        Pain point: ...
+        Impact: ...
+      value: "Current situation: \nPain point: \nImpact: "
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation & Use Case
+      description: Why is this feature important? Who would benefit? How would it improve the LLM4S experience?
+      placeholder: |
+        This would benefit:
+        - Developer experience by...
+        - Production reliability by...
+        - Feature completeness by...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe your ideal solution. Include API design, behavior, and integration points if relevant.
+      placeholder: |
+        Proposed API:
+        ```scala
+        // Example code showing how the feature would be used
+        ```
+        Behavior:
+        Integration:
+      value: |
+        Proposed API:
+        ```scala
+        // Example code here
+        ```
+        Behavior:
+        Integration:
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: What other solutions or workarounds have you considered?
+      placeholder: |
+        1. Alternative A: ...
+        2. Alternative B: ...
+        3. Current workaround: ...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: impact_areas
+    attributes:
+      label: Impact Areas
+      description: Select any that apply (leave blank if unsure).
+      options:
+        - label: API / Compatibility
+        - label: Security / Privacy
+        - label: Reliability / Availability
+        - label: Performance
+        - label: Documentation
+        - label: Unsure
+
+  - type: dropdown
+    id: breaking_changes
+    attributes:
+      label: Breaking Changes
+      description: Does this feature require breaking changes to existing APIs?
+      options:
+        - "No - Purely additive"
+        - "Yes - Requires API changes"
+        - "Unsure - Needs discussion"
+    validations:
+      required: true
+
+  - type: textarea
+    id: breaking_details
+    attributes:
+      label: Breaking Change Details (if applicable)
+      description: If this requires breaking changes, please explain what would break and migration path.
+      placeholder: "This would require changes to:\n- ...\n\nMigration path:\n- ..."
+
+  - type: textarea
+    id: related_issues
+    attributes:
+      label: Related Issues or PRs
+      description: Link to any related issues or PRs.
+      placeholder: "Relates to #123, #456\nDuplicate of #789"
+
+  - type: checkboxes
+    id: willingness
+    attributes:
+      label: Implementation Willingness
+      description: Would you be interested in implementing this feature?
+      options:
+        - label: I would like to implement this feature myself
+        - label: I would be open to collaborating on implementation
+        - label: I would prefer someone else to implement this
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please confirm that you have completed the following.
+      options:
+        - label: I have searched existing issues and found no duplicates
+          required: true
+        - label: I have clearly described the problem and motivation
+          required: true
+        - label: I have included a proposed solution or example API
+          required: true
+        - label: I have considered alternatives and breaking changes
+          required: true

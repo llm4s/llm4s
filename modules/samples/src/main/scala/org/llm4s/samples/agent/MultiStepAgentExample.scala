@@ -1,6 +1,6 @@
 package org.llm4s.samples.agent
 
-import org.llm4s.agent.Agent
+import org.llm4s.agent.{ Agent, AgentContext }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.MessageRole.Tool
@@ -21,7 +21,8 @@ object MultiStepAgentExample {
     val res = for {
       providerCfg <- Llm4sConfig.provider()
       client      <- LLMConnect.getClient(providerCfg)
-      toolRegistry = new ToolRegistry(Seq(WeatherTool.tool))
+      weatherTool <- WeatherTool.toolSafe
+      toolRegistry = new ToolRegistry(Seq(weatherTool))
       agent        = new Agent(client)
       query = "What's the weather like in London, and is it different from New York?"
         .tap(q => logger.info("User Query: {}", q))
@@ -38,14 +39,8 @@ object MultiStepAgentExample {
       _ = agent.run(
         query = query,
         tools = toolRegistry,
-        inputGuardrails = Seq.empty,
-        outputGuardrails = Seq.empty,
-        handoffs = Seq.empty,
         maxSteps = Some(1),
-        traceLogPath = Some(limitedTraceLogPath),
-        systemPromptAddition = None,
-        completionOptions = org.llm4s.llmconnect.model.CompletionOptions(),
-        debug = false
+        context = AgentContext(traceLogPath = Some(limitedTraceLogPath))
       ) match {
         case Right(finalState) =>
           logger.info("Final status: {}", finalState.status)
@@ -79,9 +74,8 @@ object MultiStepAgentExample {
       _                  = logger.info("=== Manual Step Execution to Demonstrate Two-Phase Flow ===")
       _                  = logger.info("Example 3: Running with manual step execution")
       manualTraceLogPath = ".log/agent-trace-manual.md"
-      initialState = agent
-        .initialize(query, toolRegistry)
-        .tap(s => logger.info("Initial state: {}", s.status))
+      initialState <- agent.initializeSafe(query, toolRegistry)
+      _ = logger.info("Initial state: {}", initialState.status)
 
       _ = agent
         .writeTraceLog(initialState, manualTraceLogPath)

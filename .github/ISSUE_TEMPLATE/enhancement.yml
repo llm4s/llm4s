@@ -1,0 +1,146 @@
+name: Enhancement
+description: Suggest an improvement to existing functionality
+title: "[ENHANCEMENT] "
+labels: ["enhancement", "triage"]
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting an enhancement! Help us understand how to improve the existing functionality.
+
+  - type: textarea
+    id: current_behavior
+    attributes:
+      label: Current Behavior
+      description: Describe the current behavior or functionality.
+      placeholder: |
+        Currently, the Agent class...
+        The memory system...
+        Tool calling works by...
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_improvement
+    attributes:
+      label: Proposed Improvement
+      description: How could this functionality be improved?
+      placeholder: |
+        Proposed changes:
+        - ...
+        - ...
+        
+        Example:
+        ```scala
+        // Current
+        agent.run(query, tools)
+        
+        // Proposed
+        agent.run(query, tools).withTimeout(30.seconds)
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: benefits
+    attributes:
+      label: Benefits & Use Cases
+      description: What benefits would this improvement provide? Who benefits?
+      placeholder: |
+        Benefits:
+        - Improved performance by...
+        - Better ergonomics for...
+        - Enables use cases like...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: impact_areas
+    attributes:
+      label: Impact Areas
+      description: Select any that apply (leave blank if unsure).
+      options:
+        - label: API / Compatibility
+        - label: Security / Privacy
+        - label: Reliability / Availability
+        - label: Performance
+        - label: Documentation
+        - label: Unsure
+
+  - type: textarea
+    id: implementation
+    attributes:
+      label: Implementation Approach (if known)
+      description: If you have ideas about how to implement this, please share.
+      placeholder: |
+        Potential implementation:
+        - Modify Agent.scala to...
+        - Add new configuration option...
+        - Update guardrails system to...
+    validations:
+      required: false
+
+  - type: dropdown
+    id: impact_scope
+    attributes:
+      label: Impact Scope
+      description: Which components would be affected by this enhancement?
+      multiple: true
+      options:
+        - "Agent Framework"
+        - "Tool Calling"
+        - "Guardrails"
+        - "Memory System"
+        - "RAG Engine"
+        - "Configuration"
+        - "Observability"
+        - "Error Handling"
+        - "Documentation"
+        - "Other"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: breaking_changes
+    attributes:
+      label: Breaking Changes
+      description: Does this enhancement require breaking changes?
+      options:
+        - "No - Backward compatible"
+        - "Yes - Requires API changes"
+        - "Unsure - Needs discussion"
+    validations:
+      required: true
+
+  - type: textarea
+    id: related_issues
+    attributes:
+      label: Related Issues or PRs
+      description: Link to any related issues or PRs.
+      placeholder: "Relates to #123\nBlocked by #456"
+
+  - type: checkboxes
+    id: willingness
+    attributes:
+      label: Implementation Willingness
+      description: Would you be interested in implementing this enhancement?
+      options:
+        - label: I would like to implement this enhancement myself
+        - label: I would be open to collaborating on implementation
+        - label: I would prefer someone else to implement this
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Pre-submission Checklist
+      description: Please confirm that you have completed the following.
+      options:
+        - label: I have searched existing issues and found no duplicates
+          required: true
+        - label: I have clearly described the current behavior
+          required: true
+        - label: I have explained the proposed improvement
+          required: true
+        - label: I have identified the benefits and impact
+          required: true

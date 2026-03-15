@@ -5,6 +5,20 @@ import org.llm4s.llmconnect.config._
 import org.llm4s.types.Result
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 
+/**
+ * Internal loader that builds a typed [[org.llm4s.llmconnect.config.ProviderConfig]]
+ * from a PureConfig [[pureconfig.ConfigSource]].
+ *
+ * Parses the `llm4s.llm.model` key (format: `provider/model`, e.g.
+ * `"openai/gpt-4o"`) to select a provider, then reads the corresponding
+ * credential and endpoint section (`llm4s.openai`, `llm4s.anthropic`, etc.).
+ *
+ * Supported providers: OpenAI, OpenRouter, Azure, Anthropic, Ollama, Z.ai,
+ * Gemini/Google, DeepSeek, Cohere, and Mistral.
+ *
+ * This object is package-private; callers should use [[Llm4sConfig.provider]]
+ * instead.
+ */
 private[config] object ProviderConfigLoader {
 
   final private case class LlmSection(model: Option[String])
@@ -40,6 +54,21 @@ private[config] object ProviderConfigLoader {
     apiKey: Option[String]
   )
 
+  final private case class DeepSeekSection(
+    baseUrl: Option[String],
+    apiKey: Option[String]
+  )
+
+  final private case class CohereSection(
+    baseUrl: Option[String],
+    apiKey: Option[String]
+  )
+
+  final private case class MistralSection(
+    baseUrl: Option[String],
+    apiKey: Option[String]
+  )
+
   final private case class ProviderRoot(
     llm: LlmSection,
     openai: Option[OpenAISection],
@@ -47,7 +76,10 @@ private[config] object ProviderConfigLoader {
     anthropic: Option[AnthropicSection],
     ollama: Option[OllamaSection],
     zai: Option[ZaiSection],
-    gemini: Option[GeminiSection]
+    gemini: Option[GeminiSection],
+    deepseek: Option[DeepSeekSection],
+    cohere: Option[CohereSection],
+    mistral: Option[MistralSection]
   )
 
   implicit private val llmSectionReader: PureConfigReader[LlmSection] =
@@ -71,9 +103,51 @@ private[config] object ProviderConfigLoader {
   implicit private val geminiSectionReader: PureConfigReader[GeminiSection] =
     PureConfigReader.forProduct2("baseUrl", "apiKey")(GeminiSection.apply)
 
-  implicit private val providerRootReader: PureConfigReader[ProviderRoot] =
-    PureConfigReader.forProduct7("llm", "openai", "azure", "anthropic", "ollama", "zai", "gemini")(ProviderRoot.apply)
+  implicit private val deepseekSectionReader: PureConfigReader[DeepSeekSection] =
+    PureConfigReader.forProduct2("baseUrl", "apiKey")(DeepSeekSection.apply)
 
+  implicit private val cohereSectionReader: PureConfigReader[CohereSection] =
+    PureConfigReader.forProduct2("baseUrl", "apiKey")(CohereSection.apply)
+
+  implicit private val mistralSectionReader: PureConfigReader[MistralSection] =
+    PureConfigReader.forProduct2("baseUrl", "apiKey")(MistralSection.apply)
+
+  implicit private val providerRootReader: PureConfigReader[ProviderRoot] =
+    PureConfigReader.forProduct10(
+      "llm",
+      "openai",
+      "azure",
+      "anthropic",
+      "ollama",
+      "zai",
+      "gemini",
+      "deepseek",
+      "cohere",
+      "mistral"
+    )(
+      ProviderRoot.apply
+    )
+
+  /**
+   * Loads a [[ProviderConfig]] from `source`.
+   *
+   * Reads the `llm4s` config tree from `source`, parses `llm4s.llm.model`
+   * to determine the provider prefix (format: `provider/model`, e.g.
+   * `"openai/gpt-4o"`), then reads the matching provider section for
+   * credentials and endpoint.
+   *
+   * When the model spec lacks a provider prefix (e.g. `"gpt-4o"` alone),
+   * the loader infers the provider from `llm4s.openai.baseUrl`: a URL
+   * containing `"openrouter.ai"` selects OpenRouter; anything else selects
+   * OpenAI.
+   *
+   * @param source PureConfig source to read from; use `ConfigSource.default`
+   *               in production to read environment variables and
+   *               `application.conf`.
+   * @return the typed provider config, or a [[org.llm4s.error.ConfigurationError]]
+   *         when `LLM_MODEL` is absent, the provider prefix is unrecognised,
+   *         or a required credential variable is missing.
+   */
   def load(source: ConfigSource): Result[ProviderConfig] = {
     val rootEither = source.at("llm4s").load[ProviderRoot]
 
@@ -85,6 +159,16 @@ private[config] object ProviderConfigLoader {
       .flatMap(buildProviderConfig)
   }
 
+  /**
+   * Reads the OpenAI API key from `source` without constructing a full provider config.
+   *
+   * Used by the embeddings subsystem, which shares the OpenAI API key for
+   * embedding requests even when a different provider is selected for the LLM.
+   *
+   * @param source PureConfig source to read from.
+   * @return the API key string, or a [[org.llm4s.error.ConfigurationError]]
+   *         when `OPENAI_API_KEY` / `llm4s.openai.apiKey` is absent or blank.
+   */
   def loadOpenAISharedApiKey(source: ConfigSource): Result[String] = {
     val rootEither = source.at("llm4s").load[ProviderRoot]
 
@@ -120,6 +204,9 @@ private[config] object ProviderConfigLoader {
         case "ollama"            => buildOllamaConfig(modelName, root.ollama)
         case "zai"               => buildZaiConfig(modelName, root.zai)
         case "gemini" | "google" => buildGeminiConfig(modelName, root.gemini)
+        case "deepseek"          => buildDeepSeekConfig(modelName, root.deepseek)
+        case "cohere"            => buildCohereConfig(modelName, root.cohere)
+        case "mistral"           => buildMistralConfig(modelName, root.mistral)
         case other if other.nonEmpty =>
           Left(ConfigurationError(s"Unknown provider prefix: $other in '$modelSpec'"))
         case _ =>
@@ -279,6 +366,78 @@ private[config] object ProviderConfigLoader {
         Left(
           ConfigurationError(
             "Gemini provider selected but llm4s.gemini section is missing"
+          )
+        )
+    }
+
+  private def buildDeepSeekConfig(modelName: String, section: Option[DeepSeekSection]): Result[ProviderConfig] =
+    section match {
+      case Some(deepseek) =>
+        val apiKeyOpt = deepseek.apiKey.map(_.trim).filter(_.nonEmpty)
+        val apiKeyResult: Result[String] =
+          apiKeyOpt.toRight(
+            ConfigurationError("Missing DeepSeek API key (llm4s.deepseek.apiKey / DEEPSEEK_API_KEY)")
+          )
+
+        apiKeyResult.map { apiKey =>
+          val baseUrl =
+            deepseek.baseUrl.map(_.trim).filter(_.nonEmpty).getOrElse(DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
+
+          DeepSeekConfig.fromValues(modelName, apiKey, baseUrl)
+        }
+
+      case None =>
+        Left(
+          ConfigurationError(
+            "DeepSeek provider selected but llm4s.deepseek section is missing"
+          )
+        )
+    }
+
+  private def buildCohereConfig(modelName: String, section: Option[CohereSection]): Result[ProviderConfig] =
+    section match {
+      case Some(cohere) =>
+        val apiKeyOpt = cohere.apiKey.map(_.trim).filter(_.nonEmpty)
+        val apiKeyResult: Result[String] =
+          apiKeyOpt.toRight(
+            ConfigurationError("Missing Cohere API key (llm4s.cohere.apiKey / COHERE_API_KEY)")
+          )
+
+        apiKeyResult.map { apiKey =>
+          val baseUrl =
+            cohere.baseUrl.map(_.trim).filter(_.nonEmpty).getOrElse(CohereConfig.DEFAULT_BASE_URL)
+
+          CohereConfig.fromValues(modelName, apiKey, baseUrl)
+        }
+
+      case None =>
+        Left(
+          ConfigurationError(
+            "Cohere provider selected but llm4s.cohere section is missing"
+          )
+        )
+    }
+
+  private def buildMistralConfig(modelName: String, section: Option[MistralSection]): Result[ProviderConfig] =
+    section match {
+      case Some(mistral) =>
+        val apiKeyOpt = mistral.apiKey.map(_.trim).filter(_.nonEmpty)
+        val apiKeyResult: Result[String] =
+          apiKeyOpt.toRight(
+            ConfigurationError("Missing Mistral API key (llm4s.mistral.apiKey / MISTRAL_API_KEY)")
+          )
+
+        apiKeyResult.map { apiKey =>
+          val baseUrl =
+            mistral.baseUrl.map(_.trim).filter(_.nonEmpty).getOrElse(MistralConfig.DEFAULT_BASE_URL)
+
+          MistralConfig.fromValues(modelName, apiKey, baseUrl)
+        }
+
+      case None =>
+        Left(
+          ConfigurationError(
+            "Mistral provider selected but llm4s.mistral section is missing"
           )
         )
     }

@@ -1,6 +1,7 @@
 package org.llm4s.toolapi.builtin.core
 
 import org.llm4s.toolapi._
+import org.llm4s.types.Result
 import upickle.default._
 
 /**
@@ -61,9 +62,9 @@ object CalculatorTool {
     )
 
   /**
-   * The calculator tool instance.
+   * The calculator tool instance, returning a Result for safe error handling.
    */
-  val tool: ToolFunction[Map[String, Any], CalculatorResult] =
+  val toolSafe: Result[ToolFunction[Map[String, Any], CalculatorResult]] =
     ToolBuilder[Map[String, Any], CalculatorResult](
       name = "calculator",
       description = "Perform mathematical calculations. Supports: add, subtract, multiply, divide, " +
@@ -77,7 +78,7 @@ object CalculatorTool {
         bOpt = extractor.getDouble("b").toOption
         result <- calculate(operation, a, bOpt)
       } yield result
-    }.build()
+    }.buildSafe()
 
   private def calculate(operation: String, a: Double, bOpt: Option[Double]): Either[String, CalculatorResult] = {
     def requireB: Either[String, Double] =

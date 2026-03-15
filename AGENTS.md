@@ -1,12 +1,12 @@
 # Repository Guidelines
 
 ## Project Structure & Modules
-- Core framework lives in `modules/core` (agents, LLM connectors, guardrails, tracing). Workspace support sits in `modules/workspace` (runner/client/shared). Cross-version checks for Scala 2.13/3.7.1 live in `modules/crossTest`, and runnable demos are in `modules/samples`. `docs/` stores documentation; `hooks/` provides the pre-commit installer. Sources live in `src/main/scala`; add version-specific sources under `src/main/scala-2.13` or `src/main/scala-3` when needed. See also [szork](https://github.com/llm4s/szork) - a demo game showcasing LLM4S agents.
+- Core framework lives in `modules/core` (agents, LLM connectors, guardrails, tracing). Workspace support sits in `modules/workspace` (runner/client/shared), and runnable demos are in `modules/samples`. `docs/` stores documentation; `hooks/` provides the pre-commit installer. Sources live in `src/main/scala`; add version-specific sources under `src/main/scala-3` when needed. See also [szork](https://github.com/llm4s/szork) - a demo game showcasing LLM4S agents.
 
 ## Build, Test, and Development Commands
-- Compile: `sbt compile` or `sbt +compile` (cross-build). Run examples via `sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"`.
-- Tests: `sbt test` for the active Scala, `sbt +test` for both, or module-specific runs (e.g., `sbt core/test`).
-- Pipeline: `sbt buildAll` cross-compiles and tests; slower but mirrors CI.
+- Compile: `sbt compile`. Run examples via `sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"`.
+- Tests: `sbt test` for the full build or module-specific runs (e.g., `sbt core/test`).
+- Pipeline: `sbt buildAll` compiles and tests; slower but mirrors CI.
 - Formatting/linting: `sbt scalafmtAll` is required; `sbt scalafixAll` is available for extra hygiene.
 - Dev hook: `./hooks/install.sh` installs a pre-commit that runs scalafmt, compile, and tests.
 
@@ -23,13 +23,21 @@
 ## Testing Guidelines
 - Scalatest is primary; Scalamock is available. Integration suites often mix in `ScalaFutures` or `BeforeAndAfterAll`.
 - Place tests under `src/test/scala`, mirroring the package of the code under test.
-- Add cross-version specs in `modules/crossTest/scala2` and `modules/crossTest/scala3` when compiler behavior differs.
-- Typical flow: `sbt test` for quick checks; `sbt +test` or `sbt buildAll` before PR. Coverage (when needed): `sbt coverage test coverageReport`.
+- Keep version-specific tests inside the owning module only when Scala-version behavior genuinely differs.
+- Typical flow: `sbt test` for quick checks or `sbt buildAll` before PR. Coverage (when needed): `sbt coverage test coverageReport`.
+
+## Issue Templates
+- We provide structured GitHub templates to streamline contributions and improve issue quality.
+- **Bug Reports** ([bug_report.yml](.github/ISSUE_TEMPLATE/bug_report.yml)): Use for crashes, errors, unexpected behavior. Include environment (Scala, JDK, OS), LLM provider/model, reproduction steps, and error logs.
+- **Feature Requests** ([feature_request.yml](.github/ISSUE_TEMPLATE/feature_request.yml)): Use for new functionality. Describe problem, proposed solution, alternatives considered, and willingness to implement.
+- **Enhancements** ([enhancement.yml](.github/ISSUE_TEMPLATE/enhancement.yml)): Use to improve existing features. Explain current behavior, proposed improvement, benefits, and implementation approach.
+- See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed contribution guidelines and [contribution-guidelines.md](./docs/reference/contribution-guidelines.md) for advanced patterns.
 
 ## Commit & Pull Request Guidelines
-- Use short, imperative commit subjects (e.g., “Add centralized model metadata system”) and include issue/PR refs when relevant.
+- Use short, imperative commit subjects (e.g., "Add centralized model metadata system") and include issue/PR refs when relevant.
 - Before a PR: run scalafmtAll and tests, update docs for user-facing changes, and add sample commands/output for new workflows.
 - PR text should state motivation, key changes, and validation steps. Screenshots only when altering docs/assets; otherwise keep notes concise.
+- Always use the structured templates when opening issues or PRs to ensure consistency and completeness.
 
 ## Security & Configuration Tips
 - Never commit secrets. Keep API keys (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `LLM_MODEL`, optional `OPENAI_BASE_URL`) in env vars or an untracked `.env`.

@@ -1,12 +1,12 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.LLMClient
+import org.llm4s.util.Redaction
+import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
+import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
-import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
 import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
@@ -16,22 +16,41 @@ import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import scala.util.Try
 
+/**
+ * LLM client for the Z.ai API.
+ *
+ * Z.ai uses an OpenAI-compatible `/chat/completions` endpoint with one important
+ * difference: message content is always an array of typed objects
+ * (`[{"type":"text","text":"..."}]`) rather than a plain string.  This applies
+ * to user, system, assistant, and tool messages alike.  Sending a plain string
+ * causes a rejection from the Z.ai API.
+ *
+ * Both non-streaming (`complete`) and streaming (`streamComplete`) are supported.
+ * Tool calling follows the standard OpenAI function-calling format.
+ *
+ * @param config  Z.ai connection configuration (API key, model, base URL, context window)
+ * @param metrics records per-call latency and token-usage events;
+ *                use [[org.llm4s.metrics.MetricsCollector.noop]] when metrics are not needed
+ */
 class ZaiClient(
   config: ZaiConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-) extends LLMClient
-    with MetricsRecording {
+) extends BaseLifecycleLLMClient {
   private val httpClient = HttpClient.newHttpClient()
   private val logger     = org.slf4j.LoggerFactory.getLogger(getClass)
+
+  protected def clientDescription: String = s"Z.ai client for model ${config.model}"
+  protected def providerName: String      = "zai"
+  protected def modelName: String         = config.model
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
-  ): Result[Completion] = withMetrics("zai", config.model) {
+  ): Result[Completion] = completeWithMetrics {
     val requestBody = createRequestBody(conversation, options)
 
     logger.debug(s"Sending request to Z.ai API at ${config.baseUrl}/chat/completions")
-    logger.debug(s"Request body: ${requestBody.render()}")
+    logger.debug(s"Request body: ${Redaction.redactForLogging(requestBody.render())}")
 
     val attempt =
       Try {
@@ -47,35 +66,27 @@ class ZaiClient(
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
 
         logger.debug(s"Response status: ${response.statusCode()}")
-        logger.debug(s"Response body: ${response.body()}")
+        logger.debug(s"Response body: ${Redaction.redactForLogging(response.body())}")
 
         response
       }.toEither.left
         .map(_.toLLMError)
 
     attempt.flatMap { response =>
-      response.statusCode() match {
-        case 200 =>
-          val responseJson = ujson.read(response.body())
-          Right(parseCompletion(responseJson))
-        case 401    => Left(AuthenticationError("zai", "Invalid API key"))
-        case 429    => Left(RateLimitError("zai"))
-        case status => Left(ServiceError(status, "zai", s"Z.ai API error: ${response.body()}"))
+      if (response.statusCode() >= 200 && response.statusCode() < 300) {
+        val responseJson = ujson.read(response.body())
+        Right(parseCompletion(responseJson))
+      } else {
+        HttpErrorMapper.mapHttpError(response.statusCode(), response.body(), providerName)
       }
     }
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens, usage.completionTokens)
-      }
-  )
+  }
 
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = withMetrics("zai", config.model) {
+  ): Result[Completion] = completeWithMetrics {
     val requestBody = createRequestBody(conversation, options)
     requestBody("stream") = true
 
@@ -98,11 +109,7 @@ class ZaiClient(
     requestResult.flatMap { response =>
       if (response.statusCode() != 200) {
         val errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
-        response.statusCode() match {
-          case 401    => Left(AuthenticationError("zai", "Invalid API key"))
-          case 429    => Left(RateLimitError("zai"))
-          case status => Left(ServiceError(status, "zai", s"Z.ai API error: $errorBody"))
-        }
+        HttpErrorMapper.mapHttpError(response.statusCode(), errorBody, providerName)
       } else {
         val streamResult = Try {
           val sseParser = SSEParser.createStreamingParser()
@@ -131,16 +138,15 @@ class ZaiClient(
           }
         }.toEither.left.map(_.toLLMError)
 
-        streamResult.flatMap(_ => accumulator.toCompletion)
+        streamResult.flatMap(_ =>
+          accumulator.toCompletion.map { c =>
+            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+            c.copy(model = config.model, estimatedCost = cost)
+          }
+        )
       }
     }
-  }(
-    extractUsage = _.usage,
-    estimateCost = usage =>
-      org.llm4s.model.ModelRegistry.lookup(config.model).toOption.flatMap { meta =>
-        meta.pricing.estimateCost(usage.promptTokens.toInt, usage.completionTokens.toInt)
-      }
-  )
+  }
 
   private def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
     val choices = json("choices").arr
@@ -165,7 +171,7 @@ class ZaiClient(
           ToolCall(
             id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
             name = function.obj.get("name").flatMap(_.strOpt).getOrElse(""),
-            arguments = parseStreamingArguments(rawArgs)
+            arguments = StreamingToolArgumentParser.parse(rawArgs)
           )
       }
 
@@ -204,10 +210,10 @@ class ZaiClient(
     }
   }
 
-  private def parseStreamingArguments(raw: String): ujson.Value =
-    if (raw.isEmpty) ujson.Null else scala.util.Try(ujson.read(raw)).getOrElse(ujson.Str(raw))
-
-  private def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
+  /**
+   * Test-visible seam for request serialization; intentionally scoped to provider package to avoid broader API surface.
+   */
+  protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
     val messages = conversation.messages.map {
       case UserMessage(content) =>
         ujson.Obj("role" -> "user", "content" -> ujson.Arr(ujson.Obj("type" -> "text", "text" -> ujson.Str(content))))
@@ -232,7 +238,7 @@ class ZaiClient(
           })
         }
         base
-      case ToolMessage(toolCallId, content) =>
+      case ToolMessage(content, toolCallId) =>
         ujson.Obj(
           "role"         -> "tool",
           "tool_call_id" -> toolCallId,
@@ -254,6 +260,10 @@ class ZaiClient(
     if (options.tools.nonEmpty) {
       val toolRegistry = new ToolRegistry(options.tools)
       base("tools") = toolRegistry.getOpenAITools()
+    }
+
+    options.responseFormat.foreach { fmt =>
+      ResponseFormatMapper.toOpenAIResponseFormat(fmt).foreach(rf => base("response_format") = rf)
     }
 
     base
@@ -292,18 +302,23 @@ class ZaiClient(
       }
     }
 
+    // Estimate cost using CostEstimator
+    val modelId = json("model").str
+    val cost    = usage.flatMap(u => CostEstimator.estimate(config.model, u))
+
     Completion(
       id = json("id").str,
       created = json("created").num.toLong,
       content = contentStr,
-      model = json("model").str,
+      model = modelId,
       message = AssistantMessage(
         contentOpt = Some(contentStr),
         toolCalls = toolCalls.toList
       ),
       toolCalls = toolCalls.toList,
       usage = usage,
-      thinking = None
+      thinking = None,
+      estimatedCost = cost
     )
   }
 
@@ -321,6 +336,12 @@ class ZaiClient(
   override def getContextWindow(): Int = config.contextWindow
 
   override def getReserveCompletion(): Int = config.reserveCompletion
+
+  override protected def releaseResources(): Unit =
+    (httpClient: Any) match {
+      case c: AutoCloseable => c.close()
+      case _                => ()
+    }
 }
 
 object ZaiClient {
