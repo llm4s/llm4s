@@ -12,6 +12,7 @@ import java.nio.file.{ Path, Files }
 import javax.sound.sampled.{ AudioFileFormat, AudioFormat => JAudioFormat, AudioSystem }
 import scala.util.{ Try, Using }
 import org.llm4s.types.TryOps
+import java.nio.charset.StandardCharsets
 
 /**
  * Eliminates code duplication in WAV file generation across the speech module.
@@ -167,35 +168,39 @@ object WavFileGenerator {
   /**
    * Create WAV header (low-level utility)
    */
-  def createWavHeader(dataSize: Int, meta: AudioMeta): Result[Array[Byte]] =
-    for {
-      _ <- validateMetadata(meta)
-    } yield {
+  def createWavHeader(dataSize: Int, meta: AudioMeta): Array[Byte] =
+    validateMetadata(meta) match {
+      case Left(err) =>
+        throw new IllegalArgumentException(err.message)
 
-      val bytesPerSample = (meta.bitDepth + 7) / 8
-      val byteRate       = meta.sampleRate * meta.numChannels * bytesPerSample
-      val blockAlign     = (meta.numChannels * bytesPerSample).toShort
+      case Right(_) =>
+        val bytesPerSample = (meta.bitDepth + 7) / 8
+        val byteRate       = meta.sampleRate * meta.numChannels * bytesPerSample
+        val blockAlign     = (meta.numChannels * bytesPerSample).toShort
 
-      val buffer = ByteBuffer.allocate(44)
-      buffer.order(ByteOrder.LITTLE_ENDIAN)
+        val buffer = ByteBuffer.allocate(44)
+        buffer.order(ByteOrder.LITTLE_ENDIAN)
 
-      buffer.put("RIFF".getBytes)
-      buffer.putInt(dataSize + 36)
+        buffer.put("RIFF".getBytes(StandardCharsets.US_ASCII))
+        buffer.putInt(dataSize + 36)
 
-      buffer.put("WAVE".getBytes)
+        buffer.put("WAVE".getBytes(StandardCharsets.US_ASCII))
 
-      buffer.put("fmt ".getBytes)
-      buffer.putInt(16)
-      buffer.putShort(1.toShort)
-      buffer.putShort(meta.numChannels.toShort)
-      buffer.putInt(meta.sampleRate)
-      buffer.putInt(byteRate)
-      buffer.putShort(blockAlign)
-      buffer.putShort(meta.bitDepth.toShort)
+        buffer.put("fmt ".getBytes(StandardCharsets.US_ASCII))
+        buffer.putInt(16)
+        buffer.putShort(1.toShort)
+        buffer.putShort(meta.numChannels.toShort)
+        buffer.putInt(meta.sampleRate)
+        buffer.putInt(byteRate)
+        buffer.putShort(blockAlign)
+        buffer.putShort(meta.bitDepth.toShort)
 
-      buffer.put("data".getBytes)
-      buffer.putInt(dataSize)
+        buffer.put("data".getBytes(StandardCharsets.US_ASCII))
+        buffer.putInt(dataSize)
 
-      buffer.array()
+        val header = buffer.array()
+        require(header.length == 44, "Invalid WAV header size")
+
+        header
     }
 }
