@@ -134,7 +134,7 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
           val params = ujson.Obj("command" -> s"echo hi && rm ${tempFile.getAbsolutePath}")
           val result = tool.handler(SafeParameterExtractor(params))
           result match {
-            case Left(err) => err should include("Shell metacharacters")
+            case Left(err)          => err should include("Shell metacharacters")
             case Right(shellResult) => fail(s"Expected Left but got Right: $shellResult")
           }
         }

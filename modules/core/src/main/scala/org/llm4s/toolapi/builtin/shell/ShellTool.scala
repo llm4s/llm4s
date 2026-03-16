@@ -109,7 +109,7 @@ object ShellTool {
     while (i < command.length) {
       command(i) match {
         case '"'                            => consumeQuotedSpan('"')
-      case '\''                           => consumeQuotedSpan('\'')
+        case '\''                           => consumeQuotedSpan('\'')
         case '\\' if i + 1 < command.length =>
           // Backslash outside quotes: consume the next character literally.
           i += 1
