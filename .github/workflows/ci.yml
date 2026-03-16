@@ -88,7 +88,7 @@ jobs:
   # Code coverage (runs on one configuration to avoid duplication)
   coverage:
     name: Code Coverage
-    needs: [quick-checks, config-policy-check]
+    needs: [quick-checks]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -149,7 +149,7 @@ jobs:
   # Main test matrix
   test:
     name: Test
-    needs: [quick-checks, config-policy-check]
+    needs: [quick-checks]
     permissions:
       contents: read
     strategy:

@@ -286,6 +286,8 @@ lazy val configPolicy = (project in file("modules/config-policy"))
   .settings(
     name := "config-policy",
     commonSettings,
+    run / fork := true,
+    Test / fork := true,
     Compile / mainClass := Some("org.llm4s.configpolicy.CheckPolicies"),
     libraryDependencies ++= Seq(
       Deps.config,

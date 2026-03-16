@@ -28,7 +28,6 @@ final case class PolicyEvaluationResult(results: List[PolicyResult]) {
 	val skipped: List[PolicySkip]  = results.collect { case s: PolicySkip => s }
 
 	def passed: Boolean = failures.isEmpty
-	def wouldPass: Boolean = failures.isEmpty
 }
 
 trait ConfigPolicy {
@@ -137,7 +136,7 @@ object PolicyBuilder {
 }
 
 object DefaultPolicies {
-	import PolicyBuilder.*
+	import PolicyBuilder._
 
 	val productionSafeDefaults: List[ConfigPolicy] = List(
 		allowedProviders(Set("openai", "anthropic", "azure"), Set("prod")),

@@ -42,6 +42,6 @@ object CheckPolicies {
   def main(args: Array[String]): Unit = {
     val options = parseArgs(args)
     val code = run(options)
-    sys.exit(code)
+    if (code != 0) throw new RuntimeException(s"Exiting with code $code")
   }
 }
