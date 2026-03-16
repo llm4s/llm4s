@@ -84,27 +84,79 @@ object ShellTool {
       } yield result
     }.buildSafe()
 
+  private val forbiddenShellChars: Set[Char] = Set(';', '|', '&', '<', '>', '`')
+
+  private def tokenizeCommand(command: String): Seq[String] = {
+    val tokens  = Seq.newBuilder[String]
+    val current = new StringBuilder
+    var i       = 0
+
+    /**
+     * Advance `i` past the quoted span, appending characters to `current`.
+     * Stops at the matching `closeChar` or at end-of-string (unclosed quote
+     * consumes the remainder of the input).
+     */
+    def consumeQuotedSpan(closeChar: Char): Unit = {
+      i += 1 // skip opening quote
+      while (i < command.length && command(i) != closeChar) {
+        current.append(command(i))
+        i += 1
+      }
+      // If we stopped on the closing quote, the outer loop will increment i
+      // to move past it; if we hit end-of-input, the outer loop ends.
+    }
+
+    while (i < command.length) {
+      command(i) match {
+        case '"'                            => consumeQuotedSpan('"')
+      case '\''                           => consumeQuotedSpan('\'')
+        case '\\' if i + 1 < command.length =>
+          // Backslash outside quotes: consume the next character literally.
+          i += 1
+          current.append(command(i))
+        case ' ' | '\t' =>
+          if (current.nonEmpty) {
+            tokens += current.toString()
+            current.clear()
+          }
+        case c => current.append(c)
+      }
+      i += 1
+    }
+
+    if (current.nonEmpty) tokens += current.toString()
+    tokens.result()
+  }
+
   private def executeCommand(
     command: String,
     config: ShellConfig
   ): Either[String, ShellResult] = {
-    // Security check - validate command is allowed
-    val baseCommand = command.trim.split("\\s+").headOption.getOrElse("")
-    if (!config.isCommandAllowed(baseCommand)) {
-      Left(s"Command '$baseCommand' is not allowed. Allowed: ${config.allowedCommands.mkString(", ")}")
+    val tokens = tokenizeCommand(command)
+
+    if (tokens.isEmpty) {
+      Left("Command is empty")
     } else {
-      runProcess(command, config)
+      // Security check - validate command is allowed
+      val baseCommand = tokens.head
+      if (!config.isCommandAllowed(baseCommand)) {
+        Left(s"Command '$baseCommand' is not allowed. Allowed: ${config.allowedCommands.mkString(", ")}")
+      } else if (tokens.exists(token => token.exists(forbiddenShellChars.contains))) {
+        Left("Shell metacharacters (e.g., &&, |, ;, <, >, `) are not allowed in command arguments")
+      } else {
+        runProcess(tokens, config)
+      }
     }
   }
 
   private def runProcess(
-    command: String,
+    tokens: Seq[String],
     config: ShellConfig
   ): Either[String, ShellResult] = {
     val startTime = System.currentTimeMillis()
 
     Try {
-      val processBuilder = new ProcessBuilder("sh", "-c", command)
+      val processBuilder = new ProcessBuilder(tokens: _*)
         .redirectErrorStream(false)
 
       // Set working directory if configured
@@ -172,7 +224,7 @@ object ShellTool {
       }
 
       ShellResult(
-        command = command,
+        command = tokens.mkString(" "),
         exitCode = exitCode,
         stdout = stdout,
         stderr = stderr,
