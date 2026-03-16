@@ -223,6 +223,33 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     (memories.toOption.get should have).length(1)
   }
 
+  it should "not change state when extractEntities is called (current placeholder behavior)" in {
+    val manager = createManager()
+
+    val result = for {
+      m1 <- manager.recordUserFact("User prefers functional programming", Some("user-1"), Some(0.8))
+
+      beforeStats <- m1.stats
+      beforeAll   <- m1.store.recall(MemoryFilter.All, 100)
+
+      m2 <- m1.extractEntities("Scala was created by Martin Odersky", Some("conv-1"))
+
+      afterStats <- m2.stats
+      afterAll   <- m2.store.recall(MemoryFilter.All, 100)
+    } yield (
+      beforeStats.totalMemories,
+      afterStats.totalMemories,
+      beforeAll.length,
+      afterAll.length
+    )
+
+    result.isRight shouldBe true
+    val (beforeTotal, afterTotal, beforeCount, afterCount) = result.toOption.get
+
+    afterTotal shouldBe beforeTotal
+    afterCount shouldBe beforeCount
+  }
+
   it should "not consolidate if below minimum count" in {
     val manager = createManager()
 
