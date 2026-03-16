@@ -332,22 +332,24 @@ final case class LLMMemoryManager(
 
   private def parseEntityArray(raw: String): Result[Seq[Obj]] = {
     val payload = normalizeJsonPayload(raw)
-    Try(ujson.read(payload)).toResult.left.map { err =>
-      org.llm4s.error.ProcessingError(
-        "entity_extraction_parse",
-        s"Failed to parse entity extraction output: ${err.message}"
-      )
-    }.flatMap {
-      case Arr(values) =>
-        Right(values.collect { case obj: Obj => obj }.toSeq)
-      case _ =>
-        Left(
-          org.llm4s.error.ValidationError(
-            "entity_extraction_output",
-            "Expected a JSON array"
-          )
+    Try(ujson.read(payload)).toResult.left
+      .map { err =>
+        org.llm4s.error.ProcessingError(
+          "entity_extraction_parse",
+          s"Failed to parse entity extraction output: ${err.message}"
         )
-    }
+      }
+      .flatMap {
+        case Arr(values) =>
+          Right(values.collect { case obj: Obj => obj }.toSeq)
+        case _ =>
+          Left(
+            org.llm4s.error.ValidationError(
+              "entity_extraction_output",
+              "Expected a JSON array"
+            )
+          )
+      }
   }
 
   private def parseEntityObject(obj: Obj): Option[(String, String, String, Option[Double])] = {
@@ -360,7 +362,7 @@ final case class LLMMemoryManager(
     val fact = obj.value.get("fact").collect { case Str(v) => v.trim }.filter(_.nonEmpty)
     val llmImportance = obj.value.get("importance").flatMap {
       case Num(v) if !v.isNaN && !v.isInfinity => Some(math.max(0.0, math.min(1.0, v)))
-      case _                                    => None
+      case _                                   => None
     }
 
     for {
@@ -385,11 +387,12 @@ final case class LLMMemoryManager(
           "allergy",
           "must"
         ).exists(normalizedFact.contains)
-      ) 0.2 else 0.0
+      ) 0.2
+      else 0.0
 
     val typeBonus = entityType match {
       case "person" | "organization" | "technology" | "product" => 0.1
-      case _                                                          => 0.0
+      case _                                                    => 0.0
     }
 
     val numericBonus = if (normalizedFact.exists(_.isDigit)) 0.05 else 0.0
@@ -443,25 +446,27 @@ final case class LLMMemoryManager(
             .map(_.head)
             .toSeq
 
-          unique.foldLeft[Result[MemoryStore]](Right(store)) { case (accStore, (name, entityType, fact, llmScore)) =>
-            accStore.flatMap { currentStore =>
-              val base = Memory
-                .forEntity(
-                  entityId = EntityId.fromName(name),
-                  entityName = name,
-                  fact = fact,
-                  entityType = entityType
-                )
-                .withImportance(scoreImportance(fact, entityType, llmScore))
+          unique
+            .foldLeft[Result[MemoryStore]](Right(store)) { case (accStore, (name, entityType, fact, llmScore)) =>
+              accStore.flatMap { currentStore =>
+                val base = Memory
+                  .forEntity(
+                    entityId = EntityId.fromName(name),
+                    entityName = name,
+                    fact = fact,
+                    entityType = entityType
+                  )
+                  .withImportance(scoreImportance(fact, entityType, llmScore))
 
-              val memory = conversationId match {
-                case Some(cid) => base.withMetadata("conversation_id", cid)
-                case None      => base
+                val memory = conversationId match {
+                  case Some(cid) => base.withMetadata("conversation_id", cid)
+                  case None      => base
+                }
+
+                currentStore.store(memory)
               }
-
-              currentStore.store(memory)
             }
-          }.map(updatedStore => copy(store = updatedStore))
+            .map(updatedStore => copy(store = updatedStore))
         }
       }
     }

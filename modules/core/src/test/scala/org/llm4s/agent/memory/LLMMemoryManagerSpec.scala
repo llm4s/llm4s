@@ -93,8 +93,9 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       conversation: Conversation,
       options: CompletionOptions
     ): Result[Completion] = {
-      val prompt   = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
-      val response = if (prompt.contains("Return JSON array only")) "{not-valid-json]" else "Consolidated memory content."
+      val prompt = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
+      val response =
+        if (prompt.contains("Return JSON array only")) "{not-valid-json]" else "Consolidated memory content."
 
       Right(
         Completion(
@@ -322,9 +323,9 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     val manager = createManager()
 
     val result = for {
-      m1       <- manager.recordUserFact("User prefers functional programming", Some("user-1"), Some(0.8))
+      m1        <- manager.recordUserFact("User prefers functional programming", Some("user-1"), Some(0.8))
       extracted <- m1.extractEntities("Scala was created by Martin Odersky and used for FP", Some("conv-1"))
-      entities <- extracted.store.recall(MemoryFilter.entities, 100)
+      entities  <- extracted.store.recall(MemoryFilter.entities, 100)
     } yield entities
 
     result.isRight shouldBe true
@@ -352,9 +353,9 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     val manager = createNoEntityManager()
 
     val result = for {
-      before <- manager.store.recall(MemoryFilter.All, 100)
+      before  <- manager.store.recall(MemoryFilter.All, 100)
       updated <- manager.extractEntities("No notable entities here.", Some("conv-1"))
-      after <- updated.store.recall(MemoryFilter.All, 100)
+      after   <- updated.store.recall(MemoryFilter.All, 100)
     } yield (before.length, after.length)
 
     result.isRight shouldBe true
