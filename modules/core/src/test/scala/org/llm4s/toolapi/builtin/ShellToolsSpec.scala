@@ -113,6 +113,53 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
               shellResult => {
                 shellResult.exitCode shouldBe 0
                 shellResult.stdout.trim shouldBe "hello world"
+                shellResult.command shouldBe "echo hello world"
+              }
+            )
+        }
+      )
+  }
+
+  it should "handle unclosed quotes" in {
+    assume(!isWindows, "Unix shell commands not available on Windows")
+    val config = ShellConfig(allowedCommands = Seq("echo"))
+
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> "echo \"hello world")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              shellResult => {
+                shellResult.exitCode shouldBe 0
+                shellResult.stdout.trim shouldBe "hello world"
+              }
+            )
+        }
+      )
+  }
+
+  it should "handle backslash escaping" in {
+    assume(!isWindows, "Unix shell commands not available on Windows")
+    val config = ShellConfig(allowedCommands = Seq("echo"))
+
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> "echo hello\\ world")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              shellResult => {
+                shellResult.exitCode shouldBe 0
+                shellResult.stdout.trim shouldBe "hello world"
               }
             )
         }
@@ -131,9 +178,16 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool => {
-          val params = ujson.Obj("command" -> s"echo hi && rm ${tempFile.getAbsolutePath}")
-          val result = tool.handler(SafeParameterExtractor(params))
-          result match {
+          // Classic injection attempt
+          val params1 = ujson.Obj("command" -> s"echo hi && rm ${tempFile.getAbsolutePath}")
+          tool.handler(SafeParameterExtractor(params1)) match {
+            case Left(err)          => err should include("Shell metacharacters")
+            case Right(shellResult) => fail(s"Expected Left but got Right: $shellResult")
+          }
+
+          // Metacharacters should be rejected even inside quoted args
+          val params2 = ujson.Obj("command" -> "echo \"hi && rm /tmp/x\"")
+          tool.handler(SafeParameterExtractor(params2)) match {
             case Left(err)          => err should include("Shell metacharacters")
             case Right(shellResult) => fail(s"Expected Left but got Right: $shellResult")
           }
@@ -141,6 +195,26 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
       )
 
     tempFile.exists() shouldBe true
+  }
+
+  it should "reject empty command" in {
+    assume(!isWindows, "Unix shell commands not available on Windows")
+    val config = ShellConfig(allowedCommands = Seq("echo"))
+
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> "")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => err should include("Command is empty"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
   }
 
   it should "reject non-allowed commands" in {
@@ -153,6 +227,26 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool => {
           val params = ujson.Obj("command" -> "rm -rf /tmp/test")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => err should include("not allowed"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
+  }
+
+  it should "reject forbidden chars in the base command" in {
+    assume(!isWindows, "Unix shell commands not available on Windows")
+    val config = ShellConfig(allowedCommands = Seq("echo"))
+
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> "ec|ho hi")
           tool
             .handler(SafeParameterExtractor(params))
             .fold(
