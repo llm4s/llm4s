@@ -47,7 +47,16 @@ object Llm4sConfig {
    *         missing or the provider prefix is unrecognised.
    */
   def provider(): Result[ProviderConfig] =
-    org.llm4s.config.ProviderConfigLoader.load(ConfigSource.default)
+    providerFrom(ConfigSource.default)
+
+  /**
+   * Loads LLM provider configuration from a custom PureConfig source.
+   *
+   * Useful for policy checks and validation workflows that need to evaluate
+   * a specific config source (for example, file overlays in CI).
+   */
+  def providerFrom(source: ConfigSource): Result[ProviderConfig] =
+    org.llm4s.config.ProviderConfigLoader.load(source)
 
   /**
    * Loads PostgreSQL vector-search index configuration from the current environment.
