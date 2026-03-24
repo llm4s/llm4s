@@ -71,8 +71,7 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
         val successMsg = execResult.fold(e => fail(s"Expected success but got: ${e.getMessage}"), identity).str
         successMsg should include("Echo: Hello World")
 
-      } finally
-        client.close()
+      } finally client.close()
     }
   }
 }

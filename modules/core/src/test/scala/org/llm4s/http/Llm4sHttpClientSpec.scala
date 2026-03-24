@@ -351,7 +351,6 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
       val response = client.postMultipart(s"$baseUrl/multipart", parts = parts)
       response.statusCode shouldBe 200
       response.body should include("content-type=multipart/form-data; boundary=")
-    } finally
-      Files.deleteIfExists(tempFile)
+    } finally Files.deleteIfExists(tempFile)
   }
 }

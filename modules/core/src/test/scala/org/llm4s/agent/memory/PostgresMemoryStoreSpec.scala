@@ -394,8 +394,7 @@ class PostgresMemoryStoreSpec extends AnyFlatSpec with Matchers with BeforeAndAf
         s"INSERT INTO ${dbConfig.tableName} (id, content, memory_type, metadata, created_at, embedding) " +
           s"VALUES ('bad-vec-id', 'bad content', 'Task', '{}', NOW(), '[bad-vec]')"
       )
-    } finally
-      conn.close()
+    } finally conn.close()
 
     store
       .get(MemoryId("bad-vec-id"))

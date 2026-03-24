@@ -177,8 +177,7 @@ class ImageGenerationClientsTest
       val result = client.editImage(tempFile.toPath, "edit prompt")
       result.isRight shouldBe true
       result.value.head.data shouldBe "edited_image_base64"
-    } finally
-      tempFile.delete()
+    } finally tempFile.delete()
   }
 
   test("OpenAIImageClient should handle malformed JSON response") {

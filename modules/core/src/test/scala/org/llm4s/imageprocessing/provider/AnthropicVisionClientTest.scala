@@ -161,8 +161,7 @@ class AnthropicVisionClientTest extends AnyFlatSpec with Matchers with BeforeAnd
       result.isLeft shouldBe true
       result.isLeft shouldBe true
       result.isLeft shouldBe true
-    } finally
-      Files.deleteIfExists(textFile)
+    } finally Files.deleteIfExists(textFile)
   }
 
   it should "use correct media type in API call" in {
