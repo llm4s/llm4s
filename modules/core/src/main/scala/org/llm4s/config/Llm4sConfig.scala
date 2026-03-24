@@ -89,6 +89,8 @@ object Llm4sConfig {
    * exchange logging remains off. When enabled, a JSONL sink is constructed
    * from a configured directory and writes to a new per-run file.
    */
+  // TODO: As part of the wider Llm4sConfig cleanup, accept an optional ConfigSource
+  // parameter here instead of hard-wiring ConfigSource.default inside the method body.
   def exchangeLogging(): Result[ProviderExchangeLogging] =
     org.llm4s.config.ProviderExchangeLoggingConfigLoader.load(ConfigSource.default)
 

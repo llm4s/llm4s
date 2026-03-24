@@ -52,7 +52,7 @@ object LLMConnect {
       case cfg: CohereConfig =>
         CohereClient(cfg, metrics, exchangeLogging)
       case cfg: MistralConfig =>
-        MistralClient(cfg, metrics)
+        MistralClient(cfg, metrics, exchangeLogging)
     }
 
   // ---- Config-driven construction -----------------------------------------

@@ -4,6 +4,7 @@ import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, Provide
 import org.llm4s.types.Result
 
 import java.time.Instant
+import scala.util.Try
 
 private[provider] object ProviderExchangeRecorder {
 
@@ -36,5 +37,5 @@ private[provider] object ProviderExchangeRecorder {
           responseBody = responseBody,
           errorMessage = result.left.toOption.map(_.message)
         )
-        sink.record(exchange)
+        val _ = Try(sink.record(exchange))
 }

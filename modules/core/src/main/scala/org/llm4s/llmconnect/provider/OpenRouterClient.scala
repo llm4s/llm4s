@@ -4,10 +4,11 @@ import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.serialization.OpenRouterToolCallDeserializer
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.toolapi.ToolRegistry
-import org.llm4s.types.Result
+import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
@@ -108,10 +109,7 @@ class OpenRouterClient(
         }
       }
     }
-    result.left.map { error =>
-      recordExchange(startedAt, "", None, Left(error))
-      error
-    }
+    result.tapLeft(error => recordExchange(startedAt, "", None, Left(error)))
   }
 
   override def streamComplete(
@@ -144,11 +142,10 @@ class OpenRouterClient(
           .POST(HttpRequest.BodyPublishers.ofString(requestText))
           .build()
         httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
-      }.toEither.left.map { error =>
-        val llmError = error.toLLMError
-        recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(llmError))
-        llmError
-      }
+      }.toResult
+        .tapLeft(error =>
+          recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
+        )
 
       // Check HTTP status, returning typed errors for known failure codes
       val streamOrError = responseOrError.flatMap { response =>
@@ -203,11 +200,9 @@ class OpenRouterClient(
             completion
           }
         )
-        .left
-        .map { error =>
+        .tapLeft(error =>
           recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
-          error
-        }
+        )
     }
   }
 

@@ -38,10 +38,14 @@ private[config] object ProviderExchangeLoggingConfigLoader:
         Left(ConfigurationError(s"Failed to load llm4s exchange logging config via PureConfig: $msg"))
 
   private def buildExchangeLogging(section: ExchangeLoggingSection): Result[ProviderExchangeLogging] =
-    if !section.enabled.getOrElse(false) then Right(ProviderExchangeLogging.Disabled)
-    else
-      section.dir
-        .map(_.trim)
-        .filter(_.nonEmpty)
-        .toRight(ConfigurationError("Provider exchange logging is enabled but llm4s.exchangeLogging.dir is missing"))
-        .flatMap(dir => ProviderExchangeSink.createRunScopedJsonl(Paths.get(dir)).map(ProviderExchangeLogging.enabled))
+    section.enabled match
+      case Some(true) =>
+        section.dir
+          .map(_.trim)
+          .filter(_.nonEmpty)
+          .toRight(ConfigurationError("Provider exchange logging is enabled but llm4s.exchangeLogging.dir is missing"))
+          .flatMap(dir =>
+            ProviderExchangeSink.createRunScopedJsonl(Paths.get(dir)).map(ProviderExchangeLogging.enabled)
+          )
+      case _ =>
+        Right(ProviderExchangeLogging.Disabled)

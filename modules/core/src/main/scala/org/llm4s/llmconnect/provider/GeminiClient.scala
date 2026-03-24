@@ -8,6 +8,7 @@ import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.TransformationResult
 import org.llm4s.toolapi.ToolFunction
@@ -181,11 +182,9 @@ class GeminiClient(
                 completion
               }
             )
-            .left
-            .map { error =>
+            .tapLeft(error =>
               recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
-              error
-            }
+            )
         }
     }
   }

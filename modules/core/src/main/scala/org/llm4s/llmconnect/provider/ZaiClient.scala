@@ -5,9 +5,10 @@ import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.toolapi.ToolRegistry
-import org.llm4s.types.Result
+import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
@@ -114,11 +115,10 @@ class ZaiClient(
         .POST(HttpRequest.BodyPublishers.ofString(requestText))
         .build()
       httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
-    }.toEither.left.map { error =>
-      val llmError = error.toLLMError
-      recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(llmError))
-      llmError
-    }
+    }.toResult
+      .tapLeft(error =>
+        recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
+      )
 
     requestResult.flatMap { response =>
       if (response.statusCode() != 200) {
@@ -153,7 +153,7 @@ class ZaiClient(
             Try(reader.close())
             Try(response.body().close())
           }
-        }.toEither.left.map(_.toLLMError)
+        }.toResult
 
         streamResult
           .flatMap(_ =>
@@ -164,11 +164,9 @@ class ZaiClient(
               completion
             }
           )
-          .left
-          .map { error =>
+          .tapLeft(error =>
             recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
-            error
-          }
+          )
       }
     }
   }

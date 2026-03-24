@@ -14,6 +14,7 @@ import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.TransformationResult
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
@@ -146,11 +147,7 @@ class AnthropicClient(
             recordExchange(startedAt, requestBody, Some(serializeResponseBody(response)), completionResult)
             completionResult
           }
-          .left
-          .map { error =>
-            recordExchange(startedAt, requestBody, None, Left(error))
-            error
-          }
+          .tapLeft(error => recordExchange(startedAt, requestBody, None, Left(error)))
           .flatten
     }
   }
@@ -373,11 +370,9 @@ curl https://api.anthropic.com/v1/messages \
               completion
             }
           )
-          .left
-          .map { error =>
+          .tapLeft(error =>
             recordExchange(startedAt, requestBody, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
-            error
-          }
+          )
     }
   }
 

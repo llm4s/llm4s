@@ -9,6 +9,7 @@ import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.TransformationResult
 import org.llm4s.toolapi.{ AzureToolHelper, ToolRegistry }
@@ -169,10 +170,7 @@ class OpenAIClient private (
       )
     } yield completion
 
-    result.left.map { error =>
-      recordExchange(startedAt, None, None, Left(error))
-      error
-    }
+    result.tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
   }
 
   override def streamComplete(
@@ -197,10 +195,7 @@ class OpenAIClient private (
           }
       }
 
-    result.left.map { error =>
-      recordExchange(startedAt, None, None, Left(error))
-      error
-    }
+    result.tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
   }
 
   override protected def releaseResources(): Unit =
@@ -233,11 +228,7 @@ class OpenAIClient private (
         recordExchange(startedAt, Some(requestBody), Some(serializeCompletions(completions)), Right(completion))
         Right(completion)
       }
-      .left
-      .map { error =>
-        recordExchange(startedAt, Some(requestBody), None, Left(error))
-        error
-      }
+      .tapLeft(error => recordExchange(startedAt, Some(requestBody), None, Left(error)))
   }
 
   /**
@@ -279,11 +270,9 @@ class OpenAIClient private (
           completion
         }
       )
-      .left
-      .map { error =>
+      .tapLeft(error =>
         recordExchange(startedAt, Some(requestBody), Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
-        error
-      }
+      )
   }
 
   /**
