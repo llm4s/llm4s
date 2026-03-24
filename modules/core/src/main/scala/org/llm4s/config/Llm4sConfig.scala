@@ -1,6 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.llmconnect.config._
+import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.metrics.{ MetricsCollector, PrometheusEndpoint }
 import org.llm4s.types.Result
 import pureconfig.ConfigSource
@@ -80,6 +81,18 @@ object Llm4sConfig {
    */
   def metrics(): Result[(MetricsCollector, Option[PrometheusEndpoint])] =
     org.llm4s.config.MetricsConfigLoader.load(ConfigSource.default)
+
+  /**
+   * Loads provider exchange logging configuration from the current environment.
+   *
+   * Reads the optional `llm4s.exchangeLogging` section. When absent or disabled,
+   * exchange logging remains off. When enabled, a JSONL sink is constructed
+   * from a configured directory and writes to a new per-run file.
+   */
+  // TODO: As part of the wider Llm4sConfig cleanup, accept an optional ConfigSource
+  // parameter here instead of hard-wiring ConfigSource.default inside the method body.
+  def exchangeLogging(): Result[ProviderExchangeLogging] =
+    org.llm4s.config.ProviderExchangeLoggingConfigLoader.load(ConfigSource.default)
 
   final case class EmbeddingsChunkingSettings(
     enabled: Boolean,

@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.error.{ ExecutionError, NetworkError, ServiceError }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
+import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
@@ -10,6 +11,7 @@ import org.llm4s.types.{ Result, TryOps }
 
 import java.io.{ BufferedReader, IOException, InputStreamReader }
 import java.nio.charset.StandardCharsets
+import java.time.Instant
 import scala.util.Try
 
 /**
@@ -46,6 +48,7 @@ import scala.util.Try
 class OllamaClient(
   config: OllamaConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
   private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
 ) extends BaseLifecycleLLMClient {
 
@@ -62,19 +65,32 @@ class OllamaClient(
 
   private def connect(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
     val requestBody = createRequestBody(conversation, options, stream = false)
+    val requestText = requestBody.render()
     val url         = s"${config.baseUrl}/api/chat"
     val headers     = Map("Content-Type" -> "application/json")
+    val startedAt   = Instant.now()
     try {
-      val response = httpClient.post(url, headers, requestBody.render(), timeout = 120000)
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        Try(ujson.read(response.body)).toResult
-          .flatMap(json => Try(parseCompletion(json)).toResult)
-      } else {
-        HttpErrorMapper.mapHttpError(response.statusCode, response.body, providerName)
-      }
+      val response = httpClient.post(url, headers, requestText, timeout = 120000)
+      val result =
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          Try(ujson.read(response.body)).toResult
+            .flatMap(json => Try(parseCompletion(json)).toResult)
+        } else {
+          HttpErrorMapper.mapHttpError(response.statusCode, response.body, providerName)
+        }
+      recordExchange(startedAt, requestText, response.body, result)
+      result
     } catch {
       case e: InterruptedException =>
         Thread.currentThread().interrupt()
+        val error = ExecutionError(
+          s"Ollama request interrupted: ${e.getMessage}",
+          operation = "ollama.chat",
+          exitCode = None,
+          cause = Some(e),
+          context = Map.empty
+        )
+        recordExchange(startedAt, requestText, "", Left(error))
         Left(
           ExecutionError(
             s"Ollama request interrupted: ${e.getMessage}",
@@ -85,11 +101,31 @@ class OllamaClient(
           )
         )
       case e: IOException =>
-        Left(NetworkError("Failed to connect to Ollama", Some(e), config.baseUrl))
+        val error = NetworkError("Failed to connect to Ollama", Some(e), config.baseUrl)
+        recordExchange(startedAt, requestText, "", Left(error))
+        Left(error)
       case scala.util.control.NonFatal(e) =>
-        Left(ServiceError(500, "ollama", s"Unexpected error: ${e.getMessage}"))
+        val error = ServiceError(500, "ollama", s"Unexpected error: ${e.getMessage}")
+        recordExchange(startedAt, requestText, "", Left(error))
+        Left(error)
     }
   }
+
+  private def recordExchange(
+    startedAt: Instant,
+    requestBody: String,
+    responseBody: String,
+    result: Result[Completion]
+  ): Unit =
+    ProviderExchangeRecorder.record(
+      exchangeLogging = exchangeLogging,
+      provider = providerName,
+      model = Some(config.model),
+      startedAt = startedAt,
+      requestBody = requestBody,
+      responseBody = Option(responseBody).filter(_.nonEmpty),
+      result = result
+    )
 
   override def streamComplete(
     conversation: Conversation,
@@ -97,22 +133,28 @@ class OllamaClient(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val requestBody = createRequestBody(conversation, options, stream = true)
+    val requestText = requestBody.render()
     val url         = s"${config.baseUrl}/api/chat"
     val headers     = Map("Content-Type" -> "application/json")
+    val startedAt   = Instant.now()
+    val rawResponse = new StringBuilder
 
     try {
-      val response = httpClient.postStream(url, headers, requestBody.render(), timeout = 600000)
+      val response = httpClient.postStream(url, headers, requestText, timeout = 600000)
       if (response.statusCode != 200) {
         val err = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)
         response.body.close()
-        HttpErrorMapper.mapHttpError(response.statusCode, err, providerName)
+        val result = HttpErrorMapper.mapHttpError(response.statusCode, err, providerName)
+        recordExchange(startedAt, requestText, err, result)
+        result
       } else {
         val accumulator = StreamingAccumulator.create()
         val reader      = new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))
-        val processEither = Try {
+        val processResult = Try {
           try {
             var line: String = null
             while ({ line = reader.readLine(); line != null }) {
+              rawResponse.append(line).append('\n')
               val trimmed = line.trim
               if (trimmed.nonEmpty) {
                 val json = ujson.read(trimmed)
@@ -146,17 +188,29 @@ class OllamaClient(
             Try(reader.close())
             Try(response.body.close())
           }
-        }.toEither
-        val _ = processEither
+        }.toResult
 
-        accumulator.toCompletion.map { c =>
-          val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-          c.copy(model = config.model, estimatedCost = cost)
-        }
+        val result = processResult
+          .flatMap(_ => accumulator.toCompletion)
+          .map { c =>
+            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+            c.copy(model = config.model, estimatedCost = cost)
+          }
+
+        recordExchange(startedAt, requestText, rawResponse.result(), result)
+        result
       }
     } catch {
       case e: InterruptedException =>
         Thread.currentThread().interrupt()
+        val error = ExecutionError(
+          s"Ollama streaming request interrupted: ${e.getMessage}",
+          operation = "ollama.stream",
+          exitCode = None,
+          cause = Some(e),
+          context = Map.empty
+        )
+        recordExchange(startedAt, requestText, rawResponse.result(), Left(error))
         Left(
           ExecutionError(
             s"Ollama streaming request interrupted: ${e.getMessage}",
@@ -167,9 +221,13 @@ class OllamaClient(
           )
         )
       case e: IOException =>
-        Left(NetworkError("Failed to connect to Ollama stream", Some(e), config.baseUrl))
+        val error = NetworkError("Failed to connect to Ollama stream", Some(e), config.baseUrl)
+        recordExchange(startedAt, requestText, rawResponse.result(), Left(error))
+        Left(error)
       case scala.util.control.NonFatal(e) =>
-        Left(ServiceError(500, "ollama", s"Unexpected streaming error: ${e.getMessage}"))
+        val error = ServiceError(500, "ollama", s"Unexpected streaming error: ${e.getMessage}")
+        recordExchange(startedAt, requestText, rawResponse.result(), Left(error))
+        Left(error)
     }
   }
 
@@ -254,7 +312,8 @@ object OllamaClient {
    */
   def apply(
     config: OllamaConfig,
-    metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+    metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
+    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
   ): Result[OllamaClient] =
-    Try(new OllamaClient(config, metrics)).toResult
+    Try(new OllamaClient(config, metrics, exchangeLogging)).toResult
 }

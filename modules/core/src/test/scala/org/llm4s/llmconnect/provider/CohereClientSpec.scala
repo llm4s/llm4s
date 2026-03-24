@@ -2,13 +2,16 @@ package org.llm4s.llmconnect.provider
 
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, ValidationError }
+import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.CohereConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.OptionValues._
 
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
+import scala.collection.mutable.ListBuffer
 
 class CohereClientSpec extends AnyFlatSpec with Matchers {
 
@@ -181,5 +184,47 @@ class CohereClientSpec extends AnyFlatSpec with Matchers {
     val err = result.left.toOption.get
     err shouldBe a[ServiceError]
     err.context("httpStatus") shouldBe "500"
+  }
+
+  it should "record provider exchanges when logging is enabled" in withServer { exchange =>
+    val body =
+      """{
+        |  "message": {
+        |    "content": [
+        |      { "text": "Logged response" }
+        |    ]
+        |  },
+        |  "usage": {
+        |    "tokens": {
+        |      "input_tokens": 10,
+        |      "output_tokens": 5
+        |    }
+        |  }
+        |}""".stripMargin
+
+    val bytes = body.getBytes(StandardCharsets.UTF_8)
+    exchange.getResponseHeaders.add("Content-Type", "application/json")
+    exchange.sendResponseHeaders(200, bytes.length)
+    val os = exchange.getResponseBody
+    os.write(bytes)
+    os.close()
+  } { baseUrl =>
+    val exchanges = ListBuffer.empty[ProviderExchange]
+    val sink = new ProviderExchangeSink {
+      override def record(exchange: ProviderExchange): Unit =
+        exchanges += exchange
+    }
+    val client = new CohereClient(
+      config(baseUrl),
+      exchangeLogging = ProviderExchangeLogging.Enabled(sink)
+    )
+
+    val result = client.complete(conversation, CompletionOptions())
+    result.isRight shouldBe true
+    exchanges should have size 1
+    exchanges.head.provider shouldBe "cohere"
+    exchanges.head.model shouldBe Some("command-r")
+    exchanges.head.requestBody should include("hello")
+    exchanges.head.responseBody.value should include("Logged response")
   }
 }

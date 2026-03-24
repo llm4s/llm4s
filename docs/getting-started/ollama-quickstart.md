@@ -535,9 +535,14 @@ sbt "samples/runMain org.llm4s.samples.basic.OllamaExample"
 # Run Ollama streaming example
 sbt "samples/runMain org.llm4s.samples.basic.OllamaStreamingExample"
 
+# Run Ollama streaming example with raw provider exchange logging
+sbt "samples/runMain org.llm4s.samples.basic.OllamaStreamingExample /tmp/my-provider-exchanges"
+
 # Run tool calling example (works with any provider)
 sbt "samples/runMain org.llm4s.samples.toolapi.BuiltinToolsExample"
 ```
+
+The logging-enabled streaming example writes one timestamped JSONL file per run to the directory you provide. Each entry captures the raw request and response exchange, including accumulated streaming payloads for streaming-capable providers.
 
 ---
 

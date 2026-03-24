@@ -65,6 +65,7 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
 - **Multimodal Generation**: Support for text, image, voice, and other LLM modalities.
 - **RAG (Retrieval-Augmented Generation)**: Built-in tools for search, embedding, retrieval workflows, and RAGAS evaluation with benchmarking harness.
 - **Observability**: Detailed trace logging, monitoring, and analytics for debugging and performance insights.
+- **Raw Provider Exchange Logging**: Persist request/response exchanges, including streaming responses for streaming-capable providers, to inspect raw provider payloads during development and debugging.
 
 ## Architecture
 
