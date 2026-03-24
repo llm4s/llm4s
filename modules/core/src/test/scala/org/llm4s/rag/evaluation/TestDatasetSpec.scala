@@ -223,8 +223,7 @@ class TestDatasetSpec extends AnyFlatSpec with Matchers {
       loaded.name shouldBe "file_test"
       loaded.samples.size shouldBe 1
       loaded.samples.head.question shouldBe "Q1"
-    } finally
-      Files.deleteIfExists(tempFile)
+    } finally Files.deleteIfExists(tempFile)
   }
 
   it should "fail gracefully for invalid JSON" in {

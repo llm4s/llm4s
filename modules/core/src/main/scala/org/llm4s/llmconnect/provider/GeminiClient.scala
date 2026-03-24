@@ -5,6 +5,7 @@ import org.llm4s.error.ValidationError
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
+import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming._
@@ -15,6 +16,7 @@ import org.slf4j.LoggerFactory
 
 import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
+import java.time.Instant
 import java.util.UUID
 import scala.util.Try
 
@@ -60,6 +62,7 @@ import scala.util.Try
 class GeminiClient(
   config: GeminiConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
   private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
 ) extends BaseLifecycleLLMClient {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -72,25 +75,31 @@ class GeminiClient(
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = completeWithMetrics {
+    val startedAt = Instant.now()
     TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
       transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
+        val requestText             = requestBody.render()
         val url                     = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
 
         // Note: URL contains API key as query param - do not log full URL
         logger.debug(s"[Gemini] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
-        logger.debug(s"[Gemini] Request body: ${Redaction.redactForLogging(requestBody.render())}")
+        logger.debug(s"[Gemini] Request body: ${Redaction.redactForLogging(requestText)}")
 
         val headers = Map("Content-Type" -> "application/json")
 
         val attempt = Try {
-          val response = httpClient.post(url, headers, requestBody.render(), timeout = 120000)
+          val response = httpClient.post(url, headers, requestText, timeout = 120000)
 
           if (response.statusCode >= 200 && response.statusCode < 300) {
-            parseCompletionResponse(response.body)
+            val completionResult = parseCompletionResponse(response.body)
+            recordExchange(startedAt, requestText, Some(response.body), completionResult)
+            completionResult
           } else {
-            handleErrorResponse(response.statusCode, response.body)
+            val errorResult = handleErrorResponse(response.statusCode, response.body)
+            recordExchange(startedAt, requestText, Some(response.body), errorResult)
+            errorResult
           }
         }.toEither.left
           .map(e => e.toLLMError)
@@ -105,31 +114,37 @@ class GeminiClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
+    val startedAt = Instant.now()
     TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
       transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
+        val requestText             = requestBody.render()
         val url = s"${config.baseUrl}/models/${config.model}:streamGenerateContent?key=${config.apiKey}&alt=sse"
 
         // Note: URL contains API key as query param - do not log full URL
         logger.debug(s"[Gemini] Starting stream to ${config.baseUrl}/models/${config.model}:streamGenerateContent")
 
         val headers  = Map("Content-Type" -> "application/json")
-        val response = httpClient.postStream(url, headers, requestBody.render(), timeout = 600000)
+        val response = httpClient.postStream(url, headers, requestText, timeout = 600000)
 
         if (response.statusCode < 200 || response.statusCode >= 300) {
           val err = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)
           response.body.close()
-          handleErrorResponse(response.statusCode, err)
+          val errorResult = handleErrorResponse(response.statusCode, err)
+          recordExchange(startedAt, requestText, Some(err), errorResult)
+          errorResult
         } else {
           val accumulator = StreamingAccumulator.create()
           val messageId   = UUID.randomUUID().toString
           val reader      = new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))
+          val rawStream   = StringBuilder()
 
           Try {
             try {
               var line: String = null
               while ({ line = reader.readLine(); line != null }) {
+                rawStream.append(line).append('\n')
                 val trimmed = line.trim
                 // SSE format: lines starting with "data: " contain JSON
                 if (trimmed.startsWith("data: ")) {
@@ -160,10 +175,17 @@ class GeminiClient(
             .map(_.toLLMError)
             .flatMap(_ =>
               accumulator.toCompletion.map { c =>
-                val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-                c.copy(model = config.model, estimatedCost = cost)
+                val cost       = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+                val completion = c.copy(model = config.model, estimatedCost = cost)
+                recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
+                completion
               }
             )
+            .left
+            .map { error =>
+              recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
+              error
+            }
         }
     }
   }
@@ -448,6 +470,22 @@ class GeminiClient(
     HttpErrorMapper.mapHttpError(statusCode, body, providerName)
   }
 
+  private def recordExchange(
+    startedAt: Instant,
+    requestBody: String,
+    responseBody: Option[String],
+    result: Result[?]
+  ): Unit =
+    ProviderExchangeRecorder.record(
+      exchangeLogging = exchangeLogging,
+      provider = providerName,
+      model = Some(config.model),
+      startedAt = startedAt,
+      requestBody = requestBody,
+      responseBody = responseBody,
+      result = result
+    )
+
   override protected def releaseResources(): Unit =
     (httpClient: Any) match {
       case c: AutoCloseable => c.close()
@@ -463,4 +501,11 @@ object GeminiClient {
 
   def apply(config: GeminiConfig, metrics: org.llm4s.metrics.MetricsCollector): Result[GeminiClient] =
     Try(new GeminiClient(config, metrics)).toResult
+
+  def apply(
+    config: GeminiConfig,
+    metrics: org.llm4s.metrics.MetricsCollector,
+    exchangeLogging: ProviderExchangeLogging
+  ): Result[GeminiClient] =
+    Try(new GeminiClient(config, metrics, exchangeLogging)).toResult
 }

@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
+import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.MistralConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
@@ -10,6 +11,7 @@ import org.llm4s.types.Result
 import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
+import java.time.Instant
 import java.time.Duration
 import scala.util.Try
 
@@ -27,7 +29,8 @@ import scala.util.Try
  */
 class MistralClient(
   config: MistralConfig,
-  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
 ) extends BaseLifecycleLLMClient {
 
   private val httpClient = HttpClient.newHttpClient()
@@ -46,14 +49,16 @@ class MistralClient(
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = completeWithMetrics {
+    val startedAt = Instant.now()
     buildChatRequest(conversation, options).flatMap { requestBody =>
+      val requestText = requestBody.render()
       val request = HttpRequest
         .newBuilder()
         .uri(URI.create(s"${config.baseUrl}/v1/chat/completions"))
         .header("Content-Type", "application/json")
         .header("Authorization", s"Bearer ${config.apiKey}")
         .timeout(Duration.ofMinutes(2))
-        .POST(HttpRequest.BodyPublishers.ofString(requestBody.render(), StandardCharsets.UTF_8))
+        .POST(HttpRequest.BodyPublishers.ofString(requestText, StandardCharsets.UTF_8))
         .build()
 
       val attempt = Try {
@@ -63,9 +68,13 @@ class MistralClient(
       attempt.flatMap { response =>
         val status = response.statusCode()
         if (status >= 200 && status < 300) {
-          parseChatResponse(response.body())
+          val completionResult = parseChatResponse(response.body())
+          recordExchange(startedAt, requestText, Some(response.body()), completionResult)
+          completionResult
         } else {
-          handleErrorResponse(status, response.body())
+          val errorResult = handleErrorResponse(status, response.body())
+          recordExchange(startedAt, requestText, Some(response.body()), errorResult)
+          errorResult
         }
       }
     }
@@ -76,6 +85,9 @@ class MistralClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
+    // TODO: When Mistral streaming is implemented here, add raw streaming
+    // exchange capture using the same completed-or-partial logging contract
+    // used by the other streaming-capable providers.
     Left(
       ConfigurationError(
         "Mistral streaming is not supported in this minimal v1 provider implementation"
@@ -221,6 +233,22 @@ class MistralClient(
   private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] =
     HttpErrorMapper.mapHttpError(statusCode, body, providerName)
 
+  private def recordExchange(
+    startedAt: Instant,
+    requestBody: String,
+    responseBody: Option[String],
+    result: Result[?]
+  ): Unit =
+    ProviderExchangeRecorder.record(
+      exchangeLogging = exchangeLogging,
+      provider = providerName,
+      model = Some(config.model),
+      startedAt = startedAt,
+      requestBody = requestBody,
+      responseBody = responseBody,
+      result = result
+    )
+
 }
 
 object MistralClient {
@@ -231,4 +259,11 @@ object MistralClient {
 
   def apply(config: MistralConfig, metrics: org.llm4s.metrics.MetricsCollector): Result[MistralClient] =
     Try(new MistralClient(config, metrics)).toResult
+
+  def apply(
+    config: MistralConfig,
+    metrics: org.llm4s.metrics.MetricsCollector,
+    exchangeLogging: ProviderExchangeLogging
+  ): Result[MistralClient] =
+    Try(new MistralClient(config, metrics, exchangeLogging)).toResult
 }

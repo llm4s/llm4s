@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.util.Redaction
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
+import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
@@ -12,6 +13,7 @@ import org.llm4s.error.ThrowableOps._
 import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.time.Duration
+import java.time.Instant
 import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import scala.util.Try
@@ -34,7 +36,8 @@ import scala.util.Try
  */
 class ZaiClient(
   config: ZaiConfig,
-  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
+  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
 ) extends BaseLifecycleLLMClient {
   private val httpClient = HttpClient.newHttpClient()
   private val logger     = org.slf4j.LoggerFactory.getLogger(getClass)
@@ -47,10 +50,12 @@ class ZaiClient(
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = completeWithMetrics {
+    val startedAt   = Instant.now()
     val requestBody = createRequestBody(conversation, options)
+    val requestText = requestBody.render()
 
     logger.debug(s"Sending request to Z.ai API at ${config.baseUrl}/chat/completions")
-    logger.debug(s"Request body: ${Redaction.redactForLogging(requestBody.render())}")
+    logger.debug(s"Request body: ${Redaction.redactForLogging(requestText)}")
 
     val attempt =
       Try {
@@ -60,7 +65,7 @@ class ZaiClient(
           .header("Content-Type", "application/json")
           .header("Authorization", s"Bearer ${config.apiKey}")
           .header("User-Agent", "llm4s-coding-assistant/1.0")
-          .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
+          .POST(HttpRequest.BodyPublishers.ofString(requestText))
           .build()
 
         val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
@@ -74,10 +79,13 @@ class ZaiClient(
 
     attempt.flatMap { response =>
       if (response.statusCode() >= 200 && response.statusCode() < 300) {
-        val responseJson = ujson.read(response.body())
-        Right(parseCompletion(responseJson))
+        val completionResult = Try(ujson.read(response.body())).toEither.left.map(_.toLLMError).map(parseCompletion)
+        recordExchange(startedAt, requestText, Some(response.body()), completionResult)
+        completionResult
       } else {
-        HttpErrorMapper.mapHttpError(response.statusCode(), response.body(), providerName)
+        val errorResult = HttpErrorMapper.mapHttpError(response.statusCode(), response.body(), providerName)
+        recordExchange(startedAt, requestText, Some(response.body()), errorResult)
+        errorResult
       }
     }
   }
@@ -87,10 +95,13 @@ class ZaiClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
+    val startedAt   = Instant.now()
     val requestBody = createRequestBody(conversation, options)
     requestBody("stream") = true
+    val requestText = requestBody.render()
 
     val accumulator = StreamingAccumulator.create()
+    val rawStream   = StringBuilder()
 
     val requestResult = Try {
       val request = HttpRequest
@@ -100,16 +111,21 @@ class ZaiClient(
         .header("Authorization", s"Bearer ${config.apiKey}")
         .header("User-Agent", "llm4s-coding-assistant/1.0")
         .timeout(Duration.ofMinutes(5))
-        .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
+        .POST(HttpRequest.BodyPublishers.ofString(requestText))
         .build()
-
       httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
-    }.toEither.left.map(_.toLLMError)
+    }.toEither.left.map { error =>
+      val llmError = error.toLLMError
+      recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(llmError))
+      llmError
+    }
 
     requestResult.flatMap { response =>
       if (response.statusCode() != 200) {
-        val errorBody = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
-        HttpErrorMapper.mapHttpError(response.statusCode(), errorBody, providerName)
+        val errorBody   = new String(response.body().readAllBytes(), StandardCharsets.UTF_8)
+        val errorResult = HttpErrorMapper.mapHttpError(response.statusCode(), errorBody, providerName)
+        recordExchange(startedAt, requestText, Some(errorBody), errorResult)
+        errorResult
       } else {
         val streamResult = Try {
           val sseParser = SSEParser.createStreamingParser()
@@ -117,6 +133,7 @@ class ZaiClient(
           try {
             var line: String = null
             while ({ line = reader.readLine(); line != null }) {
+              rawStream.append(line).append('\n')
               sseParser.addChunk(line + "\n")
               while (sseParser.hasEvents)
                 sseParser.nextEvent().foreach { event =>
@@ -138,12 +155,20 @@ class ZaiClient(
           }
         }.toEither.left.map(_.toLLMError)
 
-        streamResult.flatMap(_ =>
-          accumulator.toCompletion.map { c =>
-            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            c.copy(model = config.model, estimatedCost = cost)
+        streamResult
+          .flatMap(_ =>
+            accumulator.toCompletion.map { c =>
+              val cost       = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+              val completion = c.copy(model = config.model, estimatedCost = cost)
+              recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
+              completion
+            }
+          )
+          .left
+          .map { error =>
+            recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
+            error
           }
-        )
       }
     }
   }
@@ -342,6 +367,22 @@ class ZaiClient(
       case c: AutoCloseable => c.close()
       case _                => ()
     }
+
+  private def recordExchange(
+    startedAt: Instant,
+    requestBody: String,
+    responseBody: Option[String],
+    result: Result[?]
+  ): Unit =
+    ProviderExchangeRecorder.record(
+      exchangeLogging = exchangeLogging,
+      provider = providerName,
+      model = Some(config.model),
+      startedAt = startedAt,
+      requestBody = requestBody,
+      responseBody = responseBody,
+      result = result
+    )
 }
 
 object ZaiClient {
@@ -352,4 +393,11 @@ object ZaiClient {
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
   ): Result[ZaiClient] =
     Try(new ZaiClient(config, metrics)).toResult
+
+  def apply(
+    config: ZaiConfig,
+    metrics: org.llm4s.metrics.MetricsCollector,
+    exchangeLogging: ProviderExchangeLogging
+  ): Result[ZaiClient] =
+    Try(new ZaiClient(config, metrics, exchangeLogging)).toResult
 }

@@ -2,6 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
+import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model.{
   CompletionOptions,
@@ -12,11 +13,14 @@ import org.llm4s.llmconnect.model.{
   UserMessage
 }
 import org.llm4s.metrics.MockMetricsCollector
+import org.llm4s.testutil.LocalProviderTestServer.{ openAISseBody, sendSseResponse }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.OptionValues._
 
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
+import scala.collection.mutable.ListBuffer
 
 class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
@@ -137,6 +141,40 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
     requestBody.obj should not contain key("response_format")
   }
 
+  it should "record a provider exchange when logging is enabled" in withServer { exchange =>
+    sendResponse(
+      exchange,
+      200,
+      """{"id":"chatcmpl-openrouter-1","created":0,"model":"anthropic/claude-3.5-sonnet","choices":[{"index":0,"message":{"role":"assistant","content":"logged via openrouter"}}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}"""
+    )
+  } { baseUrl =>
+    val recorded = ListBuffer.empty[ProviderExchange]
+    val sink = new ProviderExchangeSink:
+      override def record(exchange: ProviderExchange): Unit =
+        recorded += exchange
+
+    val client = new OpenRouterClient(
+      localConfig(baseUrl),
+      exchangeLogging = ProviderExchangeLogging.enabled(sink)
+    )
+
+    val result = client.complete(conversation, CompletionOptions())
+
+    result.isRight shouldBe true
+    recorded should have size 1
+
+    val exchange = recorded.head
+    exchange.provider shouldBe "openrouter"
+    exchange.model shouldBe Some("anthropic/claude-3.5-sonnet")
+    exchange.requestBody should include("\"messages\"")
+    exchange.requestBody should include("hello")
+    exchange.responseBody shouldBe defined
+    exchange.responseBody.get should include("chatcmpl-openrouter-1")
+    exchange.responseBody.get should include("logged via openrouter")
+    exchange.errorMessage shouldBe empty
+    exchange.durationMs should be >= 0L
+  }
+
   // ==========================================================================
   // complete() error handling
   // ==========================================================================
@@ -226,6 +264,31 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
     result.isLeft shouldBe true
     chunkCount shouldBe 0
+  }
+
+  it should "record provider exchanges for streaming responses when logging is enabled" in withServer { exchange =>
+    sendSseResponse(exchange, openAISseBody(Seq("Hello", " world"), "anthropic/claude-3.5-sonnet"))
+  } { baseUrl =>
+    val recorded = ListBuffer.empty[ProviderExchange]
+    val sink = new ProviderExchangeSink:
+      override def record(exchange: ProviderExchange): Unit =
+        recorded += exchange
+
+    val client = new OpenRouterClient(
+      localConfig(baseUrl),
+      exchangeLogging = ProviderExchangeLogging.enabled(sink)
+    )
+
+    val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+
+    result.isRight shouldBe true
+    recorded should have size 1
+    recorded.head.provider shouldBe "openrouter"
+    recorded.head.requestBody should include("\"stream\":true")
+    recorded.head.responseBody.value should include("data:")
+    recorded.head.responseBody.value should include("Hello")
+    recorded.head.responseBody.value should include("[DONE]")
+    recorded.head.errorMessage shouldBe empty
   }
 
   it should "stream a successful SSE response" in withServer { exchange =>

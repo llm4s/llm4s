@@ -1,14 +1,17 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
+import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model._
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.OptionValues._
 
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
+import scala.collection.mutable.ListBuffer
 
 class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
 
@@ -21,7 +24,12 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
   )
 
   private def mkClient(mockHttp: Llm4sHttpClient): GeminiClient =
-    new GeminiClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, mockHttp)
+    new GeminiClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
 
   private def httpOk(body: String): HttpResponse = HttpResponse(200, body, Map.empty)
   private def httpErr(status: Int): HttpResponse = HttpResponse(status, s"Error $status", Map.empty)
@@ -131,6 +139,31 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     result.left.toOption.get shouldBe a[org.llm4s.error.ServiceError]
   }
 
+  it should "record provider exchanges when logging is enabled" in {
+    val exchanges = ListBuffer.empty[ProviderExchange]
+    val sink = new ProviderExchangeSink {
+      override def record(exchange: ProviderExchange): Unit =
+        exchanges += exchange
+    }
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(httpOk(successBody))
+
+    val client = new GeminiClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Enabled(sink),
+      mockHttp
+    )
+    val result = client.complete(conversation("Hi"), CompletionOptions())
+
+    result.isRight shouldBe true
+    exchanges should have size 1
+    exchanges.head.provider shouldBe "gemini"
+    exchanges.head.model shouldBe Some("gemini-2.0-flash")
+    exchanges.head.requestBody should include("Hi")
+    exchanges.head.responseBody.value should include("Hello!")
+  }
+
   it should "include responseMimeType and no responseSchema when ResponseFormat.Json is set" in {
     var capturedBody: String = ""
     val mockHttp             = stub[Llm4sHttpClient]
@@ -225,6 +258,37 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     val usage = result.toOption.get.usage.get
     usage.promptTokens shouldBe 5
     usage.completionTokens shouldBe 2
+  }
+
+  it should "record provider exchanges for streaming responses when logging is enabled" in {
+    val exchanges = ListBuffer.empty[ProviderExchange]
+    val sink = new ProviderExchangeSink:
+      override def record(exchange: ProviderExchange): Unit =
+        exchanges += exchange
+
+    val sseData =
+      "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]}}]}\n" +
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" world\"}]}}]," +
+        "\"usageMetadata\":{\"promptTokenCount\":5,\"candidatesTokenCount\":2,\"totalTokenCount\":7}}\n"
+    val inputStream = new ByteArrayInputStream(sseData.getBytes(StandardCharsets.UTF_8))
+    val mockHttp    = stub[Llm4sHttpClient]
+    (mockHttp.postStream _).when(*, *, *, *).returns(StreamingHttpResponse(200, inputStream))
+
+    val client = new GeminiClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.enabled(sink),
+      mockHttp
+    )
+    val result = client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
+
+    result.isRight shouldBe true
+    exchanges should have size 1
+    exchanges.head.provider shouldBe "gemini"
+    exchanges.head.requestBody should include("Hi")
+    exchanges.head.responseBody.value should include("data:")
+    exchanges.head.responseBody.value should include("Hello")
+    exchanges.head.errorMessage shouldBe empty
   }
 
   it should "return an error for non-200 status before reading the body" in {

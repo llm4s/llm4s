@@ -2,13 +2,16 @@ package org.llm4s.llmconnect.provider
 
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError, ValidationError }
+import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.MistralConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ToolMessage, UserMessage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.OptionValues._
 
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
+import scala.collection.mutable.ListBuffer
 
 class MistralClientSpec extends AnyFlatSpec with Matchers {
 
@@ -606,6 +609,50 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
       err => err shouldBe a[ServiceError],
       _ => fail("Expected Left(ServiceError)")
     )
+  }
+
+  it should "record provider exchanges when logging is enabled" in withServer { exchange =>
+    val responseBody =
+      """{
+        |  "id": "cmpl-log",
+        |  "created": 1700000000,
+        |  "model": "mistral-small-latest",
+        |  "choices": [
+        |    {
+        |      "message": {
+        |        "role": "assistant",
+        |        "content": "Logged response"
+        |      },
+        |      "finish_reason": "stop"
+        |    }
+        |  ]
+        |}""".stripMargin
+
+    val bytes = responseBody.getBytes(StandardCharsets.UTF_8)
+    exchange.getResponseHeaders.add("Content-Type", "application/json")
+    exchange.sendResponseHeaders(200, bytes.length)
+    val os = exchange.getResponseBody
+    os.write(bytes)
+    os.close()
+  } { baseUrl =>
+    val exchanges = ListBuffer.empty[ProviderExchange]
+    val sink = new ProviderExchangeSink {
+      override def record(exchange: ProviderExchange): Unit =
+        exchanges += exchange
+    }
+    val client = new MistralClient(
+      config(baseUrl),
+      exchangeLogging = ProviderExchangeLogging.Enabled(sink)
+    )
+
+    val result = client.complete(conversation, CompletionOptions())
+
+    result.isRight shouldBe true
+    exchanges should have size 1
+    exchanges.head.provider shouldBe "mistral"
+    exchanges.head.model shouldBe Some("mistral-small-latest")
+    exchanges.head.requestBody should include("hello")
+    exchanges.head.responseBody.value should include("Logged response")
   }
 
   it should "fail fast with ValidationError for unsupported message types" in withServer { exchange =>

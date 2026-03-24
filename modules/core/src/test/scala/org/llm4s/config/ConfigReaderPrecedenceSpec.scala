@@ -33,8 +33,7 @@ class ConfigReaderPrecedenceSpec extends AnyWordSpec with Matchers {
           case other =>
             fail(s"Expected OpenAIConfig, got $other")
         }
-      } finally
-        if (original == null) System.clearProperty(key) else System.setProperty(key, original)
+      } finally if (original == null) System.clearProperty(key) else System.setProperty(key, original)
     }
   }
 }

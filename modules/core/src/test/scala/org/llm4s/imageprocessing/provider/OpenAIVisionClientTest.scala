@@ -146,8 +146,7 @@ class OpenAIVisionClientTest extends AnyFlatSpec with Matchers with BeforeAndAft
       result.isLeft shouldBe true
       result.isLeft shouldBe true
       result.isLeft shouldBe true
-    } finally
-      Files.deleteIfExists(textFile)
+    } finally Files.deleteIfExists(textFile)
   }
 
   it should "use correct authorization header" in {

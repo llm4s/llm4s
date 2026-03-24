@@ -66,8 +66,7 @@ class ImageModelsTest extends AnyFlatSpec with Matchers {
       result shouldBe Right(())
       Files.exists(tempFile) shouldBe true
       Files.readAllBytes(tempFile) shouldBe data
-    } finally
-      Files.deleteIfExists(tempFile)
+    } finally Files.deleteIfExists(tempFile)
   }
 
   it should "fail to save with invalid path" in {

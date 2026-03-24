@@ -426,8 +426,7 @@ class AgentStateSpec extends AnyFlatSpec with Matchers {
       loaded.status shouldBe AgentStatus.Complete
       loaded.logs shouldBe Seq("Initialized", "Completed")
       loaded.systemMessage.map(_.content) shouldBe Some("You are helpful")
-    } finally
-      Files.deleteIfExists(tempFile)
+    } finally Files.deleteIfExists(tempFile)
   }
 
   it should "return error for non-existent file" in {
@@ -441,8 +440,7 @@ class AgentStateSpec extends AnyFlatSpec with Matchers {
       Files.write(tempFile, "not valid json".getBytes)
       val result = AgentState.loadFromFile(tempFile.toString, emptyTools)
       result.isLeft shouldBe true
-    } finally
-      Files.deleteIfExists(tempFile)
+    } finally Files.deleteIfExists(tempFile)
   }
 
   // ==========================================================================

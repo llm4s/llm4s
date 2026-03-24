@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
+import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.metrics.MockMetricsCollector
@@ -9,6 +10,7 @@ import org.scalatest.funsuite.AnyFunSuite
 
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
+import scala.collection.mutable.ListBuffer
 
 /**
  * Test helper for building Ollama request bodies.
@@ -105,7 +107,18 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
   )
 
   private def mkClient(mockHttp: Llm4sHttpClient): OllamaClient =
-    new OllamaClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, mockHttp)
+    new OllamaClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
+
+  private def mkClient(
+    mockHttp: Llm4sHttpClient,
+    exchangeLogging: ProviderExchangeLogging
+  ): OllamaClient =
+    new OllamaClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, exchangeLogging, mockHttp)
 
   private def httpOk(body: String): HttpResponse = HttpResponse(200, body, Map.empty)
   private def conversation(text: String): Conversation =
@@ -138,6 +151,32 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     assert(usage.promptTokens == 12)
     assert(usage.completionTokens == 8)
     assert(usage.totalTokens == 20)
+  }
+
+  test("complete() records a provider exchange when logging is enabled") {
+    val mockHttp = stub[Llm4sHttpClient]
+    val body     = """{"message":{"content":"Logged!"},"prompt_eval_count":10,"eval_count":5}"""
+    val recorded = ListBuffer.empty[ProviderExchange]
+    val sink = new ProviderExchangeSink:
+      override def record(exchange: ProviderExchange): Unit =
+        recorded += exchange
+
+    (mockHttp.post _).when(*, *, *, *).returns(httpOk(body))
+
+    val client = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
+    val result = client.complete(conversation("Hello"), CompletionOptions())
+
+    assert(result.isRight)
+    assert(recorded.size == 1)
+
+    val exchange = recorded.head
+    assert(exchange.provider == "ollama")
+    assert(exchange.model.contains("llama3.1"))
+    assert(exchange.requestBody.contains("\"model\":\"llama3.1\""))
+    assert(exchange.requestBody.contains("\"stream\":false"))
+    assert(exchange.responseBody.contains(body))
+    assert(exchange.errorMessage.isEmpty)
+    assert(exchange.durationMs >= 0)
   }
 
   test("complete() returns None usage when token counts are absent") {
@@ -272,6 +311,35 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     val usage = result.toOption.get.usage.get
     assert(usage.promptTokens == 15)
     assert(usage.completionTokens == 7)
+  }
+
+  test("streamComplete() records a provider exchange when logging is enabled") {
+    val jsonLines =
+      "{\"message\":{\"content\":\"Hello\"},\"done\":false}\n" +
+        "{\"message\":{\"content\":\" world\"},\"done\":false}\n" +
+        "{\"message\":{\"content\":\"\"},\"done\":true,\"prompt_eval_count\":10,\"eval_count\":5}\n"
+    val inputStream = new ByteArrayInputStream(jsonLines.getBytes(StandardCharsets.UTF_8))
+    val mockHttp    = stub[Llm4sHttpClient]
+    val recorded    = ListBuffer.empty[ProviderExchange]
+    val sink = new ProviderExchangeSink:
+      override def record(exchange: ProviderExchange): Unit =
+        recorded += exchange
+
+    (mockHttp.postStream _).when(*, *, *, *).returns(StreamingHttpResponse(200, inputStream))
+
+    val client = mkClient(mockHttp, ProviderExchangeLogging.enabled(sink))
+    val result = client.streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+
+    assert(result.isRight)
+    assert(recorded.size == 1)
+
+    val exchange = recorded.head
+    assert(exchange.provider == "ollama")
+    assert(exchange.model.contains("llama3.1"))
+    assert(exchange.requestBody.contains("\"stream\":true"))
+    assert(exchange.responseBody.exists(_.contains(""""done":true""")))
+    assert(exchange.errorMessage.isEmpty)
+    assert(exchange.durationMs >= 0)
   }
 
   test("streamComplete() returns error on non-200 status") {

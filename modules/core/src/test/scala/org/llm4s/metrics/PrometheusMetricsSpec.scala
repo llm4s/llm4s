@@ -47,8 +47,7 @@ class PrometheusMetricsSpec extends AnyWordSpec with Matchers {
       try {
         val result2 = PrometheusEndpoint.start(port = actualPort, registry)
         (result2 should be).a(Symbol("left"))
-      } finally
-        endpoint1.stop()
+      } finally endpoint1.stop()
     }
   }
 
