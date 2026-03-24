@@ -3,14 +3,19 @@ package org.llm4s.llmconnect
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
 import org.llm4s.types.TryOps
+
 import java.nio.charset.StandardCharsets
-import java.nio.file.{ Files, Path, StandardOpenOption }
+import java.nio.file.FileAlreadyExistsException
+import java.nio.file.{Files, Path, StandardOpenOption}
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
+import scala.util.Failure
+import scala.util.Success
 import scala.util.Try
-
 import org.llm4s.util.Redaction
+
+import scala.annotation.unused
 
 /**
  * Sink for completed provider exchanges.
@@ -24,8 +29,7 @@ trait ProviderExchangeSink:
 
 object ProviderExchangeSink:
   val noop: ProviderExchangeSink = new ProviderExchangeSink:
-    override def record(exchange: ProviderExchange): Unit =
-      val _ = exchange
+    override def record( @unused exchange: ProviderExchange): Unit =
       ()
 
   private val timestampFormatter =
@@ -37,8 +41,7 @@ object ProviderExchangeSink:
   ): Result[JsonlProviderExchangeSink] =
     for
       _    <- prepareDirectory(directory)
-      path <- allocateRunFile(directory, startedAt)
-      sink <- createJsonlSink(path, directory)
+      sink <- createJsonlSink(directory, startedAt)
     yield sink
 
   private def prepareDirectory(directory: Path): Result[Path] =
@@ -50,27 +53,24 @@ object ProviderExchangeSink:
         .map(error => configurationError(directory, error.message))
         .map(_ => directory)
 
-  private def allocateRunFile(directory: Path, startedAt: Instant): Result[Path] =
+  private def createJsonlSink(directory: Path, startedAt: Instant): Result[JsonlProviderExchangeSink] =
     val timestamp = timestampFormatter.format(startedAt)
     val baseName  = s"provider-exchanges-$timestamp"
 
-    def candidate(suffix: Option[Int]): Path =
-      val fileName = suffix match
-        case None        => s"$baseName.jsonl"
-        case Some(index) => s"$baseName-$index.jsonl"
+    def candidate(index: Int): Path =
+      val fileName =
+        if index == 1 then s"$baseName.jsonl"
+        else s"$baseName-$index.jsonl"
       directory.resolve(fileName)
 
-    Try {
-      (Iterator
-        .single(candidate(None)) ++ Iterator.from(2).map(index => candidate(Some(index))))
-        .find(path => !Files.exists(path))
-        .get
-    }.toResult.left.map(error => configurationError(directory, error.message))
+    def createAt(index: Int): Result[JsonlProviderExchangeSink] =
+      val path = candidate(index)
+      Try(Files.createFile(path)) match
+        case Success(_)                             => Right(JsonlProviderExchangeSink(path))
+        case Failure(_: FileAlreadyExistsException) => createAt(index + 1)
+        case Failure(error)                         => Left(configurationError(directory, error.getMessage))
 
-  private def createJsonlSink(path: Path, directory: Path): Result[JsonlProviderExchangeSink] =
-    Try(Files.createFile(path)).toResult.left
-      .map(error => configurationError(directory, error.message))
-      .map(_ => JsonlProviderExchangeSink(path))
+    createAt(1)
 
   private def configurationError(directory: Path, detail: String): ConfigurationError =
     ConfigurationError(

@@ -4,6 +4,10 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermissions
 import java.time.Instant
+import scala.concurrent.Await
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
+import scala.concurrent.duration.Duration
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -67,6 +71,21 @@ class ProviderExchangeSinkSpec extends AnyFunSuite with Matchers:
     val sink = result.toOption.get
     sink.path.getFileName.toString shouldBe "provider-exchanges-2026-03-23T07-15-00Z-2.jsonl"
     Files.exists(sink.path) shouldBe true
+  }
+
+  test("ProviderExchangeSink.createRunScopedJsonl allocates unique files under parallel contention") {
+    val tempDir   = Files.createTempDirectory("provider-exchange-parallel")
+    val startedAt = Instant.parse("2026-03-23T07:15:00Z")
+
+    val results = Await.result(
+      Future.sequence((1 to 8).map(_ => Future(ProviderExchangeSink.createRunScopedJsonl(tempDir, startedAt)))),
+      Duration("10s")
+    )
+
+    all(results.map(_.isRight)) shouldBe true
+    val paths = results.flatMap(_.toOption.map(_.path))
+    paths.distinct.size shouldBe 8
+    all(paths.map(Files.exists(_))) shouldBe true
   }
 
   test("ProviderExchangeSink.createRunScopedJsonl fails when the directory path is an existing file") {

@@ -104,8 +104,7 @@ class AnthropicClient(
         val paramsBuilder = MessageCreateParams
           .builder()
           .model(config.model)
-          .temperature(transformed.options.temperature.floatValue())
-          .topP(transformed.options.topP.floatValue())
+        applySamplingParameters(paramsBuilder, transformed.options)
 
         // Add max tokens if specified
         // max tokens is required by the api
@@ -191,8 +190,7 @@ curl https://api.anthropic.com/v1/messages \
         val paramsBuilder = MessageCreateParams
           .builder()
           .model(config.model)
-          .temperature(transformed.options.temperature.floatValue())
-          .topP(transformed.options.topP.floatValue())
+        applySamplingParameters(paramsBuilder, transformed.options)
 
         // Add max tokens if specified (required by the API)
         val maxTokens = transformed.options.maxTokens.getOrElse(2048)
@@ -572,6 +570,14 @@ curl https://api.anthropic.com/v1/messages \
 
   private def serializeStreamEvent(event: RawMessageStreamEvent): String =
     ObjectMappers.jsonMapper().writeValueAsString(event)
+
+  private def applySamplingParameters(
+    builder: MessageCreateParams.Builder,
+    options: CompletionOptions
+  ): Unit =
+    // Anthropic rejects some requests that specify both temperature and top_p.
+    // Prefer temperature as the single sampling control for our default path.
+    builder.temperature(options.temperature.floatValue())
 
   override protected def releaseResources(): Unit =
     client.close()

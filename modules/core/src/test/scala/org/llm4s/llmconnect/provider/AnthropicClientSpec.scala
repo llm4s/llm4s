@@ -110,4 +110,44 @@ class AnthropicClientSpec extends AnyFunSuite with Matchers {
       exchanges.head.responseBody.value should include("Logged response")
     }
   }
+
+  test("anthropic client request body does not send top_p by default") {
+    withServer { exchange =>
+      val requestBody = new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)
+      requestBody should include("temperature")
+      (requestBody should not).include("\"top_p\"")
+
+      val body =
+        """{
+          |  "id": "msg_test_456",
+          |  "type": "message",
+          |  "role": "assistant",
+          |  "model": "claude-3-5-sonnet-latest",
+          |  "content": [
+          |    {
+          |      "type": "text",
+          |      "text": "Sampling parameters accepted"
+          |    }
+          |  ],
+          |  "stop_reason": "end_turn",
+          |  "stop_sequence": null,
+          |  "usage": {
+          |    "input_tokens": 8,
+          |    "output_tokens": 4
+          |  }
+          |}""".stripMargin
+
+      val bytes = body.getBytes(StandardCharsets.UTF_8)
+      exchange.getResponseHeaders.add("Content-Type", "application/json")
+      exchange.sendResponseHeaders(200, bytes.length)
+      val os = exchange.getResponseBody
+      os.write(bytes)
+      os.close()
+    } { baseUrl =>
+      val client = new AnthropicClient(testConfig.copy(baseUrl = baseUrl))
+      val result = client.complete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())
+
+      result.isRight shouldBe true
+    }
+  }
 }

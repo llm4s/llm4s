@@ -259,7 +259,8 @@ lazy val samples = (project in file("modules//samples"))
     name := "samples",
     commonSettings,
     publish / skip := true,
-    coverageEnabled := false
+    coverageEnabled := false,
+    libraryDependencies += Deps.termflow
   )
 
 lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))

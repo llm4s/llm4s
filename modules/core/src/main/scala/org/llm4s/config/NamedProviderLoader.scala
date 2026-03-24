@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.error.ConfigurationError
+import org.llm4s.error.{ ConfigurationError, LLMError }
 import org.llm4s.llmconnect.config.*
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
@@ -19,6 +19,31 @@ private[config] object NamedProviderLoader:
           .toRight(ConfigurationError(s"Configured provider '$trimmed' was not found"))
         config <- buildConfigFromNamedConfig(trimmed, normalized)
       yield config
+
+  def loadProviderConfigs(
+    source: ConfigSource
+  ): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
+    for
+      providers <- ProvidersConfigLoader.load(source)
+      namedProviders = providers.namedProviders
+      r              = getProviderConfigs(namedProviders)
+    yield r
+
+  def getProviderConfigs(
+    namedProviders: Map[ProviderName, NamedProviderConfig]
+  ): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
+    namedProviders.toList.foldLeft((Map.empty[ProviderName, LLMError], Map.empty[ProviderName, ProviderConfig]))(
+      (x, y) =>
+        buildConfigFromNamedConfig(y._1.asName, y._2).fold(
+          (error: LLMError) =>
+            val kv = (y._1, error)
+            (x._1 + kv, x._2)
+          ,
+          (providerConfig: ProviderConfig) =>
+            val kv: (ProviderName, ProviderConfig) = (y._1, providerConfig)
+            (x._1, x._2 + kv)
+        )
+    )
 
   private def buildConfigFromNamedConfig(
     providerName: String,

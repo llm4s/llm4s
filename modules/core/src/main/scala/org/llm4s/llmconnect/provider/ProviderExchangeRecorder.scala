@@ -37,5 +37,5 @@ private[provider] object ProviderExchangeRecorder {
           responseBody = responseBody,
           errorMessage = result.left.toOption.map(_.message)
         )
-        val _ = Try(sink.record(exchange))
+        Try(sink.record(exchange))
 }

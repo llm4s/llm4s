@@ -1,10 +1,11 @@
 package org.llm4s.config
 
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config._
+import org.llm4s.llmconnect.config.*
 import org.llm4s.metrics.{ MetricsCollector, PrometheusEndpoint }
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.{ ProviderName, ProvidersConfig }
+import org.llm4s.error.LLMError
 import org.llm4s.http.Llm4sHttpClient
 import pureconfig.ConfigSource
 
@@ -70,6 +71,14 @@ object Llm4sConfig {
    */
   def provider(name: String): Result[ProviderConfig] =
     org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name)
+
+  def providerConfigs(): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
+    org.llm4s.config.NamedProviderLoader.loadProviderConfigs(ConfigSource.default)
+
+  def providerConfigs(
+    map: Map[ProviderName, ProvidersConfigModel.NamedProviderConfig]
+  ): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
+    org.llm4s.config.NamedProviderLoader.getProviderConfigs(map)
 
   private[config] def provider(source: ConfigSource, name: String): Result[ProviderConfig] =
     org.llm4s.config.NamedProviderLoader.load(source, name)
