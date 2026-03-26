@@ -38,10 +38,12 @@ This project follows our [Code of Conduct](CODE_OF_CONDUCT.md). By participating
    - Use `Result[A]` for errors (not exceptions)
    - Configure at app edge only (see [AGENTS.md](AGENTS.md#configuration-boundary))
    - Write tests mirroring source structure
+   - Run `sbt scalafixAll` to catch boundary and syntax violations early
    - Run `sbt scalafmtAll` before committing
 
 6. **Test thoroughly:**
    ```bash
+   sbt scalafixAll        # Run scalafix checks (enforced in CI/compile)
    sbt scalafmtAll        # Format code
    sbt +compile           # Compile all versions
    sbt +test              # Run all tests
@@ -84,6 +86,7 @@ sbt +compile          # Compile all versions
 sbt test              # Run tests
 sbt +test             # Run tests all versions
 sbt buildAll          # Full pipeline (compile + test all versions)
+sbt scalafixAll       # Run Scalafix rules
 sbt scalafmtAll       # Format code
 ```
 

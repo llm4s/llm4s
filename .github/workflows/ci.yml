@@ -36,6 +36,9 @@ jobs:
       
       - name: Check formatting
         run: sbt scalafmtCheckAll
+
+      - name: Run Scalafix
+        run: sbt scalafixAll
       
       - name: Compile
         run: sbt compile

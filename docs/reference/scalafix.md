@@ -1,42 +1,36 @@
-Scalafix: Ban Environment Variable Access
+Scalafix: Configuration Boundary Enforcement
 
 Overview
-- Purpose: Prevent direct access to environment variables to encourage centralized configuration via `Llm4sConfig`.
-- Enforced APIs: `sys.env` and `java.lang.System.getenv(...)`.
-- Message: Violations emit guidance to use `Llm4sConfig`.
+- Purpose: Keep configuration loading at the application edge and prevent direct reads in core main code.
+- Enforcement scope: `modules/core/src/main/scala/**` (excluding `org.llm4s.config`).
+- Blocked patterns in scoped files:
+  - `org.llm4s.config.Llm4sConfig`
+  - `ConfigFactory`
+  - `ConfigSource.default`
+  - `sys.env`
+  - `System.getenv`
 
 What's Included
 - Plugin: `sbt-scalafix` (see `project/plugins.sbt`).
-- Rule: Uses `DisableSyntax` with regex to flag:
-  - `sys.env`
-  - `System.getenv`
-  This approach is syntactic and does not require SemanticDB.
+- Rule: `DisableSyntax` with scoped regex checks in `.scalafix.conf`.
+- Rule type: Syntactic checks (no SemanticDB required).
 
 Running Scalafix
-- Lint on compile: Disabled by default (`scalafixOnCompile := false`).
+- Compile-time enforcement: Enabled (`scalafixOnCompile := true`).
 - Manual run:
-  - `sbt scalafixAll` to check all modules.
-  - `sbt Test/scalafix` to check only test sources.
+  - `sbt scalafixAll` to run all configured checks.
+  - `sbt core/scalafix` to run only core compile checks.
 
-Violation Examples
-- `val v = sys.env("API_KEY")` → warning: use `Llm4sConfig`
-- `val v = System.getenv("API_KEY")` → warning: use `Llm4sConfig`
-
-Suppressing a Finding (discouraged)
-- Next line only: add `// scalafix:ok NoSysEnv` or `// scalafix:ok NoSystemGetenv`.
-- Block scope: wrap with `// scalafix:off` and `// scalafix:on`.
-Use sparingly and document why the exception is necessary.
+Violation Examples (in core main)
+- `val x = sys.env.get("OPENAI_API_KEY")`
+- `val cfg = ConfigSource.default`
+- `import org.llm4s.config.Llm4sConfig`
 
 Migration Guidance
-- Replace env access with a typed configuration layer, for example:
-  - Use `Llm4sConfig` to validate and load values (e.g., from Typesafe Config, system properties, or injected config), and use it at the app edge.
-  - Avoid hard dependencies on the process environment in library code; prefer dependency injection.
-
-Files Changed
-- `.scalafix.conf`: Adds `DisableSyntax` regex rules with custom messages.
-- `project/plugins.sbt`: Adds the `sbt-scalafix` plugin.
-- `build.sbt`: Disables `scalafixOnCompile` by default; use manual runs in CI or locally.
+- Load configuration at the app/test edge.
+- Inject typed settings into core builders/services.
+- Keep `Llm4sConfig` usage in edge code (samples, CLIs, tests, config package).
 
 Notes
-- The rule is syntactic and works for both Scala 2.13 and Scala 3 without SemanticDB.
-- If you see false negatives for unusual code paths, please open an issue with a minimal repro so we can extend the rule.
+- CI and pre-commit run Scalafix checks.
+- If you hit a false positive, open an issue with a minimal repro.
