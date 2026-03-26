@@ -82,37 +82,37 @@ private[config] object ProviderConfigLoader {
     mistral: Option[MistralSection]
   )
 
-  implicit private val llmSectionReader: PureConfigReader[LlmSection] =
+  private given llmSectionReader: PureConfigReader[LlmSection] =
     PureConfigReader.forProduct1("model")(LlmSection.apply)
 
-  implicit private val openAISectionReader: PureConfigReader[OpenAISection] =
+  private given openAISectionReader: PureConfigReader[OpenAISection] =
     PureConfigReader.forProduct3("baseUrl", "apiKey", "organization")(OpenAISection.apply)
 
-  implicit private val azureSectionReader: PureConfigReader[AzureSection] =
+  private given azureSectionReader: PureConfigReader[AzureSection] =
     PureConfigReader.forProduct3("endpoint", "apiKey", "apiVersion")(AzureSection.apply)
 
-  implicit private val anthropicSectionReader: PureConfigReader[AnthropicSection] =
+  private given anthropicSectionReader: PureConfigReader[AnthropicSection] =
     PureConfigReader.forProduct2("baseUrl", "apiKey")(AnthropicSection.apply)
 
-  implicit private val ollamaSectionReader: PureConfigReader[OllamaSection] =
+  private given ollamaSectionReader: PureConfigReader[OllamaSection] =
     PureConfigReader.forProduct1("baseUrl")(OllamaSection.apply)
 
-  implicit private val zaiSectionReader: PureConfigReader[ZaiSection] =
+  private given zaiSectionReader: PureConfigReader[ZaiSection] =
     PureConfigReader.forProduct2("baseUrl", "apiKey")(ZaiSection.apply)
 
-  implicit private val geminiSectionReader: PureConfigReader[GeminiSection] =
+  private given geminiSectionReader: PureConfigReader[GeminiSection] =
     PureConfigReader.forProduct2("baseUrl", "apiKey")(GeminiSection.apply)
 
-  implicit private val deepseekSectionReader: PureConfigReader[DeepSeekSection] =
+  private given deepseekSectionReader: PureConfigReader[DeepSeekSection] =
     PureConfigReader.forProduct2("baseUrl", "apiKey")(DeepSeekSection.apply)
 
-  implicit private val cohereSectionReader: PureConfigReader[CohereSection] =
+  private given cohereSectionReader: PureConfigReader[CohereSection] =
     PureConfigReader.forProduct2("baseUrl", "apiKey")(CohereSection.apply)
 
-  implicit private val mistralSectionReader: PureConfigReader[MistralSection] =
+  private given mistralSectionReader: PureConfigReader[MistralSection] =
     PureConfigReader.forProduct2("baseUrl", "apiKey")(MistralSection.apply)
 
-  implicit private val providerRootReader: PureConfigReader[ProviderRoot] =
+  private given providerRootReader: PureConfigReader[ProviderRoot] =
     PureConfigReader.forProduct10(
       "llm",
       "openai",
@@ -149,6 +149,10 @@ private[config] object ProviderConfigLoader {
    *         or a required credential variable is missing.
    */
   def load(source: ConfigSource): Result[ProviderConfig] = {
+    loadRoot(source).flatMap(buildProviderConfig)
+  }
+
+  private def loadRoot(source: ConfigSource): Result[ProviderRoot] = {
     val rootEither = source.at("llm4s").load[ProviderRoot]
 
     rootEither.left
@@ -156,7 +160,6 @@ private[config] object ProviderConfigLoader {
         val msg = failures.toList.map(_.description).mkString("; ")
         ConfigurationError(s"Failed to load llm4s provider config via PureConfig: $msg")
       }
-      .flatMap(buildProviderConfig)
   }
 
   /**
@@ -196,22 +199,7 @@ private[config] object ProviderConfigLoader {
         if (parts.length == 2) (parts(0).toLowerCase, parts(1))
         else (inferProviderFromBaseUrl(root), parts(0))
 
-      prefix match {
-        case "openai"            => buildOpenAIConfig(modelName, root.openai)
-        case "openrouter"        => buildOpenAIConfig(modelName, root.openai)
-        case "azure"             => buildAzureConfig(modelName, root.azure)
-        case "anthropic"         => buildAnthropicConfig(modelName, root.anthropic)
-        case "ollama"            => buildOllamaConfig(modelName, root.ollama)
-        case "zai"               => buildZaiConfig(modelName, root.zai)
-        case "gemini" | "google" => buildGeminiConfig(modelName, root.gemini)
-        case "deepseek"          => buildDeepSeekConfig(modelName, root.deepseek)
-        case "cohere"            => buildCohereConfig(modelName, root.cohere)
-        case "mistral"           => buildMistralConfig(modelName, root.mistral)
-        case other if other.nonEmpty =>
-          Left(ConfigurationError(s"Unknown provider prefix: $other in '$modelSpec'"))
-        case _ =>
-          Left(ConfigurationError(s"Unable to infer provider for model '$modelSpec'"))
-      }
+      buildConfigFromSections(prefix, modelName, root)
     }
   }
 
@@ -220,6 +208,24 @@ private[config] object ProviderConfigLoader {
       root.openai.flatMap(_.baseUrl).filter(_.nonEmpty).getOrElse(DefaultConfig.DEFAULT_OPENAI_BASE_URL)
     if (base.contains("openrouter.ai")) "openrouter" else "openai"
   }
+
+  private def buildConfigFromSections(prefix: String, modelName: String, root: ProviderRoot): Result[ProviderConfig] =
+    prefix match {
+      case "openai"            => buildOpenAIConfig(modelName, root.openai)
+      case "openrouter"        => buildOpenAIConfig(modelName, root.openai)
+      case "azure"             => buildAzureConfig(modelName, root.azure)
+      case "anthropic"         => buildAnthropicConfig(modelName, root.anthropic)
+      case "ollama"            => buildOllamaConfig(modelName, root.ollama)
+      case "zai"               => buildZaiConfig(modelName, root.zai)
+      case "gemini" | "google" => buildGeminiConfig(modelName, root.gemini)
+      case "deepseek"          => buildDeepSeekConfig(modelName, root.deepseek)
+      case "cohere"            => buildCohereConfig(modelName, root.cohere)
+      case "mistral"           => buildMistralConfig(modelName, root.mistral)
+      case other if other.nonEmpty =>
+        Left(ConfigurationError(s"Unknown provider prefix: $other in '$prefix/$modelName'"))
+      case _ =>
+        Left(ConfigurationError(s"Unable to infer provider for model '$modelName'"))
+    }
 
   private def buildOpenAIConfig(modelName: String, section: Option[OpenAISection]): Result[ProviderConfig] =
     section match {

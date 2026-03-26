@@ -4,6 +4,7 @@ import org.llm4s.llmconnect.config._
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.metrics.{ MetricsCollector, PrometheusEndpoint }
 import org.llm4s.types.Result
+import org.llm4s.config.ProvidersConfigModel.{ ProviderName, ProvidersConfig }
 import pureconfig.ConfigSource
 
 /**
@@ -15,11 +16,18 @@ import pureconfig.ConfigSource
  * `System.getenv`, or `ConfigFactory.load()` directly.
  *
  * == Provider setup ==
- * Set `LLM_MODEL` to `provider/model` (e.g. `"openai/gpt-4o"`,
- * `"anthropic/claude-sonnet-4-5-latest"`, `"gemini/gemini-2.0-flash"`) and
- * the corresponding API key environment variable. Then call [[provider]] to
- * obtain a [[org.llm4s.llmconnect.config.ProviderConfig]] ready for
- * [[org.llm4s.llmconnect.LLMConnect.getClient]].
+ * Either:
+ *
+ *  - Set `LLM_MODEL` to `provider/model` (e.g. `"openai/gpt-4o"`,
+ *    `"anthropic/claude-sonnet-4-5-latest"`, `"gemini/gemini-2.0-flash"`) and
+ *    the corresponding provider settings, or
+ *  - Resolve a named configured provider directly with [[provider(name)*]] from
+ *    `llm4s.providers.<name>`.
+ *
+ * Then call [[provider]] to obtain a
+ * [[org.llm4s.llmconnect.config.ProviderConfig]] ready for
+ * [[org.llm4s.llmconnect.LLMConnect.getClient]]. Apps that need multiple
+ * configured providers can call [[provider(name)*]] directly.
  *
  * @example
  * {{{
@@ -39,9 +47,9 @@ object Llm4sConfig {
   /**
    * Loads LLM provider configuration from the current environment.
    *
-   * Reads `LLM_MODEL` (format: `provider/model`) and the matching
-   * credential variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) to
-   * build a typed [[org.llm4s.llmconnect.config.ProviderConfig]].
+   * Reads `LLM_MODEL` / `llm4s.llm.model` (format: `provider/model`) plus the
+   * matching credential variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.)
+   * for the current single-provider path.
    *
    * @return the provider configuration, or a
    *         [[org.llm4s.error.ConfigurationError]] when required variables are
@@ -49,6 +57,48 @@ object Llm4sConfig {
    */
   def provider(): Result[ProviderConfig] =
     org.llm4s.config.ProviderConfigLoader.load(ConfigSource.default)
+
+  private[config] def provider(source: ConfigSource): Result[ProviderConfig] =
+    org.llm4s.config.ProviderConfigLoader.load(source)
+
+  /**
+   * Loads a named provider from `llm4s.providers.<name>`.
+   *
+   * Useful for applications that need to resolve multiple configured provider
+   * instances, including multiple accounts for the same provider type.
+   */
+  def provider(name: String): Result[ProviderConfig] =
+    org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name)
+
+  private[config] def provider(source: ConfigSource, name: String): Result[ProviderConfig] =
+    org.llm4s.config.NamedProviderLoader.load(source, name)
+
+  /**
+   * Loads the full validated named-providers configuration from `llm4s.providers`.
+   */
+  def providers(): Result[ProvidersConfig] =
+    org.llm4s.config.ProvidersConfigLoader.load(ConfigSource.default)
+
+  private[config] def providers(source: ConfigSource): Result[ProvidersConfig] =
+    org.llm4s.config.ProvidersConfigLoader.load(source)
+
+  /**
+   * Loads the configured default provider name from `llm4s.providers.provider`.
+   */
+  def defaultProviderName(): Result[ProviderName] =
+    providers().flatMap(_.defaultProviderName)
+
+  private[config] def defaultProviderName(source: ConfigSource): Result[ProviderName] =
+    providers(source).flatMap(_.defaultProviderName)
+
+  /**
+   * Loads the configured default named provider as a runtime [[ProviderConfig]].
+   */
+  def defaultProvider(): Result[ProviderConfig] =
+    defaultProviderName().flatMap(name => provider(name.asName))
+
+  private[config] def defaultProvider(source: ConfigSource): Result[ProviderConfig] =
+    defaultProviderName(source).flatMap(name => provider(source, name.asName))
 
   /**
    * Loads PostgreSQL vector-search index configuration from the current environment.

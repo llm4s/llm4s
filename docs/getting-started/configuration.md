@@ -32,7 +32,8 @@ LLM4S uses a hierarchical configuration system with the following precedence (hi
 
 ## Environment Variables
 
-The simplest way to configure LLM4S is through environment variables.
+The simplest way to configure LLM4S is through environment variables when you
+only need one provider at a time.
 
 ### Core Settings
 
@@ -182,80 +183,118 @@ Restart sbt after adding this file. This grants the plugin the reflective access
 
 For more complex configurations, use `application.conf`:
 
-### Create application.conf
+### Preferred: Named Providers
+
+For production systems and applications that need multiple configured providers,
+prefer the `llm4s.providers` section.
+
+This keeps:
+
+- provider names and structure in HOCON
+- secrets in environment variables
+- the environment variable names under your control
+
+For example, `${?FOO}` is perfectly valid if that is the name you want to use.
+
+```hocon
+llm4s {
+  providers {
+    provider = "openai-main"
+
+    openai-main {
+      provider = "openai"
+      model = "gpt-4o-mini"
+      apiKey = ${?OPENAI_MAIN_API_KEY}
+      baseUrl = ${?OPENAI_MAIN_BASE_URL}
+      organization = ${?OPENAI_MAIN_ORGANIZATION}
+    }
+
+    gemini-main {
+      provider = "gemini"
+      model = "gemini-2.0-flash"
+      apiKey = ${?GEMINI_MAIN_API_KEY}
+      baseUrl = ${?GEMINI_MAIN_BASE_URL}
+    }
+
+    ollama-local {
+      provider = "ollama"
+      model = "llama3.2"
+      baseUrl = ${?OLLAMA_LOCAL_BASE_URL}
+    }
+  }
+}
+```
+
+You can then access the new configuration path with:
+
+```scala
+import org.llm4s.config.Llm4sConfig
+
+val providersResult = Llm4sConfig.providers()
+val defaultName     = Llm4sConfig.defaultProviderName()
+val defaultConfig   = Llm4sConfig.defaultProvider()
+val namedConfig     = Llm4sConfig.provider("openai-main")
+```
+
+If `llm4s.providers.provider` is set, it must match one of the configured
+provider names. If it is absent, the providers config still loads successfully,
+but requesting the default provider will fail clearly at runtime.
+
+### Legacy Single-Provider Configuration
+
+The legacy `LLM_MODEL` / `llm4s.llm.model` path is still supported and remains
+the simplest option when you only need one provider at a time.
 
 Create `src/main/resources/application.conf`:
 
 ```hocon
-llm {
-  # Model configuration
-  model = ${?LLM_MODEL}  # Fallback to env var
-  model = "openai/gpt-4o"  # Default if not set
-
-  # Generation parameters
-  temperature = 0.7
-  max-tokens = 2000
-  top-p = 1.0
-
-  # Provider configurations
-  providers {
-    openai {
-      api-key = ${?OPENAI_API_KEY}
-      base-url = ${?OPENAI_BASE_URL}
-      base-url = "https://api.openai.com/v1"  # Default
-      organization = ${?OPENAI_ORGANIZATION}
-    }
-
-    anthropic {
-      api-key = ${?ANTHROPIC_API_KEY}
-      base-url = ${?ANTHROPIC_BASE_URL}
-      base-url = "https://api.anthropic.com"
-      version = ${?ANTHROPIC_VERSION}
-      version = "2023-06-01"
-    }
-
-    azure {
-      api-key = ${?AZURE_API_KEY}
-      api-base = ${?AZURE_API_BASE}
-      deployment-name = ${?AZURE_DEPLOYMENT_NAME}
-      api-version = ${?AZURE_API_VERSION}
-      api-version = "2024-02-15-preview"
-    }
-
-    ollama {
-      base-url = ${?OLLAMA_BASE_URL}
-      base-url = "http://localhost:11434"
-    }
-  }
-}
-
-# Tracing configuration
-tracing {
-  mode = ${?TRACING_MODE}
-  mode = "none"  # Default: disabled
-
-  langfuse {
-    public-key = ${?LANGFUSE_PUBLIC_KEY}
-    secret-key = ${?LANGFUSE_SECRET_KEY}
-    url = ${?LANGFUSE_URL}
-    url = "https://cloud.langfuse.com"
+llm4s {
+  llm {
+    model = ${?LLM_MODEL}
+    model = "openai/gpt-4o"
   }
 
-  opentelemetry {
-    service-name = ${?OTEL_SERVICE_NAME}
-    service-name = "llm4s"
-    endpoint = ${?OTEL_EXPORTER_OTLP_ENDPOINT}
-    endpoint = "http://localhost:4317"
-    headers = ${?OTEL_EXPORTER_OTLP_HEADERS}
-    headers = ""  # Format: "key1=value1,key2=value2"
+  openai {
+    apiKey = ${?OPENAI_API_KEY}
+    baseUrl = ${?OPENAI_BASE_URL}
+    baseUrl = "https://api.openai.com/v1"
+    organization = ${?OPENAI_ORGANIZATION}
   }
-}
 
-# Context window management
-context {
-  max-messages = 50
-  preserve-system-message = true
-  pruning-strategy = "oldest-first"  # oldest-first, middle-out, recent-turns
+  anthropic {
+    apiKey = ${?ANTHROPIC_API_KEY}
+    baseUrl = ${?ANTHROPIC_BASE_URL}
+    baseUrl = "https://api.anthropic.com"
+  }
+
+  azure {
+    apiKey = ${?AZURE_API_KEY}
+    endpoint = ${?AZURE_API_BASE}
+    apiVersion = ${?AZURE_API_VERSION}
+  }
+
+  ollama {
+    baseUrl = ${?OLLAMA_BASE_URL}
+    baseUrl = "http://localhost:11434"
+  }
+
+  gemini {
+    apiKey = ${?GOOGLE_API_KEY}
+    baseUrl = ${?GEMINI_BASE_URL}
+    baseUrl = "https://generativelanguage.googleapis.com/v1beta"
+  }
+
+  tracing {
+    mode = ${?TRACING_MODE}
+    mode = "none"
+
+    langfuse {
+      publicKey = ${?LANGFUSE_PUBLIC_KEY}
+      secretKey = ${?LANGFUSE_SECRET_KEY}
+      url = ${?LANGFUSE_URL}
+      url = "https://cloud.langfuse.com"
+    }
+  }
 }
 ```
 
