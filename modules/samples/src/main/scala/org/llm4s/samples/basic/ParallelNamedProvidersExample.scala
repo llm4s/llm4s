@@ -30,7 +30,7 @@ object ParallelNamedProvidersExample:
       "ollama-local"
     )
 
-    val logger = LoggerFactory.getLogger("org.llm4s.samples.basic.ParallelNamedProvidersExample")
+    val logger       = LoggerFactory.getLogger("org.llm4s.samples.basic.ParallelNamedProvidersExample")
     val conversation = Conversation(Seq(UserMessage(prompt)))
 
     logger.info("=== Parallel Named Providers Example ===")
@@ -41,12 +41,11 @@ object ParallelNamedProvidersExample:
       Future.traverse(providerNames): providerName =>
         runProvider(providerName, conversation)
           .map(result => formatProviderBlock(providerName, result))
-          .recover {
-            case throwable =>
-              formatProviderBlock(
-                providerName,
-                Left(org.llm4s.error.UnknownError(s"Unexpected failure: ${throwable.getMessage}", throwable))
-              )
+          .recover { case throwable =>
+            formatProviderBlock(
+              providerName,
+              Left(org.llm4s.error.UnknownError(s"Unexpected failure: ${throwable.getMessage}", throwable))
+            )
           }
 
     val blocks = Await.result(resultsFuture, 5.minutes)
@@ -59,8 +58,8 @@ object ParallelNamedProvidersExample:
     Future:
       for
         providerCfg <- Llm4sConfig.provider(providerName)
-        client <- LLMConnect.getClient(providerCfg)
-        completion <- client.complete(conversation)
+        client      <- LLMConnect.getClient(providerCfg)
+        completion  <- client.complete(conversation)
       yield (providerCfg, completion)
 
   private def formatProviderBlock(
@@ -68,14 +67,12 @@ object ParallelNamedProvidersExample:
     result: Result[(org.llm4s.llmconnect.config.ProviderConfig, Completion)]
   ): String =
     result.fold(
-      err =>
-        s"""
+      err => s"""
            |
            |=== $providerName ===
            |Status: FAILED
            |Error: ${err.formatted}
-           |""".stripMargin.trim
-      ,
+           |""".stripMargin.trim,
       { case (cfg, completion) =>
         val usageLine =
           completion.usage

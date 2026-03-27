@@ -148,9 +148,8 @@ private[config] object ProviderConfigLoader {
    *         when `LLM_MODEL` is absent, the provider prefix is unrecognised,
    *         or a required credential variable is missing.
    */
-  def load(source: ConfigSource): Result[ProviderConfig] = {
+  def load(source: ConfigSource): Result[ProviderConfig] =
     loadRoot(source).flatMap(buildProviderConfig)
-  }
 
   private def loadRoot(source: ConfigSource): Result[ProviderRoot] = {
     val rootEither = source.at("llm4s").load[ProviderRoot]

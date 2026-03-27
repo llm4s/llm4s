@@ -13,7 +13,7 @@ private[config] object ProvidersConfigLoader:
   def validate(raw: RawProvidersConfig): Result[ProvidersConfig] =
     for
       namedProviders <- validateNamedProviders(raw.namedProviders)
-      _ <- validateSelectedProvider(raw.selectedProvider, namedProviders)
+      _              <- validateSelectedProvider(raw.selectedProvider, namedProviders)
     yield ProvidersConfig(
       selectedProvider = raw.selectedProvider,
       namedProviders = namedProviders,
@@ -25,7 +25,7 @@ private[config] object ProvidersConfigLoader:
     rawNamedProviders.foldLeft[Result[Map[ProviderName, NamedProviderConfig]]](Right(Map.empty)):
       case (accResult, (providerName, rawSection)) =>
         for
-          acc <- accResult
+          acc        <- accResult
           normalized <- NamedProviderConfigValidator.validate(providerName, rawSection)
         yield acc.updated(providerName, normalized)
 

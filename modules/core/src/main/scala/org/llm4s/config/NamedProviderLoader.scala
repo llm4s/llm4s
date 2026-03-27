@@ -10,8 +10,7 @@ private[config] object NamedProviderLoader:
 
   def load(source: ConfigSource, providerName: String): Result[ProviderConfig] =
     val trimmed = providerName.trim
-    if trimmed.isEmpty then
-      Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
+    if trimmed.isEmpty then Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
     else
       for
         providers <- ProvidersConfigLoader.load(source)
@@ -41,7 +40,7 @@ private[config] object NamedProviderLoader:
       case ProviderKind.Azure =>
         for
           endpoint <- required("endpoint", section.endpoint, "llm4s.providers.<name>.endpoint")
-          apiKey <- requiredApiKey("llm4s.providers.<name>.apiKey")
+          apiKey   <- requiredApiKey("llm4s.providers.<name>.apiKey")
           apiVersion = section.apiVersion.getOrElse(DefaultConfig.DEFAULT_AZURE_V2025_01_01_PREVIEW)
         yield AzureConfig.fromValues(section.model.asString, endpoint, apiKey, apiVersion)
       case ProviderKind.Anthropic =>
@@ -49,8 +48,13 @@ private[config] object NamedProviderLoader:
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL)
           AnthropicConfig.fromValues(section.model.asString, apiKey, baseUrl)
       case ProviderKind.Ollama =>
-        section.baseUrl.map(_.asUrl)
-          .toRight(ConfigurationError(s"Configured provider '$providerName' is missing base URL (llm4s.providers.<name>.baseUrl)"))
+        section.baseUrl
+          .map(_.asUrl)
+          .toRight(
+            ConfigurationError(
+              s"Configured provider '$providerName' is missing base URL (llm4s.providers.<name>.baseUrl)"
+            )
+          )
           .map(url => OllamaConfig.fromValues(section.model.asString, url))
       case ProviderKind.Zai =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>

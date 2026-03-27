@@ -24,7 +24,7 @@ object SerialNamedProvidersExample:
       "ollama-local"
     )
 
-    val logger = LoggerFactory.getLogger("org.llm4s.samples.basic.SerialNamedProvidersExample")
+    val logger       = LoggerFactory.getLogger("org.llm4s.samples.basic.SerialNamedProvidersExample")
     val conversation = Conversation(Seq(UserMessage(prompt)))
 
     logger.info("=== Serial Named Providers Example ===")
@@ -34,8 +34,8 @@ object SerialNamedProvidersExample:
     providerNames.foreach: providerName =>
       val result = for
         providerCfg <- Llm4sConfig.provider(providerName)
-        client <- LLMConnect.getClient(providerCfg)
-        completion <- client.complete(conversation)
+        client      <- LLMConnect.getClient(providerCfg)
+        completion  <- client.complete(conversation)
       yield (providerCfg, completion)
 
       result.fold(

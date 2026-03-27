@@ -155,10 +155,10 @@ private[config] object NamedProviderValidators:
   ): Result[NamedProviderConfig] =
     for
       normalized <- NamedProviderConfigNormalizer.normalize(providerName, section)
-      _ <- validateProviderKind(providerName, normalized, providerKind)
-      _ <- validateRequiredApiKey(providerName, section, requireApiKey)
-      _ <- validateRequiredBaseUrl(providerName, section, requireBaseUrl)
-      _ <- validateRequiredEndpoint(providerName, section, requireEndpoint)
+      _          <- validateProviderKind(providerName, normalized, providerKind)
+      _          <- validateRequiredApiKey(providerName, section, requireApiKey)
+      _          <- validateRequiredBaseUrl(providerName, section, requireBaseUrl)
+      _          <- validateRequiredEndpoint(providerName, section, requireEndpoint)
     yield normalized
 
   private def validateProviderKind(
@@ -197,7 +197,9 @@ private[config] object NamedProviderValidators:
         .map(_.trim)
         .filter(_.nonEmpty)
         .map(_ => ())
-        .toRight(ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `baseUrl`"))
+        .toRight(
+          ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `baseUrl`")
+        )
     else Right(())
 
   private def validateRequiredEndpoint(
@@ -210,5 +212,7 @@ private[config] object NamedProviderValidators:
         .map(_.trim)
         .filter(_.nonEmpty)
         .map(_ => ())
-        .toRight(ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `endpoint`"))
+        .toRight(
+          ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `endpoint`")
+        )
     else Right(())

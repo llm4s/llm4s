@@ -12,14 +12,14 @@ private[config] object ValidatorsRegistry:
       .toRight(ConfigurationError(s"No validator registered for provider '${kind.toString}'"))
 
   private val registry: Map[ProviderKind, NamedProviderValidator] = Map(
-    ProviderKind.OpenAI -> NamedProviderValidators.OpenAI,
+    ProviderKind.OpenAI     -> NamedProviderValidators.OpenAI,
     ProviderKind.OpenRouter -> NamedProviderValidators.OpenRouter,
-    ProviderKind.Azure -> NamedProviderValidators.Azure,
-    ProviderKind.Anthropic -> NamedProviderValidators.Anthropic,
-    ProviderKind.Ollama -> NamedProviderValidators.Ollama,
-    ProviderKind.Zai -> NamedProviderValidators.Zai,
-    ProviderKind.Gemini -> NamedProviderValidators.Gemini,
-    ProviderKind.DeepSeek -> NamedProviderValidators.DeepSeek,
-    ProviderKind.Cohere -> NamedProviderValidators.Cohere,
-    ProviderKind.Mistral -> NamedProviderValidators.Mistral,
+    ProviderKind.Azure      -> NamedProviderValidators.Azure,
+    ProviderKind.Anthropic  -> NamedProviderValidators.Anthropic,
+    ProviderKind.Ollama     -> NamedProviderValidators.Ollama,
+    ProviderKind.Zai        -> NamedProviderValidators.Zai,
+    ProviderKind.Gemini     -> NamedProviderValidators.Gemini,
+    ProviderKind.DeepSeek   -> NamedProviderValidators.DeepSeek,
+    ProviderKind.Cohere     -> NamedProviderValidators.Cohere,
+    ProviderKind.Mistral    -> NamedProviderValidators.Mistral,
   )

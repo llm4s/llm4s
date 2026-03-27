@@ -5,9 +5,9 @@ import org.llm4s.types.Result
 
 object ProvidersConfigModel:
 
-  opaque type ModelName = String
-  opaque type BaseUrl = String
-  opaque type ApiKey = String
+  opaque type ModelName    = String
+  opaque type BaseUrl      = String
+  opaque type ApiKey       = String
   opaque type ProviderName = String
 
   object ModelName:
@@ -22,9 +22,9 @@ object ProvidersConfigModel:
   object ProviderName:
     def apply(value: String): ProviderName = value
 
-  extension (value: ModelName) def asString: String = value
-  extension (value: BaseUrl) def asUrl: String = value
-  extension (value: ApiKey) def asKey: String = value
+  extension (value: ModelName) def asString: String  = value
+  extension (value: BaseUrl) def asUrl: String       = value
+  extension (value: ApiKey) def asKey: String        = value
   extension (value: ProviderName) def asName: String = value
 
   enum ProviderKind:

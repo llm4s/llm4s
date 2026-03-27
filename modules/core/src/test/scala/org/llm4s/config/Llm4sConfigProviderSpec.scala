@@ -116,7 +116,8 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
           |}
           |""".stripMargin
 
-      val cfg = Llm4sConfig.provider(ConfigSource.string(hocon), "deepseek-main").fold(err => fail(err.toString), identity)
+      val cfg =
+        Llm4sConfig.provider(ConfigSource.string(hocon), "deepseek-main").fold(err => fail(err.toString), identity)
 
       cfg match
         case deepseek: DeepSeekConfig =>
@@ -198,7 +199,8 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
           |}
           |""".stripMargin
 
-      val providerName = Llm4sConfig.defaultProviderName(ConfigSource.string(hocon)).fold(err => fail(err.toString), identity)
+      val providerName =
+        Llm4sConfig.defaultProviderName(ConfigSource.string(hocon)).fold(err => fail(err.toString), identity)
       providerName shouldBe ProviderName("openai-main")
     }
 
@@ -294,11 +296,11 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
 
       val source = ConfigSource.string(hocon)
 
-      val legacyCfg = Llm4sConfig.provider(source).fold(err => fail(err.toString), identity)
-      val providersCfg = Llm4sConfig.providers(source).fold(err => fail(err.toString), identity)
+      val legacyCfg           = Llm4sConfig.provider(source).fold(err => fail(err.toString), identity)
+      val providersCfg        = Llm4sConfig.providers(source).fold(err => fail(err.toString), identity)
       val defaultProviderName = Llm4sConfig.defaultProviderName(source).fold(err => fail(err.toString), identity)
-      val defaultProviderCfg = Llm4sConfig.defaultProvider(source).fold(err => fail(err.toString), identity)
-      val namedProviderCfg = Llm4sConfig.provider(source, "openai-main").fold(err => fail(err.toString), identity)
+      val defaultProviderCfg  = Llm4sConfig.defaultProvider(source).fold(err => fail(err.toString), identity)
+      val namedProviderCfg    = Llm4sConfig.provider(source, "openai-main").fold(err => fail(err.toString), identity)
 
       legacyCfg match
         case openai: OpenAIConfig =>

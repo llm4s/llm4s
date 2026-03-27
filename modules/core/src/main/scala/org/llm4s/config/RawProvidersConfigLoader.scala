@@ -27,20 +27,23 @@ private[config] object RawProvidersConfigLoader:
           readOptionalString("provider").map(_.map(ProviderName.apply))
 
         val namedProvidersEither =
-          objCursor.objValue.keySet().asScala.toList
+          objCursor.objValue
+            .keySet()
+            .asScala
+            .toList
             .filterNot(_ == "provider")
             .foldLeft[Either[ConfigReaderFailures, Map[ProviderName, RawNamedProviderSection]]](Right(Map.empty)) {
               case (accEither, key) =>
                 for
-                  acc <- accEither
+                  acc       <- accEither
                   keyCursor <- objCursor.atKey(key)
-                  entry <- namedProviderSectionReader.from(keyCursor)
+                  entry     <- namedProviderSectionReader.from(keyCursor)
                 yield acc.updated(ProviderName(key), entry)
             }
 
         for
           selectedProvider <- selectedProviderEither
-          namedProviders <- namedProvidersEither
+          namedProviders   <- namedProvidersEither
         yield RawProvidersConfig(
           selectedProvider = selectedProvider,
           namedProviders = namedProviders,
@@ -49,7 +52,10 @@ private[config] object RawProvidersConfigLoader:
     }
 
   def load(source: ConfigSource): Result[RawProvidersConfig] =
-    source.at("llm4s.providers").load[RawProvidersConfig].left
+    source
+      .at("llm4s.providers")
+      .load[RawProvidersConfig]
+      .left
       .map { failures =>
         val msg = failures.toList.map(_.description).mkString("; ")
         ConfigurationError(s"Failed to load raw providers config via PureConfig: $msg")

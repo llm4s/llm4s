@@ -30,9 +30,9 @@ object DefaultNamedProviderExample:
 
     val result = for
       defaultProviderName <- Llm4sConfig.defaultProviderName()
-      providerCfg <- Llm4sConfig.defaultProvider()
-      client <- LLMConnect.getClient(providerCfg)
-      completion <- client.complete(conversation)
+      providerCfg         <- Llm4sConfig.defaultProvider()
+      client              <- LLMConnect.getClient(providerCfg)
+      completion          <- client.complete(conversation)
     yield (defaultProviderName, providerCfg, completion)
 
     result.fold(

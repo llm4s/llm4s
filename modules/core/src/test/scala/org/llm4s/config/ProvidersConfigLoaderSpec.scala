@@ -84,9 +84,11 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
             cfg.selectedProvider.getOrElse(fail("Expected selected provider to be defined"))
 
           val selectedProvider =
-            cfg.namedProviders.get(selectedProviderName).getOrElse(
-              fail(s"Expected selected provider '${selectedProviderName.asName}' to exist in namedProviders")
-            )
+            cfg.namedProviders
+              .get(selectedProviderName)
+              .getOrElse(
+                fail(s"Expected selected provider '${selectedProviderName.asName}' to exist in namedProviders")
+              )
 
           selectedProviderName.asName shouldBe "gemini-main"
           selectedProvider.provider shouldBe ProviderKind.Gemini
