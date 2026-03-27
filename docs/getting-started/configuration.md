@@ -236,6 +236,23 @@ val defaultConfig   = Llm4sConfig.defaultProvider()
 val namedConfig     = Llm4sConfig.provider("openai-main")
 ```
 
+Named providers can also be used for model discovery:
+
+```scala
+import org.llm4s.config.Llm4sConfig
+
+val defaultModels = Llm4sConfig.listModels()
+val namedModels   = Llm4sConfig.listModels("openai-main")
+```
+
+See the runnable samples for end-to-end examples:
+
+```bash
+sbt "samples/runMain samples.basic.NamedProviderModelListingExample"
+sbt "samples/runMain samples.basic.SerialNamedProviderModelListingExample"
+sbt "samples/runMain samples.basic.ParallelNamedProviderModelListingExample"
+```
+
 If `llm4s.providers.provider` is set, it must match one of the configured
 provider names. If it is absent, the providers config still loads successfully,
 but requesting the default provider will fail clearly at runtime.

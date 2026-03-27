@@ -1,10 +1,11 @@
 package org.llm4s.config
 
-import org.llm4s.llmconnect.config._
 import org.llm4s.llmconnect.ProviderExchangeLogging
+import org.llm4s.llmconnect.config._
 import org.llm4s.metrics.{ MetricsCollector, PrometheusEndpoint }
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.{ ProviderName, ProvidersConfig }
+import org.llm4s.http.Llm4sHttpClient
 import pureconfig.ConfigSource
 
 /**
@@ -99,6 +100,50 @@ object Llm4sConfig {
 
   private[config] def defaultProvider(source: ConfigSource): Result[ProviderConfig] =
     defaultProviderName(source).flatMap(name => provider(source, name.asName))
+
+  /**
+   * Lists models for the configured default named provider.
+   */
+  def listModels(): Result[List[DiscoveredModel]] =
+    listModels(ConfigSource.default)
+
+  private[config] def listModels(source: ConfigSource): Result[List[DiscoveredModel]] =
+    listModels(source, Llm4sHttpClient.create())
+
+  private[config] def listModels(
+    source: ConfigSource,
+    httpClient: Llm4sHttpClient
+  ): Result[List[DiscoveredModel]] =
+    for
+      defaultName <- defaultProviderName(source)
+      models      <- listModels(defaultName.asName, source, httpClient)
+    yield models
+
+  /**
+   * Lists models for a named provider configured under `llm4s.providers.<name>`.
+   */
+  def listModels(name: String): Result[List[DiscoveredModel]] =
+    listModels(name, ConfigSource.default, Llm4sHttpClient.create())
+
+  private[config] def listModels(
+    name: String,
+    source: ConfigSource,
+    httpClient: Llm4sHttpClient
+  ): Result[List[DiscoveredModel]] =
+    for
+      providers     <- providers(source)
+      namedProvider <- providers.namedProviders
+        .get(ProviderName(name))
+        .toRight(org.llm4s.error.ConfigurationError(s"Configured provider '$name' was not found"))
+      capabilities <- ProviderCapabilitiesRegistry.forKind(namedProvider.provider)
+      lister <- capabilities.modelLister
+        .toRight(
+          org.llm4s.error.ConfigurationError(
+            s"Model discovery is not supported yet for provider '${namedProvider.provider.toString.toLowerCase}'"
+          )
+        )
+      models <- lister.listModels(namedProvider, httpClient)
+    yield models
 
   /**
    * Loads PostgreSQL vector-search index configuration from the current environment.

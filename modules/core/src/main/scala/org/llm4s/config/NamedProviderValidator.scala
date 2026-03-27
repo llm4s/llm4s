@@ -4,25 +4,13 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
 
-private[config] trait NamedProviderValidator:
+private[llm4s] trait NamedProviderValidator:
   def validate(
     providerName: ProviderName,
     section: RawNamedProviderSection
   ): Result[NamedProviderConfig]
 
-private[config] object NamedProviderConfigValidator:
-
-  def validate(
-    providerName: ProviderName,
-    section: RawNamedProviderSection
-  ): Result[NamedProviderConfig] =
-    NamedProviderConfigNormalizer.normalize(providerName, section).flatMap { normalized =>
-      ValidatorsRegistry
-        .forKind(normalized.provider)
-        .flatMap(_.validate(providerName, section))
-    }
-
-private[config] object NamedProviderValidators:
+private[llm4s] object NamedProviderValidators:
 
   object OpenAI extends NamedProviderValidator:
     def validate(
@@ -216,3 +204,15 @@ private[config] object NamedProviderValidators:
           ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `endpoint`")
         )
     else Right(())
+
+private[llm4s] object NamedProviderConfigValidator:
+
+  def validate(
+    providerName: ProviderName,
+    section: RawNamedProviderSection
+  ): Result[NamedProviderConfig] =
+    NamedProviderConfigNormalizer.normalize(providerName, section).flatMap { normalized =>
+      ProviderCapabilitiesRegistry
+        .forKind(normalized.provider)
+        .flatMap(_.validator.validate(providerName, section))
+    }

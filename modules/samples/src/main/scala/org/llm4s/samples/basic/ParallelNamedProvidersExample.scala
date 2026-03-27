@@ -1,4 +1,4 @@
-package org.llm4s.samples.basic
+package samples.basic
 
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
@@ -13,7 +13,7 @@ import scala.concurrent.{ Await, ExecutionContext, Future }
  * Demonstrates sending the same prompt to a list of named providers in parallel.
  *
  * Usage:
- *   sbt "samples/runMain org.llm4s.samples.basic.ParallelNamedProvidersExample"
+ *   sbt "samples/runMain samples.basic.ParallelNamedProvidersExample"
  */
 object ParallelNamedProvidersExample:
   private given ExecutionContext = ExecutionContext.global
@@ -30,7 +30,7 @@ object ParallelNamedProvidersExample:
       "ollama-local"
     )
 
-    val logger       = LoggerFactory.getLogger("org.llm4s.samples.basic.ParallelNamedProvidersExample")
+    val logger       = LoggerFactory.getLogger("samples.basic.ParallelNamedProvidersExample")
     val conversation = Conversation(Seq(UserMessage(prompt)))
 
     logger.info("=== Parallel Named Providers Example ===")

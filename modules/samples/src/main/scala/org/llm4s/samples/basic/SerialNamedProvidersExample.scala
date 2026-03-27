@@ -1,4 +1,4 @@
-package org.llm4s.samples.basic
+package samples.basic
 
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
@@ -9,7 +9,7 @@ import org.slf4j.LoggerFactory
  * Demonstrates sending the same prompt to a list of named providers serially.
  *
  * Usage:
- *   sbt "samples/runMain org.llm4s.samples.basic.SerialNamedProvidersExample"
+ *   sbt "samples/runMain samples.basic.SerialNamedProvidersExample"
  */
 object SerialNamedProvidersExample:
   def main(args: Array[String]): Unit =
@@ -24,7 +24,7 @@ object SerialNamedProvidersExample:
       "ollama-local"
     )
 
-    val logger       = LoggerFactory.getLogger("org.llm4s.samples.basic.SerialNamedProvidersExample")
+    val logger       = LoggerFactory.getLogger("samples.basic.SerialNamedProvidersExample")
     val conversation = Conversation(Seq(UserMessage(prompt)))
 
     logger.info("=== Serial Named Providers Example ===")

@@ -1,7 +1,9 @@
 package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.ProviderName
+import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ AnthropicConfig, DeepSeekConfig, GeminiConfig, MistralConfig, OpenAIConfig }
+import org.llm4s.llmconnect.provider.LLMProvider
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import pureconfig.ConfigSource
@@ -228,6 +230,75 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
           openai.baseUrl shouldBe DefaultConfig.DEFAULT_OPENAI_BASE_URL
         case other =>
           fail(s"Expected OpenAIConfig, got $other")
+    }
+
+    "list models for a configured named provider by name" in {
+      val hocon =
+        """
+          |llm4s {
+          |  providers {
+          |    provider = "ollama-main"
+          |    ollama-main {
+          |      provider = "ollama"
+          |      model = "llama3.1"
+          |      baseUrl = "http://localhost:11434"
+          |    }
+          |  }
+          |}
+          |""".stripMargin
+
+      val responseBody =
+        """{
+          |  "models": [
+          |    {
+          |      "name": "llama3.2:latest",
+          |      "modified_at": "2026-03-27T08:00:00Z",
+          |      "size": 2019393189,
+          |      "digest": "sha256:abc123"
+          |    }
+          |  ]
+          |}""".stripMargin
+
+      val httpClient = new MockHttpClient(HttpResponse(200, responseBody, Map.empty))
+
+      val result = Llm4sConfig.listModels("ollama-main", ConfigSource.string(hocon), httpClient)
+
+      result match
+        case Right(models) =>
+          models.map(_.name.asString) shouldBe List("llama3.2:latest")
+          models.map(_.provider) shouldBe List(LLMProvider.Ollama)
+          httpClient.lastUrl shouldBe Some("http://localhost:11434/api/tags")
+        case Left(err) =>
+          fail(s"Expected listed models, got error: ${err.message}")
+    }
+
+    "fail clearly when listing models for a missing named provider" in {
+      val hocon =
+        """
+          |llm4s {
+          |  providers {
+          |    provider = "ollama-main"
+          |    ollama-main {
+          |      provider = "ollama"
+          |      model = "llama3.1"
+          |      baseUrl = "http://localhost:11434"
+          |    }
+          |  }
+          |}
+          |""".stripMargin
+
+      val result =
+        Llm4sConfig.listModels(
+          "ollmaa-main",
+          ConfigSource.string(hocon),
+          new MockHttpClient(HttpResponse(200, "{}", Map.empty))
+        )
+
+      result match
+        case Left(err) =>
+          err.message should include("Configured provider 'ollmaa-main' was not found")
+        case Right(models) =>
+          fail(s"Expected missing named provider failure, got models: $models")
     }
 
     "fail when requesting the default provider name and no default is configured" in {

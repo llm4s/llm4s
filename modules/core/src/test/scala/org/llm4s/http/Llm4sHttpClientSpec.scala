@@ -1,5 +1,7 @@
 package org.llm4s.http
 
+import org.llm4s.error.{ ServiceError, ValidationError }
+import org.llm4s.http.HttpResponse.*
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
@@ -12,7 +14,7 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
 
   private var server: HttpServer = _
   private var baseUrl: String    = _
-  private val client             = new JdkHttpClient()
+  private val client             = Llm4sHttpClient.create()
 
   override def beforeAll(): Unit = {
     server = HttpServer.create(new InetSocketAddress(0), 0)
@@ -130,6 +132,49 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
     response.headers shouldBe Map.empty
   }
 
+  it should "convert a successful response to JsonHttpResponse" in {
+    val response = HttpResponse(200, """{"ok":true}""", Map("content-type" -> Seq("application/json")))
+
+    val result = response.toJson()
+
+    result match
+      case Right(jsonResponse) =>
+        jsonResponse.statusCode shouldBe 200
+        jsonResponse.body("ok").bool shouldBe true
+        jsonResponse.headers shouldBe response.headers
+      case Left(err) =>
+        fail(s"Expected JSON response, got error: ${err.message}")
+  }
+
+  it should "fail clearly when JSON response parsing fails" in {
+    val response = HttpResponse(200, """not-json""")
+
+    val result = response.toJson()
+
+    result match
+      case Left(err: ValidationError) =>
+        err.field shouldBe "responseBody"
+      case Left(err) =>
+        fail(s"Expected ValidationError, got: ${err.message}")
+      case Right(jsonResponse) =>
+        fail(s"Expected JSON parsing to fail, got: $jsonResponse")
+  }
+
+  it should "reject non-success responses via ensureSuccess" in {
+    val response = HttpResponse(404, "missing")
+
+    val result = response.ensureSuccess("test-provider")
+
+    result match
+      case Left(err: ServiceError) =>
+        err.httpStatus shouldBe 404
+        err.provider shouldBe "test-provider"
+      case Left(err) =>
+        fail(s"Expected ServiceError, got: ${err.message}")
+      case Right(ok) =>
+        fail(s"Expected failed response, got: $ok")
+  }
+
   it should "store headers" in {
     val headers  = Map("content-type" -> Seq("application/json"))
     val response = HttpResponse(200, "{}", headers)
@@ -167,7 +212,7 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
 
   "Llm4sHttpClient.create()" should "return a JdkHttpClient instance" in {
     val instance = Llm4sHttpClient.create()
-    instance shouldBe a[JdkHttpClient]
+    instance.getClass.getSimpleName shouldBe "JdkHttpClient"
   }
 
   // ============================================================
@@ -178,6 +223,17 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
     val response = client.get(s"$baseUrl/echo")
     response.statusCode shouldBe 200
     response.body should startWith("method=GET")
+  }
+
+  it should "return Result from getResult for successful requests" in {
+    val result = client.getResult(s"$baseUrl/echo")
+
+    result match
+      case Right(response) =>
+        response.statusCode shouldBe 200
+        response.body should startWith("method=GET")
+      case Left(err) =>
+        fail(s"Expected successful Result, got error: ${err.message}")
   }
 
   it should "pass custom headers" in {
@@ -209,6 +265,22 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
   it should "return response headers with lowercase keys" in {
     val response = client.get(s"$baseUrl/echo")
     response.headers.get("x-custom-header") shouldBe Some(Seq("test-value"))
+  }
+
+  it should "return Left from getResult when transport fails" in {
+    val failing = new FailingHttpClient(new RuntimeException("boom"))
+
+    val result = failing.getResult("http://localhost:1/unreachable")
+
+    result match
+      case Left(err: ServiceError) =>
+        err.provider shouldBe "http"
+        err.httpStatus shouldBe 500
+        err.message should include("GET request failed")
+      case Left(err) =>
+        fail(s"Expected ServiceError, got: ${err.message}")
+      case Right(response) =>
+        fail(s"Expected transport failure, got response: $response")
   }
 
   // ============================================================
