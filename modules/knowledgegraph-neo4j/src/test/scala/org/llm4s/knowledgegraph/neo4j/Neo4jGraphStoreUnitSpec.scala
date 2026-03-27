@@ -9,8 +9,8 @@ import org.scalatest.matchers.should.Matchers
  * These tests always execute and provide a baseline coverage metric that is
  * meaningful even in environments without a Neo4j server.
  *
- * Full integration coverage (all GraphStore operations) is provided by
- * Neo4jGraphStoreSpec, which runs when Neo4j is available on localhost:7687.
+ * Full integration coverage (all GraphStore operations) is provided by the
+ * `it` module, which runs against a live Neo4j instance.
  */
 class Neo4jGraphStoreUnitSpec extends AnyFunSuite with Matchers {
 

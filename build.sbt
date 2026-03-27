@@ -84,11 +84,11 @@ addCommandAlias(
 // testSmoke:  Tier 3 — cloud smoke tests against real APIs (requires API keys in .env or environment)
 addCommandAlias(
   "testOllama",
-  """;set core / Test / testOptions := Seq(); core/testOnly -- -n org.llm4s.tags.OllamaRequired"""
+  """;it/testOnly org.llm4s.llmconnect.provider.OllamaIntegrationSpec"""
 )
 addCommandAlias(
   "testSmoke",
-  """;set core / Test / testOptions := Seq(); core/testOnly -- -n org.llm4s.tags.CloudSmoke"""
+  """;it/testOnly org.llm4s.llmconnect.smoke.*"""
 )
 
 // ---- shared settings ----
@@ -107,6 +107,7 @@ lazy val commonSettings = Seq(
     Deps.cats,
     Deps.upickle,
     Deps.logback,
+    Deps.log4jToSlf4j,
     Deps.monocleCore,
     Deps.monocleMacro,
     Deps.scalatest % Test,
@@ -123,7 +124,16 @@ lazy val commonSettings = Seq(
 
 // ---- projects ----
 lazy val llm4s = (project in file("."))
-  .aggregate(core, samples, workspaceShared, workspaceRunner, workspaceClient, workspaceSamples, traceOpentelemetry, knowledgegraphNeo4j)
+  .aggregate(
+    core,
+    samples,
+    workspaceShared,
+    workspaceRunner,
+    workspaceClient,
+    workspaceSamples,
+    traceOpentelemetry,
+    knowledgegraphNeo4j
+  )
   .settings(
     publish / skip := true
   )
@@ -284,7 +294,19 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
       Deps.scalatest % Test
     ),
     // Enforce ≥80% statement coverage when running with `sbt coverage test`
-    // (requires Neo4j on bolt://localhost:7687 — tests auto-skip without it)
+    // for the unit-test suite that ships with this module.
     coverageMinimumStmtTotal := 80,
-    coverageFailOnMinimum    := false // don't fail CI when Neo4j is absent
+    coverageFailOnMinimum    := true
+  )
+
+lazy val it = (project in file("modules/it"))
+  .dependsOn(core, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
+  .settings(
+    name := "it",
+    commonSettings,
+    publish / skip := true,
+    Test / fork := true,
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    )
   )

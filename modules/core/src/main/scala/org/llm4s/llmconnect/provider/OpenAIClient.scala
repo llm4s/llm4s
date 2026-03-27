@@ -49,7 +49,7 @@ private[provider] trait OpenAIClientTransport {
  * @param config provider configuration containing context window and reserve completion settings
  * @param metrics metrics collector for observability (default: noop)
  */
-class OpenAIClient private (
+class OpenAIClient private[provider] (
   private val model: String,
   private val transport: OpenAIClientTransport,
   private val config: ProviderConfig,

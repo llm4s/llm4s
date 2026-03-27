@@ -1,37 +1,38 @@
 package org.llm4s.llmconnect.smoke
 
 import org.llm4s.error.AuthenticationError
-import org.llm4s.llmconnect.config.AnthropicConfig
+import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
-import org.llm4s.llmconnect.provider.AnthropicClient
-import org.llm4s.testutil.CloudSmoke
+import org.llm4s.llmconnect.provider.GeminiClient
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Cloud smoke tests for Anthropic.
+ * Cloud smoke tests for Gemini.
  *
- * Tagged [[CloudSmoke]] — excluded from default `sbt test`.
- * Run with: `sbt testSmoke`
- * Requires: ANTHROPIC_API_KEY environment variable.
+ * These tests live in the dedicated integration-test module so default `sbt test`
+ * stays fast. Run them with `sbt "it/testOnly org.llm4s.llmconnect.smoke.*"`
+ * or the `sbt testSmoke` alias.
+ *
+ * Requires: `GEMINI_API_KEY` environment variable.
  */
-class AnthropicSmokeSpec extends AnyFlatSpec with Matchers {
+class GeminiSmokeSpec extends AnyFlatSpec with Matchers {
 
-  private val apiKey: Option[String] = Option(System.getenv("ANTHROPIC_API_KEY")).filter(_.nonEmpty)
+  private val apiKey: Option[String] = Option(System.getenv("GEMINI_API_KEY")).filter(_.nonEmpty)
 
-  private def config(key: String): AnthropicConfig =
-    AnthropicConfig.fromValues(
-      modelName = "claude-3-haiku-20240307",
+  private def config(key: String): GeminiConfig =
+    GeminiConfig.fromValues(
+      modelName = "gemini-1.5-flash",
       apiKey = key,
-      baseUrl = "https://api.anthropic.com"
+      baseUrl = "https://generativelanguage.googleapis.com"
     )
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 
-  "Anthropic" should "complete a basic request" taggedAs CloudSmoke in {
-    assume(apiKey.isDefined, "ANTHROPIC_API_KEY not set")
+  "Gemini" should "complete a basic request" in {
+    assume(apiKey.isDefined, "GEMINI_API_KEY not set")
 
-    val clientResult = AnthropicClient(config(apiKey.get))
+    val clientResult = GeminiClient(config(apiKey.get))
     withClue(s"Client creation failed: ${clientResult.swap.toOption}") {
       clientResult.isRight shouldBe true
     }
@@ -45,10 +46,10 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers {
     completion.toOption.get.content should not be empty
   }
 
-  it should "stream a response" taggedAs CloudSmoke in {
-    assume(apiKey.isDefined, "ANTHROPIC_API_KEY not set")
+  it should "stream a response" in {
+    assume(apiKey.isDefined, "GEMINI_API_KEY not set")
 
-    val client = AnthropicClient(config(apiKey.get)).toOption.get
+    val client = GeminiClient(config(apiKey.get)).toOption.get
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
     val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
 
@@ -59,8 +60,8 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers {
     chunks should not be empty
   }
 
-  it should "return AuthenticationError for invalid key" taggedAs CloudSmoke in {
-    val client = AnthropicClient(config("sk-ant-invalid-key-for-testing")).toOption.get
+  it should "return an error for invalid key" in {
+    val client = GeminiClient(config("invalid-key-for-testing")).toOption.get
     val result = client.complete(conversation, CompletionOptions())
 
     result.isLeft shouldBe true

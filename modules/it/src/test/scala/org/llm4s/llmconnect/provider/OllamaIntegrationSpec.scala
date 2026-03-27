@@ -3,7 +3,6 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
-import org.llm4s.testutil.OllamaRequired
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -12,8 +11,9 @@ import scala.util.Try
 /**
  * Integration tests that verify full round-trip against a running Ollama instance.
  *
- * All tests are tagged [[OllamaRequired]] and excluded from default `sbt test`.
- * Run with: `sbt testOllama`
+ * These tests live in the dedicated integration-test module so default `sbt test`
+ * stays fast. Run them with `sbt "it/testOnly org.llm4s.llmconnect.provider.OllamaIntegrationSpec"`
+ * or the `sbt testOllama` alias.
  *
  * Each test uses `assume(ollamaAvailable)` to skip gracefully when Ollama is not
  * running. Uses a small model (`qwen2.5:0.5b`) to minimise resource usage.
@@ -58,11 +58,7 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
     finally client.close()
   }
 
-  // ==========================================================================
-  // Basic round-trip
-  // ==========================================================================
-
-  "OllamaClient" should "complete a basic request" taggedAs OllamaRequired in {
+  "OllamaClient" should "complete a basic request" in {
     assume(ollamaAvailable, s"Ollama not available with model $testModel")
 
     withClient { client =>
@@ -74,11 +70,7 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  // ==========================================================================
-  // Streaming round-trip
-  // ==========================================================================
-
-  it should "stream a response with chunks" taggedAs OllamaRequired in {
+  it should "stream a response with chunks" in {
     assume(ollamaAvailable, s"Ollama not available with model $testModel")
 
     withClient { client =>
@@ -96,11 +88,7 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  // ==========================================================================
-  // Multi-turn conversation
-  // ==========================================================================
-
-  it should "handle a multi-turn conversation" taggedAs OllamaRequired in {
+  it should "handle a multi-turn conversation" in {
     assume(ollamaAvailable, s"Ollama not available with model $testModel")
 
     withClient { client =>
@@ -117,11 +105,7 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  // ==========================================================================
-  // Token usage reporting
-  // ==========================================================================
-
-  it should "report token usage" taggedAs OllamaRequired in {
+  it should "report token usage" in {
     assume(ollamaAvailable, s"Ollama not available with model $testModel")
 
     withClient { client =>
@@ -135,15 +119,10 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  // ==========================================================================
-  // Close lifecycle
-  // ==========================================================================
-
-  it should "return ConfigurationError after close" taggedAs OllamaRequired in {
+  it should "return ConfigurationError after close" in {
     assume(ollamaAvailable, s"Ollama not available with model $testModel")
 
     val client = new OllamaClient(config)
-    // Verify it works before close
     val beforeClose = client.complete(conversation("hi"), CompletionOptions())
     beforeClose.isRight shouldBe true
 

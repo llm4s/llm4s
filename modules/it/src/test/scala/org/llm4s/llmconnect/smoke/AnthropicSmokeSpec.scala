@@ -1,38 +1,38 @@
 package org.llm4s.llmconnect.smoke
 
 import org.llm4s.error.AuthenticationError
-import org.llm4s.llmconnect.config.OpenAIConfig
+import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
-import org.llm4s.llmconnect.provider.OpenAIClient
-import org.llm4s.testutil.CloudSmoke
+import org.llm4s.llmconnect.provider.AnthropicClient
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /**
- * Cloud smoke tests for OpenAI.
+ * Cloud smoke tests for Anthropic.
  *
- * Tagged [[CloudSmoke]] — excluded from default `sbt test`.
- * Run with: `sbt testSmoke`
- * Requires: OPENAI_API_KEY environment variable.
+ * These tests live in the dedicated integration-test module so default `sbt test`
+ * stays fast. Run them with `sbt "it/testOnly org.llm4s.llmconnect.smoke.*"`
+ * or the `sbt testSmoke` alias.
+ *
+ * Requires: `ANTHROPIC_API_KEY` environment variable.
  */
-class OpenAISmokeSpec extends AnyFlatSpec with Matchers {
+class AnthropicSmokeSpec extends AnyFlatSpec with Matchers {
 
-  private val apiKey: Option[String] = Option(System.getenv("OPENAI_API_KEY")).filter(_.nonEmpty)
+  private val apiKey: Option[String] = Option(System.getenv("ANTHROPIC_API_KEY")).filter(_.nonEmpty)
 
-  private def config(key: String): OpenAIConfig =
-    OpenAIConfig.fromValues(
-      modelName = "gpt-4o-mini",
+  private def config(key: String): AnthropicConfig =
+    AnthropicConfig.fromValues(
+      modelName = "claude-3-haiku-20240307",
       apiKey = key,
-      organization = None,
-      baseUrl = "https://api.openai.com/v1"
+      baseUrl = "https://api.anthropic.com"
     )
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 
-  "OpenAI" should "complete a basic request" taggedAs CloudSmoke in {
-    assume(apiKey.isDefined, "OPENAI_API_KEY not set")
+  "Anthropic" should "complete a basic request" in {
+    assume(apiKey.isDefined, "ANTHROPIC_API_KEY not set")
 
-    val clientResult = OpenAIClient(config(apiKey.get))
+    val clientResult = AnthropicClient(config(apiKey.get))
     withClue(s"Client creation failed: ${clientResult.swap.toOption}") {
       clientResult.isRight shouldBe true
     }
@@ -46,10 +46,10 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers {
     completion.toOption.get.content should not be empty
   }
 
-  it should "stream a response" taggedAs CloudSmoke in {
-    assume(apiKey.isDefined, "OPENAI_API_KEY not set")
+  it should "stream a response" in {
+    assume(apiKey.isDefined, "ANTHROPIC_API_KEY not set")
 
-    val client = OpenAIClient(config(apiKey.get)).toOption.get
+    val client = AnthropicClient(config(apiKey.get)).toOption.get
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
     val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
 
@@ -60,8 +60,8 @@ class OpenAISmokeSpec extends AnyFlatSpec with Matchers {
     chunks should not be empty
   }
 
-  it should "return AuthenticationError for invalid key" taggedAs CloudSmoke in {
-    val client = OpenAIClient(config("sk-invalid-key-for-testing")).toOption.get
+  it should "return AuthenticationError for invalid key" in {
+    val client = AnthropicClient(config("sk-ant-invalid-key-for-testing")).toOption.get
     val result = client.complete(conversation, CompletionOptions())
 
     result.isLeft shouldBe true

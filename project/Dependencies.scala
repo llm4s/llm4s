@@ -9,6 +9,7 @@ object Versions {
   val cats     = "2.13.0"
   val upickle  = "4.2.1"
   val logback  = "1.5.18"
+  val log4j    = "2.24.3"
   val monocle  = "3.3.0"
   val scalatest               = "3.2.19"
   val scalamock               = "7.4.2"
@@ -51,6 +52,7 @@ object Deps {
   val cats      = "org.typelevel" %% "cats-core" % Versions.cats
   val upickle   = "com.lihaoyi"   %% "upickle"   % Versions.upickle
   val logback   = "ch.qos.logback" % "logback-classic" % Versions.logback
+  val log4jToSlf4j = "org.apache.logging.log4j" % "log4j-to-slf4j" % Versions.log4j
   val monocleCore  = "dev.optics" %% "monocle-core"  % Versions.monocle
   val monocleMacro = "dev.optics" %% "monocle-macro" % Versions.monocle
   val scalatest               = "org.scalatest"    %% "scalatest"          % Versions.scalatest

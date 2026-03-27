@@ -4,16 +4,17 @@ import org.llm4s.error.AuthenticationError
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.OpenRouterClient
-import org.llm4s.testutil.CloudSmoke
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 /**
  * Cloud smoke tests for OpenRouter.
  *
- * Tagged [[CloudSmoke]] — excluded from default `sbt test`.
- * Run with: `sbt testSmoke`
- * Requires: OPENROUTER_API_KEY environment variable.
+ * These tests live in the dedicated integration-test module so default `sbt test`
+ * stays fast. Run them with `sbt "it/testOnly org.llm4s.llmconnect.smoke.*"`
+ * or the `sbt testSmoke` alias.
+ *
+ * Requires: `OPENROUTER_API_KEY` environment variable.
  */
 class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers {
 
@@ -29,19 +30,19 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers {
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 
-  "OpenRouter" should "complete a basic request" taggedAs CloudSmoke in {
+  "OpenRouter" should "complete a basic request" in {
     assume(apiKey.isDefined, "OPENROUTER_API_KEY not set")
 
-    val client = new OpenRouterClient(config(apiKey.get))
-    val result = client.complete(conversation, CompletionOptions())
+    val client     = new OpenRouterClient(config(apiKey.get))
+    val completion = client.complete(conversation, CompletionOptions())
 
-    withClue(s"Completion failed: ${result.swap.toOption}") {
-      result.isRight shouldBe true
+    withClue(s"Completion failed: ${completion.swap.toOption}") {
+      completion.isRight shouldBe true
     }
-    result.toOption.get.content should not be empty
+    completion.toOption.get.content should not be empty
   }
 
-  it should "stream a response" taggedAs CloudSmoke in {
+  it should "stream a response" in {
     assume(apiKey.isDefined, "OPENROUTER_API_KEY not set")
 
     val client = new OpenRouterClient(config(apiKey.get))
@@ -55,7 +56,7 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers {
     chunks should not be empty
   }
 
-  it should "return AuthenticationError for invalid key" taggedAs CloudSmoke in {
+  it should "return AuthenticationError for invalid key" in {
     val client = new OpenRouterClient(config("sk-or-invalid-key-for-testing"))
     val result = client.complete(conversation, CompletionOptions())
 

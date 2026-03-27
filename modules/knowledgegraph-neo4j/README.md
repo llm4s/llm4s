@@ -65,16 +65,24 @@ All operations return `Result[A]` (`Either[LLMError, A]`).
 
 All nodes are stored with the `:LLM4S` label and two reserved properties (`llm4s_id`, `llm4s_label`). This lets llm4s coexist with your own data in the same Neo4j database.
 
-## Running the Integration Tests
+## Testing
 
-The tests require a running Neo4j 5.x instance (Community Edition is fine). Without one, all tests are automatically **skipped** — the build still passes.
+The published `knowledgegraph-neo4j` module keeps only the pure unit tests, so:
+
+```bash
+sbt "knowledgegraphNeo4j/test"
+```
+
+does not require a running Neo4j instance.
+
+Live Neo4j integration coverage now lives in the separate `it` module. Those tests require a running Neo4j 5.x instance (Community Edition is fine). Without one, the tests are automatically **skipped**.
 
 ```bash
 # Start Neo4j (Docker, easiest):
 docker run --rm -p 7687:7687 -e NEO4J_AUTH=neo4j/neo4j neo4j:5
 
-# Run tests:
-sbt "knowledgegraphNeo4j/test"
+# Run the live integration suite:
+sbt "it/test"
 ```
 
 Tests connect to `bolt://localhost:7687` with credentials `neo4j` / `neo4j`.

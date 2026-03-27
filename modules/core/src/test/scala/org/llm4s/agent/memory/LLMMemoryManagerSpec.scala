@@ -1,10 +1,12 @@
 package org.llm4s.agent.memory
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -15,6 +17,14 @@ import java.time.temporal.ChronoUnit
  * These tests verify LLM-powered memory consolidation behavior.
  */
 class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
+
+  private def withLLMMemoryManagerLoggerSilenced[A](body: => A): A = {
+    val logger   = LoggerFactory.getLogger(classOf[LLMMemoryManager]).asInstanceOf[LBLogger]
+    val previous = logger.getLevel
+    logger.setLevel(Level.OFF)
+    try body
+    finally logger.setLevel(previous)
+  }
 
   // ============================================================
   // Mock LLM Client for testing
@@ -657,16 +667,18 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
   it should "handle LLM failures during consolidation" in {
     val manager = createFailingManager()
 
-    val result = for {
-      m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
-      m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
-      m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
+    val result = withLLMMemoryManagerLoggerSilenced {
+      for {
+        m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
+        m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
+        m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
 
-      consolidated <- m3.consolidateMemories(
-        olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
-        minCount = 3
-      )
-    } yield consolidated
+        consolidated <- m3.consolidateMemories(
+          olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
+          minCount = 3
+        )
+      } yield consolidated
+    }
 
     // Should succeed (non-fatal error recovery) but preserve original memories
     result.isRight shouldBe true
@@ -677,19 +689,21 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
   it should "preserve original memories when LLM consolidation fails" in {
     val manager = createFailingManager()
 
-    val result = for {
-      m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
-      m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
-      m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
+    val result = withLLMMemoryManagerLoggerSilenced {
+      for {
+        m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
+        m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
+        m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
 
-      // Try to consolidate (should continue despite LLM failure)
-      consolidated <- m3.consolidateMemories(
-        olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
-        minCount = 3
-      )
+        // Try to consolidate (should continue despite LLM failure)
+        consolidated <- m3.consolidateMemories(
+          olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
+          minCount = 3
+        )
 
-      memories <- consolidated.store.recall(MemoryFilter.All, 100)
-    } yield memories
+        memories <- consolidated.store.recall(MemoryFilter.All, 100)
+      } yield memories
+    }
 
     // Should succeed and preserve original memories (non-fatal error recovery)
     result.isRight shouldBe true
@@ -704,17 +718,19 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     val store   = InMemoryStore.empty
     val manager = LLMMemoryManager(strictConfig, store, client)
 
-    val result = for {
-      m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
-      m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
-      m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
+    val result = withLLMMemoryManagerLoggerSilenced {
+      for {
+        m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
+        m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
+        m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
 
-      // Try to consolidate in strict mode (should fail fast)
-      consolidated <- m3.consolidateMemories(
-        olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
-        minCount = 3
-      )
-    } yield consolidated
+        // Try to consolidate in strict mode (should fail fast)
+        consolidated <- m3.consolidateMemories(
+          olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
+          minCount = 3
+        )
+      } yield consolidated
+    }
 
     // Should fail fast in strict mode
     result.isLeft shouldBe true

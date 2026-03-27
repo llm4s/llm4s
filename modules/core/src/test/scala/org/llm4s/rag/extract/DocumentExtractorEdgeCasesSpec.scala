@@ -1,7 +1,9 @@
 package org.llm4s.rag.extract
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.slf4j.LoggerFactory
 
 import java.io.{ ByteArrayInputStream, IOException, InputStream }
 import java.nio.charset.StandardCharsets
@@ -10,12 +12,22 @@ class DocumentExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   val extractor: DocumentExtractor = DefaultDocumentExtractor
 
+  private def withDocumentExtractorLoggerSilenced[A](body: => A): A = {
+    val logger   = LoggerFactory.getLogger(DefaultDocumentExtractor.getClass).asInstanceOf[LBLogger]
+    val previous = logger.getLevel
+    logger.setLevel(Level.OFF)
+    try body
+    finally logger.setLevel(previous)
+  }
+
   // ========== Corrupted PDF ==========
 
   "DefaultDocumentExtractor" should "return Left for corrupted PDF content" in {
     // PDF magic bytes followed by garbage
     val corruptPdf = Array[Byte](0x25, 0x50, 0x44, 0x46, 0x2d) ++ Array.fill[Byte](50)(0xff.toByte)
-    val result     = extractor.extract(corruptPdf, "corrupt.pdf", Some("application/pdf"))
+    val result = withDocumentExtractorLoggerSilenced {
+      extractor.extract(corruptPdf, "corrupt.pdf", Some("application/pdf"))
+    }
 
     result.isLeft shouldBe true
     result.left.toOption.get.message should include("PDF")
@@ -25,11 +37,13 @@ class DocumentExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   it should "return Left for corrupted DOCX content" in {
     val corruptDocx = Array.fill[Byte](100)(0xab.toByte)
-    val result = extractor.extract(
-      corruptDocx,
-      "corrupt.docx",
-      Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-    )
+    val result = withDocumentExtractorLoggerSilenced {
+      extractor.extract(
+        corruptDocx,
+        "corrupt.docx",
+        Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+      )
+    }
 
     result.isLeft shouldBe true
     result.left.toOption.get.message should include("DOCX")
@@ -54,7 +68,9 @@ class DocumentExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   it should "attempt Tika extraction for unknown binary format" in {
     val unknownBytes = Array.fill[Byte](100)(0x00)
-    val result       = extractor.extract(unknownBytes, "unknown.bin")
+    val result = withDocumentExtractorLoggerSilenced {
+      extractor.extract(unknownBytes, "unknown.bin")
+    }
 
     // Tika may return Left (empty content) or Right depending on content
     // The important thing is it doesn't throw
@@ -65,7 +81,9 @@ class DocumentExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   it should "attempt Tika extraction for legacy .doc format" in {
     val content = "Some text content".getBytes(StandardCharsets.UTF_8)
-    val result  = extractor.extract(content, "legacy.doc", Some("application/msword"))
+    val result = withDocumentExtractorLoggerSilenced {
+      extractor.extract(content, "legacy.doc", Some("application/msword"))
+    }
 
     // Legacy .doc with text bytes may produce output via Tika or fail gracefully
     result.isLeft || result.isRight shouldBe true
@@ -81,7 +99,9 @@ class DocumentExtractorEdgeCasesSpec extends AnyFlatSpec with Matchers {
     // Text content but forced to PDF MIME — should fail gracefully
     val content = "not a pdf".getBytes(StandardCharsets.UTF_8)
     val stream  = new ByteArrayInputStream(content)
-    val result  = extractor.extractFromStream(stream, "fake.pdf", Some("application/pdf"))
+    val result = withDocumentExtractorLoggerSilenced {
+      extractor.extractFromStream(stream, "fake.pdf", Some("application/pdf"))
+    }
 
     result.isLeft shouldBe true
     result.left.toOption.get.message should include("PDF")

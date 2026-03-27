@@ -1,17 +1,24 @@
 package org.llm4s.mcp
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterAll
 import org.llm4s.toolapi.{ Schema, SafeParameterExtractor, ToolBuilder }
+import org.slf4j.LoggerFactory
 import scala.concurrent.duration._
 
 class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
 
-  var server: MCPServer = _
-  var port: Int         = _
+  var server: MCPServer                        = _
+  var port: Int                                = _
+  private var previousMcpServerLogLevel: Level = _
 
   override def beforeAll(): Unit = {
+    val logger = LoggerFactory.getLogger("org.llm4s.mcp.MCPServer").asInstanceOf[LBLogger]
+    previousMcpServerLogLevel = logger.getLevel
+    logger.setLevel(Level.OFF)
+
     // 1. Define a simple tool
     val pingSchema = Schema
       .`object`[Map[String, Any]]("Ping parameters")
@@ -38,7 +45,11 @@ class MCPServerSpec extends AnyFunSpec with Matchers with BeforeAndAfterAll {
   }
 
   override def afterAll(): Unit =
-    if (server != null) server.stop()
+    try if (server != null) server.stop()
+    finally {
+      val logger = LoggerFactory.getLogger("org.llm4s.mcp.MCPServer").asInstanceOf[LBLogger]
+      logger.setLevel(previousMcpServerLogLevel)
+    }
 
   describe("MCPServer Integration") {
 

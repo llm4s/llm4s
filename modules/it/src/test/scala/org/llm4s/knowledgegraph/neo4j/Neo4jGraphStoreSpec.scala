@@ -16,7 +16,7 @@ import org.scalatest.matchers.should.Matchers
  *
  * To run locally:
  *   docker run -p 7687:7687 -e NEO4J_AUTH=neo4j/neo4j neo4j:5
- *   sbt "knowledgegraphNeo4j/test"
+ *   sbt "it/test"
  *
  * Note: The neo4j-harness embedded approach was attempted but is unusable on
  * Java 17+ with neo4j-harness 5.26.x — the harness's LocalNettyConnector uses
