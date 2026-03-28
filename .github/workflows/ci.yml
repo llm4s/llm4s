@@ -37,8 +37,11 @@ jobs:
       - name: Check formatting
         run: sbt scalafmtCheckAll
       
-      - name: Compile
+      - name: Compile (Scala 3.x)
         run: sbt compile
+
+      - name: Compile (Cross-version: Scala 2.13 + 3.x)
+        run: sbt +compile
 
   # Code coverage (runs on one configuration to avoid duplication)
   coverage:
