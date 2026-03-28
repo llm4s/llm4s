@@ -33,11 +33,12 @@ jobs:
 
       - uses: sbt/setup-sbt@v1
 
+      # Smoke test: exercises CheckPolicies + dev policy against committed HOCON (no live Ollama).
       - name: Run policy check
-        env:
-          LLM_MODEL: ollama/llama3
-          OLLAMA_BASE_URL: http://localhost:11434
-        run: sbt "configPolicy/runMain org.llm4s.configpolicy.CheckPolicies --env=dev"
+        run: >-
+          sbt "configPolicy/runMain org.llm4s.configpolicy.CheckPolicies
+          --env=dev
+          --config config/examples/application-policy-smoke.conf"
 
   # Quick checks that should fail fast
   quick-checks:

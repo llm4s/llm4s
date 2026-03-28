@@ -35,4 +35,3 @@ object CheckPolicies {
     else args.find(_.startsWith(name + "=")).map(_.stripPrefix(name + "="))
   }
 }
-

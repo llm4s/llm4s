@@ -2,6 +2,7 @@ package org.llm4s.configpolicy
 
 import org.llm4s.llmconnect.config._
 
+import scala.util.{ Failure, Success, Try }
 import scala.util.matching.Regex
 
 final case class ConfigPolicy(
@@ -49,15 +50,38 @@ object ConfigPolicy {
       case "permissive" | "none" => Some(permissive)
       case "dev" | "dev-sandbox" => Some(devSandbox)
       case "prod" | "prod-safe"  => Some(prodSafeDefaults)
-      case _                      => None
+      case _                     => None
     }
 }
 
 final case class PolicyViolation(rule: String, message: String)
 
 object ConfigPolicyEngine {
+
+  private def compileRegexList(
+    patterns: List[String],
+    rule: String
+  ): Either[List[PolicyViolation], List[Regex]] =
+    patterns.zipWithIndex.foldLeft[Either[List[PolicyViolation], List[Regex]]](Right(Nil)) {
+      case (Left(errs), _) => Left(errs)
+      case (Right(acc), (raw, idx)) =>
+        Try(new Regex(raw)) match {
+          case Success(r) => Right(acc :+ r)
+          case Failure(e) =>
+            Left(
+              List(
+                PolicyViolation(
+                  rule,
+                  s"Invalid regex at index $idx ('$raw'): ${e.getMessage}"
+                )
+              )
+            )
+        }
+    }
+
+  /** `@unchecked`: keep a default branch for future [[ProviderConfig]] subtypes without failing -Werror. */
   def providerName(config: ProviderConfig): String =
-    config match {
+    (config: @unchecked) match {
       case _: OpenAIConfig    => "openai"
       case _: AzureConfig     => "azure"
       case _: AnthropicConfig => "anthropic"
@@ -67,13 +91,17 @@ object ConfigPolicyEngine {
       case _: DeepSeekConfig  => "deepseek"
       case _: CohereConfig    => "cohere"
       case _: MistralConfig   => "mistral"
+      case other =>
+        val simple = other.getClass.getSimpleName.stripSuffix("Config")
+        if (simple.isEmpty) "unknown"
+        else simple.toLowerCase
     }
 
   def providerModel(config: ProviderConfig): String =
     s"${providerName(config)}/${config.model}"
 
   def baseUrlOrEndpoint(config: ProviderConfig): Option[String] =
-    config match {
+    (config: @unchecked) match {
       case c: OpenAIConfig    => Some(c.baseUrl)
       case c: AzureConfig     => Some(c.endpoint)
       case c: AnthropicConfig => Some(c.baseUrl)
@@ -83,6 +111,7 @@ object ConfigPolicyEngine {
       case c: DeepSeekConfig  => Some(c.baseUrl)
       case c: CohereConfig    => Some(c.baseUrl)
       case c: MistralConfig   => Some(c.baseUrl)
+      case _                  => None
     }
 
   def check(config: ProviderConfig, policy: ConfigPolicy, environment: CatalogEnvironment): List[PolicyViolation] = {
@@ -95,13 +124,20 @@ object ConfigPolicyEngine {
       } else Nil
 
     val modelViolations =
-      if (policy.allowedModelPatterns.nonEmpty) {
-        val matches = policy.allowedModelPatterns.exists { pattern =>
-          new Regex(pattern).findFirstIn(fullSpec).isDefined
+      if (policy.allowedModelPatterns.isEmpty) Nil
+      else
+        compileRegexList(policy.allowedModelPatterns, "allowedModelPatterns") match {
+          case Left(violations) => violations
+          case Right(compiled) =>
+            if (compiled.exists(_.findFirstIn(fullSpec).isDefined)) Nil
+            else
+              List(
+                PolicyViolation(
+                  "allowedModels",
+                  s"Model '$fullSpec' does not match configured allowlist"
+                )
+              )
         }
-        if (matches) Nil
-        else List(PolicyViolation("allowedModels", s"Model '$fullSpec' does not match configured allowlist"))
-      } else Nil
 
     val maxContextViolations =
       policy.maxContextWindowByEnv
@@ -114,15 +150,21 @@ object ConfigPolicyEngine {
       policy.requiredBaseUrlPatternByEnv
         .get(environment)
         .toList
-        .flatMap { pattern =>
-          baseUrlOrEndpoint(config) match {
-            case Some(url) if new Regex(pattern).findFirstIn(url).isDefined => Nil
-            case Some(_)                                                     => List(PolicyViolation("requiredBaseUrl", s"Endpoint must match $pattern"))
-            case None                                                        => List(PolicyViolation("requiredBaseUrl", "No endpoint/baseUrl found"))
+        .flatMap { rawPattern =>
+          compileRegexList(List(rawPattern), "requiredBaseUrl") match {
+            case Left(violations) => violations
+            case Right(compiled) =>
+              val pattern = compiled.head
+              baseUrlOrEndpoint(config) match {
+                case Some(url) if pattern.findFirstIn(url).isDefined => Nil
+                case Some(_) =>
+                  List(PolicyViolation("requiredBaseUrl", s"Endpoint must match $rawPattern"))
+                case None =>
+                  List(PolicyViolation("requiredBaseUrl", "No endpoint/baseUrl found"))
+              }
           }
         }
 
     providerViolations ++ modelViolations ++ maxContextViolations ++ baseUrlViolations
   }
 }
-
