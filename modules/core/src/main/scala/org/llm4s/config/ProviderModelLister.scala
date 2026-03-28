@@ -54,7 +54,7 @@ private[llm4s] object ProviderModelListers:
       for
         anthropic <- config.requireProvider(ProviderKind.Anthropic)
         apiKey    <- anthropic.requireApiKey
-        baseUrl    = anthropic.baseUrlOrDefault(DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL)
+        baseUrl = anthropic.baseUrlOrDefault(DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL)
         models <- listAnthropicModels(baseUrl, apiKey, httpClient)
       yield models
 
@@ -70,7 +70,7 @@ private[llm4s] object ProviderModelListers:
           .getResult(
             s"${baseUrl.asUrl}/v1/models",
             headers = Map(
-              "x-api-key" -> apiKey.asKey,
+              "x-api-key"         -> apiKey.asKey,
               "anthropic-version" -> AnthropicVersion
             ),
             params = Map("limit" -> DefaultLimit) ++ afterId.map("after_id" -> _),
@@ -80,20 +80,22 @@ private[llm4s] object ProviderModelListers:
         okResponse   <- response.ensureSuccess("anthropic")
         jsonResponse <- okResponse.toJson("responseBody")
         page         <- parseAnthropicPage(jsonResponse.body)
-        all           = acc ++ page.models
-        models <- if page.hasMore then
-          page.lastId match
-            case Some(lastId) => listAnthropicModels(baseUrl, apiKey, httpClient, Some(lastId), all)
-            case None         => Left(ValidationError("last_id", "Anthropic models response set has_more=true without last_id"))
-        else Right(all)
+        all = acc ++ page.models
+        models <-
+          if page.hasMore then
+            page.lastId match
+              case Some(lastId) => listAnthropicModels(baseUrl, apiKey, httpClient, Some(lastId), all)
+              case None =>
+                Left(ValidationError("last_id", "Anthropic models response set has_more=true without last_id"))
+          else Right(all)
       yield models
 
   object Gemini extends ProviderModelLister:
     def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
       for
-        gemini  <- config.requireProvider(ProviderKind.Gemini)
-        apiKey  <- gemini.requireApiKey
-        baseUrl  = gemini.baseUrlOrDefault(DefaultConfig.DEFAULT_GEMINI_BASE_URL)
+        gemini <- config.requireProvider(ProviderKind.Gemini)
+        apiKey <- gemini.requireApiKey
+        baseUrl = gemini.baseUrlOrDefault(DefaultConfig.DEFAULT_GEMINI_BASE_URL)
         models <- listGeminiModels(baseUrl, apiKey, httpClient)
       yield models
 
@@ -116,7 +118,7 @@ private[llm4s] object ProviderModelListers:
         okResponse   <- response.ensureSuccess("gemini")
         jsonResponse <- okResponse.toJson("responseBody")
         page         <- parseGeminiPage(jsonResponse.body)
-        all           = acc ++ page.models
+        all = acc ++ page.models
         models <- page.nextPageToken match
           case Some(token) if token.nonEmpty => listGeminiModels(baseUrl, apiKey, httpClient, Some(token), all)
           case _                             => Right(all)
@@ -175,8 +177,8 @@ private[llm4s] object ProviderModelListers:
     for
       normalized <- config.requireProvider(expected)
       apiKey     <- normalized.requireApiKey
-      baseUrl     = normalized.baseUrlOrDefault(defaultBaseUrl)
-      headers     = authHeaders(normalized, apiKey)
+      baseUrl = normalized.baseUrlOrDefault(defaultBaseUrl)
+      headers = authHeaders(normalized, apiKey)
       response <- httpClient
         .getResult(s"${baseUrl.asUrl}$modelsPath", headers = headers, timeout = 10000)
         .mapServiceError(provider.name, "Failed to discover models")
@@ -185,7 +187,10 @@ private[llm4s] object ProviderModelListers:
       models       <- parseOpenAICompatibleModels(jsonResponse.body, provider)
     yield models
 
-  private def authHeaders(config: NamedProviderConfig, apiKey: org.llm4s.types.ProviderModelTypes.ApiKey): Map[String, String] =
+  private def authHeaders(
+    config: NamedProviderConfig,
+    apiKey: org.llm4s.types.ProviderModelTypes.ApiKey
+  ): Map[String, String] =
     val base =
       Map("Authorization" -> s"Bearer ${apiKey.asKey}") ++
         config.organization.map(org => "OpenAI-Organization" -> org)
@@ -193,7 +198,7 @@ private[llm4s] object ProviderModelListers:
     if config.provider == ProviderKind.OpenRouter then
       base ++ Map(
         "HTTP-Referer" -> "https://github.com/llm4s/llm4s",
-        "X-Title" -> "LLM4S"
+        "X-Title"      -> "LLM4S"
       )
     else base
 
@@ -202,15 +207,14 @@ private[llm4s] object ProviderModelListers:
     provider: LLMProvider
   ): Result[List[DiscoveredModel]] =
     val dataResult =
-      Try(json("data").arr.toList).toResult
-        .left
+      Try(json("data").arr.toList).toResult.left
         .map(err => ValidationError("data", s"Missing or invalid models payload: ${err.message}"))
 
     dataResult.flatMap: data =>
       data.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)):
         case (accResult, modelJson) =>
           for
-            acc <- accResult
+            acc    <- accResult
             parsed <- parseOpenAICompatibleModel(modelJson, provider)
           yield parsed match
             case Some(model) => acc :+ model
@@ -236,21 +240,20 @@ private[llm4s] object ProviderModelListers:
 
   private def parseAnthropicModels(json: ujson.Value): Result[List[DiscoveredModel]] =
     val dataResult =
-      Try(json("data").arr.toList).toResult
-        .left
+      Try(json("data").arr.toList).toResult.left
         .map(err => ValidationError("data", s"Missing or invalid models payload: ${err.message}"))
 
     dataResult.flatMap: data =>
       data.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)):
         case (accResult, modelJson) =>
           for
-            acc <- accResult
+            acc    <- accResult
             parsed <- parseAnthropicModel(modelJson)
           yield parsed match
             case Some(model) => acc :+ model
             case None        => acc
 
-  private final case class AnthropicPage(
+  final private case class AnthropicPage(
     models: List[DiscoveredModel],
     hasMore: Boolean,
     lastId: Option[String]
@@ -278,21 +281,20 @@ private[llm4s] object ProviderModelListers:
 
   private def parseGeminiModels(json: ujson.Value): Result[List[DiscoveredModel]] =
     val modelsResult =
-      Try(json("models").arr.toList).toResult
-        .left
+      Try(json("models").arr.toList).toResult.left
         .map(err => ValidationError("models", s"Missing or invalid Gemini models payload: ${err.message}"))
 
     modelsResult.flatMap: models =>
       models.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)):
         case (accResult, modelJson) =>
           for
-            acc <- accResult
+            acc    <- accResult
             parsed <- parseGeminiModel(modelJson)
           yield parsed match
             case Some(model) => acc :+ model
             case None        => acc
 
-  private final case class GeminiPage(
+  final private case class GeminiPage(
     models: List[DiscoveredModel],
     nextPageToken: Option[String]
   )
@@ -324,15 +326,14 @@ private[llm4s] object ProviderModelListers:
 
   private def parseOllamaModels(json: ujson.Value): Result[List[DiscoveredModel]] =
     val modelsResult =
-      Try(json("models").arr.toList).toResult
-        .left
+      Try(json("models").arr.toList).toResult.left
         .map(err => ValidationError("models", s"Missing or invalid Ollama models payload: ${err.message}"))
 
     modelsResult.flatMap: models =>
       models.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)):
         case (accResult, modelJson) =>
           for
-            acc <- accResult
+            acc    <- accResult
             parsed <- parseOllamaModel(modelJson)
           yield parsed match
             case Some(model) => acc :+ model

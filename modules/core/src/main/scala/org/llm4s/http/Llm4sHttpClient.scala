@@ -39,8 +39,7 @@ object HttpResponse:
       else Left(ServiceError(response.statusCode, provider, response.body))
 
     def toJson(fieldName: String = "responseBody"): Result[JsonHttpResponse] =
-      Try(ujson.read(response.body)).toResult
-        .left
+      Try(ujson.read(response.body)).toResult.left
         .map(err => ValidationError(fieldName, s"Failed to parse JSON response: ${err.message}"))
         .map(json => JsonHttpResponse(response.statusCode, json, response.headers))
 
@@ -115,8 +114,7 @@ trait Llm4sHttpClient {
     params: Map[String, String] = Map.empty,
     timeout: Int = 10000
   ): Result[HttpResponse] =
-    Try(get(url, headers, params, timeout)).toResult
-      .left
+    Try(get(url, headers, params, timeout)).toResult.left
       .map(err => ServiceError(500, "http", s"GET request failed: ${err.message}"))
 
   def post(

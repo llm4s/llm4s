@@ -116,7 +116,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
         |}""".stripMargin
 
     val mockHttp = MockHttpClient(HttpResponse(200, responseBody, Map.empty))
-    val result = ProviderModelListers.OpenAI.listModels(config, mockHttp)
+    val result   = ProviderModelListers.OpenAI.listModels(config, mockHttp)
 
     result match
       case Right(models) =>
@@ -193,7 +193,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
         |}""".stripMargin
 
     val mockHttp = MockHttpClient(HttpResponse(200, responseBody, Map.empty))
-    val result = ProviderModelListers.Anthropic.listModels(config, mockHttp)
+    val result   = ProviderModelListers.Anthropic.listModels(config, mockHttp)
 
     result match
       case Left(err) =>
@@ -265,7 +265,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
         |}""".stripMargin
 
     val mockHttp = MockHttpClient(HttpResponse(200, responseBody, Map.empty))
-    val result = ProviderModelListers.OpenRouter.listModels(config, mockHttp)
+    val result   = ProviderModelListers.OpenRouter.listModels(config, mockHttp)
 
     result match
       case Right(models) =>
@@ -293,7 +293,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
         |}""".stripMargin
 
     val mockHttp = MockHttpClient(HttpResponse(200, responseBody, Map.empty))
-    val result = ProviderModelListers.DeepSeek.listModels(config, mockHttp)
+    val result   = ProviderModelListers.DeepSeek.listModels(config, mockHttp)
 
     result match
       case Right(models) =>
@@ -318,7 +318,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
         |}""".stripMargin
 
     val mockHttp = MockHttpClient(HttpResponse(200, responseBody, Map.empty))
-    val result = ProviderModelListers.Mistral.listModels(config, mockHttp)
+    val result   = ProviderModelListers.Mistral.listModels(config, mockHttp)
 
     result match
       case Right(models) =>

@@ -7,12 +7,12 @@ final class MockHttpClient(response: HttpResponse) extends Llm4sHttpClient {
     this(responses.headOption.getOrElse(HttpResponse(200, "", Map.empty)))
     enqueueResponses(responses.drop(1))
 
-  var lastUrl: Option[String]                  = None
-  var lastHeaders: Option[Map[String, String]] = None
-  var lastParams: Option[Map[String, String]]  = None
-  var lastBody: Option[String]                 = None
-  var lastTimeout: Option[Int]                 = None
-  var postCallCount: Int                       = 0
+  var lastUrl: Option[String]                                                              = None
+  var lastHeaders: Option[Map[String, String]]                                             = None
+  var lastParams: Option[Map[String, String]]                                              = None
+  var lastBody: Option[String]                                                             = None
+  var lastTimeout: Option[Int]                                                             = None
+  var postCallCount: Int                                                                   = 0
   val getRequests: mutable.Buffer[(String, Map[String, String], Map[String, String], Int)] = mutable.Buffer.empty
 
   private val queuedResponses: mutable.Queue[HttpResponse] = mutable.Queue(response)

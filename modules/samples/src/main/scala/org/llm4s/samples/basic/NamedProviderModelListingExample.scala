@@ -16,10 +16,10 @@ import org.slf4j.LoggerFactory
 object NamedProviderModelListingExample:
   def main(args: Array[String]): Unit =
     val providerName = "ollama-local"
-    val logger = LoggerFactory.getLogger("samples.basic.NamedProviderModelListingExample")
+    val logger       = LoggerFactory.getLogger("samples.basic.NamedProviderModelListingExample")
 
     val result = for
-      providers   <- Llm4sConfig.providers()
+      providers <- Llm4sConfig.providers()
       namedConfig <- providers.namedProviders
         .get(org.llm4s.config.ProvidersConfigModel.ProviderName(providerName))
         .toRight(org.llm4s.error.ConfigurationError(s"Configured provider '$providerName' was not found"))
@@ -42,10 +42,11 @@ object NamedProviderModelListingExample:
           logger.info("")
           logger.info("=== {} ===", model.name.asString)
           logger.info("Provider: {}", model.provider)
-          if model.metadata.isEmpty then
-            logger.info("Metadata: none")
+          if model.metadata.isEmpty then logger.info("Metadata: none")
           else
-            model.metadata.toSeq.sortBy(_._1).foreach: (key, value) =>
-              logger.info("{}: {}", key, value)
+            model.metadata.toSeq
+              .sortBy(_._1)
+              .foreach: (key, value) =>
+                logger.info("{}: {}", key, value)
       }
     )

@@ -49,7 +49,9 @@ object ParallelNamedProviderModelListingExample:
 
   private def runProvider(
     providerName: String
-  ): Future[Result[(org.llm4s.config.ProvidersConfigModel.NamedProviderConfig, List[org.llm4s.config.DiscoveredModel])]] =
+  ): Future[
+    Result[(org.llm4s.config.ProvidersConfigModel.NamedProviderConfig, List[org.llm4s.config.DiscoveredModel])]
+  ] =
     Future:
       for
         providers <- Llm4sConfig.providers()
@@ -73,8 +75,8 @@ object ParallelNamedProviderModelListingExample:
       { case (named, models) =>
         val modelLines =
           models match
-            case Nil  => "Models: none"
-            case all  => all.map(model => s"- ${model.name.asString}").mkString("\n")
+            case Nil => "Models: none"
+            case all => all.map(model => s"- ${model.name.asString}").mkString("\n")
 
         s"""
            |

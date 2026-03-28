@@ -22,7 +22,7 @@ private[llm4s] object ProviderCapabilities:
     override val modelLister: Option[ProviderModelLister] = Some(ProviderModelListers.Anthropic)
 
   object Ollama extends ProviderCapabilities:
-    val validator: NamedProviderValidator               = NamedProviderValidators.Ollama
+    val validator: NamedProviderValidator                 = NamedProviderValidators.Ollama
     override val modelLister: Option[ProviderModelLister] = Some(ProviderModelListers.Ollama)
 
   object Zai extends ProviderCapabilities:

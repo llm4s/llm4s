@@ -131,7 +131,7 @@ object Llm4sConfig {
     httpClient: Llm4sHttpClient
   ): Result[List[DiscoveredModel]] =
     for
-      providers     <- providers(source)
+      providers <- providers(source)
       namedProvider <- providers.namedProviders
         .get(ProviderName(name))
         .toRight(org.llm4s.error.ConfigurationError(s"Configured provider '$name' was not found"))
