@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.util.Redaction
+import org.llm4s.error.AuthenticationError
 import org.llm4s.error.ValidationError
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.http.Llm4sHttpClient
@@ -466,7 +467,15 @@ class GeminiClient(
 
   private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] = {
     logger.error(s"[Gemini] Error response: $statusCode")
-    HttpErrorMapper.mapHttpError(statusCode, body, providerName)
+    val details = HttpErrorMapper.extractErrorDetails(body, statusCode, providerName)
+    if statusCode == 400 && isInvalidApiKey(details) then Left(AuthenticationError(providerName, details))
+    else HttpErrorMapper.mapHttpError(statusCode, body, providerName)
+  }
+
+  private def isInvalidApiKey(details: String): Boolean = {
+    val normalized = details.toLowerCase
+    normalized.contains("api key not valid") ||
+    normalized.contains("invalid api key")
   }
 
   private def recordExchange(

@@ -128,6 +128,32 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
     result.left.toOption.get shouldBe a[org.llm4s.error.ValidationError]
   }
 
+  it should "return AuthenticationError when Gemini reports an invalid API key with HTTP 400" in {
+    val invalidKeyBody =
+      """{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}"""
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(HttpResponse(400, invalidKeyBody, Map.empty))
+
+    val client = mkClient(mockHttp)
+    val result = client.complete(conversation("Hi"), CompletionOptions())
+
+    result.isLeft shouldBe true
+    result.left.toOption.get shouldBe a[org.llm4s.error.AuthenticationError]
+  }
+
+  it should "keep non-auth Gemini HTTP 400 responses as ValidationError" in {
+    val invalidRequestBody =
+      """{"error":{"code":400,"message":"Invalid value at 'contents[0].parts[0].text'","status":"INVALID_ARGUMENT"}}"""
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(HttpResponse(400, invalidRequestBody, Map.empty))
+
+    val client = mkClient(mockHttp)
+    val result = client.complete(conversation("Hi"), CompletionOptions())
+
+    result.isLeft shouldBe true
+    result.left.toOption.get shouldBe a[org.llm4s.error.ValidationError]
+  }
+
   it should "return ServiceError on HTTP 500" in {
     val mockHttp = stub[Llm4sHttpClient]
     (mockHttp.post _).when(*, *, *, *).returns(httpErr(500))

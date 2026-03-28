@@ -431,6 +431,7 @@ case class GeminiConfig(
 
 object GeminiConfig {
   private val standardReserve = 8192
+  private val DefaultApiPath  = "/v1beta"
 
   private def geminiFallback(modelName: String): (Int, Int) =
     modelName match {
@@ -457,6 +458,7 @@ object GeminiConfig {
   ): GeminiConfig = {
     require(apiKey.trim.nonEmpty, "Gemini apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Gemini baseUrl must be non-empty")
+    val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
     val (cw, rc) = ContextWindowResolver.resolve(
       lookupProviders = Seq("gemini", "google"),
       modelName = modelName,
@@ -467,10 +469,16 @@ object GeminiConfig {
     GeminiConfig(
       apiKey = apiKey,
       model = modelName,
-      baseUrl = baseUrl,
+      baseUrl = normalizedBaseUrl,
       contextWindow = cw,
       reserveCompletion = rc
     )
+  }
+
+  private def normalizeBaseUrl(baseUrl: String): String = {
+    val trimmed = baseUrl.trim.stripSuffix("/")
+    if trimmed.matches(""".*/v\d+(?:alpha|beta)?$""") then trimmed
+    else s"$trimmed$DefaultApiPath"
   }
 }
 

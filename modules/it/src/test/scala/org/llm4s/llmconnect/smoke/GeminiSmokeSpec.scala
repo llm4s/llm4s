@@ -24,7 +24,7 @@ class GeminiSmokeSpec extends AnyFlatSpec with Matchers {
     GeminiConfig.fromValues(
       modelName = "gemini-1.5-flash",
       apiKey = key,
-      baseUrl = "https://generativelanguage.googleapis.com"
+      baseUrl = "https://generativelanguage.googleapis.com/v1beta"
     )
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
