@@ -19,12 +19,11 @@ case class ShellConfig(
 ) {
 
   /**
-   * Check if a command is allowed.
+   * Check if a command name is in the allowlist.
+   * Expects a single command name (not a full command string with arguments).
    */
-  def isCommandAllowed(command: String): Boolean = {
-    val baseCommand = command.trim.split("\\s+").headOption.getOrElse("")
-    allowedCommands.contains(baseCommand)
-  }
+  def isCommandAllowed(command: String): Boolean =
+    allowedCommands.contains(command.trim)
 }
 
 object ShellConfig {

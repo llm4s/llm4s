@@ -13,15 +13,14 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
     val config = ShellConfig(allowedCommands = Seq("ls", "cat", "echo"))
 
     config.isCommandAllowed("ls") shouldBe true
-    config.isCommandAllowed("ls -la") shouldBe true
-    config.isCommandAllowed("cat file.txt") shouldBe true
-    config.isCommandAllowed("echo hello") shouldBe true
+    config.isCommandAllowed("cat") shouldBe true
+    config.isCommandAllowed("echo") shouldBe true
   }
 
   it should "reject non-allowed commands" in {
     val config = ShellConfig(allowedCommands = Seq("ls", "cat"))
 
-    config.isCommandAllowed("rm -rf /") shouldBe false
+    config.isCommandAllowed("rm") shouldBe false
     config.isCommandAllowed("wget") shouldBe false
     config.isCommandAllowed("curl") shouldBe false
   }
@@ -166,7 +165,7 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
       )
   }
 
-  it should "reject commands containing shell metacharacters" in {
+  it should "reject unquoted shell metacharacters" in {
     assume(!isWindows, "Unix shell commands not available on Windows")
     val tempFile = java.io.File.createTempFile("shell-tool", ".tmp")
     tempFile.deleteOnExit()
@@ -178,23 +177,68 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool => {
-          // Classic injection attempt
+          // Classic injection attempt: unquoted && must be rejected
           val params1 = ujson.Obj("command" -> s"echo hi && rm ${tempFile.getAbsolutePath}")
           tool.handler(SafeParameterExtractor(params1)) match {
-            case Left(err)          => err should include("Shell metacharacters")
+            case Left(err)          => err should include("shell metacharacter")
             case Right(shellResult) => fail(s"Expected Left but got Right: $shellResult")
           }
 
-          // Metacharacters should be rejected even inside quoted args
-          val params2 = ujson.Obj("command" -> "echo \"hi && rm /tmp/x\"")
+          // Pipe injection
+          val params2 = ujson.Obj("command" -> "echo hi | cat")
           tool.handler(SafeParameterExtractor(params2)) match {
-            case Left(err)          => err should include("Shell metacharacters")
+            case Left(err)          => err should include("shell metacharacter")
+            case Right(shellResult) => fail(s"Expected Left but got Right: $shellResult")
+          }
+
+          // Semicolon injection
+          val params3 = ujson.Obj("command" -> "echo hi; rm /tmp/x")
+          tool.handler(SafeParameterExtractor(params3)) match {
+            case Left(err)          => err should include("shell metacharacter")
+            case Right(shellResult) => fail(s"Expected Left but got Right: $shellResult")
+          }
+
+          // Backtick injection
+          val params4 = ujson.Obj("command" -> "echo `whoami`")
+          tool.handler(SafeParameterExtractor(params4)) match {
+            case Left(err)          => err should include("shell metacharacter")
+            case Right(shellResult) => fail(s"Expected Left but got Right: $shellResult")
+          }
+
+          // Dollar sign injection
+          val params5 = ujson.Obj("command" -> "echo $HOME")
+          tool.handler(SafeParameterExtractor(params5)) match {
+            case Left(err)          => err should include("shell metacharacter")
             case Right(shellResult) => fail(s"Expected Left but got Right: $shellResult")
           }
         }
       )
 
     tempFile.exists() shouldBe true
+  }
+
+  it should "allow metacharacters inside quoted arguments" in {
+    assume(!isWindows, "Unix shell commands not available on Windows")
+    val config = ShellConfig(allowedCommands = Seq("echo"))
+
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          // Quoted metacharacters are safe — ProcessBuilder doesn't interpret them
+          val params = ujson.Obj("command" -> "echo \"hello && world\"")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              shellResult => {
+                shellResult.exitCode shouldBe 0
+                shellResult.stdout.trim shouldBe "hello && world"
+              }
+            )
+        }
+      )
   }
 
   it should "reject empty command" in {
@@ -237,7 +281,7 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
       )
   }
 
-  it should "reject forbidden chars in the base command" in {
+  it should "reject metacharacters in the base command" in {
     assume(!isWindows, "Unix shell commands not available on Windows")
     val config = ShellConfig(allowedCommands = Seq("echo"))
 
@@ -246,12 +290,78 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
       .fold(
         e => fail(s"Tool creation failed: ${e.formatted}"),
         tool => {
+          // Pipe in command name is caught as unquoted metacharacter
           val params = ujson.Obj("command" -> "ec|ho hi")
           tool
             .handler(SafeParameterExtractor(params))
             .fold(
-              err => err should include("not allowed"),
+              err => err should include("shell metacharacter"),
               result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
+  }
+
+  it should "handle escaped quotes inside double-quoted arguments" in {
+    assume(!isWindows, "Unix shell commands not available on Windows")
+    val config = ShellConfig(allowedCommands = Seq("echo"))
+
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          // Backslash escaping inside double quotes: \" produces literal "
+          val params = ujson.Obj("command" -> """echo "hello \"world\"" """)
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              shellResult => {
+                shellResult.exitCode shouldBe 0
+                shellResult.stdout.trim shouldBe """hello "world""""
+              }
+            )
+        }
+      )
+  }
+
+  it should "handle whitespace-only input" in {
+    assume(!isWindows, "Unix shell commands not available on Windows")
+    val config = ShellConfig(allowedCommands = Seq("echo"))
+
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> "   ")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => err should include("Command is empty"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
+  }
+
+  it should "handle trailing backslash" in {
+    assume(!isWindows, "Unix shell commands not available on Windows")
+    val config = ShellConfig(allowedCommands = Seq("echo"))
+
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          // Trailing backslash is treated as a literal backslash character
+          val params = ujson.Obj("command" -> "echo hello\\")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              shellResult => shellResult.exitCode shouldBe 0
             )
         }
       )
