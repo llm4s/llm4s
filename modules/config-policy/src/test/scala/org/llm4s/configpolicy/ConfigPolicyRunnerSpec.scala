@@ -39,12 +39,12 @@ class ConfigPolicyRunnerSpec extends AnyFunSpec with Matchers {
       result.warnings.size shouldBe 1
     }
 
-    it("should report wouldPass correctly") {
+    it("should report passed correctly") {
       val failResult = ConfigPolicyRunner.evaluate(sample, "prod", List(PolicyBuilder.maxTokensLimit(100)))
       val passResult = ConfigPolicyRunner.evaluate(sample, "prod", List(PolicyBuilder.maxTokensLimit(4096)))
 
-      failResult.wouldPass shouldBe false
-      passResult.wouldPass shouldBe true
+      failResult.passed shouldBe false
+      passResult.passed shouldBe true
     }
 
     it("should format report properly") {

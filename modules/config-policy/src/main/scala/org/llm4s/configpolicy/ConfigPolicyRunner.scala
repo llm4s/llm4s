@@ -18,7 +18,8 @@ object ConfigPolicyRunner {
         case _                        => None
       }
 
-    val summary = s"Summary: failures=${result.failures.size}, warnings=${result.warnings.size}, skipped=${result.skipped.size}"
+    val summary =
+      s"Summary: failures=${result.failures.size}, warnings=${result.warnings.size}, skipped=${result.skipped.size}"
 
     (header :: summary :: details).mkString("\n")
   }

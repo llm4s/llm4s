@@ -21,43 +21,53 @@ class DefaultPoliciesSpec extends AnyFunSpec with Matchers {
     }
 
     it("should reject unsafe providers in production") {
-      val result = ConfigPolicyRunner.evaluate(prodGood.copy(provider = Some("ollama")), "prod", DefaultPolicies.productionSafeDefaults)
+      val result = ConfigPolicyRunner.evaluate(
+        prodGood.copy(provider = Some("ollama")),
+        "prod",
+        DefaultPolicies.productionSafeDefaults
+      )
       result.passed shouldBe false
     }
 
     it("should require region in production") {
-      val result = ConfigPolicyRunner.evaluate(prodGood.copy(region = None), "prod", DefaultPolicies.productionSafeDefaults)
+      val result =
+        ConfigPolicyRunner.evaluate(prodGood.copy(region = None), "prod", DefaultPolicies.productionSafeDefaults)
       result.failures.map(_.policyName) should contain("required-region")
     }
 
     it("should enforce token limits in production") {
-      val result = ConfigPolicyRunner.evaluate(prodGood.copy(maxTokens = Some(50000)), "prod", DefaultPolicies.productionSafeDefaults)
+      val result = ConfigPolicyRunner.evaluate(
+        prodGood.copy(maxTokens = Some(50000)),
+        "prod",
+        DefaultPolicies.productionSafeDefaults
+      )
       result.failures.map(_.policyName) should contain("max-tokens-limit")
     }
   }
 
   describe("DefaultPolicies.devSandboxDefaults") {
     it("should allow any provider in dev") {
-      val cfg = prodGood.copy(provider = Some("ollama"), maxTokens = Some(10000))
+      val cfg    = prodGood.copy(provider = Some("ollama"), maxTokens = Some(10000))
       val result = ConfigPolicyRunner.evaluate(cfg, "dev", DefaultPolicies.devSandboxDefaults)
       result.passed shouldBe true
     }
 
     it("should allow higher token limits in dev") {
-      val result = ConfigPolicyRunner.evaluate(prodGood.copy(maxTokens = Some(12000)), "dev", DefaultPolicies.devSandboxDefaults)
+      val result =
+        ConfigPolicyRunner.evaluate(prodGood.copy(maxTokens = Some(12000)), "dev", DefaultPolicies.devSandboxDefaults)
       result.passed shouldBe true
     }
   }
 
   describe("DefaultPolicies.stagingBalancedDefaults") {
     it("should enforce staging policies") {
-      val cfg = prodGood.copy(provider = Some("gemini"), model = Some("gemini-1.5-pro"), maxTokens = Some(4096))
+      val cfg    = prodGood.copy(provider = Some("gemini"), model = Some("gemini-1.5-pro"), maxTokens = Some(4096))
       val result = ConfigPolicyRunner.evaluate(cfg, "staging", DefaultPolicies.stagingBalancedDefaults)
       result.passed shouldBe true
     }
 
     it("should reject unsafe models in staging") {
-      val cfg = prodGood.copy(provider = Some("openai"), model = Some("gpt-4.1"))
+      val cfg    = prodGood.copy(provider = Some("openai"), model = Some("gpt-4.1"))
       val result = ConfigPolicyRunner.evaluate(cfg, "staging", DefaultPolicies.stagingBalancedDefaults)
       result.passed shouldBe false
     }
@@ -70,19 +80,31 @@ class DefaultPoliciesSpec extends AnyFunSpec with Matchers {
     }
 
     it("should reject excessive token usage") {
-      val result = ConfigPolicyRunner.evaluate(prodGood.copy(maxTokens = Some(99999)), "prod", DefaultPolicies.costControlledDefaults)
+      val result = ConfigPolicyRunner.evaluate(
+        prodGood.copy(maxTokens = Some(99999)),
+        "prod",
+        DefaultPolicies.costControlledDefaults
+      )
       result.passed shouldBe false
     }
   }
 
   describe("DefaultPolicies.complianceDefaults") {
     it("should enforce data residency") {
-      val result = ConfigPolicyRunner.evaluate(prodGood.copy(region = Some("eastasia")), "prod", DefaultPolicies.complianceDefaults)
+      val result = ConfigPolicyRunner.evaluate(
+        prodGood.copy(region = Some("eastasia")),
+        "prod",
+        DefaultPolicies.complianceDefaults
+      )
       result.passed shouldBe false
     }
 
     it("should allow safe providers only") {
-      val result = ConfigPolicyRunner.evaluate(prodGood.copy(provider = Some("deepseek")), "prod", DefaultPolicies.complianceDefaults)
+      val result = ConfigPolicyRunner.evaluate(
+        prodGood.copy(provider = Some("deepseek")),
+        "prod",
+        DefaultPolicies.complianceDefaults
+      )
       result.passed shouldBe false
     }
   }
@@ -112,7 +134,7 @@ class DefaultPoliciesSpec extends AnyFunSpec with Matchers {
 
   describe("DefaultPolicies.listPresets") {
     it("should contain all available preset names") {
-      DefaultPolicies.listPresets should contain allOf (
+      (DefaultPolicies.listPresets should contain).allOf(
         "prod-safe",
         "dev-sandbox",
         "staging-balanced",

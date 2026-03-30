@@ -105,7 +105,10 @@ class ConfigPolicySpec extends AnyFunSpec with Matchers {
         if (cfg.baseUrl.exists(_.nonEmpty)) Right("ok") else Left("baseUrl required")
       }
 
-      p.evaluate(base.copy(baseUrl = Some("https://api.example.com")), "prod") shouldBe PolicyPass("base-url-required", "ok")
+      p.evaluate(base.copy(baseUrl = Some("https://api.example.com")), "prod") shouldBe PolicyPass(
+        "base-url-required",
+        "ok"
+      )
       p.evaluate(base, "prod").isInstanceOf[PolicyFail] shouldBe true
     }
   }

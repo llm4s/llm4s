@@ -23,12 +23,12 @@ class CheckPoliciesSpec extends AnyFunSpec with Matchers {
   describe("Config snapshot extraction") {
     it("should handle all environment variable cases") {
       val env = Map(
-        "LLM_PROVIDER" -> "openai",
-        "LLM_MODEL" -> "gpt-4o-mini",
-        "LLM_MAX_TOKENS" -> "2048",
+        "LLM_PROVIDER"         -> "openai",
+        "LLM_MODEL"            -> "gpt-4o-mini",
+        "LLM_MAX_TOKENS"       -> "2048",
         "LLM_REASONING_BUDGET" -> "1000",
-        "LLM_REGION" -> "eastus",
-        "OPENAI_BASE_URL" -> "https://api.openai.com"
+        "LLM_REGION"           -> "eastus",
+        "OPENAI_BASE_URL"      -> "https://api.openai.com"
       )
 
       val snapshot = CheckPolicies.snapshotFromEnv(env.get)
@@ -53,11 +53,11 @@ class CheckPoliciesSpec extends AnyFunSpec with Matchers {
   describe("Policy evaluation integration") {
     it("should work end-to-end for prod environment") {
       val env = Map(
-        "LLM_PROVIDER" -> "openai",
-        "LLM_MODEL" -> "gpt-4o-mini",
-        "LLM_MAX_TOKENS" -> "1024",
+        "LLM_PROVIDER"         -> "openai",
+        "LLM_MODEL"            -> "gpt-4o-mini",
+        "LLM_MAX_TOKENS"       -> "1024",
         "LLM_REASONING_BUDGET" -> "5000",
-        "LLM_REGION" -> "eastus"
+        "LLM_REGION"           -> "eastus"
       )
 
       val code = CheckPolicies.run(CheckPolicies.Options(env = "prod", preset = "prod-safe"), env.get)
@@ -66,9 +66,9 @@ class CheckPoliciesSpec extends AnyFunSpec with Matchers {
 
     it("should detect multiple violations in one check") {
       val env = Map(
-        "LLM_PROVIDER" -> "ollama",
-        "LLM_MODEL" -> "unknown-model",
-        "LLM_MAX_TOKENS" -> "50000",
+        "LLM_PROVIDER"         -> "ollama",
+        "LLM_MODEL"            -> "unknown-model",
+        "LLM_MAX_TOKENS"       -> "50000",
         "LLM_REASONING_BUDGET" -> "999999"
       )
 
@@ -87,11 +87,11 @@ class CheckPoliciesSpec extends AnyFunSpec with Matchers {
 
     it("should show correct status codes in output") {
       val env = Map(
-        "LLM_PROVIDER" -> "openai",
-        "LLM_MODEL" -> "gpt-4o-mini",
-        "LLM_MAX_TOKENS" -> "1000",
+        "LLM_PROVIDER"         -> "openai",
+        "LLM_MODEL"            -> "gpt-4o-mini",
+        "LLM_MAX_TOKENS"       -> "1000",
         "LLM_REASONING_BUDGET" -> "1000",
-        "LLM_REGION" -> "eastus"
+        "LLM_REGION"           -> "eastus"
       )
 
       CheckPolicies.run(CheckPolicies.Options(env = "prod", preset = "prod-safe"), env.get) shouldBe 0
@@ -99,11 +99,11 @@ class CheckPoliciesSpec extends AnyFunSpec with Matchers {
 
     it("should show failure status when policies fail") {
       val env = Map(
-        "LLM_PROVIDER" -> "deepseek",
-        "LLM_MODEL" -> "foo",
-        "LLM_MAX_TOKENS" -> "100000",
+        "LLM_PROVIDER"         -> "deepseek",
+        "LLM_MODEL"            -> "foo",
+        "LLM_MAX_TOKENS"       -> "100000",
         "LLM_REASONING_BUDGET" -> "200000",
-        "LLM_REGION" -> "moon"
+        "LLM_REGION"           -> "moon"
       )
 
       CheckPolicies.run(CheckPolicies.Options(env = "prod", preset = "prod-safe"), env.get) shouldBe 1
