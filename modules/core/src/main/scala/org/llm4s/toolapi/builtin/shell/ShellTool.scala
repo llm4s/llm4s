@@ -84,27 +84,93 @@ object ShellTool {
       } yield result
     }.buildSafe()
 
+  // Comprehensive set of shell metacharacters that could be dangerous in unquoted contexts
+  private val SHELL_METACHARACTERS: Set[Char] = Set(
+    ';', '|', '&', '<', '>', '`', '$', '(', ')', '{', '}', '!', '~', '#'
+  )
+
+  private def tokenizeCommand(command: String): Either[String, Seq[String]] = {
+    val tokens  = Seq.newBuilder[String]
+    val current = new StringBuilder
+    var i       = 0
+
+    /**
+     * Advance `i` past the quoted span, appending characters to `current`.
+     * Handles backslash escaping inside double quotes.
+     * Stops at the matching `closeChar` or at end-of-string (unclosed quote
+     * consumes the remainder of the input).
+     */
+    def consumeQuotedSpan(closeChar: Char): Unit = {
+      i += 1 // skip opening quote
+      while (i < command.length && command(i) != closeChar) {
+        if (closeChar == '"' && command(i) == '\\' && i + 1 < command.length) {
+          // Handle backslash escaping inside double quotes
+          i += 1
+          current.append(command(i))
+        } else {
+          current.append(command(i))
+        }
+        i += 1
+      }
+      // If we stopped on the closing quote, the outer loop will increment i
+      // to move past it; if we hit end-of-input, the outer loop ends.
+    }
+
+    while (i < command.length) {
+      command(i) match {
+        case '"'                            => consumeQuotedSpan('"')
+        case '\''                           => consumeQuotedSpan('\'')
+        case '\\' if i + 1 < command.length =>
+          // Backslash outside quotes: consume the next character literally.
+          i += 1
+          current.append(command(i))
+        case ' ' | '\t' =>
+          if (current.nonEmpty) {
+            tokens += current.toString()
+            current.clear()
+          }
+        case c => 
+          // Check for unquoted metacharacters
+          if (SHELL_METACHARACTERS.contains(c)) {
+            return Left(s"Unquoted shell metacharacter '$c' is not allowed")
+          }
+          current.append(c)
+      }
+      i += 1
+    }
+
+    if (current.nonEmpty) tokens += current.toString()
+    Right(tokens.result())
+  }
+
   private def executeCommand(
     command: String,
     config: ShellConfig
   ): Either[String, ShellResult] = {
-    // Security check - validate command is allowed
-    val baseCommand = command.trim.split("\\s+").headOption.getOrElse("")
-    if (!config.isCommandAllowed(baseCommand)) {
-      Left(s"Command '$baseCommand' is not allowed. Allowed: ${config.allowedCommands.mkString(", ")}")
-    } else {
-      runProcess(command, config)
-    }
+    for {
+      tokens <- tokenizeCommand(command)
+      result <- if (tokens.isEmpty) {
+        Left("Command is empty")
+      } else {
+        // Security check - validate command is allowed
+        val baseCommand = tokens.head
+        if (!config.isCommandAllowed(baseCommand)) {
+          Left(s"Command '$baseCommand' is not allowed. Allowed: ${config.allowedCommands.mkString(", ")}")
+        } else {
+          runProcess(tokens, config)
+        }
+      }
+    } yield result
   }
 
   private def runProcess(
-    command: String,
+    tokens: Seq[String],
     config: ShellConfig
   ): Either[String, ShellResult] = {
     val startTime = System.currentTimeMillis()
 
     Try {
-      val processBuilder = new ProcessBuilder("sh", "-c", command)
+      val processBuilder = new ProcessBuilder(tokens: _*)
         .redirectErrorStream(false)
 
       // Set working directory if configured
@@ -172,7 +238,7 @@ object ShellTool {
       }
 
       ShellResult(
-        command = command,
+        command = tokens.mkString(" "),
         exitCode = exitCode,
         stdout = stdout,
         stderr = stderr,

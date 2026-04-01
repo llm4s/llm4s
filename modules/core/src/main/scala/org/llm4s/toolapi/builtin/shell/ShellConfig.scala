@@ -22,8 +22,7 @@ case class ShellConfig(
    * Check if a command is allowed.
    */
   def isCommandAllowed(command: String): Boolean = {
-    val baseCommand = command.trim.split("\\s+").headOption.getOrElse("")
-    allowedCommands.contains(baseCommand)
+    allowedCommands.contains(command.trim)
   }
 }
 
