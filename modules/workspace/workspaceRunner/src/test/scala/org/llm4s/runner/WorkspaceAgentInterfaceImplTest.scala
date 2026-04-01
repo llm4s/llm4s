@@ -7,6 +7,9 @@ import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import scala.concurrent.duration._
+import scala.concurrent.{ Await, Future }
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.jdk.CollectionConverters._
 import scala.util.Using
 
@@ -119,6 +122,49 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
     response.matches.exists(_.path == "test2.txt") shouldBe true
     // truncated should be false when number of hits is small
     response.isTruncated shouldBe false
+  }
+
+  it should "fallback to literal matching for unsafe regex in searchFiles" in {
+    interface.writeFile("redos-search.txt", "payload ((a+)+)+b marker")
+
+    val response = interface.searchFiles(
+      paths = List("."),
+      query = "((a+)+)+b",
+      searchType = "regex",
+      recursive = Some(true)
+    )
+
+    response.matches.exists(_.path == "redos-search.txt") shouldBe true
+  }
+
+  it should "complete malicious regex search within bounded time" in {
+    interface.writeFile("redos-time.txt", "a" * 28 + "X")
+
+    val eventual = Future {
+      interface.searchFiles(
+        paths = List("redos-time.txt"),
+        query = "((a+)+)+b",
+        searchType = "regex",
+        recursive = Some(false)
+      )
+    }
+
+    val response = Await.result(eventual, 2.seconds)
+    response.matches shouldBe empty
+  }
+
+  it should "fallback to literal replacement for unsafe regexReplace operations" in {
+    interface.writeFile("redos-replace.txt", "prefix ((a+)+)+b suffix ((a+)+)+b")
+
+    val op = RegexReplaceOperation(
+      pattern = "((a+)+)+b",
+      replacement = "SAFE",
+      flags = Some("g")
+    )
+
+    interface.modifyFile("redos-replace.txt", List(op)).success shouldBe true
+    val content = interface.readFile("redos-replace.txt").content
+    content should include("prefix SAFE suffix SAFE")
   }
 
   it should "set isTruncated when result cap is reached" in {

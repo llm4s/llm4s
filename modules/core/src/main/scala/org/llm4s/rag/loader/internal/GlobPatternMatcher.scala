@@ -1,5 +1,7 @@
 package org.llm4s.rag.loader.internal
 
+import org.llm4s.security.RegexSafetyManager
+
 import java.util.regex.Pattern
 import scala.collection.mutable
 
@@ -95,7 +97,10 @@ object GlobPatternMatcher {
       i += 1
     }
 
-    Pattern.compile(sb.toString, Pattern.CASE_INSENSITIVE)
+    RegexSafetyManager.safeCompile(sb.toString, Pattern.CASE_INSENSITIVE) match {
+      case Right(regex) => regex
+      case Left(_)      => RegexSafetyManager.compileLiteral(glob, Pattern.CASE_INSENSITIVE)
+    }
   }
 
   /**

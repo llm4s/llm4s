@@ -441,15 +441,35 @@ class WorkspaceAgentInterfaceImpl(
             result
           }
 
-          val regex = Pattern.compile(pattern, regexFlags)
-
-          currentLines.map { line =>
-            val matcher = regex.matcher(line)
-            if (patternFlags.contains("g")) {
-              matcher.replaceAll(replacement)
-            } else {
-              matcher.replaceFirst(replacement)
-            }
+          WorkspaceRegexSafetyManager.safeCompile(pattern, regexFlags) match {
+            case Right(regex) =>
+              currentLines.map { line =>
+                val matcher = regex.matcher(line)
+                if (patternFlags.contains("g")) {
+                  matcher.replaceAll(replacement)
+                } else {
+                  matcher.replaceFirst(replacement)
+                }
+              }
+            case Left(_) =>
+              // Degrade to literal replacement for unsafe/invalid regex patterns.
+              currentLines.map { line =>
+                if (patternFlags.contains("g")) {
+                  WorkspaceRegexSafetyManager.replaceAllLiteral(
+                    line,
+                    pattern,
+                    replacement,
+                    patternFlags.contains("i")
+                  )
+                } else {
+                  WorkspaceRegexSafetyManager.replaceFirstLiteral(
+                    line,
+                    pattern,
+                    replacement,
+                    patternFlags.contains("i")
+                  )
+                }
+              }
           }
       }
     }
@@ -479,16 +499,11 @@ class WorkspaceAgentInterfaceImpl(
 
     // Prepare regex pattern
     val pattern = if (searchType == "literal") {
-      Pattern.compile(Pattern.quote(query))
+      WorkspaceRegexSafetyManager.compileLiteral(query)
     } else {
-      Try(Pattern.compile(query)) match {
-        case Success(p) => p
-        case Failure(e) =>
-          throw new WorkspaceAgentException(
-            s"Invalid regex pattern: ${e.getMessage}",
-            "INVALID_ARGUMENT",
-            None
-          )
+      WorkspaceRegexSafetyManager.safeCompile(query) match {
+        case Right(p) => p
+        case Left(_)  => WorkspaceRegexSafetyManager.compileLiteral(query)
       }
     }
 

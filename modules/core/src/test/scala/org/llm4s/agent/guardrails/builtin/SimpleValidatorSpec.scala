@@ -229,6 +229,20 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
     validator.validate("hello") shouldBe Right("hello")
   }
 
+  it should "not throw for invalid regex patterns in apply(String)" in {
+    val validator = RegexValidator("(")
+    val result    = validator.validate("anything")
+    result.isLeft shouldBe true
+    result.swap.toOption.get.message should include("Invalid or unsafe regex pattern")
+  }
+
+  it should "reject known ReDoS regex patterns safely" in {
+    val validator = RegexValidator("((a+)+)+b")
+    val result    = validator.validate("a" * 28 + "X")
+    result.isLeft shouldBe true
+    result.swap.toOption.get.message should include("Invalid or unsafe regex pattern")
+  }
+
   it should "create with custom error message via apply(String, String)" in {
     val validator = RegexValidator("^[0-9]+$", "Numbers only please")
     val result    = validator.validate("abc")
