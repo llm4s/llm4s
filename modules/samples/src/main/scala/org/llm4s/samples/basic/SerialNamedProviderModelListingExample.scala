@@ -1,4 +1,4 @@
-package samples.basic
+package org.llm4s.samples.basic
 
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.config.ProvidersConfigModel.ProviderName
@@ -9,7 +9,7 @@ import org.slf4j.LoggerFactory
  * under `llm4s.providers`.
  *
  * To run:
- *   sbt "samples/runMain samples.basic.SerialNamedProviderModelListingExample"
+ *   sbt "samples/runMain org.llm4s.samples.basic.SerialNamedProviderModelListingExample"
  */
 object SerialNamedProviderModelListingExample:
   def main(args: Array[String]): Unit =
@@ -22,7 +22,7 @@ object SerialNamedProviderModelListingExample:
       "ollama-local"
     )
 
-    val logger = LoggerFactory.getLogger("samples.basic.SerialNamedProviderModelListingExample")
+    val logger = LoggerFactory.getLogger("org.llm4s.samples.basic.SerialNamedProviderModelListingExample")
 
     logger.info("=== Serial Named Provider Model Listing Example ===")
     logger.info("Provider names: {}", providerNames.mkString(", "))

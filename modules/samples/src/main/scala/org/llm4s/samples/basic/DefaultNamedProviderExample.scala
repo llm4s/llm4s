@@ -1,4 +1,4 @@
-package samples.basic
+package org.llm4s.samples.basic
 
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
@@ -13,14 +13,14 @@ import org.slf4j.LoggerFactory
  *  - printing the response
  *
  * To run:
- *   sbt "samples/runMain samples.basic.DefaultNamedProviderExample"
+ *   sbt "samples/runMain org.llm4s.samples.basic.DefaultNamedProviderExample"
  */
 object DefaultNamedProviderExample:
   def main(args: Array[String]): Unit =
     val prompt =
       args.headOption.getOrElse("Reply in one short sentence: who are you?")
 
-    val logger = LoggerFactory.getLogger("samples.basic.DefaultNamedProviderExample")
+    val logger = LoggerFactory.getLogger("org.llm4s.samples.basic.DefaultNamedProviderExample")
 
     val conversation = Conversation(
       Seq(

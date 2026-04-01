@@ -1,4 +1,4 @@
-package samples.basic
+package org.llm4s.samples.basic
 
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.config.ProvidersConfigModel.ProviderName
@@ -13,7 +13,7 @@ import scala.concurrent.{ Await, ExecutionContext, Future }
  * configured under `llm4s.providers`.
  *
  * To run:
- *   sbt "samples/runMain samples.basic.ParallelNamedProviderModelListingExample"
+ *   sbt "samples/runMain org.llm4s.samples.basic.ParallelNamedProviderModelListingExample"
  */
 object ParallelNamedProviderModelListingExample:
   private given ExecutionContext = ExecutionContext.global
@@ -28,7 +28,7 @@ object ParallelNamedProviderModelListingExample:
       "ollama-local"
     )
 
-    val logger = LoggerFactory.getLogger("samples.basic.ParallelNamedProviderModelListingExample")
+    val logger = LoggerFactory.getLogger("org.llm4s.samples.basic.ParallelNamedProviderModelListingExample")
 
     logger.info("=== Parallel Named Provider Model Listing Example ===")
     logger.info("Provider names: {}", providerNames.mkString(", "))

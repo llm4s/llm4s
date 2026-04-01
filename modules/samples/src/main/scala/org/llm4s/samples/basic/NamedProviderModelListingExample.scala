@@ -1,4 +1,4 @@
-package samples.basic
+package org.llm4s.samples.basic
 
 import org.llm4s.config.Llm4sConfig
 import org.slf4j.LoggerFactory
@@ -11,12 +11,12 @@ import org.slf4j.LoggerFactory
  * provider with model discovery support.
  *
  * To run:
- *   sbt "samples/runMain samples.basic.NamedProviderModelListingExample"
+ *   sbt "samples/runMain org.llm4s.samples.basic.NamedProviderModelListingExample"
  */
 object NamedProviderModelListingExample:
   def main(args: Array[String]): Unit =
     val providerName = "ollama-local"
-    val logger       = LoggerFactory.getLogger("samples.basic.NamedProviderModelListingExample")
+    val logger       = LoggerFactory.getLogger("org.llm4s.samples.basic.NamedProviderModelListingExample")
 
     val result = for
       providers <- Llm4sConfig.providers()
