@@ -137,6 +137,19 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
     response.matches.exists(_.path == "redos-search.txt") shouldBe true
   }
 
+  it should "fallback to literal matching for overlapping alternation regex" in {
+    interface.writeFile("redos-alt-search.txt", "token (a|aa)+X token")
+
+    val response = interface.searchFiles(
+      paths = List("."),
+      query = "(a|aa)+X",
+      searchType = "regex",
+      recursive = Some(true)
+    )
+
+    response.matches.exists(_.path == "redos-alt-search.txt") shouldBe true
+  }
+
   it should "complete malicious regex search within bounded time" in {
     interface.writeFile("redos-time.txt", "a" * 28 + "X")
 

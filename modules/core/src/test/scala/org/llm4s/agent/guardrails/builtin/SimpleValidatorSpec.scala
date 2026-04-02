@@ -249,6 +249,29 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
     result.swap.toOption.get.message should include("Numbers only please")
   }
 
+  it should "create from Regex via apply(Regex)" in {
+    val validator = RegexValidator("^[a-z]+$".r)
+    validator.validate("letters") shouldBe Right("letters")
+    validator.validate("letters123").isLeft shouldBe true
+  }
+
+  it should "support constructor with custom error message" in {
+    val validator = new RegexValidator("^[0-9]+$".r, Some("Digits required"))
+    val result    = validator.validate("abc")
+    result.swap.toOption.get.message should include("Digits required")
+  }
+
+  it should "return fallback error when constructor receives one" in {
+    val validator = new RegexValidator(
+      "^[0-9]+$".r,
+      Some("Digits required"),
+      Some("Forced fallback path")
+    )
+    val result = validator.validate("123")
+    result.isLeft shouldBe true
+    result.swap.toOption.get.message should include("Forced fallback path")
+  }
+
   // -- Phone preset --
 
   "RegexValidator.phone" should "accept valid phone numbers" in {

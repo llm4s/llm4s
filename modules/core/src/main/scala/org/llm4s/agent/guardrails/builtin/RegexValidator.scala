@@ -5,6 +5,7 @@ import org.llm4s.error.ValidationError
 import org.llm4s.security.RegexSafetyManager
 import org.llm4s.types.Result
 
+import java.util.regex.Pattern
 import scala.util.matching.Regex
 
 /**
@@ -18,23 +19,33 @@ import scala.util.matching.Regex
  * @param errorMessage Optional custom error message
  */
 class RegexValidator(
-  pattern: Regex,
+  compiledPattern: Pattern,
+  patternDescription: String,
   errorMessage: Option[String] = None,
   fallbackError: Option[String] = None
 ) extends InputGuardrail
     with OutputGuardrail {
 
+  def this(pattern: Regex, errorMessage: Option[String], fallbackError: Option[String]) =
+    this(pattern.pattern, pattern.toString, errorMessage, fallbackError)
+
+  def this(pattern: Regex, errorMessage: Option[String]) =
+    this(pattern.pattern, pattern.toString, errorMessage, None)
+
+  def this(pattern: Regex) =
+    this(pattern.pattern, pattern.toString, None, None)
+
   def validate(value: String): Result[String] =
     fallbackError match {
       case Some(error) => Left(ValidationError.invalid("value", error))
       case None =>
-        RegexSafetyManager.safeFind(pattern.pattern, value) match {
+        RegexSafetyManager.safeFind(compiledPattern, value) match {
           case Right(true) => Right(value)
           case Right(false) =>
             Left(
               ValidationError.invalid(
                 "value",
-                errorMessage.getOrElse(s"Value does not match pattern: $pattern")
+                errorMessage.getOrElse(s"Value does not match pattern: $patternDescription")
               )
             )
           case Left(error) =>
@@ -45,7 +56,7 @@ class RegexValidator(
   val name: String = "RegexValidator"
 
   override val description: Option[String] = Some(
-    s"Validates against pattern: $pattern"
+    s"Validates against pattern: $patternDescription"
   )
 
   // Resolve conflicting transform methods from both traits
@@ -59,10 +70,11 @@ object RegexValidator {
    */
   def apply(pattern: String): RegexValidator =
     RegexSafetyManager.safeCompile(pattern) match {
-      case Right(compiled) => new RegexValidator(compiled.pattern().r)
+      case Right(compiled) => new RegexValidator(compiled, pattern)
       case Left(error) =>
         new RegexValidator(
-          "(?!)".r,
+          Pattern.compile("(?!)"),
+          pattern,
           fallbackError = Some(s"Invalid or unsafe regex pattern: $error")
         )
     }
@@ -78,10 +90,11 @@ object RegexValidator {
    */
   def apply(pattern: String, errorMessage: String): RegexValidator =
     RegexSafetyManager.safeCompile(pattern) match {
-      case Right(compiled) => new RegexValidator(compiled.pattern().r, Some(errorMessage))
+      case Right(compiled) => new RegexValidator(compiled, pattern, Some(errorMessage))
       case Left(error) =>
         new RegexValidator(
-          "(?!)".r,
+          Pattern.compile("(?!)"),
+          pattern,
           Some(errorMessage),
           Some(s"Invalid or unsafe regex pattern: $error")
         )

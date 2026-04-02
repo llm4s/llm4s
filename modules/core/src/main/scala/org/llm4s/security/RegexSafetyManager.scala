@@ -1,13 +1,13 @@
 package org.llm4s.security
 
-import java.util.concurrent.{ Executors, TimeUnit, TimeoutException }
 import java.util.regex.{ Matcher, Pattern, PatternSyntaxException }
+import scala.util.control.NonFatal
 
 /**
  * Safety wrapper for user-supplied regex compilation and matching.
  *
- * This manager blocks known catastrophic patterns, enforces basic bounds,
- * and time-boxes compile/match operations to reduce ReDoS risk.
+ * This manager blocks known catastrophic patterns and enforces basic bounds
+ * so we can avoid relying on interruption-based regex timeouts.
  */
 object RegexSafetyManager {
 
@@ -31,18 +31,18 @@ object RegexSafetyManager {
   ): Either[String, Pattern] =
     for {
       _ <- validatePattern(pattern)
-      p <- compileWithTimeout(pattern, flags, timeoutMs)
+      p <- compileSafely(pattern, flags, timeoutMs)
     } yield p
 
   def safeFind(pattern: Pattern, input: String, timeoutMs: Long = DefaultMatchingTimeoutMs): Either[String, Boolean] =
-    withInputValidation(input).flatMap(_ => findWithTimeout(pattern, input, timeoutMs))
+    withInputValidation(input).flatMap(_ => findSafely(pattern, input, timeoutMs))
 
   def safeMatches(
     pattern: Pattern,
     input: String,
     timeoutMs: Long = DefaultMatchingTimeoutMs
   ): Either[String, Boolean] =
-    withInputValidation(input).flatMap(_ => matchesWithTimeout(pattern, input, timeoutMs))
+    withInputValidation(input).flatMap(_ => matchesSafely(pattern, input, timeoutMs))
 
   def compileLiteral(pattern: String, flags: Int = 0): Pattern =
     Pattern.compile(Pattern.quote(pattern), flags)
@@ -65,45 +65,31 @@ object RegexSafetyManager {
       Left(s"Input too large: ${input.length} > $MaxInputLength")
     else Right(())
 
-  private def compileWithTimeout(pattern: String, flags: Int, timeoutMs: Long): Either[String, Pattern] = {
-    val executor = Executors.newSingleThreadExecutor()
+  private def compileSafely(pattern: String, flags: Int, timeoutMs: Long): Either[String, Pattern] =
     try {
-      val future = executor.submit(new java.util.concurrent.Callable[Pattern] {
-        override def call(): Pattern = Pattern.compile(pattern, flags)
-      })
-      Right(future.get(timeoutMs, TimeUnit.MILLISECONDS))
+      // timeoutMs kept for API compatibility; execution safety comes from pre-checks.
+      val _ = timeoutMs
+      Right(Pattern.compile(pattern, flags))
     } catch {
-      case _: TimeoutException       => Left(s"Regex compilation timeout after ${timeoutMs}ms")
       case e: PatternSyntaxException => Left(s"Invalid regex syntax: ${e.getMessage}")
-      case e: Exception              => Left(s"Regex compilation failed: ${e.getMessage}")
-    } finally executor.shutdownNow()
-  }
+      case NonFatal(e)               => Left(s"Regex compilation failed: ${e.getMessage}")
+    }
 
-  private def findWithTimeout(pattern: Pattern, input: String, timeoutMs: Long): Either[String, Boolean] = {
-    val executor = Executors.newSingleThreadExecutor()
+  private def findSafely(pattern: Pattern, input: String, timeoutMs: Long): Either[String, Boolean] =
     try {
-      val future = executor.submit(new java.util.concurrent.Callable[Boolean] {
-        override def call(): Boolean = pattern.matcher(input).find()
-      })
-      Right(future.get(timeoutMs, TimeUnit.MILLISECONDS))
+      val _ = timeoutMs
+      Right(pattern.matcher(input).find())
     } catch {
-      case _: TimeoutException => Left(s"Regex matching timeout after ${timeoutMs}ms")
-      case e: Exception        => Left(s"Regex matching failed: ${e.getMessage}")
-    } finally executor.shutdownNow()
-  }
+      case NonFatal(e) => Left(s"Regex matching failed: ${e.getMessage}")
+    }
 
-  private def matchesWithTimeout(pattern: Pattern, input: String, timeoutMs: Long): Either[String, Boolean] = {
-    val executor = Executors.newSingleThreadExecutor()
+  private def matchesSafely(pattern: Pattern, input: String, timeoutMs: Long): Either[String, Boolean] =
     try {
-      val future = executor.submit(new java.util.concurrent.Callable[Boolean] {
-        override def call(): Boolean = pattern.matcher(input).matches()
-      })
-      Right(future.get(timeoutMs, TimeUnit.MILLISECONDS))
+      val _ = timeoutMs
+      Right(pattern.matcher(input).matches())
     } catch {
-      case _: TimeoutException => Left(s"Regex matching timeout after ${timeoutMs}ms")
-      case e: Exception        => Left(s"Regex matching failed: ${e.getMessage}")
-    } finally executor.shutdownNow()
-  }
+      case NonFatal(e) => Left(s"Regex matching failed: ${e.getMessage}")
+    }
 
   def replaceAllLiteral(
     input: String,

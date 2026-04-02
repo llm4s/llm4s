@@ -444,11 +444,28 @@ class WorkspaceAgentInterfaceImpl(
           WorkspaceRegexSafetyManager.safeCompile(pattern, regexFlags) match {
             case Right(regex) =>
               currentLines.map { line =>
-                val matcher = regex.matcher(line)
                 if (patternFlags.contains("g")) {
-                  matcher.replaceAll(replacement)
+                  WorkspaceRegexSafetyManager
+                    .safeReplaceAll(regex, line, replacement)
+                    .getOrElse(
+                      WorkspaceRegexSafetyManager.replaceAllLiteral(
+                        line,
+                        pattern,
+                        replacement,
+                        patternFlags.contains("i")
+                      )
+                    )
                 } else {
-                  matcher.replaceFirst(replacement)
+                  WorkspaceRegexSafetyManager
+                    .safeReplaceFirst(regex, line, replacement)
+                    .getOrElse(
+                      WorkspaceRegexSafetyManager.replaceFirstLiteral(
+                        line,
+                        pattern,
+                        replacement,
+                        patternFlags.contains("i")
+                      )
+                    )
                 }
               }
             case Left(_) =>
@@ -506,6 +523,7 @@ class WorkspaceAgentInterfaceImpl(
         case Left(_)  => WorkspaceRegexSafetyManager.compileLiteral(query)
       }
     }
+    val literalFallbackPattern = WorkspaceRegexSafetyManager.compileLiteral(query)
 
     // Collect all files to search
     val filesToSearch = paths.flatMap { path =>
@@ -550,9 +568,12 @@ class WorkspaceAgentInterfaceImpl(
 
       Try(Files.readAllLines(file, StandardCharsets.UTF_8).asScala.toList).toOption.foreach { lines =>
         for ((line, lineIndex) <- lines.zipWithIndex if !done) {
-          val matcher = pattern.matcher(line)
+          val isMatch =
+            WorkspaceRegexSafetyManager.safeFind(pattern, line).getOrElse {
+              literalFallbackPattern.matcher(line).find()
+            }
 
-          if (matcher.find()) {
+          if (isMatch) {
             totalMatches += 1
 
             if (matches.size < defaultLimits.maxSearchResults) {
