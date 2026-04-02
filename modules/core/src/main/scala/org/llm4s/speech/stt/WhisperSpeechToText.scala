@@ -21,8 +21,9 @@ final class WhisperSpeechToText(
   model: String = "base",
   outputFormat: String = "txt"
 ) extends SpeechToText {
-  override val name: String                   = "whisper-cli"
-  override val supportedFormats: List[String] = List("audio/wav", "audio/pcm")
+  override val name: String = "whisper-cli"
+
+  override val supportedFormats: List[String] = List("audio/wav", "audio/mp3", "audio/m4a", "audio/flac", "audio/ogg")
 
   override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] = {
     val wavResult = inputToWavPath(input)
