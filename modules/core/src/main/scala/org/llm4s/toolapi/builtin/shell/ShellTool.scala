@@ -54,6 +54,7 @@ object ShellResult {
  * }}}}
  */
 object ShellTool {
+  private val forbiddenShellChars: Set[Char] = Set(';', '|', '&', '<', '>', '`')
 
   private def createSchema = Schema
     .`object`[Map[String, Any]]("Shell command parameters")
@@ -88,23 +89,29 @@ object ShellTool {
     command: String,
     config: ShellConfig
   ): Either[String, ShellResult] = {
-    // Security check - validate command is allowed
-    val baseCommand = command.trim.split("\\s+").headOption.getOrElse("")
-    if (!config.isCommandAllowed(baseCommand)) {
+    val tokens      = command.trim.split("\\s+").toSeq.filter(_.nonEmpty)
+    val baseCommand = tokens.headOption.getOrElse("")
+
+    if (baseCommand.isEmpty) {
+      Left("Command cannot be empty")
+    } else if (!config.isCommandAllowed(baseCommand)) {
       Left(s"Command '$baseCommand' is not allowed. Allowed: ${config.allowedCommands.mkString(", ")}")
+    } else if (tokens.exists(token => token.exists(forbiddenShellChars.contains))) {
+      Left("Shell metacharacters (e.g., &&, |, ;, <, >, `) are not allowed in command arguments")
     } else {
-      runProcess(command, config)
+      runProcess(tokens, command, config)
     }
   }
 
   private def runProcess(
-    command: String,
+    tokens: Seq[String],
+    originalCommand: String,
     config: ShellConfig
   ): Either[String, ShellResult] = {
     val startTime = System.currentTimeMillis()
 
     Try {
-      val processBuilder = new ProcessBuilder("sh", "-c", command)
+      val processBuilder = new ProcessBuilder(tokens: _*)
         .redirectErrorStream(false)
 
       // Set working directory if configured
@@ -172,7 +179,7 @@ object ShellTool {
       }
 
       ShellResult(
-        command = command,
+        command = originalCommand,
         exitCode = exitCode,
         stdout = stdout,
         stderr = stderr,

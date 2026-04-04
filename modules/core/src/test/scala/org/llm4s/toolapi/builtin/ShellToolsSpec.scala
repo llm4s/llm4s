@@ -213,4 +213,30 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
       )
   }
 
+  it should "not allow shell metacharacters to escape the allowlist" in {
+    assume(!isWindows, "Unix shell commands not available on Windows")
+    val tempFile = java.io.File.createTempFile("shell-tool", ".tmp")
+    tempFile.deleteOnExit()
+
+    val config = ShellConfig(allowedCommands = Seq("echo"))
+
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> s"echo hi && rm ${tempFile.getAbsolutePath}")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => {
+                err.toLowerCase should include("metacharacters")
+                tempFile.exists() shouldBe true
+              },
+              result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
+  }
+
 }
