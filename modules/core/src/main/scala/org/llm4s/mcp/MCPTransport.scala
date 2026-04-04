@@ -608,7 +608,6 @@ class SSETransportImpl(
   def generateId(): String = requestId.incrementAndGet().toString
 }
 
-// scalafix:off
 // Stdio transport implementation using subprocess communication with proper MCP protocol compliance.
 // Uses CompletableFuture and a background reader thread to handle concurrent requests safely.
 // This fixes the race condition where multiple threads could get mismatched responses.
@@ -1064,8 +1063,6 @@ class StdioTransportImpl(
   // Generates unique request IDs
   def generateId(): String = requestId.incrementAndGet().toString
 }
-// scalafix:on
-
 // Factory for creating transport implementations
 object MCPTransport {
   // Creates appropriate transport implementation based on configuration

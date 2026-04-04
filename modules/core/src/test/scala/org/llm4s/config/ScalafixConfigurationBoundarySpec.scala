@@ -16,12 +16,11 @@ class ScalafixConfigurationBoundarySpec extends AnyWordSpec with Matchers {
       // Verify basic structure
       content should include("rules = [DisableSyntax]")
 
-      // Verify global excludePackages for infrastructure
+      // Verify global excludePackages for application-edge packages
       content should include("org.llm4s.config")
       content should include("org.llm4s.samples")
       content should include("org.llm4s.workspace")
-      content should include("org.llm4s.core.safety")
-      content should include("org.llm4s.agent.orchestration")
+      content should include("org.llm4s.runner")
     }
 
     "enforce global configuration boundaries" in {
@@ -38,13 +37,11 @@ class ScalafixConfigurationBoundarySpec extends AnyWordSpec with Matchers {
       content should include("NoSystemGetenv")
       content should include("System\\\\.getenv")
 
-      // Exception handling rules
+      // Exception handling rules (scoped to migrated core packages)
+      content should include("NoExceptionKeywordsInMigratedCore")
       content should include("NoKeywordTry")
       content should include("NoKeywordCatch")
       content should include("NoKeywordFinally")
-
-      // Code style rules
-      content should include("NoInfixOperators")
     }
 
     "enforce scoped core main source boundaries" in {
@@ -75,8 +72,9 @@ class ScalafixConfigurationBoundarySpec extends AnyWordSpec with Matchers {
       content should include("rules = [DisableSyntax]")
 
       // Verify key rule blocks exist
-      content should include("DisableSyntax {")
       content should include("DisableSyntax.NoLlm4sConfig")
+      content should include("DisableSyntax.GlobalConfigBoundary")
+      content should include("DisableSyntax.NoExceptionKeywordsInMigratedCore")
       content should include("DisableSyntax.NoConfigFactory")
       content should include("DisableSyntax.NoPureConfigDefault")
       content should include("DisableSyntax.NoEnvReads")

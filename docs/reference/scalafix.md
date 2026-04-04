@@ -16,7 +16,7 @@ What's Included
 - Rule type: Syntactic checks (no SemanticDB required).
 
 Running Scalafix
-- Compile-time enforcement: Enabled (`scalafixOnCompile := true`).
+- Compile-time enforcement: Enabled in CI (`scalafixOnCompile := sys.env.getOrElse("CI", "false").toBoolean`).
 - Manual run:
   - `sbt scalafixAll` to run all configured checks.
   - `sbt core/scalafix` to run only core compile checks.

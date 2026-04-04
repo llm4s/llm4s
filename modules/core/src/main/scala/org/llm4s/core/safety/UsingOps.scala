@@ -1,4 +1,3 @@
-// scalafix:off
 package org.llm4s.core.safety
 
 /**
