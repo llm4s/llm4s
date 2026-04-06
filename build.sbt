@@ -255,11 +255,16 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
 
 lazy val samples = (project in file("modules//samples"))
   .dependsOn(core)
+  .enablePlugins(JavaAppPackaging)
   .settings(
     name := "samples",
     commonSettings,
     publish / skip := true,
-    coverageEnabled := false
+    coverageEnabled := false,
+    libraryDependencies += Deps.cask,
+    Compile / mainClass := Some("org.llm4s.samples.deploy.SafeDeploymentService"),
+    Universal / name := "safe-deployment-service",
+    executableScriptName := "safe-deployment-service"
   )
 
 lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))
