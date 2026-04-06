@@ -45,6 +45,7 @@ final class VoskSpeechToText(
   override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] =
     for {
       audioBytes <- prepareAudioForVosk(input)
+      startTime = System.currentTimeMillis()
       transcription <- Safety
         .fromTry(Try(Using.resource(new ByteArrayInputStream(audioBytes)) { audio =>
           val recognizer = new Recognizer(model, targetSampleRate.toFloat)
@@ -55,7 +56,10 @@ final class VoskSpeechToText(
           logger.error("Vosk transcription failed", e)
           ProcessingError.audioValidation("Vosk transcription failed", Some(e))
         }
-    } yield transcription
+    } yield {
+      val processingTimeMs = System.currentTimeMillis() - startTime
+      transcription.copy(processingTimeMs = Some(processingTimeMs))
+    }
 
   /**
    * Transcribe audio stream using Vosk recognizer.

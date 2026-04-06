@@ -26,6 +26,7 @@ final class WhisperSpeechToText(
   override val supportedFormats: List[String] = List("audio/wav", "audio/mp3", "audio/m4a", "audio/flac", "audio/ogg")
 
   override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] = {
+    val startTime = System.currentTimeMillis()
     val wavResult = inputToWavPath(input)
 
     val result = for {
@@ -40,7 +41,11 @@ final class WhisperSpeechToText(
             ProcessingError.audioValidation("Whisper CLI execution failed with non-zero exit code")
           case _ => ProcessingError.audioValidation("Whisper CLI execution failed")
         }
-    } yield parseWhisperOutput(output, options)
+    } yield {
+      val processingTimeMs = System.currentTimeMillis() - startTime
+      val transcription    = parseWhisperOutput(output, options)
+      transcription.copy(processingTimeMs = Some(processingTimeMs))
+    }
 
     // Clean up any temp file that was created, regardless of transcription success or failure
     wavResult.foreach { case (path, isTemp) => if (isTemp) Try(Files.deleteIfExists(path)) }
