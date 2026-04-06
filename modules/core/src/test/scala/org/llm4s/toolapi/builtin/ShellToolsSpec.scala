@@ -239,4 +239,72 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
       )
   }
 
+  "ShellToolAllowlistBypassPoC" should "exit early on Windows" in {
+    val lines            = scala.collection.mutable.ArrayBuffer.empty[String]
+    var createCalled     = false
+    var executeWasCalled = false
+
+    ShellToolAllowlistBypassPoC.run(
+      isWindows = true,
+      createTempFile = () => {
+        createCalled = true
+        java.io.File.createTempFile("unused", ".tmp")
+      },
+      printLine = line => lines += line,
+      executePayload = _ => {
+        executeWasCalled = true
+        Right("ok")
+      }
+    )
+
+    createCalled shouldBe false
+    executeWasCalled shouldBe false
+    lines should contain("PoC is intended for Unix-like systems (uses rm).")
+  }
+
+  it should "print rejection output when payload is blocked" in {
+    val lines    = scala.collection.mutable.ArrayBuffer.empty[String]
+    val tempFile = java.io.File.createTempFile("shell-tool-bypass-spec", ".tmp")
+    tempFile.deleteOnExit()
+
+    ShellToolAllowlistBypassPoC.run(
+      isWindows = false,
+      createTempFile = () => tempFile,
+      printLine = line => lines += line,
+      executePayload = payload => {
+        payload should startWith("echo hi && rm ")
+        Left("Shell metacharacters are not allowed")
+      }
+    )
+
+    lines should contain("Rejected as expected: Shell metacharacters are not allowed")
+    lines should contain(s"Temp file still exists: ${tempFile.exists()}")
+  }
+
+  it should "print unexpected success output when payload is accepted" in {
+    val lines    = scala.collection.mutable.ArrayBuffer.empty[String]
+    val tempFile = java.io.File.createTempFile("shell-tool-bypass-spec", ".tmp")
+    tempFile.deleteOnExit()
+
+    ShellToolAllowlistBypassPoC.run(
+      isWindows = false,
+      createTempFile = () => tempFile,
+      printLine = line => lines += line,
+      executePayload = _ => Right("""{"ok":true}""")
+    )
+
+    lines should contain("Unexpected success: {\"ok\":true}")
+    lines should contain(s"Temp file still exists: ${tempFile.exists()}")
+  }
+
+  it should "delegate from main to run" in {
+    val out = new java.io.ByteArrayOutputStream()
+    Console.withOut(out) {
+      ShellToolAllowlistBypassPoC.main(Array.empty)
+    }
+
+    val printed = out.toString("UTF-8")
+    printed should (include("PoC is intended for Unix-like systems (uses rm).").or(include("Temp file still exists:")))
+  }
+
 }

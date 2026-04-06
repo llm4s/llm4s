@@ -10,33 +10,43 @@ import org.llm4s.toolapi.SafeParameterExtractor
  * - temp file still exists because rm never executes
  */
 object ShellToolAllowlistBypassPoC {
-  def main(args: Array[String]): Unit = {
-    val isWindows = System.getProperty("os.name").toLowerCase.contains("win")
+  private def defaultExecutePayload(payload: String): Either[String, String] =
+    ShellTool
+      .createSafe(ShellConfig(allowedCommands = Seq("echo")))
+      .fold(
+        err => Left(s"Tool creation failed: ${err.formatted}"),
+        tool => tool.handler(SafeParameterExtractor(ujson.Obj("command" -> payload))).map(_.toString())
+      )
+
+  def run(
+    isWindows: Boolean,
+    createTempFile: () => java.io.File = () => java.io.File.createTempFile("shell-tool-bypass", ".tmp"),
+    printLine: String => Unit = println,
+    executePayload: String => Either[String, String] = defaultExecutePayload
+  ): Unit = {
     if (isWindows) {
-      println("PoC is intended for Unix-like systems (uses rm).")
+      printLine("PoC is intended for Unix-like systems (uses rm).")
       return
     }
 
-    val tempFile = java.io.File.createTempFile("shell-tool-bypass", ".tmp")
+    val tempFile = createTempFile()
     tempFile.deleteOnExit()
 
-    val config  = ShellConfig(allowedCommands = Seq("echo"))
     val payload = s"echo hi && rm ${tempFile.getAbsolutePath}"
-
-    val result = ShellTool
-      .createSafe(config)
-      .fold(
-        err => Left(s"Tool creation failed: ${err.formatted}"),
-        tool => tool.handler(SafeParameterExtractor(ujson.Obj("command" -> payload)))
-      )
+    val result  = executePayload(payload)
 
     result match {
       case Left(error) =>
-        println(s"Rejected as expected: $error")
+        printLine(s"Rejected as expected: $error")
       case Right(value) =>
-        println(s"Unexpected success: $value")
+        printLine(s"Unexpected success: $value")
     }
 
-    println(s"Temp file still exists: ${tempFile.exists()}")
+    printLine(s"Temp file still exists: ${tempFile.exists()}")
+  }
+
+  def main(args: Array[String]): Unit = {
+    val isWindows = System.getProperty("os.name").toLowerCase.contains("win")
+    run(isWindows = isWindows)
   }
 }
