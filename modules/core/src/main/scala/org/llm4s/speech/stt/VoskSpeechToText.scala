@@ -12,6 +12,7 @@ import org.llm4s.core.safety.Safety
 import org.llm4s.speech.processing.AudioPreprocessing
 import org.slf4j.LoggerFactory
 import scala.util.control.NonFatal
+import scala.volatile
 
 /**
  * Vosk-based speech-to-text implementation.
@@ -41,7 +42,7 @@ final class VoskSpeechToText(
   @volatile
   private var modelRef: Option[Model] = None
 
-  private def getOrLoadModel(): Result[Model] = {
+  private def getOrLoadModel(): Result[Model] =
     if (modelRef.isDefined) {
       Right(modelRef.get)
     } else {
@@ -64,14 +65,13 @@ final class VoskSpeechToText(
         }
       }
     }
-  }
 
   /**
    * Close the cached Vosk model and release resources.
    * Safe to call multiple times (idempotent).
    * Should be called when the instance is no longer needed, especially in long-lived processes.
    */
-  def close(): Unit = {
+  def close(): Unit =
     synchronized {
       modelRef.foreach { m =>
         try {
@@ -83,13 +83,12 @@ final class VoskSpeechToText(
       }
       modelRef = None
     }
-  }
 
   override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] = {
     val startTime = System.currentTimeMillis()
     for {
       audioBytes <- prepareAudioForVosk(input)
-      model <- getOrLoadModel()
+      model      <- getOrLoadModel()
       transcription <- Safety
         .fromTry(Try(Using.resource(new ByteArrayInputStream(audioBytes)) { audio =>
           Using.resource(new Recognizer(model, targetSampleRate.toFloat)) { recognizer =>

@@ -120,9 +120,7 @@ class WhisperSpeechToTextIntegrationSpec extends AnyFlatSpec with Matchers with 
 
     val result = whisper.transcribe(input, options)
 
-    result.foreach { transcription =>
-      transcription.language shouldBe Some("fr-FR")
-    }
+    result.foreach(transcription => transcription.language shouldBe Some("fr-FR"))
   }
 
   it should "handle BytesAudio, StreamAudio, and FileAudio input types" taggedAs Integration in {

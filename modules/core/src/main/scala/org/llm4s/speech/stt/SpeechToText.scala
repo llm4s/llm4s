@@ -38,7 +38,7 @@ object STTOptions {
    * @param tag Language tag to validate
    * @return Right(tag) if valid, Left(error) if invalid
    */
-  def validateBcp47(tag: String): Result[String] = {
+  def validateBcp47(tag: String): Result[String] =
     if (tag.trim.isEmpty) {
       Left(STTError.InvalidInput("Language tag cannot be empty"))
     } else if (tag.length > 35) {
@@ -49,16 +49,15 @@ object STTOptions {
       // Language: 2-3 lowercase letters
       // Script: 4 letters (title case: first uppercase, rest lowercase)
       // Region: 2 uppercase letters
-      val bcp47Pattern = 
+      val bcp47Pattern =
         """^[a-z]{2}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2})?$""".r
-      
+
       if (bcp47Pattern.matches(tag)) {
         Right(tag)
       } else {
         Left(STTError.InvalidInput(s"Language tag '$tag' is not a valid BCP 47 tag"))
       }
     }
-  }
 
   /**
    * Create STTOptions with typed validation (Result-based).
@@ -86,11 +85,7 @@ object STTOptions {
     }
 
     // Validate language format (BCP 47) using proper locale validation
-    language.foreach { lang =>
-      validateBcp47(lang).left.foreach { error =>
-        errors += error.message
-      }
-    }
+    language.foreach(lang => validateBcp47(lang).left.foreach(error => errors += error.message))
 
     // Validate prompt length (if provided)
     if (prompt.isDefined && prompt.get.length > 4000) {
