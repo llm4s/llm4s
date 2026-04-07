@@ -66,14 +66,17 @@ class STTValidationSpec extends AnyFlatSpec with Matchers {
       "en-",     // Incomplete
       "-US",     // Missing language
       "en_US",   // Underscore instead of dash
-      "eng"      // Three letters
+      "eng",     // Three letters
+      "english"  // Full word
     )
 
     invalidTags.foreach { tag =>
-      val ex = intercept[IllegalArgumentException] {
-        STTOptions(language = Some(tag))
+      val result = STTOptions.validate(language = Some(tag))
+      result shouldBe a[Left[_, _]]
+      result match {
+        case Left(error) => error.message should include("Language tag")
+        case Right(_)    => fail("Expected Left but got Right")
       }
-      ex.getMessage should include("Language must be valid BCP 47 tag")
     }
   }
 

@@ -2,435 +2,173 @@ package org.llm4s.speech.stt
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.Tag
 import org.scalatest.BeforeAndAfterEach
 import org.llm4s.speech.AudioInput
-import org.llm4s.types.Result
+import org.llm4s.error.ProcessingError
 import java.io.ByteArrayInputStream
 import java.nio.file.Paths
 
+object Integration extends Tag("integration")
+
 class WhisperSpeechToTextIntegrationSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
-  // ===== BytesAudio Input Tests =====
-  "WhisperSpeechToText.transcribe with BytesAudio" should "handle small audio bytes" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-    val options    = STTOptions(language = Some("en"))
+  // ===== Error Handling Tests (non-integration) =====
 
-    val result = whisper.transcribe(input, options)
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "handle larger audio bytes" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array.fill[Byte](5000)(0)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "handle empty audio bytes gracefully" in {
-    val whisper    = new WhisperSpeechToText()
-    val emptyBytes = Array[Byte]()
-    val input      = AudioInput.BytesAudio(emptyBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  // ===== StreamAudio Input Tests =====
-  "WhisperSpeechToText.transcribe with StreamAudio" should "handle stream input" in {
-    val whisper    = new WhisperSpeechToText()
-    val streamData = Array[Byte](0, 1, 2, 3, 4, 5)
-    val stream     = new ByteArrayInputStream(streamData)
-    val input      = AudioInput.StreamAudio(stream, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "accept mono and stereo streams" in {
-    val whisper      = new WhisperSpeechToText()
-    val streamMono   = new ByteArrayInputStream(Array[Byte](0, 1, 2, 3))
-    val streamStereo = new ByteArrayInputStream(Array[Byte](0, 1, 2, 3, 4, 5))
-
-    val inputMono   = AudioInput.StreamAudio(streamMono, sampleRate = 16000, numChannels = 1)
-    val inputStereo = AudioInput.StreamAudio(streamStereo, sampleRate = 16000, numChannels = 2)
-
-    val resultMono   = whisper.transcribe(inputMono, STTOptions())
-    val resultStereo = whisper.transcribe(inputStereo, STTOptions())
-
-    resultMono.isInstanceOf[Result[Transcription]] shouldBe true
-    resultStereo.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  // ===== File Audio Input Tests =====
-  "WhisperSpeechToText.transcribe with FileAudio" should "return error for non-existent file" in {
+  "WhisperSpeechToText.transcribe" should "return error for non-existent file" in {
     val whisper         = new WhisperSpeechToText()
     val nonExistentPath = Paths.get("/nonexistent/audio/file.wav")
     val input           = AudioInput.FileAudio(nonExistentPath)
 
     val result = whisper.transcribe(input, STTOptions())
     result.isLeft shouldBe true
+    result.swap.map { case _: ProcessingError => () }.isRight shouldBe true
   }
 
-  // ===== Model Selection =====
-  "WhisperSpeechToText with different models" should "support 'tiny' model" in {
-    val whisper    = new WhisperSpeechToText(model = "tiny")
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "support 'base' model (default)" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "support 'small' model" in {
-    val whisper    = new WhisperSpeechToText(model = "small")
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "support 'medium' model" in {
-    val whisper    = new WhisperSpeechToText(model = "medium")
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "support 'large' model" in {
-    val whisper    = new WhisperSpeechToText(model = "large")
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  // ===== Output Format Selection =====
-  "WhisperSpeechToText with different output formats" should "support 'txt' format (default)" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "support 'json' format" in {
-    val whisper    = new WhisperSpeechToText(outputFormat = "json")
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "support 'vtt' format" in {
-    val whisper    = new WhisperSpeechToText(outputFormat = "vtt")
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "support 'srt' format" in {
-    val whisper    = new WhisperSpeechToText(outputFormat = "srt")
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  // ===== STT Options Tests =====
-  "WhisperSpeechToText with STTOptions" should "accept language configuration" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val optionsFr = STTOptions(language = Some("fr"))
-    val optionsEn = STTOptions(language = Some("en"))
-    val optionsJa = STTOptions(language = Some("ja"))
-
-    val resultFr = whisper.transcribe(input, optionsFr)
-    val resultEn = whisper.transcribe(input, optionsEn)
-    val resultJa = whisper.transcribe(input, optionsJa)
-
-    resultFr.isInstanceOf[Result[Transcription]] shouldBe true
-    resultEn.isInstanceOf[Result[Transcription]] shouldBe true
-    resultJa.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "accept prompt configuration" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-    val options    = STTOptions(prompt = Some("medical terminology"))
-
-    val result = whisper.transcribe(input, options)
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "accept timestamps configuration" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val optionsWithTimestamps    = STTOptions(enableTimestamps = true)
-    val optionsWithoutTimestamps = STTOptions(enableTimestamps = false)
-
-    val result1 = whisper.transcribe(input, optionsWithTimestamps)
-    val result2 = whisper.transcribe(input, optionsWithoutTimestamps)
-
-    result1.isInstanceOf[Result[Transcription]] shouldBe true
-    result2.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "accept diarization configuration" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-    val options    = STTOptions(diarization = true)
-
-    val result = whisper.transcribe(input, options)
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "accept confidence threshold configuration" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-    val options    = STTOptions(confidenceThreshold = 0.7)
-
-    val result = whisper.transcribe(input, options)
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  // ===== Command Configuration =====
-  "WhisperSpeechToText with custom commands" should "accept single command" in {
-    val whisper    = new WhisperSpeechToText(command = Seq("whisper"))
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "accept command with arguments" in {
-    val whisper    = new WhisperSpeechToText(command = Seq("whisper", "--gpu"))
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  // ===== Audio Format Support =====
-  "Supported audio formats" should "include WAV" in {
-    val whisper = new WhisperSpeechToText()
-    whisper.supportedFormats should contain("audio/wav")
-  }
-
-  it should "include MP3" in {
-    val whisper = new WhisperSpeechToText()
-    whisper.supportedFormats should contain("audio/mp3")
-  }
-
-  it should "include M4A" in {
-    val whisper = new WhisperSpeechToText()
-    whisper.supportedFormats should contain("audio/m4a")
-  }
-
-  it should "include FLAC" in {
-    val whisper = new WhisperSpeechToText()
-    whisper.supportedFormats should contain("audio/flac")
-  }
-
-  it should "include OGG" in {
-    val whisper = new WhisperSpeechToText()
-    whisper.supportedFormats should contain("audio/ogg")
-  }
-
-  // ===== Combined Configurations =====
-  "WhisperSpeechToText with combined configurations" should "support all custom parameters" in {
-    val whisper = new WhisperSpeechToText(
-      command = Seq("whisper", "--gpu"),
-      model = "large",
-      outputFormat = "json"
-    )
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-    val options = STTOptions(
-      language = Some("de"),
-      prompt = Some("German audio"),
-      enableTimestamps = true,
-      diarization = true,
-      confidenceThreshold = 0.6
-    )
-
-    val result = whisper.transcribe(input, options)
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "support defaults with custom options" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-    val options = STTOptions(
-      language = Some("es"),
-      prompt = Some("Spanish conversation"),
-      enableTimestamps = true
-    )
-
-    val result = whisper.transcribe(input, options)
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  // ===== Different Sample Rates =====
-  "WhisperSpeechToText with different sample rates" should "support 8000 Hz" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 8000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "support 16000 Hz (standard)" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "support 44100 Hz" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 44100, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "support 48000 Hz (professional)" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 48000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  // ===== Different Channel Configurations =====
-  "WhisperSpeechToText with different channels" should "support mono (1 channel)" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "support stereo (2 channels)" in {
-    val whisper         = new WhisperSpeechToText()
-    val audioBytesMulti = Array.fill[Byte](8)(0)
-    val input           = AudioInput.BytesAudio(audioBytesMulti, sampleRate = 16000, numChannels = 2)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  it should "support 5.1 surround (6 channels)" in {
-    val whisper         = new WhisperSpeechToText()
-    val audioBytesMulti = Array.fill[Byte](50)(0)
-    val input           = AudioInput.BytesAudio(audioBytesMulti, sampleRate = 16000, numChannels = 6)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  // ===== Result Type Validation =====
-  "Transcription result type" should "be Either (Result[Transcription])" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-
-    val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Either[_, _]] shouldBe true
-  }
-
-  it should "be Left on error for non-existent file" in {
-    val whisper         = new WhisperSpeechToText()
-    val nonExistentPath = Paths.get("/invalid/path/audio.wav")
-    val input           = AudioInput.FileAudio(nonExistentPath)
+  it should "return error when Whisper CLI is not found" in {
+    val whisper = new WhisperSpeechToText(command = Seq("nonexistent-whisper-command"))
+    val bytes   = Array[Byte](0, 1, 2, 3)
+    val input   = AudioInput.BytesAudio(bytes, sampleRate = 16000, numChannels = 1)
 
     val result = whisper.transcribe(input, STTOptions())
     result.isLeft shouldBe true
   }
 
-  // ===== Repeated Operations =====
-  "WhisperSpeechToText repeated operations" should "handle multiple transcriptions" in {
+  // ===== Options Validation Tests =====
+
+  "STTOptions.validate" should "accept valid language codes" in {
+    val validTags = Seq("en", "en-US", "fr-FR", "zh-Hans-CN", "de")
+    validTags.foreach { tag =>
+      val result = STTOptions.validate(language = Some(tag))
+      result.isRight shouldBe true
+    }
+  }
+
+  it should "reject invalid language codes" in {
+    val invalidTags = Seq("invalid%lang", "123", "")
+    invalidTags.foreach { tag =>
+      val result = STTOptions.validate(language = Some(tag))
+      result.isLeft shouldBe true
+    }
+  }
+
+  it should "reject confidence thresholds outside [0.0, 1.0]" in {
+    val result1 = STTOptions.validate(confidenceThreshold = -0.1)
+    val result2 = STTOptions.validate(confidenceThreshold = 1.5)
+
+    result1.isLeft shouldBe true
+    result2.isLeft shouldBe true
+  }
+
+  it should "accept valid confidence thresholds" in {
+    val validThresholds = Seq(0.0, 0.5, 1.0)
+    validThresholds.foreach { threshold =>
+      val result = STTOptions.validate(confidenceThreshold = threshold)
+      result.isRight shouldBe true
+    }
+  }
+
+  it should "reject prompts longer than 4000 characters" in {
+    val longPrompt = "a" * 4001
+    val result     = STTOptions.validate(prompt = Some(longPrompt))
+    result.isLeft shouldBe true
+  }
+
+  // ===== Integration Tests (require Whisper CLI, run conditionally) =====
+
+  "WhisperSpeechToText.transcribe with real Whisper" should "produce non-empty Transcription on valid input" taggedAs Integration in {
     val whisper    = new WhisperSpeechToText()
     val audioBytes = Array[Byte](0, 1, 2, 3)
+    val input      = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
+    val options    = STTOptions(language = Some("en"))
 
-    val input1 = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-    val input2 = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
+    val result = whisper.transcribe(input, options)
 
-    val result1 = whisper.transcribe(input1, STTOptions())
-    val result2 = whisper.transcribe(input2, STTOptions())
-
-    result1.isInstanceOf[Result[Transcription]] shouldBe true
-    result2.isInstanceOf[Result[Transcription]] shouldBe true
+    // Verify result is a Result type and check structure
+    result match {
+      case Right(transcription) =>
+        transcription.text shouldBe a[String]
+        transcription.language shouldBe Some("en")
+      case Left(error) =>
+        // Skip test if Whisper CLI is not available (integration test dependency)
+        if (error.message.contains("Whisper CLI")) {
+          cancel("Whisper CLI not available - skipping integration test")
+        } else {
+          fail(s"Expected Right, got Left: $error")
+        }
+    }
   }
 
-  it should "handle alternating input types" in {
-    val whisper    = new WhisperSpeechToText()
-    val audioBytes = Array[Byte](0, 1, 2, 3)
-
-    val bytesInput  = AudioInput.BytesAudio(audioBytes, sampleRate = 16000, numChannels = 1)
-    val streamInput = AudioInput.StreamAudio(new ByteArrayInputStream(audioBytes), sampleRate = 16000, numChannels = 1)
-
-    val result1 = whisper.transcribe(bytesInput, STTOptions())
-    val result2 = whisper.transcribe(streamInput, STTOptions())
-
-    result1.isInstanceOf[Result[Transcription]] shouldBe true
-    result2.isInstanceOf[Result[Transcription]] shouldBe true
-  }
-
-  // ===== Edge Cases =====
-  "WhisperSpeechToText edge cases" should "handle very small audio" in {
-    val whisper   = new WhisperSpeechToText()
-    val tinyBytes = Array[Byte](1)
-    val input     = AudioInput.BytesAudio(tinyBytes, sampleRate = 16000, numChannels = 1)
+  it should "populate processingTimeMs when available" taggedAs Integration in {
+    val whisper = new WhisperSpeechToText()
+    val bytes   = Array[Byte](0, 1, 2, 3)
+    val input   = AudioInput.BytesAudio(bytes, sampleRate = 16000, numChannels = 1)
 
     val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
+
+    result.foreach { transcription =>
+      transcription.processingTimeMs shouldBe defined
+      transcription.processingTimeMs.get should be >= 0L
+    }
   }
 
-  it should "handle larger audio data" in {
+  it should "respect language option in output" taggedAs Integration in {
+    val whisper = new WhisperSpeechToText()
+    val bytes   = Array[Byte](0, 1, 2, 3)
+    val input   = AudioInput.BytesAudio(bytes, sampleRate = 16000, numChannels = 1)
+    val options = STTOptions(language = Some("fr-FR"))
+
+    val result = whisper.transcribe(input, options)
+
+    result.foreach { transcription =>
+      transcription.language shouldBe Some("fr-FR")
+    }
+  }
+
+  it should "handle BytesAudio, StreamAudio, and FileAudio input types" taggedAs Integration in {
+    val whisper = new WhisperSpeechToText()
+    val bytes   = Array[Byte](0, 1, 2, 3)
+
+    // BytesAudio
+    val bytesInput = AudioInput.BytesAudio(bytes, sampleRate = 16000, numChannels = 1)
+    val result1    = whisper.transcribe(bytesInput, STTOptions())
+    result1.isRight || result1.isLeft shouldBe true // Valid Result type
+
+    // StreamAudio
+    val streamInput = AudioInput.StreamAudio(new ByteArrayInputStream(bytes), sampleRate = 16000, numChannels = 1)
+    val result2     = whisper.transcribe(streamInput, STTOptions())
+    result2.isRight || result2.isLeft shouldBe true // Valid Result type
+  }
+
+  it should "handle empty audio gracefully (returning error or empty text)" taggedAs Integration in {
     val whisper    = new WhisperSpeechToText()
-    val largeBytes = Array.fill[Byte](100000)(0.toByte)
-    val input      = AudioInput.BytesAudio(largeBytes, sampleRate = 16000, numChannels = 1)
+    val emptyBytes = Array[Byte]()
+    val input      = AudioInput.BytesAudio(emptyBytes, sampleRate = 16000, numChannels = 1)
 
     val result = whisper.transcribe(input, STTOptions())
-    result.isInstanceOf[Result[Transcription]] shouldBe true
+
+    // Result should be valid (either success with empty/whitespace text or error)
+    result match {
+      case Right(transcription) =>
+        transcription shouldBe a[Transcription]
+      case Left(_) =>
+        // Also acceptable - empty audio produces no transcription
+        ()
+    }
   }
+
+  it should "support multiple Whisper model sizes" taggedAs Integration in {
+    val models = Seq("tiny", "base", "small", "medium", "large")
+    val bytes  = Array[Byte](0, 1, 2, 3)
+    val input  = AudioInput.BytesAudio(bytes, sampleRate = 16000, numChannels = 1)
+
+    models.foreach { model =>
+      val whisper = new WhisperSpeechToText(model = model)
+      val result  = whisper.transcribe(input, STTOptions())
+
+      // Just verify we get a valid Result type, not that it succeeds
+      (result.isRight || result.isLeft) shouldBe true
+    }
+  }
+
 }

@@ -21,11 +21,44 @@ final case class STTOptions(
   confidenceThreshold: Double = 0.0
 ) {
   require(confidenceThreshold >= 0.0 && confidenceThreshold <= 1.0, "Confidence threshold must be between 0.0 and 1.0")
-
-  require(language.forall(_.matches("[a-z]{2}(-[A-Z]{2})?")), "Language must be valid BCP 47 tag")
 }
 
 object STTOptions {
+
+  /**
+   * Validate BCP 47 language tag format.
+   * Accepts standard tags like "en", "en-US", "zh", etc.
+   * Rejects full English words like "english" or invalid formats.
+   *
+   * BCP 47 format:
+   * - Language (2 letters, lowercase): en, fr, de
+   * - Region (2 letters, uppercase): US, GB, FR
+   * - Script (4 letters, title case): Hans (for zh-Hans)
+   *
+   * @param tag Language tag to validate
+   * @return Right(tag) if valid, Left(error) if invalid
+   */
+  def validateBcp47(tag: String): Result[String] = {
+    if (tag.trim.isEmpty) {
+      Left(STTError.InvalidInput("Language tag cannot be empty"))
+    } else if (tag.length > 35) {
+      // BCP 47 tags should not exceed ~35 characters
+      Left(STTError.InvalidInput(s"Language tag '$tag' is too long"))
+    } else {
+      // Pattern for BCP 47 tags: language[-script][-region]
+      // Language: 2-3 lowercase letters
+      // Script: 4 letters (title case: first uppercase, rest lowercase)
+      // Region: 2 uppercase letters
+      val bcp47Pattern = 
+        """^[a-z]{2}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2})?$""".r
+      
+      if (bcp47Pattern.matches(tag)) {
+        Right(tag)
+      } else {
+        Left(STTError.InvalidInput(s"Language tag '$tag' is not a valid BCP 47 tag"))
+      }
+    }
+  }
 
   /**
    * Create STTOptions with typed validation (Result-based).
@@ -52,9 +85,11 @@ object STTOptions {
       errors += s"Confidence threshold must be between 0.0 and 1.0, got $confidenceThreshold"
     }
 
-    // Validate language format (BCP 47)
-    if (language.isDefined && !language.get.matches("[a-z]{2}(-[A-Z]{2})?(-.+)?")) {
-      errors += s"Language must be valid BCP 47 tag (e.g., 'en', 'en-US'), got '${language.get}'"
+    // Validate language format (BCP 47) using proper locale validation
+    language.foreach { lang =>
+      validateBcp47(lang).left.foreach { error =>
+        errors += error.message
+      }
     }
 
     // Validate prompt length (if provided)

@@ -41,11 +41,11 @@ final class WhisperSpeechToText(
             ProcessingError.audioValidation("Whisper CLI execution failed with non-zero exit code")
           case _ => ProcessingError.audioValidation("Whisper CLI execution failed")
         }
-    } yield {
-      val processingTimeMs = System.currentTimeMillis() - startTime
-      val transcription    = parseWhisperOutput(output, options)
-      transcription.copy(processingTimeMs = Some(processingTimeMs))
-    }
+      transcription <- {
+        val processingTimeMs = System.currentTimeMillis() - startTime
+        parseWhisperOutput(output, options).map(_.copy(processingTimeMs = Some(processingTimeMs)))
+      }
+    } yield transcription
 
     // Clean up any temp file that was created, regardless of transcription success or failure
     wavResult.foreach { case (path, isTemp) => if (isTemp) Try(Files.deleteIfExists(path)) }
@@ -92,19 +92,40 @@ final class WhisperSpeechToText(
     baseArgs ++ optFlags.combineAll
   }
 
-  private def parseWhisperOutput(output: String, options: STTOptions): Transcription = {
+  private def parseWhisperOutput(
+    output: String,
+    options: STTOptions
+  ): Result[Transcription] = {
     // Parse output based on format and options
     val text       = output.trim
     val confidence = extractConfidence(output)
     val timestamps = if (options.enableTimestamps) extractTimestamps(output) else Nil
 
-    Transcription(
-      text = text,
-      language = options.language,
-      confidence = confidence,
-      timestamps = timestamps,
-      meta = None
-    )
+    // Wrap construction in Try to catch require() violations (empty text)
+    Safety
+      .fromTry(
+        Try(
+          Transcription(
+            text = text,
+            language = options.language,
+            confidence = confidence,
+            timestamps = timestamps,
+            meta = None
+          )
+        )
+      )
+      .left
+      .map {
+        case _: IllegalArgumentException =>
+          if (text.isEmpty) {
+            ProcessingError
+              .audioValidation("Transcription produced empty text")
+          } else {
+            ProcessingError.audioValidation("Failed to construct transcription object")
+          }
+        case e: Throwable =>
+          ProcessingError.audioValidation(s"Unexpected error parsing Whisper output: ${e.getMessage}")
+      }
   }
 
   private def extractConfidence(output: String): Option[Double] =

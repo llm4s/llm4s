@@ -11,6 +11,7 @@ import java.nio.file.Files
 import org.llm4s.core.safety.Safety
 import org.llm4s.speech.processing.AudioPreprocessing
 import org.slf4j.LoggerFactory
+import scala.util.control.NonFatal
 
 /**
  * Vosk-based speech-to-text implementation.
@@ -33,23 +34,67 @@ final class VoskSpeechToText(
   override val supportedFormats: List[String] = List("audio/wav", "audio/pcm")
 
   /**
-   * Cached Vosk model to avoid reloading on each transcription.
-   *  Models are large; caching improves performance significantly.
+   * Thread-safe lazy reference to the Vosk model.
+   * Cached to avoid reloading on each transcription (models are large).
+   * Use atomicModel to track initialization state for proper cleanup.
    */
-  private lazy val model: Model = {
-    val path = modelPath.getOrElse(VoskSpeechToText.DEFAULT_MODEL_PATH)
-    logger.info(s"Loading Vosk model from $path")
-    new Model(path)
+  @volatile
+  private var modelRef: Option[Model] = None
+
+  private def getOrLoadModel(): Result[Model] = {
+    if (modelRef.isDefined) {
+      Right(modelRef.get)
+    } else {
+      synchronized {
+        // Double-check after acquiring lock
+        if (modelRef.isDefined) {
+          Right(modelRef.get)
+        } else {
+          val path = modelPath.getOrElse(VoskSpeechToText.DEFAULT_MODEL_PATH)
+          try {
+            logger.info(s"Loading Vosk model from $path")
+            val m = new Model(path)
+            modelRef = Some(m)
+            Right(m)
+          } catch {
+            case NonFatal(e) =>
+              logger.error(s"Failed to load Vosk model from $path", e)
+              Left(ProcessingError.audioValidation(s"Failed to load Vosk model: ${e.getMessage}", Some(e)))
+          }
+        }
+      }
+    }
   }
 
-  override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] =
+  /**
+   * Close the cached Vosk model and release resources.
+   * Safe to call multiple times (idempotent).
+   * Should be called when the instance is no longer needed, especially in long-lived processes.
+   */
+  def close(): Unit = {
+    synchronized {
+      modelRef.foreach { m =>
+        try {
+          logger.info("Closing Vosk model")
+          m.close()
+        } catch {
+          case NonFatal(e) => logger.warn("Error closing Vosk model", e)
+        }
+      }
+      modelRef = None
+    }
+  }
+
+  override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] = {
+    val startTime = System.currentTimeMillis()
     for {
       audioBytes <- prepareAudioForVosk(input)
-      startTime = System.currentTimeMillis()
+      model <- getOrLoadModel()
       transcription <- Safety
         .fromTry(Try(Using.resource(new ByteArrayInputStream(audioBytes)) { audio =>
-          val recognizer = new Recognizer(model, targetSampleRate.toFloat)
-          transcribeAudio(audio, recognizer, bufferSize, options)
+          Using.resource(new Recognizer(model, targetSampleRate.toFloat)) { recognizer =>
+            transcribeAudio(audio, recognizer, bufferSize, options)
+          }
         }))
         .left
         .map { case e: Throwable =>
@@ -60,6 +105,7 @@ final class VoskSpeechToText(
       val processingTimeMs = System.currentTimeMillis() - startTime
       transcription.copy(processingTimeMs = Some(processingTimeMs))
     }
+  }
 
   /**
    * Transcribe audio stream using Vosk recognizer.
@@ -138,6 +184,7 @@ final class VoskSpeechToText(
             AudioPreprocessing.standardizeForSTT(bytes, meta, targetRate = targetSampleRate).map { case (b, _) => b }
           }
     }
+
 }
 
 object VoskSpeechToText {
