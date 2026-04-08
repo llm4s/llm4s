@@ -9,6 +9,11 @@ coverage:
         target: 90%
         threshold: 5%
 
+# Ignore documentation from coverage calculation
+ignore:
+  - "**/*.md"
+  - "docs/**"
+
 # Coverage flags for per-module tracking
 # Only track main source code (not tests or resources)
 flags:
