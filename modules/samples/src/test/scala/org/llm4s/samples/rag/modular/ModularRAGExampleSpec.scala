@@ -53,10 +53,12 @@ class ModularRAGExampleSpec extends AnyFunSuite with Matchers {
     val result    = ModularRAGSupport.seedCorpus(ingestion)
 
     result shouldBe Right(3)
-    ingestion.ingestedDocumentIds should contain theSameElementsInOrderAs Seq(
-      "rag-intro",
-      "llm4s-reliability",
-      "architecture"
+    (ingestion.ingestedDocumentIds should contain).theSameElementsInOrderAs(
+      Seq(
+        "rag-intro",
+        "llm4s-reliability",
+        "architecture"
+      )
     )
   }
 }
