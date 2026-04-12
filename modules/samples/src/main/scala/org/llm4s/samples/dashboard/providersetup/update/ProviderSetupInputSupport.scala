@@ -103,8 +103,7 @@ private[providersetup] object ProviderSetupInputSupport:
   private def demoTranscriptLineCount(model: Model): Int =
     if model.demoEntries.isEmpty then
       wrap("No demo messages yet. Type a prompt below to start.", demoTranscriptWidth(model)).length
-    else
-      model.demoEntries.map(entry => demoTranscriptBlockLineCount(entry, demoTranscriptWidth(model))).sum
+    else model.demoEntries.map(entry => demoTranscriptBlockLineCount(entry, demoTranscriptWidth(model))).sum
 
   private def demoTranscriptBlockLineCount(entry: DemoEntry, width: Int): Int =
     val label = entry.role match

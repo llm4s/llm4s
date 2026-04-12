@@ -28,7 +28,8 @@ private[providersetup] object CompareModeUpdate:
 
       case Msg.Compare(CompareMsg.ConsoleInputKey(key)) =>
         ProviderSetupInputSupport.handleHistoryRecallKey(model, key).orElse(handleCompareNavKey(model, key)).getOrElse {
-          val (nextPrompt, maybeCmd) = PromptHistory.handleKey[Msg](model.prompt, key)(ProviderSetupInputSupport.inputToMsg)
+          val (nextPrompt, maybeCmd) =
+            PromptHistory.handleKey[Msg](model.prompt, key)(ProviderSetupInputSupport.inputToMsg)
           maybeCmd match
             case Some(cmd) => Tui(model.updateShell(_.copy(prompt = nextPrompt)), cmd)
             case None      => model.updateShell(_.copy(prompt = nextPrompt)).tui

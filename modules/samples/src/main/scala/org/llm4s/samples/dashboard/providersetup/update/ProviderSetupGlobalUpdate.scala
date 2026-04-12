@@ -2,10 +2,7 @@ package org.llm4s.samples.dashboard.providersetup.update
 
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupMessages.*
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupModel.*
-import org.llm4s.samples.dashboard.providersetup.{
-  ProviderSetupProviderSelection,
-  ProviderSetupRuntime
-}
+import org.llm4s.samples.dashboard.providersetup.{ ProviderSetupProviderSelection, ProviderSetupRuntime }
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupTabs
 import org.llm4s.samples.dashboard.shared.DashboardSupport
 import termflow.tui.*

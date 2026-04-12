@@ -6,7 +6,7 @@ import org.llm4s.types.TryOps
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.FileAlreadyExistsException
-import java.nio.file.{Files, Path, StandardOpenOption}
+import java.nio.file.{ Files, Path, StandardOpenOption }
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -29,7 +29,7 @@ trait ProviderExchangeSink:
 
 object ProviderExchangeSink:
   val noop: ProviderExchangeSink = new ProviderExchangeSink:
-    override def record( @unused exchange: ProviderExchange): Unit =
+    override def record(@unused exchange: ProviderExchange): Unit =
       ()
 
   private val timestampFormatter =

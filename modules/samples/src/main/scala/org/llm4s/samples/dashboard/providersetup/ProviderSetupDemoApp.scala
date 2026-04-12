@@ -42,7 +42,11 @@ object ProviderSetupDemoApp:
   ): TuiApp[Model, Msg] =
     new TuiApp[Model, Msg]:
       override def init(ctx: RuntimeCtx[Msg]): Tui[Model, Msg] =
-        Sub.InputKey(key => Msg.Setup(SetupMsg.ConsoleInputKey(key)), error => Msg.Global(GlobalMsg.ConsoleInputError(error)), ctx)
+        Sub.InputKey(
+          key => Msg.Setup(SetupMsg.ConsoleInputKey(key)),
+          error => Msg.Global(GlobalMsg.ConsoleInputError(error)),
+          ctx
+        )
         Sub.Every(150L, () => Msg.Global(GlobalMsg.Tick), ctx)
         Sub.TerminalResize(250L, (width, height) => Msg.Global(GlobalMsg.Resize(width, height)), ctx)
 

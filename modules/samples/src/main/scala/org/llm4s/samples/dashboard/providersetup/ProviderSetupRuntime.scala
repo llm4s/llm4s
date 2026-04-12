@@ -205,9 +205,9 @@ private[providersetup] object ProviderSetupRuntime:
         )
       case ProviderKind.Azure =>
         for
-          model <- requiredModel(input, "Session override for Azure OpenAI needs `set model <deployment>`.")
+          model    <- requiredModel(input, "Session override for Azure OpenAI needs `set model <deployment>`.")
           endpoint <- requiredEndpoint(input, "Session override for Azure OpenAI needs `set endpoint <url>`.")
-          apiKey <- requiredApiKey(input, "Session override for Azure OpenAI needs `set api-key <key>`.")
+          apiKey   <- requiredApiKey(input, "Session override for Azure OpenAI needs `set api-key <key>`.")
         yield activeSession(
           providerId = "azure",
           model = model,
@@ -378,7 +378,9 @@ private[providersetup] object ProviderSetupRuntime:
   ): Cmd[Msg] =
     Cmd.FCmd(
       task = Future {
-        Msg.Global(GlobalMsg.DemoResponseReceived(runDemoCompletion(providerConfig, entries, demoConfig, exchangeLogging, ctx)))
+        Msg.Global(
+          GlobalMsg.DemoResponseReceived(runDemoCompletion(providerConfig, entries, demoConfig, exchangeLogging, ctx))
+        )
       },
       toCmd = result => Cmd.GCmd(result)
     )
@@ -422,7 +424,9 @@ private[providersetup] object ProviderSetupRuntime:
                   )
                 )
             val latencyMs = java.time.Duration.between(startedAt, Instant.now()).toMillis
-            ctx.publish(Cmd.GCmd(Msg.Global(GlobalMsg.CompareResponseReceived(selection.providerName, latencyMs, result))))
+            ctx.publish(
+              Cmd.GCmd(Msg.Global(GlobalMsg.CompareResponseReceived(selection.providerName, latencyMs, result)))
+            )
           }
         }
         Msg.Global(GlobalMsg.NoOp)
@@ -527,7 +531,8 @@ private[providersetup] object ProviderSetupRuntime:
                   s"error=$message"
                 )
               )
-              Left(message),
+              Left(message)
+            ,
             identity
           )
         }

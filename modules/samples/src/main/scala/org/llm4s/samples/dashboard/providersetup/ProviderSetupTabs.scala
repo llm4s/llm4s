@@ -23,8 +23,16 @@ object ProviderSetupTabs:
       ProviderSetupContent.docs(1),
       Vector(PanelFocus.Main, PanelFocus.Models, PanelFocus.Status)
     ),
-    SetupTabSpec(SetupTabId.Providers, ProviderSetupContent.docs(2), Vector(PanelFocus.Main, PanelFocus.Models, PanelFocus.Status)),
-    SetupTabSpec(SetupTabId.Compare, ProviderSetupContent.docs(3), Vector(PanelFocus.Main, PanelFocus.Models, PanelFocus.Status)),
+    SetupTabSpec(
+      SetupTabId.Providers,
+      ProviderSetupContent.docs(2),
+      Vector(PanelFocus.Main, PanelFocus.Models, PanelFocus.Status)
+    ),
+    SetupTabSpec(
+      SetupTabId.Compare,
+      ProviderSetupContent.docs(3),
+      Vector(PanelFocus.Main, PanelFocus.Models, PanelFocus.Status)
+    ),
     SetupTabSpec(SetupTabId.ConfigPaths, ProviderSetupContent.docs(4), Vector(PanelFocus.Main, PanelFocus.Status)),
     SetupTabSpec(SetupTabId.Status, ProviderSetupContent.docs(5), Vector(PanelFocus.Main, PanelFocus.Status))
   )
@@ -59,7 +67,10 @@ object ProviderSetupTabs:
   def tabTitle(model: Model, tabId: SetupTabId): String =
     tabId match
       case SetupTabId.DefaultNamedProvider =>
-        ProviderSetupProviderSelection.defaultConfiguredProvider(model.configStatus).map(_.name).getOrElse(setupDoc(tabId).title)
+        ProviderSetupProviderSelection
+          .defaultConfiguredProvider(model.configStatus)
+          .map(_.name)
+          .getOrElse(setupDoc(tabId).title)
       case _ =>
         setupDoc(tabId).title
 

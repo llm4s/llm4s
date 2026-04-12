@@ -30,8 +30,7 @@ private[providersetup] object SetupModeUpdate:
       case Msg.Setup(SetupMsg.RunCommand(command)) =>
         handleSetupCommand(model, command)
 
-      case Msg.Setup(SetupMsg.ConsoleInputKey(key))
-          if ProviderSetupTabs.shouldHandleNavKeys(model.prompt, key) =>
+      case Msg.Setup(SetupMsg.ConsoleInputKey(key)) if ProviderSetupTabs.shouldHandleNavKeys(model.prompt, key) =>
         ProviderSetupTabs.handleNavKey(model, key, model.demoAppConfigs.docs).tui
 
       case Msg.Setup(SetupMsg.ConsoleInputKey(KeyDecoder.InputKey.Enter | KeyDecoder.InputKey.Ctrl('M')))
@@ -43,7 +42,8 @@ private[providersetup] object SetupModeUpdate:
         ProviderSetupSetupPolicy.handleSetupEnter(model).tui
 
       case Msg.Setup(SetupMsg.ConsoleInputKey(key)) =>
-        val (nextPrompt, maybeCmd) = PromptHistory.handleKey[Msg](model.prompt, key)(ProviderSetupInputSupport.inputToMsg)
+        val (nextPrompt, maybeCmd) =
+          PromptHistory.handleKey[Msg](model.prompt, key)(ProviderSetupInputSupport.inputToMsg)
         maybeCmd match
           case Some(cmd) => Tui(model.updateShell(_.copy(prompt = nextPrompt)), cmd)
           case None      => model.updateShell(_.copy(prompt = nextPrompt)).tui
@@ -167,7 +167,7 @@ private[providersetup] object SetupModeUpdate:
       case field :: value :: Nil if value.trim.nonEmpty =>
         val target  = ProviderSetupProviderSelection.selectedSessionOverrideTarget(model)
         val current = model.sessionInputs.getOrElse(target, ProviderSessionInput())
-        val trimmed    = value.trim
+        val trimmed = value.trim
         val next =
           field.toLowerCase match
             case "model"       => current.copy(model = Some(trimmed))

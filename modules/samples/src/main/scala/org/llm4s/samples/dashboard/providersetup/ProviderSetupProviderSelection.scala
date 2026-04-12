@@ -172,8 +172,8 @@ object ProviderSetupProviderSelection:
     else providerKindFromString(activeDocId.value)
 
   def currentSetupSessionRequest(model: Model): Result[ProviderSetupSetupPolicy.SetupSessionRequest] =
-    val activeDoc          = ProviderSetupTabs.activeSetupDoc(model)
-    val isDefaultTab       = ProviderSetupSetupPolicy.isDefaultProviderTab(model)
+    val activeDoc    = ProviderSetupTabs.activeSetupDoc(model)
+    val isDefaultTab = ProviderSetupSetupPolicy.isDefaultProviderTab(model)
     val selectedConfigured =
       Option
         .when(ProviderSetupSetupPolicy.isProvidersTab(model))(selectedConfiguredProvider(model))

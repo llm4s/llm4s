@@ -25,10 +25,12 @@ private[providersetup] object DemoModeUpdate:
         handleDemoCommand(model, command, model.demoAppConfigs.demoCfg, model.demoAppConfigs.exchangeLogging, ctx)
 
       case Msg.Demo(DemoMsg.ConsoleInputKey(key)) =>
-        ProviderSetupInputSupport.handleHistoryRecallKey(model, key)
+        ProviderSetupInputSupport
+          .handleHistoryRecallKey(model, key)
           .orElse(ProviderSetupInputSupport.handleDemoScrollKey(model, key))
           .getOrElse {
-            val (nextPrompt, maybeCmd) = PromptHistory.handleKey[Msg](model.prompt, key)(ProviderSetupInputSupport.inputToMsg)
+            val (nextPrompt, maybeCmd) =
+              PromptHistory.handleKey[Msg](model.prompt, key)(ProviderSetupInputSupport.inputToMsg)
             maybeCmd match
               case Some(cmd) => Tui(model.updateShell(_.copy(prompt = nextPrompt)), cmd)
               case None      => model.updateShell(_.copy(prompt = nextPrompt)).tui

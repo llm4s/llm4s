@@ -31,7 +31,7 @@ object ProviderSetupModel:
     val Zai: SetupTabDocId       = SetupTabDocId("zai")
 
   extension (id: SetupTabDocId)
-    def value: String = id
+    def value: String                        = id
     def is(expected: SetupTabDocId): Boolean = id == expected
 
   enum SetupTabId:
@@ -209,28 +209,28 @@ object ProviderSetupModel:
   )
 
   extension (model: Model)
-    def terminalWidth: Int = model.ui.shell.terminalWidth
-    def terminalHeight: Int = model.ui.shell.terminalHeight
-    def prompt: PromptHistory.State = model.ui.shell.prompt
-    def screenMode: ScreenMode = model.ui.shell.screenMode
-    def activeTab: SetupTabId = model.ui.shell.activeTab
-    def focusTarget: FocusTarget = model.ui.shell.focusTarget
-    def panelFocus: PanelFocus = model.ui.shell.panelFocus
-    def selectedProviderIndex: Int = model.ui.setup.selectedProviderIndex
-    def highlightedModel: Option[String] = model.ui.setup.highlightedModel
-    def chosenModel: Option[String] = model.ui.setup.chosenModel
-    def providersPanelMode: ProvidersPanelMode = model.ui.setup.providersPanelMode
+    def terminalWidth: Int                          = model.ui.shell.terminalWidth
+    def terminalHeight: Int                         = model.ui.shell.terminalHeight
+    def prompt: PromptHistory.State                 = model.ui.shell.prompt
+    def screenMode: ScreenMode                      = model.ui.shell.screenMode
+    def activeTab: SetupTabId                       = model.ui.shell.activeTab
+    def focusTarget: FocusTarget                    = model.ui.shell.focusTarget
+    def panelFocus: PanelFocus                      = model.ui.shell.panelFocus
+    def selectedProviderIndex: Int                  = model.ui.setup.selectedProviderIndex
+    def highlightedModel: Option[String]            = model.ui.setup.highlightedModel
+    def chosenModel: Option[String]                 = model.ui.setup.chosenModel
+    def providersPanelMode: ProvidersPanelMode      = model.ui.setup.providersPanelMode
     def compareSelections: Vector[CompareSelection] = model.compare.selections
-    def highlightedCompareSelectionIndex: Int = model.compare.highlightedSelectionIndex
-    def activeCompareTab: Int = model.compare.activeTab
-    def compareResults: Vector[CompareResult] = model.compare.results
-    def comparePrompt: Option[String] = model.compare.prompt
-    def compareScrollOffsets: Vector[Int] = model.compare.scrollOffsets
-    def activeSession: Option[ActiveSession] = model.demo.activeSession
-    def demoEntries: Vector[DemoEntry] = model.demo.entries
-    def demoScrollOffset: Int = model.demo.scrollOffset
-    def demoPending: Boolean = model.demo.pending
-    def demoTicks: Long = model.demo.ticks
+    def highlightedCompareSelectionIndex: Int       = model.compare.highlightedSelectionIndex
+    def activeCompareTab: Int                       = model.compare.activeTab
+    def compareResults: Vector[CompareResult]       = model.compare.results
+    def comparePrompt: Option[String]               = model.compare.prompt
+    def compareScrollOffsets: Vector[Int]           = model.compare.scrollOffsets
+    def activeSession: Option[ActiveSession]        = model.demo.activeSession
+    def demoEntries: Vector[DemoEntry]              = model.demo.entries
+    def demoScrollOffset: Int                       = model.demo.scrollOffset
+    def demoPending: Boolean                        = model.demo.pending
+    def demoTicks: Long                             = model.demo.ticks
 
     def updateShell(f: ShellUiState => ShellUiState): Model =
       model.copy(ui = model.ui.copy(shell = f(model.ui.shell)))

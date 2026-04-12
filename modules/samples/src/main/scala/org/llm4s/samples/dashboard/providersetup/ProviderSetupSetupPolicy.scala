@@ -47,7 +47,9 @@ object ProviderSetupSetupPolicy:
           model.panelFocus == PanelFocus.Status))
 
   def exitBodyFocus(model: Model): Model =
-    if isProvidersTab(model) && model.panelFocus == PanelFocus.Models && model.providersPanelMode == ProvidersPanelMode.Models
+    if isProvidersTab(
+        model
+      ) && model.panelFocus == PanelFocus.Models && model.providersPanelMode == ProvidersPanelMode.Models
     then
       model
         .updateSetup(_.copy(providersPanelMode = ProvidersPanelMode.Providers, highlightedModel = None))

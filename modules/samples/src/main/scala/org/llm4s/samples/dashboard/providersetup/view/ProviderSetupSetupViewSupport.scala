@@ -196,9 +196,13 @@ private[providersetup] object ProviderSetupSetupViewSupport:
       "Navigation:",
       if model.focusTarget == FocusTarget.TabBar then "Left/right change tabs" else "Esc returns to tabs",
       if model.focusTarget == FocusTarget.TabBar then "Down enters selected tab" else bodyNavigationHint(model),
-      if model.focusTarget == FocusTarget.Body && ProviderSetupSetupPolicy.isDefaultProviderTab(model) && model.panelFocus == PanelFocus.Models then
-        "Enter chooses highlighted"
-      else if model.focusTarget == FocusTarget.Body && tabDoc.id.is(SetupTabDocIds.Providers) && model.panelFocus == PanelFocus.Models
+      if model.focusTarget == FocusTarget.Body && ProviderSetupSetupPolicy.isDefaultProviderTab(
+          model
+        ) && model.panelFocus == PanelFocus.Models
+      then "Enter chooses highlighted"
+      else if model.focusTarget == FocusTarget.Body && tabDoc.id.is(
+          SetupTabDocIds.Providers
+        ) && model.panelFocus == PanelFocus.Models
       then
         if model.providersPanelMode == ProvidersPanelMode.Providers then "Enter opens models"
         else "Enter chooses highlighted"
@@ -238,7 +242,8 @@ private[providersetup] object ProviderSetupSetupViewSupport:
           s"Chosen model: ${chosenModel.getOrElse("none")}",
           s"Required: ${doc.requiredVars.headOption.getOrElse("provider-specific")}",
           s"Configured now: ${
-              if selectedConfigured.nonEmpty || model.configStatus.providerId.contains(doc.id.value) then "yes" else "no"
+              if selectedConfigured.nonEmpty || model.configStatus.providerId.contains(doc.id.value) then "yes"
+              else "no"
             }",
           "",
           "Next move:",
@@ -336,7 +341,11 @@ private[providersetup] object ProviderSetupSetupViewSupport:
   def bodyNavigationHint(model: Model): String =
     if ProviderSetupSetupPolicy.isDefaultProviderTab(model) && model.panelFocus == PanelFocus.Models then
       "Up/down browse models"
-    else if ProviderSetupTabs.activeSetupDoc(model).id.is(SetupTabDocIds.Providers) && model.panelFocus == PanelFocus.Models then
+    else if ProviderSetupTabs
+        .activeSetupDoc(model)
+        .id
+        .is(SetupTabDocIds.Providers) && model.panelFocus == PanelFocus.Models
+    then
       if model.providersPanelMode == ProvidersPanelMode.Providers then "Up/down browse providers"
       else "Up/down browse models"
     else if ProviderSetupTabs.activeSetupDoc(model).id.is(SetupTabDocIds.Compare) then
@@ -397,7 +406,7 @@ private[providersetup] object ProviderSetupSetupViewSupport:
            "Use the middle panel for discovered model browsing."
          )
        else if doc.id.is(SetupTabDocIds.Status) then List("", s"Current detail: ${status.detail}")
-       else Nil).flatMap(line => wrap(line, width))
+       else Nil) .flatMap(line => wrap(line, width))
 
   private def renderTabOverview(doc: ProviderDoc, width: Int): List[String] =
     List(

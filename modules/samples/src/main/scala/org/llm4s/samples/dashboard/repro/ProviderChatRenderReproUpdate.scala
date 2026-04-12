@@ -3,13 +3,19 @@ package org.llm4s.samples.dashboard.repro
 import termflow.tui.*
 import termflow.tui.Tui.*
 import org.llm4s.samples.dashboard.repro.ProviderChatRenderReproApp.App.toMsg
-import org.llm4s.samples.dashboard.repro.ProviderChatRenderReproApp.Msg.{ConsoleInputError, ConsoleInputKey, ExitRequested, Resize, RunCommand}
-import org.llm4s.samples.dashboard.repro.ProviderChatRenderReproApp.{Entry, Model, Msg, Role}
-import termflow.tui.{Cmd, PromptHistory, RuntimeCtx, Tui}
+import org.llm4s.samples.dashboard.repro.ProviderChatRenderReproApp.Msg.{
+  ConsoleInputError,
+  ConsoleInputKey,
+  ExitRequested,
+  Resize,
+  RunCommand
+}
+import org.llm4s.samples.dashboard.repro.ProviderChatRenderReproApp.{ Entry, Model, Msg, Role }
+import termflow.tui.{ Cmd, PromptHistory, RuntimeCtx, Tui }
 
 import scala.annotation.unused
 
-private def ProviderChatRenderReproUpdate(model: Model, msg: Msg, @unused ctx: RuntimeCtx[Msg]) = {
+private def ProviderChatRenderReproUpdate(model: Model, msg: Msg, @unused ctx: RuntimeCtx[Msg]) =
   msg match
     case Resize(width, height) =>
       model.copy(terminalWidth = width, terminalHeight = height).tui
@@ -28,7 +34,6 @@ private def ProviderChatRenderReproUpdate(model: Model, msg: Msg, @unused ctx: R
       maybeCmd match
         case Some(cmd) => Tui(model.copy(prompt = nextPrompt), cmd)
         case None      => model.copy(prompt = nextPrompt).tui
-}
 private def handleCommand(model: Model, command: String): Tui[Model, Msg] =
   command.trim match
     case "help" =>

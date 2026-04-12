@@ -109,10 +109,12 @@ class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers:
         shell = ShellUiState(
           terminalWidth = 120,
           terminalHeight = 40,
-          prompt =
-            PromptHistory.initial(
-              FileHistoryStore(Path.of(System.getProperty("java.io.tmpdir"), "provider-setup-session-target-spec.txt"), 10)
-            ),
+          prompt = PromptHistory.initial(
+            FileHistoryStore(
+              Path.of(System.getProperty("java.io.tmpdir"), "provider-setup-session-target-spec.txt"),
+              10
+            )
+          ),
           screenMode = ScreenMode.Setup,
           activeTab = SetupTabId.Overview,
           focusTarget = FocusTarget.TabBar,

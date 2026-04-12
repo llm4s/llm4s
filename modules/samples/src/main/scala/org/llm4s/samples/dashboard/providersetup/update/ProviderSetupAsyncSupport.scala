@@ -8,8 +8,7 @@ import termflow.tui.Tui.*
 private[providersetup] object ProviderSetupAsyncSupport:
 
   def handleTick(model: Model): Tui[Model, Msg] =
-    if hasPendingActivity(model) then
-      model.updateDemo(_.copy(ticks = model.demoTicks + 1)).tui
+    if hasPendingActivity(model) then model.updateDemo(_.copy(ticks = model.demoTicks + 1)).tui
     else model.tui
 
   def handleDemoResponse(model: Model, result: Either[String, String]): Tui[Model, Msg] =
@@ -25,11 +24,13 @@ private[providersetup] object ProviderSetupAsyncSupport:
               scrollOffset =
                 if model.demoStreamingEnabled then
                   clampDemoScrollOffset(model.updateDemo(_.copy(entries = nextEntries)), model.demoScrollOffset)
-                else ProviderSetupInputSupport.preserveDemoViewport(
-                  model,
-                  DemoEntry(DemoRole.Assistant, response),
-                  nextEntries
-                ),
+                else
+                  ProviderSetupInputSupport.preserveDemoViewport(
+                    model,
+                    DemoEntry(DemoRole.Assistant, response),
+                    nextEntries
+                  )
+              ,
               pending = false
             )
           )
@@ -102,7 +103,8 @@ private[providersetup] object ProviderSetupAsyncSupport:
         .updateDemo(
           _.copy(
             entries = nextEntries,
-            scrollOffset = clampDemoScrollOffset(model.updateDemo(_.copy(entries = nextEntries)), model.demoScrollOffset)
+            scrollOffset =
+              clampDemoScrollOffset(model.updateDemo(_.copy(entries = nextEntries)), model.demoScrollOffset)
           )
         )
         .copy(

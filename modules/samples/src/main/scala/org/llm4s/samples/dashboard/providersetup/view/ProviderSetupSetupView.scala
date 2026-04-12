@@ -29,9 +29,9 @@ private[providersetup] object ProviderSetupSetupView:
       if tabDoc.id.is(SetupTabDocIds.Providers) then selectedProvider
       else if ProviderSetupSetupPolicy.isDefaultProviderTab(model) then defaultProviderDoc(model).getOrElse(tabDoc)
       else tabDoc
-    val isDefaultTab       = ProviderSetupSetupPolicy.isDefaultProviderTab(model)
-    val isProvidersTab     = tabDoc.id.is(SetupTabDocIds.Providers)
-    val isCompareTab       = tabDoc.id.is(SetupTabDocIds.Compare)
+    val isDefaultTab   = ProviderSetupSetupPolicy.isDefaultProviderTab(model)
+    val isProvidersTab = tabDoc.id.is(SetupTabDocIds.Providers)
+    val isCompareTab   = tabDoc.id.is(SetupTabDocIds.Compare)
     val selectedTarget = ProviderSetupProviderSelection.selectedSessionOverrideTarget(model)
     val sessionInput   = model.sessionInputs.get(selectedTarget)
 
