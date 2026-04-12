@@ -4,6 +4,7 @@ import org.llm4s.config.ProvidersConfigModel
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupModel.*
+import org.llm4s.types.ProviderModelTypes.ProviderKind
 import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -23,10 +24,10 @@ class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers:
       )
     )
 
-    val request = ProviderSetupProviderSelection.currentSetupSessionRequest(model)
+    val request = ProviderSetupProviderSelection.currentSetupSessionRequest(model).toOption.get
 
     request.isDefaultProviderTab shouldBe false
-    request.selectedProviderKindId shouldBe Some("ollama")
+    request.selectedProviderKind shouldBe Some(ProviderKind.Ollama)
     request.selectedConfiguredProvider.map(_.name) shouldBe Some("ollama-qwen")
     request.sessionTarget shouldBe SessionOverrideTarget.NamedProvider(ProviderName("ollama-qwen"))
   }
@@ -37,10 +38,10 @@ class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers:
       ui = baseModel.ui.copy(shell = baseModel.ui.shell.copy(activeTab = SetupTabId.DefaultNamedProvider))
     )
 
-    val request = ProviderSetupProviderSelection.currentSetupSessionRequest(model)
+    val request = ProviderSetupProviderSelection.currentSetupSessionRequest(model).toOption.get
 
     request.isDefaultProviderTab shouldBe true
-    request.selectedProviderKindId shouldBe None
+    request.selectedProviderKind shouldBe None
     request.selectedConfiguredProvider.map(_.name) shouldBe Some("anthropic-main")
     request.sessionTarget shouldBe SessionOverrideTarget.NamedProvider(ProviderName("anthropic-main"))
   }
@@ -51,11 +52,11 @@ class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers:
       ui = baseModel.ui.copy(shell = baseModel.ui.shell.copy(activeTab = SetupTabId.Status))
     )
 
-    val request = ProviderSetupProviderSelection.currentSetupSessionRequest(model)
+    val request = ProviderSetupProviderSelection.currentSetupSessionRequest(model).toOption.get
 
     request.isDefaultProviderTab shouldBe false
     request.activeDocId shouldBe SetupTabDocIds.Status
-    request.selectedProviderKindId shouldBe None
+    request.selectedProviderKind shouldBe None
     request.selectedConfiguredProvider shouldBe None
     request.sessionTarget shouldBe SessionOverrideTarget.ProviderKind(SetupTabDocIds.Status)
   }
