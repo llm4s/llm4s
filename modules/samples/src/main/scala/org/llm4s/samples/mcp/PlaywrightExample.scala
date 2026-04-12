@@ -103,7 +103,7 @@ object PlaywrightExample {
     for {
       _      <- checkCommand("node", "Node.js")
       _      <- checkCommand("npx", "npx")
-      client <- Llm4sConfig.provider().flatMap(LLMConnect.getClient).leftMap(_.formatted)
+      client <- Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient).leftMap(_.formatted)
     } yield {
       logger.info("✅ Prerequisites validated and LLM client initialized")
       client

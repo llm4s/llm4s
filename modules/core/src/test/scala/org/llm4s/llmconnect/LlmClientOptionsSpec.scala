@@ -3,7 +3,7 @@ package org.llm4s.llmconnect
 import java.time.Instant
 
 import org.llm4s.llmconnect.config.{ OllamaConfig, OpenAIConfig }
-import org.llm4s.llmconnect.provider.LLMProvider
+import org.llm4s.types.ProviderModelTypes.ProviderKind
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -45,7 +45,7 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers {
       exchangeLogging = ProviderExchangeLogging.enabled(ProviderExchangeSink.noop)
     )
 
-    val res = LLMConnect.getClient(LLMProvider.Ollama, cfg, options)
+    val res = LLMConnect.getClient(ProviderKind.Ollama, cfg, options)
 
     res.isRight shouldBe true
   }

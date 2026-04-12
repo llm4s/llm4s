@@ -480,7 +480,7 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
 - Provider API keys and endpoints
   - Keys: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `AZURE_API_BASE`, `AZURE_API_KEY`, `AZURE_API_VERSION`, `OLLAMA_BASE_URL`, `GEMINI_BASE_URL`, `GOOGLE_API_KEY`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `COHERE_BASE_URL`, `COHERE_API_KEY`
   - Type: concrete `ProviderConfig` (e.g., `OpenAIConfig`, `AnthropicConfig`, `AzureConfig`, `OllamaConfig`, `GeminiConfig`, `DeepSeekConfig`, `CohereConfig`)
-  - Loader: `Llm4sConfig.provider()` → then provider-specific config constructors
+  - Loader: `Llm4sConfig.defaultProvider()` or `Llm4sConfig.provider("name")`
 
 Tracing
 
@@ -494,13 +494,13 @@ Tracing
 Example (no application.conf required):
 
 ```
-sbt -Dllm4s.llm.model=openai/gpt-4o -Dllm4s.openai.apiKey=sk-... "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
+sbt -Dllm4s.providers.provider=openai-main -Dllm4s.providers.openai-main.provider=openai -Dllm4s.providers.openai-main.model=gpt-4o -Dllm4s.providers.openai-main.apiKey=sk-... "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
-Or with environment variables (picked up via `reference.conf`):
+Or with environment variables / `application.conf`:
 
 ```
-export LLM_MODEL=openai/gpt-4o
+export LLM4S_PROVIDER=openai-main
 export OPENAI_API_KEY=sk-...
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```

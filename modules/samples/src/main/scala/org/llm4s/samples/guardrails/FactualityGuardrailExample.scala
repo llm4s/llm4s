@@ -42,7 +42,7 @@ object FactualityGuardrailExample extends App {
     """.stripMargin.trim
 
   val result = for {
-    providerCfg <- Llm4sConfig.provider()
+    providerCfg <- Llm4sConfig.defaultProvider()
     client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 

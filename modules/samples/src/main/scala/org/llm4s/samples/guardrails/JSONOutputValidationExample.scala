@@ -21,7 +21,7 @@ object JSONOutputValidationExample extends App {
   logger.info("=== JSON Output Validation Example ===")
 
   val result = for {
-    providerCfg <- Llm4sConfig.provider()
+    providerCfg <- Llm4sConfig.defaultProvider()
     client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 

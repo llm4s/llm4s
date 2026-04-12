@@ -60,7 +60,7 @@ object AssistantAgentExample {
 
     // Get LLM client from typed configuration (Result-first)
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       playwrightServerConfig = MCPServerConfig.stdio(
         name = "playwright-mcp-server",

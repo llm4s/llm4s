@@ -50,7 +50,7 @@ object CustomGuardrailExample extends App {
   logger.info("=== Custom Guardrail Example ===")
 
   val result = for {
-    providerCfg <- Llm4sConfig.provider()
+    providerCfg <- Llm4sConfig.defaultProvider()
     client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
@@ -82,7 +82,7 @@ object CustomGuardrailExample extends App {
   logger.info("=== Testing with missing keywords ===")
 
   val failureResult = for {
-    providerCfg <- Llm4sConfig.provider()
+    providerCfg <- Llm4sConfig.defaultProvider()
     client      <- LLMConnect.getClient(providerCfg)
     agent           = new Agent(client)
     customGuardrail = new KeywordRequirementGuardrail(Set("scala", "programming"))

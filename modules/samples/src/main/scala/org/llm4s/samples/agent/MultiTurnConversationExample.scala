@@ -23,7 +23,7 @@ object MultiTurnConversationExample {
 
     // Functional style - no var, no mutation!
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
       tools = new ToolRegistry(Seq(weatherTool))

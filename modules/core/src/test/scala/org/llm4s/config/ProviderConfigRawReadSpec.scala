@@ -7,7 +7,7 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class ProviderConfigRawReadSpec extends AnyWordSpec with Matchers:
 
-  "ProviderConfigLoader raw config reading" should {
+  "RawProvidersConfigLoader" should {
 
     "read the selected provider name and named providers from the new providers.provider config shape" in {
       val hocon =

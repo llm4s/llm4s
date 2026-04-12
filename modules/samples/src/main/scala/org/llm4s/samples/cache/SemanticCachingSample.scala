@@ -30,7 +30,7 @@ object SemanticCachingSample extends App {
 
   def runDemo(): Unit = {
     // Load provider config via Llm4sConfig and extract OpenAI API key
-    val apiKey = Llm4sConfig.provider() match {
+    val apiKey = Llm4sConfig.defaultProvider() match {
       case Right(cfg: OpenAIConfig) => cfg.apiKey
       case Right(_) =>
         logger.error("This sample requires an OpenAI provider (set LLM_MODEL=openai/<model>)")

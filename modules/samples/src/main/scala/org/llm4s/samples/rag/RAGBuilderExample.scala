@@ -136,7 +136,7 @@ object RAGBuilderExample extends App {
 
   // Check if we have LLM configured for answer generation
   val llmResult = for {
-    cfg    <- Llm4sConfig.provider()
+    cfg    <- Llm4sConfig.defaultProvider()
     client <- LLMConnect.getClient(cfg)
   } yield client
   val hasLLM = llmResult.isRight

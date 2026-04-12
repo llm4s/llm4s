@@ -45,7 +45,7 @@ def ProviderKeyValidationMain(): Unit =
   )
 
   val result = for {
-    providerCfg <- Llm4sConfig.provider()
+    providerCfg <- Llm4sConfig.defaultProvider()
     client      <- LLMConnect.getClient(providerCfg)
     _ = logResolvedConfig(providerCfg)
     completion <- client.complete(conversation)

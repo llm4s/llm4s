@@ -37,6 +37,19 @@ object ProviderModelTypes:
     case Mistral
 
   object ProviderKind:
+    val all: Seq[ProviderKind] = Seq(
+      ProviderKind.OpenAI,
+      ProviderKind.OpenRouter,
+      ProviderKind.Azure,
+      ProviderKind.Anthropic,
+      ProviderKind.Ollama,
+      ProviderKind.Zai,
+      ProviderKind.Gemini,
+      ProviderKind.DeepSeek,
+      ProviderKind.Cohere,
+      ProviderKind.Mistral
+    )
+
     def fromString(value: String): Option[ProviderKind] =
       value.trim.toLowerCase match
         case "openai"     => Some(ProviderKind.OpenAI)
@@ -51,3 +64,20 @@ object ProviderModelTypes:
         case "cohere"     => Some(ProviderKind.Cohere)
         case "mistral"    => Some(ProviderKind.Mistral)
         case _            => None
+
+    def fromName(value: String): Option[ProviderKind] =
+      fromString(value)
+
+  extension (kind: ProviderKind)
+    def name: String =
+      kind match
+        case ProviderKind.OpenAI     => "openai"
+        case ProviderKind.OpenRouter => "openrouter"
+        case ProviderKind.Azure      => "azure"
+        case ProviderKind.Anthropic  => "anthropic"
+        case ProviderKind.Ollama     => "ollama"
+        case ProviderKind.Zai        => "zai"
+        case ProviderKind.Gemini     => "gemini"
+        case ProviderKind.DeepSeek   => "deepseek"
+        case ProviderKind.Cohere     => "cohere"
+        case ProviderKind.Mistral    => "mistral"

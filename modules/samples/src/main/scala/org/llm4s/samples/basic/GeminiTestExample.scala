@@ -22,7 +22,7 @@ object GeminiTestExample {
   def main(args: Array[String]): Unit = {
 
     val result = for {
-      providerCfg <- org.llm4s.config.Llm4sConfig.provider()
+      providerCfg <- org.llm4s.config.Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       _ = {
         logger.info("=" * 60)

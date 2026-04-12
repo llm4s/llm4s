@@ -38,7 +38,7 @@ object TokenWindowExample {
     logger.info("Starting Multi-Provider Token Window Management Demo")
 
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       modelName = providerCfg.model
       client       <- LLMConnect.getClient(providerCfg)
       tokenCounter <- createTokenCounter(modelName)

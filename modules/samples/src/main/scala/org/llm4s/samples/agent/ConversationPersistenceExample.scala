@@ -25,7 +25,7 @@ object ConversationPersistenceExample {
 
     // Part 1: Start a conversation and save it
     val saveResult = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
       tools = new ToolRegistry(Seq(weatherTool))
@@ -49,7 +49,7 @@ object ConversationPersistenceExample {
     // Part 2: Load the conversation and continue it
     val continueResult = for {
       _            <- saveResult // Wait for save to complete
-      providerCfg  <- Llm4sConfig.provider()
+      providerCfg  <- Llm4sConfig.defaultProvider()
       client       <- LLMConnect.getClient(providerCfg)
       weatherTool2 <- WeatherTool.toolSafe
       tools = new ToolRegistry(Seq(weatherTool2))

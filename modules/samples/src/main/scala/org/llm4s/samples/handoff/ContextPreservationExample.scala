@@ -20,7 +20,7 @@ object ContextPreservationExample extends App {
   logger.info("=" * 80)
 
   val result = for {
-    providerCfg <- Llm4sConfig.provider()
+    providerCfg <- Llm4sConfig.defaultProvider()
     client      <- LLMConnect.getClient(providerCfg)
 
     generalAgent    = new Agent(client)

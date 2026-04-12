@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect
 
 import org.llm4s.llmconnect.config.{ OllamaConfig, OpenAIConfig }
-import org.llm4s.llmconnect.provider.LLMProvider
+import org.llm4s.types.ProviderModelTypes.ProviderKind
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -28,7 +28,7 @@ class LLMConnectEnvReaderRoutingTest extends AnyFunSuite with Matchers {
       baseUrl = "http://localhost:11434"
     )
 
-    val res = LLMConnect.getClient(LLMProvider.Ollama, cfg)
+    val res = LLMConnect.getClient(ProviderKind.Ollama, cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OllamaClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")

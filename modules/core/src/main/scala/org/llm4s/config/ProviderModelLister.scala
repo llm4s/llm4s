@@ -4,7 +4,6 @@ import org.llm4s.error.ValidationError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.http.HttpResponse.*
 import org.llm4s.config.DefaultConfig
-import org.llm4s.llmconnect.provider.LLMProvider
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.ProvidersConfigModel.{ BaseUrl, NamedProviderConfig, ProviderKind }
@@ -14,7 +13,7 @@ import scala.util.Try
 
 final case class DiscoveredModel(
   name: ModelName,
-  provider: LLMProvider,
+  provider: ProviderKind,
   metadata: Map[String, String] = Map.empty
 )
 
@@ -31,7 +30,7 @@ private[llm4s] object ProviderModelListers:
       listOpenAICompatibleModels(
         config = config,
         expected = ProviderKind.OpenAI,
-        provider = LLMProvider.OpenAI,
+        provider = ProviderKind.OpenAI,
         defaultBaseUrl = DefaultConfig.DEFAULT_OPENAI_BASE_URL,
         httpClient = httpClient
       )
@@ -41,7 +40,7 @@ private[llm4s] object ProviderModelListers:
       listOpenAICompatibleModels(
         config = config,
         expected = ProviderKind.OpenRouter,
-        provider = LLMProvider.OpenRouter,
+        provider = ProviderKind.OpenRouter,
         defaultBaseUrl = DefaultConfig.DEFAULT_OPENROUTER_BASE_URL,
         httpClient = httpClient
       )
@@ -129,7 +128,7 @@ private[llm4s] object ProviderModelListers:
       listOpenAICompatibleModels(
         config = config,
         expected = ProviderKind.DeepSeek,
-        provider = LLMProvider.DeepSeek,
+        provider = ProviderKind.DeepSeek,
         defaultBaseUrl = DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL,
         httpClient = httpClient
       )
@@ -139,7 +138,7 @@ private[llm4s] object ProviderModelListers:
       listOpenAICompatibleModels(
         config = config,
         expected = ProviderKind.Mistral,
-        provider = LLMProvider.Mistral,
+        provider = ProviderKind.Mistral,
         defaultBaseUrl = MistralConfig.DEFAULT_BASE_URL,
         modelsPath = "/v1/models",
         httpClient = httpClient
@@ -169,7 +168,7 @@ private[llm4s] object ProviderModelListers:
   private def listOpenAICompatibleModels(
     config: NamedProviderConfig,
     expected: ProviderKind,
-    provider: LLMProvider,
+    provider: ProviderKind,
     defaultBaseUrl: String,
     modelsPath: String = "/models",
     httpClient: Llm4sHttpClient
@@ -181,8 +180,8 @@ private[llm4s] object ProviderModelListers:
       headers = authHeaders(normalized, apiKey)
       response <- httpClient
         .getResult(s"${baseUrl.asUrl}$modelsPath", headers = headers, timeout = 10000)
-        .mapServiceError(provider.name, "Failed to discover models")
-      okResponse   <- response.ensureSuccess(provider.name)
+        .mapServiceError(provider.toString.toLowerCase, "Failed to discover models")
+      okResponse   <- response.ensureSuccess(provider.toString.toLowerCase)
       jsonResponse <- okResponse.toJson("responseBody")
       models       <- parseOpenAICompatibleModels(jsonResponse.body, provider)
     yield models
@@ -204,7 +203,7 @@ private[llm4s] object ProviderModelListers:
 
   private def parseOpenAICompatibleModels(
     json: ujson.Value,
-    provider: LLMProvider
+    provider: ProviderKind
   ): Result[List[DiscoveredModel]] =
     val dataResult =
       Try(json("data").arr.toList).toResult.left
@@ -222,7 +221,7 @@ private[llm4s] object ProviderModelListers:
 
   private def parseOpenAICompatibleModel(
     json: ujson.Value,
-    provider: LLMProvider
+    provider: ProviderKind
   ): Result[Option[DiscoveredModel]] =
     val obj = json.obj
     obj.get("id").flatMap(_.strOpt).filter(_.nonEmpty) match
@@ -277,7 +276,7 @@ private[llm4s] object ProviderModelListers:
             obj.get("created_at").flatMap(_.strOpt).map("createdAt" -> _),
             obj.get("type").flatMap(_.strOpt).map("type" -> _),
           ).flatten.toMap
-        Right(Some(DiscoveredModel(ModelName(id), LLMProvider.Anthropic, metadata)))
+        Right(Some(DiscoveredModel(ModelName(id), ProviderKind.Anthropic, metadata)))
 
   private def parseGeminiModels(json: ujson.Value): Result[List[DiscoveredModel]] =
     val modelsResult =
@@ -322,7 +321,7 @@ private[llm4s] object ProviderModelListers:
               .flatMap(_.arrOpt)
               .map(methods => "supportedGenerationMethods" -> methods.flatMap(_.strOpt).mkString(",")),
           ).flatten.toMap
-        Right(Some(DiscoveredModel(ModelName(modelId), LLMProvider.Gemini, metadata)))
+        Right(Some(DiscoveredModel(ModelName(modelId), ProviderKind.Gemini, metadata)))
 
   private def parseOllamaModels(json: ujson.Value): Result[List[DiscoveredModel]] =
     val modelsResult =
@@ -362,7 +361,7 @@ private[llm4s] object ProviderModelListers:
           Some(
             DiscoveredModel(
               name = modelName,
-              provider = LLMProvider.Ollama,
+              provider = ProviderKind.Ollama,
               metadata = metadata
             )
           )

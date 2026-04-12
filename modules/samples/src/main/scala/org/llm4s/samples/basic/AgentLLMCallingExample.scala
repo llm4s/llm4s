@@ -96,7 +96,7 @@ object AgentLLMCallingExample {
     val benchmarkResult: BenchmarkUtil.BenchmarkResult[Either[LLMError, AgentExecutionResult]] =
       BenchmarkUtil.timeWithSteps { timer =>
         for {
-          providerCfg <- org.llm4s.config.Llm4sConfig.provider()
+          providerCfg <- org.llm4s.config.Llm4sConfig.defaultProvider()
           llmClient   <- LLMConnect.getClient(providerCfg)
           agent = new Agent(llmClient)
           agentExecutionResult <- {

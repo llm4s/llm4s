@@ -44,7 +44,7 @@ object BenchmarkRunnerCli {
     logger.info("Loading benchmark runner...")
 
     val runnerResult = for {
-      providerCfg     <- Llm4sConfig.provider()
+      providerCfg     <- Llm4sConfig.defaultProvider()
       llmClient       <- LLMConnect.getClient(providerCfg)
       embeddingResult <- Llm4sConfig.embeddings()
       (providerName, providerConfig) = embeddingResult

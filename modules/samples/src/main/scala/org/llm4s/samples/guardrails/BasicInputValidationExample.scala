@@ -21,7 +21,7 @@ object BasicInputValidationExample extends App {
   logger.info("=== Basic Input Validation Example ===")
 
   val result = for {
-    providerCfg <- Llm4sConfig.provider()
+    providerCfg <- Llm4sConfig.defaultProvider()
     client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 

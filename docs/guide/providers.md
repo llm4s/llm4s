@@ -39,13 +39,13 @@ LLM4S supports 7 major LLM providers plus local models:
 
 ### How It Works
 
-LLM4S automatically selects the provider based on your `LLM_MODEL` setting:
+LLM4S resolves the named provider you select as the default:
 
 ```bash
-# Format: <provider>/<model-name>
-LLM_MODEL=openai/gpt-4o              # Uses OpenAI
-LLM_MODEL=anthropic/claude-opus-4-6  # Uses Anthropic
-LLM_MODEL=ollama/mistral              # Uses Ollama
+# Pick one of your configured named providers
+LLM4S_PROVIDER=openai-main       # Uses your OpenAI named provider
+LLM4S_PROVIDER=anthropic-main    # Uses your Anthropic named provider
+LLM4S_PROVIDER=ollama-local      # Uses your Ollama named provider
 ```
 
 ### Available Models
@@ -74,7 +74,7 @@ See [MODEL_METADATA.md](/MODEL_METADATA.md) for the complete model list. Quick r
 2. **Set environment variables:**
 
 ```bash
-export LLM_MODEL=openai/gpt-4o
+export LLM4S_PROVIDER=openai-main
 export OPENAI_API_KEY=sk-proj-...
 ```
 
@@ -95,11 +95,15 @@ export OPENAI_BASE_URL=https://api.openai.com/v1  # Default
 In `application.conf`:
 
 ```hocon
-llm {
+llm4s {
   providers {
-    openai {
-      api-key = ${?OPENAI_API_KEY}
-      base-url = "https://api.openai.com/v1"
+    provider = "openai-main"
+
+    openai-main {
+      provider = "openai"
+      model = "gpt-4o"
+      apiKey = ${?OPENAI_API_KEY}
+      baseUrl = "https://api.openai.com/v1"
       organization = ${?OPENAI_ORGANIZATION}
     }
   }
@@ -136,7 +140,7 @@ See [OpenAI Pricing](https://openai.com/pricing). Generally:
 2. **Set environment variables:**
 
 ```bash
-export LLM_MODEL=anthropic/claude-opus-4-6
+export LLM4S_PROVIDER=anthropic-main
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
@@ -151,12 +155,15 @@ export ANTHROPIC_BASE_URL=https://api.anthropic.com
 In `application.conf`:
 
 ```hocon
-llm {
+llm4s {
   providers {
-    anthropic {
-      api-key = ${?ANTHROPIC_API_KEY}
-      base-url = "https://api.anthropic.com"
-      version = "2023-06-01"  # API version
+    provider = "anthropic-main"
+
+    anthropic-main {
+      provider = "anthropic"
+      model = "claude-opus-4-6"
+      apiKey = ${?ANTHROPIC_API_KEY}
+      baseUrl = "https://api.anthropic.com"
     }
   }
 }
@@ -194,7 +201,7 @@ Claude models generally score higher on reasoning benchmarks.
 2. **Set environment variables:**
 
 ```bash
-export LLM_MODEL=gemini/gemini-2.0-flash
+export LLM4S_PROVIDER=gemini-main
 export GOOGLE_API_KEY=your-api-key
 ```
 
@@ -209,11 +216,15 @@ export GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 In `application.conf`:
 
 ```hocon
-llm {
+llm4s {
   providers {
-    gemini {
-      api-key = ${?GOOGLE_API_KEY}
-      base-url = "https://generativelanguage.googleapis.com/v1beta"
+    provider = "gemini-main"
+
+    gemini-main {
+      provider = "gemini"
+      model = "gemini-2.0-flash"
+      apiKey = ${?GOOGLE_API_KEY}
+      baseUrl = "https://generativelanguage.googleapis.com/v1beta"
     }
   }
 }
@@ -481,7 +492,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ```scala
 // Keys from env/config - never hardcoded
-val providerConfig = Llm4sConfig.provider()
+val providerConfig = Llm4sConfig.defaultProvider()
 ```
 
 **Bad:**
@@ -531,12 +542,16 @@ export DEEPSEEK_BASE_URL=https://api.deepseek.com
 ### Via application.conf
 
 ```hocon
-llm {
+llm4s {
   providers {
-    openai {
-      api-key = ${?OPENAI_API_KEY}
-      base-url = ${?OPENAI_BASE_URL}
-      base-url = "https://proxy.example.com/openai"
+    provider = "openai-main"
+
+    openai-main {
+      provider = "openai"
+      model = "gpt-4o"
+      apiKey = ${?OPENAI_API_KEY}
+      baseUrl = ${?OPENAI_BASE_URL}
+      baseUrl = "https://proxy.example.com/openai"
     }
   }
 }
@@ -579,8 +594,8 @@ Switch providers at runtime:
 
 ```scala
 for {
-  // Get configured provider from environment
-  providerConfig <- Llm4sConfig.provider()
+  // Get the configured default named provider
+  providerConfig <- Llm4sConfig.defaultProvider()
   client <- LLMConnect.getClient(providerConfig)
 } yield {
   // Use the available provider
@@ -638,5 +653,4 @@ Use provider-specific strategies:
 - OpenAI: Wait before retrying, use batching API
 - Gemini: Upgrade from free tier
 - Ollama: Increase system resources or use GPU
-
 

@@ -14,7 +14,7 @@ import termflow.tui.TuiRuntime
 def Llm4sDashboardMain(): Unit =
   (
     for
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       _ = TuiRuntime.run(Llm4sDashboardApp.App(providerCfg))
     yield ()
   ).fold(

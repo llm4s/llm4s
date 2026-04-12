@@ -85,7 +85,7 @@ object AgentContext {
  * == Basic Usage ==
  * {{{
  * for {
- *   providerConfig <- Llm4sConfig.provider()
+ *   providerConfig <- Llm4sConfig.defaultProvider()
  *   client <- LLMConnect.getClient(providerConfig)
  *   agent = new Agent(client)
  *   tools = new ToolRegistry(Seq(myTool))

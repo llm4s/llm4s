@@ -15,7 +15,7 @@ object BasicLLMCallingWithTrace {
     val result = for {
       tracingSettings <- Llm4sConfig.tracing()
       tracer = Tracing.create(tracingSettings)
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       _ = {
         // Create a conversation with messages

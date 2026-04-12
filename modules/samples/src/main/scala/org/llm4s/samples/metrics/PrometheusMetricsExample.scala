@@ -17,9 +17,9 @@ import org.slf4j.LoggerFactory
  *
  * == Quick Start ==
  *
- * 1. Set your provider and model:
+ * 1. Configure your default named provider:
  *    {{{
- *    export LLM_MODEL=openai/gpt-4o
+ *    export LLM4S_PROVIDER=openai-main
  *    }}}
  *
  * 2. Set your API key:
@@ -117,7 +117,7 @@ object PrometheusMetricsExample {
 
         try {
           // Load provider configuration
-          val configResult = Llm4sConfig.provider()
+          val configResult = Llm4sConfig.defaultProvider()
 
           configResult match {
             case Left(error) =>
@@ -125,7 +125,7 @@ object PrometheusMetricsExample {
               println(s"ERROR: ${error.message}")
               println()
               println("Please set required environment variables:")
-              println("  export LLM_MODEL=openai/gpt-4o")
+              println("  export LLM4S_PROVIDER=openai-main")
               println("  export OPENAI_API_KEY=sk-...")
               sys.exit(1)
 

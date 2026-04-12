@@ -8,24 +8,24 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class ConfigReaderPrecedenceSpec extends AnyWordSpec with Matchers {
 
-  "LLMConfig" should {
-    "read llm4s.* values from test application.conf" in {
+  "Llm4sConfig.defaultProvider" should {
+    "read llm4s.providers values from test application.conf" in {
       val cfg = Llm4sConfig
-        .provider()
+        .defaultProvider()
         .fold(err => fail(err.toString), identity)
 
       cfg.model shouldBe "gpt-4o"
     }
 
     "allow -D system property to override application.conf" in {
-      val key      = "llm4s.openai.apiKey"
+      val key      = "llm4s.providers.openai-main.apiKey"
       val original = System.getProperty(key)
       try {
         System.setProperty(key, "overridden-key")
         // Ensure updated system properties are visible to ConfigSource.default.
         ConfigFactory.invalidateCaches()
         val cfg = Llm4sConfig
-          .provider()
+          .defaultProvider()
           .fold(err => fail(err.toString), identity)
         cfg match {
           case openai: org.llm4s.llmconnect.config.OpenAIConfig =>

@@ -32,16 +32,16 @@ LLM4S uses a hierarchical configuration system with the following precedence (hi
 
 ## Environment Variables
 
-The simplest way to configure LLM4S is through environment variables when you
-only need one provider at a time.
+Use environment variables for secrets and for selecting the default named
+provider you want `Llm4sConfig.defaultProvider()` to resolve.
 
 ### Core Settings
 
 ```bash
-# Required: Model selection (determines provider)
-LLM_MODEL=openai/gpt-4o
+# Required: default named provider
+LLM4S_PROVIDER=openai-main
 
-# Required: API key for your chosen provider
+# Required: API key for the configured provider
 OPENAI_API_KEY=sk-proj-...
 ```
 
@@ -51,11 +51,9 @@ Create a `.env` file in your project root:
 
 ```bash
 # ===================
-# Model Selection
+# Named Provider Selection
 # ===================
-# Format: <provider>/<model-name>
-# Supported providers: openai, anthropic, azure, ollama, gemini, cohere
-LLM_MODEL=openai/gpt-4o
+LLM4S_PROVIDER=openai-main
 
 # ===================
 # OpenAI Configuration
@@ -257,64 +255,6 @@ If `llm4s.providers.provider` is set, it must match one of the configured
 provider names. If it is absent, the providers config still loads successfully,
 but requesting the default provider will fail clearly at runtime.
 
-### Legacy Single-Provider Configuration
-
-The legacy `LLM_MODEL` / `llm4s.llm.model` path is still supported and remains
-the simplest option when you only need one provider at a time.
-
-Create `src/main/resources/application.conf`:
-
-```hocon
-llm4s {
-  llm {
-    model = ${?LLM_MODEL}
-    model = "openai/gpt-4o"
-  }
-
-  openai {
-    apiKey = ${?OPENAI_API_KEY}
-    baseUrl = ${?OPENAI_BASE_URL}
-    baseUrl = "https://api.openai.com/v1"
-    organization = ${?OPENAI_ORGANIZATION}
-  }
-
-  anthropic {
-    apiKey = ${?ANTHROPIC_API_KEY}
-    baseUrl = ${?ANTHROPIC_BASE_URL}
-    baseUrl = "https://api.anthropic.com"
-  }
-
-  azure {
-    apiKey = ${?AZURE_API_KEY}
-    endpoint = ${?AZURE_API_BASE}
-    apiVersion = ${?AZURE_API_VERSION}
-  }
-
-  ollama {
-    baseUrl = ${?OLLAMA_BASE_URL}
-    baseUrl = "http://localhost:11434"
-  }
-
-  gemini {
-    apiKey = ${?GOOGLE_API_KEY}
-    baseUrl = ${?GEMINI_BASE_URL}
-    baseUrl = "https://generativelanguage.googleapis.com/v1beta"
-  }
-
-  tracing {
-    mode = ${?TRACING_MODE}
-    mode = "none"
-
-    langfuse {
-      publicKey = ${?LANGFUSE_PUBLIC_KEY}
-      secretKey = ${?LANGFUSE_SECRET_KEY}
-      url = ${?LANGFUSE_URL}
-      url = "https://cloud.langfuse.com"
-    }
-  }
-}
-```
-
 ### Access Configuration in Code
 
 ```scala
@@ -324,7 +264,7 @@ object ConfigurationLoader {
   def load(): Unit = {
     // 1. Load configuration at the application boundary
     val configResult = for {
-      providerConfig <- Llm4sConfig.provider()
+      providerConfig <- Llm4sConfig.defaultProvider()
       tracingConfig <- Llm4sConfig.tracing()
       embeddingsConfig <- Llm4sConfig.embeddings()
     } yield (providerConfig, tracingConfig, embeddingsConfig)
@@ -352,10 +292,8 @@ object ConfigurationLoader {
 ### OpenAI
 
 ```bash
-# Model selection
-LLM_MODEL=openai/gpt-4o          # Latest GPT-4o
-LLM_MODEL=openai/gpt-4-turbo     # GPT-4 Turbo
-LLM_MODEL=openai/gpt-3.5-turbo   # GPT-3.5
+# Example named provider selection
+LLM4S_PROVIDER=openai-main
 
 # Required
 OPENAI_API_KEY=sk-proj-...
@@ -374,9 +312,8 @@ OPENAI_ORGANIZATION=org-...
 ### Anthropic
 
 ```bash
-# Model selection
-LLM_MODEL=anthropic/claude-sonnet-4-5-latest
-LLM_MODEL=anthropic/claude-opus-4-5-latest
+# Example named provider selection
+LLM4S_PROVIDER=anthropic-main
 
 # Required
 ANTHROPIC_API_KEY=sk-ant-...
@@ -394,8 +331,8 @@ ANTHROPIC_VERSION=2023-06-01
 ### Azure OpenAI
 
 ```bash
-# Model selection
-LLM_MODEL=azure/gpt-4o
+# Example named provider selection
+LLM4S_PROVIDER=azure-main
 
 # Required
 AZURE_API_KEY=your-azure-key
@@ -409,10 +346,8 @@ AZURE_API_VERSION=2024-02-15-preview
 ### Ollama (Local Models)
 
 ```bash
-# Model selection
-LLM_MODEL=ollama/llama2
-LLM_MODEL=ollama/mistral
-LLM_MODEL=ollama/codellama
+# Example named provider selection
+LLM4S_PROVIDER=ollama-local
 
 # Required
 OLLAMA_BASE_URL=http://localhost:11434

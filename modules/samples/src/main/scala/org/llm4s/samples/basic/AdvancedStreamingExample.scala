@@ -73,7 +73,7 @@ object AdvancedStreamingExample {
     val maxLineLength = 80
 
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       _ = {
         val model = providerCfg.model
         logger.info("Advanced Streaming Example - Story Generation")

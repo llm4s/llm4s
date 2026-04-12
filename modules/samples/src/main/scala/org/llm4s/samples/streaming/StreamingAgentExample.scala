@@ -104,7 +104,7 @@ object StreamingAgentExample extends App {
   // Run the example
   val result = for {
     weatherTool <- weatherToolResult
-    providerCfg <- Llm4sConfig.provider()
+    providerCfg <- Llm4sConfig.defaultProvider()
     client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
     tools = new ToolRegistry(Seq(weatherTool))

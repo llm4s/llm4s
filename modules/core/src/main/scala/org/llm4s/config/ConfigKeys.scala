@@ -9,17 +9,11 @@ package org.llm4s.config
  *
  * == Quick reference ==
  *
- *  - `LLM_MODEL` — required; format `provider/model` (e.g. `"openai/gpt-4o"`).
  *  - Provider API keys — required for cloud providers; see per-section comments.
  *  - `TRACING_MODE` — optional; `langfuse`, `opentelemetry`, `console`, or `none`.
  *  - `EMBEDDING_MODEL` — required when using embeddings; format `provider/model`.
  */
 object ConfigKeys {
-  // ---- Core model selection -----------------------------------------------
-
-  /** Selects the LLM provider and model. Format: `provider/model`, e.g. `"openai/gpt-4o"`. */
-  val LLM_MODEL = "LLM_MODEL"
-
   // ---- OpenAI -------------------------------------------------------------
 
   /** OpenAI API key (`sk-...`). Also used for embeddings when no separate embedding key is set. */
@@ -44,8 +38,8 @@ object ConfigKeys {
    * OpenRouter base URL alias.
    *
    * OpenRouter uses the same `OPENAI_BASE_URL` variable — there is no separate
-   * `OPENROUTER_BASE_URL`. Set `OPENAI_BASE_URL` to your OpenRouter endpoint
-   * and `LLM_MODEL` to `openrouter/model-name`.
+   * `OPENROUTER_BASE_URL`. Point `OPENAI_BASE_URL` at your OpenRouter endpoint
+   * and configure a named provider with `provider = "openrouter"`.
    */
   val OPENROUTER_BASE_URL = OPENAI_BASE_URL // alias via base URL
 

@@ -4,6 +4,7 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config._
 import org.llm4s.llmconnect.provider._
 import org.llm4s.metrics.MetricsCollector
+import org.llm4s.types.ProviderModelTypes.ProviderKind
 import org.llm4s.types.Result
 
 /**
@@ -19,12 +20,12 @@ import org.llm4s.types.Result
  * @example
  * {{{
  * for {
- *   cfg    <- Llm4sConfig.provider()
+ *   cfg    <- Llm4sConfig.defaultProvider()
  *   client <- LLMConnect.getClient(cfg)
  * } yield client
  * }}}
  *
- * @see [[org.llm4s.config.Llm4sConfig.provider]] to load configuration from environment variables
+ * @see [[org.llm4s.config.Llm4sConfig.defaultProvider]] to load the configured default named provider
  * @see [[LLMClient]] for the conversation and completion API
  */
 object LLMConnect {
@@ -122,7 +123,7 @@ object LLMConnect {
    *         [[org.llm4s.error.UnknownError]] if client initialisation throws.
    */
   def getClient(
-    provider: LLMProvider,
+    provider: ProviderKind,
     config: ProviderConfig,
     metrics: MetricsCollector
   ): Result[LLMClient] =
@@ -133,23 +134,23 @@ object LLMConnect {
    * explicit runtime options.
    */
   def getClient(
-    provider: LLMProvider,
+    provider: ProviderKind,
     config: ProviderConfig,
     options: LlmClientOptions
   ): Result[LLMClient] =
     val metrics         = options.metrics
     val exchangeLogging = options.exchangeLogging
     (provider, config) match {
-      case (LLMProvider.OpenAI, cfg: OpenAIConfig)       => OpenAIClient(cfg, metrics, exchangeLogging)
-      case (LLMProvider.OpenRouter, cfg: OpenAIConfig)   => OpenRouterClient(cfg, metrics, exchangeLogging)
-      case (LLMProvider.Azure, cfg: AzureConfig)         => OpenAIClient(cfg, metrics, exchangeLogging)
-      case (LLMProvider.Anthropic, cfg: AnthropicConfig) => AnthropicClient(cfg, metrics, exchangeLogging)
-      case (LLMProvider.Ollama, cfg: OllamaConfig)       => OllamaClient(cfg, metrics, exchangeLogging)
-      case (LLMProvider.Zai, cfg: ZaiConfig)             => ZaiClient(cfg, metrics, exchangeLogging)
-      case (LLMProvider.Gemini, cfg: GeminiConfig)       => GeminiClient(cfg, metrics, exchangeLogging)
-      case (LLMProvider.DeepSeek, cfg: DeepSeekConfig)   => DeepSeekClient(cfg, metrics, exchangeLogging)
-      case (LLMProvider.Cohere, cfg: CohereConfig)       => CohereClient(cfg, metrics, exchangeLogging)
-      case (LLMProvider.Mistral, cfg: MistralConfig)     => MistralClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.OpenAI, cfg: OpenAIConfig)       => OpenAIClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.OpenRouter, cfg: OpenAIConfig)   => OpenRouterClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Azure, cfg: AzureConfig)         => OpenAIClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Anthropic, cfg: AnthropicConfig) => AnthropicClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Ollama, cfg: OllamaConfig)       => OllamaClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Zai, cfg: ZaiConfig)             => ZaiClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Gemini, cfg: GeminiConfig)       => GeminiClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.DeepSeek, cfg: DeepSeekConfig)   => DeepSeekClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Cohere, cfg: CohereConfig)       => CohereClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Mistral, cfg: MistralConfig)     => MistralClient(cfg, metrics, exchangeLogging)
       case (prov, wrongCfg) =>
         val cfgType = wrongCfg.getClass.getSimpleName
         val msg     = s"Invalid config type $cfgType for provider $prov"
@@ -167,7 +168,7 @@ object LLMConnect {
    *         [[org.llm4s.error.UnknownError]] if client initialisation throws.
    */
   def getClient(
-    provider: LLMProvider,
+    provider: ProviderKind,
     config: ProviderConfig
   ): Result[LLMClient] =
     getClient(provider, config, LlmClientOptions.default)

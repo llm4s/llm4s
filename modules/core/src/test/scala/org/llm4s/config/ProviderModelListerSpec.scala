@@ -2,7 +2,6 @@ package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient }
-import org.llm4s.llmconnect.provider.LLMProvider
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -59,7 +58,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     result match
       case Right(models) =>
         models.map(_.name) shouldBe List(ModelName("llama3.2:latest"), ModelName("mistral:latest"))
-        models.forall(_.provider == LLMProvider.Ollama) shouldBe true
+        models.forall(_.provider == ProviderKind.Ollama) shouldBe true
         mockHttp.lastUrl shouldBe Some("http://localhost:11434/api/tags")
 
         val llama = models.head
@@ -121,7 +120,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     result match
       case Right(models) =>
         models.map(_.name.asString) shouldBe List("gpt-4o-mini")
-        models.map(_.provider) shouldBe List(LLMProvider.OpenAI)
+        models.map(_.provider) shouldBe List(ProviderKind.OpenAI)
         mockHttp.lastUrl shouldBe Some("https://api.openai.com/v1/models")
       case Left(err) =>
         fail(s"Expected discovered OpenAI models, got error: ${err.message}")
@@ -167,7 +166,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     result match
       case Right(models) =>
         models.map(_.name.asString) shouldBe List("claude-sonnet-4-20250514", "claude-haiku-4-5-20251001")
-        models.map(_.provider) shouldBe List(LLMProvider.Anthropic, LLMProvider.Anthropic)
+        models.map(_.provider) shouldBe List(ProviderKind.Anthropic, ProviderKind.Anthropic)
         mockHttp.lastUrl shouldBe Some("https://api.anthropic.com/v1/models")
         mockHttp.getRequests.map(_._3) shouldBe Seq(
           Map("limit" -> "100"),
@@ -241,7 +240,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     result match
       case Right(models) =>
         models.map(_.name.asString) shouldBe List("gemini-2.0-flash", "gemini-2.5-pro")
-        models.map(_.provider) shouldBe List(LLMProvider.Gemini, LLMProvider.Gemini)
+        models.map(_.provider) shouldBe List(ProviderKind.Gemini, ProviderKind.Gemini)
         mockHttp.lastUrl shouldBe Some("https://generativelanguage.googleapis.com/v1beta/models")
         mockHttp.getRequests.map(_._3) shouldBe Seq(
           Map("pageSize" -> "1000"),
@@ -270,7 +269,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     result match
       case Right(models) =>
         models.map(_.name.asString) shouldBe List("openai/gpt-4o-mini")
-        models.map(_.provider) shouldBe List(LLMProvider.OpenRouter)
+        models.map(_.provider) shouldBe List(ProviderKind.OpenRouter)
         mockHttp.lastUrl shouldBe Some("https://openrouter.ai/api/v1/models")
         mockHttp.lastHeaders shouldBe defined
         mockHttp.lastHeaders.get should contain("HTTP-Referer" -> "https://github.com/llm4s/llm4s")
@@ -298,7 +297,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     result match
       case Right(models) =>
         models.map(_.name.asString) shouldBe List("deepseek-chat")
-        models.map(_.provider) shouldBe List(LLMProvider.DeepSeek)
+        models.map(_.provider) shouldBe List(ProviderKind.DeepSeek)
         mockHttp.lastUrl shouldBe Some("https://api.deepseek.com/models")
       case Left(err) =>
         fail(s"Expected discovered DeepSeek models, got error: ${err.message}")
@@ -323,7 +322,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     result match
       case Right(models) =>
         models.map(_.name.asString) shouldBe List("mistral-large-latest")
-        models.map(_.provider) shouldBe List(LLMProvider.Mistral)
+        models.map(_.provider) shouldBe List(ProviderKind.Mistral)
         mockHttp.lastUrl shouldBe Some("https://api.mistral.ai/v1/models")
       case Left(err) =>
         fail(s"Expected discovered Mistral models, got error: ${err.message}")

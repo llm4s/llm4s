@@ -23,7 +23,7 @@ import org.slf4j.LoggerFactory
  *
  * @example
  * {{{
- * export LLM_MODEL=openai/gpt-4o
+ * export LLM4S_PROVIDER=openai-main
  * export OPENAI_API_KEY=sk-...
  * sbt "samples/runMain org.llm4s.samples.agent.BuiltinToolsAgentExample"
  * }}}
@@ -41,7 +41,7 @@ object BuiltinToolsAgentExample {
     )
 
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       tools <- BuiltinTools.customSafe(
         fileConfig = Some(fileConfig),
@@ -52,7 +52,7 @@ object BuiltinToolsAgentExample {
     result match {
       case Left(error) =>
         logger.error("Failed to initialise agent: {}", error.formatted)
-        logger.error("Make sure LLM_MODEL and appropriate API key are set")
+        logger.error("Make sure a default named provider and appropriate API key are configured")
 
       case Right((client, tools)) =>
         logger.info("LLM client created successfully")

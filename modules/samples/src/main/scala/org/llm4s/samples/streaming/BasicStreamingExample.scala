@@ -9,9 +9,8 @@ import org.slf4j.LoggerFactory
  * Basic example of using the streaming API to get real-time responses from LLMs.
  *
  * To run this example:
- * 1. Set your LLM_MODEL environment variable (e.g., "openai/gpt-4", "anthropic/claude-3-sonnet")
- * 2. Set your API key (OPENAI_API_KEY or ANTHROPIC_API_KEY)
- * 3. Run: sbt "samples/runMain org.llm4s.samples.streaming.BasicStreamingExample"
+ * 1. Configure a default named provider in `application.local.conf`
+ * 2. Run: sbt "samples/runMain org.llm4s.samples.streaming.BasicStreamingExample"
  */
 object BasicStreamingExample {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -29,7 +28,7 @@ object BasicStreamingExample {
 
     // Get a client using typed configuration (Result-first)
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       _ = {
         logger.info("=== LLM4S Basic Streaming Example ===")
         logger.info("Using model: {}", providerCfg.model)

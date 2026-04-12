@@ -28,7 +28,7 @@ object OllamaStreamingExample {
     val buffer = new StringBuilder
 
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       sink        <- ProviderExchangeSink.createRunScopedJsonl(Paths.get(logDir))
       options = LlmClientOptions(
         exchangeLogging = ProviderExchangeLogging.enabled(sink)

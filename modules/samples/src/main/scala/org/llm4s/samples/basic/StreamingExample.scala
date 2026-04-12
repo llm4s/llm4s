@@ -39,7 +39,7 @@ object StreamingExample {
     var chunkCount  = 0
     val startTime   = System.currentTimeMillis()
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       _ = {
         logger.info("=== Streaming Response ===")

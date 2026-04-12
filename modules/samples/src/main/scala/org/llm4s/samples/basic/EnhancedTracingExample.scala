@@ -28,7 +28,7 @@ object EnhancedTracingExample {
       tracer = Tracing.create(tracingSettings)
 
       // Create LLM client from provider config
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       _ = runConversationWithTracing(client, tracer)
     } yield ()

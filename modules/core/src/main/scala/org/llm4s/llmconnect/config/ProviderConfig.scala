@@ -11,8 +11,9 @@ import org.llm4s.util.Redaction
  * Each subtype carries the credentials, endpoint URL, and context-window
  * metadata needed to construct an [[org.llm4s.llmconnect.LLMClient]] via
  * [[org.llm4s.llmconnect.LLMConnect]]. Instances are normally obtained from
- * [[org.llm4s.config.Llm4sConfig.provider]], which reads standard environment
- * variables (`LLM_MODEL`, `OPENAI_API_KEY`, etc.).
+ * [[org.llm4s.config.Llm4sConfig.defaultProvider]] or
+ * [[org.llm4s.config.Llm4sConfig.provider(name)*]], which resolve configured
+ * named providers under `llm4s.providers`.
  *
  * Prefer each subtype's `fromValues` factory over its primary constructor:
  * `fromValues` resolves `contextWindow` and `reserveCompletion` automatically

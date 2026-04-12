@@ -14,7 +14,7 @@ private[providersetup] object ProviderSetupContent:
         "For a first pass, env vars are the simplest and safest path.",
         "This app validates the current machine using real llm4s config loading."
       ),
-      requiredVars = List("LLM_MODEL"),
+      requiredVars = List("LLM4S_PROVIDER"),
       optionalVars = List("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "AZURE_API_KEY", "AZURE_API_BASE", "OLLAMA_HOST"),
       recommendedModels = List("ollama/llama3:latest", "openai/gpt-4o-mini"),
       setupSteps = List(
@@ -128,7 +128,7 @@ private[providersetup] object ProviderSetupContent:
         "Useful when you want a local-first workflow or your own reachable Ollama host.",
         "Model discovery depends on the configured host being reachable."
       ),
-      requiredVars = List("LLM_MODEL=ollama/<model-name>"),
+      requiredVars = List("LLM4S_PROVIDER=ollama-local"),
       optionalVars = List("OLLAMA_HOST", "OPENAI_BASE_URL"),
       recommendedModels = List("ollama/llama3:latest", "ollama/qwen2.5:3b"),
       setupSteps = List(
@@ -147,13 +147,13 @@ private[providersetup] object ProviderSetupContent:
         "Use a small model first while iterating to keep costs predictable.",
         "The key should normally stay in env vars rather than a committed file."
       ),
-      requiredVars = List("LLM_MODEL=openai/<model-name>", "OPENAI_API_KEY=<your-api-key>"),
+      requiredVars = List("LLM4S_PROVIDER=openai-main", "OPENAI_API_KEY=<your-api-key>"),
       optionalVars = List("OPENAI_BASE_URL", "OPENAI_ORG_ID"),
       recommendedModels = List("openai/gpt-4o-mini", "openai/gpt-4.1-mini"),
       setupSteps = List(
         "Create an API key in the OpenAI platform dashboard.",
         "Export `OPENAI_API_KEY` in your shell.",
-        "Export `LLM_MODEL=openai/gpt-4o-mini`.",
+        "Export `LLM4S_PROVIDER=openai-main`.",
         "Use `reload` in this app to validate the setup."
       )
     ),
@@ -166,14 +166,13 @@ private[providersetup] object ProviderSetupContent:
         "Useful when your organization standardizes on Azure networking and identity.",
         "Deployment names can differ from the underlying model family."
       ),
-      requiredVars =
-        List("LLM_MODEL=azure/<deployment-name>", "AZURE_API_KEY=<your-api-key>", "AZURE_API_BASE=<endpoint>"),
+      requiredVars = List("LLM4S_PROVIDER=azure-main", "AZURE_API_KEY=<your-api-key>", "AZURE_API_BASE=<endpoint>"),
       optionalVars = List("AZURE_API_VERSION"),
       recommendedModels = List("azure/gpt-4o-mini", "azure/gpt-4.1-mini"),
       setupSteps = List(
         "Create or reuse an Azure OpenAI resource.",
         "Deploy a model and note the deployment name.",
-        "Export the Azure key, base URL, and `LLM_MODEL`.",
+        "Export the Azure key, base URL, and `LLM4S_PROVIDER`.",
         "Run `reload` here to verify llm4s can resolve the provider."
       )
     ),
@@ -186,13 +185,13 @@ private[providersetup] object ProviderSetupContent:
         "A good option when you want Claude models and their message API.",
         "Keep the key in env vars or local private config only."
       ),
-      requiredVars = List("LLM_MODEL=anthropic/<model-name>", "ANTHROPIC_API_KEY=<your-api-key>"),
+      requiredVars = List("LLM4S_PROVIDER=anthropic-main", "ANTHROPIC_API_KEY=<your-api-key>"),
       optionalVars = List("ANTHROPIC_BASE_URL"),
       recommendedModels = List("anthropic/claude-3-5-haiku-latest", "anthropic/claude-3-7-sonnet-latest"),
       setupSteps = List(
         "Create an Anthropic API key.",
         "Export `ANTHROPIC_API_KEY`.",
-        "Export a Claude model in `LLM_MODEL`.",
+        "Export `LLM4S_PROVIDER=anthropic-main`.",
         "Use `reload` to confirm the setup."
       )
     ),
@@ -205,13 +204,13 @@ private[providersetup] object ProviderSetupContent:
         "Useful for Gemini model families inside llm4s.",
         "Model naming can change, so keep one known-good default while iterating."
       ),
-      requiredVars = List("LLM_MODEL=gemini/<model-name>", "GEMINI_API_KEY=<your-api-key>"),
+      requiredVars = List("LLM4S_PROVIDER=gemini-main", "GEMINI_API_KEY=<your-api-key>"),
       optionalVars = List("GEMINI_BASE_URL"),
       recommendedModels = List("gemini/gemini-2.0-flash", "gemini/gemini-1.5-pro"),
       setupSteps = List(
         "Create or retrieve a Gemini API key.",
         "Export `GEMINI_API_KEY`.",
-        "Pick one working Gemini model in `LLM_MODEL`.",
+        "Pick one working Gemini named provider in `LLM4S_PROVIDER`.",
         "Run `reload` to verify detection."
       )
     ),
@@ -224,13 +223,13 @@ private[providersetup] object ProviderSetupContent:
         "Shares a similar setup shape to OpenAI-compatible providers.",
         "A useful path when you want reasoning-oriented models through llm4s."
       ),
-      requiredVars = List("LLM_MODEL=deepseek/<model-name>", "DEEPSEEK_API_KEY=<your-api-key>"),
+      requiredVars = List("LLM4S_PROVIDER=deepseek-main", "DEEPSEEK_API_KEY=<your-api-key>"),
       optionalVars = List("DEEPSEEK_BASE_URL"),
       recommendedModels = List("deepseek/deepseek-chat", "deepseek/deepseek-reasoner"),
       setupSteps = List(
         "Create a DeepSeek API key.",
         "Export `DEEPSEEK_API_KEY`.",
-        "Set `LLM_MODEL` to a known DeepSeek model.",
+        "Set `LLM4S_PROVIDER` to a known DeepSeek named provider.",
         "Use `reload` to validate the configuration."
       )
     ),
@@ -243,13 +242,13 @@ private[providersetup] object ProviderSetupContent:
         "Useful when you want Cohere models or embeddings in the same ecosystem.",
         "Keep the first setup to one working command model."
       ),
-      requiredVars = List("LLM_MODEL=cohere/<model-name>", "COHERE_API_KEY=<your-api-key>"),
+      requiredVars = List("LLM4S_PROVIDER=cohere-main", "COHERE_API_KEY=<your-api-key>"),
       optionalVars = List("COHERE_BASE_URL"),
       recommendedModels = List("cohere/command-r", "cohere/command-r-plus"),
       setupSteps = List(
         "Create a Cohere API key.",
         "Export `COHERE_API_KEY`.",
-        "Set `LLM_MODEL` to a supported command model.",
+        "Set `LLM4S_PROVIDER` to a supported Cohere named provider.",
         "Run `reload` here to check resolution."
       )
     ),
@@ -262,13 +261,13 @@ private[providersetup] object ProviderSetupContent:
         "Good when you want Mistral-hosted text models.",
         "Model families differ, so start with a smaller known-good choice."
       ),
-      requiredVars = List("LLM_MODEL=mistral/<model-name>", "MISTRAL_API_KEY=<your-api-key>"),
+      requiredVars = List("LLM4S_PROVIDER=mistral-main", "MISTRAL_API_KEY=<your-api-key>"),
       optionalVars = List("MISTRAL_BASE_URL"),
       recommendedModels = List("mistral/mistral-small-latest", "mistral/open-mistral-nemo"),
       setupSteps = List(
         "Create a Mistral API key.",
         "Export `MISTRAL_API_KEY`.",
-        "Export a supported model in `LLM_MODEL`.",
+        "Export a supported Mistral named provider in `LLM4S_PROVIDER`.",
         "Use `reload` to confirm llm4s can load it."
       )
     ),
@@ -281,13 +280,13 @@ private[providersetup] object ProviderSetupContent:
         "Follows a provider-specific hosted setup similar to the other API-backed connectors.",
         "Keep a single working model configured first."
       ),
-      requiredVars = List("LLM_MODEL=zai/<model-name>", "ZAI_API_KEY=<your-api-key>"),
+      requiredVars = List("LLM4S_PROVIDER=zai-main", "ZAI_API_KEY=<your-api-key>"),
       optionalVars = List("ZAI_BASE_URL"),
       recommendedModels = List("zai/glm-4.5-air", "zai/glm-4.5"),
       setupSteps = List(
         "Create a Z.ai API key.",
         "Export `ZAI_API_KEY`.",
-        "Set `LLM_MODEL` to a supported Z.ai model.",
+        "Set `LLM4S_PROVIDER` to a supported Z.ai named provider.",
         "Use `reload` to validate the setup."
       )
     )
