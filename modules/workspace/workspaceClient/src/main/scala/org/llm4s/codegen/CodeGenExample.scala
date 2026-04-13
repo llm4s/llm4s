@@ -31,7 +31,7 @@ object CodeGenExample {
       _ = logger.info(s"Using workspace directory: ${ws.workspaceDir}")
       _ = logger.info(s"Trace log will be written to: ${ws.traceLogPath}")
 
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
 
       finalState <- Using.resource(
