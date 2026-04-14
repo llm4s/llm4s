@@ -2,7 +2,8 @@ package org.llm4s.rag.evaluation
 
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ModelDimensionRegistry, ProviderConfig }
-import org.llm4s.rag.evaluation.metrics._
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.rag.evaluation.metrics.*
 import org.llm4s.types.Result
 
 /**
@@ -34,9 +35,9 @@ object RAGASFactory {
   def fromConfigs(
     providerCfg: ProviderConfig,
     embedding: (String, org.llm4s.llmconnect.config.EmbeddingProviderConfig)
-  ): Result[RAGASEvaluator] =
+  )(using ModelRegistryService): Result[RAGASEvaluator] =
     for {
-      llmClient <- LLMConnect.getClient(providerCfg)
+      llmClient <- LLMConnect.fromConfig(providerCfg)
       (providerName, embeddingConfig) = embedding
       embeddingClient <- EmbeddingClient.from(providerName, embeddingConfig)
       dims              = ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model).getOrElse(1536)
@@ -104,9 +105,9 @@ object RAGASFactory {
   def basicFromConfigs(
     providerCfg: ProviderConfig,
     embedding: (String, org.llm4s.llmconnect.config.EmbeddingProviderConfig)
-  ): Result[RAGASEvaluator] =
+  )(using ModelRegistryService): Result[RAGASEvaluator] =
     for {
-      llmClient <- LLMConnect.getClient(providerCfg)
+      llmClient <- LLMConnect.fromConfig(providerCfg)
       (providerName, embeddingConfig) = embedding
       embeddingClient <- EmbeddingClient.from(providerName, embeddingConfig)
       dims              = ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model).getOrElse(1536)

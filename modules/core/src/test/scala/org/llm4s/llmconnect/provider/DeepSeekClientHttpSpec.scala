@@ -9,6 +9,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.OptionValues._
 import scala.collection.mutable.ListBuffer
+import org.llm4s.model.ModelRegistryService
 
 /**
  * Local HTTP server tests for DeepSeekClient (Tier 1).
@@ -18,6 +19,8 @@ import scala.collection.mutable.ListBuffer
  * No API keys or external services required — runs unconditionally as part of `sbt test`.
  */
 class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def localConfig(baseUrl: String): DeepSeekConfig =
     DeepSeekConfig(

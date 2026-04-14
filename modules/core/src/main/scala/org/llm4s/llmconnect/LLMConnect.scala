@@ -4,6 +4,7 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config._
 import org.llm4s.llmconnect.provider._
 import org.llm4s.metrics.MetricsCollector
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderKind
 import org.llm4s.types.Result
 
@@ -20,8 +21,9 @@ import org.llm4s.types.Result
  * @example
  * {{{
  * for {
- *   cfg    <- Llm4sConfig.defaultProvider()
- *   client <- LLMConnect.getClient(cfg)
+ *   registry <- Llm4sConfig.modelRegistryService()
+ *   cfg      <- Llm4sConfig.defaultProvider()
+ *   client   <- LLMConnect.getClient(cfg)(using registry)
  * } yield client
  * }}}
  *
@@ -30,7 +32,9 @@ import org.llm4s.types.Result
  */
 object LLMConnect {
 
-  private def buildClient(config: ProviderConfig, options: LlmClientOptions): Result[LLMClient] =
+  private def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
+    ModelRegistryService
+  ): Result[LLMClient] =
     val metrics         = options.metrics
     val exchangeLogging = options.exchangeLogging
     config match {
@@ -56,6 +60,12 @@ object LLMConnect {
         MistralClient(cfg, metrics, exchangeLogging)
     }
 
+  def fromConfig(
+    config: ProviderConfig,
+    options: LlmClientOptions = LlmClientOptions.default
+  )(using ModelRegistryService): Result[LLMClient] =
+    buildClient(config, options)
+
   // ---- Config-driven construction -----------------------------------------
 
   /**
@@ -75,8 +85,8 @@ object LLMConnect {
   def getClient(
     config: ProviderConfig,
     metrics: MetricsCollector
-  ): Result[LLMClient] =
-    buildClient(config, LlmClientOptions(metrics = metrics))
+  )(using ModelRegistryService): Result[LLMClient] =
+    fromConfig(config, LlmClientOptions(metrics = metrics))
 
   /**
    * Constructs an [[LLMClient]] using explicit runtime options.
@@ -87,8 +97,8 @@ object LLMConnect {
   def getClient(
     config: ProviderConfig,
     options: LlmClientOptions
-  ): Result[LLMClient] =
-    buildClient(config, options)
+  )(using ModelRegistryService): Result[LLMClient] =
+    fromConfig(config, options)
 
   /**
    * Constructs an [[LLMClient]] without recording call statistics.
@@ -99,8 +109,8 @@ object LLMConnect {
    *
    * @param config Provider configuration; the concrete subtype determines which client is built.
    */
-  def getClient(config: ProviderConfig): Result[LLMClient] =
-    buildClient(config, LlmClientOptions.default)
+  def getClient(config: ProviderConfig)(using ModelRegistryService): Result[LLMClient] =
+    fromConfig(config)
 
   // ---- Provider-explicit construction (validates provider/config pairing) -
 
@@ -126,7 +136,7 @@ object LLMConnect {
     provider: ProviderKind,
     config: ProviderConfig,
     metrics: MetricsCollector
-  ): Result[LLMClient] =
+  )(using ModelRegistryService): Result[LLMClient] =
     getClient(provider, config, LlmClientOptions(metrics = metrics))
 
   /**
@@ -137,7 +147,14 @@ object LLMConnect {
     provider: ProviderKind,
     config: ProviderConfig,
     options: LlmClientOptions
-  ): Result[LLMClient] =
+  )(using ModelRegistryService): Result[LLMClient] =
+    fromProvider(provider, config, options)
+
+  def fromProvider(
+    provider: ProviderKind,
+    config: ProviderConfig,
+    options: LlmClientOptions = LlmClientOptions.default
+  )(using ModelRegistryService): Result[LLMClient] =
     val metrics         = options.metrics
     val exchangeLogging = options.exchangeLogging
     (provider, config) match {
@@ -170,6 +187,6 @@ object LLMConnect {
   def getClient(
     provider: ProviderKind,
     config: ProviderConfig
-  ): Result[LLMClient] =
+  )(using ModelRegistryService): Result[LLMClient] =
     getClient(provider, config, LlmClientOptions.default)
 }

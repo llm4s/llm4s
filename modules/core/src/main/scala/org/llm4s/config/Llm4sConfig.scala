@@ -7,6 +7,7 @@ import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.{ ProviderName, ProvidersConfig }
 import org.llm4s.error.LLMError
 import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import pureconfig.ConfigSource
 
 /**
@@ -31,10 +32,11 @@ import pureconfig.ConfigSource
  * @example
  * {{{
  * for {
- *   cfg    <- Llm4sConfig.defaultProvider()
- *   client <- LLMConnect.getClient(cfg)
- *   agent  = new Agent(client)
- *   state  <- agent.run("Hello", ToolRegistry.empty)
+ *   registry <- Llm4sConfig.modelRegistryService()
+ *   cfg      <- Llm4sConfig.defaultProvider()
+ *   client   <- LLMConnect.getClient(cfg)(using registry)
+ *   agent     = new Agent(client)
+ *   state    <- agent.run("Hello", ToolRegistry.empty)
  * } yield state
  * }}}
  *
@@ -43,6 +45,32 @@ import pureconfig.ConfigSource
  */
 object Llm4sConfig {
 
+  def modelRegistryConfig(): Result[ModelRegistryConfig] =
+    modelRegistryConfig(ConfigSource.default)
+
+  private[config] def modelRegistryConfig(source: ConfigSource): Result[ModelRegistryConfig] = {
+    val modelRegistrySource = source.at("llm4s.modelRegistry")
+    val resourcePath       = modelRegistrySource.at("resourcePath").load[String].toOption.map(_.trim).filter(_.nonEmpty)
+    val filePathFromConfig = modelRegistrySource.at("filePath").load[String].toOption.map(_.trim).filter(_.nonEmpty)
+    val urlFromConfig      = modelRegistrySource.at("url").load[String].toOption.map(_.trim).filter(_.nonEmpty)
+    val useDefaultResource = resourcePath.isEmpty && filePathFromConfig.isEmpty && urlFromConfig.isEmpty
+
+    Right(
+      ModelRegistryConfig(
+        resourcePath =
+          resourcePath.orElse(if useDefaultResource then Some(ModelRegistryConfig.DefaultResourcePath) else None),
+        filePath = filePathFromConfig,
+        url = urlFromConfig
+      )
+    )
+  }
+
+  def modelRegistryService(): Result[ModelRegistryService] =
+    modelRegistryConfig().flatMap(ModelRegistryService.fromConfig)
+
+  private[config] def modelRegistryService(source: ConfigSource): Result[ModelRegistryService] =
+    modelRegistryConfig(source).flatMap(ModelRegistryService.fromConfig)
+
   /**
    * Loads a named provider from `llm4s.providers.<name>`.
    *
@@ -50,18 +78,36 @@ object Llm4sConfig {
    * instances, including multiple accounts for the same provider type.
    */
   def provider(name: String): Result[ProviderConfig] =
-    org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name)
+    for
+      service <- modelRegistryService()
+      given ContextWindowResolver = ContextWindowResolver(service)
+      config <- org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name)
+    yield config
 
   def providerConfigs(): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
-    org.llm4s.config.NamedProviderLoader.loadProviderConfigs(ConfigSource.default)
+    for
+      service <- modelRegistryService()
+      given ContextWindowResolver = ContextWindowResolver(service)
+      result <- org.llm4s.config.NamedProviderLoader.loadProviderConfigs(ConfigSource.default)
+    yield result
 
   def providerConfigs(
     map: Map[ProviderName, ProvidersConfigModel.NamedProviderConfig]
   ): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
-    org.llm4s.config.NamedProviderLoader.getProviderConfigs(map)
+    modelRegistryService() match
+      case Right(service) =>
+        given ContextWindowResolver = ContextWindowResolver(service)
+        org.llm4s.config.NamedProviderLoader.getProviderConfigs(map)
+      case Left(err) =>
+        val errors = map.map { case (name, _) => name -> (err: LLMError) }
+        (errors, Map.empty)
 
   private[config] def provider(source: ConfigSource, name: String): Result[ProviderConfig] =
-    org.llm4s.config.NamedProviderLoader.load(source, name)
+    for
+      service <- modelRegistryService(source)
+      given ContextWindowResolver = ContextWindowResolver(service)
+      config <- org.llm4s.config.NamedProviderLoader.load(source, name)
+    yield config
 
   /**
    * Loads the full validated named-providers configuration from `llm4s.providers`.
@@ -85,10 +131,20 @@ object Llm4sConfig {
    * Loads the configured default named provider as a runtime [[ProviderConfig]].
    */
   def defaultProvider(): Result[ProviderConfig] =
-    defaultProviderName().flatMap(name => provider(name.asName))
+    for
+      service <- modelRegistryService()
+      given ContextWindowResolver = ContextWindowResolver(service)
+      name   <- defaultProviderName()
+      config <- org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name.asName)
+    yield config
 
   private[config] def defaultProvider(source: ConfigSource): Result[ProviderConfig] =
-    defaultProviderName(source).flatMap(name => provider(source, name.asName))
+    for
+      service <- modelRegistryService(source)
+      given ContextWindowResolver = ContextWindowResolver(service)
+      name   <- defaultProviderName(source)
+      config <- org.llm4s.config.NamedProviderLoader.load(source, name.asName)
+    yield config
 
   /**
    * Lists models for the configured default named provider.
@@ -353,19 +409,6 @@ object Llm4sConfig {
     val source     = ConfigSource.default.at("llm4s.embeddings")
     val configured = source.at("experimentalStubs").load[Boolean].toOption
     configured.getOrElse(false)
-  }
-
-  /**
-   * Returns the path to a user-supplied model-metadata override file, if configured.
-   *
-   * When set via `llm4s.modelMetadata.file`, the override file is consulted
-   * before the bundled model catalogue when resolving context-window sizes.
-   * Returns `None` when the key is absent or blank.
-   */
-  def modelMetadataOverridePath: Option[String] = {
-    val source   = ConfigSource.default.at("llm4s.modelMetadata")
-    val fromConf = source.at("file").load[String].toOption.map(_.trim).filter(_.nonEmpty)
-    fromConf
   }
 
   /**

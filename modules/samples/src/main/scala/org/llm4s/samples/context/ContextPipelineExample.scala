@@ -44,8 +44,10 @@ object ContextPipelineExample {
     logger.info("Starting Context Management Pipeline Example")
 
     val result = for {
-      providerCfg <- Llm4sConfig.defaultProvider()
-      modelName = providerCfg.model
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      modelName                                  = providerCfg.model
       client       <- LLMConnect.getClient(providerCfg)
       tokenCounter <- ConversationTokenCounter.forModel(modelName)
       contextMgr   <- createContextManager(tokenCounter, client)

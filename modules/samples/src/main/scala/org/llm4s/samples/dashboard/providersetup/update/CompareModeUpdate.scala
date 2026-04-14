@@ -9,6 +9,7 @@ import org.llm4s.samples.dashboard.providersetup.{
 import org.llm4s.samples.dashboard.providersetup.view.ProviderSetupView
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupMessages.*
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupModel.*
+import org.llm4s.model.ModelRegistryService
 import termflow.tui.KeyDecoder
 import termflow.tui.PromptHistory
 import termflow.tui.RuntimeCtx
@@ -21,7 +22,7 @@ private[providersetup] object CompareModeUpdate:
     model: Model,
     msg: Msg,
     ctx: RuntimeCtx[Msg]
-  ): Tui[Model, Msg] =
+  )(using ModelRegistryService): Tui[Model, Msg] =
     msg match
       case Msg.Compare(CompareMsg.RunCommand(command)) =>
         handleCompareCommand(model, command, model.demoAppConfigs.demoCfg, ctx)
@@ -43,7 +44,7 @@ private[providersetup] object CompareModeUpdate:
     raw: String,
     config: ProviderSetupDemoConfig,
     ctx: RuntimeCtx[Msg]
-  ): Tui[Model, Msg] =
+  )(using ModelRegistryService): Tui[Model, Msg] =
     val trimmed = raw.trim
     val lower   = trimmed.toLowerCase
 

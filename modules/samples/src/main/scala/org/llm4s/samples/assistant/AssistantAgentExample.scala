@@ -60,8 +60,10 @@ object AssistantAgentExample {
 
     // Get LLM client from typed configuration (Result-first)
     val result = for {
-      providerCfg <- Llm4sConfig.defaultProvider()
-      client      <- LLMConnect.getClient(providerCfg)
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
       playwrightServerConfig = MCPServerConfig.stdio(
         name = "playwright-mcp-server",
         command = Seq("npx", "@playwright/mcp@latest"),

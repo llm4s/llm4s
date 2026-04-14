@@ -35,7 +35,9 @@ object MCPAgentExample {
 
     val startTime = System.currentTimeMillis()
     val agentState = for {
-      providerCfg <- Llm4sConfig.defaultProvider()
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
       agent = new Agent(client)

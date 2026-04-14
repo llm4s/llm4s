@@ -19,7 +19,9 @@ object MultiStepAgentExample {
   def main(args: Array[String]): Unit = {
     // Get a client using environment variables (Result-first)
     val res = for {
-      providerCfg <- Llm4sConfig.defaultProvider()
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
       toolRegistry = new ToolRegistry(Seq(weatherTool))

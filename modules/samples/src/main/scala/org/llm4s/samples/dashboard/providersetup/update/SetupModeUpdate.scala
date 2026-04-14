@@ -11,6 +11,7 @@ import org.llm4s.samples.dashboard.providersetup.{
   ProviderSetupSetupPolicy
 }
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupTabs
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderName
 import termflow.tui.Cmd
 import termflow.tui.KeyDecoder
@@ -25,7 +26,7 @@ private[providersetup] object SetupModeUpdate:
     model: Model,
     msg: Msg,
     @scala.annotation.unused ctx: RuntimeCtx[Msg]
-  ): Tui[Model, Msg] =
+  )(using ModelRegistryService): Tui[Model, Msg] =
     msg match
       case Msg.Setup(SetupMsg.RunCommand(command)) =>
         handleSetupCommand(model, command)
@@ -51,7 +52,7 @@ private[providersetup] object SetupModeUpdate:
       case _ =>
         model.tui
 
-  private def handleSetupCommand(model: Model, raw: String): Tui[Model, Msg] =
+  private def handleSetupCommand(model: Model, raw: String)(using ModelRegistryService): Tui[Model, Msg] =
     val lower = raw.trim.toLowerCase
 
     lower match
@@ -137,7 +138,7 @@ private[providersetup] object SetupModeUpdate:
   private def activateDemoSession(
     model: Model,
     providerConfigs: Map[ProviderName, ProviderConfig]
-  ): Tui[Model, Msg] =
+  )(using ModelRegistryService): Tui[Model, Msg] =
     ProviderSetupProviderSelection.currentSetupSessionRequest(model).left.map(_.formatted).flatMap { sessionRequest =>
       ProviderSetupRuntime.resolveSession(
         providerConfigs,

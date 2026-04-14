@@ -4,11 +4,14 @@ import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class RAGASFactorySpec extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   class MockLLMClient extends LLMClient {
     override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] =

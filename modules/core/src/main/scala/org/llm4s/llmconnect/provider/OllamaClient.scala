@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.streaming.StreamingAccumulator
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
 
 import java.io.{ BufferedReader, IOException, InputStreamReader }
@@ -50,7 +51,8 @@ class OllamaClient(
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
   private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
-) extends BaseLifecycleLLMClient {
+)(using val registryService: ModelRegistryService)
+    extends BaseLifecycleLLMClient {
 
   protected def clientDescription: String = s"Ollama client for model ${config.model}"
   protected def providerName: String      = "ollama"
@@ -314,6 +316,6 @@ object OllamaClient {
     config: OllamaConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
     exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
-  ): Result[OllamaClient] =
+  )(using ModelRegistryService): Result[OllamaClient] =
     Try(new OllamaClient(config, metrics, exchangeLogging)).toResult
 }

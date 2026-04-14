@@ -4,8 +4,9 @@ import com.azure.ai.openai.models.{ ChatCompletions, ChatCompletionsOptions }
 import com.azure.core.util.IterableStream
 import com.azure.json.JsonProviders
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
-import org.llm4s.llmconnect.config.OpenAIConfig
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
+import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.OptionValues._
@@ -15,6 +16,9 @@ import scala.jdk.CollectionConverters._
 import scala.util.Using
 
 final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers {
+
+  private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+  private given ContextWindowResolver     = ContextWindowResolver(mrs)
 
   private def completionsFromJson(json: String): ChatCompletions =
     Using.resource(JsonProviders.createReader(json))(ChatCompletions.fromJson)

@@ -12,8 +12,11 @@ import org.scalatest.OptionValues._
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable.ListBuffer
+import org.llm4s.model.ModelRegistryService
 
 class MistralClientSpec extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def withServer(handler: HttpExchange => Unit)(test: String => Any): Unit = {
     val server = HttpServer.create(new InetSocketAddress("localhost", 0), 0)

@@ -1,9 +1,10 @@
 package org.llm4s.llmconnect.smoke
 
 import org.llm4s.error.AuthenticationError
-import org.llm4s.llmconnect.config.DeepSeekConfig
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, DeepSeekConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.DeepSeekClient
+import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -17,6 +18,9 @@ import org.scalatest.matchers.should.Matchers
  * Requires: `DEEPSEEK_API_KEY` environment variable.
  */
 class DeepSeekSmokeSpec extends AnyFlatSpec with Matchers {
+
+  private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
+  private given ContextWindowResolver = ContextWindowResolver(mrs)
 
   private val apiKey: Option[String] = Option(System.getenv("DEEPSEEK_API_KEY")).filter(_.nonEmpty)
 

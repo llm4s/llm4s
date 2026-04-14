@@ -2,7 +2,8 @@ package org.llm4s.samples.dashboard.providersetup
 
 import org.llm4s.config.ProvidersConfigModel
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.OpenAIConfig
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
+import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupModel.*
 import org.llm4s.types.ProviderModelTypes.ProviderKind
 import org.llm4s.types.ProviderModelTypes.ProviderName
@@ -14,6 +15,9 @@ import termflow.tui.PromptHistory
 import java.nio.file.Path
 
 class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers:
+
+  private given ContextWindowResolver =
+    ContextWindowResolver(ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get)
 
   "currentSetupSessionRequest" should "use the named provider as the session target on the Providers tab" in {
     val model = baseModel.copy(

@@ -96,8 +96,10 @@ object AgentLLMCallingExample {
     val benchmarkResult: BenchmarkUtil.BenchmarkResult[Either[LLMError, AgentExecutionResult]] =
       BenchmarkUtil.timeWithSteps { timer =>
         for {
-          providerCfg <- org.llm4s.config.Llm4sConfig.defaultProvider()
-          llmClient   <- LLMConnect.getClient(providerCfg)
+          providerCfg     <- org.llm4s.config.Llm4sConfig.defaultProvider()
+          registryService <- org.llm4s.config.Llm4sConfig.modelRegistryService()
+          given org.llm4s.model.ModelRegistryService = registryService
+          llmClient <- LLMConnect.getClient(providerCfg)
           agent = new Agent(llmClient)
           agentExecutionResult <- {
             val calcToolResult = CalculatorTool.toolSafe

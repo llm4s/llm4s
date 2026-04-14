@@ -2,14 +2,15 @@ package org.llm4s.samples.embeddingsupport
 
 import org.llm4s.samples.embeddingsupport.{
   EmbeddingQuery,
+  EmbeddingRuntimeSettings,
   EmbeddingTargets,
-  EmbeddingUiSettings,
-  EmbeddingRuntimeSettings
+  EmbeddingUiSettings
 }
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.EmbeddingClient
-import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.utils.SimilarityUtils
+import org.llm4s.model.ModelRegistryService
 import org.slf4j.LoggerFactory
 
 import java.time.{ ZoneId, ZonedDateTime }
@@ -46,7 +47,11 @@ object EmbeddingExample {
       inputs  <- Llm4sConfig.embeddingsInputs()
       targets <- EmbeddingTargets.fromInputs(inputs.inputPath, inputs.inputPaths).map(_.targets)
       emb     <- Llm4sConfig.embeddings()
-      client  <- EmbeddingClient.from(emb._1, emb._2)
+      service <- Llm4sConfig.modelRegistryService()
+      client <- {
+        given ModelRegistryService = service
+        EmbeddingClient.from(emb._1, emb._2)
+      }
       runtime <- EmbeddingRuntimeSettings()
       textCfg <- Llm4sConfig.textEmbeddingModel()
       textModel = org.llm4s.llmconnect.config.EmbeddingModelConfig(

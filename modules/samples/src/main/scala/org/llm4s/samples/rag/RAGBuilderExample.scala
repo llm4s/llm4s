@@ -4,7 +4,7 @@ import org.llm4s.chunking.ChunkerFactory
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.rag.{ EmbeddingProvider, RAG, RAGConfig }
-import org.llm4s.rag.RAG.RAGConfigOps
+
 import org.slf4j.LoggerFactory
 import scala.util.chaining._
 
@@ -136,7 +136,9 @@ object RAGBuilderExample extends App {
 
   // Check if we have LLM configured for answer generation
   val llmResult = for {
-    cfg    <- Llm4sConfig.defaultProvider()
+    cfg             <- Llm4sConfig.defaultProvider()
+    registryService <- Llm4sConfig.modelRegistryService()
+    given org.llm4s.model.ModelRegistryService = registryService
     client <- LLMConnect.getClient(cfg)
   } yield client
   val hasLLM = llmResult.isRight
@@ -146,12 +148,14 @@ object RAGBuilderExample extends App {
 
     val result = for {
       llmClient <- llmResult
-      rag <- RAG
-        .builder()
-        .withEmbeddings(EmbeddingProvider.OpenAI)
-        .withTopK(3)
-        .withLLM(llmClient)
-        .build()
+      service   <- Llm4sConfig.modelRegistryService()
+      rag <- RAG.build(
+        RAG
+          .builder()
+          .withEmbeddings(EmbeddingProvider.OpenAI)
+          .withTopK(3)
+          .withLLM(llmClient)
+      )(using service)
     } yield {
       logger.info("RAG pipeline created successfully!")
       logger.info("Document count: {}", rag.documentCount)

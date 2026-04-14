@@ -1,9 +1,10 @@
 package org.llm4s.llmconnect.smoke
 
 import org.llm4s.error.AuthenticationError
-import org.llm4s.llmconnect.config.AnthropicConfig
+import org.llm4s.llmconnect.config.{ AnthropicConfig, ContextWindowResolver }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.provider.AnthropicClient
+import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -17,6 +18,9 @@ import org.scalatest.matchers.should.Matchers
  * Requires: `ANTHROPIC_API_KEY` environment variable.
  */
 class AnthropicSmokeSpec extends AnyFlatSpec with Matchers {
+
+  private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
+  private given ContextWindowResolver = ContextWindowResolver(mrs)
 
   private val apiKey: Option[String] = Option(System.getenv("ANTHROPIC_API_KEY")).filter(_.nonEmpty)
 

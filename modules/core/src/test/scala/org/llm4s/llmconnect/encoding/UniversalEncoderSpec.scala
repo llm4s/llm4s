@@ -4,6 +4,7 @@ import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, LocalEmbeddingModels }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -12,6 +13,8 @@ import java.io.File
 import java.nio.file.Files
 
 class UniversalEncoderSpec extends AnyFunSuite with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private class MockEmbeddingProvider extends EmbeddingProvider {
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] =

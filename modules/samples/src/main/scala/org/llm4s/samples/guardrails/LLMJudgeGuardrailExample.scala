@@ -32,8 +32,10 @@ object LLMJudgeGuardrailExample extends App {
   logger.info("=== LLM-as-Judge Guardrail Example ===")
 
   val result = for {
-    providerCfg <- Llm4sConfig.defaultProvider()
-    client      <- LLMConnect.getClient(providerCfg)
+    providerCfg     <- Llm4sConfig.defaultProvider()
+    registryService <- Llm4sConfig.modelRegistryService()
+    given org.llm4s.model.ModelRegistryService = registryService
+    client <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
     // === Example 1: Professional Tone Validation ===

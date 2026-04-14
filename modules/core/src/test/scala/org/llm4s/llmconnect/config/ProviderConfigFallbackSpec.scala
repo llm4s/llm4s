@@ -6,10 +6,13 @@ import org.scalatest.matchers.should.Matchers
 /**
  * Tests provider config fallback branches for patch coverage.
  *
- * Uses model names not in ModelRegistry to trigger fallbackResolver path.
+ * Uses model names not in the registry snapshot to trigger fallbackResolver path.
  * Model names use "patch-cov-" prefix to ensure registry miss.
  */
 class ProviderConfigFallbackSpec extends AnyFlatSpec with Matchers {
+
+  private given ContextWindowResolver =
+    ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
 
   val azureEndpoint = "https://azure.example.com"
   val azureVersion  = "2024-02-15"

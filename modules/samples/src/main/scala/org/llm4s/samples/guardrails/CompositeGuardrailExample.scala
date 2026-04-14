@@ -32,8 +32,10 @@ object CompositeGuardrailExample extends App {
   )
 
   val result1 = for {
-    providerCfg <- Llm4sConfig.defaultProvider()
-    client      <- LLMConnect.getClient(providerCfg)
+    providerCfg     <- Llm4sConfig.defaultProvider()
+    registryService <- Llm4sConfig.modelRegistryService()
+    given org.llm4s.model.ModelRegistryService = registryService
+    client <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
     state <- agent.run(
@@ -65,8 +67,10 @@ object CompositeGuardrailExample extends App {
   )
 
   val result2 = for {
-    providerCfg <- Llm4sConfig.defaultProvider()
-    client      <- LLMConnect.getClient(providerCfg)
+    providerCfg     <- Llm4sConfig.defaultProvider()
+    registryService <- Llm4sConfig.modelRegistryService()
+    given org.llm4s.model.ModelRegistryService = registryService
+    client <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
     state <- agent.run(
@@ -96,8 +100,10 @@ object CompositeGuardrailExample extends App {
   )
 
   val result3 = for {
-    providerCfg <- Llm4sConfig.defaultProvider()
-    client      <- LLMConnect.getClient(providerCfg)
+    providerCfg     <- Llm4sConfig.defaultProvider()
+    registryService <- Llm4sConfig.modelRegistryService()
+    given org.llm4s.model.ModelRegistryService = registryService
+    client <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
     state <- agent.run(
@@ -145,8 +151,10 @@ object CompositeGuardrailExample extends App {
   }
 
   val result4 = for {
-    providerCfg <- Llm4sConfig.defaultProvider()
-    client      <- LLMConnect.getClient(providerCfg)
+    providerCfg     <- Llm4sConfig.defaultProvider()
+    registryService <- Llm4sConfig.modelRegistryService()
+    given org.llm4s.model.ModelRegistryService = registryService
+    client <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
     state <- agent.run(

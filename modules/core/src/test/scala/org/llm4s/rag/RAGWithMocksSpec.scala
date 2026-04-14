@@ -5,6 +5,7 @@ import org.llm4s.knowledgegraph.graphrag.{ GraphRAGConfig, GraphRAGMode }
 import org.llm4s.knowledgegraph.storage.InMemoryGraphStore
 import org.llm4s.knowledgegraph.{ Edge, Node }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
@@ -27,6 +28,8 @@ import scala.collection.mutable
  * (embedding APIs, LLM APIs, databases).
  */
 class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   // ==========================================================================
   // Mock Implementations

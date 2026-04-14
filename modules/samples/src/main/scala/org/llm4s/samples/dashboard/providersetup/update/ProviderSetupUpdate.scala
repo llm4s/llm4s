@@ -2,6 +2,7 @@ package org.llm4s.samples.dashboard.providersetup.update
 
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupMessages.*
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupModel.*
+import org.llm4s.model.ModelRegistryService
 import termflow.tui.*
 
 private[providersetup] object ProviderSetupUpdate:
@@ -10,7 +11,7 @@ private[providersetup] object ProviderSetupUpdate:
     model: Model,
     msg: Msg,
     ctx: RuntimeCtx[Msg]
-  ): Tui[Model, Msg] =
+  )(using ModelRegistryService): Tui[Model, Msg] =
     ProviderSetupGlobalUpdate
       .handle(model, msg)
       .orElse(dispatchModeMessage(model, msg, ctx))
@@ -20,7 +21,7 @@ private[providersetup] object ProviderSetupUpdate:
     model: Model,
     msg: Msg,
     ctx: RuntimeCtx[Msg]
-  ): Option[Tui[Model, Msg]] =
+  )(using ModelRegistryService): Option[Tui[Model, Msg]] =
     msg match
       case Msg.Setup(input) =>
         Some(routeBoundaryInput(model, input, ctx))
@@ -38,7 +39,7 @@ private[providersetup] object ProviderSetupUpdate:
     model: Model,
     input: SetupMsg,
     ctx: RuntimeCtx[Msg]
-  ): Tui[Model, Msg] =
+  )(using ModelRegistryService): Tui[Model, Msg] =
     model.screenMode match
       case ScreenMode.Setup =>
         SetupModeUpdate.handle(model, Msg.Setup(input), ctx)

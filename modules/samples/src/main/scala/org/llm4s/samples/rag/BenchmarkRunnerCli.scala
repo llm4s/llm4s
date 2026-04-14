@@ -5,7 +5,8 @@ import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
 import org.llm4s.rag.benchmark.{ BenchmarkReport, BenchmarkRunner, BenchmarkSuite, DatasetManager }
 import org.llm4s.error.ConfigurationError
 import org.slf4j.LoggerFactory
-import scala.util.chaining._
+
+import scala.util.chaining.*
 
 /**
  * CLI entrypoint for running RAG benchmarks from the samples module.
@@ -45,6 +46,8 @@ object BenchmarkRunnerCli {
 
     val runnerResult = for {
       providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
       llmClient       <- LLMConnect.getClient(providerCfg)
       embeddingResult <- Llm4sConfig.embeddings()
       (providerName, providerConfig) = embeddingResult

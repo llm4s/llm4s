@@ -11,8 +11,11 @@ import org.llm4s.metrics.MockMetricsCollector
 import scala.collection.mutable.ListBuffer
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
+import org.llm4s.model.ModelRegistryService
 
 class AnthropicClientSpec extends AnyFunSuite with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val testConfig = AnthropicConfig(
     apiKey = "test-key",

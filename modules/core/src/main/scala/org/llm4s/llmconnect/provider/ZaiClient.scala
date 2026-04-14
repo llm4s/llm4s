@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.error.ThrowableOps._
@@ -39,7 +40,9 @@ class ZaiClient(
   config: ZaiConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
-) extends BaseLifecycleLLMClient {
+)(using val registryService: ModelRegistryService)
+    extends BaseLifecycleLLMClient {
+
   private val httpClient = HttpClient.newHttpClient()
   private val logger     = org.slf4j.LoggerFactory.getLogger(getClass)
 
@@ -389,13 +392,13 @@ object ZaiClient {
   def apply(
     config: ZaiConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-  ): Result[ZaiClient] =
+  )(using ModelRegistryService): Result[ZaiClient] =
     Try(new ZaiClient(config, metrics)).toResult
 
   def apply(
     config: ZaiConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  ): Result[ZaiClient] =
+  )(using ModelRegistryService): Result[ZaiClient] =
     Try(new ZaiClient(config, metrics, exchangeLogging)).toResult
 }

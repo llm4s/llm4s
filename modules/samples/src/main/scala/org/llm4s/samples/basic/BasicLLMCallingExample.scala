@@ -89,7 +89,9 @@ object BasicLLMCallingExample {
     // Execute the example with explicit configuration and error handling
     val result = for {
       // Load the configured default named provider
-      providerCfg <- Llm4sConfig.defaultProvider()
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
       // Build LLM client from typed provider config
       client <- LLMConnect.getClient(providerCfg)
 

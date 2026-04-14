@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect
 
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 // scalafix:off DisableSyntax.NoConfigFactory
@@ -9,6 +10,7 @@ import com.typesafe.config.ConfigFactory
 import scala.util.Using
 
 class LLMClientFactoryTest extends AnyFunSuite with Matchers {
+  private val registryService = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
 
   private def withProps(props: Map[String, String])(f: => Unit): Unit =
     Using.resource(SystemPropertiesOverride(props))(_ => f)
@@ -38,7 +40,8 @@ class LLMClientFactoryTest extends AnyFunSuite with Matchers {
     )
 
     withProps(props) {
-      val res = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+      given ModelRegistryService = registryService
+      val res                    = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
       res match {
         case Right(client) => client.getClass.getSimpleName shouldBe "OpenAIClient"
         case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -56,7 +59,8 @@ class LLMClientFactoryTest extends AnyFunSuite with Matchers {
     )
 
     withProps(props) {
-      val res = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+      given ModelRegistryService = registryService
+      val res                    = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
       res match {
         case Right(client) => client.getClass.getSimpleName shouldBe "AnthropicClient"
         case Left(err)     => fail(s"Expected Right, got Left($err)")

@@ -2,7 +2,8 @@ package org.llm4s.rag.benchmark
 
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
-import org.llm4s.rag.evaluation._
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.rag.evaluation.*
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -38,7 +39,7 @@ class BenchmarkRunner(
   resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig],
   datasetManager: DatasetManager = DatasetManager(),
   val options: BenchmarkRunnerOptions = BenchmarkRunnerOptions()
-) {
+)(using ModelRegistryService) {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -277,6 +278,6 @@ object BenchmarkRunner {
     embeddingClient: EmbeddingClient,
     resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig],
     options: BenchmarkRunnerOptions = BenchmarkRunnerOptions()
-  ): BenchmarkRunner =
+  )(using ModelRegistryService): BenchmarkRunner =
     new BenchmarkRunner(llmClient, embeddingClient, resolveEmbeddingProvider, options = options)
 }

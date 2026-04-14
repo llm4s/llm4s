@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect
 
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 // scalafix:off DisableSyntax.NoConfigFactory
@@ -9,6 +10,7 @@ import com.typesafe.config.ConfigFactory
 import scala.util.Using
 
 class LLMConnectResultTest extends AnyFunSuite with Matchers {
+  private val registryService = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
 
   private def withProps(props: Map[String, String])(f: => Either[_, _]): Either[_, _] =
     Using.resource(SystemPropertiesOverride(props))(_ => f)
@@ -38,6 +40,7 @@ class LLMConnectResultTest extends AnyFunSuite with Matchers {
     )
 
     val res = withProps(props) {
+      given ModelRegistryService = registryService
       Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
     }
     res.isRight shouldBe true
@@ -54,6 +57,7 @@ class LLMConnectResultTest extends AnyFunSuite with Matchers {
     )
 
     val res = withProps(props) {
+      given ModelRegistryService = registryService
       Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
     }
     res.isRight shouldBe true
@@ -70,6 +74,7 @@ class LLMConnectResultTest extends AnyFunSuite with Matchers {
     )
 
     val res = withProps(props) {
+      given ModelRegistryService = registryService
       Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
     }
     res.isRight shouldBe true

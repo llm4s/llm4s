@@ -21,8 +21,10 @@ object BasicInputValidationExample extends App {
   logger.info("=== Basic Input Validation Example ===")
 
   val result = for {
-    providerCfg <- Llm4sConfig.defaultProvider()
-    client      <- LLMConnect.getClient(providerCfg)
+    providerCfg     <- Llm4sConfig.defaultProvider()
+    registryService <- Llm4sConfig.modelRegistryService()
+    given org.llm4s.model.ModelRegistryService = registryService
+    client <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
     // Define input guardrails

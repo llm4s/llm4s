@@ -39,7 +39,9 @@ object StreamingWithProgressExample {
     var spinnerIndex = 0
     // Get a client (Result-first)
     val result = for {
-      providerCfg <- Llm4sConfig.defaultProvider()
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
       _ = {
         logger.info("=== LLM4S Streaming with Progress Example ===")
         logger.info("Using model: {}", providerCfg.model)

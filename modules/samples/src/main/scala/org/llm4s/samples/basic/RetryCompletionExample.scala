@@ -30,8 +30,10 @@ object RetryCompletionExample {
     )
 
     val result = for {
-      providerCfg <- Llm4sConfig.defaultProvider()
-      client      <- LLMConnect.getClient(providerCfg)
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
       completion <- LLMClientRetry.completeWithRetry(
         client,
         conversation,

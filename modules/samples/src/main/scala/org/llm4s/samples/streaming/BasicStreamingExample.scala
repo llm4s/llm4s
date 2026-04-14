@@ -28,7 +28,9 @@ object BasicStreamingExample {
 
     // Get a client using typed configuration (Result-first)
     val result = for {
-      providerCfg <- Llm4sConfig.defaultProvider()
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
       _ = {
         logger.info("=== LLM4S Basic Streaming Example ===")
         logger.info("Using model: {}", providerCfg.model)

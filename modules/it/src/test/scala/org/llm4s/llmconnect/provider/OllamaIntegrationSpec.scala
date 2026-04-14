@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.OllamaConfig
 import org.llm4s.llmconnect.model._
+import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -22,6 +23,8 @@ import scala.util.Try
  * structural properties: isRight, nonEmpty, > 0, correct types.
  */
 class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = ModelRegistryService.default().toOption.get
 
   private val testModel = "qwen2.5:0.5b"
   private val baseUrl   = "http://localhost:11434"

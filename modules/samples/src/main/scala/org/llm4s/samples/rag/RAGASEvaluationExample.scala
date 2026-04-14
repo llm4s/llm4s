@@ -62,7 +62,9 @@ object RAGASEvaluationExample extends App {
 
   // Create evaluator from environment
   val result = for {
+    registryService <- Llm4sConfig.modelRegistryService()
     providerCfg     <- Llm4sConfig.defaultProvider()
+    given org.llm4s.model.ModelRegistryService = registryService
     llmClient       <- LLMConnect.getClient(providerCfg)
     embeddingResult <- Llm4sConfig.embeddings()
     (providerName, embeddingConfig) = embeddingResult

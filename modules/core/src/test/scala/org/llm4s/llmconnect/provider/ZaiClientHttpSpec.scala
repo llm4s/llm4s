@@ -11,6 +11,7 @@ import org.scalatest.OptionValues._
 
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable.ListBuffer
+import org.llm4s.model.ModelRegistryService
 
 /**
  * Local HTTP server tests for ZaiClient (Tier 1).
@@ -20,6 +21,8 @@ import scala.collection.mutable.ListBuffer
  * No API keys or external services required — runs unconditionally as part of `sbt test`.
  */
 class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def localConfig(baseUrl: String): ZaiConfig =
     ZaiConfig(

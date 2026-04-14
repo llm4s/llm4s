@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.serialization.OpenRouterToolCallDeserializer
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.error.ThrowableOps._
@@ -61,7 +62,9 @@ class OpenRouterClient(
   config: OpenAIConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
-) extends BaseLifecycleLLMClient {
+)(using val registryService: ModelRegistryService)
+    extends BaseLifecycleLLMClient {
+
   private val httpClient = HttpClient.newHttpClient()
 
   protected def clientDescription: String = s"OpenRouter client for model ${config.model}"
@@ -477,13 +480,13 @@ object OpenRouterClient {
   def apply(
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-  ): Result[OpenRouterClient] =
+  )(using ModelRegistryService): Result[OpenRouterClient] =
     Try(new OpenRouterClient(config, metrics)).toResult
 
   def apply(
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  ): Result[OpenRouterClient] =
+  )(using ModelRegistryService): Result[OpenRouterClient] =
     Try(new OpenRouterClient(config, metrics, exchangeLogging)).toResult
 }

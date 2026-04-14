@@ -4,8 +4,10 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.types.ProviderModelTypes.ProviderKind
 import org.llm4s.llmconnect.config._
+import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 
 class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
+  private given ModelRegistryService = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
 
   test("OpenAI provider with OpenAIConfig returns OpenAIClient") {
     val cfg: ProviderConfig = OpenAIConfig(

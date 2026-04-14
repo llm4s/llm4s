@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.rag.evaluation.{ EvalSample, EvaluationError, TestDataset }
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -16,6 +17,7 @@ import org.scalatest.matchers.should.Matchers
  * lightweight test doubles.
  */
 class BenchmarkRunnerSpec extends AnyFlatSpec with Matchers {
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   // =========================================================================
   // Test doubles

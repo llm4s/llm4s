@@ -18,9 +18,11 @@ object OllamaExample {
     )
 
     val result = for {
-      providerCfg <- Llm4sConfig.defaultProvider()
-      client      <- LLMConnect.getClient(providerCfg)
-      completion  <- client.complete(conversation, CompletionOptions())
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client     <- LLMConnect.getClient(providerCfg)
+      completion <- client.complete(conversation, CompletionOptions())
       _ = {
         logger.info("Assistant:")
         logger.info("{}", completion.message.content)

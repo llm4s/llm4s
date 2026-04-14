@@ -68,7 +68,8 @@ object WorkspaceToolExample {
               logger.error("Failed to create workspace tools: {}", err.formatted)
 
             case Right(workspaceTools) =>
-              val toolRegistry = new ToolRegistry(workspaceTools)
+              val toolRegistry       = new ToolRegistry(workspaceTools)
+              val registryServiceRes = Llm4sConfig.modelRegistryService()
 
               // Create test prompt for the LLM
               val prompt = "You are a helpful assistant that has access to a workspace with files. " +
@@ -78,9 +79,12 @@ object WorkspaceToolExample {
 
               // Optional: run with the active provider from configuration (LLM_MODEL) via PureConfig
               logger.info("Attempting active provider from configuration (llm4s.llm.model / LLM_MODEL)...")
-              val activeClientRes = Llm4sConfig.defaultProvider().flatMap { provCfg =>
-                logger.info(s"Testing with active model: ${provCfg.model}")
-                LLMConnect.getClient(provCfg).map(client => (client, provCfg.model))
+              val activeClientRes = registryServiceRes.flatMap { registryService =>
+                given org.llm4s.model.ModelRegistryService = registryService
+                Llm4sConfig.defaultProvider().flatMap { provCfg =>
+                  logger.info(s"Testing with active model: ${provCfg.model}")
+                  LLMConnect.getClient(provCfg).map(client => (client, provCfg.model))
+                }
               }
               activeClientRes match {
                 case Right((client, model)) =>
@@ -96,7 +100,10 @@ object WorkspaceToolExample {
                 val key      = "llm4s.llm.model"
                 val original = Option(System.getProperty(key))
                 System.setProperty(key, s"openai/$gpt4oModelName")
-                val res = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+                val res = registryServiceRes.flatMap { registryService =>
+                  given org.llm4s.model.ModelRegistryService = registryService
+                  Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+                }
                 original match {
                   case Some(v) => System.setProperty(key, v)
                   case None    => System.clearProperty(key)
@@ -116,7 +123,10 @@ object WorkspaceToolExample {
                 val key      = "llm4s.llm.model"
                 val original = Option(System.getProperty(key))
                 System.setProperty(key, s"anthropic/$sonnetModelName")
-                val res = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+                val res = registryServiceRes.flatMap { registryService =>
+                  given org.llm4s.model.ModelRegistryService = registryService
+                  Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+                }
                 original match {
                   case Some(v) => System.setProperty(key, v)
                   case None    => System.clearProperty(key)

@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.metrics.MetricsCollector
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.error.ThrowableOps._
@@ -35,7 +36,9 @@ class DeepSeekClient(
   config: DeepSeekConfig,
   protected val metrics: MetricsCollector = MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
-) extends BaseLifecycleLLMClient {
+)(using val registryService: ModelRegistryService)
+    extends BaseLifecycleLLMClient {
+
   private val httpClient = HttpClient.newHttpClient()
   private val logger     = org.slf4j.LoggerFactory.getLogger(getClass)
 
@@ -358,12 +361,12 @@ object DeepSeekClient {
     config: DeepSeekConfig,
     metrics: MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  ): Result[DeepSeekClient] =
+  )(using ModelRegistryService): Result[DeepSeekClient] =
     Try(new DeepSeekClient(config, metrics, exchangeLogging)).toResult
 
-  def apply(config: DeepSeekConfig, metrics: MetricsCollector): Result[DeepSeekClient] =
+  def apply(config: DeepSeekConfig, metrics: MetricsCollector)(using ModelRegistryService): Result[DeepSeekClient] =
     Try(new DeepSeekClient(config, metrics)).toResult
 
-  def apply(config: DeepSeekConfig): Result[DeepSeekClient] =
+  def apply(config: DeepSeekConfig)(using ModelRegistryService): Result[DeepSeekClient] =
     Try(new DeepSeekClient(config, MetricsCollector.noop)).toResult
 }

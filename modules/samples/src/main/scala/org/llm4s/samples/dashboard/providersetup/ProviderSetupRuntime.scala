@@ -5,6 +5,7 @@ import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.config.*
 import org.llm4s.llmconnect.model.{ AssistantMessage, Conversation, SystemMessage, UserMessage }
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect, LlmClientOptions, ProviderExchangeLogging }
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupMessages.*
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupModel.*
 import org.llm4s.samples.dashboard.shared.DashboardSupport
@@ -19,6 +20,8 @@ import scala.util.Try
 import scala.util.Using
 
 private[providersetup] object ProviderSetupRuntime:
+  private def contextWindowResolver(using ModelRegistryService): ContextWindowResolver =
+    ContextWindowResolver(summon[ModelRegistryService])
 
   def detectConfigStatus(
     providersCfg: ProvidersConfigModel.ProvidersConfig,
@@ -84,7 +87,7 @@ private[providersetup] object ProviderSetupRuntime:
     selectedProviderKind: Option[ProviderKind],
     selectedConfiguredProvider: Option[ConfiguredProvider],
     sessionInput: Option[ProviderSessionInput]
-  ): Either[String, ActiveSession] =
+  )(using ModelRegistryService): Either[String, ActiveSession] =
     val overrideInput = sessionInput.filter(_.hasAnyValue)
     selectedConfiguredProvider match
       case Some(configured) =>
@@ -170,7 +173,8 @@ private[providersetup] object ProviderSetupRuntime:
   private def buildOverrideSession(
     providerKind: ProviderKind,
     input: ProviderSessionInput
-  ): Either[String, ActiveSession] =
+  )(using ModelRegistryService): Either[String, ActiveSession] =
+    given ContextWindowResolver = contextWindowResolver
     providerKind match
       case ProviderKind.Ollama =>
         for
@@ -375,7 +379,7 @@ private[providersetup] object ProviderSetupRuntime:
     demoConfig: ProviderSetupDemoConfig,
     exchangeLogging: ProviderExchangeLogging,
     ctx: RuntimeCtx[Msg]
-  ): Cmd[Msg] =
+  )(using ModelRegistryService): Cmd[Msg] =
     Cmd.FCmd(
       task = Future {
         Msg.Global(
@@ -406,7 +410,7 @@ private[providersetup] object ProviderSetupRuntime:
     demoConfig: ProviderSetupDemoConfig,
     exchangeLogging: ProviderExchangeLogging,
     ctx: RuntimeCtx[Msg]
-  ): Cmd[Msg] =
+  )(using ModelRegistryService): Cmd[Msg] =
     Cmd.FCmd(
       task = Future {
         selections.foreach { selection =>
@@ -440,7 +444,7 @@ private[providersetup] object ProviderSetupRuntime:
     demoConfig: ProviderSetupDemoConfig,
     exchangeLogging: ProviderExchangeLogging,
     ctx: RuntimeCtx[Msg]
-  ): Either[String, String] =
+  )(using ModelRegistryService): Either[String, String] =
     val clientResult: Result[LLMClient] = LLMConnect.getClient(
       config,
       LlmClientOptions(

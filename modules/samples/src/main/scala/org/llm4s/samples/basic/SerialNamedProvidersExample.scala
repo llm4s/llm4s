@@ -33,9 +33,11 @@ object SerialNamedProvidersExample:
 
     providerNames.foreach: providerName =>
       val result = for
-        providerCfg <- Llm4sConfig.provider(providerName)
-        client      <- LLMConnect.getClient(providerCfg)
-        completion  <- client.complete(conversation)
+        providerCfg     <- Llm4sConfig.provider(providerName)
+        registryService <- Llm4sConfig.modelRegistryService()
+        given org.llm4s.model.ModelRegistryService = registryService
+        client     <- LLMConnect.getClient(providerCfg)
+        completion <- client.complete(conversation)
       yield (providerCfg, completion)
 
       result.fold(

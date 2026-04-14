@@ -6,6 +6,9 @@ import org.scalatest.matchers.should.Matchers
 
 class ProviderConfigSpec extends AnyFunSuite with Matchers {
 
+  private given ContextWindowResolver =
+    ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
+
   // ================================= OPENAI CONFIG =================================
 
   test("OpenAIConfig.fromValues creates config with correct model") {
@@ -173,7 +176,7 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers {
       baseUrl = "http://localhost:11434"
     )
 
-    // Context window may come from ModelRegistry or fallback logic
+    // Context window may come from registry metadata or fallback logic
     config.contextWindow should be > 0
   }
 
@@ -188,7 +191,7 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers {
 
   test("OllamaConfig.fromValues sets reserveCompletion for all models") {
     val config = OllamaConfig.fromValues("llama3", "http://localhost:11434")
-    // reserveCompletion may come from ModelRegistry or fallback logic
+    // reserveCompletion may come from registry metadata or fallback logic
     config.reserveCompletion should be > 0
   }
 

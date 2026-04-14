@@ -11,12 +11,14 @@ import org.scalatest.funsuite.AnyFunSuite
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable.ListBuffer
+import org.llm4s.model.ModelRegistryService
 
 /**
  * Test helper for building Ollama request bodies.
  * Delegates to the real production implementation to ensure tests validate actual behavior.
  */
 private[provider] object OllamaRequestBodyTestHelper {
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private val testConfig = OllamaConfig(
     model = "llama3.1",
     baseUrl = "http://localhost:11434",
@@ -35,6 +37,7 @@ private[provider] object OllamaRequestBodyTestHelper {
 }
 
 class OllamaClientSpec extends AnyFunSuite {
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   test("ollama chat request sends assistant content as a plain string") {
 
@@ -98,6 +101,7 @@ class OllamaClientSpec extends AnyFunSuite {
 // HTTP stub-based tests for OllamaClient
 // ============================================================
 class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val testConfig = OllamaConfig(
     model = "llama3.1",

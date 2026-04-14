@@ -8,6 +8,7 @@ import org.llm4s.samples.dashboard.providersetup.ProviderSetupModel.*
 import org.llm4s.samples.dashboard.providersetup.update.{ ProviderSetupInputSupport, ProviderSetupUpdate }
 import org.llm4s.samples.dashboard.providersetup.view.ProviderSetupView
 import org.llm4s.types.ProviderModelTypes.ProviderName
+import org.llm4s.model.ModelRegistryService
 
 import java.nio.file.Path
 import termflow.tui.FileHistoryStore
@@ -39,7 +40,7 @@ object ProviderSetupDemoApp:
     defaultProvider: ProviderConfig,
     discoveredModels: Map[ProviderName, List[DiscoveredModel]],
     exchangeLogging: ProviderExchangeLogging
-  ): TuiApp[Model, Msg] =
+  )(using ModelRegistryService): TuiApp[Model, Msg] =
     new TuiApp[Model, Msg]:
       override def init(ctx: RuntimeCtx[Msg]): Tui[Model, Msg] =
         Sub.InputKey(

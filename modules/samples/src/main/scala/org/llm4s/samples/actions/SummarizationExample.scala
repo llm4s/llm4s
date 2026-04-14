@@ -71,9 +71,11 @@ object SummarizationExample {
 
     // Get a client using typed configuration (Result-first)
     val result = for {
-      providerCfg <- Llm4sConfig.defaultProvider()
-      client      <- LLMConnect.getClient(providerCfg)
-      completion  <- client.complete(conversation)
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client     <- LLMConnect.getClient(providerCfg)
+      completion <- client.complete(conversation)
       _ = CompletionSummaryInfo(completion)
       summaryResult <- summarizeText(textToSummarize2, Some("50 words"))(client)
       _ = logger.info("{}", summaryResult)

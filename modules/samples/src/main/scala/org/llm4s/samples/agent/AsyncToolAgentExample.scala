@@ -35,8 +35,10 @@ object AsyncToolAgentExample {
 
     val result = for {
       // Load typed provider configuration and build LLM client
-      providerCfg <- Llm4sConfig.defaultProvider()
-      client      <- LLMConnect.getClient(providerCfg)
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
 
       // Create weather tool
       weatherTool <- createWeatherTool()

@@ -2,7 +2,6 @@ package org.llm4s.llmconnect.config
 
 import org.llm4s.types.ProviderModelTypes.ProviderKind
 import org.slf4j.LoggerFactory
-import org.llm4s.model.ModelRegistry
 import org.llm4s.util.Redaction
 
 /**
@@ -105,10 +104,10 @@ object OpenAIConfig {
     apiKey: String,
     organization: Option[String],
     baseUrl: String
-  ): OpenAIConfig = {
+  )(using resolver: ContextWindowResolver): OpenAIConfig = {
     require(apiKey.trim.nonEmpty, "OpenAI apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "OpenAI baseUrl must be non-empty")
-    val (cw, rc) = ContextWindowResolver.resolve(
+    val (cw, rc) = resolver.resolve(
       lookupProviders = Seq("openai"),
       modelName = modelName,
       defaultContextWindow = 8192,
@@ -189,10 +188,10 @@ object AzureConfig {
     endpoint: String,
     apiKey: String,
     apiVersion: String
-  ): AzureConfig = {
+  )(using resolver: ContextWindowResolver): AzureConfig = {
     require(endpoint.trim.nonEmpty, "Azure endpoint must be non-empty")
     require(apiKey.trim.nonEmpty, "Azure apiKey must be non-empty")
-    val (cw, rc) = ContextWindowResolver.resolve(
+    val (cw, rc) = resolver.resolve(
       lookupProviders = Seq("azure", "openai"),
       modelName = modelName,
       defaultContextWindow = 8192,
@@ -259,10 +258,10 @@ object AnthropicConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  ): AnthropicConfig = {
+  )(using resolver: ContextWindowResolver): AnthropicConfig = {
     require(apiKey.trim.nonEmpty, "Anthropic apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Anthropic baseUrl must be non-empty")
-    val (cw, rc) = ContextWindowResolver.resolve(
+    val (cw, rc) = resolver.resolve(
       lookupProviders = Seq("anthropic"),
       modelName = modelName,
       defaultContextWindow = 200000,
@@ -321,9 +320,9 @@ object OllamaConfig {
   def fromValues(
     modelName: String,
     baseUrl: String
-  ): OllamaConfig = {
+  )(using resolver: ContextWindowResolver): OllamaConfig = {
     require(baseUrl.trim.nonEmpty, "Ollama baseUrl must be non-empty")
-    val (cw, rc) = ContextWindowResolver.resolve(
+    val (cw, rc) = resolver.resolve(
       lookupProviders = Seq("ollama"),
       modelName = modelName,
       defaultContextWindow = 8192,
@@ -389,10 +388,10 @@ object ZaiConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  ): ZaiConfig = {
+  )(using resolver: ContextWindowResolver): ZaiConfig = {
     require(apiKey.trim.nonEmpty, "Zai apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Zai baseUrl must be non-empty")
-    val (cw, rc) = ContextWindowResolver.resolve(
+    val (cw, rc) = resolver.resolve(
       lookupProviders = Seq("zai"),
       modelName = modelName,
       defaultContextWindow = 128000,
@@ -459,11 +458,11 @@ object GeminiConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  ): GeminiConfig = {
+  )(using resolver: ContextWindowResolver): GeminiConfig = {
     require(apiKey.trim.nonEmpty, "Gemini apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Gemini baseUrl must be non-empty")
     val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
-    val (cw, rc) = ContextWindowResolver.resolve(
+    val (cw, rc) = resolver.resolve(
       lookupProviders = Seq("gemini", "google"),
       modelName = modelName,
       defaultContextWindow = 1048576,
@@ -550,10 +549,10 @@ object DeepSeekConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  ): DeepSeekConfig = {
+  )(using resolver: ContextWindowResolver): DeepSeekConfig = {
     require(apiKey.trim.nonEmpty, "DeepSeek apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "DeepSeek baseUrl must be non-empty")
-    val (cw, rc) = ContextWindowResolver.resolve(
+    val (cw, rc) = resolver.resolve(
       lookupProviders = Seq("deepseek"),
       modelName = modelName,
       defaultContextWindow = 64000,
@@ -616,10 +615,10 @@ object CohereConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  ): CohereConfig = {
+  )(using resolver: ContextWindowResolver): CohereConfig = {
     require(apiKey.trim.nonEmpty, "Cohere apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Cohere baseUrl must be non-empty")
-    val (cw, rc) = ContextWindowResolver.resolve(
+    val (cw, rc) = resolver.resolve(
       lookupProviders = Seq("cohere"),
       modelName = modelName,
       defaultContextWindow = DefaultContextWindow,
@@ -648,41 +647,29 @@ case class MistralConfig(
     s"MistralConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
 
-object MistralConfig {
-  private val logger = LoggerFactory.getLogger(getClass)
-
+object MistralConfig:
   val DEFAULT_BASE_URL: String = "https://api.mistral.ai"
 
   private val DefaultContextWindow     = 128000
   private val DefaultReserveCompletion = 4096
 
-  private def getContextWindowForModel(modelName: String): (Int, Int) = {
-    val registryResult =
-      ModelRegistry
-        .lookup("mistral", modelName)
-        .toOption
-        .orElse(ModelRegistry.lookup(modelName).toOption)
-
-    registryResult match {
-      case Some(metadata) =>
-        val contextWindow = metadata.maxInputTokens.getOrElse(DefaultContextWindow)
-        val reserve       = metadata.maxOutputTokens.getOrElse(DefaultReserveCompletion)
-        logger.debug(s"Using ModelRegistry metadata for $modelName: context=$contextWindow, reserve=$reserve")
-        (contextWindow, reserve)
-      case None =>
-        logger.debug(s"Model $modelName not found in registry, using fallback values")
-        (DefaultContextWindow, DefaultReserveCompletion)
-    }
-  }
+  private val mistralFallback: String => (Int, Int) =
+    _ => (DefaultContextWindow, DefaultReserveCompletion)
 
   def fromValues(
     modelName: String,
     apiKey: String,
     baseUrl: String
-  ): MistralConfig = {
+  )(using resolver: ContextWindowResolver): MistralConfig =
     require(apiKey.trim.nonEmpty, "Mistral apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Mistral baseUrl must be non-empty")
-    val (cw, rc) = getContextWindowForModel(modelName)
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("mistral"),
+      modelName = modelName,
+      defaultContextWindow = DefaultContextWindow,
+      defaultReserve = DefaultReserveCompletion,
+      fallbackResolver = mistralFallback
+    )
     MistralConfig(
       apiKey = apiKey,
       model = modelName,
@@ -690,5 +677,3 @@ object MistralConfig {
       contextWindow = cw,
       reserveCompletion = rc
     )
-  }
-}

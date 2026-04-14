@@ -8,7 +8,7 @@ import pureconfig.ConfigSource
 
 private[config] object NamedProviderLoader:
 
-  def load(source: ConfigSource, providerName: String): Result[ProviderConfig] =
+  def load(source: ConfigSource, providerName: String)(using ContextWindowResolver): Result[ProviderConfig] =
     val trimmed = providerName.trim
     if trimmed.isEmpty then Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
     else
@@ -22,7 +22,7 @@ private[config] object NamedProviderLoader:
 
   def loadProviderConfigs(
     source: ConfigSource
-  ): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
+  )(using ContextWindowResolver): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
     for
       providers <- ProvidersConfigLoader.load(source)
       namedProviders = providers.namedProviders
@@ -31,7 +31,7 @@ private[config] object NamedProviderLoader:
 
   def getProviderConfigs(
     namedProviders: Map[ProviderName, NamedProviderConfig]
-  ): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
+  )(using ContextWindowResolver): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
     namedProviders.toList.foldLeft((Map.empty[ProviderName, LLMError], Map.empty[ProviderName, ProviderConfig]))(
       (x, y) =>
         buildConfigFromNamedConfig(y._1.asName, y._2).fold(
@@ -48,7 +48,7 @@ private[config] object NamedProviderLoader:
   private def buildConfigFromNamedConfig(
     providerName: String,
     section: NamedProviderConfig
-  ): Result[ProviderConfig] =
+  )(using ContextWindowResolver): Result[ProviderConfig] =
     def required(fieldName: String, value: Option[String], envHint: String): Result[String] =
       value.toRight(
         ConfigurationError(s"Configured provider '$providerName' is missing $fieldName ($envHint)")

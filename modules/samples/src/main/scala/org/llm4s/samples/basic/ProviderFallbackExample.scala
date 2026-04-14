@@ -74,16 +74,23 @@ object ProviderFallbackExample extends App {
     configuredProvider ++ ollamaFallback
 
   val providers: Seq[(String, LLMClient)] =
-    providerConfigs.flatMap { case (name, config) =>
-      LLMConnect.getClient(config) match {
-        case Right(client) =>
-          Some(name -> client)
-        case Left(error) =>
-          logger.info(
-            s"Failed to initialize provider: $name - ${error.formatted}"
-          )
-          None
-      }
+    Llm4sConfig.modelRegistryService() match {
+      case Left(error) =>
+        logger.info(s"Failed to initialize model registry service: ${error.formatted}")
+        Seq.empty
+      case Right(registryService) =>
+        given org.llm4s.model.ModelRegistryService = registryService
+        providerConfigs.flatMap { case (name, config) =>
+          LLMConnect.getClient(config) match {
+            case Right(client) =>
+              Some(name -> client)
+            case Left(error) =>
+              logger.info(
+                s"Failed to initialize provider: $name - ${error.formatted}"
+              )
+              None
+          }
+        }
     }
 
   def completeWithFallback(prompt: String): Either[String, String] = {

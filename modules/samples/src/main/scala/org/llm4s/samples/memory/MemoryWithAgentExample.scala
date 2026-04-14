@@ -26,8 +26,10 @@ object MemoryWithAgentExample {
     logger.info("=== Memory with Agent Integration Example ===")
 
     val result = for {
-      providerCfg <- Llm4sConfig.defaultProvider()
-      client      <- LLMConnect.getClient(providerCfg)
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
       agent = new Agent(client)
 
       // === Part 1: Initialize Memory with Background Knowledge ===

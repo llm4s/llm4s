@@ -8,7 +8,7 @@ import org.slf4j.LoggerFactory
 /**
  * Handles model-specific parameter validation and transformation.
  *
- * Uses ModelCapabilities from ModelRegistry to apply constraints based on
+ * Uses ModelCapabilities from ModelRegistryService to apply constraints based on
  * what each model supports. This mirrors LiteLLM's approach to handling
  * model-specific quirks (e.g., O-series temperature restrictions).
  *
@@ -91,25 +91,26 @@ trait RequestTransformer {
 object RequestTransformer {
 
   /**
-   * Default implementation using ModelRegistry for capability lookups.
+   * Default implementation using ModelRegistryService for capability lookups.
    */
-  val default: RequestTransformer = new DefaultRequestTransformer()
+  def default(service: ModelRegistryService): RequestTransformer = DefaultRequestTransformer(Map.empty, service)
 
   /**
    * Create a transformer with custom model overrides.
    * Useful for testing or for models not yet in the registry.
    */
-  def withOverrides(overrides: Map[String, ModelCapabilities]): RequestTransformer =
-    new DefaultRequestTransformer(overrides)
+  def withOverrides(overrides: Map[String, ModelCapabilities], service: ModelRegistryService): RequestTransformer =
+    new DefaultRequestTransformer(overrides, service)
 }
 
 /**
- * Default implementation that uses ModelRegistry for capability lookups.
+ * Default implementation that uses ModelRegistryService for capability lookups.
  *
  * @param overrides Optional map of model-specific capability overrides
  */
 class DefaultRequestTransformer(
-  private val overrides: Map[String, ModelCapabilities] = Map.empty
+  private val overrides: Map[String, ModelCapabilities] = Map.empty,
+  service: ModelRegistryService
 ) extends RequestTransformer {
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -263,7 +264,7 @@ class DefaultRequestTransformer(
       .get(modelId)
       .orElse {
         // Then check registry
-        ModelRegistry.lookup(modelId).toOption.map(_.capabilities)
+        service.lookup(modelId).toOption.map(_.capabilities)
       }
       .getOrElse(ModelCapabilities())
 
@@ -334,7 +335,7 @@ object TransformationResult {
     options: CompletionOptions,
     messages: Seq[Message],
     dropUnsupported: Boolean = true,
-    transformer: RequestTransformer = RequestTransformer.default
+    transformer: RequestTransformer
   ): Result[TransformationResult] =
     transformer.transformOptions(modelId, options, dropUnsupported).map { transformedOptions =>
       TransformationResult(
