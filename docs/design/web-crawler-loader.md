@@ -2,8 +2,7 @@
 
 **Status:** In Progress
 **Author:** RAG in a Box Team
-**Date:** 2026-01-03 → April 8, 2026
-**Last Updated:** April 8, 2026
+**Date:** 2026-01-03
 
 ## Overview
 
@@ -338,7 +337,6 @@ val rag = RAG.builder()
 - [x] Link extraction from various HTML structures
 - [x] robots.txt parser compliance
 - [x] CrawlerConfig defaults and overrides
-- Coverage: 92%
 
 ### Integration Tests (✓ Completed)
 - [x] Mock HTTP server with controlled crawling
@@ -347,7 +345,6 @@ val rag = RAG.builder()
 - [x] Page count limiting verification
 - [x] Rate limiting and delay behavior
 - [x] Error handling (timeouts, 404s, 503s)
-- Coverage: 88%
 
 ### Sample Application (✓ Completed)
 - [x] Added to `modules/samples/src/main/scala/org/llm4s/samples/rag/WebCrawlerExample.scala`
@@ -413,10 +410,6 @@ modules/core/src/test/scala/org/llm4s/rag/loader/
 - **Rate Limiting**: Default 500ms delay per request; configurable via `withDelay(ms)`
 - **Caching**: robots.txt cached per domain; LinkExtractor uses streaming to avoid DOM tree duplication
 - **Deduplication**: URL normalization prevents re-crawling (via `mutable.Set[String]`)
-- **Benchmarks** (April 2026):
-  - 1000 pages @ 500ms delay: ~8 minutes
-  - Memory usage: < 50MB for streaming iteration
-  - robots.txt cache: < 1MB for typical sites
 
 ## Related Work
 

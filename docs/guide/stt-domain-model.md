@@ -404,7 +404,7 @@ result.map { trans =>
 ### Integration Tests
 - Provider adapters populate metadata correctly
 - Error handling in real transcription scenarios
-- Confidenceᇁthreshold validation with actual provider output
+- Confidence threshold validation with actual provider output
 
 ### Edge Cases Covered
 - Unicode and multilingual text

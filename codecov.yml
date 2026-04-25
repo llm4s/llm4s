@@ -9,12 +9,6 @@ coverage:
         target: 90%
         threshold: 5%
 
-# Ignore documentation and speech modules from coverage calculation
-ignore:
-  - "**/*.md"
-  - "docs/**"
-  - "modules/core/src/main/scala/org/llm4s/speech/**"
-
 # Coverage flags for per-module tracking
 # Only track main source code (not tests or resources)
 flags:

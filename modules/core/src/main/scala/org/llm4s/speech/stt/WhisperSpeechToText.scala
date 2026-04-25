@@ -96,36 +96,22 @@ final class WhisperSpeechToText(
     output: String,
     options: STTOptions
   ): Result[Transcription] = {
-    // Parse output based on format and options
-    val text       = output.trim
-    val confidence = extractConfidence(output)
-    val timestamps = if (options.enableTimestamps) extractTimestamps(output) else Nil
-
-    // Wrap construction in Try to catch require() violations (empty text)
-    Safety
-      .fromTry(
-        Try(
-          Transcription(
-            text = text,
-            language = options.language,
-            confidence = confidence,
-            timestamps = timestamps,
-            meta = None
-          )
+    val text = output.trim
+    if (text.isEmpty) {
+      Left(ProcessingError.audioValidation("Transcription produced empty text"))
+    } else {
+      val confidence = extractConfidence(output)
+      val timestamps = if (options.enableTimestamps) extractTimestamps(output) else Nil
+      Right(
+        Transcription(
+          text = text,
+          language = options.language,
+          confidence = confidence,
+          timestamps = timestamps,
+          meta = None
         )
       )
-      .left
-      .map {
-        case _: IllegalArgumentException =>
-          if (text.isEmpty) {
-            ProcessingError
-              .audioValidation("Transcription produced empty text")
-          } else {
-            ProcessingError.audioValidation("Failed to construct transcription object")
-          }
-        case e: Throwable =>
-          ProcessingError.audioValidation(s"Unexpected error parsing Whisper output: ${e.getMessage}")
-      }
+    }
   }
 
   private def extractConfidence(output: String): Option[Double] =
