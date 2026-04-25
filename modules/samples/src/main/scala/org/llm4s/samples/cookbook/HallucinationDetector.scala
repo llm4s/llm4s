@@ -16,7 +16,7 @@ object HallucinationDetector {
 
   def main(args: Array[String]): Unit = {
     val clientResult = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
     } yield client
 

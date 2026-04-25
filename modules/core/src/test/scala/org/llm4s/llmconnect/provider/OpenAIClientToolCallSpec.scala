@@ -7,11 +7,13 @@ import com.azure.ai.openai.models.{
   ChatCompletionsJsonSchemaResponseFormat
 }
 import com.azure.json.JsonProviders
+import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ResponseFormat, UserMessage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import scala.collection.mutable.ListBuffer
 import scala.util.Using
 
 final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers {
@@ -147,5 +149,59 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers {
       case other =>
         fail(s"Expected ChatCompletionsJsonSchemaResponseFormat but got ${other.getClass.getSimpleName}")
     }
+  }
+
+  it should "record a provider exchange when logging is enabled" in {
+    val model = "gpt-4"
+    val config = OpenAIConfig.fromValues(
+      modelName = model,
+      apiKey = "test-api-key",
+      organization = None,
+      baseUrl = "https://example.invalid/v1"
+    )
+
+    val completions = completionsFromJson(
+      """{"id":"chatcmpl-1","created":0,"model":"gpt-4","choices":[{"index":0,"message":{"role":"assistant","content":"logged ok"}}],
+        |"usage":{"completion_tokens":1,"prompt_tokens":1,"total_tokens":2}}""".stripMargin
+    )
+
+    val recorded = ListBuffer.empty[ProviderExchange]
+    val sink = new ProviderExchangeSink:
+      override def record(exchange: ProviderExchange): Unit =
+        recorded += exchange
+
+    val transport = new OpenAIClientTransport {
+      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions =
+        completions
+
+      override def getChatCompletionsStream(
+        model: String,
+        options: ChatCompletionsOptions
+      ): com.azure.core.util.IterableStream[ChatCompletions] =
+        throw new UnsupportedOperationException("not used")
+    }
+
+    val client = OpenAIClient.forTest(
+      model,
+      transport,
+      config,
+      exchangeLogging = ProviderExchangeLogging.enabled(sink)
+    )
+
+    val result = client.complete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())
+
+    result.isRight shouldBe true
+    recorded should have size 1
+
+    val exchange = recorded.head
+    exchange.provider shouldBe "openai"
+    exchange.model shouldBe Some("gpt-4")
+    exchange.requestBody should include("messages")
+    exchange.requestBody should include("hello")
+    exchange.responseBody shouldBe defined
+    exchange.responseBody.get should include("chatcmpl-1")
+    exchange.responseBody.get should include("logged ok")
+    exchange.errorMessage shouldBe empty
+    exchange.durationMs should be >= 0L
   }
 }

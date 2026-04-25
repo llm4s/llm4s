@@ -121,7 +121,7 @@ object DocumentQAExample extends App {
       _ = logger.info("-" * 40)
       _ = logger.info("Step 2: Connecting to LLM")
       _ = logger.info("-" * 40)
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       _ = logger.info("LLM client connected successfully")
 

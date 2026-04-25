@@ -113,7 +113,7 @@ object StreamingWithToolsExample extends App {
 
   val result = for {
     timeTool <- timeToolResult
-    provider <- Llm4sConfig.provider()
+    provider <- Llm4sConfig.defaultProvider()
     client   <- LLMConnect.getClient(provider)
     agent = new Agent(client)
     tools = new ToolRegistry(Seq(timeTool))

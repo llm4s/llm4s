@@ -141,8 +141,7 @@ class BenchmarkReportEdgeCasesSpec extends AnyFlatSpec with Matchers {
       saveResult.isRight shouldBe true
       val content = new String(Files.readAllBytes(tempFile))
       content should include("BENCHMARK RESULTS")
-    } finally
-      Files.deleteIfExists(tempFile)
+    } finally Files.deleteIfExists(tempFile)
   }
 
   it should "save JSON format to file" in {
@@ -153,8 +152,7 @@ class BenchmarkReportEdgeCasesSpec extends AnyFlatSpec with Matchers {
       saveResult.isRight shouldBe true
       val content = new String(Files.readAllBytes(tempFile))
       ujson.read(content) // should parse without error
-    } finally
-      Files.deleteIfExists(tempFile)
+    } finally Files.deleteIfExists(tempFile)
   }
 
   it should "save Markdown format to file" in {
@@ -165,8 +163,7 @@ class BenchmarkReportEdgeCasesSpec extends AnyFlatSpec with Matchers {
       saveResult.isRight shouldBe true
       val content = new String(Files.readAllBytes(tempFile))
       content should include("# Benchmark Results")
-    } finally
-      Files.deleteIfExists(tempFile)
+    } finally Files.deleteIfExists(tempFile)
   }
 
   it should "create parent directories if needed" in {

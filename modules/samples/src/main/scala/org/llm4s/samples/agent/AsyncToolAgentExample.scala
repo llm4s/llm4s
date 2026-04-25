@@ -17,8 +17,8 @@ import scala.concurrent.ExecutionContext.Implicits.global
  * latency by executing all tools simultaneously.
  *
  * Requirements:
- * - Set LLM_MODEL environment variable (e.g., "openai/gpt-4o")
- * - Set appropriate API key (e.g., OPENAI_API_KEY)
+ * - Configure a default named provider (for example `LLM4S_PROVIDER=openai-main`)
+ * - Set the appropriate API key (for example `OPENAI_API_KEY`)
  *
  * Run with: sbt "samples/runMain org.llm4s.samples.agent.AsyncToolAgentExample"
  */
@@ -35,7 +35,7 @@ object AsyncToolAgentExample {
 
     val result = for {
       // Load typed provider configuration and build LLM client
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
 
       // Create weather tool
@@ -89,9 +89,9 @@ object AsyncToolAgentExample {
       case Left(error) =>
         logger.error("Example failed: {}", error.formatted)
         logger.error("")
-        logger.error("Make sure you have set:")
-        logger.error("  - LLM_MODEL (e.g., openai/gpt-4o)")
-        logger.error("  - OPENAI_API_KEY or appropriate provider key")
+        logger.error("Make sure you have configured:")
+        logger.error("  - a default named provider (e.g., LLM4S_PROVIDER=openai-main)")
+        logger.error("  - OPENAI_API_KEY or the appropriate provider key")
     }
   }
 

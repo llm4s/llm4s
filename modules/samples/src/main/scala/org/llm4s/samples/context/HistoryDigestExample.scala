@@ -40,7 +40,7 @@ object HistoryDigestExample {
     logger.info("Starting History Digest Compression Example")
 
     val result = for {
-      modelName    <- Llm4sConfig.provider().map(_.model)
+      modelName    <- Llm4sConfig.defaultProvider().map(_.model)
       tokenCounter <- ConversationTokenCounter.forModel(modelName)
       demo         <- runHistoryDigestDemo(tokenCounter)
     } yield demo

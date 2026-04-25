@@ -17,7 +17,7 @@ object SingleStepAgentExample {
 
   def main(args: Array[String]): Unit = {
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
       toolRegistry = new ToolRegistry(Seq(weatherTool))

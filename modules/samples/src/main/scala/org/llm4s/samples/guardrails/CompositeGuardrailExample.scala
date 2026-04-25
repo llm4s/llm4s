@@ -32,7 +32,7 @@ object CompositeGuardrailExample extends App {
   )
 
   val result1 = for {
-    providerCfg <- Llm4sConfig.provider()
+    providerCfg <- Llm4sConfig.defaultProvider()
     client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
@@ -65,7 +65,7 @@ object CompositeGuardrailExample extends App {
   )
 
   val result2 = for {
-    providerCfg <- Llm4sConfig.provider()
+    providerCfg <- Llm4sConfig.defaultProvider()
     client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
@@ -96,7 +96,7 @@ object CompositeGuardrailExample extends App {
   )
 
   val result3 = for {
-    providerCfg <- Llm4sConfig.provider()
+    providerCfg <- Llm4sConfig.defaultProvider()
     client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 
@@ -145,7 +145,7 @@ object CompositeGuardrailExample extends App {
   }
 
   val result4 = for {
-    providerCfg <- Llm4sConfig.provider()
+    providerCfg <- Llm4sConfig.defaultProvider()
     client      <- LLMConnect.getClient(providerCfg)
     agent = new Agent(client)
 

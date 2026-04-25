@@ -37,7 +37,7 @@ object MemoryConsolidationExample {
     logger.info("=" * 60)
 
     val result = for {
-      providerConfig <- Llm4sConfig.provider()
+      providerConfig <- Llm4sConfig.defaultProvider()
       client         <- LLMConnect.getClient(providerConfig)
     } yield runExample(client, providerConfig.model)
 

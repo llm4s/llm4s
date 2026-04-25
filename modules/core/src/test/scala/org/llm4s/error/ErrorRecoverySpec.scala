@@ -341,8 +341,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
                 rejectedCount.incrementAndGet()
               case _ => ()
             }
-          } finally
-            latch.countDown()
+          } finally latch.countDown()
       })
     }
 
@@ -372,8 +371,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
           try {
             barrier.await() // all threads start simultaneously to maximise contention
             cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
-          } finally
-            latch.countDown()
+          } finally latch.countDown()
       })
     }
 
@@ -463,8 +461,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
               probesAllowed.incrementAndGet()
               Result.failure(ServiceError(500, "p", "probe-failed"))
             }
-          } finally
-            latch.countDown()
+          } finally latch.countDown()
       })
     }
 

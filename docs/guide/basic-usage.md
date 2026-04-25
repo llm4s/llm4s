@@ -23,7 +23,7 @@ Learn the fundamentals of LLM4S: creating clients, making LLM calls, and handlin
 
 LLM4S makes it simple to integrate Large Language Models into your Scala applications. The core workflow is:
 
-1. **Configure** your LLM provider via environment variables or config files
+1. **Configure** a named provider via environment variables or config files
 2. **Create** an LLM client
 3. **Send** messages to the LLM
 4. **Handle** the result (success or error)
@@ -44,9 +44,9 @@ import org.llm4s.llmconnect.{LLMClient, LLMConnect}
 import org.llm4s.llmconnect.model.{Conversation, UserMessage}
 
 object SimpleExample extends App {
-  // Step 1: Load configuration from environment variables
+  // Step 1: Load the configured default named provider
   val startup = for {
-    providerConfig <- Llm4sConfig.provider()
+    providerConfig <- Llm4sConfig.defaultProvider()
     client <- LLMConnect.getClient(providerConfig)
   } yield {
     // Step 2: Create a simple message
@@ -73,31 +73,26 @@ object SimpleExample extends App {
 
 ```bash
 # OpenAI
-export LLM_MODEL=openai/gpt-4o
+export LLM4S_PROVIDER=openai-main
 export OPENAI_API_KEY=sk-proj-...
 
 # Or Anthropic
-export LLM_MODEL=anthropic/claude-opus-4-6
+export LLM4S_PROVIDER=anthropic-main
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ### Multi-Provider Pattern
 
-LLM4S automatically handles provider selection based on your `LLM_MODEL`:
+LLM4S resolves whichever named provider you configure as the default:
 
 ```scala
-// With LLM_MODEL=openai/gpt-4o → Uses OpenAI
-// With LLM_MODEL=anthropic/claude-opus-4-6 → Uses Anthropic
-// With LLM_MODEL=gemini/gemini-2.0-flash → Uses Google Gemini
-// With LLM_MODEL=ollama/mistral → Uses local Ollama
-
 val startup = for {
-  providerConfig <- Llm4sConfig.provider()
+  providerConfig <- Llm4sConfig.defaultProvider()
   client <- LLMConnect.getClient(providerConfig)
 } yield processWithAnyProvider(client)
 ```
 
-The same code works with any provider without modifications!
+The same code works with any configured named provider without modifications.
 
 ### With Explicit Model Selection
 
@@ -105,12 +100,12 @@ If you want to override the configured model:
 
 ```scala
 val startup = for {
-  providerConfig <- Llm4sConfig.provider()
+  providerConfig <- Llm4sConfig.defaultProvider()
   client <- LLMConnect.getClient(providerConfig)
 } yield {
   val conversation = Conversation(Seq(UserMessage("Tell me about Scala")))
   
-  // Adjust generation settings (the model is selected via LLM_MODEL env var / providerConfig)
+  // Adjust generation settings while keeping the configured default provider
   val response = client.complete(
     conversation,
     CompletionOptions(maxTokens = Some(512))
@@ -181,7 +176,7 @@ For cleaner code, use Scala's `for` comprehensions:
 ```scala
 val result = for {
   // Configure and create client
-  providerConfig <- Llm4sConfig.provider()
+  providerConfig <- Llm4sConfig.defaultProvider()
   client <- LLMConnect.getClient(providerConfig)
   
   // Make the LLM call — complete takes a Conversation and optional CompletionOptions
@@ -391,5 +386,4 @@ response match {
 - Check if the provider's service is operational
 - Try using a different network or VPN
 - Increase the timeout in configuration if needed
-
 

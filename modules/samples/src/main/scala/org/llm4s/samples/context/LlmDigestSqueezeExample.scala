@@ -41,7 +41,7 @@ object LlmDigestSqueezeExample {
     logger.info("Starting LLM Digest Squeeze Example")
 
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       modelName = providerCfg.model
       client       <- LLMConnect.getClient(providerCfg)
       tokenCounter <- ConversationTokenCounter.forModel(modelName)

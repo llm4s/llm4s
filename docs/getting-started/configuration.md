@@ -32,15 +32,16 @@ LLM4S uses a hierarchical configuration system with the following precedence (hi
 
 ## Environment Variables
 
-The simplest way to configure LLM4S is through environment variables.
+Use environment variables for secrets and for selecting the default named
+provider you want `Llm4sConfig.defaultProvider()` to resolve.
 
 ### Core Settings
 
 ```bash
-# Required: Model selection (determines provider)
-LLM_MODEL=openai/gpt-4o
+# Required: default named provider
+LLM4S_PROVIDER=openai-main
 
-# Required: API key for your chosen provider
+# Required: API key for the configured provider
 OPENAI_API_KEY=sk-proj-...
 ```
 
@@ -50,11 +51,9 @@ Create a `.env` file in your project root:
 
 ```bash
 # ===================
-# Model Selection
+# Named Provider Selection
 # ===================
-# Format: <provider>/<model-name>
-# Supported providers: openai, anthropic, azure, ollama, gemini, cohere
-LLM_MODEL=openai/gpt-4o
+LLM4S_PROVIDER=openai-main
 
 # ===================
 # OpenAI Configuration
@@ -182,82 +181,79 @@ Restart sbt after adding this file. This grants the plugin the reflective access
 
 For more complex configurations, use `application.conf`:
 
-### Create application.conf
+### Preferred: Named Providers
 
-Create `src/main/resources/application.conf`:
+For production systems and applications that need multiple configured providers,
+prefer the `llm4s.providers` section.
+
+This keeps:
+
+- provider names and structure in HOCON
+- secrets in environment variables
+- the environment variable names under your control
+
+For example, `${?FOO}` is perfectly valid if that is the name you want to use.
 
 ```hocon
-llm {
-  # Model configuration
-  model = ${?LLM_MODEL}  # Fallback to env var
-  model = "openai/gpt-4o"  # Default if not set
-
-  # Generation parameters
-  temperature = 0.7
-  max-tokens = 2000
-  top-p = 1.0
-
-  # Provider configurations
+llm4s {
   providers {
-    openai {
-      api-key = ${?OPENAI_API_KEY}
-      base-url = ${?OPENAI_BASE_URL}
-      base-url = "https://api.openai.com/v1"  # Default
-      organization = ${?OPENAI_ORGANIZATION}
+    provider = "openai-main"
+
+    openai-main {
+      provider = "openai"
+      model = "gpt-4o-mini"
+      apiKey = ${?OPENAI_MAIN_API_KEY}
+      baseUrl = ${?OPENAI_MAIN_BASE_URL}
+      organization = ${?OPENAI_MAIN_ORGANIZATION}
     }
 
-    anthropic {
-      api-key = ${?ANTHROPIC_API_KEY}
-      base-url = ${?ANTHROPIC_BASE_URL}
-      base-url = "https://api.anthropic.com"
-      version = ${?ANTHROPIC_VERSION}
-      version = "2023-06-01"
+    gemini-main {
+      provider = "gemini"
+      model = "gemini-2.0-flash"
+      apiKey = ${?GEMINI_MAIN_API_KEY}
+      baseUrl = ${?GEMINI_MAIN_BASE_URL}
     }
 
-    azure {
-      api-key = ${?AZURE_API_KEY}
-      api-base = ${?AZURE_API_BASE}
-      deployment-name = ${?AZURE_DEPLOYMENT_NAME}
-      api-version = ${?AZURE_API_VERSION}
-      api-version = "2024-02-15-preview"
-    }
-
-    ollama {
-      base-url = ${?OLLAMA_BASE_URL}
-      base-url = "http://localhost:11434"
+    ollama-local {
+      provider = "ollama"
+      model = "llama3.2"
+      baseUrl = ${?OLLAMA_LOCAL_BASE_URL}
     }
   }
-}
-
-# Tracing configuration
-tracing {
-  mode = ${?TRACING_MODE}
-  mode = "none"  # Default: disabled
-
-  langfuse {
-    public-key = ${?LANGFUSE_PUBLIC_KEY}
-    secret-key = ${?LANGFUSE_SECRET_KEY}
-    url = ${?LANGFUSE_URL}
-    url = "https://cloud.langfuse.com"
-  }
-
-  opentelemetry {
-    service-name = ${?OTEL_SERVICE_NAME}
-    service-name = "llm4s"
-    endpoint = ${?OTEL_EXPORTER_OTLP_ENDPOINT}
-    endpoint = "http://localhost:4317"
-    headers = ${?OTEL_EXPORTER_OTLP_HEADERS}
-    headers = ""  # Format: "key1=value1,key2=value2"
-  }
-}
-
-# Context window management
-context {
-  max-messages = 50
-  preserve-system-message = true
-  pruning-strategy = "oldest-first"  # oldest-first, middle-out, recent-turns
 }
 ```
+
+You can then access the new configuration path with:
+
+```scala
+import org.llm4s.config.Llm4sConfig
+
+val providersResult = Llm4sConfig.providers()
+val defaultName     = Llm4sConfig.defaultProviderName()
+val defaultConfig   = Llm4sConfig.defaultProvider()
+val namedConfig     = Llm4sConfig.provider("openai-main")
+```
+
+Named providers can also be used for model discovery:
+
+```scala
+import org.llm4s.config.Llm4sConfig
+
+val defaultModels = Llm4sConfig.listModels()
+val namedModels   = Llm4sConfig.listModels("openai-main")
+```
+
+See the runnable samples for end-to-end examples:
+
+```bash
+sbt "samples/runMain samples.basic.NamedProviderModelListingExample"
+sbt "samples/runMain samples.basic.SerialNamedProviderModelListingExample"
+sbt "samples/runMain samples.basic.ParallelNamedProviderModelListingExample"
+```
+
+If `llm4s.providers.provider` is set, it must match one of the configured
+provider names. If it is absent, the providers config still loads successfully,
+but requesting the default provider will fail clearly at runtime.
 
 ### Access Configuration in Code
 
@@ -268,7 +264,7 @@ object ConfigurationLoader {
   def load(): Unit = {
     // 1. Load configuration at the application boundary
     val configResult = for {
-      providerConfig <- Llm4sConfig.provider()
+      providerConfig <- Llm4sConfig.defaultProvider()
       tracingConfig <- Llm4sConfig.tracing()
       embeddingsConfig <- Llm4sConfig.embeddings()
     } yield (providerConfig, tracingConfig, embeddingsConfig)
@@ -296,10 +292,8 @@ object ConfigurationLoader {
 ### OpenAI
 
 ```bash
-# Model selection
-LLM_MODEL=openai/gpt-4o          # Latest GPT-4o
-LLM_MODEL=openai/gpt-4-turbo     # GPT-4 Turbo
-LLM_MODEL=openai/gpt-3.5-turbo   # GPT-3.5
+# Example named provider selection
+LLM4S_PROVIDER=openai-main
 
 # Required
 OPENAI_API_KEY=sk-proj-...
@@ -318,9 +312,8 @@ OPENAI_ORGANIZATION=org-...
 ### Anthropic
 
 ```bash
-# Model selection
-LLM_MODEL=anthropic/claude-sonnet-4-5-latest
-LLM_MODEL=anthropic/claude-opus-4-5-latest
+# Example named provider selection
+LLM4S_PROVIDER=anthropic-main
 
 # Required
 ANTHROPIC_API_KEY=sk-ant-...
@@ -338,8 +331,8 @@ ANTHROPIC_VERSION=2023-06-01
 ### Azure OpenAI
 
 ```bash
-# Model selection
-LLM_MODEL=azure/gpt-4o
+# Example named provider selection
+LLM4S_PROVIDER=azure-main
 
 # Required
 AZURE_API_KEY=your-azure-key
@@ -353,10 +346,8 @@ AZURE_API_VERSION=2024-02-15-preview
 ### Ollama (Local Models)
 
 ```bash
-# Model selection
-LLM_MODEL=ollama/llama2
-LLM_MODEL=ollama/mistral
-LLM_MODEL=ollama/codellama
+# Example named provider selection
+LLM4S_PROVIDER=ollama-local
 
 # Required
 OLLAMA_BASE_URL=http://localhost:11434

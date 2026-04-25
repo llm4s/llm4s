@@ -7,7 +7,7 @@ import org.llm4s.llmconnect.config._
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-class ProviderConfigLoaderTest extends AnyFunSuite with Matchers {
+class ProviderConfigConstructionTest extends AnyFunSuite with Matchers {
 
   test("OpenAIConfig.load returns Right on success") {
     val cfg = OpenAIConfig.fromValues(
@@ -62,12 +62,12 @@ class ProviderConfigLoaderTest extends AnyFunSuite with Matchers {
     res.isLeft shouldBe true
   }
 
-  test("ProviderConfigLoader.from handles provider prefixes and inference") {
+  test("OpenAIConfig.fromValues constructs an OpenAI config") {
     val openAi = OpenAIConfig.fromValues("gpt-4o", "sk", None, DEFAULT_OPENAI_BASE_URL)
     openAi shouldBe a[OpenAIConfig]
   }
 
-  test("ProviderConfigLoader.from respects OpenRouter base URL inference") {
+  test("OpenAIConfig.fromValues preserves an OpenRouter base URL") {
     val cfg = OpenAIConfig.fromValues(
       modelName = "gpt-4o",
       apiKey = "sk",

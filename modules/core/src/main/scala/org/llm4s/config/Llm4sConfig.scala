@@ -1,8 +1,12 @@
 package org.llm4s.config
 
-import org.llm4s.llmconnect.config._
+import org.llm4s.llmconnect.ProviderExchangeLogging
+import org.llm4s.llmconnect.config.*
 import org.llm4s.metrics.{ MetricsCollector, PrometheusEndpoint }
 import org.llm4s.types.Result
+import org.llm4s.config.ProvidersConfigModel.{ ProviderName, ProvidersConfig }
+import org.llm4s.error.LLMError
+import org.llm4s.http.Llm4sHttpClient
 import pureconfig.ConfigSource
 
 /**
@@ -14,16 +18,20 @@ import pureconfig.ConfigSource
  * `System.getenv`, or `ConfigFactory.load()` directly.
  *
  * == Provider setup ==
- * Set `LLM_MODEL` to `provider/model` (e.g. `"openai/gpt-4o"`,
- * `"anthropic/claude-sonnet-4-5-latest"`, `"gemini/gemini-2.0-flash"`) and
- * the corresponding API key environment variable. Then call [[provider]] to
- * obtain a [[org.llm4s.llmconnect.config.ProviderConfig]] ready for
- * [[org.llm4s.llmconnect.LLMConnect.getClient]].
+ * Define named providers under `llm4s.providers.<name>` and optionally set
+ * `llm4s.providers.provider` to choose the default provider. Then call
+ * [[defaultProvider]] or resolve a named provider directly with
+ * [[provider(name)*]].
+ *
+ * Then call [[defaultProvider]] to obtain a
+ * [[org.llm4s.llmconnect.config.ProviderConfig]] ready for
+ * [[org.llm4s.llmconnect.LLMConnect.getClient]]. Apps that need multiple
+ * configured providers can call [[provider(name)*]] directly.
  *
  * @example
  * {{{
  * for {
- *   cfg    <- Llm4sConfig.provider()
+ *   cfg    <- Llm4sConfig.defaultProvider()
  *   client <- LLMConnect.getClient(cfg)
  *   agent  = new Agent(client)
  *   state  <- agent.run("Hello", ToolRegistry.empty)
@@ -36,18 +44,95 @@ import pureconfig.ConfigSource
 object Llm4sConfig {
 
   /**
-   * Loads LLM provider configuration from the current environment.
+   * Loads a named provider from `llm4s.providers.<name>`.
    *
-   * Reads `LLM_MODEL` (format: `provider/model`) and the matching
-   * credential variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) to
-   * build a typed [[org.llm4s.llmconnect.config.ProviderConfig]].
-   *
-   * @return the provider configuration, or a
-   *         [[org.llm4s.error.ConfigurationError]] when required variables are
-   *         missing or the provider prefix is unrecognised.
+   * Useful for applications that need to resolve multiple configured provider
+   * instances, including multiple accounts for the same provider type.
    */
-  def provider(): Result[ProviderConfig] =
-    org.llm4s.config.ProviderConfigLoader.load(ConfigSource.default)
+  def provider(name: String): Result[ProviderConfig] =
+    org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name)
+
+  def providerConfigs(): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
+    org.llm4s.config.NamedProviderLoader.loadProviderConfigs(ConfigSource.default)
+
+  def providerConfigs(
+    map: Map[ProviderName, ProvidersConfigModel.NamedProviderConfig]
+  ): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
+    org.llm4s.config.NamedProviderLoader.getProviderConfigs(map)
+
+  private[config] def provider(source: ConfigSource, name: String): Result[ProviderConfig] =
+    org.llm4s.config.NamedProviderLoader.load(source, name)
+
+  /**
+   * Loads the full validated named-providers configuration from `llm4s.providers`.
+   */
+  def providers(): Result[ProvidersConfig] =
+    org.llm4s.config.ProvidersConfigLoader.load(ConfigSource.default)
+
+  private[config] def providers(source: ConfigSource): Result[ProvidersConfig] =
+    org.llm4s.config.ProvidersConfigLoader.load(source)
+
+  /**
+   * Loads the configured default provider name from `llm4s.providers.provider`.
+   */
+  def defaultProviderName(): Result[ProviderName] =
+    providers().flatMap(_.defaultProviderName)
+
+  private[config] def defaultProviderName(source: ConfigSource): Result[ProviderName] =
+    providers(source).flatMap(_.defaultProviderName)
+
+  /**
+   * Loads the configured default named provider as a runtime [[ProviderConfig]].
+   */
+  def defaultProvider(): Result[ProviderConfig] =
+    defaultProviderName().flatMap(name => provider(name.asName))
+
+  private[config] def defaultProvider(source: ConfigSource): Result[ProviderConfig] =
+    defaultProviderName(source).flatMap(name => provider(source, name.asName))
+
+  /**
+   * Lists models for the configured default named provider.
+   */
+  def listModels(): Result[List[DiscoveredModel]] =
+    listModels(ConfigSource.default)
+
+  private[config] def listModels(source: ConfigSource): Result[List[DiscoveredModel]] =
+    listModels(source, Llm4sHttpClient.create())
+
+  private[config] def listModels(
+    source: ConfigSource,
+    httpClient: Llm4sHttpClient
+  ): Result[List[DiscoveredModel]] =
+    for
+      defaultName <- defaultProviderName(source)
+      models      <- listModels(defaultName.asName, source, httpClient)
+    yield models
+
+  /**
+   * Lists models for a named provider configured under `llm4s.providers.<name>`.
+   */
+  def listModels(name: String): Result[List[DiscoveredModel]] =
+    listModels(name, ConfigSource.default, Llm4sHttpClient.create())
+
+  private[config] def listModels(
+    name: String,
+    source: ConfigSource,
+    httpClient: Llm4sHttpClient
+  ): Result[List[DiscoveredModel]] =
+    for
+      providers <- providers(source)
+      namedProvider <- providers.namedProviders
+        .get(ProviderName(name))
+        .toRight(org.llm4s.error.ConfigurationError(s"Configured provider '$name' was not found"))
+      capabilities <- ProviderCapabilitiesRegistry.forKind(namedProvider.provider)
+      lister <- capabilities.modelLister
+        .toRight(
+          org.llm4s.error.ConfigurationError(
+            s"Model discovery is not supported yet for provider '${namedProvider.provider.toString.toLowerCase}'"
+          )
+        )
+      models <- lister.listModels(namedProvider, httpClient)
+    yield models
 
   /**
    * Loads PostgreSQL vector-search index configuration from the current environment.
@@ -80,6 +165,18 @@ object Llm4sConfig {
    */
   def metrics(): Result[(MetricsCollector, Option[PrometheusEndpoint])] =
     org.llm4s.config.MetricsConfigLoader.load(ConfigSource.default)
+
+  /**
+   * Loads provider exchange logging configuration from the current environment.
+   *
+   * Reads the optional `llm4s.exchangeLogging` section. When absent or disabled,
+   * exchange logging remains off. When enabled, a JSONL sink is constructed
+   * from a configured directory and writes to a new per-run file.
+   */
+  // TODO: As part of the wider Llm4sConfig cleanup, accept an optional ConfigSource
+  // parameter here instead of hard-wiring ConfigSource.default inside the method body.
+  def exchangeLogging(): Result[ProviderExchangeLogging] =
+    org.llm4s.config.ProviderExchangeLoggingConfigLoader.load(ConfigSource.default)
 
   final case class EmbeddingsChunkingSettings(
     enabled: Boolean,

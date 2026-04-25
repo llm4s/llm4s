@@ -1,15 +1,25 @@
 package org.llm4s.trace
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.http.{ FailingHttpClient, HttpResponse, Llm4sHttpClient, MockHttpClient }
 import org.llm4s.llmconnect.model.TokenUsage
+import org.slf4j.LoggerFactory
 
 import java.util.Base64
 
 class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
 
   private def simpleEvent = TraceEvent.ToolExecuted("test-tool", """{"q":"hello"}""", "result", 100, true)
+
+  private def withLangfuseLoggerSilenced[A](body: => A): A = {
+    val logger   = LoggerFactory.getLogger(classOf[LangfuseTracing]).asInstanceOf[LBLogger]
+    val previous = logger.getLevel
+    logger.setLevel(Level.OFF)
+    try body
+    finally logger.setLevel(previous)
+  }
 
   private def makeTracing(
     mockClient: Llm4sHttpClient,
@@ -84,7 +94,9 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockHttpClient(HttpResponse(500, """{"error":"Internal Server Error"}"""))
     val tracing    = makeTracing(mockClient)
 
-    val result = tracing.traceEvent(simpleEvent)
+    val result = withLangfuseLoggerSilenced {
+      tracing.traceEvent(simpleEvent)
+    }
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse(fail("Expected Left"))
@@ -95,7 +107,9 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockHttpClient(HttpResponse(401, """{"error":"Unauthorized"}"""))
     val tracing    = makeTracing(mockClient)
 
-    val result = tracing.traceEvent(simpleEvent)
+    val result = withLangfuseLoggerSilenced {
+      tracing.traceEvent(simpleEvent)
+    }
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse(fail("Expected Left"))
@@ -106,7 +120,9 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockHttpClient(HttpResponse(200, ""))
     val tracing    = makeTracing(mockClient, publicKey = "")
 
-    val result = tracing.traceEvent(simpleEvent)
+    val result = withLangfuseLoggerSilenced {
+      tracing.traceEvent(simpleEvent)
+    }
 
     result.isRight shouldBe true
     mockClient.postCallCount shouldBe 0
@@ -116,7 +132,9 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
     val mockClient = new MockHttpClient(HttpResponse(200, ""))
     val tracing    = makeTracing(mockClient, secretKey = "")
 
-    val result = tracing.traceEvent(simpleEvent)
+    val result = withLangfuseLoggerSilenced {
+      tracing.traceEvent(simpleEvent)
+    }
 
     result.isRight shouldBe true
     mockClient.postCallCount shouldBe 0
@@ -128,7 +146,9 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
     val failingClient     = new FailingHttpClient(new InterruptedException("interrupted"))
     val tracing           = makeTracing(failingClient, restoreInterrupt = mockRestore)
 
-    val result = tracing.traceEvent(simpleEvent)
+    val result = withLangfuseLoggerSilenced {
+      tracing.traceEvent(simpleEvent)
+    }
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse(fail("Expected Left"))
@@ -140,7 +160,9 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
     val failingClient = new FailingHttpClient(new RuntimeException("connection reset"))
     val tracing       = makeTracing(failingClient)
 
-    val result = tracing.traceEvent(simpleEvent)
+    val result = withLangfuseLoggerSilenced {
+      tracing.traceEvent(simpleEvent)
+    }
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse(fail("Expected Left"))

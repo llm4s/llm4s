@@ -448,8 +448,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       // Call count should be at least 10 (some may be rejected by open circuit)
       mockClient.callCount.get() should be >= 10
 
-    } finally
-      executor.shutdown()
+    } finally executor.shutdown()
   }
 
   test("ReliableClient with disabled config passes through directly") {

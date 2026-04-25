@@ -1,10 +1,14 @@
 package org.llm4s.llmconnect.provider
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
+import com.azure.ai.openai.models.{ ChatCompletions, ChatCompletionsOptions }
+import com.azure.core.util.IterableStream
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model.{ Conversation, CompletionOptions, UserMessage }
+import org.slf4j.LoggerFactory
 
 /**
  * Tests for OpenAIClient closed state handling.
@@ -25,6 +29,32 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers {
 
   private def createTestConversation: Conversation =
     Conversation(Seq(UserMessage("Hello")))
+
+  private def withOpenAIClientLoggerSilenced[A](body: => A): A = {
+    val logger   = LoggerFactory.getLogger(classOf[OpenAIClient]).asInstanceOf[LBLogger]
+    val previous = logger.getLevel
+    logger.setLevel(Level.OFF)
+    try body
+    finally logger.setLevel(previous)
+  }
+
+  final private class StubTransport extends OpenAIClientTransport {
+    var completeCalls       = 0
+    var streamCompleteCalls = 0
+
+    override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions = {
+      completeCalls += 1
+      throw new RuntimeException("stub transport invoked")
+    }
+
+    override def getChatCompletionsStream(
+      model: String,
+      options: ChatCompletionsOptions
+    ): IterableStream[ChatCompletions] = {
+      streamCompleteCalls += 1
+      throw new RuntimeException("stub streaming transport invoked")
+    }
+  }
 
   "OpenAIClient" should "return ConfigurationError when complete() is called after close()" in {
     val client = new OpenAIClient(createTestConfig, org.llm4s.metrics.MetricsCollector.noop)
@@ -78,13 +108,22 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "succeed for operations before close() is called" in {
-    val client = new OpenAIClient(createTestConfig, org.llm4s.metrics.MetricsCollector.noop)
+    val transport = new StubTransport
+    val client = new OpenAIClient(
+      createTestConfig.model,
+      transport,
+      createTestConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      org.llm4s.llmconnect.ProviderExchangeLogging.Disabled
+    )
 
-    // Before closing, complete() should attempt the operation (and fail due to invalid API key,
-    // but NOT due to closed state). We verify the error is NOT a ConfigurationError about being closed.
-    val result = client.complete(createTestConversation, CompletionOptions())
+    // Before closing, complete() should reach the transport layer and fail there,
+    // but NOT due to closed state.
+    val result = withOpenAIClientLoggerSilenced {
+      client.complete(createTestConversation, CompletionOptions())
+    }
 
-    // The request will fail (invalid API key), but not because the client is closed
+    transport.completeCalls shouldBe 1
     result.isLeft shouldBe true
     result.left.toOption.get match {
       case ce: ConfigurationError =>

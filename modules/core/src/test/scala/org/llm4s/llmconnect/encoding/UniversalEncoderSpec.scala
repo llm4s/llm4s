@@ -38,8 +38,7 @@ class UniversalEncoderSpec extends AnyFunSuite with Matchers {
     try {
       Files.write(file.toPath, content.getBytes("UTF-8"))
       test(file)
-    } finally
-      file.delete()
+    } finally file.delete()
   }
 
   test("encodeFromPath should encode text file content") {
@@ -197,8 +196,7 @@ class UniversalEncoderSpec extends AnyFunSuite with Matchers {
     try {
       Files.write(file.toPath, content)
       test(file)
-    } finally
-      file.delete()
+    } finally file.delete()
   }
 
   test("multimodal stub success - image produces stub vector with Image modality") {

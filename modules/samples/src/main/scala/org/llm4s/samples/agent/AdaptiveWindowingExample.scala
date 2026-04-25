@@ -42,7 +42,7 @@ object AdaptiveWindowingExample {
     logger.info("\n--- Example 1: Basic Adaptive Windowing ---")
 
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
       tools = new ToolRegistry(Seq(weatherTool))
@@ -98,7 +98,7 @@ object AdaptiveWindowingExample {
     logger.info("\n--- Example 2: Cost-Optimized Windowing ---")
 
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
       tools = new ToolRegistry(Seq(weatherTool))
@@ -149,7 +149,7 @@ object AdaptiveWindowingExample {
     logger.info("\n--- Example 3: Quality-Optimized Windowing ---")
 
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       weatherTool <- WeatherTool.toolSafe
       tools = new ToolRegistry(Seq(weatherTool))

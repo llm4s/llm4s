@@ -177,8 +177,37 @@ private[config] object EmbeddingsConfigLoader {
 
     for {
       model  <- modelResult
-      apiKey <- ProviderConfigLoader.loadOpenAISharedApiKey(source)
+      apiKey <- loadOpenAISharedApiKey(source)
     } yield EmbeddingProviderConfig(baseUrl = baseUrl, model = model, apiKey = apiKey)
+  }
+
+  private def loadOpenAISharedApiKey(source: ConfigSource): Result[String] = {
+    final case class OpenAISection(apiKey: Option[String])
+    final case class Root(openai: Option[OpenAISection])
+
+    given PureConfigReader[OpenAISection] =
+      PureConfigReader.forProduct1("apiKey")(OpenAISection.apply)
+
+    given PureConfigReader[Root] =
+      PureConfigReader.forProduct1("openai")(Root.apply)
+
+    source
+      .at("llm4s")
+      .load[Root]
+      .left
+      .map { failures =>
+        val msg = failures.toList.map(_.description).mkString("; ")
+        ConfigurationError(
+          s"Failed to load llm4s provider config via PureConfig when resolving OpenAI API key: $msg"
+        )
+      }
+      .flatMap { root =>
+        root.openai
+          .flatMap(_.apiKey)
+          .map(_.trim)
+          .filter(_.nonEmpty)
+          .toRight(ConfigurationError("Missing OpenAI API key (llm4s.openai.apiKey / OPENAI_API_KEY)"))
+      }
   }
 
   private def buildOllamaEmbeddings(

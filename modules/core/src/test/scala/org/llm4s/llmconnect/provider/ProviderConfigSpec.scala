@@ -98,6 +98,28 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers {
     }
   }
 
+  // ================================= GEMINI CONFIG =================================
+
+  test("GeminiConfig.fromValues appends v1beta when baseUrl is the API host root") {
+    val config = GeminiConfig.fromValues(
+      modelName = "gemini-1.5-flash",
+      apiKey = "test-key",
+      baseUrl = "https://generativelanguage.googleapis.com"
+    )
+
+    config.baseUrl shouldBe "https://generativelanguage.googleapis.com/v1beta"
+  }
+
+  test("GeminiConfig.fromValues preserves explicit versioned baseUrl") {
+    val config = GeminiConfig.fromValues(
+      modelName = "gemini-1.5-flash",
+      apiKey = "test-key",
+      baseUrl = "https://generativelanguage.googleapis.com/v1beta"
+    )
+
+    config.baseUrl shouldBe "https://generativelanguage.googleapis.com/v1beta"
+  }
+
   // ================================= AZURE CONFIG =================================
 
   test("AzureConfig.fromValues creates config with correct model") {

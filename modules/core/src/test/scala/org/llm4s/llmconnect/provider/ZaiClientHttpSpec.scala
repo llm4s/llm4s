@@ -1,13 +1,16 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
+import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.testutil.LocalProviderTestServer._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.OptionValues._
 
 import java.nio.charset.StandardCharsets
+import scala.collection.mutable.ListBuffer
 
 /**
  * Local HTTP server tests for ZaiClient (Tier 1).
@@ -106,6 +109,28 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
       result.swap.toOption.get shouldBe a[ServiceError]
     }
 
+  it should "record provider exchanges when logging is enabled" in
+    withServer("/chat/completions")(exchange => sendJsonResponse(exchange, 200, zaiCompletion("Logged response"))) {
+      baseUrl =>
+        val exchanges = ListBuffer.empty[ProviderExchange]
+        val sink = new ProviderExchangeSink {
+          override def record(exchange: ProviderExchange): Unit =
+            exchanges += exchange
+        }
+        val client = new ZaiClient(
+          localConfig(baseUrl),
+          exchangeLogging = ProviderExchangeLogging.Enabled(sink)
+        )
+        val result = client.complete(conversation, CompletionOptions())
+
+        result.isRight shouldBe true
+        exchanges should have size 1
+        exchanges.head.provider shouldBe "zai"
+        exchanges.head.model shouldBe Some("GLM-4.7")
+        exchanges.head.requestBody should include("hello")
+        exchanges.head.responseBody.value should include("Logged response")
+    }
+
   // ==========================================================================
   // streamComplete() — success
   // ==========================================================================
@@ -122,6 +147,31 @@ class ZaiClientHttpSpec extends AnyFlatSpec with Matchers {
       val completion = result.toOption.get
       completion.content shouldBe "Hello from Z.ai"
       chunks should not be empty
+    }
+
+  it should "record provider exchanges for streaming responses when logging is enabled" in
+    withServer("/chat/completions") { exchange =>
+      sendSseResponse(exchange, openAISseBody(Seq("Hello", " from Z.ai"), "GLM-4.7"))
+    } { baseUrl =>
+      val exchanges = ListBuffer.empty[ProviderExchange]
+      val sink = new ProviderExchangeSink:
+        override def record(exchange: ProviderExchange): Unit =
+          exchanges += exchange
+
+      val client = new ZaiClient(
+        localConfig(baseUrl),
+        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      )
+      val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+
+      result.isRight shouldBe true
+      exchanges should have size 1
+      exchanges.head.provider shouldBe "zai"
+      exchanges.head.requestBody should include("\"stream\":true")
+      exchanges.head.responseBody.value should include("data:")
+      exchanges.head.responseBody.value should include("Hello")
+      exchanges.head.responseBody.value should include("[DONE]")
+      exchanges.head.errorMessage shouldBe empty
     }
 
   it should "map error status codes to typed errors" in

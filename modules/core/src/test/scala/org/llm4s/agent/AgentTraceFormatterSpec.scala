@@ -129,8 +129,7 @@ class AgentTraceFormatterSpec extends AnyFlatSpec with Matchers {
       val contents = new String(Files.readAllBytes(tmpFile))
       contents should include("written query")
       contents should include("# Agent Execution Trace")
-    } finally
-      Files.deleteIfExists(tmpFile)
+    } finally Files.deleteIfExists(tmpFile)
   }
 
   it should "silently swallow write failures without throwing an exception" in {

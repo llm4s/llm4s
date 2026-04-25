@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.types.ProviderModelTypes.ProviderKind
 import org.slf4j.LoggerFactory
 import org.llm4s.model.ModelRegistry
 import org.llm4s.util.Redaction
@@ -10,14 +11,16 @@ import org.llm4s.util.Redaction
  * Each subtype carries the credentials, endpoint URL, and context-window
  * metadata needed to construct an [[org.llm4s.llmconnect.LLMClient]] via
  * [[org.llm4s.llmconnect.LLMConnect]]. Instances are normally obtained from
- * [[org.llm4s.config.Llm4sConfig.provider]], which reads standard environment
- * variables (`LLM_MODEL`, `OPENAI_API_KEY`, etc.).
+ * [[org.llm4s.config.Llm4sConfig.defaultProvider]] or
+ * [[org.llm4s.config.Llm4sConfig.provider(name)*]], which resolve configured
+ * named providers under `llm4s.providers`.
  *
  * Prefer each subtype's `fromValues` factory over its primary constructor:
  * `fromValues` resolves `contextWindow` and `reserveCompletion` automatically
  * from the model name, so you only need to supply credentials and endpoint.
  */
 sealed trait ProviderConfig {
+  val provider: ProviderKind
 
   /** Model identifier forwarded verbatim to the provider API (e.g. `"gpt-4o"`, `"claude-sonnet-4-5-latest"`). */
   def model: String
@@ -62,11 +65,11 @@ case class OpenAIConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig {
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.OpenAI
   override def toString: String =
     s"OpenAIConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, organization=$organization, baseUrl=$baseUrl, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
-}
 
 object OpenAIConfig {
   private val standardReserve = 4096
@@ -150,11 +153,11 @@ case class AzureConfig(
   apiVersion: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig {
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.Azure
   override def toString: String =
     s"AzureConfig(endpoint=$endpoint, apiKey=${Redaction.secret(apiKey)}, model=$model, apiVersion=$apiVersion, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
-}
 
 object AzureConfig {
   private val standardReserve = 4096
@@ -227,11 +230,11 @@ case class AnthropicConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig {
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.Anthropic
   override def toString: String =
     s"AnthropicConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
-}
 
 object AnthropicConfig {
   private val standardReserve = 4096
@@ -293,7 +296,8 @@ case class OllamaConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.Ollama
 
 object OllamaConfig {
   private val standardReserve = 4096
@@ -353,11 +357,11 @@ case class ZaiConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig {
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.Zai
   override def toString: String =
     s"ZaiConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
-}
 
 object ZaiConfig {
   private val standardReserve = 4096
@@ -423,14 +427,15 @@ case class GeminiConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig {
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.Gemini
   override def toString: String =
     s"GeminiConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
-}
 
 object GeminiConfig {
   private val standardReserve = 8192
+  private val DefaultApiPath  = "/v1beta"
 
   private def geminiFallback(modelName: String): (Int, Int) =
     modelName match {
@@ -457,6 +462,7 @@ object GeminiConfig {
   ): GeminiConfig = {
     require(apiKey.trim.nonEmpty, "Gemini apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Gemini baseUrl must be non-empty")
+    val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
     val (cw, rc) = ContextWindowResolver.resolve(
       lookupProviders = Seq("gemini", "google"),
       modelName = modelName,
@@ -467,10 +473,16 @@ object GeminiConfig {
     GeminiConfig(
       apiKey = apiKey,
       model = modelName,
-      baseUrl = baseUrl,
+      baseUrl = normalizedBaseUrl,
       contextWindow = cw,
       reserveCompletion = rc
     )
+  }
+
+  private def normalizeBaseUrl(baseUrl: String): String = {
+    val trimmed = baseUrl.trim.stripSuffix("/")
+    if trimmed.matches(""".*/v\d+(?:alpha|beta)?$""") then trimmed
+    else s"$trimmed$DefaultApiPath"
   }
 }
 
@@ -493,11 +505,11 @@ case class DeepSeekConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig {
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.DeepSeek
   override def toString: String =
     s"DeepSeekConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
-}
 
 object DeepSeekConfig {
   private val logger          = LoggerFactory.getLogger(getClass)
@@ -576,11 +588,11 @@ case class CohereConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig {
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.Cohere
   override def toString: String =
     s"CohereConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
-}
 
 object CohereConfig {
   private val DefaultContextWindow     = 128000
@@ -630,11 +642,11 @@ case class MistralConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig {
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.Mistral
   override def toString: String =
     s"MistralConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
-}
 
 object MistralConfig {
   private val logger = LoggerFactory.getLogger(getClass)

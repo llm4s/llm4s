@@ -46,7 +46,7 @@ object ReasoningModesExample {
 
     // Try to create a client and run a simple completion with reasoning
     val clientResult = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
     } yield client
 

@@ -22,10 +22,10 @@ import pureconfig.ConfigSource
  *
  * @example
  * {{{
- * export LLM_MODEL=openai/gpt-4o
+ * export LLM4S_PROVIDER=openai-main
  * export OPENAI_API_KEY=sk-...
  * export BRAVE_SEARCH_API_KEY=your-brave-api-key
- * ,
+ * sbt "samples/runMain org.llm4s.samples.agent.ResearcherAgentExample"
  * }}}
  */
 
@@ -43,7 +43,7 @@ object ResearcherAgentExample {
 
     // Create LLM client and load Brave Search configuration
     val clientResult = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
     } yield client
 
@@ -52,8 +52,8 @@ object ResearcherAgentExample {
     (clientResult, braveConfigResult) match {
       case (Left(error), _) =>
         logger.error("Failed to create LLM client: {}", error)
-        logger.error("Make sure LLM_MODEL and appropriate API key are set")
-        logger.error("Example: export LLM_MODEL=openai/gpt-4o")
+        logger.error("Make sure a default named provider and appropriate API key are configured")
+        logger.error("Example: export LLM4S_PROVIDER=openai-main")
 
       case (_, Left(error)) =>
         logger.error("Failed to load Brave Search configuration: {}", error)

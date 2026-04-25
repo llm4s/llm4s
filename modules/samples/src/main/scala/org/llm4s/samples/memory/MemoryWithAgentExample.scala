@@ -17,7 +17,7 @@ import scala.util.chaining._
  * - Build up knowledge over multiple interactions
  * - Use memory for context-aware responses
  *
- * Requires: LLM_MODEL and appropriate API key in environment
+ * Requires: a default named provider and appropriate API key in the environment
  */
 object MemoryWithAgentExample {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -26,7 +26,7 @@ object MemoryWithAgentExample {
     logger.info("=== Memory with Agent Integration Example ===")
 
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       agent = new Agent(client)
 
@@ -207,7 +207,7 @@ Provide responses tailored to the user's experience level and preferences."""
       case Left(error) =>
         logger.error("Example failed with error:")
         logger.error("  {}", error.formatted)
-        logger.error("Make sure LLM_MODEL and API key are configured.")
+        logger.error("Make sure a default named provider and API key are configured.")
     }
   }
 }

@@ -18,7 +18,7 @@ object OllamaExample {
     )
 
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       completion  <- client.complete(conversation, CompletionOptions())
       _ = {

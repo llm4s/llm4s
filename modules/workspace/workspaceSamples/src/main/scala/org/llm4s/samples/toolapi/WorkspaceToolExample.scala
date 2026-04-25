@@ -78,7 +78,7 @@ object WorkspaceToolExample {
 
               // Optional: run with the active provider from configuration (LLM_MODEL) via PureConfig
               logger.info("Attempting active provider from configuration (llm4s.llm.model / LLM_MODEL)...")
-              val activeClientRes = Llm4sConfig.provider().flatMap { provCfg =>
+              val activeClientRes = Llm4sConfig.defaultProvider().flatMap { provCfg =>
                 logger.info(s"Testing with active model: ${provCfg.model}")
                 LLMConnect.getClient(provCfg).map(client => (client, provCfg.model))
               }
@@ -96,7 +96,7 @@ object WorkspaceToolExample {
                 val key      = "llm4s.llm.model"
                 val original = Option(System.getProperty(key))
                 System.setProperty(key, s"openai/$gpt4oModelName")
-                val res = Llm4sConfig.provider().flatMap(LLMConnect.getClient)
+                val res = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
                 original match {
                   case Some(v) => System.setProperty(key, v)
                   case None    => System.clearProperty(key)
@@ -116,7 +116,7 @@ object WorkspaceToolExample {
                 val key      = "llm4s.llm.model"
                 val original = Option(System.getProperty(key))
                 System.setProperty(key, s"anthropic/$sonnetModelName")
-                val res = Llm4sConfig.provider().flatMap(LLMConnect.getClient)
+                val res = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
                 original match {
                   case Some(v) => System.setProperty(key, v)
                   case None    => System.clearProperty(key)

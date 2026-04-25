@@ -39,7 +39,7 @@ object StreamingWithProgressExample {
     var spinnerIndex = 0
     // Get a client (Result-first)
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       _ = {
         logger.info("=== LLM4S Streaming with Progress Example ===")
         logger.info("Using model: {}", providerCfg.model)

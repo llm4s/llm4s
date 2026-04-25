@@ -71,7 +71,7 @@ object SummarizationExample {
 
     // Get a client using typed configuration (Result-first)
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       completion  <- client.complete(conversation)
       _ = CompletionSummaryInfo(completion)
