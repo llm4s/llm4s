@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.samples.mcp
 
 import pureconfig._

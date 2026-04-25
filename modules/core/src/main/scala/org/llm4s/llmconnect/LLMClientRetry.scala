@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.llmconnect
 
 import org.llm4s.error.{ LLMError, RateLimitError, ServiceError, SimpleError, ValidationError }

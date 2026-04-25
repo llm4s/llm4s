@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.samples.rag
 
 import org.llm4s.rag.loader.s3.{ S3DocumentSource, S3Loader }

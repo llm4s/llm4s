@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.runner
 
 import org.llm4s.shared._

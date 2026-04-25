@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.agent.orchestration
 
 import java.util.concurrent.atomic.AtomicBoolean

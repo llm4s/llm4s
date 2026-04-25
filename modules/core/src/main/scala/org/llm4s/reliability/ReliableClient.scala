@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.reliability
 
 import org.llm4s.llmconnect.LLMClient

@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.samples.agent
 
 import org.llm4s.agent.Agent

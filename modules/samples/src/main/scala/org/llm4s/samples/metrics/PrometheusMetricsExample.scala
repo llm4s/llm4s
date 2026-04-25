@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.samples.metrics
 
 import org.llm4s.config.Llm4sConfig

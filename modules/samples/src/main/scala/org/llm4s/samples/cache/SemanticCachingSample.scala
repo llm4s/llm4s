@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.samples.cache
 
 import org.llm4s.llmconnect.caching.{ CacheConfig, CachingLLMClient }

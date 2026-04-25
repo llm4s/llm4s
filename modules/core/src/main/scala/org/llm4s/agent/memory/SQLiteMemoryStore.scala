@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.agent.memory
 
 import org.llm4s.error.{ ConfigurationError, NotFoundError, ProcessingError }

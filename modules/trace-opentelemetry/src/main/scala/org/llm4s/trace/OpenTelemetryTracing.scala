@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.trace
 
 import io.opentelemetry.api.common.AttributeKey

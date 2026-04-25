@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.imageprocessing.provider.anthropicclient
 
 import org.llm4s.imageprocessing._

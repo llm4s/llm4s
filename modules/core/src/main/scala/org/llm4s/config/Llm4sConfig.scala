@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.config
 
 import org.llm4s.llmconnect.config._

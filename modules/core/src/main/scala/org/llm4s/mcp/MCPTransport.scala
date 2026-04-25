@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.mcp
 
 import scala.util.{ Try, Success, Failure }

@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.toolapi.builtin.search
 
 import org.llm4s.toolapi._

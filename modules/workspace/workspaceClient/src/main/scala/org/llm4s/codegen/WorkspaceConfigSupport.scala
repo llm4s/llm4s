@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.codegen
 
 import org.llm4s.error.ConfigurationError

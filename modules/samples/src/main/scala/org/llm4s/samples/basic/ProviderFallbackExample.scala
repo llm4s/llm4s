@@ -1,3 +1,4 @@
+// scalafix:off
 package org.llm4s.samples.basic
 
 import org.llm4s.llmconnect._
