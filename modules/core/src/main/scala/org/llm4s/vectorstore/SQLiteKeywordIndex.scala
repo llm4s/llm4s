@@ -107,14 +107,14 @@ final class SQLiteKeywordIndex private (
     topK: Int,
     filter: Option[MetadataFilter]
   ): Result[Seq[KeywordSearchResult]] =
-    Try {
-      val escapedQuery = escapeQuery(query)
-      val filterClause = filter.map(f => s"AND ${buildFilterClause(f)}").getOrElse("")
+    buildOptionalFilterClause(filter).flatMap { filterClause =>
+      Try {
+        val escapedQuery = escapeQuery(query)
 
-      // FTS5 match with BM25 scoring
-      // bm25() returns negative values (more negative = more relevant), so we negate it
-      val sql =
-        s"""
+        // FTS5 match with BM25 scoring
+        // bm25() returns negative values (more negative = more relevant), so we negate it
+        val sql =
+          s"""
         SELECT d.id, d.content, d.metadata, -bm25($ftsTableName) as score
         FROM $ftsTableName f
         JOIN $tableName d ON f.id = d.id
@@ -124,15 +124,16 @@ final class SQLiteKeywordIndex private (
         LIMIT ?
       """
 
-      val stmt = connection.prepareStatement(sql)
-      stmt.setString(1, escapedQuery)
-      stmt.setInt(2, topK)
+        val stmt = connection.prepareStatement(sql)
+        stmt.setString(1, escapedQuery)
+        stmt.setInt(2, topK)
 
-      val rs      = stmt.executeQuery()
-      val results = collectResults(rs, includeHighlights = false)
-      stmt.close()
-      results
-    }.toEither.left.map(e => ProcessingError("keyword-index", s"Search failed: ${e.getMessage}"))
+        val rs      = stmt.executeQuery()
+        val results = collectResults(rs, includeHighlights = false)
+        stmt.close()
+        results
+      }.toEither.left.map(e => ProcessingError("keyword-index", s"Search failed: ${e.getMessage}"))
+    }
 
   override def searchWithHighlights(
     query: String,
@@ -140,13 +141,13 @@ final class SQLiteKeywordIndex private (
     snippetLength: Int,
     filter: Option[MetadataFilter]
   ): Result[Seq[KeywordSearchResult]] =
-    Try {
-      val escapedQuery = escapeQuery(query)
-      val filterClause = filter.map(f => s"AND ${buildFilterClause(f)}").getOrElse("")
+    buildOptionalFilterClause(filter).flatMap { filterClause =>
+      Try {
+        val escapedQuery = escapeQuery(query)
 
-      // FTS5 snippet function for highlighting
-      val sql =
-        s"""
+        // FTS5 snippet function for highlighting
+        val sql =
+          s"""
         SELECT d.id, d.content, d.metadata, -bm25($ftsTableName) as score,
                snippet($ftsTableName, 1, '<b>', '</b>', '...', $snippetLength) as highlight
         FROM $ftsTableName f
@@ -157,15 +158,16 @@ final class SQLiteKeywordIndex private (
         LIMIT ?
       """
 
-      val stmt = connection.prepareStatement(sql)
-      stmt.setString(1, escapedQuery)
-      stmt.setInt(2, topK)
+        val stmt = connection.prepareStatement(sql)
+        stmt.setString(1, escapedQuery)
+        stmt.setInt(2, topK)
 
-      val rs      = stmt.executeQuery()
-      val results = collectResults(rs, includeHighlights = true)
-      stmt.close()
-      results
-    }.toEither.left.map(e => ProcessingError("keyword-index", s"Search with highlights failed: ${e.getMessage}"))
+        val rs      = stmt.executeQuery()
+        val results = collectResults(rs, includeHighlights = true)
+        stmt.close()
+        results
+      }.toEither.left.map(e => ProcessingError("keyword-index", s"Search with highlights failed: ${e.getMessage}"))
+    }
 
   override def get(id: String): Result[Option[KeywordDocument]] =
     Try {
@@ -269,7 +271,7 @@ final class SQLiteKeywordIndex private (
 
   // Helper methods
 
-  private val ValidMetadataKeyPattern = "^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$".r
+  private val ValidMetadataKeyPattern: String = "^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$"
 
   private def withTransaction[T](f: => T): Result[Unit] =
     Try {
@@ -324,49 +326,57 @@ final class SQLiteKeywordIndex private (
     }
   }
 
-  private def buildFilterClause(filter: MetadataFilter): String = filter match {
+  private def buildOptionalFilterClause(filter: Option[MetadataFilter]): Result[String] =
+    filter match {
+      case Some(f) => buildFilterClause(f).map(c => s"AND $c")
+      case None    => Right("")
+    }
+
+  private def buildFilterClause(filter: MetadataFilter): Result[String] = filter match {
     case MetadataFilter.All =>
-      "1=1"
+      Right("1=1")
     case MetadataFilter.Equals(key, value) =>
-      s"json_extract(d.metadata, '${escapeString(jsonPathForKey(key))}') = '${escapeString(value)}'"
+      jsonPathForKey(key).map(path => s"json_extract(d.metadata, '$path') = '${escapeString(value)}'")
     case MetadataFilter.Contains(key, substring) =>
-      s"json_extract(d.metadata, '${escapeString(jsonPathForKey(key))}') LIKE '%${escapeString(substring)}%'"
+      jsonPathForKey(key).map(path => s"json_extract(d.metadata, '$path') LIKE '%${escapeString(substring)}%'")
     case MetadataFilter.In(key, values) =>
-      val escaped = values.map(v => s"'${escapeString(v)}'").mkString(",")
-      s"json_extract(d.metadata, '${escapeString(jsonPathForKey(key))}') IN ($escaped)"
+      jsonPathForKey(key).map { path =>
+        val escaped = values.map(v => s"'${escapeString(v)}'").mkString(",")
+        s"json_extract(d.metadata, '$path') IN ($escaped)"
+      }
     case MetadataFilter.HasKey(key) =>
-      s"json_extract(d.metadata, '${escapeString(jsonPathForKey(key))}') IS NOT NULL"
+      jsonPathForKey(key).map(path => s"json_extract(d.metadata, '$path') IS NOT NULL")
     case MetadataFilter.And(left, right) =>
-      s"(${buildFilterClause(left)} AND ${buildFilterClause(right)})"
+      for {
+        l <- buildFilterClause(left)
+        r <- buildFilterClause(right)
+      } yield s"($l AND $r)"
     case MetadataFilter.Or(left, right) =>
-      s"(${buildFilterClause(left)} OR ${buildFilterClause(right)})"
+      for {
+        l <- buildFilterClause(left)
+        r <- buildFilterClause(right)
+      } yield s"($l OR $r)"
     case MetadataFilter.Not(inner) =>
-      s"NOT (${buildFilterClause(inner)})"
+      buildFilterClause(inner).map(s => s"NOT ($s)")
   }
 
-  private def validateMetadataKey(key: String): Either[String, Unit] = {
+  private def validateMetadataKey(key: String): Result[String] = {
     val trimmed = Option(key).map(_.trim).getOrElse("")
     if (trimmed.isEmpty)
-      Left("Invalid metadata key: key must not be empty")
-    else if (
-      !ValidMetadataKeyPattern.matches(trimmed) || trimmed.startsWith(".") || trimmed.endsWith(".") || trimmed.contains(
-        ".."
-      )
-    )
-      Left(s"Invalid metadata key: '$key'")
+      Left(ProcessingError("keyword-index", "Invalid metadata key: key must not be empty"))
+    else if (!trimmed.matches(ValidMetadataKeyPattern) || trimmed.endsWith(".") || trimmed.contains(".."))
+      Left(ProcessingError("keyword-index", s"Invalid metadata key: '$key'"))
     else
-      Right(())
+      Right(trimmed)
   }
 
-  private def jsonPathForKey(key: String): String = {
-    validateMetadataKey(key) match {
-      case Left(msg) => throw new IllegalArgumentException(msg)
-      case Right(_)  => ()
+  // Validation guarantees segments contain only [a-zA-Z0-9_-]; the segment
+  // escaping is defence-in-depth for the SQLite JSON path quoting.
+  private def jsonPathForKey(key: String): Result[String] =
+    validateMetadataKey(key).map { trimmed =>
+      val segments = trimmed.split("\\.").toSeq
+      "$" + segments.map(seg => s"""."${escapeJsonPathSegment(seg)}"""").mkString
     }
-    val normalized = key.trim
-    val segments   = normalized.split("\\.").toSeq
-    "$" + segments.map(seg => s"""."${escapeJsonPathSegment(seg)}"""").mkString
-  }
 
   private def escapeJsonPathSegment(seg: String): String =
     seg.replace("\\", "\\\\").replace("\"", "\\\"")

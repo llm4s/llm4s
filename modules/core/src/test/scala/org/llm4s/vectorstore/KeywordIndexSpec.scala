@@ -214,6 +214,26 @@ class KeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach
       result.left.toOption.get.formatted should include("Invalid metadata key")
     }
 
+    "propagate invalid metadata keys through composite filters" in {
+      val docs = Seq(
+        KeywordDocument("doc-1", "Scala content", Map("lang" -> "en"))
+      )
+      index.indexBatch(docs) shouldBe Right(())
+
+      val unsafeKey = "lang') OR 1=1 --"
+      val composite = MetadataFilter.And(
+        MetadataFilter.Equals("lang", "en"),
+        MetadataFilter.Or(
+          MetadataFilter.HasKey(unsafeKey),
+          MetadataFilter.Not(MetadataFilter.Contains("lang", "fr"))
+        )
+      )
+
+      val result = index.search("Scala", topK = 10, filter = Some(composite))
+      result.isLeft shouldBe true
+      result.left.toOption.get.formatted should include("Invalid metadata key")
+    }
+
     "allow metadata keys that begin with digits" in {
       val docs = Seq(
         KeywordDocument("doc-2024", "Scala release notes", Map("2024" -> "yes"))
