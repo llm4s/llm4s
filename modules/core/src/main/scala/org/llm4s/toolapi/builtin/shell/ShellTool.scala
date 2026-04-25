@@ -26,16 +26,34 @@ object ShellResult {
 }
 
 /**
- * Tool for executing shell commands.
+ * Tool for executing shell commands under a strict allowlist.
  *
  * IMPORTANT: This tool requires an explicit allowlist of commands for safety.
- * It will not execute any command that is not in the allowlist.
+ * It will not execute any command whose first token is not in the allowlist.
  *
- * Features:
- * - Command allowlist for security
- * - Configurable working directory
- * - Timeout support
- * - Output size limits
+ * == Execution model ==
+ *
+ * Commands are tokenized with shell-style quoting (see [[CommandTokenizer]]) and
+ * executed directly via [[ProcessBuilder]] '''without invoking a shell'''. As a
+ * consequence:
+ *
+ *   - No glob expansion (`*`, `?`, `[abc]` are passed literally to the program).
+ *   - No variable substitution (`$VAR`, `${VAR}`, `$(...)`, backticks).
+ *   - No command chaining or redirection (`&&`, `;`, `|`, `<`, `>`, `&`).
+ *   - Quoted arguments are honoured: `echo "hello world"` runs `echo` with one
+ *     argument `hello world`, not two.
+ *
+ * Combined with the allowlist, this means LLM-supplied input that contains
+ * shell metacharacters cannot escape into a shell — characters such as `&&`
+ * survive tokenization as literal argument bytes and are handed to the
+ * allowlisted program, which generally treats them as harmless input.
+ *
+ * == Features ==
+ *
+ *   - Command allowlist for security
+ *   - Configurable working directory
+ *   - Timeout support
+ *   - Output size limits
  *
  * @example
  * {{{{
@@ -54,7 +72,6 @@ object ShellResult {
  * }}}}
  */
 object ShellTool {
-  private val forbiddenShellChars: Set[Char] = Set(';', '|', '&', '<', '>', '`')
 
   private def createSchema = Schema
     .`object`[Map[String, Any]]("Shell command parameters")
@@ -88,20 +105,17 @@ object ShellTool {
   private def executeCommand(
     command: String,
     config: ShellConfig
-  ): Either[String, ShellResult] = {
-    val tokens      = command.trim.split("\\s+").toSeq.filter(_.nonEmpty)
-    val baseCommand = tokens.headOption.getOrElse("")
-
-    if (baseCommand.isEmpty) {
-      Left("Command cannot be empty")
-    } else if (!config.isCommandAllowed(baseCommand)) {
-      Left(s"Command '$baseCommand' is not allowed. Allowed: ${config.allowedCommands.mkString(", ")}")
-    } else if (tokens.exists(token => token.exists(forbiddenShellChars.contains))) {
-      Left("Shell metacharacters (e.g., &&, |, ;, <, >, `) are not allowed in command arguments")
-    } else {
-      runProcess(tokens, command, config)
+  ): Either[String, ShellResult] =
+    CommandTokenizer.tokenize(command).flatMap { tokens =>
+      tokens.headOption match {
+        case None =>
+          Left("Command cannot be empty")
+        case Some(baseCommand) if !config.isCommandAllowed(baseCommand) =>
+          Left(s"Command '$baseCommand' is not allowed. Allowed: ${config.allowedCommands.mkString(", ")}")
+        case Some(_) =>
+          runProcess(tokens, command, config)
+      }
     }
-  }
 
   private def runProcess(
     tokens: Seq[String],
