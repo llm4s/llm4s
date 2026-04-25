@@ -219,6 +219,16 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "propagate constructor-provided AgentContext through processInput" in {
+    val client = mockClient("done with constructor context")
+    val agent =
+      new AssistantAgent(client, emptyTools, "./sessions", agentContext = AgentContext(debug = true))
+    val emptyState = emptySessionState()
+
+    val result = agent.processInput("hello", emptyState)
+    result.isRight shouldBe true
+  }
+
   it should "return Left when the LLM call fails during step execution" in {
     val agent      = assistantAgent(failingClient("network error"))
     val emptyState = emptySessionState()

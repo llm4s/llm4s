@@ -49,7 +49,8 @@ class AssistantAgent(
   client: LLMClient,
   tools: ToolRegistry,
   sessionDir: String = "./sessions",
-  consoleConfig: ConsoleConfig = ConsoleConfig()
+  consoleConfig: ConsoleConfig = ConsoleConfig(),
+  agentContext: AgentContext = AgentContext.Default
 ) {
   private val logger         = LoggerFactory.getLogger(getClass)
   private val agent          = new Agent(client)
@@ -124,7 +125,7 @@ class AssistantAgent(
     logger.debug("Processing user query: {}", query.take(100))
     for {
       updatedState <- addUserMessage(query, state)
-      finalState <- runAgentToCompletion(updatedState, AgentContext.Default).leftMap(llmError =>
+      finalState <- runAgentToCompletion(updatedState, agentContext).leftMap(llmError =>
         AssistantError.SessionError(
           s"Agent execution failed: ${llmError.message}",
           state.sessionId,
