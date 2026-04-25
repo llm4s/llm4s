@@ -119,24 +119,18 @@ object ModularRAGExample extends App {
           case None         => base
         }
 
-        config.build(requestedProvider =>
-          ModularRAGSupport.resolveEmbeddingProviderConfig(
-            requestedProvider,
-            providerName,
-            embeddingCfg
-          )
-        )
+        config.build(_ => Right(embeddingCfg))
       }
     } yield {
       val ingestion  = new DefaultIngestionModule(rag)
       val retrieval  = new DefaultRetrievalModule(rag)
-      val generation = maybeLlm.map(_ => new DefaultGenerationModule(rag))
+      val generation = Option.when(maybeLlm.isDefined)(new DefaultGenerationModule(rag))
       (rag, ingestion, retrieval, generation)
     }
   }
 
   private def loadOptionalLlmClient(): Option[LLMClient] =
-    Llm4sConfig.provider().flatMap(LLMConnect.getClient) match {
+    Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient) match {
       case Right(client) =>
         logger.info("LLM provider detected; generation module will run.")
         Some(client)

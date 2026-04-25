@@ -1,11 +1,11 @@
 package org.llm4s.samples.rag.modular
 
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.EmbeddingProviderConfig
+import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-class ModularRAGExampleSpec extends AnyFunSuite with Matchers {
+class ModularRAGExampleSpec extends AnyFunSuite with Matchers with EitherValues {
 
   test("toEmbeddingProvider should map supported providers and reject unknown ones") {
     ModularRAGSupport.toEmbeddingProvider("openai").toOption.map(_.name) shouldBe Some("openai")
@@ -13,23 +13,7 @@ class ModularRAGExampleSpec extends AnyFunSuite with Matchers {
     ModularRAGSupport.toEmbeddingProvider("ollama").toOption.map(_.name) shouldBe Some("ollama")
 
     val unknown = ModularRAGSupport.toEmbeddingProvider("not-a-provider")
-    unknown.left.toOption.get shouldBe a[ConfigurationError]
-  }
-
-  test("resolveEmbeddingProviderConfig should only return config for matching provider") {
-    val config = EmbeddingProviderConfig(
-      baseUrl = "https://api.openai.com/v1",
-      model = "text-embedding-3-small",
-      apiKey = "test-key"
-    )
-
-    val matchResult =
-      ModularRAGSupport.resolveEmbeddingProviderConfig("openai", "openai", config)
-    matchResult shouldBe Right(config)
-
-    val mismatchResult =
-      ModularRAGSupport.resolveEmbeddingProviderConfig("voyage", "openai", config)
-    mismatchResult.left.toOption.get shouldBe a[ConfigurationError]
+    unknown.left.value shouldBe a[ConfigurationError]
   }
 
   test("seedCorpus should ingest all seeded documents") {
