@@ -38,8 +38,9 @@ import scala.util.Try
  *
  * == Timeouts ==
  *
- * Non-streaming requests time out after 120 seconds; streaming requests
- * after 600 seconds.
+ * Non-streaming request timeout is controlled by [[OllamaConfig.requestTimeout]]
+ * (default: 2 minutes). Streaming request timeout is controlled by
+ * [[OllamaConfig.streamTimeout]] (default: 10 minutes).
  *
  * @param config  Ollama configuration containing the model name and base URL.
  * @param metrics Receives per-call latency and token-usage events.
@@ -70,7 +71,7 @@ class OllamaClient(
     val headers     = Map("Content-Type" -> "application/json")
     val startedAt   = Instant.now()
     try {
-      val response = httpClient.post(url, headers, requestText, timeout = 120000)
+      val response = httpClient.post(url, headers, requestText, timeout = config.requestTimeout.toMillis.toInt)
       val result =
         if (response.statusCode >= 200 && response.statusCode < 300) {
           Try(ujson.read(response.body)).toResult
@@ -140,7 +141,7 @@ class OllamaClient(
     val rawResponse = new StringBuilder
 
     try {
-      val response = httpClient.postStream(url, headers, requestText, timeout = 600000)
+      val response = httpClient.postStream(url, headers, requestText, timeout = config.streamTimeout.toMillis.toInt)
       if (response.statusCode != 200) {
         val err = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)
         response.body.close()

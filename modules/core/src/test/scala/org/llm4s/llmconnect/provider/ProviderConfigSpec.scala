@@ -4,6 +4,8 @@ import org.llm4s.llmconnect.config._
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
+import scala.concurrent.duration._
+
 class ProviderConfigSpec extends AnyFunSuite with Matchers {
 
   // ================================= OPENAI CONFIG =================================
@@ -262,11 +264,60 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers {
       AzureConfig.fromValues("gpt-4o", "https://azure.openai.com", "key", "2024-02-15")
     val zai: ProviderConfig =
       ZaiConfig.fromValues("GLM-4.7", "key", "https://api.z.ai/api/paas/v4")
+    val openrouter: ProviderConfig =
+      OpenRouterConfig.fromValues("openai/gpt-4o", "key", "https://openrouter.ai/api/v1")
 
     openai.model shouldBe "gpt-4o"
     anthropic.model shouldBe "claude-3-sonnet"
     ollama.model shouldBe "llama3"
     azure.model shouldBe "gpt-4o"
     zai.model shouldBe "GLM-4.7"
+    openrouter.model shouldBe "openai/gpt-4o"
+  }
+
+  test("OllamaConfig has default timeouts") {
+    val cfg = OllamaConfig.fromValues("llama3", "http://localhost:11434")
+    cfg.requestTimeout shouldBe 2.minutes
+    cfg.streamTimeout shouldBe 10.minutes
+  }
+
+  test("GeminiConfig has default timeouts") {
+    val cfg = GeminiConfig.fromValues("gemini-2.0-flash", "test-key", "https://generativelanguage.googleapis.com")
+    cfg.requestTimeout shouldBe 2.minutes
+    cfg.streamTimeout shouldBe 10.minutes
+  }
+
+  test("DeepSeekConfig has default timeouts") {
+    val cfg = DeepSeekConfig.fromValues("deepseek-chat", "test-key", "https://api.deepseek.com")
+    cfg.requestTimeout shouldBe 5.minutes
+    cfg.streamTimeout shouldBe 5.minutes
+  }
+
+  test("ZaiConfig has default timeouts") {
+    val cfg = ZaiConfig.fromValues("GLM-4.7", "test-key", "https://api.z.ai/api/paas/v4")
+    cfg.requestTimeout shouldBe 5.minutes
+    cfg.streamTimeout shouldBe 5.minutes
+  }
+
+  test("CohereConfig has default requestTimeout") {
+    val cfg = CohereConfig.fromValues("command-r-plus", "test-key", "https://api.cohere.com")
+    cfg.requestTimeout shouldBe 2.minutes
+  }
+
+  test("MistralConfig has default requestTimeout") {
+    val cfg = MistralConfig.fromValues("mistral-large-latest", "test-key", "https://api.mistral.ai")
+    cfg.requestTimeout shouldBe 2.minutes
+  }
+
+  test("OpenRouterConfig.streamTimeout defaults to 5 minutes") {
+    val cfg = OpenRouterConfig.fromValues("openai/gpt-4o", "key", "https://openrouter.ai/api/v1")
+    cfg.requestTimeout shouldBe 2.minutes
+    cfg.streamTimeout shouldBe 5.minutes
+  }
+
+  test("EmbeddingProviderConfig.requestTimeout defaults to 2 minutes") {
+    val cfg =
+      EmbeddingProviderConfig(baseUrl = "https://api.openai.com", model = "text-embedding-3-small", apiKey = "key")
+    cfg.requestTimeout shouldBe 2.minutes
   }
 }

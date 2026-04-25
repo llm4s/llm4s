@@ -113,15 +113,13 @@ object ReliableProviders {
   /**
    * Create a reliable OpenRouter client.
    *
-   * OpenRouter uses OpenAI-compatible configuration.
-   *
-   * @param config OpenAI configuration (works with OpenRouter)
+   * @param config OpenRouter configuration
    * @param reliabilityConfig Reliability configuration (default: ReliabilityConfig.default)
    * @param metrics Metrics collector (default: noop)
    * @return Right(ReliableClient) wrapping OpenRouterClient, or Left(LLMError) on failure
    */
   def openRouter(
-    config: OpenAIConfig,
+    config: OpenRouterConfig,
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
   ): Result[LLMClient] =

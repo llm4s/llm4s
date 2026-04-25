@@ -51,7 +51,7 @@ object VoyageAIEmbeddingProvider {
         )
 
         val respEither: Either[EmbeddingError, Llm4sHttpResponse] =
-          try Right(httpClient.post(url, headers, payload.render(), timeout = 120000))
+          try Right(httpClient.post(url, headers, payload.render(), timeout = cfg.requestTimeout.toMillis.toInt))
           catch {
             case e: InterruptedException =>
               Thread.currentThread().interrupt()

@@ -34,9 +34,21 @@ object LLMConnect {
     val metrics         = options.metrics
     val exchangeLogging = options.exchangeLogging
     config match {
+      case cfg: OpenRouterConfig =>
+        OpenRouterClient(cfg, metrics, exchangeLogging)
       case cfg: OpenAIConfig =>
         if (cfg.baseUrl.contains("openrouter.ai"))
-          OpenRouterClient(cfg, metrics, exchangeLogging)
+          OpenRouterClient(
+            OpenRouterConfig(
+              apiKey = cfg.apiKey,
+              model = cfg.model,
+              baseUrl = cfg.baseUrl,
+              contextWindow = cfg.contextWindow,
+              reserveCompletion = cfg.reserveCompletion,
+            ),
+            metrics,
+            exchangeLogging,
+          )
         else OpenAIClient(cfg, metrics, exchangeLogging)
       case cfg: AzureConfig =>
         OpenAIClient(cfg, metrics, exchangeLogging)
@@ -141,16 +153,17 @@ object LLMConnect {
     val metrics         = options.metrics
     val exchangeLogging = options.exchangeLogging
     (provider, config) match {
-      case (ProviderKind.OpenAI, cfg: OpenAIConfig)       => OpenAIClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.OpenRouter, cfg: OpenAIConfig)   => OpenRouterClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Azure, cfg: AzureConfig)         => OpenAIClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Anthropic, cfg: AnthropicConfig) => AnthropicClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Ollama, cfg: OllamaConfig)       => OllamaClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Zai, cfg: ZaiConfig)             => ZaiClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Gemini, cfg: GeminiConfig)       => GeminiClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.DeepSeek, cfg: DeepSeekConfig)   => DeepSeekClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Cohere, cfg: CohereConfig)       => CohereClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Mistral, cfg: MistralConfig)     => MistralClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.OpenAI, cfg: OpenAIConfig)         => OpenAIClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.OpenAI, cfg: OpenRouterConfig)     => OpenRouterClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.OpenRouter, cfg: OpenRouterConfig) => OpenRouterClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Azure, cfg: AzureConfig)           => OpenAIClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Anthropic, cfg: AnthropicConfig)   => AnthropicClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Ollama, cfg: OllamaConfig)         => OllamaClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Zai, cfg: ZaiConfig)               => ZaiClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Gemini, cfg: GeminiConfig)         => GeminiClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.DeepSeek, cfg: DeepSeekConfig)     => DeepSeekClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Cohere, cfg: CohereConfig)         => CohereClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Mistral, cfg: MistralConfig)       => MistralClient(cfg, metrics, exchangeLogging)
       case (prov, wrongCfg) =>
         val cfgType = wrongCfg.getClass.getSimpleName
         val msg     = s"Invalid config type $cfgType for provider $prov"
