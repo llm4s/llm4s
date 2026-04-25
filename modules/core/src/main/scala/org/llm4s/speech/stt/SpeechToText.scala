@@ -93,20 +93,8 @@ object STTOptions {
     }
 
     if (errors.isEmpty) {
-      // Safe to construct since we already validated
-      try
-        Right(STTOptions(language, prompt, enableTimestamps, diarization, confidenceThreshold))
-      catch {
-        case e: IllegalArgumentException =>
-          Left(STTError.InvalidInput(e.getMessage, context = Map("validation_step" -> "final")))
-        case e: Throwable =>
-          Left(
-            STTError.InvalidInput(
-              "Unexpected error during validation",
-              context = Map("error" -> e.toString)
-            )
-          )
-      }
+      // All validations above subsume the case-class `require`, so construction is safe.
+      Right(STTOptions(language, prompt, enableTimestamps, diarization, confidenceThreshold))
     } else {
       Left(
         STTError.InvalidInput(
@@ -122,17 +110,11 @@ object STTOptions {
   }
 
   /**
-   * Batch validate multiple STTOptions configurations.
-   * Useful for testing or bulk configuration loading.
+   * Batch-pass already-constructed STTOptions through. Each element has
+   * already cleared the case-class `require` checks at construction time, so
+   * this is a passthrough kept for symmetry with [[validate]].
    */
-  def validateBatch(options: Seq[STTOptions]): Result[Seq[STTOptions]] =
-    // Since direct construction uses require(), catch any failures
-    try
-      Right(options)
-    catch {
-      case e: IllegalArgumentException =>
-        Left(STTError.InvalidInput(s"Configuration validation failed: ${e.getMessage}"))
-    }
+  def validateBatch(options: Seq[STTOptions]): Result[Seq[STTOptions]] = Right(options)
 }
 
 /**
