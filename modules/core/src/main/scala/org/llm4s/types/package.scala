@@ -62,65 +62,6 @@ package object types {
   type StreamResult[+A] = Result[Iterator[A]]
 
   /**
-   * Identifiers and newtypes for type safety.
-   */
-
-  /**
-   * Type-safe wrapper for LLM model names
-   */
-  final case class ModelName(value: String) extends AnyVal {
-    override def toString: String = value
-    def isEmpty: Boolean          = value.trim.isEmpty
-    def nonEmpty: Boolean         = value.trim.nonEmpty
-  }
-
-  /**
-   * Type-safe wrapper for provider names
-   */
-  final case class ProviderName(value: String) extends AnyVal {
-    override def toString: String = value
-    def normalized: String        = value.toLowerCase.trim
-  }
-
-  /**
-   * Type-safe wrapper for API keys (prevents accidental logging)
-   */
-  final case class ApiKey(private val value: String) extends AnyVal {
-    override def toString: String = "ApiKey(***)"
-    def reveal: String            = value
-    def masked: String            = s"${value.take(4)}${"*" * (value.length - 4)}"
-  }
-
-  /**
-   * Type-safe wrapper for conversation IDs
-   */
-  final case class ConversationId(value: String) extends AnyVal {
-    override def toString: String = value
-  }
-
-  object ConversationId {
-
-    /**
-     * Generates a new unique conversation ID using UUID
-     */
-    def generate(): ConversationId =
-      ConversationId(java.util.UUID.randomUUID().toString)
-
-    /**
-     * Creates a ConversationId with validation
-     *
-     * @param value The ID string to validate
-     * @return Either a validation error or valid ConversationId
-     */
-    def create(value: String): Result[ConversationId] =
-      if (value.trim.nonEmpty) {
-        Right(ConversationId(value.trim))
-      } else {
-        Left(ValidationError("Conversation ID cannot be empty", "conversationId"))
-      }
-  }
-
-  /**
    * Type-safe wrapper for completion IDs
    */
   final case class CompletionId(value: String) extends AnyVal {
@@ -260,7 +201,7 @@ package object types {
   type ConfigResult[A] = Result[A]
 
   /** Type alias for secrets map */
-  type SecretsMap = Map[String, ApiKey]
+  type SecretsMap = Map[String, org.llm4s.types.ProviderModelTypes.ApiKey]
 
   /** Type alias for configuration section */
   type ConfigSection = Map[String, Any]
@@ -401,7 +342,7 @@ package object types {
   }
 
   /** Type alias for authentication credentials */
-  type AuthCredentials = Either[ApiKey, JwtToken]
+  type AuthCredentials = Either[org.llm4s.types.ProviderModelTypes.ApiKey, JwtToken]
 
   /** Type alias for permission set */
   type Permissions = Set[String]
@@ -545,7 +486,7 @@ package object types {
   }
 
   type TrainingDataset  = List[String]
-  type FineTuningResult = Result[ModelName]
+  type FineTuningResult = Result[org.llm4s.types.ProviderModelTypes.ModelName]
 
   // Agents & Multi-Agent Types (for future agent support)
   final case class AgentId(value: String) extends AnyVal {
@@ -715,62 +656,6 @@ package object types {
    * This approach ensures type safety without runtime overhead,
    * and provides a clear and consistent API for creating and validating IDs and names.
    */
-
-  object ModelName {
-
-    private val validModelPattern = """^[a-zA-Z0-9\-_./:]+$""".r
-
-    def apply(value: String): Result[ModelName] =
-      if (validModelPattern.matches(value.trim)) Right(new ModelName(value.trim))
-      else Left(error.ValidationError("modelName", "Invalid model name format"))
-
-    def fromString(value: String): ModelName = new ModelName(value)
-
-    def unsafe(value: String): ModelName = new ModelName(value)
-
-    // Common model name constants
-    val GPT_4: ModelName           = new ModelName("gpt-4")
-    val GPT_4_TURBO: ModelName     = new ModelName("gpt-4-turbo")
-    val GPT_3_5_TURBO: ModelName   = new ModelName("gpt-3.5-turbo")
-    val CLAUDE_3_OPUS: ModelName   = new ModelName("claude-3-opus-20240229")
-    val CLAUDE_3_SONNET: ModelName = new ModelName("claude-3-sonnet-20240229")
-    val CLAUDE_3_HAIKU: ModelName  = new ModelName("claude-3-haiku-20240307")
-  }
-
-  object ProviderName {
-    def create(value: String): Result[ProviderName] =
-      if (value.trim.nonEmpty) Right(ProviderName(value.trim.toLowerCase))
-      else Left(error.ValidationError("Provider name cannot be empty", "providerName"))
-
-    // Common provider constants
-    val OPENAI: ProviderName    = ProviderName("openai")
-    val ANTHROPIC: ProviderName = ProviderName("anthropic")
-    val AZURE: ProviderName     = ProviderName("azure")
-    val GOOGLE: ProviderName    = ProviderName("google")
-    val COHERE: ProviderName    = ProviderName("cohere")
-  }
-
-  object ApiKey {
-    def apply(value: String): Result[ApiKey] =
-      if (value.trim.nonEmpty && value.length >= 8) Right(new ApiKey(value))
-      else Left(error.ValidationError("apiKey", "Must be at least 8 characters"))
-
-  }
-
-  object ToolName {
-    def create(value: String): Result[ToolName] = {
-      val trimmed = value.trim
-      if (trimmed.nonEmpty && trimmed.matches("[a-zA-Z0-9_-]+"))
-        Right(ToolName(trimmed))
-      else
-        Left(
-          error.ValidationError(
-            "Tool name must be non-empty and contain only alphanumeric characters, underscores, and hyphens",
-            "toolName"
-          )
-        )
-    }
-  }
 
   object Url {
     def create(value: String): Result[Url] =

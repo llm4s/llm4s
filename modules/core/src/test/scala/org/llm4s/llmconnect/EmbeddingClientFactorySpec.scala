@@ -1,10 +1,13 @@
 package org.llm4s.llmconnect
 
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
+import org.llm4s.model.ModelRegistryService
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   "EmbeddingClient.from(provider,cfg)" should {
     "build client for openai without throwing" in {

@@ -1,9 +1,12 @@
 package org.llm4s.mcp
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.Outcome
 import org.scalatest.wordspec.AnyWordSpec
+import org.slf4j.LoggerFactory
 import upickle.default._
 
 import scala.concurrent.duration._
@@ -19,6 +22,14 @@ import scala.concurrent.duration._
  * - Notification sending
  */
 class SSETransportImplSpec extends AnyWordSpec with Matchers with MockFactory {
+
+  override def withFixture(test: NoArgTest): Outcome = {
+    val logger   = LoggerFactory.getLogger("org.llm4s.mcp.SSETransportImpl").asInstanceOf[LBLogger]
+    val previous = logger.getLevel
+    logger.setLevel(Level.OFF)
+    try super.withFixture(test)
+    finally logger.setLevel(previous)
+  }
 
   // Test data
   val testUrl     = "http://localhost:8080/mcp"

@@ -6,14 +6,17 @@ import com.azure.core.credential.{ AzureKeyCredential, KeyCredential }
 import com.azure.core.util.{ BinaryData, IterableStream }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
+import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
-import org.llm4s.model.TransformationResult
+import org.llm4s.model.{ ModelRegistryService, TransformationResult }
 import org.llm4s.toolapi.{ AzureToolHelper, ToolRegistry }
 import org.llm4s.types.Result
 import org.slf4j.{ Logger, LoggerFactory }
 
+import java.time.Instant
 import scala.jdk.CollectionConverters._
 import scala.util.Try
 
@@ -46,12 +49,14 @@ private[provider] trait OpenAIClientTransport {
  * @param config provider configuration containing context window and reserve completion settings
  * @param metrics metrics collector for observability (default: noop)
  */
-class OpenAIClient private (
+class OpenAIClient private[provider] (
   private val model: String,
   private val transport: OpenAIClientTransport,
   private val config: ProviderConfig,
-  protected val metrics: org.llm4s.metrics.MetricsCollector
-) extends BaseLifecycleLLMClient {
+  protected val metrics: org.llm4s.metrics.MetricsCollector,
+  exchangeLogging: ProviderExchangeLogging
+)(using val registryService: ModelRegistryService)
+    extends BaseLifecycleLLMClient {
 
   private lazy val logger: Logger = LoggerFactory.getLogger(getClass)
 
@@ -65,7 +70,7 @@ class OpenAIClient private (
    * @param config OpenAI configuration with API key and base URL
    * @param metrics metrics collector (default: noop)
    */
-  def this(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector) = this(
+  def this(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) = this(
     config.model,
     OpenAIClientTransport.azure(
       new OpenAIClientBuilder()
@@ -74,7 +79,25 @@ class OpenAIClient private (
         .buildClient()
     ),
     config,
-    metrics
+    metrics,
+    ProviderExchangeLogging.Disabled
+  )
+
+  def this(
+    config: OpenAIConfig,
+    metrics: org.llm4s.metrics.MetricsCollector,
+    exchangeLogging: ProviderExchangeLogging
+  )(using ModelRegistryService) = this(
+    config.model,
+    OpenAIClientTransport.azure(
+      new OpenAIClientBuilder()
+        .credential(new KeyCredential(config.apiKey))
+        .endpoint(config.baseUrl)
+        .buildClient()
+    ),
+    config,
+    metrics,
+    exchangeLogging
   )
 
   /**
@@ -83,7 +106,7 @@ class OpenAIClient private (
    * @param config Azure configuration with API key, endpoint, and API version
    * @param metrics metrics collector (default: noop)
    */
-  def this(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector) = this(
+  def this(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) = this(
     config.model,
     OpenAIClientTransport.azure(
       new OpenAIClientBuilder()
@@ -93,20 +116,41 @@ class OpenAIClient private (
         .buildClient()
     ),
     config,
-    metrics
+    metrics,
+    ProviderExchangeLogging.Disabled
+  )
+
+  def this(
+    config: AzureConfig,
+    metrics: org.llm4s.metrics.MetricsCollector,
+    exchangeLogging: ProviderExchangeLogging
+  )(using ModelRegistryService) = this(
+    config.model,
+    OpenAIClientTransport.azure(
+      new OpenAIClientBuilder()
+        .credential(new AzureKeyCredential(config.apiKey))
+        .endpoint(config.endpoint)
+        .serviceVersion(OpenAIServiceVersion.valueOf(config.apiVersion))
+        .buildClient()
+    ),
+    config,
+    metrics,
+    exchangeLogging
   )
 
   override def complete(
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = completeWithMetrics {
+    val startedAt = Instant.now()
     // Transform options and messages for model-specific constraints
-    for {
+    val result = for {
       transformed <- TransformationResult.transform(
         model,
         options,
         conversation.messages,
-        dropUnsupported = true
+        dropUnsupported = true,
+        org.llm4s.model.RequestTransformer.default(registryService)
       )
       transformedConversation = conversation.copy(messages = transformed.messages)
       chatOptions = prepareChatOptions(
@@ -119,7 +163,16 @@ class OpenAIClient private (
           logger.error(s"OpenAI completion failed for model $model", e)
           e.toLLMError
         }
-    } yield convertFromOpenAIFormat(completions)
+      completion = convertFromOpenAIFormat(completions)
+      _ = recordExchange(
+        startedAt,
+        Some(serializeChatOptions(chatOptions)),
+        Some(serializeCompletions(completions)),
+        Right(completion)
+      )
+    } yield completion
+
+    result.tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
   }
 
   override def streamComplete(
@@ -127,19 +180,31 @@ class OpenAIClient private (
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
+    val startedAt = Instant.now()
     // Transform options and messages for model-specific constraints
-    TransformationResult.transform(model, options, conversation.messages, dropUnsupported = true).flatMap {
-      transformed =>
-        val transformedConversation = conversation.copy(messages = transformed.messages)
-        val chatOptions =
-          prepareChatOptions(transformedConversation, transformed.options, transformed.requiresMaxCompletionTokens)
+    val result =
+      TransformationResult
+        .transform(
+          model,
+          options,
+          conversation.messages,
+          dropUnsupported = true,
+          org.llm4s.model.RequestTransformer.default(registryService)
+        )
+        .flatMap { transformed =>
+          val transformedConversation = conversation.copy(messages = transformed.messages)
+          val chatOptions =
+            prepareChatOptions(transformedConversation, transformed.options, transformed.requiresMaxCompletionTokens)
+          val requestBody = serializeChatOptions(chatOptions)
 
-        if (transformed.requiresFakeStreaming) {
-          executeFakeStreaming(chatOptions, onChunk)
-        } else {
-          executeNativeStreaming(chatOptions, onChunk)
+          if (transformed.requiresFakeStreaming) {
+            executeFakeStreaming(startedAt, requestBody, chatOptions, onChunk)
+          } else {
+            executeNativeStreaming(startedAt, requestBody, chatOptions, onChunk)
+          }
         }
-    }
+
+    result.tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
   }
 
   override protected def releaseResources(): Unit =
@@ -154,6 +219,8 @@ class OpenAIClient private (
    * @return Result containing the completion or an error
    */
   private def executeFakeStreaming(
+    startedAt: Instant,
+    requestBody: String,
     chatOptions: ChatCompletionsOptions,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
@@ -163,11 +230,14 @@ class OpenAIClient private (
         e.toLLMError
       }
 
-    attempt.flatMap { completions =>
-      val completion = convertFromOpenAIFormat(completions)
-      emitCompletionAsChunks(completion, onChunk)
-      Right(completion)
-    }
+    attempt
+      .flatMap { completions =>
+        val completion = convertFromOpenAIFormat(completions)
+        emitCompletionAsChunks(completion, onChunk)
+        recordExchange(startedAt, Some(requestBody), Some(serializeCompletions(completions)), Right(completion))
+        Right(completion)
+      }
+      .tapLeft(error => recordExchange(startedAt, Some(requestBody), None, Left(error)))
   }
 
   /**
@@ -179,25 +249,39 @@ class OpenAIClient private (
    * @return Result containing the completion or an error
    */
   private def executeNativeStreaming(
+    startedAt: Instant,
+    requestBody: String,
     chatOptions: ChatCompletionsOptions,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
     val accumulator = StreamingAccumulator.create()
+    val rawStream   = StringBuilder()
 
     val attempt = Try {
       val stream = transport.getChatCompletionsStream(model, chatOptions)
-      processStreamingResponse(stream, accumulator, onChunk)
+      processStreamingResponse(
+        stream,
+        accumulator,
+        onChunk,
+        chatCompletions => rawStream.append(serializeCompletions(chatCompletions)).append('\n')
+      )
     }.toEither.left.map { e =>
       logger.error(s"OpenAI native streaming failed for model $model", e)
       e.toLLMError
     }
 
-    attempt.flatMap(_ =>
-      accumulator.toCompletion.map { c =>
-        val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
-        c.copy(model = model, estimatedCost = cost)
-      }
-    )
+    attempt
+      .flatMap(_ =>
+        accumulator.toCompletion.map { c =>
+          val cost       = c.usage.flatMap(u => CostEstimator.estimate(model, u))
+          val completion = c.copy(model = model, estimatedCost = cost)
+          recordExchange(startedAt, Some(requestBody), Some(rawStream.result()), Right(completion))
+          completion
+        }
+      )
+      .tapLeft(error =>
+        recordExchange(startedAt, Some(requestBody), Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
+      )
   }
 
   /**
@@ -210,9 +294,11 @@ class OpenAIClient private (
   private def processStreamingResponse(
     stream: IterableStream[ChatCompletions],
     accumulator: StreamingAccumulator,
-    onChunk: StreamedChunk => Unit
+    onChunk: StreamedChunk => Unit,
+    onRawChunk: ChatCompletions => Unit
   ): Unit =
     stream.forEach { chatCompletions =>
+      onRawChunk(chatCompletions)
       Option(chatCompletions.getChoices)
         .filterNot(_.isEmpty)
         .foreach(_ => processStreamingChoice(chatCompletions, accumulator, onChunk))
@@ -549,6 +635,28 @@ class OpenAIClient private (
         case _ => None
       })
       .getOrElse(Seq.empty)
+
+  private def recordExchange(
+    startedAt: Instant,
+    requestBody: Option[String],
+    responseBody: Option[String],
+    result: Result[Completion]
+  ): Unit =
+    ProviderExchangeRecorder.record(
+      exchangeLogging = exchangeLogging,
+      provider = providerName,
+      model = Some(model),
+      startedAt = startedAt,
+      requestBody = requestBody.getOrElse(""),
+      responseBody = responseBody,
+      result = result
+    )
+
+  private def serializeChatOptions(chatOptions: ChatCompletionsOptions): String =
+    BinaryData.fromObject(chatOptions).toString
+
+  private def serializeCompletions(completions: ChatCompletions): String =
+    BinaryData.fromObject(completions).toString
 }
 
 /**
@@ -563,9 +671,10 @@ object OpenAIClient {
     model: String,
     transport: OpenAIClientTransport,
     config: ProviderConfig,
-    metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-  ): OpenAIClient =
-    new OpenAIClient(model, transport, config, metrics)
+    metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
+    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+  )(using ModelRegistryService): OpenAIClient =
+    new OpenAIClient(model, transport, config, metrics, exchangeLogging)
 
   /**
    * Creates an OpenAI client for direct OpenAI API access.
@@ -574,13 +683,23 @@ object OpenAIClient {
    * @param metrics metrics collector for observability
    * @return Right(OpenAIClient) on success, Left(LLMError) if client creation fails
    */
-  def apply(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector): Result[OpenAIClient] =
+  def apply(
+    config: OpenAIConfig,
+    metrics: org.llm4s.metrics.MetricsCollector,
+    exchangeLogging: ProviderExchangeLogging
+  )(using ModelRegistryService): Result[OpenAIClient] =
+    Try(new OpenAIClient(config, metrics, exchangeLogging)).toResult
+
+  def apply(
+    config: OpenAIConfig,
+    metrics: org.llm4s.metrics.MetricsCollector
+  )(using ModelRegistryService): Result[OpenAIClient] =
     Try(new OpenAIClient(config, metrics)).toResult
 
   /**
    * Convenience overload with noop metrics.
    */
-  def apply(config: OpenAIConfig): Result[OpenAIClient] =
+  def apply(config: OpenAIConfig)(using ModelRegistryService): Result[OpenAIClient] =
     Try(new OpenAIClient(config, org.llm4s.metrics.MetricsCollector.noop)).toResult
 
   /**
@@ -590,13 +709,23 @@ object OpenAIClient {
    * @param metrics metrics collector for observability
    * @return Right(OpenAIClient) on success, Left(LLMError) if client creation fails
    */
-  def apply(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector): Result[OpenAIClient] =
+  def apply(
+    config: AzureConfig,
+    metrics: org.llm4s.metrics.MetricsCollector,
+    exchangeLogging: ProviderExchangeLogging
+  )(using ModelRegistryService): Result[OpenAIClient] =
+    Try(new OpenAIClient(config, metrics, exchangeLogging)).toResult
+
+  def apply(
+    config: AzureConfig,
+    metrics: org.llm4s.metrics.MetricsCollector
+  )(using ModelRegistryService): Result[OpenAIClient] =
     Try(new OpenAIClient(config, metrics)).toResult
 
   /**
    * Convenience overload with noop metrics.
    */
-  def apply(config: AzureConfig): Result[OpenAIClient] =
+  def apply(config: AzureConfig)(using ModelRegistryService): Result[OpenAIClient] =
     Try(new OpenAIClient(config, org.llm4s.metrics.MetricsCollector.noop)).toResult
 }
 

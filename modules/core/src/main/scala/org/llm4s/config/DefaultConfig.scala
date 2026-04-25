@@ -1,7 +1,14 @@
 package org.llm4s.config
 
+/**
+ * Default values for provider endpoints, API versions, and tracing URLs.
+ *
+ * These constants are used as fallbacks by the config loaders when the
+ * corresponding environment variables or config keys are not set.
+ */
 object DefaultConfig {
   val DEFAULT_OPENAI_BASE_URL           = "https://api.openai.com/v1"
+  val DEFAULT_OPENROUTER_BASE_URL       = "https://openrouter.ai/api/v1"
   val DEFAULT_ANTHROPIC_BASE_URL        = "https://api.anthropic.com"
   val DEFAULT_GEMINI_BASE_URL           = "https://generativelanguage.googleapis.com/v1beta"
   val DEFAULT_DEEPSEEK_BASE_URL         = "https://api.deepseek.com"

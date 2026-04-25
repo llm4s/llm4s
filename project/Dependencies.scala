@@ -9,7 +9,9 @@ object Versions {
   val cats     = "2.13.0"
   val upickle  = "4.2.1"
   val logback  = "1.5.18"
+  val log4j    = "2.24.3"
   val monocle  = "3.3.0"
+  val termflow = "0.1.23"
   val scalatest               = "3.2.19"
   val scalamock               = "7.4.2"
   val scalatestplusScalacheck = "3.2.19.0"
@@ -41,24 +43,29 @@ object Versions {
 
   // Prometheus (1.x stable)
   val prometheus = "1.4.3"
+
+  // Neo4j
+  val neo4j = "5.27.0"
 }
 
 object Deps {
 
-  val cats      = "org.typelevel" %% "cats-core" % Versions.cats
-  val upickle   = "com.lihaoyi"   %% "upickle"   % Versions.upickle
-  val logback   = "ch.qos.logback" % "logback-classic" % Versions.logback
-  val monocleCore  = "dev.optics" %% "monocle-core"  % Versions.monocle
-  val monocleMacro = "dev.optics" %% "monocle-macro" % Versions.monocle
+  val cats                    = "org.typelevel" %% "cats-core" % Versions.cats
+  val upickle                 = "com.lihaoyi"   %% "upickle"   % Versions.upickle
+  val logback                 = "ch.qos.logback" % "logback-classic" % Versions.logback
+  val log4jToSlf4j            = "org.apache.logging.log4j" % "log4j-to-slf4j" % Versions.log4j
+  val termflow                = "org.llm4s" %% "termflow" % Versions.termflow
+  val monocleCore             = "dev.optics" %% "monocle-core"  % Versions.monocle
+  val monocleMacro            = "dev.optics" %% "monocle-macro" % Versions.monocle
   val scalatest               = "org.scalatest"    %% "scalatest"          % Versions.scalatest
   val scalamock               = "org.scalamock"    %% "scalamock"          % Versions.scalamock
   val scalatestplusScalacheck = "org.scalatestplus" %% "scalacheck-1-18"   % Versions.scalatestplusScalacheck
-  val fansi     = "com.lihaoyi"   %% "fansi"     % Versions.fansi
-  val postgres  = "org.postgresql" % "postgresql" % Versions.postgres
-  val sqlite    = "org.xerial"     % "sqlite-jdbc" % Versions.sqlite
-  val config    = "com.typesafe"   % "config"    % Versions.config
-  val hikariCP  = "com.zaxxer"     % "HikariCP"  % Versions.hikariCP
-  val pureConfig  = "com.github.pureconfig" %% "pureconfig-core" % Versions.pureconfig
+  val fansi                   = "com.lihaoyi"   %% "fansi"     % Versions.fansi
+  val postgres                = "org.postgresql" % "postgresql" % Versions.postgres
+  val sqlite                  = "org.xerial"     % "sqlite-jdbc" % Versions.sqlite
+  val config                  = "com.typesafe"   % "config"    % Versions.config
+  val hikariCP                = "com.zaxxer"     % "HikariCP"  % Versions.hikariCP
+  val pureConfig              = "com.github.pureconfig" %% "pureconfig-core" % Versions.pureconfig
 
 
   val azureOpenAI = "com.azure"     % "azure-ai-openai" % Versions.azureOpenAI
@@ -86,12 +93,18 @@ object Deps {
   // Prometheus metrics
   val prometheusCore = "io.prometheus" % "prometheus-metrics-core" % Versions.prometheus
   val prometheusHttp = "io.prometheus" % "prometheus-metrics-exporter-httpserver" % Versions.prometheus
+
+  // Neo4j
+  val neo4jDriver = "org.neo4j.driver" % "neo4j-java-driver" % Versions.neo4j
+  // Note: neo4j-harness is not included as a dependency because neo4j-harness 5.26.x
+  // has a hard-coded incompatibility with Netty 4.1.115.Final on modern JVMs.
+  // Integration tests use a real Neo4j instance via Neo4jGraphStore.local().
 }
 
 object Common {
   val scala3 = "3.7.1"
 
-  val scala3CompilerOptions = Seq(
+  private val scala3CompilerOptions = Seq(
     "-explain",
     "-explain-types",
     "-Wunused:nowarn",

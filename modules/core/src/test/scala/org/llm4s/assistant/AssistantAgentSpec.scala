@@ -2,7 +2,7 @@ package org.llm4s.assistant
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.llm4s.agent.{ AgentState, AgentStatus }
+import org.llm4s.agent.{ AgentContext, AgentState, AgentStatus }
 import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -204,6 +204,29 @@ class AssistantAgentSpec extends AnyFlatSpec with Matchers {
         }
       case Left(err) => fail(s"Init failed: ${err.message}")
     }
+  }
+
+  it should "support explicit AgentContext when running to completion" in {
+    val agent       = assistantAgent(mockClient("done with context"))
+    val emptyState  = emptySessionState()
+    val initialized = agent.addUserMessage("finish this", emptyState)
+
+    initialized match {
+      case Right(stateAfterInit) =>
+        val result = agent.runAgentToCompletion(stateAfterInit, AgentContext(debug = true))
+        result.isRight shouldBe true
+      case Left(err) => fail(s"Init failed: ${err.message}")
+    }
+  }
+
+  it should "propagate constructor-provided AgentContext through processInput" in {
+    val client = mockClient("done with constructor context")
+    val agent =
+      new AssistantAgent(client, emptyTools, "./sessions", agentContext = AgentContext(debug = true))
+    val emptyState = emptySessionState()
+
+    val result = agent.processInput("hello", emptyState)
+    result.isRight shouldBe true
   }
 
   it should "return Left when the LLM call fails during step execution" in {

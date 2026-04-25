@@ -1,5 +1,6 @@
 package org.llm4s.agent
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.llm4s.agent.streaming.AgentEvent
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
@@ -8,11 +9,21 @@ import org.llm4s.types.Result
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.Outcome
+import org.slf4j.LoggerFactory
 import upickle.default._
 
 import scala.collection.mutable.ArrayBuffer
 
 class AgentToolFailureTest extends AnyFlatSpec with Matchers with MockFactory {
+
+  override def withFixture(test: NoArgTest): Outcome = {
+    val logger   = LoggerFactory.getLogger("org.llm4s.agent.ToolProcessor$").asInstanceOf[LBLogger]
+    val previous = logger.getLevel
+    logger.setLevel(Level.OFF)
+    try super.withFixture(test)
+    finally logger.setLevel(previous)
+  }
 
   // Result wrapper for tool response
   case class ToolResult(message: String)

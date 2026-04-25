@@ -32,15 +32,16 @@ LLM4S uses a hierarchical configuration system with the following precedence (hi
 
 ## Environment Variables
 
-The simplest way to configure LLM4S is through environment variables.
+Use environment variables for secrets and for selecting the default named
+provider you want `Llm4sConfig.defaultProvider()` to resolve.
 
 ### Core Settings
 
 ```bash
-# Required: Model selection (determines provider)
-LLM_MODEL=openai/gpt-4o
+# Required: default named provider
+LLM4S_PROVIDER=openai-main
 
-# Required: API key for your chosen provider
+# Required: API key for the configured provider
 OPENAI_API_KEY=sk-proj-...
 ```
 
@@ -50,11 +51,9 @@ Create a `.env` file in your project root:
 
 ```bash
 # ===================
-# Model Selection
+# Named Provider Selection
 # ===================
-# Format: <provider>/<model-name>
-# Supported providers: openai, anthropic, azure, ollama, gemini, cohere
-LLM_MODEL=openai/gpt-4o
+LLM4S_PROVIDER=openai-main
 
 # ===================
 # OpenAI Configuration
@@ -99,12 +98,17 @@ COHERE_BASE_URL=https://api.cohere.com  # Optional
 # ===================
 # Tracing Configuration
 # ===================
-TRACING_MODE=langfuse  # Options: langfuse, console, none
+TRACING_MODE=langfuse  # Options: langfuse, opentelemetry, console, none
 
 # Langfuse settings (if using TRACING_MODE=langfuse)
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
 LANGFUSE_URL=https://cloud.langfuse.com  # or self-hosted
+
+# OpenTelemetry settings (if using TRACING_MODE=opentelemetry)
+OTEL_SERVICE_NAME=llm4s-agent
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer <token>  # Optional
 
 # ===================
 # Embeddings Configuration (RAG)
@@ -177,73 +181,79 @@ Restart sbt after adding this file. This grants the plugin the reflective access
 
 For more complex configurations, use `application.conf`:
 
-### Create application.conf
+### Preferred: Named Providers
 
-Create `src/main/resources/application.conf`:
+For production systems and applications that need multiple configured providers,
+prefer the `llm4s.providers` section.
+
+This keeps:
+
+- provider names and structure in HOCON
+- secrets in environment variables
+- the environment variable names under your control
+
+For example, `${?FOO}` is perfectly valid if that is the name you want to use.
 
 ```hocon
-llm {
-  # Model configuration
-  model = ${?LLM_MODEL}  # Fallback to env var
-  model = "openai/gpt-4o"  # Default if not set
-
-  # Generation parameters
-  temperature = 0.7
-  max-tokens = 2000
-  top-p = 1.0
-
-  # Provider configurations
+llm4s {
   providers {
-    openai {
-      api-key = ${?OPENAI_API_KEY}
-      base-url = ${?OPENAI_BASE_URL}
-      base-url = "https://api.openai.com/v1"  # Default
-      organization = ${?OPENAI_ORGANIZATION}
+    provider = "openai-main"
+
+    openai-main {
+      provider = "openai"
+      model = "gpt-4o-mini"
+      apiKey = ${?OPENAI_MAIN_API_KEY}
+      baseUrl = ${?OPENAI_MAIN_BASE_URL}
+      organization = ${?OPENAI_MAIN_ORGANIZATION}
     }
 
-    anthropic {
-      api-key = ${?ANTHROPIC_API_KEY}
-      base-url = ${?ANTHROPIC_BASE_URL}
-      base-url = "https://api.anthropic.com"
-      version = ${?ANTHROPIC_VERSION}
-      version = "2023-06-01"
+    gemini-main {
+      provider = "gemini"
+      model = "gemini-2.0-flash"
+      apiKey = ${?GEMINI_MAIN_API_KEY}
+      baseUrl = ${?GEMINI_MAIN_BASE_URL}
     }
 
-    azure {
-      api-key = ${?AZURE_API_KEY}
-      api-base = ${?AZURE_API_BASE}
-      deployment-name = ${?AZURE_DEPLOYMENT_NAME}
-      api-version = ${?AZURE_API_VERSION}
-      api-version = "2024-02-15-preview"
-    }
-
-    ollama {
-      base-url = ${?OLLAMA_BASE_URL}
-      base-url = "http://localhost:11434"
+    ollama-local {
+      provider = "ollama"
+      model = "llama3.2"
+      baseUrl = ${?OLLAMA_LOCAL_BASE_URL}
     }
   }
-}
-
-# Tracing configuration
-tracing {
-  mode = ${?TRACING_MODE}
-  mode = "none"  # Default: disabled
-
-  langfuse {
-    public-key = ${?LANGFUSE_PUBLIC_KEY}
-    secret-key = ${?LANGFUSE_SECRET_KEY}
-    url = ${?LANGFUSE_URL}
-    url = "https://cloud.langfuse.com"
-  }
-}
-
-# Context window management
-context {
-  max-messages = 50
-  preserve-system-message = true
-  pruning-strategy = "oldest-first"  # oldest-first, middle-out, recent-turns
 }
 ```
+
+You can then access the new configuration path with:
+
+```scala
+import org.llm4s.config.Llm4sConfig
+
+val providersResult = Llm4sConfig.providers()
+val defaultName     = Llm4sConfig.defaultProviderName()
+val defaultConfig   = Llm4sConfig.defaultProvider()
+val namedConfig     = Llm4sConfig.provider("openai-main")
+```
+
+Named providers can also be used for model discovery:
+
+```scala
+import org.llm4s.config.Llm4sConfig
+
+val defaultModels = Llm4sConfig.listModels()
+val namedModels   = Llm4sConfig.listModels("openai-main")
+```
+
+See the runnable samples for end-to-end examples:
+
+```bash
+sbt "samples/runMain samples.basic.NamedProviderModelListingExample"
+sbt "samples/runMain samples.basic.SerialNamedProviderModelListingExample"
+sbt "samples/runMain samples.basic.ParallelNamedProviderModelListingExample"
+```
+
+If `llm4s.providers.provider` is set, it must match one of the configured
+provider names. If it is absent, the providers config still loads successfully,
+but requesting the default provider will fail clearly at runtime.
 
 ### Access Configuration in Code
 
@@ -254,7 +264,7 @@ object ConfigurationLoader {
   def load(): Unit = {
     // 1. Load configuration at the application boundary
     val configResult = for {
-      providerConfig <- Llm4sConfig.provider()
+      providerConfig <- Llm4sConfig.defaultProvider()
       tracingConfig <- Llm4sConfig.tracing()
       embeddingsConfig <- Llm4sConfig.embeddings()
     } yield (providerConfig, tracingConfig, embeddingsConfig)
@@ -282,10 +292,8 @@ object ConfigurationLoader {
 ### OpenAI
 
 ```bash
-# Model selection
-LLM_MODEL=openai/gpt-4o          # Latest GPT-4o
-LLM_MODEL=openai/gpt-4-turbo     # GPT-4 Turbo
-LLM_MODEL=openai/gpt-3.5-turbo   # GPT-3.5
+# Example named provider selection
+LLM4S_PROVIDER=openai-main
 
 # Required
 OPENAI_API_KEY=sk-proj-...
@@ -304,9 +312,8 @@ OPENAI_ORGANIZATION=org-...
 ### Anthropic
 
 ```bash
-# Model selection
-LLM_MODEL=anthropic/claude-sonnet-4-5-latest
-LLM_MODEL=anthropic/claude-opus-4-5-latest
+# Example named provider selection
+LLM4S_PROVIDER=anthropic-main
 
 # Required
 ANTHROPIC_API_KEY=sk-ant-...
@@ -324,8 +331,8 @@ ANTHROPIC_VERSION=2023-06-01
 ### Azure OpenAI
 
 ```bash
-# Model selection
-LLM_MODEL=azure/gpt-4o
+# Example named provider selection
+LLM4S_PROVIDER=azure-main
 
 # Required
 AZURE_API_KEY=your-azure-key
@@ -339,10 +346,8 @@ AZURE_API_VERSION=2024-02-15-preview
 ### Ollama (Local Models)
 
 ```bash
-# Model selection
-LLM_MODEL=ollama/llama2
-LLM_MODEL=ollama/mistral
-LLM_MODEL=ollama/codellama
+# Example named provider selection
+LLM4S_PROVIDER=ollama-local
 
 # Required
 OLLAMA_BASE_URL=http://localhost:11434
@@ -558,6 +563,116 @@ Get keys from [Langfuse](https://langfuse.com):
 3. Navigate to Settings → API Keys
 4. Copy public and secret keys
 
+
+### OpenTelemetry
+
+OpenTelemetry provides distributed tracing for observability across your infrastructure.
+
+**Setup:**
+
+```bash
+TRACING_MODE=opentelemetry
+OTEL_SERVICE_NAME=llm4s-agent
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer <token>  # Optional
+```
+
+**Environment Variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TRACING_MODE` | `none` | Must be set to `opentelemetry` |
+| `OTEL_SERVICE_NAME` | `llm4s` | Service name for trace identification |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OpenTelemetry Collector endpoint |
+| `OTEL_EXPORTER_OTLP_HEADERS` | (empty) | Additional headers (comma-separated: `key1=value1,key2=value2`) |
+
+**Example Configuration:**
+
+```bash
+# Local Jaeger (via Docker)
+TRACING_MODE=opentelemetry
+OTEL_SERVICE_NAME=llm4s-agent
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+
+# Cloud Provider with Authentication
+TRACING_MODE=opentelemetry
+OTEL_SERVICE_NAME=llm4s-runner
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-collector.example.com:4317
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer sk-otel-token
+
+# Custom Headers (multiple values)
+OTEL_EXPORTER_OTLP_HEADERS=API-Key=secret123,Environment=production
+```
+
+**Spans Generated:**
+
+```
+Span: LLM Completion
+  ├─ gen_ai.request.model: gpt-4o
+  ├─ gen_ai.usage.input_tokens: 150
+  └─ gen_ai.usage.output_tokens: 50
+
+Span: Tool Execution: web_search
+  ├─ tool.name: web_search
+  ├─ tool.input: "Scala 3 features"
+  └─ duration_ms: 1234
+
+Span: Token Usage - completion
+  ├─ operation: completion
+  ├─ gen_ai.usage.total_tokens: 200
+  └─ cost.usd: 0.0042
+
+Span: Agent State Updated
+  ├─ status: RUNNING
+  ├─ message_count: 5
+  └─ log_count: 12
+```
+
+**Setting Up Jaeger (Local Development):**
+
+```bash
+# Start Jaeger all-in-one
+docker run -d \
+  -p 6831:6831/udp \
+  -p 6832:6832/udp \
+  -p 5778:5778 \
+  -p 16686:16686 \
+  -p 14268:14268 \
+  -p 14250:14250 \
+  -p 9411:9411 \
+  jaegertracing/all-in-one:latest
+
+# Configure LLM4S
+export TRACING_MODE=opentelemetry
+export OTEL_SERVICE_NAME=llm4s-dev
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+
+# View traces at http://localhost:16686
+```
+
+**Code Usage:**
+
+```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.trace.Tracing
+
+// Automatic initialization from environment variables
+val tracing = Tracing.create(Llm4sConfig.tracing())
+
+// Or create directly
+import org.llm4s.trace.OpenTelemetryTracing
+val tracer = OpenTelemetryTracing.fromEnvironment()
+
+// Use tracer
+val result = for {
+  _ <- tracer.traceEvent(TraceEvent.AgentInitialized("query", List("tool1")))
+  _ <- tracer.traceTokenUsage(usage, "gpt-4o", "completion")
+} yield ()
+
+// Always shutdown
+tracer.shutdown()
+```
+
 ### Disable Tracing
 
 ```bash
@@ -644,9 +759,17 @@ Create `.env.prod`:
 ```bash
 LLM_MODEL=anthropic/claude-sonnet-4-5-latest
 ANTHROPIC_API_KEY=${PROD_ANTHROPIC_KEY}
-TRACING_MODE=langfuse
-LANGFUSE_PUBLIC_KEY=${PROD_LANGFUSE_PUBLIC}
-LANGFUSE_SECRET_KEY=${PROD_LANGFUSE_SECRET}
+
+# Tracing with OpenTelemetry
+TRACING_MODE=opentelemetry
+OTEL_SERVICE_NAME=llm4s-prod
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-collector.prod.example.com:4317
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer ${OTEL_AUTH_TOKEN}
+
+# Or use Langfuse
+# TRACING_MODE=langfuse
+# LANGFUSE_PUBLIC_KEY=${PROD_LANGFUSE_PUBLIC}
+# LANGFUSE_SECRET_KEY=${PROD_LANGFUSE_SECRET}
 ```
 
 Load the appropriate file:

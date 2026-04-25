@@ -1,14 +1,34 @@
 package org.llm4s.mcp
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.llm4s.toolapi.ToolFunction
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.Outcome
+import org.slf4j.LoggerFactory
 
 import scala.concurrent.duration._
 
 class MCPClientImplSpec extends AnyFlatSpec with Matchers with MockFactory with EitherValues {
+
+  override def withFixture(test: NoArgTest): Outcome = {
+    val clientLogger = LoggerFactory.getLogger("org.llm4s.mcp.MCPClientImpl").asInstanceOf[LBLogger]
+    val stdioLogger  = LoggerFactory.getLogger("org.llm4s.mcp.StdioTransportImpl").asInstanceOf[LBLogger]
+
+    val previousClientLevel = clientLogger.getLevel
+    val previousStdioLevel  = stdioLogger.getLevel
+
+    clientLogger.setLevel(Level.OFF)
+    stdioLogger.setLevel(Level.OFF)
+
+    try super.withFixture(test)
+    finally {
+      clientLogger.setLevel(previousClientLevel)
+      stdioLogger.setLevel(previousStdioLevel)
+    }
+  }
 
   // Test fixtures
   val config = MCPServerConfig.stdio(

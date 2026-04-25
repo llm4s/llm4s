@@ -36,4 +36,21 @@ trait EmbeddingProvider {
    * @return Right(EmbeddingResponse) with vectors on success, Left(error) on failure
    */
   def embed(request: EmbeddingRequest): Result[EmbeddingResponse]
+
+  /**
+   * Generates embeddings for multimedia inputs.
+   * By default, returns a 501 Not Implemented error for providers that do not
+   * support genuine multimodal embedding endpoints.
+   *
+   * @param request multimodal embedding request
+   * @return Right(EmbeddingResponse) with vectors on success, Left(error) on failure
+   */
+  def embedMultimodal(request: org.llm4s.llmconnect.model.MultimediaEmbeddingRequest): Result[EmbeddingResponse] =
+    Left(
+      org.llm4s.llmconnect.model.EmbeddingError(
+        code = Some("501"),
+        message = s"Multimodal embeddings (modality: ${request.modality}) not implemented by this provider.",
+        provider = "encoder"
+      )
+    )
 }

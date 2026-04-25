@@ -1,6 +1,6 @@
 # WebCrawlerLoader Design Specification
 
-**Status:** Proposed
+**Status:** In Progress
 **Author:** RAG in a Box Team
 **Date:** 2026-01-03
 
@@ -16,6 +16,32 @@ The existing `UrlLoader` requires explicit URLs to be provided. For documentatio
 - Automatically discovers linked pages
 - Respects domain boundaries and robots.txt
 - Converts HTML to clean text for RAG ingestion
+
+## Implementation Progress
+
+### Completed (✓)
+- [x] Core API design finalized (`CrawlerConfig`, `WebCrawlerLoader`)
+- [x] Link extraction using JSoup implemented
+- [x] URL normalization logic complete
+- [x] Breadth-first crawling algorithm implemented
+- [x] robots.txt parser and caching layer
+- [x] Pattern matching for URL filtering (glob support)
+- [x] HTML content extraction with structure preservation
+- [x] Unit tests for core utilities
+- [x] Integration tests with mock HTTP server
+- [x] Rate limiting and delay configuration
+- [x] Error handling and retry logic
+
+### In Progress (🔄)
+- [ ] Performance optimization for large crawls (>10k pages)
+- [ ] Async/concurrent crawling support (experimental)
+- [ ] Memory profiling and optimization
+
+### Planned (📋)
+- [ ] Sitemap.xml parsing support
+- [ ] JavaScript rendering support (headless browser integration)
+- [ ] Distributed crawling for very large sites
+- [ ] Cache layer for repeated crawls
 
 ## API Design
 
@@ -305,19 +331,30 @@ val rag = RAG.builder()
 
 ## Testing Strategy
 
-1. **Unit Tests**
-   - URL normalization
-   - Pattern matching
-   - Link extraction from HTML
+### Unit Tests (✓ Completed)
+- [x] URL normalization edge cases
+- [x] Pattern matching with glob patterns
+- [x] Link extraction from various HTML structures
+- [x] robots.txt parser compliance
+- [x] CrawlerConfig defaults and overrides
 
-2. **Integration Tests**
-   - Mock HTTP server for controlled crawling
-   - robots.txt parsing and respect
-   - Depth limiting
-   - Page count limiting
+### Integration Tests (✓ Completed)
+- [x] Mock HTTP server with controlled crawling
+- [x] robots.txt parsing and user-agent respect
+- [x] Depth limiting verification
+- [x] Page count limiting verification
+- [x] Rate limiting and delay behavior
+- [x] Error handling (timeouts, 404s, 503s)
 
-3. **Sample Application**
-   - Add to `modules/samples` with a real-world crawl example
+### Sample Application (✓ Completed)
+- [x] Added to `modules/samples/src/main/scala/org/llm4s/samples/rag/WebCrawlerExample.scala`
+- [x] Demonstrates crawling documentation sites
+- [x] Real-world example with LLM4S docs
+
+### Performance Tests (🔄 In Progress)
+- [ ] Benchmark large crawls (1000+ pages)
+- [ ] Memory usage profiling
+- [ ] Concurrent crawling performance
 
 ## File Structure
 
@@ -338,16 +375,46 @@ modules/core/src/test/scala/org/llm4s/rag/loader/
     └── UrlNormalizerSpec.scala
 ```
 
+## Decisions Made
+
+### 1. Iterator-Based Lazy Loading
+**Decision:** Maintain Iterator-based API for memory efficiency and streaming
+**Rationale:** Allows processing of large crawls without holding all pages in memory. Aligns with existing `DocumentLoader` abstraction.
+**Trade-off:** Single-threaded only. Future: Async variant via `Future[Iterator[LoadResult]]`
+
+### 2. robots.txt Compliance by Default
+**Decision:** Respect robots.txt by default; make opt-out explicit
+**Rationale:** Ethical crawling, reduces server load, prevents legal issues
+**Implementation:** `respectRobotsTxt: Boolean = true` (configurable)
+
+### 3. JSoup for HTML Parsing
+**Decision:** Use JSoup instead of headless browser for initial release
+**Rationale:** Lightweight, fast, zero external dependencies (no Chromium), sufficient for static HTML sites
+**Trade-off:** Doesn't execute JavaScript. Future: Optional Playwright integration for JS-heavy sites
+
+### 4. BFS Over DFS
+**Decision:** Breadth-first crawling by default
+**Rationale:** Discovers high-value shallow pages first, better for RAG ingestion, more intuitive depth limiting
+
 ## Open Questions
 
-1. **Async/Concurrent Crawling**: Should we support concurrent requests for faster crawling? This would complicate the Iterator-based API.
+1. **Async/Concurrent Crawling**: Should we support concurrent requests for faster crawling? Current Iterator-based API would require redesign. Proposal: Add `WebCrawlerLoaderAsync` as separate implementation.
 
-2. **Sitemap Support**: Should we parse sitemap.xml for more efficient discovery?
+2. **Sitemap Support**: Should we parse sitemap.xml for more efficient discovery? Priority: Medium (Phase 2)
 
-3. **JavaScript Rendering**: Should we support JavaScript-heavy sites (would require headless browser)?
+3. **JavaScript Rendering**: Should we support JavaScript-heavy sites (would require headless browser)? Preliminary research done; deferred to Phase 3 due to complexity.
+
+## Performance Considerations
+
+- **Memory**: Iterator-based design keeps memory footprint constant regardless of crawl size
+- **Rate Limiting**: Default 500ms delay per request; configurable via `withDelay(ms)`
+- **Caching**: robots.txt cached per domain; LinkExtractor uses streaming to avoid DOM tree duplication
+- **Deduplication**: URL normalization prevents re-crawling (via `mutable.Set[String]`)
 
 ## Related Work
 
 - Existing `UrlLoader` - loads explicit URLs
 - Existing `DirectoryLoader` - loads from filesystem
+- Existing `WebLoader` - loads single URLs with basic HTTP
 - `HTTPTool` - agent tool for HTTP requests (different use case)
+- Java/Scala equivalents: Jsoup-based crawlers, Apache Nutch (heavier option)

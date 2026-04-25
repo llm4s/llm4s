@@ -8,17 +8,22 @@ import com.anthropic.models.messages.{
   ThinkingConfigEnabled,
   Tool
 }
+
+import scala.collection.mutable
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
+import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
-import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.streaming._
-import org.llm4s.model.TransformationResult
+import org.llm4s.llmconnect.model.*
+import org.llm4s.llmconnect.provider.ProviderResultOps.*
+import org.llm4s.llmconnect.streaming.*
+import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ValidationError }
-import org.llm4s.error.ThrowableOps._
+import org.llm4s.error.ThrowableOps.*
 
-import scala.jdk.CollectionConverters._
+import java.time.Instant
+import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
 /**
@@ -68,8 +73,11 @@ import scala.util.Try
  */
 class AnthropicClient(
   config: AnthropicConfig,
-  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-) extends BaseLifecycleLLMClient {
+  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+)(using val registryService: ModelRegistryService)
+    extends BaseLifecycleLLMClient {
+
   // Store config for budget calculations
   private val providerConfig: ProviderConfig = config
 
@@ -88,17 +96,24 @@ class AnthropicClient(
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = completeWithMetrics {
+    val startedAt = Instant.now()
     // Transform options and messages for model-specific constraints
-    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
-      transformed =>
+    TransformationResult
+      .transform(
+        config.model,
+        options,
+        conversation.messages,
+        dropUnsupported = true,
+        RequestTransformer.default(registryService)
+      )
+      .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
 
         // Create message parameters builder
         val paramsBuilder = MessageCreateParams
           .builder()
           .model(config.model)
-          .temperature(transformed.options.temperature.floatValue())
-          .topP(transformed.options.topP.floatValue())
+        applySamplingParameters(paramsBuilder, transformed.options)
 
         // Add max tokens if specified
         // max tokens is required by the api
@@ -124,6 +139,7 @@ class AnthropicClient(
 
         // Build the parameters
         val messageParams = paramsBuilder.build()
+        val requestBody   = serializeRequestBody(messageParams)
 
         val messageService = client.messages()
         // Make API call
@@ -133,8 +149,15 @@ class AnthropicClient(
           case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
           case e: Exception                                          => e.toLLMError
         }
-        attempt.map(convertFromAnthropicResponse) // Convert response to our model
-    }
+        attempt
+          .map { response =>
+            val completionResult = Right(convertFromAnthropicResponse(response))
+            recordExchange(startedAt, requestBody, Some(serializeResponseBody(response)), completionResult)
+            completionResult
+          }
+          .tapLeft(error => recordExchange(startedAt, requestBody, None, Left(error)))
+          .flatten
+      }
   }
 
   /*
@@ -166,17 +189,24 @@ curl https://api.anthropic.com/v1/messages \
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
+    val startedAt = Instant.now()
     // Transform options and messages for model-specific constraints
-    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
-      transformed =>
+    TransformationResult
+      .transform(
+        config.model,
+        options,
+        conversation.messages,
+        dropUnsupported = true,
+        RequestTransformer.default(registryService)
+      )
+      .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
 
         // Build parameters
         val paramsBuilder = MessageCreateParams
           .builder()
           .model(config.model)
-          .temperature(transformed.options.temperature.floatValue())
-          .topP(transformed.options.topP.floatValue())
+        applySamplingParameters(paramsBuilder, transformed.options)
 
         // Add max tokens if specified (required by the API)
         val maxTokens = transformed.options.maxTokens.getOrElse(2048)
@@ -197,10 +227,13 @@ curl https://api.anthropic.com/v1/messages \
         addMessagesToParams(transformedConversation, paramsBuilder)
         // Build the parameters
         val messageParams = paramsBuilder.build()
+        val requestBody   = serializeRequestBody(messageParams)
 
         // Create accumulator for building the final completion
         val accumulator                      = StreamingAccumulator.create()
         var currentMessageId: Option[String] = None
+        val blockIndexToToolId               = mutable.Map.empty[Long, String]
+        val rawStream                        = StringBuilder()
 
         // Process the stream
         val attempt = Try {
@@ -211,6 +244,7 @@ curl https://api.anthropic.com/v1/messages \
           val stream: Iterator[RawMessageStreamEvent] = streamResponse.stream().toScala(Iterator)
           val loopTry = Try {
             stream.foreach { event =>
+              rawStream.append(serializeStreamEvent(event)).append('\n')
               // Process different event types using the event's accessor methods
               // Check for message start event
               val messageStartOpt = event.messageStart()
@@ -261,6 +295,24 @@ curl https://api.anthropic.com/v1/messages \
                     }
                   }
                 }
+
+                // Handle input_json_delta for tool call arguments
+                Try(delta.inputJson()).foreach { inputJsonOpt =>
+                  if (inputJsonOpt != null && inputJsonOpt.isPresent) {
+                    val fragment   = inputJsonOpt.get().partialJson()
+                    val toolCallId = blockIndexToToolId.getOrElse(contentDelta.index(), "")
+                    if (fragment != null && fragment.nonEmpty && toolCallId.nonEmpty) {
+                      val chunk = StreamedChunk(
+                        id = currentMessageId.getOrElse(""),
+                        content = None,
+                        toolCall = Some(ToolCall(id = toolCallId, name = "", arguments = ujson.Str(fragment))),
+                        finishReason = None
+                      )
+                      accumulator.addChunk(chunk)
+                      onChunk(chunk)
+                    }
+                  }
+                }
               }
 
               val contentStartOpt = event.contentBlockStart()
@@ -269,6 +321,7 @@ curl https://api.anthropic.com/v1/messages \
                 val block        = contentStart.contentBlock()
                 if (block.isToolUse) {
                   val toolUse = block.asToolUse()
+                  blockIndexToToolId(contentStart.index()) = toolUse.id()
                   val chunk = StreamedChunk(
                     id = currentMessageId.getOrElse(""),
                     content = None,
@@ -322,13 +375,19 @@ curl https://api.anthropic.com/v1/messages \
           }
 
         // Return the accumulated completion
-        attempt.flatMap(_ =>
-          accumulator.toCompletion.map { c =>
-            val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            c.copy(model = config.model, estimatedCost = cost)
-          }
-        )
-    }
+        attempt
+          .flatMap(_ =>
+            accumulator.toCompletion.map { c =>
+              val cost       = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+              val completion = c.copy(model = config.model, estimatedCost = cost)
+              recordExchange(startedAt, requestBody, Some(rawStream.result()), Right(completion))
+              completion
+            }
+          )
+          .tapLeft(error =>
+            recordExchange(startedAt, requestBody, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
+          )
+      }
   }
 
   override def getContextWindow(): Int = providerConfig.contextWindow
@@ -473,11 +532,13 @@ curl https://api.anthropic.com/v1/messages \
 
     val cachedTokens: Option[Int] =
       Option(usage.cacheReadInputTokens())
-        .flatMap(opt => if (opt.isPresent) Some(opt.get().toInt) else None)
+        .filter(_.isPresent)
+        .map(_.get().toInt)
 
     val cacheCreationTokens: Option[Int] =
       Option(usage.cacheCreationInputTokens())
-        .flatMap(opt => if (opt.isPresent) Some(opt.get().toInt) else None)
+        .filter(_.isPresent)
+        .map(_.get().toInt)
 
     val tokenUsage = TokenUsage(
       promptTokens = usage.inputTokens().toInt,
@@ -523,8 +584,41 @@ curl https://api.anthropic.com/v1/messages \
     toolCalls
   }
 
+  private def serializeStreamEvent(event: RawMessageStreamEvent): String =
+    ObjectMappers.jsonMapper().writeValueAsString(event)
+
+  private def applySamplingParameters(
+    builder: MessageCreateParams.Builder,
+    options: CompletionOptions
+  ): Unit =
+    // Anthropic rejects some requests that specify both temperature and top_p.
+    // Prefer temperature as the single sampling control for our default path.
+    builder.temperature(options.temperature.floatValue())
+
   override protected def releaseResources(): Unit =
     client.close()
+
+  private[provider] def serializeRequestBody(params: MessageCreateParams): String =
+    ObjectMappers.jsonMapper().writeValueAsString(params._body())
+
+  private[provider] def serializeResponseBody(message: Message): String =
+    ObjectMappers.jsonMapper().writeValueAsString(message)
+
+  private def recordExchange(
+    startedAt: Instant,
+    requestBody: String,
+    responseBody: Option[String],
+    result: Result[?]
+  ): Unit =
+    ProviderExchangeRecorder.record(
+      exchangeLogging = exchangeLogging,
+      provider = providerName,
+      model = Some(config.model),
+      startedAt = startedAt,
+      requestBody = requestBody,
+      responseBody = responseBody,
+      result = result
+    )
 }
 
 object AnthropicClient {
@@ -543,6 +637,13 @@ object AnthropicClient {
   def apply(
     config: AnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-  ): Result[AnthropicClient] =
+  )(using ModelRegistryService): Result[AnthropicClient] =
     Try(new AnthropicClient(config, metrics)).toResult
+
+  def apply(
+    config: AnthropicConfig,
+    metrics: org.llm4s.metrics.MetricsCollector,
+    exchangeLogging: ProviderExchangeLogging
+  )(using ModelRegistryService): Result[AnthropicClient] =
+    Try(new AnthropicClient(config, metrics, exchangeLogging)).toResult
 }

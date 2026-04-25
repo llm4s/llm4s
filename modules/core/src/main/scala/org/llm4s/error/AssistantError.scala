@@ -16,7 +16,7 @@ sealed abstract class AssistantError extends Product with Serializable {
   /** Converts to a formatted error message with context */
   def formatted: String = {
     val contextStr = if (context.nonEmpty) {
-      " [" + context.map { case (k, v) => s"$k: $v" }.mkString(", ") + "]"
+      s" [${context.map { case (k, v) => s"$k: $v" }.mkString(", ")}]"
     } else ""
     s"${getClass.getSimpleName}: $message$contextStr"
   }

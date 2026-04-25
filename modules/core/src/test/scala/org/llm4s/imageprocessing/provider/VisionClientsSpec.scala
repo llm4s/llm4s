@@ -32,8 +32,7 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
       val testImage = createTestImage()
       ImageIO.write(testImage, "jpg", tempFile.toFile)
       f(tempFile.toString)
-    } finally
-      Files.deleteIfExists(tempFile)
+    } finally Files.deleteIfExists(tempFile)
   }
 
   @scala.annotation.nowarn

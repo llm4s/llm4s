@@ -59,7 +59,7 @@ class SessionManager(sessionDir: DirectoryPath, agent: Agent) {
    * Converts SessionState to JSON format for persistence (using upickle automatic derivation)
    * Note: We handle ToolRegistry separately since it contains function references
    */
-  private def sessionStateToJson(state: SessionState): String = {
+  private def sessionStateToJson(state: SessionState): Either[AssistantError, String] = {
     logger.debug("Starting SessionState serialization")
 
     // Test each component separately
@@ -72,30 +72,31 @@ class SessionManager(sessionDir: DirectoryPath, agent: Agent) {
     val createdJson = ujson.Str(state.created.toString)
     logger.debug("Created timestamp serialized successfully")
 
-    val agentStateJson = state.agentState match {
+    val agentStateJsonResult: Either[AssistantError, ujson.Value] = state.agentState match {
       case None =>
         logger.debug("No agent state to serialize")
-        ujson.Null
+        Right(ujson.Null)
       case Some(agentState) =>
         logger.debug("Serializing agent state components")
 
         // Test conversation serialization
-        val conversationJson = Try(write(agentState.conversation)).getOrElse {
-          val ex = new RuntimeException("Conversation serialization failed")
+        val conversationResult = Try(write(agentState.conversation)).toEither.left.map { ex =>
           logger.error("Failed to serialize conversation", ex)
-          throw ex
+          AssistantError.jsonSerializationFailed("Conversation", ex)
         }
-        logger.debug("Conversation serialized successfully")
 
         // Test status serialization
-        val statusJson = Try(write(agentState.status)).getOrElse {
-          val ex = new RuntimeException("AgentStatus serialization failed")
+        val statusResult = Try(write(agentState.status)).toEither.left.map { ex =>
           logger.error("Failed to serialize agent status", ex)
-          throw ex
+          AssistantError.jsonSerializationFailed("AgentStatus", ex)
         }
-        logger.debug("AgentStatus serialized successfully")
 
-        ujson.Obj(
+        for {
+          conversationJson <- conversationResult
+          _ = logger.debug("Conversation serialized successfully")
+          statusJson <- statusResult
+          _ = logger.debug("AgentStatus serialized successfully")
+        } yield ujson.Obj(
           "conversation" -> ujson.read(conversationJson),
           "initialQuery" -> agentState.initialQuery.map(ujson.Str.apply).getOrElse(ujson.Null),
           "status"       -> ujson.read(statusJson),
@@ -104,16 +105,18 @@ class SessionManager(sessionDir: DirectoryPath, agent: Agent) {
         )
     }
 
-    val jsonObj = ujson.Obj(
-      "sessionId"  -> sessionIdJson,
-      "sessionDir" -> sessionDirJson,
-      "created"    -> createdJson,
-      "agentState" -> agentStateJson
-    )
+    agentStateJsonResult.map { agentStateJson =>
+      val jsonObj = ujson.Obj(
+        "sessionId"  -> sessionIdJson,
+        "sessionDir" -> sessionDirJson,
+        "created"    -> createdJson,
+        "agentState" -> agentStateJson
+      )
 
-    val result = ujson.write(jsonObj)
-    logger.debug("SessionState serialization completed successfully")
-    result
+      val result = ujson.write(jsonObj)
+      logger.debug("SessionState serialization completed successfully")
+      result
+    }
   }
 
   /**
@@ -156,8 +159,7 @@ class SessionManager(sessionDir: DirectoryPath, agent: Agent) {
    * Creates JSON content for session storage
    */
   private def createJsonContent(state: SessionState): Either[AssistantError, String] =
-    Try(sessionStateToJson(state)).toEither
-      .leftMap(ex => AssistantError.jsonSerializationFailed("SessionState", ex))
+    sessionStateToJson(state)
 
   /**
    * Converts JSON back to SessionState for loading

@@ -4,6 +4,7 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag.permissions._
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.{ MetadataFilter, ScoredRecord, VectorRecord }
@@ -14,6 +15,8 @@ import org.scalatest.matchers.should.Matchers
  * Tests for RAG permission-aware operations using a mock SearchIndex.
  */
 class RAGPermissionsSpec extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   // ==========================================================================
   // Mock Implementations

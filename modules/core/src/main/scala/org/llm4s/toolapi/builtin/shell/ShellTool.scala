@@ -26,16 +26,34 @@ object ShellResult {
 }
 
 /**
- * Tool for executing shell commands.
+ * Tool for executing shell commands under a strict allowlist.
  *
  * IMPORTANT: This tool requires an explicit allowlist of commands for safety.
- * It will not execute any command that is not in the allowlist.
+ * It will not execute any command whose first token is not in the allowlist.
  *
- * Features:
- * - Command allowlist for security
- * - Configurable working directory
- * - Timeout support
- * - Output size limits
+ * == Execution model ==
+ *
+ * Commands are tokenized with shell-style quoting (see [[CommandTokenizer]]) and
+ * executed directly via [[ProcessBuilder]] '''without invoking a shell'''. As a
+ * consequence:
+ *
+ *   - No glob expansion (`*`, `?`, `[abc]` are passed literally to the program).
+ *   - No variable substitution (`$VAR`, `${VAR}`, `$(...)`, backticks).
+ *   - No command chaining or redirection (`&&`, `;`, `|`, `<`, `>`, `&`).
+ *   - Quoted arguments are honoured: `echo "hello world"` runs `echo` with one
+ *     argument `hello world`, not two.
+ *
+ * Combined with the allowlist, this means LLM-supplied input that contains
+ * shell metacharacters cannot escape into a shell — characters such as `&&`
+ * survive tokenization as literal argument bytes and are handed to the
+ * allowlisted program, which generally treats them as harmless input.
+ *
+ * == Features ==
+ *
+ *   - Command allowlist for security
+ *   - Configurable working directory
+ *   - Timeout support
+ *   - Output size limits
  *
  * @example
  * {{{{
@@ -87,24 +105,27 @@ object ShellTool {
   private def executeCommand(
     command: String,
     config: ShellConfig
-  ): Either[String, ShellResult] = {
-    // Security check - validate command is allowed
-    val baseCommand = command.trim.split("\\s+").headOption.getOrElse("")
-    if (!config.isCommandAllowed(baseCommand)) {
-      Left(s"Command '$baseCommand' is not allowed. Allowed: ${config.allowedCommands.mkString(", ")}")
-    } else {
-      runProcess(command, config)
+  ): Either[String, ShellResult] =
+    CommandTokenizer.tokenize(command).flatMap { tokens =>
+      tokens.headOption match {
+        case None =>
+          Left("Command cannot be empty")
+        case Some(baseCommand) if !config.isCommandAllowed(baseCommand) =>
+          Left(s"Command '$baseCommand' is not allowed. Allowed: ${config.allowedCommands.mkString(", ")}")
+        case Some(_) =>
+          runProcess(tokens, command, config)
+      }
     }
-  }
 
   private def runProcess(
-    command: String,
+    tokens: Seq[String],
+    originalCommand: String,
     config: ShellConfig
   ): Either[String, ShellResult] = {
     val startTime = System.currentTimeMillis()
 
     Try {
-      val processBuilder = new ProcessBuilder("sh", "-c", command)
+      val processBuilder = new ProcessBuilder(tokens: _*)
         .redirectErrorStream(false)
 
       // Set working directory if configured
@@ -172,7 +193,7 @@ object ShellTool {
       }
 
       ShellResult(
-        command = command,
+        command = originalCommand,
         exitCode = exitCode,
         stdout = stdout,
         stderr = stderr,

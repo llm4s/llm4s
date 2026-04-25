@@ -1,0 +1,3 @@
+LLM4S is a Scala toolkit for building production-grade language model applications.
+It provides typed APIs for LLM calls, embeddings, tools, agents, and observability.
+RAG pipelines in LLM4S use chunking, vector search, and optional reranking.

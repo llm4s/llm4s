@@ -18,9 +18,9 @@ import org.slf4j.LoggerFactory
  *
  * == Quick Start ==
  *
- * 1. Set your provider and model:
+ * 1. Configure your default named provider:
  *    {{{
- *    export LLM_MODEL=openai/gpt-4o
+ *    export LLM4S_PROVIDER=openai-main
  *    }}}
  *
  * 2. Set your API key:
@@ -118,7 +118,7 @@ object PrometheusMetricsExample {
 
         try {
           // Load provider configuration
-          val configResult = Llm4sConfig.provider()
+          val configResult = Llm4sConfig.defaultProvider()
 
           configResult match {
             case Left(error) =>
@@ -126,7 +126,7 @@ object PrometheusMetricsExample {
               println(s"ERROR: ${error.message}")
               println()
               println("Please set required environment variables:")
-              println("  export LLM_MODEL=openai/gpt-4o")
+              println("  export LLM4S_PROVIDER=openai-main")
               println("  export OPENAI_API_KEY=sk-...")
               sys.exit(1)
 
@@ -147,123 +147,133 @@ object PrometheusMetricsExample {
               println(s"Provider: $providerName")
               println()
 
-              // Get LLM client with metrics injection
-              LLMConnect.getClient(config, metrics) match {
+              Llm4sConfig.modelRegistryService() match {
                 case Left(error) =>
-                  logger.error("Failed to create LLM client", error)
+                  logger.error("Failed to create model registry service", error)
                   println(s"ERROR: ${error.message}")
                   sys.exit(1)
 
-                case Right(client) =>
-                  println("Making LLM API calls (metrics will be recorded automatically)...")
-                  println()
+                case Right(registryService) =>
+                  given org.llm4s.model.ModelRegistryService = registryService
 
-                  // Example 1: Successful request
-                  println("1. Simple question (should succeed):")
-                  val conversation1 = Conversation(
-                    Seq(
-                      UserMessage("What is 2+2?")
-                    )
-                  )
-
-                  client.complete(conversation1) match {
-                    case Right(completion) =>
-                      println(s"   Response: ${completion.content.take(100)}...")
-                      completion.usage.foreach { usage =>
-                        println(s"   Tokens: ${usage.promptTokens} in, ${usage.completionTokens} out")
-                      }
-                      println("   ✓ Metrics recorded: success, tokens, duration")
-
+                  // Get LLM client with metrics injection
+                  LLMConnect.getClient(config, metrics) match {
                     case Left(error) =>
-                      println(s"   ✗ Error: ${error.message}")
-                      println("   ✓ Metrics recorded: error, duration")
-                  }
-                  println()
+                      logger.error("Failed to create LLM client", error)
+                      println(s"ERROR: ${error.message}")
+                      sys.exit(1)
 
-                  // Example 2: Another successful request
-                  println("2. Follow-up question (should succeed):")
-                  val conversation2 = Conversation(
-                    Seq(
-                      UserMessage("What is the capital of France?")
-                    )
-                  )
+                    case Right(client) =>
+                      println("Making LLM API calls (metrics will be recorded automatically)...")
+                      println()
 
-                  client.complete(conversation2) match {
-                    case Right(completion) =>
-                      println(s"   Response: ${completion.content.take(100)}...")
-                      completion.usage.foreach { usage =>
-                        println(s"   Tokens: ${usage.promptTokens} in, ${usage.completionTokens} out")
+                      // Example 1: Successful request
+                      println("1. Simple question (should succeed):")
+                      val conversation1 = Conversation(
+                        Seq(
+                          UserMessage("What is 2+2?")
+                        )
+                      )
+
+                      client.complete(conversation1) match {
+                        case Right(completion) =>
+                          println(s"   Response: ${completion.content.take(100)}...")
+                          completion.usage.foreach { usage =>
+                            println(s"   Tokens: ${usage.promptTokens} in, ${usage.completionTokens} out")
+                          }
+                          println("   ✓ Metrics recorded: success, tokens, duration")
+
+                        case Left(error) =>
+                          println(s"   ✗ Error: ${error.message}")
+                          println("   ✓ Metrics recorded: error, duration")
                       }
-                      println("   ✓ Metrics recorded: success, tokens, duration")
+                      println()
 
-                    case Left(error) =>
-                      println(s"   ✗ Error: ${error.message}")
-                      println("   ✓ Metrics recorded: error, duration")
-                  }
-                  println()
+                      // Example 2: Another successful request
+                      println("2. Follow-up question (should succeed):")
+                      val conversation2 = Conversation(
+                        Seq(
+                          UserMessage("What is the capital of France?")
+                        )
+                      )
 
-                  // Example 3: Large request (to show token tracking)
-                  println("3. Larger request (to demonstrate token metrics):")
-                  val conversation3 = Conversation(
-                    Seq(
-                      UserMessage("Write a short poem about Scala programming.")
-                    )
-                  )
+                      client.complete(conversation2) match {
+                        case Right(completion) =>
+                          println(s"   Response: ${completion.content.take(100)}...")
+                          completion.usage.foreach { usage =>
+                            println(s"   Tokens: ${usage.promptTokens} in, ${usage.completionTokens} out")
+                          }
+                          println("   ✓ Metrics recorded: success, tokens, duration")
 
-                  client.complete(conversation3) match {
-                    case Right(completion) =>
-                      println(s"   Response: ${completion.content.take(100)}...")
-                      completion.usage.foreach { usage =>
-                        println(s"   Tokens: ${usage.promptTokens} in, ${usage.completionTokens} out")
+                        case Left(error) =>
+                          println(s"   ✗ Error: ${error.message}")
+                          println("   ✓ Metrics recorded: error, duration")
                       }
-                      println("   ✓ Metrics recorded: success, tokens, duration")
+                      println()
 
-                    case Left(error) =>
-                      println(s"   ✗ Error: ${error.message}")
-                      println("   ✓ Metrics recorded: error, duration")
+                      // Example 3: Large request (to show token tracking)
+                      println("3. Larger request (to demonstrate token metrics):")
+                      val conversation3 = Conversation(
+                        Seq(
+                          UserMessage("Write a short poem about Scala programming.")
+                        )
+                      )
+
+                      client.complete(conversation3) match {
+                        case Right(completion) =>
+                          println(s"   Response: ${completion.content.take(100)}...")
+                          completion.usage.foreach { usage =>
+                            println(s"   Tokens: ${usage.promptTokens} in, ${usage.completionTokens} out")
+                          }
+                          println("   ✓ Metrics recorded: success, tokens, duration")
+
+                        case Left(error) =>
+                          println(s"   ✗ Error: ${error.message}")
+                          println("   ✓ Metrics recorded: error, duration")
+                      }
+                      println()
+
+                      // Close client
+                      client.close()
+
+                      // Display metrics summary
+                      println("=" * 80)
+                      println("Metrics Summary")
+                      println("=" * 80)
+                      println()
+                      println("The following metrics have been recorded:")
+                      println("  • llm4s_requests_total - Total number of requests")
+                      println("  • llm4s_tokens_total - Total tokens consumed (input/output)")
+                      println("  • llm4s_request_duration_seconds - Request latency distribution")
+                      println()
+                      endpointOpt.foreach(endpoint => println(s"View all metrics at: ${endpoint.url}"))
+                      println()
+                      println("Sample metrics output:")
+                      println("-" * 80)
+                      println("# HELP llm4s_requests_total Total number of LLM requests")
+                      println("# TYPE llm4s_requests_total counter")
+                      println(
+                        s"llm4s_requests_total{provider=\"$providerName\",model=\"${config.model}\",status=\"success\"} 3.0"
+                      )
+                      println()
+                      println("# HELP llm4s_tokens_total Total tokens used")
+                      println("# TYPE llm4s_tokens_total counter")
+                      println(
+                        s"llm4s_tokens_total{provider=\"$providerName\",model=\"${config.model}\",type=\"input\"} X.0"
+                      )
+                      println(
+                        s"llm4s_tokens_total{provider=\"$providerName\",model=\"${config.model}\",type=\"output\"} Y.0"
+                      )
+                      println()
+                      println("# HELP llm4s_request_duration_seconds Request duration in seconds")
+                      println("# TYPE llm4s_request_duration_seconds histogram")
+                      println(
+                        s"llm4s_request_duration_seconds_bucket{provider=\"$providerName\",model=\"${config.model}\",le=\"1.0\"} 3.0"
+                      )
+                      println("-" * 80)
+                      println()
+                      println("✓ Example completed successfully!")
                   }
-                  println()
-
-                  // Close client
-                  client.close()
-
-                  // Display metrics summary
-                  println("=" * 80)
-                  println("Metrics Summary")
-                  println("=" * 80)
-                  println()
-                  println("The following metrics have been recorded:")
-                  println("  • llm4s_requests_total - Total number of requests")
-                  println("  • llm4s_tokens_total - Total tokens consumed (input/output)")
-                  println("  • llm4s_request_duration_seconds - Request latency distribution")
-                  println()
-                  endpointOpt.foreach(endpoint => println(s"View all metrics at: ${endpoint.url}"))
-                  println()
-                  println("Sample metrics output:")
-                  println("-" * 80)
-                  println("# HELP llm4s_requests_total Total number of LLM requests")
-                  println("# TYPE llm4s_requests_total counter")
-                  println(
-                    s"llm4s_requests_total{provider=\"$providerName\",model=\"${config.model}\",status=\"success\"} 3.0"
-                  )
-                  println()
-                  println("# HELP llm4s_tokens_total Total tokens used")
-                  println("# TYPE llm4s_tokens_total counter")
-                  println(
-                    s"llm4s_tokens_total{provider=\"$providerName\",model=\"${config.model}\",type=\"input\"} X.0"
-                  )
-                  println(
-                    s"llm4s_tokens_total{provider=\"$providerName\",model=\"${config.model}\",type=\"output\"} Y.0"
-                  )
-                  println()
-                  println("# HELP llm4s_request_duration_seconds Request duration in seconds")
-                  println("# TYPE llm4s_request_duration_seconds histogram")
-                  println(
-                    s"llm4s_request_duration_seconds_bucket{provider=\"$providerName\",model=\"${config.model}\",le=\"1.0\"} 3.0"
-                  )
-                  println("-" * 80)
-                  println()
-                  println("✓ Example completed successfully!")
               }
           }
 

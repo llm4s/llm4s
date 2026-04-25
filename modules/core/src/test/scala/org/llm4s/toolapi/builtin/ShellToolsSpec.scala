@@ -213,4 +213,190 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
       )
   }
 
+  it should "not let shell metacharacters escape the allowlist" in {
+    assume(!isWindows, "Unix shell commands not available on Windows")
+    val tempFile = java.io.File.createTempFile("shell-tool", ".tmp")
+    tempFile.deleteOnExit()
+
+    val config = ShellConfig(allowedCommands = Seq("echo"))
+
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> s"echo hi && rm ${tempFile.getAbsolutePath}")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              shellResult => {
+                // No shell is invoked, so `&&` is just an argument to echo.
+                // The dangerous part — rm running — must not happen.
+                shellResult.exitCode shouldBe 0
+                shellResult.stdout should include("&&")
+                shellResult.stdout should include(tempFile.getAbsolutePath)
+                tempFile.exists() shouldBe true
+              }
+            )
+        }
+      )
+  }
+
+  it should "honour double-quoted arguments containing whitespace" in {
+    assume(!isWindows, "Unix shell commands not available on Windows")
+    val config = ShellConfig(allowedCommands = Seq("echo"))
+
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> "echo \"hello world\"")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              shellResult => {
+                shellResult.exitCode shouldBe 0
+                // Single argument "hello world" — quotes consumed by the tokenizer.
+                shellResult.stdout.trim shouldBe "hello world"
+              }
+            )
+        }
+      )
+  }
+
+  it should "honour single-quoted arguments containing metacharacters" in {
+    assume(!isWindows, "Unix shell commands not available on Windows")
+    val config = ShellConfig(allowedCommands = Seq("echo"))
+
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> "echo 'a && b | c'")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => fail(s"Expected Right but got Left: $err"),
+              shellResult => {
+                shellResult.exitCode shouldBe 0
+                shellResult.stdout.trim shouldBe "a && b | c"
+              }
+            )
+        }
+      )
+  }
+
+  it should "reject commands with unclosed quotes" in {
+    val config = ShellConfig(allowedCommands = Seq("echo"))
+
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> "echo \"missing close")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => err.toLowerCase should include("unclosed"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
+  }
+
+  it should "reject empty commands" in {
+    val config = ShellConfig(allowedCommands = Seq("echo"))
+
+    ShellTool
+      .createSafe(config)
+      .fold(
+        e => fail(s"Tool creation failed: ${e.formatted}"),
+        tool => {
+          val params = ujson.Obj("command" -> "   ")
+          tool
+            .handler(SafeParameterExtractor(params))
+            .fold(
+              err => err.toLowerCase should include("empty"),
+              result => fail(s"Expected Left but got Right: $result")
+            )
+        }
+      )
+  }
+
+  "ShellToolAllowlistBypassPoC" should "exit early on Windows" in {
+    val lines            = scala.collection.mutable.ArrayBuffer.empty[String]
+    var createCalled     = false
+    var executeWasCalled = false
+
+    ShellToolAllowlistBypassPoC.run(
+      isWindows = true,
+      createTempFile = () => {
+        createCalled = true
+        java.io.File.createTempFile("unused", ".tmp")
+      },
+      printLine = line => lines += line,
+      executePayload = _ => {
+        executeWasCalled = true
+        Right("ok")
+      }
+    )
+
+    createCalled shouldBe false
+    executeWasCalled shouldBe false
+    lines should contain("PoC is intended for Unix-like systems (uses rm).")
+  }
+
+  it should "report safe execution when echo runs without shell expansion" in {
+    val lines    = scala.collection.mutable.ArrayBuffer.empty[String]
+    val tempFile = java.io.File.createTempFile("shell-tool-bypass-spec", ".tmp")
+    tempFile.deleteOnExit()
+
+    ShellToolAllowlistBypassPoC.run(
+      isWindows = false,
+      createTempFile = () => tempFile,
+      printLine = line => lines += line,
+      executePayload = payload => {
+        payload should startWith("echo hi && rm ")
+        Right("""{"exitCode":0,"stdout":"hi && rm ..."}""")
+      }
+    )
+
+    lines should contain("""Executed safely (no shell invoked): {"exitCode":0,"stdout":"hi && rm ..."}""")
+    lines should contain(s"rm side-effect avoided (temp file still exists): ${tempFile.exists()}")
+  }
+
+  it should "report rejection output when the tool refuses the payload" in {
+    val lines    = scala.collection.mutable.ArrayBuffer.empty[String]
+    val tempFile = java.io.File.createTempFile("shell-tool-bypass-spec", ".tmp")
+    tempFile.deleteOnExit()
+
+    ShellToolAllowlistBypassPoC.run(
+      isWindows = false,
+      createTempFile = () => tempFile,
+      printLine = line => lines += line,
+      executePayload = _ => Left("Command 'echo' is not allowed.")
+    )
+
+    lines should contain("Rejected: Command 'echo' is not allowed.")
+    lines should contain(s"rm side-effect avoided (temp file still exists): ${tempFile.exists()}")
+  }
+
+  it should "delegate from main to run without throwing" in {
+    val out = new java.io.ByteArrayOutputStream()
+    Console.withOut(out) {
+      ShellToolAllowlistBypassPoC.main(Array.empty)
+    }
+
+    val printed = out.toString("UTF-8")
+    printed should (
+      include("PoC is intended for Unix-like systems (uses rm).")
+        .or(include("rm side-effect avoided (temp file still exists):"))
+    )
+  }
+
 }

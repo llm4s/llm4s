@@ -4,6 +4,7 @@ import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model.{ EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -24,9 +25,11 @@ class SemanticChunkerSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  private given service: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+
   // Create mock client with provider
   def createMockClient(embeddings: Map[String, Seq[Double]] = Map.empty): EmbeddingClient =
-    new EmbeddingClient(new MockEmbeddingProvider(embeddings))
+    EmbeddingClient(new MockEmbeddingProvider(embeddings))
 
   val modelConfig: EmbeddingModelConfig = EmbeddingModelConfig("mock-model", 10)
 
@@ -38,7 +41,6 @@ class SemanticChunkerSpec extends AnyFlatSpec with Matchers {
   it should "create chunker with default parameters" in {
     val client  = createMockClient()
     val chunker = SemanticChunker(client, modelConfig)
-
     chunker shouldBe a[SemanticChunker]
   }
 

@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.llm4s.trace.{ TraceEvent, Tracing }
 import org.llm4s.agent.AgentState
@@ -16,6 +17,8 @@ import scala.concurrent.duration._
 import scala.collection.mutable.ListBuffer
 
 class CachingLLMClientTest extends AnyFunSuite with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   class MockTracing extends Tracing {
     val events = ListBuffer[TraceEvent]()

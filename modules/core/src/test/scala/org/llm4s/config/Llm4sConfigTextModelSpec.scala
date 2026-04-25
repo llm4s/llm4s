@@ -43,7 +43,8 @@ class Llm4sConfigTextModelSpec extends AnyWordSpec with Matchers {
         pure.modelName shouldBe "text-embedding-3-small"
 
         // And explicitly via the registry as an extra safety check
-        val expectedDims = ModelDimensionRegistry.getDimension("openai", pure.modelName)
+        val expectedDims =
+          ModelDimensionRegistry.getDimension("openai", pure.modelName).fold(err => fail(err.formatted), identity)
         pure.dimensions shouldBe expectedDims
       }
     }

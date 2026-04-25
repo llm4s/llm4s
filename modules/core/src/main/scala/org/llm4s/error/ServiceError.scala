@@ -12,7 +12,7 @@ final case class ServiceError private (
     with RecoverableError {
 
   override val code: Option[String]     = Some(httpStatus.toString)
-  override val retryDelay: Option[Long] = if (isRecoverable) Some(2000) else None
+  override val retryDelay: Option[Long] = Some(2000)
 
   override val context: Map[String, String] = Map(
     "httpStatus" -> httpStatus.toString,

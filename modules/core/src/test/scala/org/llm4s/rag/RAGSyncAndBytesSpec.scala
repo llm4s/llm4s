@@ -3,6 +3,7 @@ package org.llm4s.rag
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag.loader._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -12,6 +13,8 @@ import org.scalatest.matchers.should.Matchers
  * Tests for RAG sync, byte ingestion, and async operations.
  */
 class RAGSyncAndBytesSpec extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   class MockEmbeddingProvider(dimensions: Int = 3) extends EmbeddingProvider {
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
