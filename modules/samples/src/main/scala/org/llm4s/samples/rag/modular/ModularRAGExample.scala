@@ -4,6 +4,7 @@ import org.llm4s.chunking.ChunkerFactory
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag.{ RAG, RAGSearchResult }
 import org.llm4s.rag.RAG.RAGConfigOps
 import org.llm4s.types.Result
@@ -99,37 +100,39 @@ object ModularRAGExample extends App {
       }
     }
 
-  private def buildModules(): Result[(RAG, IngestionModule, RetrievalModule, Option[GenerationModule])] = {
-    val maybeLlm = loadOptionalLlmClient()
+  private def buildModules(): Result[(RAG, IngestionModule, RetrievalModule, Option[GenerationModule])] =
+    Llm4sConfig.modelRegistryService().flatMap { registryService =>
+      given ModelRegistryService = registryService
+      val maybeLlm               = loadOptionalLlmClient()
 
-    for {
-      providerTuple <- Llm4sConfig.embeddings()
-      (providerName, embeddingCfg) = providerTuple
-      embeddingProvider <- ModularRAGSupport.toEmbeddingProvider(providerName)
-      rag <- {
-        val base = RAG
-          .builder()
-          .withEmbeddings(embeddingProvider, embeddingCfg.model)
-          .withChunking(ChunkerFactory.Strategy.Sentence, 800, 150)
-          .withTopK(defaultTopK)
-          .inMemory
+      for {
+        providerTuple <- Llm4sConfig.embeddings()
+        (providerName, embeddingCfg) = providerTuple
+        embeddingProvider <- ModularRAGSupport.toEmbeddingProvider(providerName)
+        rag <- {
+          val base = RAG
+            .builder()
+            .withEmbeddings(embeddingProvider, embeddingCfg.model)
+            .withChunking(ChunkerFactory.Strategy.Sentence, 800, 150)
+            .withTopK(defaultTopK)
+            .inMemory
 
-        val config = maybeLlm match {
-          case Some(client) => base.withLLM(client)
-          case None         => base
+          val config = maybeLlm match {
+            case Some(client) => base.withLLM(client)
+            case None         => base
+          }
+
+          config.build(_ => Right(embeddingCfg))
         }
-
-        config.build(_ => Right(embeddingCfg))
+      } yield {
+        val ingestion  = new DefaultIngestionModule(rag)
+        val retrieval  = new DefaultRetrievalModule(rag)
+        val generation = Option.when(maybeLlm.isDefined)(new DefaultGenerationModule(rag))
+        (rag, ingestion, retrieval, generation)
       }
-    } yield {
-      val ingestion  = new DefaultIngestionModule(rag)
-      val retrieval  = new DefaultRetrievalModule(rag)
-      val generation = Option.when(maybeLlm.isDefined)(new DefaultGenerationModule(rag))
-      (rag, ingestion, retrieval, generation)
     }
-  }
 
-  private def loadOptionalLlmClient(): Option[LLMClient] =
+  private def loadOptionalLlmClient()(using ModelRegistryService): Option[LLMClient] =
     Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient) match {
       case Right(client) =>
         logger.info("LLM provider detected; generation module will run.")
