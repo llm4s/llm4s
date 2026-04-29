@@ -87,9 +87,7 @@ class SpeechIntegrationTest extends AnyFunSuite with Matchers {
     )
 
     val result = tts.synthesize("Hello world", options)
-    // With mock echo command, this will return Left (error) since echo doesn't create valid WAV
-    // Accept both Left and Right to handle mock limitations
-    result.isLeft || result.isRight shouldBe true
+    result shouldBe Symbol("right")
   }
 
   test("AudioIO should handle WAV and raw PCM output") {

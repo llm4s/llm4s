@@ -11,42 +11,57 @@ class WavFileGeneratorSpec extends AnyFlatSpec with Matchers {
   val dataSize = 1000
 
   "createWavHeader" should "produce a 44-byte result" in {
-    val header = WavFileGenerator.createWavHeader(dataSize, testMeta)
-    header.length shouldBe 44
+    val result = WavFileGenerator.createWavHeader(dataSize, testMeta)
+    result.isRight shouldBe true
+    result.foreach(header => header.length shouldBe 44)
   }
 
   it should "start with RIFF magic bytes" in {
-    val header = WavFileGenerator.createWavHeader(dataSize, testMeta)
-    new String(header.slice(0, 4)) shouldBe "RIFF"
+    val result = WavFileGenerator.createWavHeader(dataSize, testMeta)
+    result.isRight shouldBe true
+    result.foreach(header => new String(header.slice(0, 4)) shouldBe "RIFF")
   }
 
   it should "have WAVE marker at bytes 8-11" in {
-    val header = WavFileGenerator.createWavHeader(dataSize, testMeta)
-    new String(header.slice(8, 12)) shouldBe "WAVE"
+    val result = WavFileGenerator.createWavHeader(dataSize, testMeta)
+    result.isRight shouldBe true
+    result.foreach(header => new String(header.slice(8, 12)) shouldBe "WAVE")
   }
 
   it should "correctly encode NumChannels at offset 22" in {
-    val header           = WavFileGenerator.createWavHeader(dataSize, testMeta)
-    val (numChannels, _) = header.read[Short](22)
-    numChannels shouldBe testMeta.numChannels.toShort
+    val result = WavFileGenerator.createWavHeader(dataSize, testMeta)
+    result.isRight shouldBe true
+    result.foreach { header =>
+      val (numChannels, _) = header.read[Short](22)
+      numChannels shouldBe testMeta.numChannels.toShort
+    }
   }
 
   it should "correctly encode SampleRate at offset 24" in {
-    val header          = WavFileGenerator.createWavHeader(dataSize, testMeta)
-    val (sampleRate, _) = header.read[Int](24)
-    sampleRate shouldBe testMeta.sampleRate
+    val result = WavFileGenerator.createWavHeader(dataSize, testMeta)
+    result.isRight shouldBe true
+    result.foreach { header =>
+      val (sampleRate, _) = header.read[Int](24)
+      sampleRate shouldBe testMeta.sampleRate
+    }
   }
 
   it should "correctly encode BitsPerSample at offset 34" in {
-    val header             = WavFileGenerator.createWavHeader(dataSize, testMeta)
-    val (bitsPerSample, _) = header.read[Short](34)
-    bitsPerSample shouldBe testMeta.bitDepth.toShort
+    val result = WavFileGenerator.createWavHeader(dataSize, testMeta)
+    result.isRight shouldBe true
+    result.foreach { header =>
+      val (bitsPerSample, _) = header.read[Short](34)
+      bitsPerSample shouldBe testMeta.bitDepth.toShort
+    }
   }
 
   it should "encode ChunkSize as dataSize + 36 at offset 4" in {
-    val header         = WavFileGenerator.createWavHeader(dataSize, testMeta)
-    val (chunkSize, _) = header.read[Int](4)
-    chunkSize shouldBe dataSize + 36
+    val result = WavFileGenerator.createWavHeader(dataSize, testMeta)
+    result.isRight shouldBe true
+    result.foreach { header =>
+      val (chunkSize, _) = header.read[Int](4)
+      chunkSize shouldBe dataSize + 36
+    }
   }
 
   "writeToTempWav + readWavFile" should "roundtrip AudioMeta correctly" in {

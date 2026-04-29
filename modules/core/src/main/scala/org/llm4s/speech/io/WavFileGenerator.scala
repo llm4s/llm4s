@@ -5,78 +5,55 @@ import org.llm4s.types.Result
 import org.llm4s.speech.{ GeneratedAudio, AudioMeta, AudioFormat }
 import org.llm4s.resource.ManagedResource
 
-import java.io.ByteArrayOutputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import java.io.{ ByteArrayOutputStream, DataOutputStream }
 import java.nio.file.{ Path, Files }
 import javax.sound.sampled.{ AudioFileFormat, AudioFormat => JAudioFormat, AudioSystem }
-import scala.util.{ Try, Using }
+import scala.util.Try
 import org.llm4s.types.TryOps
-import java.nio.charset.StandardCharsets
 
-/**
- * Eliminates code duplication in WAV file generation across the speech module.
- * Provides centralized WAV file creation, format conversion, and temporary file management.
- */
 object WavFileGenerator {
 
   sealed trait WavError extends LLMError
-  final case class WavGenerationFailed(message: String, override val context: Map[String, String] = Map.empty)
-      extends WavError
-  final case class WavSaveFailed(message: String, override val context: Map[String, String] = Map.empty)
-      extends WavError
-  final case class WavValidationFailed(message: String, override val context: Map[String, String] = Map.empty)
-      extends WavError
+  final case class WavGenerationFailed(
+    message: String,
+    override val context: Map[String, String] = Map.empty
+  ) extends WavError
 
-  private val MinSampleRate  = 8000
-  private val MaxSampleRate  = 192000
-  private val ValidBitDepths = Set(8, 16, 24, 32)
-  private val MaxChannels    = 8
-
-  /** Prevent loading extremely large WAV files */
-  private val MaxWavSizeBytes = 50 * 1024 * 1024 // 50MB
-
-  /** llm4s currently supports only PCM16 WAV */
-  private def detectFormat(bitDepth: Int): AudioFormat =
-    AudioFormat.WavPcm16
+  final case class WavSaveFailed(
+    message: String,
+    override val context: Map[String, String] = Map.empty
+  ) extends WavError
 
   /**
-   * Validates AudioMeta for correctness
+   * Validate AudioMeta for correctness.
+   * Only enforce minimal constraints (aligned with main + reviewer feedback).
    */
   def validateMetadata(meta: AudioMeta): Result[AudioMeta] =
-    if (meta.sampleRate < MinSampleRate || meta.sampleRate > MaxSampleRate)
-      Left(WavValidationFailed(s"Sample rate ${meta.sampleRate} out of range [$MinSampleRate, $MaxSampleRate]"))
-    else if (!ValidBitDepths.contains(meta.bitDepth))
-      Left(WavValidationFailed(s"Bit depth ${meta.bitDepth} not supported. Valid: $ValidBitDepths"))
-    else if (meta.numChannels < 1 || meta.numChannels > MaxChannels)
-      Left(WavValidationFailed(s"Number of channels ${meta.numChannels} out of range [1, $MaxChannels]"))
-    else
+    if (meta.sampleRate <= 0) {
+      Left(WavGenerationFailed(s"Sample rate must be > 0, got: ${meta.sampleRate}"))
+    } else if (meta.numChannels <= 0 || meta.numChannels > 8) {
+      Left(WavGenerationFailed(s"Number of channels must be between 1 and 8, got: ${meta.numChannels}"))
+    } else if (meta.bitDepth <= 0 || meta.bitDepth % 8 != 0) {
+      Left(WavGenerationFailed(s"Bit depth must be a positive multiple of 8, got: ${meta.bitDepth}"))
+    } else {
       Right(meta)
+    }
 
-  /**
-   * Create a temporary WAV file
-   */
   def createTempWavFile(prefix: String): Result[Path] =
     Try {
       Files.createTempFile(prefix, ".wav")
     }.toResult.left.map(_ => WavGenerationFailed(s"Failed to create temp WAV file with prefix: $prefix"))
 
-  /**
-   * Managed temp file (auto cleanup)
-   */
   def managedTempWavFile(prefix: String): ManagedResource[Path] =
     ManagedResource.tempFile(prefix, ".wav")
 
-  /**
-   * Convert AudioMeta -> Java AudioFormat
-   */
   def createJavaAudioFormat(meta: AudioMeta): JAudioFormat =
     new JAudioFormat(
       meta.sampleRate.toFloat,
       meta.bitDepth,
       meta.numChannels,
-      true,
-      false
+      /* signed = */ true,
+      /* bigEndian = */ false
     )
 
   /**
@@ -85,122 +62,103 @@ object WavFileGenerator {
   def saveAsWav(audio: GeneratedAudio, path: Path): Result[Path] =
     for {
       _ <- validateMetadata(audio.meta)
-      result <- ManagedResource.audioInputStream(audio.data, createJavaAudioFormat(audio.meta)).use { ais =>
-        Try {
-          AudioSystem.write(ais, AudioFileFormat.Type.WAVE, path.toFile)
-          path
-        }.toResult.left.map(_ => WavSaveFailed(s"Failed to save WAV to: $path"))
-      }
+      result <- ManagedResource
+        .audioInputStream(audio.data, createJavaAudioFormat(audio.meta))
+        .use { ais =>
+          Try {
+            AudioSystem.write(ais, AudioFileFormat.Type.WAVE, path.toFile)
+            path
+          }.toResult.left.map(_ => WavSaveFailed(s"Failed to save WAV to: $path"))
+        }
     } yield result
 
   /**
-   * Save PCM bytes as WAV
+   * Save raw PCM data as WAV (no double validation)
    */
-  def saveRawPcmAsWav(data: Array[Byte], meta: AudioMeta, path: Path): Result[Path] =
-    for {
-      validMeta <- validateMetadata(meta)
-      audio = GeneratedAudio(data, validMeta, detectFormat(validMeta.bitDepth))
-      result <- saveAsWav(audio, path)
-    } yield result
+  def saveRawPcmAsWav(data: Array[Byte], meta: AudioMeta, path: Path): Result[Path] = {
+    val audio = GeneratedAudio(data, meta, AudioFormat.WavPcm16)
+    saveAsWav(audio, path)
+  }
 
   /**
-   * Construct GeneratedAudio from raw bytes
+   * Create GeneratedAudio from raw bytes
    */
   def createWavFromBytes(data: Array[Byte], meta: AudioMeta): Result[GeneratedAudio] =
-    for {
-      validMeta <- validateMetadata(meta)
-    } yield GeneratedAudio(data, validMeta, detectFormat(validMeta.bitDepth))
+    Right(GeneratedAudio(data, meta, AudioFormat.WavPcm16))
 
   /**
-   * Write audio bytes to temp WAV
+   * Write audio data to temporary WAV file
    */
-  def writeToTempWav(data: Array[Byte], meta: AudioMeta, prefix: String = "llm4s-audio"): Result[Path] =
+  def writeToTempWav(
+    data: Array[Byte],
+    meta: AudioMeta,
+    prefix: String = "llm4s-audio"
+  ): Result[Path] =
     for {
-      validMeta <- validateMetadata(meta)
-      tempPath  <- createTempWavFile(prefix)
-      audio = GeneratedAudio(data, validMeta, detectFormat(validMeta.bitDepth))
+      tempPath <- createTempWavFile(prefix)
+      audio = GeneratedAudio(data, meta, AudioFormat.WavPcm16)
       savedPath <- saveAsWav(audio, tempPath)
     } yield savedPath
 
   /**
-   * Read WAV file safely
+   * Read WAV file and return GeneratedAudio.
+   *
+   * WAV header layout (little-endian):
+   *   Offset 22: NumChannels (Short)
+   *   Offset 24: SampleRate (Int)
+   *   Offset 34: BitsPerSample (Short)
+   *   Offset 44+: audio data
    */
   def readWavFile(path: Path): Result[GeneratedAudio] =
-    if (!Files.exists(path))
-      Left(WavGenerationFailed(s"WAV file does not exist: $path"))
-    else {
+    Try {
+      val bytes = Files.readAllBytes(path)
+      import BinaryReader._
 
-      val fileSize = Files.size(path)
+      val (numChannels, _)   = bytes.read[Short](22)
+      val (sampleRate, _)    = bytes.read[Int](24)
+      val (bitsPerSample, _) = bytes.read[Short](34)
 
-      if (fileSize > MaxWavSizeBytes)
-        Left(WavValidationFailed(s"WAV file too large: $fileSize bytes (max allowed $MaxWavSizeBytes)"))
-      else
-        Try {
-          Using.resource(AudioSystem.getAudioInputStream(path.toFile)) { audioInputStream =>
+      val audioData = bytes.drop(44)
 
-            val javaFormat = audioInputStream.getFormat
+      val meta = AudioMeta(
+        sampleRate = sampleRate,
+        numChannels = numChannels,
+        bitDepth = bitsPerSample
+      )
 
-            if (javaFormat.getEncoding != javax.sound.sampled.AudioFormat.Encoding.PCM_SIGNED)
-              throw new IllegalArgumentException("Unsupported WAV encoding (only PCM_SIGNED supported)")
-
-            val meta = AudioMeta(
-              sampleRate = javaFormat.getSampleRate.toInt,
-              numChannels = javaFormat.getChannels,
-              bitDepth = javaFormat.getSampleSizeInBits
-            )
-
-            val out    = new ByteArrayOutputStream()
-            val buffer = new Array[Byte](4096)
-
-            var read = audioInputStream.read(buffer)
-            while (read != -1) {
-              out.write(buffer, 0, read)
-              read = audioInputStream.read(buffer)
-            }
-
-            val audioData = out.toByteArray
-
-            GeneratedAudio(audioData, meta, detectFormat(meta.bitDepth))
-          }
-        }.toResult.left.map(e => WavGenerationFailed(s"Failed to read WAV file: $path. Error: ${e.message}"))
-    }
+      GeneratedAudio(audioData, meta, AudioFormat.WavPcm16)
+    }.toResult.left.map(_ => WavGenerationFailed(s"Failed to read WAV file: $path"))
 
   /**
    * Create WAV header (low-level utility)
+   * Returns Result instead of throwing (project convention)
    */
-  def createWavHeader(dataSize: Int, meta: AudioMeta): Array[Byte] =
-    validateMetadata(meta) match {
-      case Left(err) =>
-        throw new IllegalArgumentException(err.message)
+  def createWavHeader(dataSize: Int, meta: AudioMeta): Result[Array[Byte]] =
+    for {
+      _ <- validateMetadata(meta)
+    } yield {
+      val iw         = BinaryWriter.intWriter
+      val sw         = BinaryWriter.shortWriter
+      val byteRate   = meta.sampleRate * meta.numChannels * (meta.bitDepth / 8)
+      val blockAlign = (meta.numChannels * meta.bitDepth / 8).toShort
 
-      case Right(_) =>
-        val bytesPerSample = (meta.bitDepth + 7) / 8
-        val byteRate       = meta.sampleRate * meta.numChannels * bytesPerSample
-        val blockAlign     = (meta.numChannels * bytesPerSample).toShort
+      val header = new ByteArrayOutputStream(44)
+      val dos    = new DataOutputStream(header)
 
-        val buffer = ByteBuffer.allocate(44)
-        buffer.order(ByteOrder.LITTLE_ENDIAN)
+      dos.write("RIFF".getBytes)
+      iw.write(dos, dataSize + 36)
+      dos.write("WAVE".getBytes)
+      dos.write("fmt ".getBytes)
+      iw.write(dos, 16)
+      sw.write(dos, 1.toShort)
+      sw.write(dos, meta.numChannels.toShort)
+      iw.write(dos, meta.sampleRate)
+      iw.write(dos, byteRate)
+      sw.write(dos, blockAlign)
+      sw.write(dos, meta.bitDepth.toShort)
+      dos.write("data".getBytes)
+      iw.write(dos, dataSize)
 
-        buffer.put("RIFF".getBytes(StandardCharsets.US_ASCII))
-        buffer.putInt(dataSize + 36)
-
-        buffer.put("WAVE".getBytes(StandardCharsets.US_ASCII))
-
-        buffer.put("fmt ".getBytes(StandardCharsets.US_ASCII))
-        buffer.putInt(16)
-        buffer.putShort(1.toShort)
-        buffer.putShort(meta.numChannels.toShort)
-        buffer.putInt(meta.sampleRate)
-        buffer.putInt(byteRate)
-        buffer.putShort(blockAlign)
-        buffer.putShort(meta.bitDepth.toShort)
-
-        buffer.put("data".getBytes(StandardCharsets.US_ASCII))
-        buffer.putInt(dataSize)
-
-        val header = buffer.array()
-        require(header.length == 44, "Invalid WAV header size")
-
-        header
+      header.toByteArray
     }
 }

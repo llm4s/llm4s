@@ -23,8 +23,6 @@ The **[Scaladoc](/scaladoc/)** provides comprehensive, auto-generated API docume
 | [Tool Calling API Design](../tool-calling-api-design) | Tool calling interface design |
 | [Workspace Agent Protocol](../workspace-agent-protocol) | Standardized interface for LLM workspace interaction |
 
-|[Workspace Agent Protocol](/workspace-agent-protocol)| Standardized interface for LLM workspace interaction |
-
 ## API Design Principles
 
 LLM4S follows these design principles:
