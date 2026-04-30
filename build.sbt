@@ -74,6 +74,7 @@ addCommandAlias(
   ";scalafmtAll;cleanTestAll"
 )
 addCommandAlias("compileAll", ";compile")
+addCommandAlias("chatTuiDemo", "samples/runMain org.llm4s.samples.chat.tui.ChatTuiMain")
 addCommandAlias(
   "testFast",
   """;set core / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", "org.llm4s.tags.SlowTest"); test"""

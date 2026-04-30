@@ -11,7 +11,7 @@ object Versions {
   val logback  = "1.5.18"
   val log4j    = "2.24.3"
   val monocle  = "3.3.0"
-  val termflow = "0.1.23"
+  val termflow = "0.4.0"
   val scalatest               = "3.2.19"
   val scalamock               = "7.4.2"
   val scalatestplusScalacheck = "3.2.19.0"
