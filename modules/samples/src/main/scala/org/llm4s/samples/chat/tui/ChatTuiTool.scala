@@ -39,20 +39,54 @@ object ChatTuiTool:
     .`object`[Map[String, Any]]("read_file parameters")
     .withProperty(Schema.property("path", Schema.string("Workspace-relative file path")))
 
-  /** Resolve `path` against `root` and reject any escape outside it. */
+  /**
+   * Resolve `path` against `root` and reject any escape outside it,
+   * including escapes via symlinks.
+   *
+   * Lexical `Path.normalize` only handles `..` segments — it does not
+   * follow symlinks. A workspace-relative path that traverses a symlink
+   * pointing at `/etc` would still pass a `startsWith(root)` check after
+   * normalisation. We therefore resolve to **real** paths via
+   * [[Path.toRealPath]] before the containment check.
+   *
+   * For a path that doesn't exist yet (which `read_file` will reject
+   * later anyway, but `safeResolve` is also called by the dialog's
+   * size-probe), we resolve the deepest existing ancestor's real path
+   * and append the remaining segments — that way a symlink anywhere in
+   * the existing prefix is still followed.
+   */
   def safeResolve(root: Path, path: String): Either[String, Path] =
     if path == null || path.trim.isEmpty then Left("path must be non-empty")
     else
       Try {
-        val absRoot   = root.toAbsolutePath.normalize
-        val candidate = absRoot.resolve(path).normalize
-        (absRoot, candidate)
+        val realRoot  = root.toRealPath()
+        val candidate = realRoot.resolve(path).normalize
+        val resolved  = realPathOfBestEffort(candidate)
+        (realRoot, resolved)
       }.toEither.left
         .map(t => s"could not resolve path: ${Option(t.getMessage).getOrElse(t.getClass.getSimpleName)}")
-        .flatMap { case (absRoot, candidate) =>
-          if !candidate.startsWith(absRoot) then Left(s"path '$path' resolves outside the workspace")
-          else Right(candidate)
+        .flatMap { case (realRoot, resolved) =>
+          if !resolved.startsWith(realRoot) then Left(s"path '$path' resolves outside the workspace")
+          else Right(resolved)
         }
+
+  /**
+   * `Path.toRealPath` requires the file to exist. For missing leaves we
+   * walk up to the deepest existing ancestor, take its real path, then
+   * re-append the missing segments. This ensures any symlink in the
+   * existing prefix is still resolved before the containment check.
+   */
+  private def realPathOfBestEffort(p: Path): Path =
+    Try(p.toRealPath()).getOrElse {
+      var existing: Path = p
+      val pending        = scala.collection.mutable.ListBuffer.empty[String]
+      while existing != null && !Files.exists(existing) do
+        val name = existing.getFileName
+        if name != null then pending.prepend(name.toString)
+        existing = existing.getParent
+      val anchor = if existing == null then p else Try(existing.toRealPath()).getOrElse(existing)
+      pending.foldLeft(anchor)((acc, seg) => acc.resolve(seg))
+    }
 
   /** Probe the size of a candidate path (used by the approval dialog). */
   def probeSize(root: Path, path: String): Option[Long] =

@@ -10,7 +10,7 @@ import org.llm4s.llmconnect.model.{
   ToolMessage,
   UserMessage
 }
-import org.llm4s.samples.chat.tui.ChatTuiModel.{ Model, Msg, StreamSession }
+import org.llm4s.samples.chat.tui.ChatTuiModel.{ Model, Msg }
 import org.llm4s.toolapi.{ ToolCallRequest, ToolRegistry }
 import termflow.tui.*
 import termflow.tui.Tui.*
@@ -227,18 +227,18 @@ private[tui] object ChatTuiUpdate:
       scrollOffset = ChatTuiView.maxScroll(model)
     )
 
-    val capturedSession = model.session
+    // Capture the pump itself, not `model.session`. If the user aborts
+    // and starts a new turn before this future resolves, `session.pump`
+    // would point at the *new* turn's pump and a stale callback would
+    // drain its tokens. The closure must drain only the pump it owns.
+    val capturedPump = pump
     val cmd = Cmd.asyncResult[org.llm4s.llmconnect.model.Completion, Msg](
       task = task,
-      onSuccess = (_: org.llm4s.llmconnect.model.Completion) =>
-        Msg.StreamComplete(generation, drainAfterCompletion(capturedSession)),
+      onSuccess = (_: org.llm4s.llmconnect.model.Completion) => Msg.StreamComplete(generation, capturedPump.drainAll()),
       onError = (err: TermFlowError) => Msg.StreamError(generation, err)
     )
 
     Tui(nextModel, cmd)
-
-  private def drainAfterCompletion(session: StreamSession): Vector[StreamedChunk] =
-    if session.pump == null then Vector.empty else session.pump.drainAll()
 
   private def pumpTick(model: Model): Tui[Model, Msg] =
     model.pending match {
@@ -254,6 +254,10 @@ private[tui] object ChatTuiUpdate:
     }
 
   private def applyChunks(model: Model, intoIdx: Int, chunks: Vector[StreamedChunk]): Model =
+    // Capture tool-call deltas onto the session so handleStreamComplete
+    // sees them even when they were drained mid-stream by a pump tick.
+    val toolCalls = chunks.flatMap(_.toolCall)
+    if toolCalls.nonEmpty then model.session.toolCalls = model.session.toolCalls ++ toolCalls
     val newText = chunks.flatMap(_.content).mkString
     if newText.isEmpty then model
     else
@@ -269,20 +273,20 @@ private[tui] object ChatTuiUpdate:
     model.pending match {
       case PendingState.Streaming(intoIdx, gen) if gen == generation =>
         // Apply any leftover tokens captured between the last pump tick and
-        // the completion arrival.
+        // the completion arrival. `applyChunks` also harvests `toolCall`
+        // deltas from `finalChunks` onto `session.toolCalls`.
         val flushed = applyChunks(model, intoIdx, finalChunks)
+
+        // Snapshot the buffered tool calls before `reset()` clears them.
+        // This includes calls drained by earlier pump ticks plus any
+        // captured from `finalChunks` above.
+        val bufferedToolCalls = flushed.session.toolCalls
 
         // Cancel the pump; we're done with the live stream.
         flushed.session.reset()
 
-        // Pull the *real* AssistantMessage from the chunks: `finishReason`
-        // and `toolCall` arrive as separate chunks. We synthesise the
-        // message from accumulated state.
         val accumulatedText  = flushed.entries(intoIdx).content
-        val toolCallFromMsgs = finalChunks.flatMap(_.toolCall).headOption
-        // The pump was already drained by the time PumpTick last ran, so
-        // any tool-call chunks still in `finalChunks` represent the only
-        // tool call for this turn.
+        val toolCallFromMsgs = bufferedToolCalls.headOption
 
         toolCallFromMsgs match {
           case Some(call) =>

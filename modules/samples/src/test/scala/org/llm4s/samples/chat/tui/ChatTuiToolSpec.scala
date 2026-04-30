@@ -18,7 +18,27 @@ class ChatTuiToolSpec extends AnyFlatSpec with Matchers {
 
   "safeResolve" should "accept a path inside the workspace" in withTempRoot { root =>
     val file = Files.createFile(root.resolve("hello.txt"))
-    ChatTuiTool.safeResolve(root, "hello.txt") shouldBe Right(file)
+    ChatTuiTool.safeResolve(root, "hello.txt") shouldBe Right(file.toRealPath())
+  }
+
+  it should "reject paths that traverse a symlink out of the workspace" in withTempRoot { root =>
+    val outside = Files.createTempDirectory("chat-tui-tool-spec-outside")
+    try {
+      val secret = Files.write(outside.resolve("secret.txt"), "shh".getBytes)
+      val link   = root.resolve("escape")
+      try Files.createSymbolicLink(link, outside)
+      catch {
+        case _: UnsupportedOperationException => cancel("symlink unsupported on this filesystem")
+        case _: java.io.IOException           => cancel("symlink creation denied on this filesystem")
+      }
+      ChatTuiTool.safeResolve(root, "escape/secret.txt") match {
+        case Left(msg) => msg should include("outside the workspace")
+        case Right(p)  => fail(s"expected Left for symlink escape, got Right($p) (target was $secret)")
+      }
+    } finally {
+      val _ = outside.toFile.listFiles().foreach(_.delete())
+      val _ = outside.toFile.delete()
+    }
   }
 
   it should "reject empty paths" in withTempRoot { root =>

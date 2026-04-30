@@ -95,10 +95,20 @@ object ChatTuiModel:
     var sub: Sub[Msg]    = Sub.NoSub
     var generation: Long = 0L
 
+    /**
+     * Tool calls drained during PumpTick. The pump's queue holds raw
+     * `StreamedChunk` values; once we drain them to extract text we lose
+     * the `toolCall` field unless we capture it here. `handleStreamComplete`
+     * inspects this list alongside the post-completion final drain so a
+     * tool call emitted mid-stream isn't dropped.
+     */
+    var toolCalls: Vector[org.llm4s.llmconnect.model.ToolCall] = Vector.empty
+
     def reset(): Unit =
       pump = null
       if sub != Sub.NoSub then sub.cancel()
       sub = Sub.NoSub
+      toolCalls = Vector.empty
 
   final case class Model(
     width: Int,
