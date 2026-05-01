@@ -32,35 +32,11 @@ object ChatTuiView:
     Coord(2.x, 4.y)
 
   def maxScroll(model: Model): Int =
-    widgets.LogView.maxScroll(
-      transcriptLines(model),
+    ChatTuiTranscript.maxScroll(
+      ChatTuiTranscript.renderEntries(model.entries, model.theme),
       transcriptWidth(model),
-      transcriptHeight(model),
-      wrap = true
+      transcriptHeight(model)
     )
-
-  /** Flatten the conversation entries into the LogView's line buffer. */
-  def transcriptLines(model: Model): Vector[String] =
-    if model.entries.isEmpty then Vector("(no messages yet — type below to start)")
-    else
-      model.entries
-        .flatMap { entry =>
-          val head = s"${entry.role.label}: ${entry.content}"
-          val tool = entry.toolCall.toList.flatMap(renderToolCall)
-          Vector(head) ++ tool ++ Vector("")
-        }
-        .dropRight(1)
-
-  private def renderToolCall(summary: ToolCallSummary): List[String] =
-    val args = if summary.args.length > 60 then summary.args.take(57) + "..." else summary.args
-    val head = s"  ⚙ tool: ${summary.name}($args)"
-    val tail = summary.outcome match {
-      case Some(ToolOutcome.Ok(s))  => List(s"  ✓ $s")
-      case Some(ToolOutcome.Err(m)) => List(s"  ✗ $m")
-      case Some(ToolOutcome.Denied) => List("  ⊘ denied by user")
-      case None                     => Nil
-    }
-    head :: tail
 
   def view(model: Model): RootNode =
     given Theme = model.theme
@@ -78,14 +54,10 @@ object ChatTuiView:
     val helpLine =
       "↑/↓ scroll · End tail · /help · Ctrl+T theme · Ctrl+C quit"
 
-    val transcript = widgets.LogView(
-      lines = transcriptLines(model),
-      width = transcriptWidth(model),
-      height = transcriptHeight(model),
-      scrollOffset = model.scrollOffset,
-      at = transcriptOrigin(model),
-      wrap = true
-    )
+    val richEntries  = ChatTuiTranscript.renderEntries(model.entries, model.theme)
+    val displayLines = ChatTuiTranscript.expand(richEntries, transcriptWidth(model))
+    val visible      = ChatTuiTranscript.viewport(displayLines, transcriptHeight(model), model.scrollOffset)
+    val transcript   = ChatTuiTranscript.toNodes(visible, transcriptOrigin(model))
 
     val statusLeft = " " + (model.pending match {
       case PendingState.Idle                       => "ready"
