@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
-import org.llm4s.llmconnect.config.OpenAIConfig
+import org.llm4s.llmconnect.config.OpenRouterConfig
 import org.llm4s.llmconnect.model.{
   CompletionOptions,
   Conversation,
@@ -24,20 +24,18 @@ import scala.collection.mutable.ListBuffer
 
 class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
 
-  private val testConfig = OpenAIConfig(
+  private val testConfig = OpenRouterConfig(
     apiKey = "test-key",
     model = "anthropic/claude-3.5-sonnet",
-    organization = None,
     baseUrl = "https://openrouter.ai/api/v1",
     contextWindow = 200000,
     reserveCompletion = 4096
   )
 
-  private def localConfig(baseUrl: String): OpenAIConfig =
-    OpenAIConfig(
+  private def localConfig(baseUrl: String): OpenRouterConfig =
+    OpenRouterConfig(
       apiKey = "test-key",
       model = "anthropic/claude-3.5-sonnet",
-      organization = None,
       baseUrl = baseUrl,
       contextWindow = 200000,
       reserveCompletion = 4096
@@ -315,7 +313,7 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
   }
 }
 
-final private class OpenRouterClientTestHelper(cfg: OpenAIConfig) extends OpenRouterClient(cfg) {
+final private class OpenRouterClientTestHelper(cfg: OpenRouterConfig) extends OpenRouterClient(cfg) {
   def exposedCreateRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj =
     createRequestBody(conversation, options)
 }

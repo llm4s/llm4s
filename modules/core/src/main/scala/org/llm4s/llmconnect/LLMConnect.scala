@@ -154,7 +154,6 @@ object LLMConnect {
     val exchangeLogging = options.exchangeLogging
     (provider, config) match {
       case (ProviderKind.OpenAI, cfg: OpenAIConfig)         => OpenAIClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.OpenAI, cfg: OpenRouterConfig)     => OpenRouterClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.OpenRouter, cfg: OpenRouterConfig) => OpenRouterClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.Azure, cfg: AzureConfig)           => OpenAIClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.Anthropic, cfg: AnthropicConfig)   => AnthropicClient(cfg, metrics, exchangeLogging)

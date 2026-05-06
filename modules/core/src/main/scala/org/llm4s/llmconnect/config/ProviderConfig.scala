@@ -715,7 +715,7 @@ case class OpenRouterConfig(
   requestTimeout: FiniteDuration = 2.minutes,
   streamTimeout: FiniteDuration  = 5.minutes,
 ) extends ProviderConfig {
-  override val provider: ProviderKind = ProviderKind.OpenAI
+  override val provider: ProviderKind = ProviderKind.OpenRouter
   override def toString: String =
     s"OpenRouterConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
