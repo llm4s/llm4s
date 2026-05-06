@@ -43,8 +43,10 @@ object ResearcherAgentExample {
 
     // Create LLM client and load Brave Search configuration
     val clientResult = for {
-      providerCfg <- Llm4sConfig.defaultProvider()
-      client      <- LLMConnect.getClient(providerCfg)
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
     } yield client
 
     val braveConfigResult = Llm4sConfig.loadBraveSearchTool()

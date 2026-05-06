@@ -12,8 +12,11 @@ import org.scalatest.OptionValues._
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable.ListBuffer
+import org.llm4s.model.ModelRegistryService
 
 class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val testConfig = GeminiConfig(
     apiKey = "test-key",

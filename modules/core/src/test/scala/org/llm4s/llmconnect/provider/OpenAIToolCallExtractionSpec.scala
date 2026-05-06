@@ -2,14 +2,18 @@ package org.llm4s.llmconnect.provider
 
 import com.azure.ai.openai.models.{ ChatCompletions, ChatCompletionsOptions }
 import com.azure.json.JsonProviders
-import org.llm4s.llmconnect.config.OpenAIConfig
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
+import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.util.Using
 
 final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers {
+
+  private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+  private given ContextWindowResolver     = ContextWindowResolver(mrs)
 
   private def completionsFromJson(json: String): ChatCompletions =
     Using.resource(JsonProviders.createReader(json))(ChatCompletions.fromJson)

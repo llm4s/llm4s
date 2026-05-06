@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.config.LocalEmbeddingModels
 import org.llm4s.llmconnect.utils.ModelSelector
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -24,6 +25,8 @@ import javax.imageio.ImageIO
  * - We never call real HTTP providers; a stub EmbeddingProvider is used.
  */
 class EmbedxV2Spec extends AnyFunSuite with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   // ----------------- Test scaffolding -----------------
 

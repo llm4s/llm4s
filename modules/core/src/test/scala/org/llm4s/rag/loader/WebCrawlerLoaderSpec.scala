@@ -203,4 +203,11 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
 
     config.acceptContentTypes shouldBe Set("text/html")
   }
+
+  it should "produce an empty result iterator when no seed URLs are provided" in {
+    val loader = WebCrawlerLoader(Seq.empty)
+
+    loader.seedUrls shouldBe Seq.empty
+    loader.load().toList shouldBe empty
+  }
 }

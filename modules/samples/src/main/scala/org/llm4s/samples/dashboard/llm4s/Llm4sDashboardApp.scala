@@ -16,7 +16,9 @@ object Llm4sDashboardApp:
     status: String,
     providerStatus: String,
     events: Vector[String],
-    ticks: Long
+    ticks: Long,
+    eventScrollOffset: Int = 0,
+    eventAutoTail: Boolean = true
   )
 
   enum Msg:
@@ -25,6 +27,8 @@ object Llm4sDashboardApp:
     case ConsoleInputKey(key: KeyDecoder.InputKey)
     case ConsoleInputError(error: Throwable)
     case RunCommand(command: String)
+    case ScrollEvents(delta: Int)
+    case ScrollEventsToEnd
     case ExitRequested
 
   import Msg._

@@ -1,16 +1,20 @@
 package org.llm4s.samples.cache
 
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.caching.{ CacheConfig, CachingLLMClient }
-import org.llm4s.llmconnect.config.EmbeddingModelConfig
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, EmbeddingModelConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.OpenAIClient
 import org.llm4s.llmconnect.config.{ OpenAIConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
-import org.llm4s.trace.{ ConsoleTracing, Tracing }
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.trace.ConsoleTracing
+import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
 import scala.concurrent.duration._
+import scala.util.Using
 
 /**
  * Sample demonstrating semantic LLM response caching.
@@ -28,73 +32,79 @@ import scala.concurrent.duration._
 object SemanticCachingSample extends App {
   private val logger = LoggerFactory.getLogger(getClass)
 
-  def runDemo(): Unit = {
-    // Load provider config via Llm4sConfig and extract OpenAI API key
-    val apiKey = Llm4sConfig.defaultProvider() match {
-      case Right(cfg: OpenAIConfig) => cfg.apiKey
-      case Right(_) =>
-        logger.error("This sample requires an OpenAI provider (set LLM_MODEL=openai/<model>)")
-        return
-      case Left(err) =>
-        logger.error("Failed to load provider config: {}", err.formatted)
-        return
+  private def runDemo(): Result[Unit] =
+    for {
+      registryService <- Llm4sConfig.modelRegistryService()
+      result <- {
+        given ModelRegistryService  = registryService
+        given ContextWindowResolver = ContextWindowResolver(registryService)
+        for {
+          apiKey          <- loadApiKey()
+          baseLLMClient   <- createBaseClient(apiKey)
+          embeddingClient <- createEmbeddingClient(apiKey)
+          cacheConfig     <- createCacheConfig()
+          conv1           <- Conversation.userOnly("What is the capital of France?")
+          conv2           <- Conversation.userOnly("Tell me the capital city of France")
+          conv3           <- Conversation.userOnly("What is the capital of Germany?")
+        } yield {
+          val tracing        = new ConsoleTracing()
+          val embeddingModel = EmbeddingModelConfig("text-embedding-3-small", 1536)
+          Using.resource(
+            new CachingLLMClient(
+              baseClient = baseLLMClient,
+              embeddingClient = embeddingClient,
+              embeddingModel = embeddingModel,
+              config = cacheConfig,
+              tracing = tracing
+            )
+          )(cachingClient => runScenarios(cachingClient, cacheConfig, conv1, conv2, conv3))
+        }
+      }
+    } yield result
+
+  private def loadApiKey(): Result[String] =
+    Llm4sConfig.defaultProvider().flatMap {
+      case cfg: OpenAIConfig => Right(cfg.apiKey)
+      case _ =>
+        Left(ConfigurationError("This sample requires an OpenAI provider (set LLM_MODEL=openai/<model>)"))
     }
 
+  private def createBaseClient(
+    apiKey: String
+  )(using ContextWindowResolver, ModelRegistryService): Result[LLMClient] = {
     println("=== Semantic Caching Demo ===\n")
-
-    // Configure tracing to see cache hits/misses
-    val tracing: Tracing = new ConsoleTracing()
-
-    // Create base LLM client
     val openAIConfig = OpenAIConfig.fromValues(
       modelName = "gpt-4o-mini",
       apiKey = apiKey,
       organization = None,
       baseUrl = "https://api.openai.com"
     )
-    val baseLLMClient: LLMClient = OpenAIClient(openAIConfig) match {
-      case Right(client) => client
-      case Left(err) =>
-        logger.error(s"Failed to initialize OpenAI client: ${err.message}")
-        return
-    }
+    OpenAIClient(openAIConfig)
+  }
 
-    // Create embedding client for semantic similarity
+  private def createEmbeddingClient(apiKey: String)(using ModelRegistryService): Result[EmbeddingClient] = {
     val embeddingConfig = EmbeddingProviderConfig(
       baseUrl = "https://api.openai.com",
       model = "text-embedding-3-small",
       apiKey = apiKey
     )
-    val embeddingClient = EmbeddingClient.from("openai", embeddingConfig) match {
-      case Right(client) => client
-      case Left(err) =>
-        logger.error(s"Failed to initialize embedding client: ${err.message}")
-        return
-    }
-    val embeddingModel = EmbeddingModelConfig("text-embedding-3-small", 1536)
+    EmbeddingClient.from("openai", embeddingConfig)
+  }
 
-    // Configure cache: 95% similarity threshold, 5 minute TTL, max 100 entries
-    val cacheConfig = CacheConfig
-      .create(
-        similarityThreshold = 0.95,
-        ttl = 5.minutes,
-        maxSize = 100
-      ) match {
-      case Right(config) => config
-      case Left(err) =>
-        logger.error(s"Failed to create cache config: ${err.message}")
-        return
-    }
-
-    // Wrap base client with caching
-    val cachingClient = new CachingLLMClient(
-      baseClient = baseLLMClient,
-      embeddingClient = embeddingClient,
-      embeddingModel = embeddingModel,
-      config = cacheConfig,
-      tracing = tracing
+  private def createCacheConfig(): Result[CacheConfig] =
+    CacheConfig.create(
+      similarityThreshold = 0.95,
+      ttl = 5.minutes,
+      maxSize = 100
     )
 
+  private def runScenarios(
+    cachingClient: CachingLLMClient,
+    cacheConfig: CacheConfig,
+    conv1: Conversation,
+    conv2: Conversation,
+    conv3: Conversation
+  ): Unit = {
     println("Configuration:")
     println(s"  Similarity Threshold: ${cacheConfig.similarityThreshold}")
     println(s"  TTL: ${cacheConfig.ttl}")
@@ -102,13 +112,7 @@ object SemanticCachingSample extends App {
 
     // Demo 1: Cache miss then hit
     println("--- Demo 1: Identical queries (should hit cache) ---")
-    val query1 = "What is the capital of France?"
-    val conv1 = Conversation.userOnly(query1) match {
-      case Right(conv) => conv
-      case Left(err) =>
-        logger.error(s"Failed to create conversation: ${err.message}")
-        return
-    }
+    val query1 = conv1.messages.last.content
 
     println(s"Query 1: $query1")
     cachingClient.complete(conv1) match {
@@ -124,13 +128,7 @@ object SemanticCachingSample extends App {
 
     // Demo 2: Similar query (should hit cache if similarity > threshold)
     println("--- Demo 2: Similar query ---")
-    val query2 = "Tell me the capital city of France"
-    val conv2 = Conversation.userOnly(query2) match {
-      case Right(conv) => conv
-      case Left(err) =>
-        logger.error(s"Failed to create conversation: ${err.message}")
-        return
-    }
+    val query2 = conv2.messages.last.content
 
     println(s"Query 3 (similar): $query2")
     cachingClient.complete(conv2) match {
@@ -140,13 +138,7 @@ object SemanticCachingSample extends App {
 
     // Demo 3: Different query (should miss cache)
     println("--- Demo 3: Different query (should miss cache) ---")
-    val query3 = "What is the capital of Germany?"
-    val conv3 = Conversation.userOnly(query3) match {
-      case Right(conv) => conv
-      case Left(err) =>
-        logger.error(s"Failed to create conversation: ${err.message}")
-        return
-    }
+    val query3 = conv3.messages.last.content
 
     println(s"Query 4 (different): $query3")
     cachingClient.complete(conv3) match {
@@ -169,10 +161,7 @@ object SemanticCachingSample extends App {
     println("  - CACHE HIT or MISS (similar query, depends on embedding similarity)")
     println("  - CACHE MISS (different query)")
     println("  - CACHE MISS (options mismatch)")
-
-    // Cleanup
-    cachingClient.close()
   }
 
-  runDemo()
+  runDemo().left.foreach(err => logger.error("Semantic caching demo failed: {}", err.formatted))
 }

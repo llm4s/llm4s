@@ -1,14 +1,14 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.model.TokenUsage
-import org.llm4s.model.{ ModelMetadata, ModelRegistry }
+import org.llm4s.model.{ ModelMetadata, ModelRegistryService }
 
 /**
  * Centralized cost estimation for LLM completions.
  *
  * This provides a single source of truth for estimating completion costs
  * based on token usage and model pricing information. It integrates with
- * the ModelRegistry to look up pricing data and applies it to usage statistics.
+ * the ModelRegistryService to look up pricing data and applies it to usage statistics.
  *
  * The estimator:
  * - Uses existing ModelPricing logic (no duplication)
@@ -38,8 +38,8 @@ object CostEstimator {
    * @param usage Token usage statistics from the completion
    * @return Estimated cost in USD, or None if pricing is unavailable
    */
-  def estimate(model: String, usage: TokenUsage): Option[Double] =
-    estimateFromMetadata(ModelRegistry.lookup(model).toOption, usage)
+  def estimate(model: String, usage: TokenUsage)(using service: ModelRegistryService): Option[Double] =
+    estimateFromMetadata(service.lookup(model).toOption, usage)
 
   /**
    * Estimate cost using pre-fetched model metadata.

@@ -2,10 +2,11 @@ package org.llm4s.samples.rag
 
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMConnect }
-import org.llm4s.rag.benchmark._
+import org.llm4s.rag.benchmark.*
 import org.llm4s.error.ConfigurationError
 import org.slf4j.LoggerFactory
-import scala.util.chaining._
+
+import scala.util.chaining.*
 
 /**
  * Example demonstrating the RAG benchmarking harness.
@@ -74,6 +75,8 @@ object BenchmarkExample {
     // Initialize benchmark runner
     val runnerResult = for {
       providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
       llmClient       <- LLMConnect.getClient(providerCfg)
       embeddingResult <- Llm4sConfig.embeddings()
       (providerName, embCfg) = embeddingResult

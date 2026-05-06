@@ -101,9 +101,14 @@ object PlaywrightExample {
 
   private def validatePrerequisites(): Either[String, LLMClient] =
     for {
-      _      <- checkCommand("node", "Node.js")
-      _      <- checkCommand("npx", "npx")
-      client <- Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient).leftMap(_.formatted)
+      _               <- checkCommand("node", "Node.js")
+      _               <- checkCommand("npx", "npx")
+      registryService <- Llm4sConfig.modelRegistryService().leftMap(_.formatted)
+      providerCfg     <- Llm4sConfig.defaultProvider().leftMap(_.formatted)
+      client <- {
+        given org.llm4s.model.ModelRegistryService = registryService
+        LLMConnect.getClient(providerCfg).leftMap(_.formatted)
+      }
     } yield {
       logger.info("✅ Prerequisites validated and LLM client initialized")
       client

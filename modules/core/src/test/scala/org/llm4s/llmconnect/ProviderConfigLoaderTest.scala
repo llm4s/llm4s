@@ -9,6 +9,9 @@ import org.scalatest.matchers.should.Matchers
 
 class ProviderConfigConstructionTest extends AnyFunSuite with Matchers {
 
+  private given ContextWindowResolver =
+    ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
+
   test("OpenAIConfig.load returns Right on success") {
     val cfg = OpenAIConfig.fromValues(
       modelName = "gpt-4o",

@@ -2,6 +2,7 @@ package org.llm4s.samples.dashboard.providersetup.update
 
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupMessages.*
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupModel.*
+import termflow.tui.Cmd
 import termflow.tui.Tui
 import termflow.tui.Tui.*
 
@@ -41,7 +42,7 @@ private[providersetup] object ProviderSetupAsyncSupport:
       case Left(error) =>
         val nextEntry   = DemoEntry(DemoRole.System, s"Demo error: $error")
         val nextEntries = model.demoEntries :+ nextEntry
-        model
+        val nextModel = model
           .updateDemo(
             _.copy(
               entries = nextEntries,
@@ -52,7 +53,9 @@ private[providersetup] object ProviderSetupAsyncSupport:
           .copy(
             statusLine = s"Demo request failed: $error"
           )
-          .tui
+        // Modern (termflow 0.4): cheap "needs attention" ping when an LLM call
+        // fails — terminal bell / iTerm2 dock bounce, no notification overlay.
+        Tui(nextModel, Cmd.RequestAttention)
 
   def handleCompareResponse(
     model: Model,
@@ -81,7 +84,8 @@ private[providersetup] object ProviderSetupAsyncSupport:
             )
       else current
     }
-    val pending = nextResults.count(_.status == CompareResultStatus.Pending)
+    val pending  = nextResults.count(_.status == CompareResultStatus.Pending)
+    val failures = nextResults.count(_.status == CompareResultStatus.Failure)
     val nextStatus =
       result match
         case Right(_) if pending > 0 => s"${providerName} finished. Waiting for $pending more provider(s)."
@@ -90,10 +94,26 @@ private[providersetup] object ProviderSetupAsyncSupport:
           s"${providerName} failed: $error. Waiting for $pending more provider(s)."
         case Left(error) =>
           s"Compare finished with failures. Last error from $providerName: $error"
-    model
+    val nextModel = model
       .updateCompare(_.copy(results = nextResults))
       .copy(statusLine = nextStatus)
-      .tui
+    // Modern (termflow 0.4): desktop notification on the run-complete edge.
+    // Falls back to BEL on terminals without OSC 9 / 99 / 777, no-op when
+    // TERMFLOW_NOTIFICATIONS=off.
+    val cmd: Cmd[Msg] =
+      if pending == 0 then
+        if failures > 0 then
+          Cmd.Notify(
+            "Compare run finished",
+            s"${nextResults.size} provider(s) done — $failures failure(s)"
+          )
+        else
+          Cmd.Notify(
+            "Compare run finished",
+            s"${nextResults.size} provider(s) responded"
+          )
+      else Cmd.NoCmd
+    Tui(nextModel, cmd)
 
   def handleDemoChunk(model: Model, chunk: String): Tui[Model, Msg] =
     if chunk.trim.isEmpty then model.tui

@@ -6,15 +6,16 @@ import org.llm4s.knowledgegraph.graphrag.{ GraphRAG, GraphRAGAnswer, GraphRAGMod
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.extractors.UniversalExtractor
-import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.model.*
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag.extract.DefaultDocumentExtractor
-import org.llm4s.rag.loader._
-import org.llm4s.rag.permissions._
+import org.llm4s.rag.loader.*
+import org.llm4s.rag.permissions.*
 import org.llm4s.rag.transform.QueryTransformer
 import org.llm4s.reranker.{ RerankProviderConfig, Reranker, RerankerFactory }
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
-import org.llm4s.vectorstore._
+import org.llm4s.vectorstore.*
 
 import java.io.{ Closeable, File }
 import java.nio.file.Path
@@ -1169,7 +1170,7 @@ object RAG {
     config: RAGConfig,
     resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig] = missingEmbeddingProviderConfig,
     resolveRerankerConfig: () => Result[Option[RerankProviderConfig]] = () => Right(None)
-  ): Result[RAG] =
+  )(using ModelRegistryService): Result[RAG] =
     build(config, None, resolveEmbeddingProvider, resolveRerankerConfig)
 
   /**
@@ -1180,7 +1181,7 @@ object RAG {
     config: RAGConfig,
     embeddingClient: EmbeddingClient,
     resolveRerankerConfig: () => Result[Option[RerankProviderConfig]] = () => Right(None)
-  ): Result[RAG] =
+  )(using ModelRegistryService): Result[RAG] =
     build(config, Some(embeddingClient), _ => Right(EmbeddingProviderConfig("", "", "")), resolveRerankerConfig)
 
   private def build(
@@ -1188,7 +1189,7 @@ object RAG {
     existingClient: Option[EmbeddingClient],
     resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig],
     resolveRerankerConfig: () => Result[Option[RerankProviderConfig]]
-  ): Result[RAG] =
+  )(using ModelRegistryService): Result[RAG] =
     for {
       embeddingClient <- existingClient match {
         case Some(c) => Right(c)
@@ -1248,13 +1249,13 @@ object RAG {
    * Extension method to build from config.
    */
   implicit class RAGConfigOps(private val config: RAGConfig) extends AnyVal {
-    def build(): Result[RAG] =
+    def build(using ModelRegistryService): Result[RAG] =
       RAG.build(config)
 
     def build(
       resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig],
       resolveRerankerConfig: () => Result[Option[RerankProviderConfig]] = () => Right(None)
-    ): Result[RAG] =
+    )(using ModelRegistryService): Result[RAG] =
       RAG.build(config, resolveEmbeddingProvider, resolveRerankerConfig)
   }
 
@@ -1263,7 +1264,7 @@ object RAG {
   private def createEmbeddingClient(
     config: RAGConfig,
     resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig]
-  ): Result[EmbeddingClient] = {
+  )(using service: ModelRegistryService): Result[EmbeddingClient] = {
     val expectedProvider = config.embeddingProvider match {
       case EmbeddingProvider.OpenAI => "openai"
       case EmbeddingProvider.Voyage => "voyage"

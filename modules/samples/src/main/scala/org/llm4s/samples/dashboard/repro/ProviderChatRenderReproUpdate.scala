@@ -1,24 +1,26 @@
 package org.llm4s.samples.dashboard.repro
 
-import termflow.tui.*
-import termflow.tui.Tui.*
 import org.llm4s.samples.dashboard.repro.ProviderChatRenderReproApp.App.toMsg
 import org.llm4s.samples.dashboard.repro.ProviderChatRenderReproApp.Msg.{
   ConsoleInputError,
   ConsoleInputKey,
   ExitRequested,
   Resize,
-  RunCommand
+  RunCommand,
+  ScrollBy,
+  ScrollToEnd
 }
 import org.llm4s.samples.dashboard.repro.ProviderChatRenderReproApp.{ Entry, Model, Msg, Role }
-import termflow.tui.{ Cmd, PromptHistory, RuntimeCtx, Tui }
+import termflow.tui.Tui.*
+import termflow.tui.{ Cmd, KeyDecoder, PromptHistory, RuntimeCtx, Tui }
+import termflow.tui.widgets
 
 import scala.annotation.unused
 
 private def ProviderChatRenderReproUpdate(model: Model, msg: Msg, @unused ctx: RuntimeCtx[Msg]) =
   msg match
     case Resize(width, height) =>
-      model.copy(terminalWidth = width, terminalHeight = height).tui
+      retailIfFollowing(model.copy(terminalWidth = width, terminalHeight = height)).tui
 
     case ConsoleInputError(error) =>
       model.copy(status = s"input error: ${Option(error.getMessage).getOrElse("unknown")}").tui
@@ -29,26 +31,66 @@ private def ProviderChatRenderReproUpdate(model: Model, msg: Msg, @unused ctx: R
     case RunCommand(command) =>
       handleCommand(model, command)
 
+    case ScrollBy(delta) =>
+      scrollBy(model, delta).tui
+
+    case ScrollToEnd =>
+      val mx = transcriptMaxScroll(model)
+      model.copy(scrollOffset = mx, autoTail = true).tui
+
     case ConsoleInputKey(key) =>
+      handleConsoleInputKey(model, key)
+
+private def handleConsoleInputKey(model: Model, key: KeyDecoder.InputKey): Tui[Model, Msg] =
+  val capacity = transcriptHeightFor(model)
+  key match
+    case KeyDecoder.InputKey.PageUp =>
+      scrollBy(model, -capacity).tui
+    case KeyDecoder.InputKey.PageDown =>
+      scrollBy(model, capacity).tui
+    case KeyDecoder.InputKey.End =>
+      val mx = transcriptMaxScroll(model)
+      model.copy(scrollOffset = mx, autoTail = true).tui
+    case KeyDecoder.InputKey.Mouse(ev) =>
+      // Modern (termflow 0.4): wheel scrolls only when the cursor is over the
+      // transcript viewport rect.
+      widgets.LogView.scrollDelta(ev, transcriptViewport(model)) match
+        case Some(d) => scrollBy(model, d).tui
+        case None    => model.tui
+    case _ =>
       val (nextPrompt, maybeCmd) = PromptHistory.handleKey[Msg](model.prompt, key)(toMsg)
       maybeCmd match
         case Some(cmd) => Tui(model.copy(prompt = nextPrompt), cmd)
         case None      => model.copy(prompt = nextPrompt).tui
+
+private def retailIfFollowing(model: Model): Model =
+  val mx = transcriptMaxScroll(model)
+  if model.autoTail then model.copy(scrollOffset = mx)
+  else model.copy(scrollOffset = math.min(model.scrollOffset, mx))
+
+private def scrollBy(model: Model, delta: Int): Model =
+  val mx   = transcriptMaxScroll(model)
+  val next = math.max(0, math.min(mx, model.scrollOffset + delta))
+  model.copy(scrollOffset = next, autoTail = next >= mx)
+
 private def handleCommand(model: Model, command: String): Tui[Model, Msg] =
   command.trim match
     case "help" =>
       model.copy(status = "Commands: seed, clear, help, quit. Any other text appends a fake user+assistant turn.").tui
     case "seed" =>
-      val nextBurst = seedBurst(model.seedRound)
-      model
-        .copy(
-          entries = model.entries ++ nextBurst,
+      val nextBurst   = seedBurst(model.seedRound)
+      val nextEntries = model.entries ++ nextBurst
+      retailIfFollowing(
+        model.copy(
+          entries = nextEntries,
           seedRound = model.seedRound + 1,
           status = s"Added ${nextBurst.length} seeded transcript entries in round ${model.seedRound + 1}."
         )
-        .tui
+      ).tui
     case "clear" =>
-      model.copy(entries = Vector.empty, seedRound = 0, status = "Transcript cleared.").tui
+      model
+        .copy(entries = Vector.empty, seedRound = 0, scrollOffset = 0, autoTail = true, status = "Transcript cleared.")
+        .tui
     case other =>
       val nextEntries = model.entries ++ Vector(
         Entry(Role.User, other),
@@ -57,7 +99,12 @@ private def handleCommand(model: Model, command: String): Tui[Model, Msg] =
           s"This is a synthetic assistant reply for render debugging. It intentionally wraps across multiple lines and grows the transcript without involving any llm call. Echoed input: $other"
         )
       )
-      model.copy(entries = nextEntries, status = s"Added a fake turn. Transcript entries=${nextEntries.length}.").tui
+      retailIfFollowing(
+        model.copy(
+          entries = nextEntries,
+          status = s"Added a fake turn. Transcript entries=${nextEntries.length}."
+        )
+      ).tui
 
 private val seedBursts: Vector[Vector[Entry]] =
   Vector(

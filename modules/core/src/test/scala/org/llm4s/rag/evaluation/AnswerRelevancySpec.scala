@@ -4,6 +4,7 @@ import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag.evaluation.metrics.AnswerRelevancy
 import org.llm4s.testutil.MockLLMClients
 import org.llm4s.types.Result
@@ -11,6 +12,8 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 class AnswerRelevancySpec extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   class MockEmbeddingProvider(embeddings: Map[String, Seq[Double]]) extends EmbeddingProvider {
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {

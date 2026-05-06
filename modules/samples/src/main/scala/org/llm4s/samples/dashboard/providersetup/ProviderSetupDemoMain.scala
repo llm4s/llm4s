@@ -16,6 +16,8 @@ def ProviderSetupDemoMain(): Unit =
   (
     for
       demoCfg         <- ProviderSetupDemoConfig.load()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
       providersCfg    <- Llm4sConfig.providers()
       defaultProvider <- providersCfg.defaultProviderName
       _ <- providersCfg.namedProviders

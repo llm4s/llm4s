@@ -11,7 +11,7 @@ import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
-import org.llm4s.model.TransformationResult
+import org.llm4s.model.{ ModelRegistryService, TransformationResult }
 import org.llm4s.toolapi.{ AzureToolHelper, ToolRegistry }
 import org.llm4s.types.Result
 import org.slf4j.{ Logger, LoggerFactory }
@@ -55,7 +55,8 @@ class OpenAIClient private[provider] (
   private val config: ProviderConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector,
   exchangeLogging: ProviderExchangeLogging
-) extends BaseLifecycleLLMClient {
+)(using val registryService: ModelRegistryService)
+    extends BaseLifecycleLLMClient {
 
   private lazy val logger: Logger = LoggerFactory.getLogger(getClass)
 
@@ -69,7 +70,7 @@ class OpenAIClient private[provider] (
    * @param config OpenAI configuration with API key and base URL
    * @param metrics metrics collector (default: noop)
    */
-  def this(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector) = this(
+  def this(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) = this(
     config.model,
     OpenAIClientTransport.azure(
       new OpenAIClientBuilder()
@@ -86,7 +87,7 @@ class OpenAIClient private[provider] (
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  ) = this(
+  )(using ModelRegistryService) = this(
     config.model,
     OpenAIClientTransport.azure(
       new OpenAIClientBuilder()
@@ -105,7 +106,7 @@ class OpenAIClient private[provider] (
    * @param config Azure configuration with API key, endpoint, and API version
    * @param metrics metrics collector (default: noop)
    */
-  def this(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector) = this(
+  def this(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) = this(
     config.model,
     OpenAIClientTransport.azure(
       new OpenAIClientBuilder()
@@ -123,7 +124,7 @@ class OpenAIClient private[provider] (
     config: AzureConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  ) = this(
+  )(using ModelRegistryService) = this(
     config.model,
     OpenAIClientTransport.azure(
       new OpenAIClientBuilder()
@@ -148,7 +149,8 @@ class OpenAIClient private[provider] (
         model,
         options,
         conversation.messages,
-        dropUnsupported = true
+        dropUnsupported = true,
+        org.llm4s.model.RequestTransformer.default(registryService)
       )
       transformedConversation = conversation.copy(messages = transformed.messages)
       chatOptions = prepareChatOptions(
@@ -181,8 +183,15 @@ class OpenAIClient private[provider] (
     val startedAt = Instant.now()
     // Transform options and messages for model-specific constraints
     val result =
-      TransformationResult.transform(model, options, conversation.messages, dropUnsupported = true).flatMap {
-        transformed =>
+      TransformationResult
+        .transform(
+          model,
+          options,
+          conversation.messages,
+          dropUnsupported = true,
+          org.llm4s.model.RequestTransformer.default(registryService)
+        )
+        .flatMap { transformed =>
           val transformedConversation = conversation.copy(messages = transformed.messages)
           val chatOptions =
             prepareChatOptions(transformedConversation, transformed.options, transformed.requiresMaxCompletionTokens)
@@ -193,7 +202,7 @@ class OpenAIClient private[provider] (
           } else {
             executeNativeStreaming(startedAt, requestBody, chatOptions, onChunk)
           }
-      }
+        }
 
     result.tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
   }
@@ -664,7 +673,7 @@ object OpenAIClient {
     config: ProviderConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
     exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
-  ): OpenAIClient =
+  )(using ModelRegistryService): OpenAIClient =
     new OpenAIClient(model, transport, config, metrics, exchangeLogging)
 
   /**
@@ -678,19 +687,19 @@ object OpenAIClient {
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  ): Result[OpenAIClient] =
+  )(using ModelRegistryService): Result[OpenAIClient] =
     Try(new OpenAIClient(config, metrics, exchangeLogging)).toResult
 
   def apply(
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector
-  ): Result[OpenAIClient] =
+  )(using ModelRegistryService): Result[OpenAIClient] =
     Try(new OpenAIClient(config, metrics)).toResult
 
   /**
    * Convenience overload with noop metrics.
    */
-  def apply(config: OpenAIConfig): Result[OpenAIClient] =
+  def apply(config: OpenAIConfig)(using ModelRegistryService): Result[OpenAIClient] =
     Try(new OpenAIClient(config, org.llm4s.metrics.MetricsCollector.noop)).toResult
 
   /**
@@ -704,19 +713,19 @@ object OpenAIClient {
     config: AzureConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  ): Result[OpenAIClient] =
+  )(using ModelRegistryService): Result[OpenAIClient] =
     Try(new OpenAIClient(config, metrics, exchangeLogging)).toResult
 
   def apply(
     config: AzureConfig,
     metrics: org.llm4s.metrics.MetricsCollector
-  ): Result[OpenAIClient] =
+  )(using ModelRegistryService): Result[OpenAIClient] =
     Try(new OpenAIClient(config, metrics)).toResult
 
   /**
    * Convenience overload with noop metrics.
    */
-  def apply(config: AzureConfig): Result[OpenAIClient] =
+  def apply(config: AzureConfig)(using ModelRegistryService): Result[OpenAIClient] =
     Try(new OpenAIClient(config, org.llm4s.metrics.MetricsCollector.noop)).toResult
 }
 

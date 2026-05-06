@@ -1,14 +1,14 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.config.MistralConfig
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, MistralConfig }
+import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-/**
- * Tests for MistralConfig context-window fallback mappings,
- * fromValues validation, and toString redaction.
- */
-class MistralConfigSpec extends AnyFlatSpec with Matchers {
+class MistralConfigSpec extends AnyFlatSpec with Matchers:
+
+  private given ContextWindowResolver =
+    ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
 
   // ============ fromValues validation ============
 
@@ -36,12 +36,11 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers {
   // ============ Context-window fallback mappings ============
 
   "MistralConfig context window fallback" should "return conservative fallback from registry for mistral-small models" in {
-    // 1. Lookup the canonical model to get the source of truth
-    val canonical = org.llm4s.model.ModelRegistry
-      .lookup("mistral-small-latest")
-      .getOrElse(fail("mistral-small-latest not found in registry"))
+    val canonical = ModelRegistryService
+      .default()
+      .flatMap(_.lookup("mistral", "mistral-small-latest"))
+      .getOrElse(fail("mistral-small-latest not found via service"))
 
-    // 2. Validate fallback matches the canonical truth
     val maxTokens = canonical.contextWindow.getOrElse(fail("contextWindow not defined for mistral-small-latest"))
     val cfg =
       MistralConfig.fromValues("mistral-small-latest", apiKey = "key", baseUrl = MistralConfig.DEFAULT_BASE_URL)
@@ -49,10 +48,10 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return conservative fallback from registry for codestral models" in {
-    // 1. Lookup the canonical model to get the source of truth
-    val canonical = org.llm4s.model.ModelRegistry
-      .lookup("mistral/codestral-latest")
-      .getOrElse(fail("mistral/codestral-latest not found in registry"))
+    val canonical = ModelRegistryService
+      .default()
+      .flatMap(_.lookup("mistral", "codestral-latest"))
+      .getOrElse(fail("codestral-latest not found via service"))
 
     val maxTokens = canonical.contextWindow.getOrElse(fail("contextWindow not defined for codestral-latest"))
     val cfg = MistralConfig.fromValues("codestral-latest", apiKey = "key", baseUrl = MistralConfig.DEFAULT_BASE_URL)
@@ -87,4 +86,3 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers {
   "MistralConfig.DEFAULT_BASE_URL" should "point to Mistral AI API" in {
     MistralConfig.DEFAULT_BASE_URL shouldBe "https://api.mistral.ai"
   }
-}

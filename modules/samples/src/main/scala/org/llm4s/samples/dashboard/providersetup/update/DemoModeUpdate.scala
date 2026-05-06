@@ -8,6 +8,7 @@ import org.llm4s.samples.dashboard.providersetup.{
   ProviderSetupModeTransitions,
   ProviderSetupRuntime
 }
+import org.llm4s.model.ModelRegistryService
 import termflow.tui.RuntimeCtx
 import termflow.tui.PromptHistory
 import termflow.tui.Tui
@@ -19,7 +20,7 @@ private[providersetup] object DemoModeUpdate:
     model: Model,
     msg: Msg,
     ctx: RuntimeCtx[Msg]
-  ): Tui[Model, Msg] =
+  )(using ModelRegistryService): Tui[Model, Msg] =
     msg match
       case Msg.Demo(DemoMsg.RunCommand(command)) =>
         handleDemoCommand(model, command, model.demoAppConfigs.demoCfg, model.demoAppConfigs.exchangeLogging, ctx)
@@ -45,7 +46,7 @@ private[providersetup] object DemoModeUpdate:
     config: ProviderSetupDemoConfig,
     exchangeLogging: ProviderExchangeLogging,
     ctx: RuntimeCtx[Msg]
-  ): Tui[Model, Msg] =
+  )(using ModelRegistryService): Tui[Model, Msg] =
     val trimmed = raw.trim
     val lower   = trimmed.toLowerCase
 

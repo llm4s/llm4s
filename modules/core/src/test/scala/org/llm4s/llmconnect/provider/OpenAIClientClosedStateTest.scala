@@ -6,8 +6,9 @@ import com.azure.core.util.IterableStream
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.OpenAIConfig
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ Conversation, CompletionOptions, UserMessage }
+import org.llm4s.model.ModelRegistryService
 import org.slf4j.LoggerFactory
 
 /**
@@ -18,6 +19,9 @@ import org.slf4j.LoggerFactory
  * - close() is idempotent (can be called multiple times safely)
  */
 class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers {
+
+  private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+  private given ContextWindowResolver     = ContextWindowResolver(mrs)
 
   private def createTestConfig: OpenAIConfig = OpenAIConfig.fromValues(
     modelName = "gpt-4",

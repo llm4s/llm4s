@@ -2,10 +2,16 @@ package org.llm4s.llmconnect
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import org.llm4s.llmconnect.config.OllamaConfig
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OllamaConfig }
+import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.llm4s.types.ProviderModelTypes.ProviderKind
 
 class OllamaRoutingTest extends AnyFunSuite with Matchers {
+  private val registryService        = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
+  private given ModelRegistryService = registryService
+
+  private given ContextWindowResolver =
+    ContextWindowResolver(registryService)
 
   test("provider-based getClientResult returns OllamaClient") {
     val cfg = OllamaConfig(

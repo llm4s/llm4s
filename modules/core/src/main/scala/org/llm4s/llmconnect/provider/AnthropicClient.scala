@@ -13,17 +13,17 @@ import scala.collection.mutable
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
-import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
-import org.llm4s.llmconnect.streaming._
-import org.llm4s.model.TransformationResult
+import org.llm4s.llmconnect.streaming.*
+import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ValidationError }
-import org.llm4s.error.ThrowableOps._
+import org.llm4s.error.ThrowableOps.*
 
 import java.time.Instant
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
 /**
@@ -75,7 +75,9 @@ class AnthropicClient(
   config: AnthropicConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
-) extends BaseLifecycleLLMClient {
+)(using val registryService: ModelRegistryService)
+    extends BaseLifecycleLLMClient {
+
   // Store config for budget calculations
   private val providerConfig: ProviderConfig = config
 
@@ -96,8 +98,15 @@ class AnthropicClient(
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
     // Transform options and messages for model-specific constraints
-    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
-      transformed =>
+    TransformationResult
+      .transform(
+        config.model,
+        options,
+        conversation.messages,
+        dropUnsupported = true,
+        RequestTransformer.default(registryService)
+      )
+      .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
 
         // Create message parameters builder
@@ -148,7 +157,7 @@ class AnthropicClient(
           }
           .tapLeft(error => recordExchange(startedAt, requestBody, None, Left(error)))
           .flatten
-    }
+      }
   }
 
   /*
@@ -182,8 +191,15 @@ curl https://api.anthropic.com/v1/messages \
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
     // Transform options and messages for model-specific constraints
-    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
-      transformed =>
+    TransformationResult
+      .transform(
+        config.model,
+        options,
+        conversation.messages,
+        dropUnsupported = true,
+        RequestTransformer.default(registryService)
+      )
+      .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
 
         // Build parameters
@@ -371,7 +387,7 @@ curl https://api.anthropic.com/v1/messages \
           .tapLeft(error =>
             recordExchange(startedAt, requestBody, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
           )
-    }
+      }
   }
 
   override def getContextWindow(): Int = providerConfig.contextWindow
@@ -621,13 +637,13 @@ object AnthropicClient {
   def apply(
     config: AnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-  ): Result[AnthropicClient] =
+  )(using ModelRegistryService): Result[AnthropicClient] =
     Try(new AnthropicClient(config, metrics)).toResult
 
   def apply(
     config: AnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  ): Result[AnthropicClient] =
+  )(using ModelRegistryService): Result[AnthropicClient] =
     Try(new AnthropicClient(config, metrics, exchangeLogging)).toResult
 }

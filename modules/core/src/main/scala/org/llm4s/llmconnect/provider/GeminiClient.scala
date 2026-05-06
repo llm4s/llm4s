@@ -11,7 +11,7 @@ import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
-import org.llm4s.model.TransformationResult
+import org.llm4s.model.{ ModelRegistryService, TransformationResult }
 import org.llm4s.toolapi.ToolFunction
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -66,7 +66,9 @@ class GeminiClient(
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
   private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
-) extends BaseLifecycleLLMClient {
+)(using val registryService: ModelRegistryService)
+    extends BaseLifecycleLLMClient {
+
   private val logger = LoggerFactory.getLogger(getClass)
 
   protected def clientDescription: String = s"Gemini client for model ${config.model}"
@@ -78,8 +80,15 @@ class GeminiClient(
     options: CompletionOptions
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
-    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
-      transformed =>
+    TransformationResult
+      .transform(
+        config.model,
+        options,
+        conversation.messages,
+        dropUnsupported = true,
+        org.llm4s.model.RequestTransformer.default(registryService)
+      )
+      .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
@@ -108,7 +117,7 @@ class GeminiClient(
           .flatten
 
         attempt
-    }
+      }
   }
 
   override def streamComplete(
@@ -117,8 +126,15 @@ class GeminiClient(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
-    TransformationResult.transform(config.model, options, conversation.messages, dropUnsupported = true).flatMap {
-      transformed =>
+    TransformationResult
+      .transform(
+        config.model,
+        options,
+        conversation.messages,
+        dropUnsupported = true,
+        org.llm4s.model.RequestTransformer.default(registryService)
+      )
+      .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
         val requestBody             = buildRequestBody(transformedConversation, transformed.options)
         val requestText             = requestBody.render()
@@ -187,7 +203,7 @@ class GeminiClient(
               recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
             )
         }
-    }
+      }
   }
 
   override def getContextWindow(): Int = config.contextWindow
@@ -504,16 +520,18 @@ class GeminiClient(
 object GeminiClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: GeminiConfig): Result[GeminiClient] =
+  def apply(config: GeminiConfig)(using ModelRegistryService): Result[GeminiClient] =
     Try(new GeminiClient(config)).toResult
 
-  def apply(config: GeminiConfig, metrics: org.llm4s.metrics.MetricsCollector): Result[GeminiClient] =
+  def apply(config: GeminiConfig, metrics: org.llm4s.metrics.MetricsCollector)(using
+    ModelRegistryService
+  ): Result[GeminiClient] =
     Try(new GeminiClient(config, metrics)).toResult
 
   def apply(
     config: GeminiConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  ): Result[GeminiClient] =
+  )(using ModelRegistryService): Result[GeminiClient] =
     Try(new GeminiClient(config, metrics, exchangeLogging)).toResult
 }

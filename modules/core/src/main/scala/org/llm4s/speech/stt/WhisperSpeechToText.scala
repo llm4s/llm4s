@@ -23,7 +23,10 @@ final class WhisperSpeechToText(
 ) extends SpeechToText {
   override val name: String = "whisper-cli"
 
+  override val supportedFormats: List[String] = List("audio/wav", "audio/mp3", "audio/m4a", "audio/flac", "audio/ogg")
+
   override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] = {
+    val startTime = System.currentTimeMillis()
     val wavResult = inputToWavPath(input)
 
     val result = for {
@@ -38,7 +41,11 @@ final class WhisperSpeechToText(
             ProcessingError.audioValidation("Whisper CLI execution failed with non-zero exit code")
           case _ => ProcessingError.audioValidation("Whisper CLI execution failed")
         }
-    } yield parseWhisperOutput(output, options)
+      transcription <- {
+        val processingTimeMs = System.currentTimeMillis() - startTime
+        parseWhisperOutput(output, options).map(_.copy(processingTimeMs = Some(processingTimeMs)))
+      }
+    } yield transcription
 
     // Clean up any temp file that was created, regardless of transcription success or failure
     wavResult.foreach { case (path, isTemp) => if (isTemp) Try(Files.deleteIfExists(path)) }
@@ -85,19 +92,26 @@ final class WhisperSpeechToText(
     baseArgs ++ optFlags.combineAll
   }
 
-  private def parseWhisperOutput(output: String, options: STTOptions): Transcription = {
-    // Parse output based on format and options
-    val text       = output.trim
-    val confidence = extractConfidence(output)
-    val timestamps = if (options.enableTimestamps) extractTimestamps(output) else Nil
-
-    Transcription(
-      text = text,
-      language = options.language,
-      confidence = confidence,
-      timestamps = timestamps,
-      meta = None
-    )
+  private def parseWhisperOutput(
+    output: String,
+    options: STTOptions
+  ): Result[Transcription] = {
+    val text = output.trim
+    if (text.isEmpty) {
+      Left(ProcessingError.audioValidation("Transcription produced empty text"))
+    } else {
+      val confidence = extractConfidence(output)
+      val timestamps = if (options.enableTimestamps) extractTimestamps(output) else Nil
+      Right(
+        Transcription(
+          text = text,
+          language = options.language,
+          confidence = confidence,
+          timestamps = timestamps,
+          meta = None
+        )
+      )
+    }
   }
 
   private def extractConfidence(output: String): Option[Double] =

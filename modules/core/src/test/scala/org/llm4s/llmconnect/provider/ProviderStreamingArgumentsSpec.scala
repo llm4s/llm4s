@@ -8,8 +8,11 @@ import org.scalatest.matchers.should.Matchers
 
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
+import org.llm4s.model.ModelRegistryService
 
 final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def toolCallEvent(callId: String, args: String): ujson.Value =
     ujson.Obj(

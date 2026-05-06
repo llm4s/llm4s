@@ -39,8 +39,10 @@ object StreamingExample {
     var chunkCount  = 0
     val startTime   = System.currentTimeMillis()
     val result = for {
-      providerCfg <- Llm4sConfig.defaultProvider()
-      client      <- LLMConnect.getClient(providerCfg)
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
       _ = {
         logger.info("=== Streaming Response ===")
         logger.info("Receiving chunks as they arrive:")

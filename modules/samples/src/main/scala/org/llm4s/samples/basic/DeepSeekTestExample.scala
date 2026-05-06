@@ -21,8 +21,10 @@ object DeepSeekTestExample {
   def main(args: Array[String]): Unit = {
 
     val result = for {
-      providerCfg <- org.llm4s.config.Llm4sConfig.defaultProvider()
-      client      <- LLMConnect.getClient(providerCfg)
+      providerCfg     <- org.llm4s.config.Llm4sConfig.defaultProvider()
+      registryService <- org.llm4s.config.Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
       _ = {
         logger.info("=" * 60)
         logger.info("DeepSeek Provider Test Suite")

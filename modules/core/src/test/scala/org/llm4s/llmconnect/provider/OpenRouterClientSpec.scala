@@ -13,6 +13,7 @@ import org.llm4s.llmconnect.model.{
   UserMessage
 }
 import org.llm4s.metrics.MockMetricsCollector
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.testutil.LocalProviderTestServer.{ openAISseBody, sendSseResponse }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -23,6 +24,8 @@ import java.nio.charset.StandardCharsets
 import scala.collection.mutable.ListBuffer
 
 class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val testConfig = OpenRouterConfig(
     apiKey = "test-key",

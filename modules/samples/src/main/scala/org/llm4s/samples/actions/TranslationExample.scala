@@ -44,8 +44,10 @@ object TranslationExample {
     logger.info("-------------------------")
 
     val result = for {
-      providerCfg <- Llm4sConfig.defaultProvider()
-      client      <- LLMConnect.getClient(providerCfg)
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
 
       // Demonstrate both tones
       informal <- translate(textToTranslate, language, Tone.Informal)(client)

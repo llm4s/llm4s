@@ -46,8 +46,10 @@ object ReasoningModesExample {
 
     // Try to create a client and run a simple completion with reasoning
     val clientResult = for {
-      providerCfg <- Llm4sConfig.defaultProvider()
-      client      <- LLMConnect.getClient(providerCfg)
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
     } yield client
 
     clientResult match {
