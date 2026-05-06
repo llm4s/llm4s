@@ -713,10 +713,10 @@ object OpenRouterConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String,
-  ): OpenRouterConfig = {
+  )(using resolver: ContextWindowResolver): OpenRouterConfig = {
     require(apiKey.trim.nonEmpty, "OpenRouter apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "OpenRouter baseUrl must be non-empty")
-    val (cw, rc) = ContextWindowResolver.resolve(
+    val (cw, rc) = resolver.resolve(
       lookupProviders = Seq("openai"),
       modelName = modelName,
       defaultContextWindow = 8192,
