@@ -689,8 +689,6 @@ object MistralConfig:
       contextWindow = cw,
       reserveCompletion = rc
     )
-  }
-}
 
 // OpenRouter-specific config; uses streamTimeout = 5.minutes to match the previously hardcoded value
 case class OpenRouterConfig(
@@ -700,7 +698,7 @@ case class OpenRouterConfig(
   contextWindow: Int,
   reserveCompletion: Int,
   requestTimeout: FiniteDuration = 2.minutes,
-  streamTimeout: FiniteDuration  = 5.minutes,
+  streamTimeout: FiniteDuration = 5.minutes,
 ) extends ProviderConfig {
   override val provider: ProviderKind = ProviderKind.OpenRouter
   override def toString: String =
@@ -711,7 +709,7 @@ case class OpenRouterConfig(
 object OpenRouterConfig {
   private val standardReserve = 4096
 
-  def fromValues(  
+  def fromValues(
     modelName: String,
     apiKey: String,
     baseUrl: String,

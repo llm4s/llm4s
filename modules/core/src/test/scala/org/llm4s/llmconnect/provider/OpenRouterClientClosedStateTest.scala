@@ -16,7 +16,6 @@ import org.llm4s.model.ModelRegistryService
  */
 class OpenRouterClientClosedStateTest extends AnyFlatSpec with Matchers {
 
- 
   private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
 

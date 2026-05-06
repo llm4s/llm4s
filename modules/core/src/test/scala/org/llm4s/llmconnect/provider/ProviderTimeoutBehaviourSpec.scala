@@ -30,7 +30,7 @@ class ProviderTimeoutBehaviourSpec extends AnyFunSuite with Matchers with MockFa
 
   private def conversation(text: String) = Conversation(messages = Seq(UserMessage(text)))
   private def httpOk(body: String)       = HttpResponse(200, body, Map.empty)
-  private def streamOk(body: String)     =
+  private def streamOk(body: String) =
     StreamingHttpResponse(200, new ByteArrayInputStream(body.getBytes(StandardCharsets.UTF_8)))
 
   test("GeminiClient.complete() uses custom requestTimeout") {
