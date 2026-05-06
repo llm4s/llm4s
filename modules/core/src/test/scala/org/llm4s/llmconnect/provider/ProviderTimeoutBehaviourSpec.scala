@@ -7,12 +7,15 @@ import org.llm4s.llmconnect.model._
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.model.ModelRegistryService
 
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import scala.concurrent.duration._
 
 class ProviderTimeoutBehaviourSpec extends AnyFunSuite with Matchers with MockFactory {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val geminiSuccessBody =
     """{"candidates":[{"content":{"parts":[{"text":"ok"}],"role":"model"}}],

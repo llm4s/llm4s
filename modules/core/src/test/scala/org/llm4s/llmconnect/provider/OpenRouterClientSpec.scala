@@ -316,7 +316,8 @@ class OpenRouterClientSpec extends AnyFlatSpec with Matchers {
   }
 }
 
-final private class OpenRouterClientTestHelper(cfg: OpenRouterConfig) extends OpenRouterClient(cfg) {
+final private class OpenRouterClientTestHelper(cfg: OpenRouterConfig)(using ModelRegistryService)
+    extends OpenRouterClient(cfg) {
   def exposedCreateRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj =
     createRequestBody(conversation, options)
 }
