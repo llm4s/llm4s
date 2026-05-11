@@ -11,6 +11,7 @@ import java.nio.file.Files
 import org.llm4s.core.safety.Safety
 import org.llm4s.speech.processing.AudioPreprocessing
 import org.slf4j.LoggerFactory
+import ujson.Value
 
 /**
  * Vosk-based speech-to-text implementation.
@@ -111,41 +112,39 @@ final class VoskSpeechToText(
     bufferSize: Int,
     options: STTOptions
   ): Transcription = {
+    recognizer.setWords(options.enableTimestamps || options.confidenceThreshold > 0.0)
 
     val buffer   = new Array[Byte](bufferSize)
-    val segments = List.newBuilder[String]
+    val segments = List.newBuilder[VoskSpeechToText.ParsedSegment]
 
     var bytesRead = audio.read(buffer)
 
     while (bytesRead > 0) {
       if (recognizer.acceptWaveForm(buffer, bytesRead)) {
-        segments += extractText(recognizer.getResult)
+        segments += VoskSpeechToText.parseSegment(recognizer.getResult)
       }
       bytesRead = audio.read(buffer)
     }
 
-    segments += extractText(recognizer.getFinalResult)
+    segments += VoskSpeechToText.parseSegment(recognizer.getFinalResult)
 
-    val finalText = segments.result().mkString(" ").trim
+    val parsedSegments    = segments.result()
+    val parsedWords       = parsedSegments.flatMap(_.words)
+    val filteredWords     = VoskSpeechToText.applyConfidenceThreshold(parsedWords, options.confidenceThreshold)
+    val retainedWords     = if (filteredWords.nonEmpty) filteredWords else parsedWords
+    val filteredText      = VoskSpeechToText.renderWords(filteredWords)
+    val unfilteredText    = parsedSegments.map(_.text).mkString(" ").trim
+    val finalText         = if (filteredText.nonEmpty) filteredText else unfilteredText
+    val overallConfidence = VoskSpeechToText.averageConfidence(retainedWords)
 
     Transcription(
       text = finalText,
-      language = options.language.orElse(Some("en")),
-      confidence = None,
-      timestamps = Nil,
+      language = options.language,
+      confidence = overallConfidence,
+      timestamps = if (options.enableTimestamps) retainedWords.toList else Nil,
       meta = None
     )
   }
-
-  /**
-   * Extract "text" field from Vosk JSON response.
-   *  Vosk returns JSON with format: {"text": "transcribed words"}
-   */
-  private def extractText(json: String): String =
-    "\"text\"\\s*:\\s*\"([^\"]*)\"".r
-      .findFirstMatchIn(json)
-      .map(_.group(1))
-      .getOrElse("")
 
   /**
    * Prepare audio input by converting to raw bytes and standardizing format.
@@ -186,4 +185,60 @@ object VoskSpeechToText {
 
   /** Default buffer size for audio processing (bytes) */
   val DEFAULT_BUFFER_SIZE: Int = 4096
+
+  final private[stt] case class ParsedSegment(
+    text: String,
+    words: List[WordTimestamp]
+  )
+
+  private[stt] def parseSegment(json: String): ParsedSegment =
+    Try(ujson.read(json)).toOption match {
+      case Some(value) =>
+        ParsedSegment(
+          text = stringField(value, "text").getOrElse("").trim,
+          words = arrayField(value, "result").flatMap(parseWord).toList
+        )
+      case None => ParsedSegment("", Nil)
+    }
+
+  private[stt] def applyConfidenceThreshold(
+    words: Seq[WordTimestamp],
+    threshold: Double
+  ): Seq[WordTimestamp] =
+    if (threshold <= 0.0) words else words.filter(_.meetsConfidence(threshold))
+
+  private[stt] def renderWords(words: Seq[WordTimestamp]): String =
+    words.map(_.word.trim).filter(_.nonEmpty).mkString(" ").trim
+
+  private[stt] def averageConfidence(words: Seq[WordTimestamp]): Option[Double] = {
+    val confidences = words.flatMap(_.confidence)
+    if (confidences.nonEmpty) Some(confidences.sum / confidences.size) else None
+  }
+
+  private def parseWord(value: Value): Option[WordTimestamp] =
+    for {
+      word  <- stringField(value, "word").map(_.trim).filter(_.nonEmpty)
+      start <- doubleField(value, "start")
+      end   <- doubleField(value, "end")
+      timestamp <- WordTimestamp
+        .validate(
+          word = word,
+          startSec = start,
+          endSec = end,
+          confidence = doubleField(value, "conf").orElse(doubleField(value, "confidence"))
+        )
+        .toOption
+    } yield timestamp
+
+  private def field(value: Value, key: String): Option[Value] =
+    Try(value(key)).toOption
+
+  private def stringField(value: Value, key: String): Option[String] =
+    field(value, key).flatMap(v => Try(v.str).toOption)
+
+  private def doubleField(value: Value, key: String): Option[Double] =
+    field(value, key).flatMap(v => Try(v.num).toOption)
+
+  private def arrayField(value: Value, key: String): Seq[Value] =
+    field(value, key).flatMap(v => Try(v.arr.toSeq).toOption).getOrElse(Seq.empty)
 }
