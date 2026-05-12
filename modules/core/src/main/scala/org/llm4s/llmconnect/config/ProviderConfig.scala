@@ -699,29 +699,28 @@ case class OpenRouterConfig(
   reserveCompletion: Int,
   requestTimeout: FiniteDuration = 2.minutes,
   streamTimeout: FiniteDuration = 5.minutes,
-) extends ProviderConfig {
+) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.OpenRouter
   override def toString: String =
     s"OpenRouterConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
-}
 
-object OpenRouterConfig {
+object OpenRouterConfig:
   private val standardReserve = 4096
 
   def fromValues(
     modelName: String,
     apiKey: String,
     baseUrl: String,
-  )(using resolver: ContextWindowResolver): OpenRouterConfig = {
+  )(using resolver: ContextWindowResolver): OpenRouterConfig =
     require(apiKey.trim.nonEmpty, "OpenRouter apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "OpenRouter baseUrl must be non-empty")
     val (cw, rc) = resolver.resolve(
-      lookupProviders = Seq("openai"),
+      lookupProviders = Seq("openai", "anthropic", "google", "meta-llama", "mistralai"),
       modelName = modelName,
-      defaultContextWindow = 8192,
+      defaultContextWindow = 128000,
       defaultReserve = standardReserve,
-      fallbackResolver = _ => (8192, standardReserve),
+      fallbackResolver = _ => (128000, standardReserve),
     )
     OpenRouterConfig(
       apiKey = apiKey,
@@ -730,5 +729,3 @@ object OpenRouterConfig {
       contextWindow = cw,
       reserveCompletion = rc,
     )
-  }
-}

@@ -259,4 +259,54 @@ class ProviderTimeoutBehaviourSpec extends AnyFunSuite with Matchers with MockFa
 
     capturedTimeout shouldBe 120000
   }
+
+  // OpenRouterClient uses java.net.HttpClient directly; verify timeouts via config
+
+  test("OpenRouterClient uses custom requestTimeout from config") {
+    val customTimeout = 45.seconds
+    val config = OpenRouterConfig(
+      apiKey = "test-key",
+      model = "anthropic/claude-3.5-sonnet",
+      baseUrl = "https://openrouter.ai/api/v1",
+      contextWindow = 200000,
+      reserveCompletion = 4096,
+      requestTimeout = customTimeout,
+    )
+    config.requestTimeout shouldBe customTimeout
+  }
+
+  test("OpenRouterClient requestTimeout defaults to 2 minutes") {
+    val config = OpenRouterConfig(
+      apiKey = "test-key",
+      model = "anthropic/claude-3.5-sonnet",
+      baseUrl = "https://openrouter.ai/api/v1",
+      contextWindow = 200000,
+      reserveCompletion = 4096,
+    )
+    config.requestTimeout shouldBe 2.minutes
+  }
+
+  test("OpenRouterClient uses custom streamTimeout from config") {
+    val customTimeout = 12.minutes
+    val config = OpenRouterConfig(
+      apiKey = "test-key",
+      model = "anthropic/claude-3.5-sonnet",
+      baseUrl = "https://openrouter.ai/api/v1",
+      contextWindow = 200000,
+      reserveCompletion = 4096,
+      streamTimeout = customTimeout,
+    )
+    config.streamTimeout shouldBe customTimeout
+  }
+
+  test("OpenRouterClient streamTimeout defaults to 5 minutes") {
+    val config = OpenRouterConfig(
+      apiKey = "test-key",
+      model = "anthropic/claude-3.5-sonnet",
+      baseUrl = "https://openrouter.ai/api/v1",
+      contextWindow = 200000,
+      reserveCompletion = 4096,
+    )
+    config.streamTimeout shouldBe 5.minutes
+  }
 }

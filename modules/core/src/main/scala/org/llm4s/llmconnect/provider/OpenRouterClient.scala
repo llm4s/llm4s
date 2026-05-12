@@ -24,9 +24,10 @@ import scala.util.Try
  * [[LLMClient]] implementation for the OpenRouter unified model gateway.
  *
  * Sends requests to the OpenRouter REST API using the OpenAI-compatible
- * `/chat/completions` endpoint. Accepts `OpenAIConfig` — there is no
- * separate `OpenRouterConfig`; `LLMConnect` detects OpenRouter by checking
- * whether `baseUrl` contains `"openrouter.ai"` and routes accordingly.
+ * `/chat/completions` endpoint. Accepts an [[OpenRouterConfig]] (preferred);
+ * for legacy callers, an [[OpenAIConfig]] whose `baseUrl` contains
+ * `"openrouter.ai"` is also accepted and automatically converted to
+ * [[OpenRouterConfig]] by [[org.llm4s.llmconnect.LLMConnect]].
  *
  * == Required headers ==
  *
@@ -53,8 +54,8 @@ import scala.util.Try
  * populates: `message.thinking`, `message.reasoning`, or
  * `choice.thinking` (checked in that order).
  *
- * @param config  `OpenAIConfig` whose `baseUrl` must contain `"openrouter.ai"`;
- *                carries the API key and model name.
+ * @param config  [[OpenRouterConfig]] carrying the API key, model name, base URL,
+ *                and HTTP timeout configuration.
  * @param metrics Receives per-call latency and token-usage events.
  *                Defaults to `MetricsCollector.noop`.
  */

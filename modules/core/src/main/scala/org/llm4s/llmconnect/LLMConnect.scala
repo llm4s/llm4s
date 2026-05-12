@@ -13,8 +13,9 @@ import org.llm4s.types.Result
  *
  * Provider selection is determined entirely by the runtime type of the
  * [[ProviderConfig]] supplied: an [[AnthropicConfig]] produces an Anthropic
- * client, an [[OpenAIConfig]] produces an OpenAI or OpenRouter client (the
- * latter when `baseUrl` contains `"openrouter.ai"`), and so on. Azure uses
+ * client, an [[OpenAIConfig]] produces an OpenAI client; an [[OpenRouterConfig]]
+ * (or a legacy [[OpenAIConfig]] with `baseUrl` containing `"openrouter.ai"`) produces
+ * an OpenRouter client, and so on. Azure uses
  * [[OpenAIClient]] internally — [[AzureConfig]] carries the deployment
  * endpoint and API-version fields that OpenAI does not require.
  *
@@ -40,6 +41,7 @@ object LLMConnect {
     config match {
       case cfg: OpenRouterConfig =>
         OpenRouterClient(cfg, metrics, exchangeLogging)
+      // back-compat: OpenAIConfig with openrouter.ai baseUrl; OpenRouter has no org concept
       case cfg: OpenAIConfig =>
         if (cfg.baseUrl.contains("openrouter.ai"))
           OpenRouterClient(
@@ -89,8 +91,9 @@ object LLMConnect {
    * if the HTTP client library throws during initialisation).
    *
    * @param config  Provider configuration; the concrete subtype determines which
-   *                client is built. For OpenRouter, supply an [[OpenAIConfig]]
-   *                whose `baseUrl` contains `"openrouter.ai"`.
+   *                client is built. For OpenRouter, use [[OpenRouterConfig]]
+   *                (preferred); an [[OpenAIConfig]] whose `baseUrl` contains
+   *                `"openrouter.ai"` is also accepted as a legacy shim.
    * @param metrics Receives per-call latency and token-usage events.
    *                Use [[org.llm4s.metrics.MetricsCollector.noop]] when no metrics backend is needed.
    */
@@ -172,6 +175,7 @@ object LLMConnect {
     (provider, config) match {
       case (ProviderKind.OpenAI, cfg: OpenAIConfig)         => OpenAIClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.OpenRouter, cfg: OpenRouterConfig) => OpenRouterClient(cfg, metrics, exchangeLogging)
+      // back-compat shim; OpenRouter has no org concept so that field is dropped
       case (ProviderKind.OpenRouter, cfg: OpenAIConfig) =>
         OpenRouterClient(
           OpenRouterConfig(
