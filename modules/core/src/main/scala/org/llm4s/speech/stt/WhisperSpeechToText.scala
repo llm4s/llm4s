@@ -77,9 +77,8 @@ final class WhisperSpeechToText(
         }
     }
 
-  private def buildWhisperArgs(inputPath: Path, options: STTOptions): Seq[String] = {
+  private def buildWhisperArgs(inputPath: Path, options: STTOptions): Seq[String] =
     WhisperSpeechToText.buildArgs(command, model, outputFormat, inputPath, options)
-  }
 
   private def parseWhisperOutput(
     output: String,

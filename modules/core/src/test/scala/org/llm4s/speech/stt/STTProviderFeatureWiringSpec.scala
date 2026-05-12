@@ -226,7 +226,7 @@ class STTProviderFeatureWiringSpec extends AnyFlatSpec with Matchers {
         )
       )
 
-      args should contain inOrderOnly (
+      (args should contain).inOrderOnly(
         "whisper",
         inputPath.toString,
         "--model",
@@ -239,9 +239,7 @@ class STTProviderFeatureWiringSpec extends AnyFlatSpec with Matchers {
         "hello",
         "--word-timestamps"
       )
-    } finally {
-      Files.deleteIfExists(inputPath)
-    }
+    } finally Files.deleteIfExists(inputPath)
   }
 
   it should "prefer generated CLI output files over stdout when present" in {
