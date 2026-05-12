@@ -112,7 +112,7 @@ final class VoskSpeechToText(
     bufferSize: Int,
     options: STTOptions
   ): Transcription = {
-    recognizer.setWords(options.enableTimestamps || options.confidenceThreshold > 0.0)
+    recognizer.setWords(VoskSpeechToText.shouldRequestWordMetadata(options))
 
     val buffer   = new Array[Byte](bufferSize)
     val segments = List.newBuilder[VoskSpeechToText.ParsedSegment]
@@ -128,22 +128,7 @@ final class VoskSpeechToText(
 
     segments += VoskSpeechToText.parseSegment(recognizer.getFinalResult)
 
-    val parsedSegments    = segments.result()
-    val parsedWords       = parsedSegments.flatMap(_.words)
-    val filteredWords     = VoskSpeechToText.applyConfidenceThreshold(parsedWords, options.confidenceThreshold)
-    val retainedWords     = if (filteredWords.nonEmpty) filteredWords else parsedWords
-    val filteredText      = VoskSpeechToText.renderWords(filteredWords)
-    val unfilteredText    = parsedSegments.map(_.text).mkString(" ").trim
-    val finalText         = if (filteredText.nonEmpty) filteredText else unfilteredText
-    val overallConfidence = VoskSpeechToText.averageConfidence(retainedWords)
-
-    Transcription(
-      text = finalText,
-      language = options.language,
-      confidence = overallConfidence,
-      timestamps = if (options.enableTimestamps) retainedWords.toList else Nil,
-      meta = None
-    )
+    VoskSpeechToText.buildTranscription(segments.result(), options)
   }
 
   /**
@@ -191,6 +176,9 @@ object VoskSpeechToText {
     words: List[WordTimestamp]
   )
 
+  private[stt] def shouldRequestWordMetadata(options: STTOptions): Boolean =
+    options.enableTimestamps || options.confidenceThreshold > 0.0
+
   private[stt] def parseSegment(json: String): ParsedSegment =
     Try(ujson.read(json)).toOption match {
       case Some(value) =>
@@ -213,6 +201,27 @@ object VoskSpeechToText {
   private[stt] def averageConfidence(words: Seq[WordTimestamp]): Option[Double] = {
     val confidences = words.flatMap(_.confidence)
     if (confidences.nonEmpty) Some(confidences.sum / confidences.size) else None
+  }
+
+  private[stt] def buildTranscription(
+    parsedSegments: Seq[ParsedSegment],
+    options: STTOptions
+  ): Transcription = {
+    val parsedWords       = parsedSegments.flatMap(_.words)
+    val filteredWords     = applyConfidenceThreshold(parsedWords, options.confidenceThreshold)
+    val retainedWords     = if (filteredWords.nonEmpty) filteredWords else parsedWords
+    val filteredText      = renderWords(filteredWords)
+    val unfilteredText    = parsedSegments.map(_.text).mkString(" ").trim
+    val finalText         = if (filteredText.nonEmpty) filteredText else unfilteredText
+    val overallConfidence = averageConfidence(retainedWords)
+
+    Transcription(
+      text = finalText,
+      language = options.language,
+      confidence = overallConfidence,
+      timestamps = if (options.enableTimestamps) retainedWords.toList else Nil,
+      meta = None
+    )
   }
 
   private def parseWord(value: Value): Option[WordTimestamp] =

@@ -78,44 +78,14 @@ final class WhisperSpeechToText(
     }
 
   private def buildWhisperArgs(inputPath: Path, options: STTOptions): Seq[String] = {
-    val effectiveFormat = WhisperSpeechToText.effectiveOutputFormat(outputFormat, options)
-    val baseArgs = command ++ Seq(
-      inputPath.toString,
-      "--model",
-      model,
-      "--output_format",
-      effectiveFormat
-    )
-
-    val optFlags = List(
-      options.language.map(l => Seq("--language", l)),
-      options.prompt.map(p => Seq("--initial_prompt", p)),
-      if (options.enableTimestamps) Some(Seq("--word-timestamps")) else None
-    ).flatten
-
-    baseArgs ++ optFlags.combineAll
+    WhisperSpeechToText.buildArgs(command, model, outputFormat, inputPath, options)
   }
 
   private def parseWhisperOutput(
     output: String,
     options: STTOptions
-  ): Result[Transcription] = {
-    val parsed = WhisperSpeechToText.parseOutput(output, options)
-    val text   = parsed.text.trim
-    if (text.isEmpty) {
-      Left(ProcessingError.audioValidation("Transcription produced empty text"))
-    } else {
-      Right(
-        Transcription(
-          text = text,
-          language = parsed.language.orElse(options.language),
-          confidence = parsed.confidence,
-          timestamps = if (options.enableTimestamps) parsed.timestamps else Nil,
-          meta = None
-        )
-      )
-    }
-  }
+  ): Result[Transcription] =
+    WhisperSpeechToText.toTranscription(output, options)
 }
 
 object WhisperSpeechToText {
@@ -132,6 +102,31 @@ object WhisperSpeechToText {
     options: STTOptions
   ): String =
     if (options.enableTimestamps) "json" else configuredOutputFormat
+
+  private[stt] def buildArgs(
+    command: Seq[String],
+    model: String,
+    configuredOutputFormat: String,
+    inputPath: Path,
+    options: STTOptions
+  ): Seq[String] = {
+    val effectiveFormat = effectiveOutputFormat(configuredOutputFormat, options)
+    val baseArgs = command ++ Seq(
+      inputPath.toString,
+      "--model",
+      model,
+      "--output_format",
+      effectiveFormat
+    )
+
+    val optFlags = List(
+      options.language.map(l => Seq("--language", l)),
+      options.prompt.map(p => Seq("--initial_prompt", p)),
+      if (options.enableTimestamps) Some(Seq("--word-timestamps")) else None
+    ).flatten
+
+    baseArgs ++ optFlags.combineAll
+  }
 
   private[stt] def parseOutput(
     output: String,
@@ -160,6 +155,27 @@ object WhisperSpeechToText {
           timestamps = Nil
         )
     }
+
+  private[stt] def toTranscription(
+    output: String,
+    options: STTOptions
+  ): Result[Transcription] = {
+    val parsed = parseOutput(output, options)
+    val text   = parsed.text.trim
+    if (text.isEmpty) {
+      Left(ProcessingError.audioValidation("Transcription produced empty text"))
+    } else {
+      Right(
+        Transcription(
+          text = text,
+          language = parsed.language.orElse(options.language),
+          confidence = parsed.confidence,
+          timestamps = if (options.enableTimestamps) parsed.timestamps else Nil,
+          meta = None
+        )
+      )
+    }
+  }
 
   private[stt] def resolveCliOutput(
     inputPath: Path,
