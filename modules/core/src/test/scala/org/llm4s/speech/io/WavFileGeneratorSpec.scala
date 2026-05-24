@@ -49,6 +49,32 @@ class WavFileGeneratorSpec extends AnyFlatSpec with Matchers {
     chunkSize shouldBe dataSize + 36
   }
 
+  "validateMetadata" should "accept valid AudioMeta" in {
+    val meta = AudioMeta(sampleRate = 44100, numChannels = 2, bitDepth = 16)
+    WavFileGenerator.validateMetadata(meta) shouldBe Right(meta)
+  }
+
+  it should "reject non-positive sampleRate" in {
+    val result = WavFileGenerator.validateMetadata(AudioMeta(sampleRate = 0, numChannels = 1, bitDepth = 16))
+    result.isLeft shouldBe true
+  }
+
+  it should "reject non-positive numChannels" in {
+    val result = WavFileGenerator.validateMetadata(AudioMeta(sampleRate = 44100, numChannels = -1, bitDepth = 16))
+    result.isLeft shouldBe true
+  }
+
+  it should "reject unsupported bitDepth" in {
+    val result = WavFileGenerator.validateMetadata(AudioMeta(sampleRate = 44100, numChannels = 1, bitDepth = 12))
+    result.isLeft shouldBe true
+  }
+
+  it should "accept all standard bit depths" in {
+    Seq(8, 16, 24, 32).foreach { bd =>
+      WavFileGenerator.validateMetadata(AudioMeta(sampleRate = 44100, numChannels = 1, bitDepth = bd)).isRight shouldBe true
+    }
+  }
+
   "writeToTempWav + readWavFile" should "roundtrip AudioMeta correctly" in {
     // Stereo 16-bit PCM, small size for fast test
     val sampleCount = 1024

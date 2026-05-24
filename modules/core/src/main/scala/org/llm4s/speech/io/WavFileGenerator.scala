@@ -8,7 +8,7 @@ import org.llm4s.resource.ManagedResource
 import java.io.{ ByteArrayOutputStream, DataOutputStream }
 import java.nio.file.{ Path, Files }
 import javax.sound.sampled.{ AudioFileFormat, AudioFormat => JAudioFormat, AudioSystem }
-import scala.util.Try
+import scala.util.{ Try, Using }
 import org.llm4s.types.TryOps
 
 /**
@@ -38,6 +38,22 @@ object WavFileGenerator {
     ManagedResource.tempFile(prefix, ".wav")
 
   /**
+   * Validate AudioMeta values before file generation to catch bad parameters early.
+   */
+  def validateMetadata(meta: AudioMeta): Result[AudioMeta] = {
+    val validBitDepths = Set(8, 16, 24, 32)
+    val errors = List(
+      Option.when(meta.sampleRate <= 0)(s"sampleRate must be positive, got ${meta.sampleRate}"),
+      Option.when(meta.numChannels <= 0)(s"numChannels must be positive, got ${meta.numChannels}"),
+      Option.when(!validBitDepths.contains(meta.bitDepth))(
+        s"bitDepth must be one of $validBitDepths, got ${meta.bitDepth}"
+      )
+    ).flatten
+    if (errors.isEmpty) Right(meta)
+    else Left(WavGenerationFailed(errors.mkString("; ")))
+  }
+
+  /**
    * Create a Java AudioFormat from AudioMeta
    */
   def createJavaAudioFormat(meta: AudioMeta): JAudioFormat =
@@ -63,10 +79,11 @@ object WavFileGenerator {
   /**
    * Save raw PCM data as WAV file (eliminates duplication from AudioIO.saveRawPcm16)
    */
-  def saveRawPcmAsWav(data: Array[Byte], meta: AudioMeta, path: Path): Result[Path] = {
-    val audio = GeneratedAudio(data, meta, AudioFormat.WavPcm16)
-    saveAsWav(audio, path)
-  }
+  def saveRawPcmAsWav(data: Array[Byte], meta: AudioMeta, path: Path): Result[Path] =
+    for {
+      validMeta <- validateMetadata(meta)
+      result    <- saveAsWav(GeneratedAudio(data, validMeta, AudioFormat.WavPcm16), path)
+    } yield result
 
   /**
    * Create WAV file from raw bytes with metadata
@@ -82,30 +99,27 @@ object WavFileGenerator {
    */
   def writeToTempWav(data: Array[Byte], meta: AudioMeta, prefix: String = "llm4s-audio"): Result[Path] =
     for {
-      tempPath <- createTempWavFile(prefix)
-      audio = GeneratedAudio(data, meta, AudioFormat.WavPcm16)
-      savedPath <- saveAsWav(audio, tempPath)
+      validMeta <- validateMetadata(meta)
+      tempPath  <- createTempWavFile(prefix)
+      savedPath <- saveAsWav(GeneratedAudio(data, validMeta, AudioFormat.WavPcm16), tempPath)
     } yield savedPath
 
   /**
-   * Read WAV file and return GeneratedAudio, parsing actual RIFF/WAV header fields.
+   * Read WAV file and return GeneratedAudio.
    *
-   * WAV header layout (little-endian):
-   *   Offset 22: NumChannels (Short)
-   *   Offset 24: SampleRate (Int)
-   *   Offset 34: BitsPerSample (Short)
-   *   Offset 44+: audio data
+   * Uses AudioSystem.getAudioInputStream to delegate format parsing to the JDK,
+   * which handles non-standard chunk layouts and avoids loading the entire file
+   * into memory before we know where the audio data starts.
    */
   def readWavFile(path: Path): Result[GeneratedAudio] =
-    Try {
-      val bytes = Files.readAllBytes(path)
-      import BinaryReader._
-      val (numChannels, _)   = bytes.read[Short](22)
-      val (sampleRate, _)    = bytes.read[Int](24)
-      val (bitsPerSample, _) = bytes.read[Short](34)
-      val audioData          = bytes.drop(44)
-      val meta               = AudioMeta(sampleRate = sampleRate, numChannels = numChannels, bitDepth = bitsPerSample)
-      GeneratedAudio(audioData, meta, AudioFormat.WavPcm16)
+    Using(AudioSystem.getAudioInputStream(path.toFile)) { ais =>
+      val fmt  = ais.getFormat
+      val meta = AudioMeta(
+        sampleRate  = fmt.getSampleRate.toInt,
+        numChannels = fmt.getChannels,
+        bitDepth    = fmt.getSampleSizeInBits
+      )
+      GeneratedAudio(ais.readAllBytes(), meta, AudioFormat.WavPcm16)
     }.toResult.left.map(_ => WavGenerationFailed(s"Failed to read WAV file: $path"))
 
   /**
