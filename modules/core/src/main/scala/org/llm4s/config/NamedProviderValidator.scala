@@ -133,6 +133,19 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  object BedrockAnthropic extends NamedProviderValidator:
+    def validate(
+      providerName: ProviderName,
+      section: RawNamedProviderSection
+    ): Result[NamedProviderConfig] =
+      validateNamedProviderConfig(
+        providerName = providerName,
+        providerKind = ProviderKind.BedrockAnthropic,
+        section = section,
+        requireApiKey = false,
+        requireBaseUrl = true,
+      )
+
   private def validateNamedProviderConfig(
     providerName: ProviderName,
     providerKind: ProviderKind,

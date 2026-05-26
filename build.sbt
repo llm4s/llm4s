@@ -178,6 +178,7 @@ lazy val core = (project in file("modules/core"))
     libraryDependencies ++= Seq(
       Deps.azureOpenAI,
       Deps.anthropic,
+      Deps.anthropicBedrock,
       Deps.jtokkit,
       Deps.websocket,
       Deps.scalatest % Test,
@@ -197,6 +198,13 @@ lazy val core = (project in file("modules/core"))
       Deps.awsSts,
       Deps.prometheusCore,
       Deps.prometheusHttp
+    ),
+    dependencyOverrides ++= Seq(
+      "software.amazon.awssdk" % "auth"    % Versions.awsSdk,
+      "software.amazon.awssdk" % "regions" % Versions.awsSdk,
+      "software.amazon.awssdk" % "sdk-core" % Versions.awsSdk,
+      "software.amazon.awssdk" % "utils"   % Versions.awsSdk,
+      "software.amazon.awssdk" % "retries" % Versions.awsSdk
     )
   )
 

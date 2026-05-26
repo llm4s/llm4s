@@ -21,5 +21,6 @@ private[llm4s] object ProviderCapabilitiesRegistry:
     ProviderKind.Gemini     -> ProviderCapabilities.Gemini,
     ProviderKind.DeepSeek   -> ProviderCapabilities.DeepSeek,
     ProviderKind.Cohere     -> ProviderCapabilities.Cohere,
-    ProviderKind.Mistral    -> ProviderCapabilities.Mistral,
+    ProviderKind.Mistral           -> ProviderCapabilities.Mistral,
+    ProviderKind.BedrockAnthropic  -> ProviderCapabilities.BedrockAnthropic,
   )

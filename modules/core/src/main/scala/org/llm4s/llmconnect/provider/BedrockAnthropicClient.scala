@@ -1,15 +1,18 @@
 package org.llm4s.llmconnect.provider
+
+import com.anthropic.bedrock.backends.BedrockBackend
 import com.anthropic.client.okhttp.AnthropicOkHttpClient
 import com.anthropic.models.messages.{
   MessageCreateParams,
   RawMessageStreamEvent,
   ThinkingConfigEnabled
 }
+import software.amazon.awssdk.regions.Region
 
 import scala.collection.mutable
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
+import org.llm4s.llmconnect.config.{ BedrockAnthropicConfig, ProviderConfig }
 import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.*
@@ -22,70 +25,43 @@ import java.time.Instant
 import scala.util.Try
 
 /**
- * [[LLMClient]] implementation for Anthropic Claude models.
+ * [[org.llm4s.llmconnect.LLMClient]] implementation for Anthropic Claude
+ * models accessed through AWS Bedrock.
  *
- * Uses the official Anthropic Java SDK (`AnthropicOkHttpClient`) for all
- * API calls. SDK exceptions are mapped to the appropriate [[org.llm4s.error.LLMError]]
- * subtypes before being returned.
+ * Uses the Anthropic Java SDK's Bedrock transport (`AnthropicBedrockOkHttpClient`)
+ * which authenticates via the AWS Default Credential Provider Chain. No explicit
+ * API key is required — credentials are resolved from environment variables,
+ * `~/.aws/credentials`, IAM roles, etc.
  *
- * == Message format adaptations ==
+ * Message format adaptations and streaming event handling are identical to
+ * [[AnthropicClient]]; both mix in [[AnthropicMessageSupport]] for shared logic.
  *
- * The Anthropic Messages API differs from the OpenAI convention in several
- * ways that this client handles transparently:
- *
- *  - **Default system prompt**: if the conversation contains no
- *    `SystemMessage`, the client injects `"You are Claude, a helpful AI
- *    assistant."` automatically. Supply an explicit `SystemMessage` to
- *    override this.
- *
- *  - **Tool results as user messages**: the Anthropic API does not accept
- *    native tool-result messages in the same turn structure as OpenAI.
- *    `ToolMessage` values are therefore forwarded as user messages with
- *    the prefix `"[Tool result for <toolCallId>]: "`.
- *
- *  - **Assistant messages with tool calls are skipped**: when an
- *    `AssistantMessage` carries pending tool calls, it is not forwarded —
- *    Anthropic infers the assistant turn from the subsequent tool-result
- *    user messages.
- *
- *  - **Schema sanitisation**: OpenAI-specific fields (`strict`,
- *    `additionalProperties`) are stripped from tool schemas before sending,
- *    because Anthropic's API rejects them.
- *
- * == Extended thinking ==
- *
- * When `CompletionOptions.reasoning` is set, a `thinking` block is added
- * to the request. The token budget is clamped to `[1024, maxTokens - 1]`
- * to satisfy the Anthropic API constraint; the effective budget may
- * therefore differ from what was requested.
- *
- * `maxTokens` defaults to 2048 when not set in `CompletionOptions` because
- * the Anthropic API requires the field.
- *
- * @param config  `AnthropicConfig` carrying the API key, model name, and base URL.
+ * @param config  `BedrockAnthropicConfig` carrying the region and model name.
  * @param metrics Receives per-call latency and token-usage events.
  *                Defaults to `MetricsCollector.noop`.
  */
-class AnthropicClient(
-  config: AnthropicConfig,
+class BedrockAnthropicClient(
+  config: BedrockAnthropicConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient
     with AnthropicMessageSupport {
 
-  // Store config for budget calculations
   private val providerConfig: ProviderConfig = config
 
-  // Initialize Anthropic client
   private val client = AnthropicOkHttpClient
     .builder()
-    .apiKey(config.apiKey)
-    .baseUrl(config.baseUrl)
+    .backend(
+      BedrockBackend
+        .builder()
+        .region(Region.of(config.region))
+        .build()
+    )
     .build()
 
-  protected def clientDescription: String = s"Anthropic client for model ${config.model}"
-  protected def providerName: String      = "anthropic"
+  protected def clientDescription: String = s"Bedrock Anthropic client for model ${config.model}"
+  protected def providerName: String      = "bedrock-anthropic"
   protected def modelName: String         = config.model
 
   override def complete(
@@ -93,7 +69,6 @@ class AnthropicClient(
     options: CompletionOptions
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
-    // Transform options and messages for model-specific constraints
     TransformationResult
       .transform(
         config.model,
@@ -105,19 +80,14 @@ class AnthropicClient(
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
 
-        // Create message parameters builder
         val paramsBuilder = MessageCreateParams
           .builder()
           .model(config.model)
         applySamplingParameters(paramsBuilder, transformed.options)
 
-        // Add max tokens if specified
-        // max tokens is required by the api
         val maxTokens = transformed.options.maxTokens.getOrElse(2048)
         paramsBuilder.maxTokens(maxTokens)
 
-        // Add extended thinking configuration if requested
-        // Minimum budget is 1024 tokens, must be less than max_tokens
         transformed.options.effectiveBudgetTokens.foreach { budgetTokens =>
           val effectiveBudget = clampBudgetTokens(budgetTokens, maxTokens)
           paramsBuilder.thinking(
@@ -125,23 +95,19 @@ class AnthropicClient(
           )
         }
 
-        // Add tools if specified
         if (transformed.options.tools.nonEmpty) {
           transformed.options.tools.foreach(tool => paramsBuilder.addTool(convertToolToAnthropicTool(tool)))
         }
 
-        // Add messages from conversation
         addMessagesToParams(transformedConversation, paramsBuilder)
 
-        // Build the parameters
         val messageParams = paramsBuilder.build()
         val requestBody   = serializeRequestBody(messageParams)
 
         val messageService = client.messages()
-        // Make API call
         val attempt = Try(messageService.create(messageParams)).toEither.left.map {
-          case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
-          case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
+          case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("bedrock-anthropic", e.getMessage)
+          case _: com.anthropic.errors.RateLimitException            => RateLimitError("bedrock-anthropic")
           case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
           case e: Exception                                          => e.toLLMError
         }
@@ -156,37 +122,12 @@ class AnthropicClient(
       }
   }
 
-  /*
-curl https://api.anthropic.com/v1/messages \
-     --header "x-api-key: $ANTHROPIC_API_KEY" \
-     --header "anthropic-version: 2023-06-01" \
-     --header "content-type: application/json" \
-     --data \
-'{
-    "model": "claude-3-7-sonnet-20250219",
-    "max_tokens": 1024,
-    "tools": [{
-        "name": "get_weather",
-        "description": "Get the current weather in a given location",
-        "input_schema": {
-          "type":"object",
-          "properties":{
-            "location":{"type":"string","description":"City and country e.g. Bogotá, Colombia"},
-            "units":{"type":"string","description":"Units the temperature will be returned in.","enum":["celsius","fahrenheit"]}
-          },
-          "additionalProperties": {}
-        }
-    }],
-    "messages": [{"role": "user", "content": "What is the weather like in San Francisco?"}]
-}'
-   */
   override def streamComplete(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
-    // Transform options and messages for model-specific constraints
     TransformationResult
       .transform(
         config.model,
@@ -198,17 +139,14 @@ curl https://api.anthropic.com/v1/messages \
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
 
-        // Build parameters
         val paramsBuilder = MessageCreateParams
           .builder()
           .model(config.model)
         applySamplingParameters(paramsBuilder, transformed.options)
 
-        // Add max tokens if specified (required by the API)
         val maxTokens = transformed.options.maxTokens.getOrElse(2048)
         paramsBuilder.maxTokens(maxTokens)
 
-        // Add extended thinking configuration if requested
         transformed.options.effectiveBudgetTokens.foreach { budgetTokens =>
           val effectiveBudget = clampBudgetTokens(budgetTokens, maxTokens)
           paramsBuilder.thinking(
@@ -216,22 +154,19 @@ curl https://api.anthropic.com/v1/messages \
           )
         }
 
-        // Add tools if specified
         if (transformed.options.tools.nonEmpty)
           transformed.options.tools.foreach(t => paramsBuilder.addTool(convertToolToAnthropicTool(t)))
-        // Add messages from conversation
+
         addMessagesToParams(transformedConversation, paramsBuilder)
-        // Build the parameters
+
         val messageParams = paramsBuilder.build()
         val requestBody   = serializeRequestBody(messageParams)
 
-        // Create accumulator for building the final completion
         val accumulator                      = StreamingAccumulator.create()
         var currentMessageId: Option[String] = None
         val blockIndexToToolId               = mutable.Map.empty[Long, String]
         val rawStream                        = StringBuilder()
 
-        // Process the stream
         val attempt = Try {
           val messageService = client.messages()
           val streamResponse = messageService.createStreaming(messageParams)
@@ -241,21 +176,18 @@ curl https://api.anthropic.com/v1/messages \
           val loopTry = Try {
             stream.foreach { event =>
               rawStream.append(serializeStreamEvent(event)).append('\n')
-              // Process different event types using the event's accessor methods
-              // Check for message start event
+
               val messageStartOpt = event.messageStart()
               if (messageStartOpt != null && messageStartOpt.isPresent) {
                 val msgStart = messageStartOpt.get()
                 currentMessageId = Some(msgStart.message().id())
               }
 
-              // Check for content block delta event
               val contentDeltaOpt = event.contentBlockDelta()
               if (contentDeltaOpt != null && contentDeltaOpt.isPresent) {
                 val contentDelta = contentDeltaOpt.get()
                 val delta        = contentDelta.delta()
 
-                // Handle text content delta
                 Try(delta.text()).foreach { textOpt =>
                   if (textOpt != null && textOpt.isPresent) {
                     val textDelta = textOpt.get()
@@ -273,7 +205,6 @@ curl https://api.anthropic.com/v1/messages \
                   }
                 }
 
-                // Handle thinking content delta
                 Try(delta.thinking()).foreach { thinkingOpt =>
                   if (thinkingOpt != null && thinkingOpt.isPresent) {
                     val thinkingDelta = thinkingOpt.get()
@@ -292,7 +223,6 @@ curl https://api.anthropic.com/v1/messages \
                   }
                 }
 
-                // Handle input_json_delta for tool call arguments
                 Try(delta.inputJson()).foreach { inputJsonOpt =>
                   if (inputJsonOpt != null && inputJsonOpt.isPresent) {
                     val fragment   = inputJsonOpt.get().partialJson()
@@ -364,13 +294,12 @@ curl https://api.anthropic.com/v1/messages \
           loopTry.get
         }.toEither.left
           .map {
-            case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("anthropic", e.getMessage)
-            case _: com.anthropic.errors.RateLimitException            => RateLimitError("anthropic")
+            case e: com.anthropic.errors.UnauthorizedException         => AuthenticationError("bedrock-anthropic", e.getMessage)
+            case _: com.anthropic.errors.RateLimitException            => RateLimitError("bedrock-anthropic")
             case e: com.anthropic.errors.AnthropicInvalidDataException => ValidationError("input", e.getMessage)
             case e: Exception                                          => e.toLLMError
           }
 
-        // Return the accumulated completion
         attempt
           .flatMap(_ =>
             accumulator.toCompletion.map { c =>
@@ -390,10 +319,8 @@ curl https://api.anthropic.com/v1/messages \
 
   override def getReserveCompletion(): Int = providerConfig.reserveCompletion
 
-
   override protected def releaseResources(): Unit =
     client.close()
-
 
   private def recordExchange(
     startedAt: Instant,
@@ -412,29 +339,19 @@ curl https://api.anthropic.com/v1/messages \
     )
 }
 
-object AnthropicClient {
+object BedrockAnthropicClient {
   import org.llm4s.types.TryOps
 
-  /**
-   * Constructs an [[AnthropicClient]], wrapping any construction-time
-   * exception in a `Left`.
-   *
-   * @param config  `AnthropicConfig` with API key, model, and base URL.
-   * @param metrics Receives per-call latency and token-usage events.
-   *                Defaults to `MetricsCollector.noop`.
-   * @return `Right(client)` on success; `Left(LLMError)` if the underlying
-   *         SDK client cannot be initialised.
-   */
   def apply(
-    config: AnthropicConfig,
+    config: BedrockAnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-  )(using ModelRegistryService): Result[AnthropicClient] =
-    Try(new AnthropicClient(config, metrics)).toResult
+  )(using ModelRegistryService): Result[BedrockAnthropicClient] =
+    Try(new BedrockAnthropicClient(config, metrics)).toResult
 
   def apply(
-    config: AnthropicConfig,
+    config: BedrockAnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService): Result[AnthropicClient] =
-    Try(new AnthropicClient(config, metrics, exchangeLogging)).toResult
+  )(using ModelRegistryService): Result[BedrockAnthropicClient] =
+    Try(new BedrockAnthropicClient(config, metrics, exchangeLogging)).toResult
 }

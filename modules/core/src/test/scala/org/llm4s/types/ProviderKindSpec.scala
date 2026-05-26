@@ -7,7 +7,7 @@ import org.scalatest.matchers.should.Matchers
 class ProviderKindSpec extends AnyFlatSpec with Matchers:
 
   "ProviderKind" should "expose all expected provider instances" in {
-    ProviderKind.all should have size 10
+    ProviderKind.all should have size 11
     (ProviderKind.all should contain).allOf(
       ProviderKind.OpenAI,
       ProviderKind.Azure,
@@ -18,7 +18,8 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
       ProviderKind.Gemini,
       ProviderKind.Cohere,
       ProviderKind.DeepSeek,
-      ProviderKind.Mistral
+      ProviderKind.Mistral,
+      ProviderKind.BedrockAnthropic
     )
   }
 
@@ -70,8 +71,9 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
       case ProviderKind.Zai        => "cloud-zai"
       case ProviderKind.Gemini     => "cloud-gemini"
       case ProviderKind.DeepSeek   => "cloud-deepseek"
-      case ProviderKind.Cohere     => "cloud-cohere"
-      case ProviderKind.Mistral    => "cloud-mistral"
+      case ProviderKind.Cohere           => "cloud-cohere"
+      case ProviderKind.Mistral          => "cloud-mistral"
+      case ProviderKind.BedrockAnthropic => "cloud-bedrock-anthropic"
 
     describe(ProviderKind.OpenAI) shouldBe "cloud-openai"
     describe(ProviderKind.Ollama) shouldBe "local"
