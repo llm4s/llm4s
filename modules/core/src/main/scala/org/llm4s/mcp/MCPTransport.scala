@@ -1,4 +1,4 @@
-// scalafix:off
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch, DisableSyntax.NoKeywordFinally
 package org.llm4s.mcp
 
 import scala.util.{ Try, Success, Failure }

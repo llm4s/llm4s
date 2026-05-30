@@ -1,4 +1,4 @@
-// scalafix:off
+// scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.samples.agent
 
 import org.llm4s.agent.Agent

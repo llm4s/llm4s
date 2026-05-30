@@ -1,4 +1,4 @@
-// scalafix:off
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch, DisableSyntax.NoKeywordFinally, DisableSyntax.NoSystemGetenv
 package org.llm4s.runner
 
 import org.llm4s.shared._
