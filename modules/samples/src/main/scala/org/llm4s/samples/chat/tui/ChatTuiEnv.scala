@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch, DisableSyntax.NoSysEnv
 package org.llm4s.samples.chat.tui
 
 import java.nio.file.{ Files, Path, Paths }
