@@ -150,7 +150,9 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
     response.matches.exists(_.path == "redos-alt-search.txt") shouldBe true
   }
 
-  it should "complete malicious regex search within bounded time" in {
+  it should "complete blocklisted regex search within bounded time" in {
+    // ((a+)+)+b is rejected by the shape blocklist, so the search degrades to a
+    // literal substring match and never runs the dangerous regex.
     interface.writeFile("redos-time.txt", "a" * 28 + "X")
 
     val eventual = Future {
@@ -164,6 +166,41 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
 
     val response = Await.result(eventual, 2.seconds)
     response.matches shouldBe empty
+  }
+
+  it should "bound regex search for catastrophic patterns the blocklist misses" in {
+    // (.*a){25}b is genuinely catastrophic in the JDK engine but slips past the
+    // shape blocklist (the group is quantified with {25}, not +/*), so it
+    // compiles as a real regex. The per-line step budget must abort the
+    // catastrophic match rather than hang. Without the bound this search never
+    // returns and the Await below would time out.
+    interface.writeFile("redos-brace-search.txt", "a" * 40)
+
+    val eventual = Future {
+      interface.searchFiles(
+        paths = List("redos-brace-search.txt"),
+        query = "(.*a){25}b",
+        searchType = "regex",
+        recursive = Some(false)
+      )
+    }
+
+    val response = Await.result(eventual, 10.seconds)
+    response.matches shouldBe empty
+  }
+
+  it should "bound regexReplace for catastrophic patterns the blocklist misses" in {
+    interface.writeFile("redos-brace-replace.txt", "a" * 40)
+
+    val op = RegexReplaceOperation(
+      pattern = "(.*a){25}b",
+      replacement = "SAFE",
+      flags = Some("g")
+    )
+
+    val eventual = Future(interface.modifyFile("redos-brace-replace.txt", List(op)))
+    val result   = Await.result(eventual, 10.seconds)
+    result.success shouldBe true
   }
 
   it should "fallback to literal replacement for unsafe regexReplace operations" in {

@@ -1,6 +1,7 @@
 package org.llm4s.runner
 
 import org.llm4s.shared._
+import org.slf4j.LoggerFactory
 
 import java.io.{ BufferedWriter, PrintWriter }
 import java.nio.charset.{ Charset, StandardCharsets }
@@ -28,6 +29,8 @@ class WorkspaceAgentInterfaceImpl(
   isWindows: Boolean,
   sandboxConfig: Option[WorkspaceSandboxConfig] = None
 ) extends WorkspaceAgentInterface {
+
+  private val logger = LoggerFactory.getLogger(getClass)
 
   private val rootPath = Paths.get(workspaceRoot).toAbsolutePath.normalize()
 
@@ -441,52 +444,45 @@ class WorkspaceAgentInterfaceImpl(
             result
           }
 
+          val caseInsensitive = patternFlags.contains("i")
+          val replaceGlobally = patternFlags.contains("g")
+
+          // Literal-replacement fallback used when a pattern is rejected up front
+          // or a per-line match aborts (e.g. exceeds the ReDoS step budget). This
+          // changes regex semantics to plain substring replacement, so it is
+          // logged (once) rather than applied silently.
+          def literalReplace(line: String): String =
+            if (replaceGlobally)
+              WorkspaceRegexSafetyManager.replaceAllLiteral(line, pattern, replacement, caseInsensitive)
+            else
+              WorkspaceRegexSafetyManager.replaceFirstLiteral(line, pattern, replacement, caseInsensitive)
+
           WorkspaceRegexSafetyManager.safeCompile(pattern, regexFlags) match {
             case Right(regex) =>
+              var loggedRuntimeFallback = false
               currentLines.map { line =>
-                if (patternFlags.contains("g")) {
-                  WorkspaceRegexSafetyManager
-                    .safeReplaceAll(regex, line, replacement)
-                    .getOrElse(
-                      WorkspaceRegexSafetyManager.replaceAllLiteral(
-                        line,
-                        pattern,
-                        replacement,
-                        patternFlags.contains("i")
+                val replaced =
+                  if (replaceGlobally) WorkspaceRegexSafetyManager.safeReplaceAll(regex, line, replacement)
+                  else WorkspaceRegexSafetyManager.safeReplaceFirst(regex, line, replacement)
+                replaced match {
+                  case Right(result) => result
+                  case Left(err) =>
+                    if (!loggedRuntimeFallback) {
+                      logger.warn(
+                        s"Regex replace aborted at runtime ($err) for pattern '$pattern'; " +
+                          "falling back to literal replacement for affected lines."
                       )
-                    )
-                } else {
-                  WorkspaceRegexSafetyManager
-                    .safeReplaceFirst(regex, line, replacement)
-                    .getOrElse(
-                      WorkspaceRegexSafetyManager.replaceFirstLiteral(
-                        line,
-                        pattern,
-                        replacement,
-                        patternFlags.contains("i")
-                      )
-                    )
+                      loggedRuntimeFallback = true
+                    }
+                    literalReplace(line)
                 }
               }
-            case Left(_) =>
-              // Degrade to literal replacement for unsafe/invalid regex patterns.
-              currentLines.map { line =>
-                if (patternFlags.contains("g")) {
-                  WorkspaceRegexSafetyManager.replaceAllLiteral(
-                    line,
-                    pattern,
-                    replacement,
-                    patternFlags.contains("i")
-                  )
-                } else {
-                  WorkspaceRegexSafetyManager.replaceFirstLiteral(
-                    line,
-                    pattern,
-                    replacement,
-                    patternFlags.contains("i")
-                  )
-                }
-              }
+            case Left(err) =>
+              logger.warn(
+                s"Rejected unsafe or invalid replace regex '$pattern' ($err); " +
+                  "falling back to literal replacement."
+              )
+              currentLines.map(literalReplace)
           }
       }
     }
@@ -514,16 +510,26 @@ class WorkspaceAgentInterfaceImpl(
       )
     }
 
-    // Prepare regex pattern
+    // Prepare regex pattern. An unsafe/invalid regex degrades to literal
+    // substring search, which changes match semantics, so we log it rather than
+    // failing silently.
     val pattern = if (searchType == "literal") {
       WorkspaceRegexSafetyManager.compileLiteral(query)
     } else {
       WorkspaceRegexSafetyManager.safeCompile(query) match {
         case Right(p) => p
-        case Left(_)  => WorkspaceRegexSafetyManager.compileLiteral(query)
+        case Left(err) =>
+          logger.warn(
+            s"Rejected unsafe or invalid search regex '$query' ($err); " +
+              "falling back to literal substring search."
+          )
+          WorkspaceRegexSafetyManager.compileLiteral(query)
       }
     }
     val literalFallbackPattern = WorkspaceRegexSafetyManager.compileLiteral(query)
+    // Set once if any per-line match aborts (e.g. exceeds the step budget) and we
+    // fall back to literal matching for that line.
+    var loggedRuntimeFallback = false
 
     // Collect all files to search
     val filesToSearch = paths.flatMap { path =>
@@ -569,8 +575,17 @@ class WorkspaceAgentInterfaceImpl(
       Try(Files.readAllLines(file, StandardCharsets.UTF_8).asScala.toList).toOption.foreach { lines =>
         for ((line, lineIndex) <- lines.zipWithIndex if !done) {
           val isMatch =
-            WorkspaceRegexSafetyManager.safeFind(pattern, line).getOrElse {
-              literalFallbackPattern.matcher(line).find()
+            WorkspaceRegexSafetyManager.safeFind(pattern, line) match {
+              case Right(m) => m
+              case Left(err) =>
+                if (!loggedRuntimeFallback) {
+                  logger.warn(
+                    s"Regex search aborted at runtime ($err) for query '$query'; " +
+                      "falling back to literal substring match for affected lines."
+                  )
+                  loggedRuntimeFallback = true
+                }
+                literalFallbackPattern.matcher(line).find()
             }
 
           if (isMatch) {
