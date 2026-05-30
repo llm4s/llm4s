@@ -234,6 +234,18 @@ class KeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach
       result.left.toOption.get.formatted should include("Invalid metadata key")
     }
 
+    "reject empty metadata keys in filters" in {
+      val docs = Seq(
+        KeywordDocument("doc-1", "Scala content", Map("lang" -> "en"))
+      )
+      index.indexBatch(docs) shouldBe Right(())
+
+      val result = index.search("Scala", topK = 10, filter = Some(MetadataFilter.Equals("   ", "en")))
+
+      result.isLeft shouldBe true
+      result.left.toOption.get.formatted should include("Invalid metadata key")
+    }
+
     "allow metadata keys that begin with digits" in {
       val docs = Seq(
         KeywordDocument("doc-2024", "Scala release notes", Map("2024" -> "yes"))
@@ -301,6 +313,13 @@ class KeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach
 
       result.isLeft shouldBe true
       result.left.toOption.get.formatted should include("Invalid table name")
+    }
+
+    "reject empty table names" in {
+      val result = SQLiteKeywordIndex.inMemory("   ")
+
+      result.isLeft shouldBe true
+      result.left.toOption.get.formatted should include("Table name must not be empty")
     }
 
     "allow SQLite-compatible table names longer than 63 characters" in {

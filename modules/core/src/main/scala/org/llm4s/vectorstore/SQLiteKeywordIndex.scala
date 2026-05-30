@@ -396,13 +396,13 @@ final class SQLiteKeywordIndex private (
 
 object SQLiteKeywordIndex {
 
-  private val ValidSqliteTableNamePattern = "^[a-zA-Z_][a-zA-Z0-9_]*$".r
+  private val ValidSqliteTableNamePattern: String = "^[a-zA-Z_][a-zA-Z0-9_]*$"
 
   private def validateTableName(tableName: String): Result[String] = {
     val trimmed = Option(tableName).map(_.trim).getOrElse("")
     if (trimmed.isEmpty)
       Left(ProcessingError("keyword-index", "Table name must not be empty"))
-    else if (!ValidSqliteTableNamePattern.matches(trimmed))
+    else if (!trimmed.matches(ValidSqliteTableNamePattern))
       Left(
         ProcessingError(
           "keyword-index",
