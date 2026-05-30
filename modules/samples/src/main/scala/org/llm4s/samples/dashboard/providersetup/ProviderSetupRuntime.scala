@@ -75,7 +75,7 @@ private[providersetup] object ProviderSetupRuntime:
           )
         )
       },
-      toCmd = result => Cmd.GCmd(result)
+      toCmd = Cmd.GCmd.apply
     )
 
   def resolveSession(
@@ -386,7 +386,7 @@ private[providersetup] object ProviderSetupRuntime:
           GlobalMsg.DemoResponseReceived(runDemoCompletion(providerConfig, entries, demoConfig, exchangeLogging, ctx))
         )
       },
-      toCmd = result => Cmd.GCmd(result)
+      toCmd = Cmd.GCmd.apply
     )
 
   def resolveCompareSession(
@@ -435,7 +435,7 @@ private[providersetup] object ProviderSetupRuntime:
         }
         Msg.Global(GlobalMsg.NoOp)
       },
-      toCmd = _ => Cmd.GCmd(Msg.Global(GlobalMsg.NoOp))
+      toCmd = Cmd.GCmd.apply
     )
 
   private def runDemoCompletion(

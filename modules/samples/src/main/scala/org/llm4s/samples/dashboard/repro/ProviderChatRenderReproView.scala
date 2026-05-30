@@ -1,39 +1,58 @@
 package org.llm4s.samples.dashboard.repro
 
 import org.llm4s.samples.dashboard.repro.ProviderChatRenderReproApp.{ Entry, Model, Role }
-import termflow.tui.{ Color, PromptHistory, RootNode, Style, VNode }
 import termflow.tui.*
 import termflow.tui.TuiPrelude.*
+import termflow.tui.widgets
 
-private def ProviderChatRenderReproView(model: Model) = {
-  val width              = math.max(model.terminalWidth, 72)
-  val height             = math.max(model.terminalHeight, 20)
-  val outerWidth         = math.max(68, width - 4)
-  val leftWidth          = weightedWidth(outerWidth, 1, Vector(42, 26), 0)
-  val rightWidth         = weightedWidth(outerWidth, 1, Vector(42, 26), 1)
-  val panelTop           = 6
-  val panelHeight        = math.max(10, height - 12)
-  val transcriptCapacity = math.max(1, panelHeight - 2)
-  val promptRow          = panelTop + panelHeight + 3
-  val renderedPrompt     = PromptHistory.renderWithPrefix(model.prompt, "repro> ")
+/**
+ * Modernized repro view using termflow 0.3.0 widgets:
+ *
+ *   - `widgets.LogView` renders the transcript with built-in wrap, scrollback,
+ *     and `LogView.Viewport` for mouse-wheel routing.
+ *   - `widgets.StatusBar` for the bottom inverse-video footer.
+ *   - `given Theme = Theme.dark` for a coherent palette across widgets.
+ *
+ * The two-panel transcript+sidebar layout is kept on absolute coordinates
+ * because the panel borders read more clearly than nested `Layout.Row` /
+ * `Layout.Column` for this case.
+ */
+private def ProviderChatRenderReproView(model: Model): RootNode =
+  given Theme = Theme.dark
 
-  val transcriptLines =
-    fixedPanelRows(renderVisibleTranscript(model.entries, leftWidth - 4, transcriptCapacity), transcriptCapacity)
-  val sidebarLines =
-    fixedPanelRows(
-      clipPanel(renderSidebar(model, rightWidth - 4), transcriptCapacity, "sidebar"),
-      transcriptCapacity
-    )
+  val width        = math.max(model.terminalWidth, 60)
+  val height       = math.max(model.terminalHeight, 16)
+  val outerWidth   = math.max(56, width - 2)
+  val leftWidth    = weightedWidth(outerWidth, 1, Vector(42, 26), 0)
+  val rightWidth   = weightedWidth(outerWidth, 1, Vector(42, 26), 1)
+  val panelTop     = 5
+  val panelHeight  = math.max(10, height - 9)
+  val statusBarRow = height - 1
+  val promptRow    = height
+
+  val transcriptOrigin = transcriptOriginFor(model)
+  val transcriptWidth  = transcriptWidthFor(model)
+  val transcriptHeight = transcriptHeightFor(model)
+
+  val renderedPrompt = PromptHistory.renderWithPrefix(model.prompt, "repro> ")
+
+  val sidebarLines = renderSidebar(model, rightWidth - 4).take(panelHeight - 2)
 
   val children: List[VNode] =
     List(
+      // Header.
       BoxNode(1.x, 1.y, outerWidth, 4, children = Nil, style = Style(border = true, fg = Color.Cyan)),
       TextNode(
         3.x,
         2.y,
         List("Provider Chat Render Repro".text(Style(fg = Color.Yellow, bold = true, underline = true)))
       ),
-      TextNode(3.x, 3.y, List(fixedWidth(model.status, outerWidth - 4).text(Style(fg = Color.Green)))),
+      TextNode(
+        3.x,
+        3.y,
+        List(fixedWidth(model.status, outerWidth - 4).text(Style(fg = Color.Green)))
+      ),
+      // Two-panel body: transcript (left) + session info (right).
       BoxNode(
         1.x,
         panelTop.y,
@@ -50,25 +69,36 @@ private def ProviderChatRenderReproView(model: Model) = {
         children = Nil,
         style = Style(border = true, fg = Color.Magenta)
       ),
-      TextNode(3.x, (panelTop + 1).y, List("Transcript".text(Style(fg = Color.Yellow, bold = true)))),
-      TextNode((leftWidth + 4).x, (panelTop + 1).y, List("Session".text(Style(fg = Color.Yellow, bold = true)))),
+      TextNode(3.x, panelTop.y, List(" Transcript ".text(Style(fg = Color.Yellow, bold = true)))),
       TextNode(
-        3.x,
-        (promptRow - 1).y,
-        List(
-          fixedWidth(
-            "Repro: seed, clear, help, quit | ArrowUp/Down recall prompt history",
-            outerWidth - 4
-          ).text(Style(fg = Color.Cyan))
-        )
+        (leftWidth + 4).x,
+        panelTop.y,
+        List(" Session ".text(Style(fg = Color.Yellow, bold = true)))
       )
     ) ++
-      transcriptLines.zipWithIndex.map { case (line, idx) =>
-        TextNode(3.x, (panelTop + 2 + idx).y, List(fixedWidth(line, leftWidth - 4).text))
-      } ++
+      // Modern: widgets.LogView replaces the hand-rolled transcript paginator.
+      widgets.LogView(
+        lines = transcriptLines(model.entries),
+        width = transcriptWidth,
+        height = transcriptHeight,
+        scrollOffset = model.scrollOffset,
+        at = transcriptOrigin,
+        wrap = true
+      ) ++
       sidebarLines.zipWithIndex.map { case (line, idx) =>
-        TextNode((leftWidth + 4).x, (panelTop + 2 + idx).y, List(fixedWidth(line, rightWidth - 4).text))
-      }
+        TextNode(
+          (leftWidth + 4).x,
+          (panelTop + 1 + idx).y,
+          List(fixedWidth(line, rightWidth - 4).text)
+        )
+      } :+
+      widgets.StatusBar(
+        left = " repro ",
+        center = s"entries ${model.entries.size}  •  seed-round ${model.seedRound}",
+        right = if model.autoTail then " auto-tail " else " paused ",
+        width = width,
+        at = Coord(1.x, statusBarRow.y)
+      )
 
   RootNode(
     width = width,
@@ -76,38 +106,62 @@ private def ProviderChatRenderReproView(model: Model) = {
     children = children,
     input = Some(
       InputNode(
-        3.x,
+        1.x,
         promptRow.y,
         renderedPrompt.text,
         Style(fg = Color.Green),
         cursor = renderedPrompt.cursorIndex,
-        lineWidth = outerWidth - 4
+        lineWidth = math.max(1, width - 1),
+        prefixLength = renderedPrompt.prefixLength
       )
     )
   )
-}
 
-private def renderVisibleTranscript(entries: Vector[Entry], width: Int, capacity: Int): List[String] =
-  if entries.isEmpty then
-    clipPanelFromEnd(wrap("No transcript entries yet. Type something or use `seed`.", width), capacity, "transcript")
+/** Convert the entries vector to a flat display-line buffer for `LogView.expand`. */
+def transcriptLines(entries: Vector[Entry]): Vector[String] =
+  if entries.isEmpty then Vector("No transcript entries yet. Type something or use `seed`.")
   else
-    val visibleLines = scala.collection.mutable.ListBuffer.empty[String]
-    var hiddenLines  = 0
+    entries
+      .flatMap(e => Vector(s"${e.label}: ${e.content}", ""))
+      .dropRight(1)
 
-    entries.reverseIterator.foreach { entry =>
-      val label = entry.role match
-        case Role.System    => "system"
-        case Role.User      => "you"
-        case Role.Assistant => "assistant"
-      val block = wrap(s"$label: ${entry.content}", width) ++ List("")
-      if visibleLines.length + block.length <= capacity then visibleLines.prependAll(block.reverseIterator)
-      else hiddenLines += block.length
-    }
+/** Top-left of the transcript pane, including a 1-cell border + 1-cell header offset. */
+def transcriptOriginFor(@scala.annotation.unused model: Model): Coord =
+  Coord(3.x, 6.y)
 
-    val lines = visibleLines.toList
-    if hiddenLines > 0 && capacity > 1 then
-      overflowLineFromTop(hiddenLines, "transcript") +: lines.takeRight(capacity - 1)
-    else lines.takeRight(capacity)
+/** Cell width of the transcript LogView viewport. */
+def transcriptWidthFor(model: Model): Int =
+  val width      = math.max(model.terminalWidth, 60)
+  val outerWidth = math.max(56, width - 2)
+  val leftWidth  = weightedWidth(outerWidth, 1, Vector(42, 26), 0)
+  math.max(8, leftWidth - 4)
+
+/** Cell height of the transcript LogView viewport. */
+def transcriptHeightFor(model: Model): Int =
+  val height      = math.max(model.terminalHeight, 16)
+  val panelHeight = math.max(10, height - 9)
+  math.max(2, panelHeight - 2)
+
+/**
+ * Mouse-wheel viewport rectangle for the transcript (termflow 0.4 feature).
+ * `LogView.scrollDelta` returns `Some(delta)` only when the wheel lands inside
+ * this rect — wheel events over the sidebar / prompt are ignored.
+ */
+def transcriptViewport(model: Model): widgets.LogView.Viewport =
+  widgets.LogView.Viewport(
+    transcriptOriginFor(model),
+    transcriptWidthFor(model),
+    transcriptHeightFor(model)
+  )
+
+/** Maximum scroll offset for the current entries + viewport size. */
+def transcriptMaxScroll(model: Model): Int =
+  widgets.LogView.maxScroll(
+    transcriptLines(model.entries),
+    transcriptWidthFor(model),
+    transcriptHeightFor(model),
+    wrap = true
+  )
 
 private def renderSidebar(model: Model, width: Int): List[String] =
   List(
@@ -124,29 +178,13 @@ private def renderSidebar(model: Model, width: Int): List[String] =
     "clear",
     "quit",
     "",
-    "Prompt history:",
-    "ArrowUp / ArrowDown",
+    "Scroll:",
+    "↑/↓  PgUp/PgDn",
+    "wheel · End",
     "",
     s"Seed round: ${model.seedRound}",
-    "",
     s"Entries: ${model.entries.length}"
   ).flatMap(line => wrap(line, width))
-
-private def clipPanel(lines: List[String], capacity: Int, area: String): List[String] =
-  val overflow = math.max(0, lines.length - capacity)
-  if overflow > 0 && capacity > 1 then lines.take(capacity - 1) :+ overflowLine(overflow, area)
-  else lines.take(capacity)
-
-private def clipPanelFromEnd(lines: List[String], capacity: Int, area: String): List[String] =
-  val overflow = math.max(0, lines.length - capacity)
-  if overflow > 0 && capacity > 1 then overflowLineFromTop(overflow, area) +: lines.takeRight(capacity - 1)
-  else lines.takeRight(capacity)
-
-private def fixedPanelRows(lines: List[String], capacity: Int): List[String] =
-  if capacity <= 0 then Nil
-  else
-    val filled = lines.take(capacity)
-    filled ++ List.fill(math.max(0, capacity - filled.length))("")
 
 private def weightedWidth(totalWidth: Int, gapWidth: Int, weights: Vector[Int], index: Int): Int =
   val gaps       = math.max(0, weights.length - 1) * math.max(0, gapWidth)
@@ -205,13 +243,7 @@ private def truncate(text: String, width: Int): String =
   else if width == 1 then "…"
   else text.take(width - 1) + "…"
 
-private def overflowLine(hiddenLines: Int, area: String): String =
-  s"... $hiddenLines more line(s) hidden in $area; enlarge terminal for more"
-
-private def overflowLineFromTop(hiddenLines: Int, area: String): String =
-  s"... $hiddenLines older line(s) hidden in $area; enlarge terminal for more"
-
-private val seedEntries: Vector[Entry] = Vector(
+private[repro] val seedEntries: Vector[Entry] = Vector(
   Entry(Role.System, "Repro ready. Use this sample to observe redraw behavior without any real llm requests."),
   Entry(Role.System, "Resize the terminal, type quickly, and use `seed` to grow the transcript.")
 )

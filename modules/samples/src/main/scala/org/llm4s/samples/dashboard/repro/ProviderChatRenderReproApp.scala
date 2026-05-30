@@ -10,7 +10,11 @@ object ProviderChatRenderReproApp:
     case User
     case Assistant
 
-  final case class Entry(role: Role, content: String)
+  final case class Entry(role: Role, content: String):
+    def label: String = role match
+      case Role.System    => "system"
+      case Role.User      => "you"
+      case Role.Assistant => "assistant"
 
   final case class Model(
     terminalWidth: Int,
@@ -18,7 +22,9 @@ object ProviderChatRenderReproApp:
     prompt: PromptHistory.State,
     entries: Vector[Entry],
     seedRound: Int,
-    status: String
+    status: String,
+    scrollOffset: Int = 0,
+    autoTail: Boolean = true
   )
 
   enum Msg:
@@ -26,6 +32,8 @@ object ProviderChatRenderReproApp:
     case ConsoleInputKey(key: KeyDecoder.InputKey)
     case ConsoleInputError(error: Throwable)
     case RunCommand(command: String)
+    case ScrollBy(delta: Int)
+    case ScrollToEnd
     case ExitRequested
 
   import Msg._
