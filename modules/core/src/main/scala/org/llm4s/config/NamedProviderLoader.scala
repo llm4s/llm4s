@@ -105,5 +105,6 @@ private[config] object NamedProviderLoader:
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(MistralConfig.DEFAULT_BASE_URL)
           MistralConfig.fromValues(section.model.asString, apiKey, baseUrl)
       case ProviderKind.BedrockAnthropic =>
-        val region = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_BEDROCK_ANTHROPIC_REGION)
-        Right(BedrockAnthropicConfig.fromValues(section.model.asString, region))
+        val region  = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_BEDROCK_ANTHROPIC_REGION)
+        val profile = section.organization
+        Right(BedrockAnthropicConfig.fromValues(section.model.asString, region, profile))

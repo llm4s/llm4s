@@ -7,6 +7,7 @@ import com.anthropic.models.messages.{
   RawMessageStreamEvent,
   ThinkingConfigEnabled
 }
+import software.amazon.awssdk.auth.credentials.{ AwsCredentialsProvider, DefaultCredentialsProvider, ProfileCredentialsProvider }
 import software.amazon.awssdk.regions.Region
 
 import scala.collection.mutable
@@ -50,12 +51,22 @@ class BedrockAnthropicClient(
 
   private val providerConfig: ProviderConfig = config
 
+  private val credentialsProvider: AwsCredentialsProvider = config.profile match {
+    case Some(profile) =>
+      ProfileCredentialsProvider.builder()
+        .profileName(profile)
+        .build()
+    case None =>
+      DefaultCredentialsProvider.create()
+  }
+
   private val client = AnthropicOkHttpClient
     .builder()
     .backend(
       BedrockBackend
         .builder()
         .region(Region.of(config.region))
+        .awsCredentialsProvider(credentialsProvider)
         .build()
     )
     .build()

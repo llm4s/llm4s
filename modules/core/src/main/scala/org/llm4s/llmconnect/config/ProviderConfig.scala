@@ -696,12 +696,13 @@ case class BedrockAnthropicConfig(
   region: String,
   model: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  profile: Option[String] = None
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.BedrockAnthropic
   override def toString: String =
-    s"BedrockAnthropicConfig(region=$region, model=$model, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion)"
+    s"BedrockAnthropicConfig(region=$region, model=$model, profile=${profile.getOrElse("default-chain")}, " +
+      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
 
 object BedrockAnthropicConfig:
   private val standardReserve = 4096
@@ -714,7 +715,8 @@ object BedrockAnthropicConfig:
 
   def fromValues(
     modelName: String,
-    region: String
+    region: String,
+    profile: Option[String] = None
   )(using resolver: ContextWindowResolver): BedrockAnthropicConfig =
     require(region.trim.nonEmpty, "Bedrock Anthropic region must be non-empty")
     val (cw, rc) = resolver.resolve(
@@ -728,5 +730,6 @@ object BedrockAnthropicConfig:
       region = region,
       model = modelName,
       contextWindow = cw,
-      reserveCompletion = rc
+      reserveCompletion = rc,
+      profile = profile
     )
