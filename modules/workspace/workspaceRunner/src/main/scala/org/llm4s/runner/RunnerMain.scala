@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch, DisableSyntax.NoKeywordFinally, DisableSyntax.NoSystemGetenv
 package org.llm4s.runner
 
 import org.llm4s.shared._
@@ -29,9 +30,7 @@ object RunnerMain extends cask.MainRoutes {
   implicit private val ec: ExecutionContext = ExecutionContext.fromExecutor(executor)
 
   // Get workspace path from environment variable or use default
-  // scalafix:off DisableSyntax.NoSystemGetenv
   private val workspacePath = Option(System.getenv("WORKSPACE_PATH")).getOrElse("/workspace")
-  // scalafix:on DisableSyntax.NoSystemGetenv
 
   // Detect host OS once and pass into the workspace interface (edge of configuration)
   private val isWindows: Boolean = System.getProperty("os.name").contains("Windows")
@@ -40,7 +39,6 @@ object RunnerMain extends cask.MainRoutes {
   // - If WORKSPACE_SANDBOX_PROFILE is not set or empty -> default to permissive (backwards compatible)
   // - If set to a known profile name -> use that profile (validated)
   // - If set to an unknown name -> log error and fail fast (do NOT silently weaken sandbox)
-  // scalafix:off DisableSyntax.NoSystemGetenv
   private val sandboxConfig: Option[WorkspaceSandboxConfig] = {
     val rawProfile = Option(System.getenv("WORKSPACE_SANDBOX_PROFILE")).map(_.trim)
 
@@ -64,7 +62,6 @@ object RunnerMain extends cask.MainRoutes {
         }
     }
   }
-  // scalafix:on DisableSyntax.NoSystemGetenv
 
   // Initialize workspace interface
   private val workspaceInterface     = new WorkspaceAgentInterfaceImpl(workspacePath, isWindows, sandboxConfig)

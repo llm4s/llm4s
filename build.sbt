@@ -55,7 +55,9 @@ inThisBuild(
     ThisBuild / (coverageReport / aggregate) := false,
     // --- scalafix ---
     ThisBuild / scalafixDependencies += "ch.epfl.scala" %% "scalafix-rules" % "0.12.1",
-    ThisBuild / scalafixOnCompile := false  // Disabled for now
+    // Run Scalafix on compile only in CI (not locally to avoid developer friction);
+    // local developers rely on pre-commit hooks and `sbt scalafixAll` for manual checks.
+    ThisBuild / scalafixOnCompile := sys.env.getOrElse("CI", "false").toBoolean
   )
 )
 

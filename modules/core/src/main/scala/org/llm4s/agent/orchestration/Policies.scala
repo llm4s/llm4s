@@ -1,4 +1,4 @@
-// scalafix:off
+// scalafix:off DisableSyntax.NoKeywordCatch
 package org.llm4s.agent.orchestration
 
 import org.llm4s.types.{ AsyncResult, AgentId }

@@ -41,6 +41,12 @@ class GlobPatternMatcherSpec extends AnyFlatSpec with Matchers with BeforeAndAft
     GlobPatternMatcher.matches("http://example.com/PAGE", "http://example.com/*") shouldBe true
   }
 
+  it should "fallback to literal matching for overlong patterns" in {
+    val longPattern = "A" * 1200
+    GlobPatternMatcher.matches(longPattern, longPattern) shouldBe true
+    GlobPatternMatcher.matches("different", longPattern) shouldBe false
+  }
+
   "GlobPatternMatcher.matchesAny" should "return true if any pattern matches" in {
     val patterns = Seq("http://a.com/*", "http://b.com/*", "http://c.com/*")
     GlobPatternMatcher.matchesAny("http://b.com/page", patterns) shouldBe true

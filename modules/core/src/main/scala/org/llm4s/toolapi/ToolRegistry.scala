@@ -345,6 +345,7 @@ object ToolRegistry {
     }
     sys.addShutdownHook {
       executor.shutdown()
+      // scalafix:off
       try
         if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
           executor.shutdownNow()
@@ -354,6 +355,7 @@ object ToolRegistry {
           executor.shutdownNow()
           Thread.currentThread().interrupt()
       }
+      // scalafix:on
     }
     executor
   }

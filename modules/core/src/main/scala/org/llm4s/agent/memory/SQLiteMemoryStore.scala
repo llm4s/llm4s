@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch, DisableSyntax.NoKeywordFinally
 package org.llm4s.agent.memory
 
 import org.llm4s.error.{ ConfigurationError, NotFoundError, ProcessingError }

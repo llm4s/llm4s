@@ -77,6 +77,54 @@ final class PrometheusMetrics(
     .classicUpperBounds(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0)
     .register(registry)
 
+  // Image generation counter
+  private val imageGenerationsTotal = Counter
+    .builder()
+    .name("llm4s_image_generations_total")
+    .help("Total number of image generation operations")
+    .labelNames("provider", "model", "operation", "status")
+    .register(registry)
+
+  // Image count counter
+  private val imagesGeneratedTotal = Counter
+    .builder()
+    .name("llm4s_images_generated_total")
+    .help("Total number of images generated")
+    .labelNames("provider", "model")
+    .register(registry)
+
+  // Image generation duration histogram
+  private val imageGenerationDuration = Histogram
+    .builder()
+    .name("llm4s_image_generation_duration_seconds")
+    .help("Image generation duration in seconds")
+    .labelNames("provider", "model", "operation")
+    .classicUpperBounds(1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0)
+    .register(registry)
+
+  // Image generation cost counter
+  private val imageGenerationCostUsdTotal = Counter
+    .builder()
+    .name("llm4s_image_generation_cost_usd_total")
+    .help("Total estimated image generation cost in USD")
+    .labelNames("provider", "model")
+    .register(registry)
+
+  // Image generation error counter (Issue #501 requirement)
+  private val imageGenerationErrorsTotal = Counter
+    .builder()
+    .name("llm4s_image_generation_errors_total")
+    .help("Total number of image generation errors")
+    .labelNames("provider", "model", "operation", "error_type")
+    .register(registry)
+
+  /** Convert ErrorKind to a stable snake_case label for metrics. */
+  private def errorKindToLabel(errorKind: ErrorKind): String = {
+    val kindStr   = errorKind.toString
+    val snakeCase = kindStr.replaceAll("([A-Z])", "_$1").toLowerCase.drop(1)
+    snakeCase
+  }
+
   /**
    * Record an LLM request with its outcome and duration.
    *
@@ -91,11 +139,7 @@ final class PrometheusMetrics(
     Try {
       val status = outcome match {
         case Outcome.Success          => "success"
-        case Outcome.Error(errorKind) =>
-          // Convert PascalCase to snake_case: RateLimit -> rate_limit
-          val kindStr   = errorKind.toString
-          val snakeCase = kindStr.replaceAll("([A-Z])", "_$1").toLowerCase.drop(1)
-          s"error_$snakeCase"
+        case Outcome.Error(errorKind) => s"error_${errorKindToLabel(errorKind)}"
       }
 
       requestsTotal.labelValues(provider, model, status).inc()
@@ -103,8 +147,7 @@ final class PrometheusMetrics(
 
       outcome match {
         case Outcome.Error(errorKind) =>
-          val errorLabel = errorKind.toString.toLowerCase
-          errorsTotal.labelValues(provider, errorLabel).inc()
+          errorsTotal.labelValues(provider, errorKindToLabel(errorKind)).inc()
         case _ => // No additional action for success
       }
     }.recover { case e: Exception =>
@@ -143,6 +186,60 @@ final class PrometheusMetrics(
       costUsdTotal.labelValues(provider, model).inc(costUsd)
     }.recover { case e: Exception =>
       logger.warn(s"Failed to record cost metrics: ${e.getMessage}")
+    }
+
+  /**
+   * Record an image generation operation.
+   *
+   * Safe: catches and logs any Prometheus errors without propagating.
+   */
+  override def observeImageGeneration(
+    provider: String,
+    model: String,
+    operation: String,
+    outcome: Outcome,
+    duration: FiniteDuration,
+    imageCount: Int
+  ): Unit =
+    Try {
+      val status = outcome match {
+        case Outcome.Success          => "success"
+        case Outcome.Error(errorKind) => s"error_${errorKindToLabel(errorKind)}"
+      }
+
+      imageGenerationsTotal.labelValues(provider, model, operation, status).inc()
+      imageGenerationDuration.labelValues(provider, model, operation).observe(duration.toMillis / 1000.0)
+
+      if (outcome == Outcome.Success && imageCount > 0) {
+        imagesGeneratedTotal.labelValues(provider, model).inc(imageCount.toDouble)
+      }
+
+      outcome match {
+        case Outcome.Error(errorKind) =>
+          val errorLabel = errorKindToLabel(errorKind)
+          errorsTotal.labelValues(provider, errorLabel).inc()
+          imageGenerationErrorsTotal.labelValues(provider, model, operation, errorLabel).inc()
+        case _ =>
+      }
+    }.recover { case e: Exception =>
+      logger.warn(s"Failed to record image generation metrics: ${e.getMessage}")
+    }
+
+  /**
+   * Record estimated image generation cost in USD.
+   *
+   * Safe: catches and logs any Prometheus errors without propagating.
+   */
+  override def recordImageGenerationCost(
+    provider: String,
+    model: String,
+    costUsd: Double,
+    imageCount: Int
+  ): Unit =
+    Try {
+      imageGenerationCostUsdTotal.labelValues(provider, model).inc(costUsd)
+    }.recover { case e: Exception =>
+      logger.warn(s"Failed to record image generation cost metrics: ${e.getMessage}")
     }
 }
 

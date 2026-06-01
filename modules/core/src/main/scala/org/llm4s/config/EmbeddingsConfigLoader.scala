@@ -1,4 +1,3 @@
-// scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
@@ -265,4 +264,3 @@ private[config] object EmbeddingsConfigLoader {
     } yield EmbeddingProviderConfig(baseUrl = baseUrl, model = model, apiKey = apiKey)
   }
 }
-// scalafix:on DisableSyntax.NoPureConfigDefault

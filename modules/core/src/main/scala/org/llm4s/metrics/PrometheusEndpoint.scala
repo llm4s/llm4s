@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.metrics
 
 import io.prometheus.metrics.model.registry.PrometheusRegistry

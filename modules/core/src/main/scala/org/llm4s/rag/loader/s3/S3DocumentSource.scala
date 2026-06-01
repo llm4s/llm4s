@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
 package org.llm4s.rag.loader.s3
 
 import org.llm4s.error.{ NetworkError, ProcessingError }

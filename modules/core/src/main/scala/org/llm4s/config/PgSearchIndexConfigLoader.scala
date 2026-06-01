@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.config
 
 import org.llm4s.error.ProcessingError

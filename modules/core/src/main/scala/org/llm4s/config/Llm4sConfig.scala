@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoConfigFactory, DisableSyntax.NoSysEnv, DisableSyntax.NoSystemGetenv, DisableSyntax.NoPureConfigDefault
 package org.llm4s.config
 
 import org.llm4s.llmconnect.ProviderExchangeLogging

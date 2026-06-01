@@ -163,6 +163,22 @@ class ConsoleTracing extends Tracing {
           println(s"${YELLOW}Reason: ${e.reason.value}$RESET")
           println()
 
+        case e: TraceEvent.ImageGenerationCompleted =>
+          println()
+          printSubHeader("IMAGE GENERATION COMPLETED", if (e.success) GREEN else RED)
+          println(s"${GRAY}Timestamp: ${e.timestamp}$RESET")
+          println(s"${GREEN}Model: ${e.model}$RESET")
+          println(s"${GREEN}Provider: ${e.provider}$RESET")
+          println(s"${GREEN}Operation: ${e.operation}$RESET")
+          println(s"${GREEN}Images: ${e.imageCount}$RESET")
+          println(s"${GREEN}Size: ${e.size}$RESET")
+          println(s"${GREEN}Quality: ${e.quality}$RESET")
+          println(s"${GREEN}Duration: ${e.durationMs}ms$RESET")
+          println(s"${GREEN}Success: ${e.success}$RESET")
+          e.costUsd.foreach(c => println(s"${YELLOW}Cost (USD): $$${f"$c%.6f"}$RESET"))
+          e.errorMessage.foreach(m => println(s"${RED}Error: $m$RESET"))
+          println()
+
         case e: TraceEvent.RAGOperationCompleted =>
           println()
           printSubHeader("RAG OPERATION COMPLETED", CYAN)

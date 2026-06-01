@@ -27,7 +27,7 @@ import scala.util.chaining._
  */
 object S3LoaderExample {
   private val logger = LoggerFactory.getLogger(getClass)
-  // S3/AWS config has no Llm4sConfig equivalent; sys.props/sys.env is acceptable here // scalafix:ok
+  // S3/AWS config has no Llm4sConfig equivalent; system env vars are acceptable here
   private def env(key: String): Option[String] =
     sys.props.get(key).orElse(sys.env.get(key)) // scalafix:ok NoSysEnv
   def main(args: Array[String]): Unit = {
@@ -65,8 +65,10 @@ object S3LoaderExample {
         ()
 
       case Right(rag) =>
+        // scalafix:off
         try runExample(rag, bucket, prefix, region, useLocalStack)
         finally rag.close()
+      // scalafix:on
     }
   }
 
@@ -144,7 +146,7 @@ object S3LoaderExample {
  */
 object S3LoaderAdvancedExample {
   private val logger = LoggerFactory.getLogger(getClass)
-  // S3/AWS config has no Llm4sConfig equivalent; sys.props/sys.env is acceptable here // scalafix:ok
+  // S3/AWS config has no Llm4sConfig equivalent; system env vars are acceptable here
   private def env(key: String): Option[String] =
     sys.props.get(key).orElse(sys.env.get(key)) // scalafix:ok NoSysEnv
   def main(args: Array[String]): Unit = {

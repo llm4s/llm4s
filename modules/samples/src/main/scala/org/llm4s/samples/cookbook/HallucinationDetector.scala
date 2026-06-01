@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.samples.cookbook
 
 import org.llm4s.config.Llm4sConfig

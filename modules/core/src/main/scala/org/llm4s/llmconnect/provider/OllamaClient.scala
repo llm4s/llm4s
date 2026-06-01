@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch, DisableSyntax.NoKeywordFinally
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ ExecutionError, NetworkError, ServiceError }

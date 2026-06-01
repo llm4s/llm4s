@@ -41,7 +41,22 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       // Extract the prompt to determine what kind of consolidation
       val prompt = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
 
-      val response = if (prompt.contains("conversation")) {
+      val response = if (prompt.contains("Return JSON array only")) {
+        """[
+          |  {
+          |    "entity_name": "Martin Odersky",
+          |    "entity_type": "person",
+          |    "fact": "Martin Odersky created Scala.",
+          |    "importance": 0.9
+          |  },
+          |  {
+          |    "entity_name": "Scala",
+          |    "entity_type": "technology",
+          |    "fact": "Scala is used for functional programming.",
+          |    "importance": 0.8
+          |  }
+          |]""".stripMargin
+      } else if (prompt.contains("conversation")) {
         "Consolidated conversation summary: User and assistant discussed various topics."
       } else if (prompt.contains("entity")) {
         "Consolidated entity description: An entity with multiple important characteristics."
@@ -68,6 +83,77 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     }
 
     // Implement other required methods
+    def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] =
+      complete(conversation, options)
+
+    def getContextWindow(): Int = 4096
+
+    def getReserveCompletion(): Int = 1024
+  }
+
+  /**
+   * Mock LLM client that returns malformed JSON for entity extraction prompts.
+   */
+  class MalformedEntityExtractionMockLLMClient extends LLMClient {
+    override def complete(
+      conversation: Conversation,
+      options: CompletionOptions
+    ): Result[Completion] = {
+      val prompt = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
+      val response =
+        if (prompt.contains("Return JSON array only")) "{not-valid-json]" else "Consolidated memory content."
+
+      Right(
+        Completion(
+          id = "mock-completion-malformed",
+          created = System.currentTimeMillis(),
+          content = response,
+          model = "mock-model",
+          message = AssistantMessage(response),
+          usage = None
+        )
+      )
+    }
+
+    def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] =
+      complete(conversation, options)
+
+    def getContextWindow(): Int = 4096
+
+    def getReserveCompletion(): Int = 1024
+  }
+
+  /**
+   * Mock LLM client that returns no entities.
+   */
+  class NoEntityExtractionMockLLMClient extends LLMClient {
+    override def complete(
+      conversation: Conversation,
+      options: CompletionOptions
+    ): Result[Completion] = {
+      val prompt   = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
+      val response = if (prompt.contains("Return JSON array only")) "[]" else "Consolidated memory content."
+
+      Right(
+        Completion(
+          id = "mock-completion-empty",
+          created = System.currentTimeMillis(),
+          content = response,
+          model = "mock-model",
+          message = AssistantMessage(response),
+          usage = None
+        )
+      )
+    }
+
     def streamComplete(
       conversation: Conversation,
       options: CompletionOptions,
@@ -113,6 +199,16 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
 
   def createFailingManager(): LLMMemoryManager = {
     val client = new FailingMockLLMClient()
+    LLMMemoryManager.forTesting(client)
+  }
+
+  def createMalformedExtractionManager(): LLMMemoryManager = {
+    val client = new MalformedEntityExtractionMockLLMClient()
+    LLMMemoryManager.forTesting(client)
+  }
+
+  def createNoEntityManager(): LLMMemoryManager = {
+    val client = new NoEntityExtractionMockLLMClient()
     LLMMemoryManager.forTesting(client)
   }
 
@@ -233,30 +329,47 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     (memories.toOption.get should have).length(1)
   }
 
-  it should "not change state when extractEntities is called (current placeholder behavior)" in {
+  it should "extract entity memories with importance scores and conversation metadata" in {
     val manager = createManager()
 
     val result = for {
-      m1 <- manager.recordUserFact("User prefers functional programming", Some("user-1"), Some(0.8))
-
-      beforeStats <- m1.stats
-      beforeAll   <- m1.store.recall(MemoryFilter.All, 100)
-
-      m2 <- m1.extractEntities("Scala was created by Martin Odersky", Some("conv-1"))
-
-      afterStats <- m2.stats
-      afterAll   <- m2.store.recall(MemoryFilter.All, 100)
-    } yield (
-      beforeStats.totalMemories,
-      afterStats.totalMemories,
-      beforeAll.length,
-      afterAll.length
-    )
+      m1        <- manager.recordUserFact("User prefers functional programming", Some("user-1"), Some(0.8))
+      extracted <- m1.extractEntities("Scala was created by Martin Odersky and used for FP", Some("conv-1"))
+      entities  <- extracted.store.recall(MemoryFilter.entities, 100)
+    } yield entities
 
     result.isRight shouldBe true
-    val (beforeTotal, afterTotal, beforeCount, afterCount) = result.toOption.get
+    val entities = result.toOption.get
 
-    afterTotal shouldBe beforeTotal
+    entities.length should be >= 2
+    entities.foreach { memory =>
+      memory.importance should not be None
+      memory.conversationId shouldBe Some("conv-1")
+      memory.getMetadata("entity_id") should not be None
+      memory.getMetadata("entity_name") should not be None
+      memory.getMetadata("entity_type") should not be None
+    }
+  }
+
+  it should "return error when entity extraction JSON is malformed" in {
+    val manager = createMalformedExtractionManager()
+
+    val result = manager.extractEntities("Scala was created by Martin Odersky", Some("conv-1"))
+
+    result.isLeft shouldBe true
+  }
+
+  it should "not add memories when entity extraction returns empty array" in {
+    val manager = createNoEntityManager()
+
+    val result = for {
+      before  <- manager.store.recall(MemoryFilter.All, 100)
+      updated <- manager.extractEntities("No notable entities here.", Some("conv-1"))
+      after   <- updated.store.recall(MemoryFilter.All, 100)
+    } yield (before.length, after.length)
+
+    result.isRight shouldBe true
+    val (beforeCount, afterCount) = result.toOption.get
     afterCount shouldBe beforeCount
   }
 

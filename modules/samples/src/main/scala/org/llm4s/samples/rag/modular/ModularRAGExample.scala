@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoKeywordFinally
 package org.llm4s.samples.rag.modular
 
 import org.llm4s.chunking.ChunkerFactory
