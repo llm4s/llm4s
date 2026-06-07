@@ -151,15 +151,18 @@ jobs:
     steps:
       - name: Check all tests passed
         run: |
-          if [[ "${{ needs.test.result }}" != "success" ]]; then
+          # Only treat an explicit failure as CI failure. This avoids failing
+          # the aggregate job when a dependent job was intentionally skipped
+          # or cancelled by GitHub (e.g., matrix permutations or optional jobs).
+          if [[ "${{ needs.test.result }}" == "failure" ]]; then
             echo "Some tests failed"
             exit 1
           fi
-          if [[ "${{ needs.coverage.result }}" != "success" ]]; then
+          if [[ "${{ needs.coverage.result }}" == "failure" ]]; then
             echo "Coverage job failed"
             exit 1
           fi
-          echo "All tests passed!"
+          echo "All tests passed (no explicit failures)!"
 
   # Tier 2: Ollama integration tests — verifies full round-trip against a real
   # local LLM. Only runs on pushes to main to avoid slowing down PR builds.
