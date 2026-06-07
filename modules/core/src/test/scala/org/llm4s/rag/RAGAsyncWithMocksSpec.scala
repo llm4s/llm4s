@@ -4,6 +4,7 @@ import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag.loader._
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -19,6 +20,8 @@ import scala.concurrent.ExecutionContext.Implicits.global
  * Tests for RAG async operations and Path-based ingestion using mock components.
  */
 class RAGAsyncWithMocksSpec extends AnyFlatSpec with Matchers with ScalaFutures {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   implicit val defaultPatience: PatienceConfig =
     PatienceConfig(timeout = Span(30, Seconds), interval = Span(100, Millis))

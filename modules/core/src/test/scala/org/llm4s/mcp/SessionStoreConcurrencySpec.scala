@@ -62,8 +62,7 @@ class SessionStoreConcurrencySpec extends AnyFunSpec with Matchers with BeforeAn
             val call = client.getTools()
             call.isRight should be(true)
 
-          } finally
-            client.close()
+          } finally client.close()
         }
       }
 

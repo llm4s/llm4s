@@ -1,6 +1,8 @@
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
 package org.llm4s.runner
 
 import org.llm4s.shared._
+import org.slf4j.LoggerFactory
 
 import java.io.{ BufferedWriter, PrintWriter }
 import java.nio.charset.{ Charset, StandardCharsets }
@@ -28,6 +30,8 @@ class WorkspaceAgentInterfaceImpl(
   isWindows: Boolean,
   sandboxConfig: Option[WorkspaceSandboxConfig] = None
 ) extends WorkspaceAgentInterface {
+
+  private val logger = LoggerFactory.getLogger(getClass)
 
   private val rootPath = Paths.get(workspaceRoot).toAbsolutePath.normalize()
 
@@ -441,15 +445,45 @@ class WorkspaceAgentInterfaceImpl(
             result
           }
 
-          val regex = Pattern.compile(pattern, regexFlags)
+          val caseInsensitive = patternFlags.contains("i")
+          val replaceGlobally = patternFlags.contains("g")
 
-          currentLines.map { line =>
-            val matcher = regex.matcher(line)
-            if (patternFlags.contains("g")) {
-              matcher.replaceAll(replacement)
-            } else {
-              matcher.replaceFirst(replacement)
-            }
+          // Literal-replacement fallback used when a pattern is rejected up front
+          // or a per-line match aborts (e.g. exceeds the ReDoS step budget). This
+          // changes regex semantics to plain substring replacement, so it is
+          // logged (once) rather than applied silently.
+          def literalReplace(line: String): String =
+            if (replaceGlobally)
+              WorkspaceRegexSafetyManager.replaceAllLiteral(line, pattern, replacement, caseInsensitive)
+            else
+              WorkspaceRegexSafetyManager.replaceFirstLiteral(line, pattern, replacement, caseInsensitive)
+
+          WorkspaceRegexSafetyManager.safeCompile(pattern, regexFlags) match {
+            case Right(regex) =>
+              var loggedRuntimeFallback = false
+              currentLines.map { line =>
+                val replaced =
+                  if (replaceGlobally) WorkspaceRegexSafetyManager.safeReplaceAll(regex, line, replacement)
+                  else WorkspaceRegexSafetyManager.safeReplaceFirst(regex, line, replacement)
+                replaced match {
+                  case Right(result) => result
+                  case Left(err) =>
+                    if (!loggedRuntimeFallback) {
+                      logger.warn(
+                        s"Regex replace aborted at runtime ($err) for pattern '$pattern'; " +
+                          "falling back to literal replacement for affected lines."
+                      )
+                      loggedRuntimeFallback = true
+                    }
+                    literalReplace(line)
+                }
+              }
+            case Left(err) =>
+              logger.warn(
+                s"Rejected unsafe or invalid replace regex '$pattern' ($err); " +
+                  "falling back to literal replacement."
+              )
+              currentLines.map(literalReplace)
           }
       }
     }
@@ -477,20 +511,26 @@ class WorkspaceAgentInterfaceImpl(
       )
     }
 
-    // Prepare regex pattern
+    // Prepare regex pattern. An unsafe/invalid regex degrades to literal
+    // substring search, which changes match semantics, so we log it rather than
+    // failing silently.
     val pattern = if (searchType == "literal") {
-      Pattern.compile(Pattern.quote(query))
+      WorkspaceRegexSafetyManager.compileLiteral(query)
     } else {
-      Try(Pattern.compile(query)) match {
-        case Success(p) => p
-        case Failure(e) =>
-          throw new WorkspaceAgentException(
-            s"Invalid regex pattern: ${e.getMessage}",
-            "INVALID_ARGUMENT",
-            None
+      WorkspaceRegexSafetyManager.safeCompile(query) match {
+        case Right(p) => p
+        case Left(err) =>
+          logger.warn(
+            s"Rejected unsafe or invalid search regex '$query' ($err); " +
+              "falling back to literal substring search."
           )
+          WorkspaceRegexSafetyManager.compileLiteral(query)
       }
     }
+    val literalFallbackPattern = WorkspaceRegexSafetyManager.compileLiteral(query)
+    // Set once if any per-line match aborts (e.g. exceeds the step budget) and we
+    // fall back to literal matching for that line.
+    var loggedRuntimeFallback = false
 
     // Collect all files to search
     val filesToSearch = paths.flatMap { path =>
@@ -535,9 +575,21 @@ class WorkspaceAgentInterfaceImpl(
 
       Try(Files.readAllLines(file, StandardCharsets.UTF_8).asScala.toList).toOption.foreach { lines =>
         for ((line, lineIndex) <- lines.zipWithIndex if !done) {
-          val matcher = pattern.matcher(line)
+          val isMatch =
+            WorkspaceRegexSafetyManager.safeFind(pattern, line) match {
+              case Right(m) => m
+              case Left(err) =>
+                if (!loggedRuntimeFallback) {
+                  logger.warn(
+                    s"Regex search aborted at runtime ($err) for query '$query'; " +
+                      "falling back to literal substring match for affected lines."
+                  )
+                  loggedRuntimeFallback = true
+                }
+                literalFallbackPattern.matcher(line).find()
+            }
 
-          if (matcher.find()) {
+          if (isMatch) {
             totalMatches += 1
 
             if (matches.size < defaultLimits.maxSearchResults) {

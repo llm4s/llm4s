@@ -8,7 +8,7 @@ import org.slf4j.LoggerFactory
  * Minimal example showing how to bootstrap an LLM client using PureConfig without any legacy reader.
  *
  * It:
- *  - Reads typed ProviderConfig via Llm4sConfig.provider()
+ *  - Reads typed ProviderConfig via Llm4sConfig.defaultProvider()
  *  - Builds an LLMConnect client from that typed config
  *  - Prints the selected model and provider details
  *
@@ -20,8 +20,10 @@ object Llm4sConfigProviderExample {
 
   def main(args: Array[String]): Unit = {
     val result = for {
-      providerCfg <- Llm4sConfig.provider()
-      client      <- LLMConnect.getClient(providerCfg)
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
     } yield (providerCfg, client)
 
     result.fold(

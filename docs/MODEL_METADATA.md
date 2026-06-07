@@ -39,28 +39,29 @@ Key methods:
 - `isDeprecated: Boolean` - Check if the model is deprecated
 - `description: String` - Get a human-readable description
 
-### ModelRegistry
+### ModelRegistryService
 
-The `ModelRegistry` object provides a singleton lookup service for model metadata:
+`ModelRegistryService` provides an immutable lookup service for model metadata.
+Applications build one instance at the boundary, usually from `Llm4sConfig`,
+and pass it down through the stack:
 
 ```scala
-// Initialize the registry (happens automatically on first use)
-ModelRegistry.initialize()
+val service = Llm4sConfig.modelRegistryService().toOption.get
 
 // Lookup a model
-val metadata = ModelRegistry.lookup("gpt-4o")
+val metadata = service.lookup("gpt-4o")
 
 // Lookup by provider and model name
-val metadata = ModelRegistry.lookup("openai", "gpt-4o")
+val metadata = service.lookup("openai", "gpt-4o")
 
 // List models by provider
-val openaiModels = ModelRegistry.listByProvider("openai")
+val openaiModels = service.listByProvider("openai")
 
 // Find models by capability
-val visionModels = ModelRegistry.findByCapability("vision")
+val visionModels = service.findByCapability("vision")
 
 // Get all providers
-val providers = ModelRegistry.listProviders()
+val providers = service.listProviders()
 ```
 
 ## Data Source
@@ -74,8 +75,8 @@ The system uses [LiteLLM's model metadata](https://github.com/BerriAI/litellm/bl
 
 The metadata file is:
 - **Embedded** in the library at compile time (`modules/core/src/main/resources/modeldata/litellm_model_metadata.json`)
-- **Updateable** at runtime from external sources
-- **Extensible** with custom model definitions
+- **Loadable** at boot from a classpath resource, local file, or URL
+- **Extensible** by constructing custom immutable registry snapshots
 
 ## Usage Examples
 
@@ -204,17 +205,13 @@ val customModel = ModelMetadata(
 ModelRegistry.register(customModel)
 ```
 
-### Loading Custom Metadata Files
+### Creating Custom Registry Snapshots
 
-You can override or extend the embedded metadata with a custom JSON file:
-
-**Option 1: Programmatic Loading (recommended)**
+You can build custom immutable registry snapshots from a JSON string or a custom file source:
 
 ```scala
-// Load from file
-ModelRegistry.loadCustomMetadata("/path/to/custom_models.json")
+val service = ModelRegistryService.fromFile("/path/to/custom_models.json").toOption.get
 
-// Load from JSON string
 val customJson = """{
   "my-model": {
     "litellm_provider": "custom",
@@ -225,10 +222,10 @@ val customJson = """{
   }
 }"""
 
-ModelRegistry.loadCustomMetadataFromString(customJson)
+val customService = ModelRegistryService.fromJsonString(customJson).toOption.get
 ```
 
-If you prefer to drive this from configuration or environment variables, read the value at the application edge (for example via `org.llm4s.config.Llm4sConfig` or `sys.env`) and then call `ModelRegistry.loadCustomMetadata(path)` explicitly during startup. The registry itself no longer reads `LLM4S_MODEL_METADATA_FILE` directly; this keeps configuration concerns separated from core metadata logic.
+If you prefer to drive this from configuration or environment variables, configure the metadata source at the application edge via `llm4s.modelRegistry.resourcePath`, `llm4s.modelRegistry.filePath`, or `llm4s.modelRegistry.url`, then build a `ModelRegistryService` with `org.llm4s.config.Llm4sConfig.modelRegistryService()` during startup. The metadata is loaded once at boot and then passed through the application as an immutable service.
 
 **Custom Metadata Format**
 
@@ -394,11 +391,13 @@ This example demonstrates:
 | `estimateCost(inputTokens: Int, outputTokens: Int): Option[Double]` | Estimate completion cost |
 | `estimateCostWithCaching(inputTokens: Int, cachedTokens: Int, outputTokens: Int): Option[Double]` | Estimate cost with caching |
 
-## Environment Variables
+## Configuration
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `LLM4S_MODEL_METADATA_FILE` | Path to custom metadata file | `/path/to/models.json` |
+| Key / Variable | Description | Example |
+|----------------|-------------|---------|
+| `llm4s.modelRegistry.filePath` / `LLM4S_MODEL_REGISTRY_FILE` | Path to a model metadata file loaded at boot | `/path/to/models.json` |
+| `llm4s.modelRegistry.url` / `LLM4S_MODEL_REGISTRY_URL` | URL to a model metadata file loaded at boot | `https://example.com/models.json` |
+| `llm4s.modelRegistry.resourcePath` / `LLM4S_MODEL_REGISTRY_RESOURCE` | Classpath resource containing model metadata | `/modeldata/litellm_model_metadata.json` |
 
 ## Best Practices
 

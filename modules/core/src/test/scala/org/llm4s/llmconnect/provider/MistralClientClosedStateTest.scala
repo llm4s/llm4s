@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.MistralConfig
 import org.llm4s.llmconnect.model.{ Conversation, CompletionOptions, UserMessage }
+import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -14,6 +15,8 @@ import org.scalatest.matchers.should.Matchers
  * - close() is idempotent (can be called multiple times safely)
  */
 class MistralClientClosedStateTest extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def createTestConfig: MistralConfig = MistralConfig(
     apiKey = "test-api-key-for-closed-state-testing",

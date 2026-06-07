@@ -24,6 +24,12 @@ object WavFileGenerator {
     override val context: Map[String, String] = Map.empty
   ) extends WavError
 
+  /** Bit depths supported by this module's PCM WAV writer and reader. */
+  val SupportedBitDepths: Set[Int] = Set(8, 16, 24, 32)
+
+  /** Maximum number of channels permitted (mono through 7.1 surround). */
+  val MaxChannels: Int = 8
+
   /**
    * Validate AudioMeta for correctness.
    * Only enforce minimal constraints (aligned with main + reviewer feedback).

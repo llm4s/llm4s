@@ -14,9 +14,9 @@ LLM4S supports multiple LLM providers through a unified API:
 - Azure OpenAI
 - Ollama (local models)
 
-Configure your provider using environment variables:
+Configure a default named provider using environment variables:
 ```bash
-export LLM_MODEL=openai/gpt-4o
+export LLM4S_PROVIDER=openai-main
 export OPENAI_API_KEY=sk-...
 ```
 
@@ -60,7 +60,7 @@ LLM4S uses `Llm4sConfig` for all configuration loading. Core logic should not ac
 
 ```scala
 // Good
-val providerCfg = Llm4sConfig.provider()
+val providerCfg = Llm4sConfig.defaultProvider()
 
 // Bad - don't do this
 val key = sys.env.get("API_KEY")

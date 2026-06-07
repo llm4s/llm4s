@@ -1,17 +1,22 @@
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
+import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.serialization.OpenRouterToolCallDeserializer
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.ToolRegistry
-import org.llm4s.types.Result
+import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.time.Duration
+import java.time.Instant
 import java.io.{ BufferedReader, InputStreamReader }
 import java.nio.charset.StandardCharsets
 import scala.util.Try
@@ -56,8 +61,11 @@ import scala.util.Try
  */
 class OpenRouterClient(
   config: OpenAIConfig,
-  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-) extends BaseLifecycleLLMClient {
+  protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+)(using val registryService: ModelRegistryService)
+    extends BaseLifecycleLLMClient {
+
   private val httpClient = HttpClient.newHttpClient()
 
   protected def clientDescription: String = s"OpenRouter client for model ${config.model}"
@@ -68,11 +76,13 @@ class OpenRouterClient(
     conversation: Conversation,
     options: CompletionOptions
   ): Result[Completion] = completeWithMetrics {
+    val startedAt = Instant.now()
     // Wrap entire body in Try so createRequestBody returns Left(error)
     // instead of throwing RuntimeException.
-    Try {
+    val result = Try {
       createRequestBody(conversation, options)
     }.toEither.left.map(_.toLLMError).flatMap { requestBody =>
+      val requestText = requestBody.render()
       val attempt =
         Try {
           val request = HttpRequest
@@ -82,7 +92,7 @@ class OpenRouterClient(
             .header("Authorization", s"Bearer ${config.apiKey}")
             .header("HTTP-Referer", "https://github.com/llm4s/llm4s") // Required by OpenRouter
             .header("X-Title", "LLM4S")                               // Required by OpenRouter
-            .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
+            .POST(HttpRequest.BodyPublishers.ofString(requestText))
             .build()
 
           httpClient.send(request, HttpResponse.BodyHandlers.ofString())
@@ -92,13 +102,18 @@ class OpenRouterClient(
       attempt.flatMap { response =>
         if (response.statusCode() >= 200 && response.statusCode() < 300) {
           Try(ujson.read(response.body())).toEither.left.map(_.toLLMError).flatMap { responseJson =>
-            Try(parseCompletion(responseJson)).toEither.left.map(_.toLLMError)
+            val completionResult = Try(parseCompletion(responseJson)).toEither.left.map(_.toLLMError)
+            recordExchange(startedAt, requestText, Some(response.body()), completionResult)
+            completionResult
           }
         } else {
-          HttpErrorMapper.mapHttpError(response.statusCode(), response.body(), providerName)
+          val errorResult = HttpErrorMapper.mapHttpError(response.statusCode(), response.body(), providerName)
+          recordExchange(startedAt, requestText, Some(response.body()), errorResult)
+          errorResult
         }
       }
     }
+    result.tapLeft(error => recordExchange(startedAt, "", None, Left(error)))
   }
 
   override def streamComplete(
@@ -106,13 +121,18 @@ class OpenRouterClient(
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = completeWithMetrics {
+    val startedAt = Instant.now()
     // Wrap entire body in Try so createRequestBody and other unprotected
     // code paths return Left(error) instead of throwing RuntimeException.
     Try {
       val requestBody = createRequestBody(conversation, options)
       requestBody("stream") = true
-      (requestBody, StreamingAccumulator.create())
-    }.toEither.left.map(_.toLLMError).flatMap { case (requestBody, accumulator) =>
+      (
+        requestBody.render(),
+        StreamingAccumulator.create(),
+        StringBuilder()
+      )
+    }.toEither.left.map(_.toLLMError).flatMap { case (requestText, streamAccumulator, rawStream) =>
       // Send the HTTP request, converting transport exceptions to Left
       val responseOrError = Try {
         val request = HttpRequest
@@ -123,11 +143,13 @@ class OpenRouterClient(
           .header("HTTP-Referer", "https://github.com/llm4s/llm4s")
           .header("X-Title", "LLM4S")
           .timeout(Duration.ofMinutes(5))
-          .POST(HttpRequest.BodyPublishers.ofString(requestBody.render()))
+          .POST(HttpRequest.BodyPublishers.ofString(requestText))
           .build()
-
         httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
-      }.toEither.left.map(_.toLLMError)
+      }.toResult
+        .tapLeft(error =>
+          recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
+        )
 
       // Check HTTP status, returning typed errors for known failure codes
       val streamOrError = responseOrError.flatMap { response =>
@@ -136,7 +158,9 @@ class OpenRouterClient(
         } else {
           val errorBody = Try(new String(response.body().readAllBytes(), StandardCharsets.UTF_8))
             .getOrElse("<error body unreadable>")
-          HttpErrorMapper.mapHttpError(response.statusCode(), errorBody, providerName)
+          val errorResult = HttpErrorMapper.mapHttpError(response.statusCode(), errorBody, providerName)
+          recordExchange(startedAt, requestText, Some(errorBody), errorResult)
+          errorResult
         }
       }
 
@@ -148,6 +172,7 @@ class OpenRouterClient(
           try {
             var line: String = null
             while ({ line = reader.readLine(); line != null }) {
+              rawStream.append(line).append('\n')
               sseParser.addChunk(line + "\n")
               while (sseParser.hasEvents)
                 sseParser.nextEvent().foreach { event =>
@@ -156,7 +181,7 @@ class OpenRouterClient(
                       val json   = ujson.read(data)
                       val chunks = parseStreamingChunks(json)
                       chunks.foreach { c =>
-                        accumulator.addChunk(c)
+                        streamAccumulator.addChunk(c)
                         onChunk(c)
                       }
                     }
@@ -170,12 +195,18 @@ class OpenRouterClient(
         }.toEither.left.map(_.toLLMError)
       }
 
-      attempt.flatMap(_ =>
-        accumulator.toCompletion.map { c =>
-          val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-          c.copy(model = config.model, estimatedCost = cost)
-        }
-      )
+      attempt
+        .flatMap(_ =>
+          streamAccumulator.toCompletion.map { c =>
+            val cost       = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+            val completion = c.copy(model = config.model, estimatedCost = cost)
+            recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
+            completion
+          }
+        )
+        .tapLeft(error =>
+          recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
+        )
     }
   }
 
@@ -239,6 +270,22 @@ class OpenRouterClient(
       Seq.empty
     }
   }
+
+  private def recordExchange(
+    startedAt: Instant,
+    requestBody: String,
+    responseBody: Option[String],
+    result: Result[Completion]
+  ): Unit =
+    ProviderExchangeRecorder.record(
+      exchangeLogging = exchangeLogging,
+      provider = providerName,
+      model = Some(config.model),
+      startedAt = startedAt,
+      requestBody = requestBody,
+      responseBody = responseBody,
+      result = result
+    )
 
   /**
    * Test-visible seam for request serialization; intentionally scoped to provider package to avoid broader API surface.
@@ -434,6 +481,13 @@ object OpenRouterClient {
   def apply(
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-  ): Result[OpenRouterClient] =
+  )(using ModelRegistryService): Result[OpenRouterClient] =
     Try(new OpenRouterClient(config, metrics)).toResult
+
+  def apply(
+    config: OpenAIConfig,
+    metrics: org.llm4s.metrics.MetricsCollector,
+    exchangeLogging: ProviderExchangeLogging
+  )(using ModelRegistryService): Result[OpenRouterClient] =
+    Try(new OpenRouterClient(config, metrics, exchangeLogging)).toResult
 }

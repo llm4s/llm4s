@@ -4,6 +4,7 @@ import com.anthropic.core.ObjectMappers
 import com.anthropic.models.messages.MessageCreateParams
 import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.model._
+import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -21,6 +22,8 @@ import org.scalatest.matchers.should.Matchers
  * No real network calls are made; we only test pure request-construction logic.
  */
 class AnthropicClientMessageBuildingTest extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val testConfig = AnthropicConfig(
     apiKey = "test-key",

@@ -336,6 +336,44 @@ class TraceCollectorTracing[F[_]](
             "hit"    -> SpanValue.BooleanValue(false)
           )
         )
+
+      case TraceEvent.ImageGenerationCompleted(
+            model,
+            provider,
+            operation,
+            imageCount,
+            size,
+            quality,
+            durationMs,
+            costUsd,
+            success,
+            errorMessage,
+            ts
+          ) =>
+        val baseAttrs: Map[String, SpanValue] = Map(
+          "model"       -> SpanValue.StringValue(model),
+          "provider"    -> SpanValue.StringValue(provider),
+          "operation"   -> SpanValue.StringValue(operation),
+          "image_count" -> SpanValue.LongValue(imageCount.toLong),
+          "size"        -> SpanValue.StringValue(size),
+          "quality"     -> SpanValue.StringValue(quality),
+          "duration_ms" -> SpanValue.LongValue(durationMs),
+          "success"     -> SpanValue.BooleanValue(success)
+        )
+        val costAttr  = costUsd.map(v => "cost_usd" -> SpanValue.DoubleValue(v))
+        val errorAttr = errorMessage.map(v => "error_message" -> SpanValue.StringValue(v))
+        val attrs     = baseAttrs ++ costAttr ++ errorAttr
+        Span(
+          spanId = SpanId.generate(),
+          traceId = traceId,
+          parentSpanId = None,
+          name = spanName,
+          kind = SpanKind.Internal,
+          startTime = ts.minusMillis(durationMs),
+          endTime = Some(ts),
+          status = if (success) SpanStatus.Ok else SpanStatus.Error(errorMessage.getOrElse("Image generation failed")),
+          attributes = attrs
+        )
     }
   }
 }

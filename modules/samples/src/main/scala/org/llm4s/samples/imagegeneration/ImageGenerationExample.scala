@@ -168,7 +168,7 @@ object ImageGenerationExample {
   def openAIGptImageExample(): Unit = {
     logger.info("\n--- OpenAI GPT Image Example (Opt-In) ---")
 
-    Llm4sConfig.provider() match {
+    Llm4sConfig.defaultProvider() match {
       case Left(_) =>
         logger.info("Skipping OpenAI GPT Image example (provider config not available)")
       case Right(providerCfg: org.llm4s.llmconnect.config.OpenAIConfig) =>

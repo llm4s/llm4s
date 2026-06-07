@@ -1,42 +1,40 @@
-Scalafix: Ban Environment Variable Access
+Scalafix: Configuration Boundary Enforcement
 
 Overview
-- Purpose: Prevent direct access to environment variables to encourage centralized configuration via `Llm4sConfig`.
-- Enforced APIs: `sys.env` and `java.lang.System.getenv(...)`.
-- Message: Violations emit guidance to use `Llm4sConfig`.
+- Purpose: Keep configuration loading at the application edge and discourage direct exception handling in favour of `Result[A]`.
+- Enforcement is global; legitimate exemptions are opt-in via `// scalafix:off` markers in source files.
 
-What's Included
+Rules enforced (`.scalafix.conf`, `DisableSyntax.regex`)
+- `NoConfigFactory` - bans `ConfigFactory` references.
+- `NoSysEnv` - bans `sys.env` references.
+- `NoSystemGetenv` - bans `System.getenv` references.
+- `NoPureConfigDefault` - bans `ConfigSource.default` references.
+- `NoKeywordTry` / `NoKeywordCatch` / `NoKeywordFinally` - prefer `Try(...).toResult` and `Result[A]` combinators.
+
+Configuration shape
+- All rules live under the canonical top-level path `DisableSyntax.regex`. scalafix only reads its regex list from this exact path; custom-named subblocks like `DisableSyntax.MyRules { regex = [...] }` are silently ignored. `ScalafixConfigurationBoundarySpec` enforces this structurally.
+- scalafix's `DisableSyntax` rule has no `excludePackages` or per-rule `fileFilter`. To exempt a file, use a `// scalafix:off` marker (optionally with a rule id) in the source.
+
+Plugin and rule type
 - Plugin: `sbt-scalafix` (see `project/plugins.sbt`).
-- Rule: Uses `DisableSyntax` with regex to flag:
-  - `sys.env`
-  - `System.getenv`
-  This approach is syntactic and does not require SemanticDB.
+- Rule type: syntactic regex (no SemanticDB required, works on Scala 2.13 and 3).
 
 Running Scalafix
-- Lint on compile: Disabled by default (`scalafixOnCompile := false`).
+- Compile-time enforcement: enabled in CI only (`scalafixOnCompile := sys.env.getOrElse("CI", "false").toBoolean`).
 - Manual run:
-  - `sbt scalafixAll` to check all modules.
-  - `sbt Test/scalafix` to check only test sources.
+  - `sbt scalafixAll` to lint every module.
+  - `sbt core/scalafix` to lint just core main sources.
 
-Violation Examples
-- `val v = sys.env("API_KEY")` → warning: use `Llm4sConfig`
-- `val v = System.getenv("API_KEY")` → warning: use `Llm4sConfig`
+Suppressing a finding
+- File-wide: put `// scalafix:off` (silences all rules) or `// scalafix:off DisableSyntax.NoSysEnv` (silences one) at the top of the file, before the `package` declaration.
+- Block: wrap the region with `// scalafix:off RuleId` / `// scalafix:on RuleId`.
+- Use sparingly; prefer fixing the violation. App-edge code (samples, workspace, the `org.llm4s.config` package) is the most common legitimate exemption.
 
-Suppressing a Finding (discouraged)
-- Next line only: add `// scalafix:ok NoSysEnv` or `// scalafix:ok NoSystemGetenv`.
-- Block scope: wrap with `// scalafix:off` and `// scalafix:on`.
-Use sparingly and document why the exception is necessary.
-
-Migration Guidance
-- Replace env access with a typed configuration layer, for example:
-  - Use `Llm4sConfig` to validate and load values (e.g., from Typesafe Config, system properties, or injected config), and use it at the app edge.
-  - Avoid hard dependencies on the process environment in library code; prefer dependency injection.
-
-Files Changed
-- `.scalafix.conf`: Adds `DisableSyntax` regex rules with custom messages.
-- `project/plugins.sbt`: Adds the `sbt-scalafix` plugin.
-- `build.sbt`: Disables `scalafixOnCompile` by default; use manual runs in CI or locally.
+Migration guidance
+- Load configuration at the app/test edge via `Llm4sConfig`.
+- Inject typed settings into core services rather than reading env vars or `ConfigSource.default` from library code.
+- Replace `try/catch` with `Try(...).toResult` and combinators on `Result[A]`.
 
 Notes
-- The rule is syntactic and works for both Scala 2.13 and Scala 3 without SemanticDB.
-- If you see false negatives for unusual code paths, please open an issue with a minimal repro so we can extend the rule.
+- CI and pre-commit run scalafix checks.
+- If you hit a false positive (e.g. a doc comment containing a banned token), prefer a `// scalafix:off DisableSyntax.<RuleId>` over loosening the regex.

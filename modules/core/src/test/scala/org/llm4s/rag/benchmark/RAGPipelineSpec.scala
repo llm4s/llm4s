@@ -2,6 +2,7 @@ package org.llm4s.rag.benchmark
 
 import org.llm4s.chunking.ChunkerFactory
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.rag.evaluation.EvaluationError
@@ -20,6 +21,8 @@ import scala.collection.mutable
  * is required.
  */
 class RAGPipelineSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   // =========================================================================
   // Test doubles

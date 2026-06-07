@@ -1,4 +1,4 @@
-// scalafix:off
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
 package org.llm4s.agent.orchestration
 
 import org.slf4j.MDC

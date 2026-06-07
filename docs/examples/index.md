@@ -234,10 +234,18 @@ export LLM_MODEL=ollama/llama2
 sbt "samples/runMain org.llm4s.samples.basic.OllamaStreamingExample"
 ```
 
+To enable raw provider exchange logging and write timestamped JSONL files to a specific directory:
+
+```bash
+export LLM_MODEL=ollama/llama2
+sbt "samples/runMain org.llm4s.samples.basic.OllamaStreamingExample /tmp/my-provider-exchanges"
+```
+
 **What it demonstrates:**
 - Local streaming
 - Ollama-specific features
 - Performance characteristics
+- Raw provider exchange logging to JSONL
 
 ---
 

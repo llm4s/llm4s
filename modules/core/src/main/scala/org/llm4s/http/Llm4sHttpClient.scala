@@ -1,5 +1,8 @@
 package org.llm4s.http
 
+import org.llm4s.error.{ ServiceError, ValidationError }
+import org.llm4s.types.{ Result, TryOps }
+
 import java.net.URI
 import java.net.URLEncoder
 import java.net.http.{ HttpClient => JHttpClient, HttpRequest, HttpResponse => JHttpResponse }
@@ -7,6 +10,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.time.Duration
 import java.util.UUID
+import scala.util.Try
 import scala.jdk.CollectionConverters._
 
 /**
@@ -21,6 +25,34 @@ case class HttpResponse(
   body: String,
   headers: Map[String, Seq[String]] = Map.empty
 )
+
+final case class JsonHttpResponse(
+  statusCode: Int,
+  body: ujson.Value,
+  headers: Map[String, Seq[String]] = Map.empty
+)
+
+object HttpResponse:
+  extension (response: HttpResponse)
+    def ensureSuccess(provider: String): Result[HttpResponse] =
+      if response.statusCode >= 200 && response.statusCode < 300 then Right(response)
+      else Left(ServiceError(response.statusCode, provider, response.body))
+
+    def toJson(fieldName: String = "responseBody"): Result[JsonHttpResponse] =
+      Try(ujson.read(response.body)).toResult.left
+        .map(err => ValidationError(fieldName, s"Failed to parse JSON response: ${err.message}"))
+        .map(json => JsonHttpResponse(response.statusCode, json, response.headers))
+
+  extension [A](result: Result[A])
+    def mapServiceError(
+      provider: String,
+      message: String
+    ): Result[A] =
+      result.left.map:
+        case service: ServiceError =>
+          ServiceError(service.httpStatus, provider, s"$message: ${service.message}")
+        case other =>
+          other
 
 /**
  * HTTP response wrapper for binary (non-text) response bodies.
@@ -75,6 +107,15 @@ trait Llm4sHttpClient {
     params: Map[String, String] = Map.empty,
     timeout: Int = 10000
   ): HttpResponse
+
+  def getResult(
+    url: String,
+    headers: Map[String, String] = Map.empty,
+    params: Map[String, String] = Map.empty,
+    timeout: Int = 10000
+  ): Result[HttpResponse] =
+    Try(get(url, headers, params, timeout)).toResult.left
+      .map(err => ServiceError(500, "http", s"GET request failed: ${err.message}"))
 
   def post(
     url: String,

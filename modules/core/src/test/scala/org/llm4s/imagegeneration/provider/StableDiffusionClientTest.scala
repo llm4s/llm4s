@@ -123,8 +123,7 @@ class StableDiffusionClientTest extends AnyFunSuite with Matchers with ScalaFutu
 
       val result = client.editImage(tempImage, "prompt")
       result should matchPattern { case Left(ServiceError(_, 500)) => }
-    } finally
-      Files.deleteIfExists(tempImage)
+    } finally Files.deleteIfExists(tempImage)
   }
 
   test("editImage handles connection error") {
@@ -136,8 +135,7 @@ class StableDiffusionClientTest extends AnyFunSuite with Matchers with ScalaFutu
 
       val result = client.editImage(tempImage, "prompt")
       result should matchPattern { case Left(UnknownError(_)) => }
-    } finally
-      Files.deleteIfExists(tempImage)
+    } finally Files.deleteIfExists(tempImage)
   }
 
   test("generateImages handles connection error") {

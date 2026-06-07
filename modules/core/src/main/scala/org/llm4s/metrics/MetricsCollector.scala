@@ -102,6 +102,40 @@ trait MetricsCollector {
     errorKind: ErrorKind,
     provider: String
   ): Unit = () // Default no-op
+
+  /**
+   * Record an image generation operation.
+   *
+   * @param provider Provider name (e.g., "openai", "stability-ai")
+   * @param model Model name (e.g., "gpt-image-1", "dall-e-3")
+   * @param operation Operation type: "generate" or "edit"
+   * @param outcome Success or Error with error kind
+   * @param duration Request duration
+   * @param imageCount Number of images generated
+   */
+  def observeImageGeneration(
+    provider: String,
+    model: String,
+    operation: String,
+    outcome: Outcome,
+    duration: FiniteDuration,
+    imageCount: Int
+  ): Unit = () // Default no-op
+
+  /**
+   * Record estimated image generation cost in USD.
+   *
+   * @param provider Provider name
+   * @param model Model name
+   * @param costUsd Estimated cost in USD
+   * @param imageCount Number of images
+   */
+  def recordImageGenerationCost(
+    provider: String,
+    model: String,
+    costUsd: Double,
+    imageCount: Int
+  ): Unit = () // Default no-op
 }
 
 object MetricsCollector {

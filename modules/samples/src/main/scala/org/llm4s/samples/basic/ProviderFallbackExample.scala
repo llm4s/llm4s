@@ -10,7 +10,7 @@ import org.slf4j.LoggerFactory
  * Provider fallback example demonstrating multi-provider support in LLM4S.
  *
  * This example shows:
- * - Loading configuration via Llm4sConfig.provider()
+ * - Loading configuration via Llm4sConfig.defaultProvider()
  * - Attempting a request across providers using fallback logic
  * - Running the same prompt across providers without changing application code
  * - Using the first provider that successfully generates a response
@@ -51,7 +51,7 @@ object ProviderFallbackExample extends App {
   //   1. The provider configured via Llm4sConfig (LLM_MODEL env var)
   //   2. A local Ollama fallback that requires no API key
   val configuredProvider: List[(String, ProviderConfig)] =
-    Llm4sConfig.provider() match {
+    Llm4sConfig.defaultProvider() match {
       case Right(cfg) => List("Configured" -> cfg)
       case Left(err) =>
         logger.info(s"No primary provider configured: ${err.formatted}")
@@ -74,16 +74,23 @@ object ProviderFallbackExample extends App {
     configuredProvider ++ ollamaFallback
 
   val providers: Seq[(String, LLMClient)] =
-    providerConfigs.flatMap { case (name, config) =>
-      LLMConnect.getClient(config) match {
-        case Right(client) =>
-          Some(name -> client)
-        case Left(error) =>
-          logger.info(
-            s"Failed to initialize provider: $name - ${error.formatted}"
-          )
-          None
-      }
+    Llm4sConfig.modelRegistryService() match {
+      case Left(error) =>
+        logger.info(s"Failed to initialize model registry service: ${error.formatted}")
+        Seq.empty
+      case Right(registryService) =>
+        given org.llm4s.model.ModelRegistryService = registryService
+        providerConfigs.flatMap { case (name, config) =>
+          LLMConnect.getClient(config) match {
+            case Right(client) =>
+              Some(name -> client)
+            case Left(error) =>
+              logger.info(
+                s"Failed to initialize provider: $name - ${error.formatted}"
+              )
+              None
+          }
+        }
     }
 
   def completeWithFallback(prompt: String): Either[String, String] = {

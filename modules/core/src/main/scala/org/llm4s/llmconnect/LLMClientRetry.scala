@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.llmconnect
 
 import org.llm4s.error.{ LLMError, RateLimitError, RecoverableError, ServiceError, SimpleError, ValidationError }
