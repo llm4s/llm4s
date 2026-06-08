@@ -157,12 +157,23 @@ jobs:
           # Only treat an explicit failure as CI failure. This avoids failing
           # the aggregate job when a dependent job was intentionally skipped
           # or cancelled by GitHub (e.g., matrix permutations or optional jobs).
-          if [[ "${{ needs.test.result }}" == "failure" ]]; then
-            echo "Some tests failed"
+          # Treat an explicit failure or an explicit cancellation of the
+          # test job as a CI failure. A cancellation (e.g., runner issue,
+          # timeout, or manual cancel) should surface so it can be
+          # investigated rather than letting the aggregate job pass.
+          if [[ "${{ needs.test.result }}" == "failure" || \
+                "${{ needs.test.result }}" == "cancelled" ]]; then
+            echo "Some tests failed or were cancelled"
             exit 1
           fi
-          if [[ "${{ needs.coverage.result }}" == "failure" ]]; then
-            echo "Coverage job failed"
+          # Treat an explicit failure or an explicit cancellation of the
+          # coverage job as a CI failure. A cancellation often indicates
+          # something went wrong running the coverage job (runners, timeouts,
+          # or manual cancel) and should be investigated rather than silently
+          # allowing the aggregate job to pass.
+          if [[ "${{ needs.coverage.result }}" == "failure" || \
+                "${{ needs.coverage.result }}" == "cancelled" ]]; then
+            echo "Coverage job failed or was cancelled"
             exit 1
           fi
           echo "All tests passed (no explicit failures)!"
