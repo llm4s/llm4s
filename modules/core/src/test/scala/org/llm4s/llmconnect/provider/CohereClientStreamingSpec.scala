@@ -180,13 +180,12 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers {
   // ===========================================================================
 
   it should "map HTTP 401 to AuthenticationError" in
-    withServer("/v2/chat")(exchange => sendJsonResponse(exchange, 401, """{"message":"Unauthorized"}""")) {
-      baseUrl =>
-        val client = new CohereClient(localConfig(baseUrl))
-        val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+    withServer("/v2/chat")(exchange => sendJsonResponse(exchange, 401, """{"message":"Unauthorized"}""")) { baseUrl =>
+      val client = new CohereClient(localConfig(baseUrl))
+      val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
 
-        result.isLeft shouldBe true
-        result.swap.toOption.get shouldBe an[AuthenticationError]
+      result.isLeft shouldBe true
+      result.swap.toOption.get shouldBe an[AuthenticationError]
     }
 
   it should "map HTTP 429 to RateLimitError" in
@@ -200,13 +199,12 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers {
     }
 
   it should "map HTTP 500 to ServiceError" in
-    withServer("/v2/chat")(exchange => sendJsonResponse(exchange, 500, """{"message":"Internal error"}""")) {
-      baseUrl =>
-        val client = new CohereClient(localConfig(baseUrl))
-        val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+    withServer("/v2/chat")(exchange => sendJsonResponse(exchange, 500, """{"message":"Internal error"}""")) { baseUrl =>
+      val client = new CohereClient(localConfig(baseUrl))
+      val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
 
-        result.isLeft shouldBe true
-        result.swap.toOption.get shouldBe a[ServiceError]
+      result.isLeft shouldBe true
+      result.swap.toOption.get shouldBe a[ServiceError]
     }
 
   it should "not invoke onChunk when the server returns an error status" in
@@ -225,45 +223,43 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers {
   // ===========================================================================
 
   it should "record a provider exchange with streaming request and SSE response body" in
-    withServer("/v2/chat")(exchange => sendSseResponse(exchange, cohereSseBody(Seq("Hello", " Cohere")))) {
-      baseUrl =>
-        val exchanges = ListBuffer.empty[ProviderExchange]
-        val sink = new ProviderExchangeSink:
-          override def record(e: ProviderExchange): Unit = exchanges += e
+    withServer("/v2/chat")(exchange => sendSseResponse(exchange, cohereSseBody(Seq("Hello", " Cohere")))) { baseUrl =>
+      val exchanges = ListBuffer.empty[ProviderExchange]
+      val sink = new ProviderExchangeSink:
+        override def record(e: ProviderExchange): Unit = exchanges += e
 
-        val client = new CohereClient(
-          localConfig(baseUrl),
-          exchangeLogging = ProviderExchangeLogging.enabled(sink)
-        )
-        val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+      val client = new CohereClient(
+        localConfig(baseUrl),
+        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      )
+      val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
 
-        result.isRight shouldBe true
-        exchanges should have size 1
-        val ex = exchanges.head
-        ex.provider shouldBe "cohere"
-        ex.model shouldBe Some("command-r")
-        ex.requestBody should include("\"stream\":true")
-        ex.requestBody should include("hello")
-        ex.responseBody.value should include("data:")
-        ex.responseBody.value should include("content-delta")
-        ex.errorMessage shouldBe empty
+      result.isRight shouldBe true
+      exchanges should have size 1
+      val ex = exchanges.head
+      ex.provider shouldBe "cohere"
+      ex.model shouldBe Some("command-r")
+      ex.requestBody should include("\"stream\":true")
+      ex.requestBody should include("hello")
+      ex.responseBody.value should include("data:")
+      ex.responseBody.value should include("content-delta")
+      ex.errorMessage shouldBe empty
     }
 
   it should "record a provider exchange with errorMessage when streaming returns an error" in
-    withServer("/v2/chat")(exchange => sendJsonResponse(exchange, 401, """{"message":"Unauthorized"}""")) {
-      baseUrl =>
-        val exchanges = ListBuffer.empty[ProviderExchange]
-        val sink = new ProviderExchangeSink:
-          override def record(e: ProviderExchange): Unit = exchanges += e
+    withServer("/v2/chat")(exchange => sendJsonResponse(exchange, 401, """{"message":"Unauthorized"}""")) { baseUrl =>
+      val exchanges = ListBuffer.empty[ProviderExchange]
+      val sink = new ProviderExchangeSink:
+        override def record(e: ProviderExchange): Unit = exchanges += e
 
-        val client = new CohereClient(
-          localConfig(baseUrl),
-          exchangeLogging = ProviderExchangeLogging.enabled(sink)
-        )
-        client.streamComplete(conversation, CompletionOptions(), _ => ())
+      val client = new CohereClient(
+        localConfig(baseUrl),
+        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      )
+      client.streamComplete(conversation, CompletionOptions(), _ => ())
 
-        exchanges should have size 1
-        exchanges.head.errorMessage shouldBe defined
+      exchanges should have size 1
+      exchanges.head.errorMessage shouldBe defined
     }
 
   // ===========================================================================
