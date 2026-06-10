@@ -142,11 +142,33 @@ jobs:
             **/target/scala-3.7.1/test-reports/
           retention-days: 5
 
+  # Binary compatibility check (MiMa)
+  mima-check:
+    name: Binary Compatibility (MiMa)
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Check binary compatibility
+        run: sbt mimaReportBinaryIssues
+
   # All tests must pass
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, coverage]
+    needs: [test, coverage, mima-check]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -160,6 +182,10 @@ jobs:
           fi
           if [[ "${{ needs.coverage.result }}" != "success" ]]; then
             echo "Coverage job failed"
+            exit 1
+          fi
+          if [[ "${{ needs.mima-check.result }}" != "success" ]]; then
+            echo "Binary compatibility check failed"
             exit 1
           fi
           echo "All tests passed!"

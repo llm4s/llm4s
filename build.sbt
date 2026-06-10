@@ -1,5 +1,6 @@
 import sbt.Keys._
 import scoverage.ScoverageKeys._
+import com.typesafe.tools.mima.core._
 import Common._
 
 inThisBuild(
@@ -174,6 +175,22 @@ lazy val core = (project in file("modules/core"))
       "-l", "org.llm4s.tags.OllamaRequired",
       "-l", "org.llm4s.tags.CloudSmoke"
     ),
+    // MiMa: check binary compatibility against the previous release.
+    // Internal packages (provider implementations, config loaders) are excluded
+    // since they are not part of the stable public API contract.
+    mimaPreviousArtifacts := Set("org.llm4s" %% "core" % "0.2.7"),
+    mimaFailOnNoPrevious  := false,
+    mimaBinaryIssueFilters ++= Seq(
+      ProblemFilters.exclude[Problem]("org.llm4s.llmconnect.provider.*"),
+      ProblemFilters.exclude[Problem]("org.llm4s.llmconnect.caching.*"),
+      ProblemFilters.exclude[Problem]("org.llm4s.llmconnect.encoding.*"),
+      ProblemFilters.exclude[Problem]("org.llm4s.config.RawProviders*"),
+      ProblemFilters.exclude[Problem]("org.llm4s.config.NamedProvider*"),
+      ProblemFilters.exclude[Problem]("org.llm4s.config.ProvidersConfig*"),
+      ProblemFilters.exclude[Problem]("org.llm4s.rag.loader.internal.*"),
+      ProblemFilters.exclude[Problem]("org.llm4s.runner.*"),
+      ProblemFilters.exclude[Problem]("org.llm4s.samples.*")
+    ),
     Compile / mainClass := None,
     Compile / discoveredMainClasses := Seq.empty,
     resolvers += "Vosk Repository" at "https://alphacephei.com/maven/",
@@ -280,6 +297,8 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
   .settings(
     name := "trace-opentelemetry",
     commonSettings,
+    mimaPreviousArtifacts := Set("org.llm4s" %% "trace-opentelemetry" % "0.2.7"),
+    mimaFailOnNoPrevious  := false,
     libraryDependencies ++= Seq(
       Deps.opentelemetryApi,
       Deps.opentelemetrySdk,
@@ -293,6 +312,8 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
     name             := "knowledgegraph-neo4j",
     commonSettings,
     Test / fork      := true,
+    mimaPreviousArtifacts := Set("org.llm4s" %% "knowledgegraph-neo4j" % "0.2.7"),
+    mimaFailOnNoPrevious  := false,
     libraryDependencies ++= Seq(
       Deps.neo4jDriver,
       Deps.scalatest % Test
