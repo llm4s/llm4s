@@ -128,8 +128,9 @@ class MistralClient(
         .flatMap { response =>
           Try {
             val sseParser = SSEParser.createStreamingParser()
-            val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
-            try {
+            scala.util.Using.resource(
+              new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
+            ) { reader =>
               var line: String = null
               while ({ line = reader.readLine(); line != null }) {
                 rawStream.append(line).append('\n')
@@ -149,9 +150,6 @@ class MistralClient(
                     }
                   }
               }
-            } finally {
-              Try(reader.close())
-              Try(response.body().close())
             }
           }.toEither.left.map { e =>
             val err = e.toLLMError
