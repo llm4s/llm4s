@@ -97,6 +97,7 @@ class MistralClient(
       val streamAccumulator = StreamingAccumulator.create()
       val rawStream         = StringBuilder()
 
+      // Network-level failure: record immediately and propagate.
       val responseOrError = Try {
         val request = HttpRequest
           .newBuilder()
@@ -107,10 +108,9 @@ class MistralClient(
           .POST(HttpRequest.BodyPublishers.ofString(requestText, StandardCharsets.UTF_8))
           .build()
         httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
-      }.toResult.tapLeft(error =>
-        recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
-      )
+      }.toResult.tapLeft(error => recordExchange(startedAt, requestText, None, Left(error)))
 
+      // HTTP error: record with response body and propagate.
       val streamOrError = responseOrError.flatMap { response =>
         if (response.statusCode() == 200) {
           Right(response)
@@ -123,37 +123,42 @@ class MistralClient(
         }
       }
 
-      val attempt = streamOrError.flatMap { response =>
-        Try {
-          val sseParser = SSEParser.createStreamingParser()
-          val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
-          try {
-            var line: String = null
-            while ({ line = reader.readLine(); line != null }) {
-              rawStream.append(line).append('\n')
-              sseParser.addChunk(line + "\n")
-              while (sseParser.hasEvents)
-                sseParser.nextEvent().foreach { event =>
-                  event.data.foreach { data =>
-                    if (data != "[DONE]") {
-                      val json   = ujson.read(data)
-                      val chunks = parseMistralStreamingChunks(json)
-                      chunks.foreach { c =>
-                        streamAccumulator.addChunk(c)
-                        onChunk(c)
+      // SSE parsing: record on I/O or parse failure.
+      streamOrError
+        .flatMap { response =>
+          Try {
+            val sseParser = SSEParser.createStreamingParser()
+            val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
+            try {
+              var line: String = null
+              while ({ line = reader.readLine(); line != null }) {
+                rawStream.append(line).append('\n')
+                sseParser.addChunk(line + "\n")
+                while (sseParser.hasEvents)
+                  sseParser.nextEvent().foreach { event =>
+                    event.data.foreach { data =>
+                      if (data != "[DONE]") {
+                        val json            = ujson.read(data)
+                        val (chunks, usage) = parseMistralStreamingChunk(json)
+                        usage.foreach { case (in, out) => streamAccumulator.updateTokens(in, out) }
+                        chunks.foreach { c =>
+                          streamAccumulator.addChunk(c)
+                          onChunk(c)
+                        }
                       }
                     }
                   }
-                }
+              }
+            } finally {
+              Try(reader.close())
+              Try(response.body().close())
             }
-          } finally {
-            Try(reader.close())
-            Try(response.body().close())
+          }.toEither.left.map { e =>
+            val err = e.toLLMError
+            recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(err))
+            err
           }
-        }.toEither.left.map(_.toLLMError)
-      }
-
-      attempt
+        }
         .flatMap(_ =>
           streamAccumulator.toCompletion.map { c =>
             val cost       = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
@@ -162,15 +167,14 @@ class MistralClient(
             completion
           }
         )
-        .tapLeft(error =>
-          recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
-        )
     }
   }
 
-  private def parseMistralStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
+  // Returns (chunks, Option[(promptTokens, completionTokens)]).
+  // Usage is present only in the last chunk of a Mistral streaming response.
+  private def parseMistralStreamingChunk(json: ujson.Value): (Seq[StreamedChunk], Option[(Int, Int)]) = {
     val choices = json("choices").arr
-    if (choices.nonEmpty) {
+    val chunks = if (choices.nonEmpty) {
       val choice       = choices(0)
       val delta        = choice("delta")
       val content      = delta.obj.get("content").flatMap(_.strOpt)
@@ -189,14 +193,29 @@ class MistralClient(
       if (toolCalls.isEmpty) {
         Seq(StreamedChunk(id = chunkId, content = content, toolCall = None, finishReason = finishReason))
       } else {
-        val first =
-          StreamedChunk(id = chunkId, content = content, toolCall = Some(toolCalls.head), finishReason = finishReason)
+        val first = StreamedChunk(
+          id = chunkId,
+          content = content,
+          toolCall = Some(toolCalls.head),
+          finishReason = finishReason
+        )
         val rest = toolCalls
           .drop(1)
           .map(tc => StreamedChunk(id = chunkId, content = None, toolCall = Some(tc), finishReason = None))
         Seq(first) ++ rest
       }
     } else Seq.empty
+
+    val usage = json.obj.get("usage").flatMap { u =>
+      val in  = u.obj.get("prompt_tokens").flatMap(_.numOpt).map(_.toInt)
+      val out = u.obj.get("completion_tokens").flatMap(_.numOpt).map(_.toInt)
+      (in, out) match {
+        case (Some(i), Some(o)) => Some((i, o))
+        case _                  => None
+      }
+    }
+
+    (chunks, usage)
   }
 
   override def getContextWindow(): Int = config.contextWindow

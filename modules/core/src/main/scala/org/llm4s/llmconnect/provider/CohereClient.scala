@@ -91,6 +91,7 @@ class CohereClient(
       val streamAccumulator = StreamingAccumulator.create()
       val rawStream         = StringBuilder()
 
+      // Network-level failure: record immediately and propagate.
       val responseOrError = Try {
         val request = HttpRequest
           .newBuilder()
@@ -101,10 +102,9 @@ class CohereClient(
           .POST(HttpRequest.BodyPublishers.ofString(requestText, StandardCharsets.UTF_8))
           .build()
         httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
-      }.toResult.tapLeft(error =>
-        recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
-      )
+      }.toResult.tapLeft(error => recordExchange(startedAt, requestText, None, Left(error)))
 
+      // HTTP error: record with response body and propagate.
       val streamOrError = responseOrError.flatMap { response =>
         if (response.statusCode() == 200) {
           Right(response)
@@ -117,30 +117,34 @@ class CohereClient(
         }
       }
 
-      val attempt = streamOrError.flatMap { response =>
-        Try {
-          val sseParser = SSEParser.createStreamingParser()
-          val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
-          try {
-            var line: String = null
-            while ({ line = reader.readLine(); line != null }) {
-              rawStream.append(line).append('\n')
-              sseParser.addChunk(line + "\n")
-              while (sseParser.hasEvents)
-                sseParser.nextEvent().foreach { event =>
-                  event.data.foreach { data =>
-                    parseCohereStreamingChunk(data, streamAccumulator).foreach(c => onChunk(c))
+      // SSE parsing: record on I/O or parse failure.
+      streamOrError
+        .flatMap { response =>
+          Try {
+            val sseParser = SSEParser.createStreamingParser()
+            val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
+            try {
+              var line: String = null
+              while ({ line = reader.readLine(); line != null }) {
+                rawStream.append(line).append('\n')
+                sseParser.addChunk(line + "\n")
+                while (sseParser.hasEvents)
+                  sseParser.nextEvent().foreach { event =>
+                    event.data.foreach { data =>
+                      parseCohereStreamingChunk(data, streamAccumulator).foreach(c => onChunk(c))
+                    }
                   }
-                }
+              }
+            } finally {
+              Try(reader.close())
+              Try(response.body().close())
             }
-          } finally {
-            Try(reader.close())
-            Try(response.body().close())
+          }.toEither.left.map { e =>
+            val err = e.toLLMError
+            recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(err))
+            err
           }
-        }.toEither.left.map(_.toLLMError)
-      }
-
-      attempt
+        }
         .flatMap(_ =>
           streamAccumulator.toCompletion.map { c =>
             val cost       = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
@@ -148,9 +152,6 @@ class CohereClient(
             recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
             completion
           }
-        )
-        .tapLeft(error =>
-          recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
         )
     }
   }
