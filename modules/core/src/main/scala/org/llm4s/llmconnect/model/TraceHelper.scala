@@ -1,7 +1,22 @@
 package org.llm4s.llmconnect.model
 import cats.implicits._
 
+/** Utility helpers for building Langfuse-compatible trace event JSON objects. */
 object TraceHelper {
+
+  /**
+   * Builds a generic trace-event JSON wrapper object, optionally including an output field.
+   *
+   * @param uuid      unique identifier for the envelope event
+   * @param now       ISO-8601 timestamp string representing the event time
+   * @param eventType Langfuse event type string (e.g. `"event-create"`, `"span-create"`)
+   * @param traceId   identifier of the parent trace this event belongs to
+   * @param idx       sequential index of the event within the trace
+   * @param input     JSON object describing the event input payload
+   * @param meta      JSON object carrying metadata for the event body
+   * @param output    optional JSON object describing the event output; omitted from body when `None`
+   * @return a `ujson.Obj` representing the complete trace event envelope
+   */
   def wrapper(
     uuid: String,
     now: String,
@@ -43,6 +58,18 @@ object TraceHelper {
       )
     }
 
+  /**
+   * Creates a Langfuse-compatible trace event JSON object for a single conversation message.
+   *
+   * @param message         the conversation message to record (user, system, assistant, or tool)
+   * @param uuid            unique identifier for the event envelope
+   * @param traceId         identifier of the parent trace this event belongs to
+   * @param idx             sequential index of the event within the trace
+   * @param now             ISO-8601 timestamp string representing the event time
+   * @param modelName       name of the LLM model used for generation events
+   * @param contextMessages preceding messages in the conversation, used to resolve tool-call names
+   * @return a `ujson.Obj` representing the typed trace event for the given message
+   */
   def createEvent(
     message: Message,
     uuid: String,

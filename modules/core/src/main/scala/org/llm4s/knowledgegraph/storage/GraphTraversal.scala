@@ -4,6 +4,7 @@ import org.llm4s.error.LLMError
 import org.llm4s.knowledgegraph.Node
 import org.llm4s.types.Result
 
+/** Graph traversal algorithms for the knowledge-graph storage layer. */
 private[storage] object GraphTraversal {
 
   import scala.annotation.tailrec

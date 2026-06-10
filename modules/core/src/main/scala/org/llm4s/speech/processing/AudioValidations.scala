@@ -5,6 +5,7 @@ import cats.implicits.catsSyntaxValidatedId
 import org.llm4s.error.ProcessingError
 import org.llm4s.speech.AudioMeta
 
+/** Validation helpers for raw audio data and its associated metadata. */
 object AudioValidations {
   private[processing] def validateFrameSize(
     input: (Array[Byte], AudioMeta)

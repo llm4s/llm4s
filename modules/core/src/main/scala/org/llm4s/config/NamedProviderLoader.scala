@@ -6,8 +6,16 @@ import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
 import pureconfig.ConfigSource
 
+/** Loads and resolves a named provider's `ProviderConfig` from a `ConfigSource`. */
 private[config] object NamedProviderLoader:
 
+  /**
+   * Loads the `ProviderConfig` for a single named provider from the given config source.
+   *
+   *  @param source       the PureConfig source to read from
+   *  @param providerName the name of the provider entry to look up
+   *  @return `Right(ProviderConfig)` on success, or `Left` with a `ConfigurationError`
+   */
   def load(source: ConfigSource, providerName: String)(using ContextWindowResolver): Result[ProviderConfig] =
     val trimmed = providerName.trim
     if trimmed.isEmpty then Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
@@ -20,6 +28,12 @@ private[config] object NamedProviderLoader:
         config <- buildConfigFromNamedConfig(trimmed, normalized)
       yield config
 
+  /**
+   * Loads all named provider configs from the given config source, returning errors and successes separately.
+   *
+   *  @param source the PureConfig source to read from
+   *  @return `Right` of a pair: failed entries mapped to their errors, and successful entries mapped to their configs
+   */
   def loadProviderConfigs(
     source: ConfigSource
   )(using ContextWindowResolver): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
@@ -29,6 +43,12 @@ private[config] object NamedProviderLoader:
       r              = getProviderConfigs(namedProviders)
     yield r
 
+  /**
+   * Converts a map of validated named provider configs into separate error and success maps.
+   *
+   *  @param namedProviders the validated named providers to process
+   *  @return a pair: provider names mapped to build errors, and provider names mapped to resolved `ProviderConfig`s
+   */
   def getProviderConfigs(
     namedProviders: Map[ProviderName, NamedProviderConfig]
   )(using ContextWindowResolver): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
