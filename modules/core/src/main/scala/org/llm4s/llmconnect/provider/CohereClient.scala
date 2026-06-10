@@ -1,14 +1,17 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.{ ConfigurationError, ValidationError }
+import org.llm4s.error.ValidationError
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.CohereConfig
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.provider.ProviderResultOps.*
+import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.Result
+import org.llm4s.types.{ Result, TryOps }
 
+import java.io.{ BufferedReader, InputStreamReader }
 import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
@@ -17,13 +20,13 @@ import java.time.Instant
 import scala.util.Try
 
 /**
- * Minimal Cohere provider client (v2 scope).
+ * Cohere provider client (v2 API).
  *
  * Supported:
  * - Non-streaming chat completion via Cohere v2 `/chat` API.
+ * - Streaming via SSE using the Cohere v2 streaming event format.
  *
- * Intentionally not supported in v2:
- * - Streaming
+ * Intentionally not supported:
  * - Tool calling
  * - Embeddings
  * - Multimodal inputs
@@ -80,15 +83,124 @@ class CohereClient(
     conversation: Conversation,
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] =
-    // TODO: When Cohere streaming is implemented here, add raw streaming
-    // exchange capture using the same completed-or-partial logging contract
-    // used by the other streaming-capable providers.
-    Left(
-      ConfigurationError(
-        "Cohere streaming is not supported in this minimal v2 provider implementation"
+  ): Result[Completion] = completeWithMetrics {
+    val startedAt = Instant.now()
+    buildChatRequest(conversation, options).flatMap { requestBody =>
+      requestBody("stream") = true
+      val requestText       = requestBody.render()
+      val streamAccumulator = StreamingAccumulator.create()
+      val rawStream         = StringBuilder()
+
+      val responseOrError = Try {
+        val request = HttpRequest
+          .newBuilder()
+          .uri(URI.create(s"${config.baseUrl}/v2/chat"))
+          .header("Content-Type", "application/json")
+          .header("Authorization", s"Bearer ${config.apiKey}")
+          .timeout(Duration.ofMinutes(5))
+          .POST(HttpRequest.BodyPublishers.ofString(requestText, StandardCharsets.UTF_8))
+          .build()
+        httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
+      }.toResult.tapLeft(error =>
+        recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
       )
-    )
+
+      val streamOrError = responseOrError.flatMap { response =>
+        if (response.statusCode() == 200) {
+          Right(response)
+        } else {
+          val errorBody = Try(new String(response.body().readAllBytes(), StandardCharsets.UTF_8))
+            .getOrElse("<error body unreadable>")
+          val errorResult = HttpErrorMapper.mapHttpError(response.statusCode(), errorBody, providerName)
+          recordExchange(startedAt, requestText, Some(errorBody), errorResult)
+          errorResult
+        }
+      }
+
+      val attempt = streamOrError.flatMap { response =>
+        Try {
+          val sseParser = SSEParser.createStreamingParser()
+          val reader    = new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))
+          try {
+            var line: String = null
+            while ({ line = reader.readLine(); line != null }) {
+              rawStream.append(line).append('\n')
+              sseParser.addChunk(line + "\n")
+              while (sseParser.hasEvents)
+                sseParser.nextEvent().foreach { event =>
+                  event.data.foreach { data =>
+                    parseCohereStreamingChunk(data, streamAccumulator).foreach(c => onChunk(c))
+                  }
+                }
+            }
+          } finally {
+            Try(reader.close())
+            Try(response.body().close())
+          }
+        }.toEither.left.map(_.toLLMError)
+      }
+
+      attempt
+        .flatMap(_ =>
+          streamAccumulator.toCompletion.map { c =>
+            val cost       = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+            val completion = c.copy(model = config.model, estimatedCost = cost)
+            recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
+            completion
+          }
+        )
+        .tapLeft(error =>
+          recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
+        )
+    }
+  }
+
+  private def parseCohereStreamingChunk(data: String, accumulator: StreamingAccumulator): Option[StreamedChunk] =
+    Try(ujson.read(data)).toOption.flatMap { json =>
+      json.obj.get("type").flatMap(_.strOpt) match {
+        case Some("message-start") =>
+          val id    = json.obj.get("id").flatMap(_.strOpt).getOrElse("")
+          val chunk = StreamedChunk(id = id, content = None, toolCall = None, finishReason = None)
+          accumulator.addChunk(chunk)
+          None
+
+        case Some("content-delta") =>
+          val textOpt = json.obj
+            .get("delta")
+            .flatMap(_.obj.get("message"))
+            .flatMap(_.obj.get("content"))
+            .flatMap(_.obj.get("text"))
+            .flatMap(_.strOpt)
+          textOpt.map { text =>
+            val chunk = StreamedChunk(id = "", content = Some(text), toolCall = None, finishReason = None)
+            accumulator.addChunk(chunk)
+            chunk
+          }
+
+        case Some("message-end") =>
+          val finishReason = json.obj
+            .get("delta")
+            .flatMap(_.obj.get("finish_reason"))
+            .flatMap(_.strOpt)
+          json.obj
+            .get("delta")
+            .flatMap(_.obj.get("usage"))
+            .flatMap(_.obj.get("tokens"))
+            .foreach { tokens =>
+              val input  = tokens.obj.get("input_tokens").flatMap(_.numOpt).map(_.toInt)
+              val output = tokens.obj.get("output_tokens").flatMap(_.numOpt).map(_.toInt)
+              (input, output) match {
+                case (Some(in), Some(out)) => accumulator.updateTokens(in, out)
+                case _                     => ()
+              }
+            }
+          val chunk = StreamedChunk(id = "", content = None, toolCall = None, finishReason = finishReason)
+          accumulator.addChunk(chunk)
+          None
+
+        case _ => None
+      }
+    }
 
   override def getContextWindow(): Int = config.contextWindow
 
