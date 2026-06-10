@@ -94,6 +94,36 @@ class MistralClientStreamingSpec extends AnyFlatSpec with Matchers {
       result.toOption.get.content shouldBe ""
     }
 
+  it should "handle a chunk with an empty choices array (usage-only chunk)" in
+    withServer("/v1/chat/completions") { exchange =>
+      val emptyChoices =
+        """data: {"id":"chatcmpl-test","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}"""
+      sendSseResponse(exchange, s"$emptyChoices\n\ndata: [DONE]\n\n")
+    } { baseUrl =>
+      val client = new MistralClient(localConfig(baseUrl))
+      val chunks = ListBuffer.empty[StreamedChunk]
+      val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
+
+      result.isRight shouldBe true
+      chunks shouldBe empty
+      result.toOption.get.content shouldBe ""
+      result.toOption.get.usage.get.promptTokens shouldBe 3
+    }
+
+  it should "tolerate a chunk whose usage field has no recognised token counts" in
+    withServer("/v1/chat/completions") { exchange =>
+      val noTokens =
+        """data: {"id":"chatcmpl-test","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}],"usage":{}}"""
+      sendSseResponse(exchange, s"$noTokens\n\ndata: [DONE]\n\n")
+    } { baseUrl =>
+      val client = new MistralClient(localConfig(baseUrl))
+      val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+
+      result.isRight shouldBe true
+      result.toOption.get.content shouldBe "hi"
+      result.toOption.get.usage shouldBe None
+    }
+
   it should "populate the returned completion id from SSE chunk ids" in
     withServer("/v1/chat/completions") { exchange =>
       sendSseResponse(exchange, openAISseBody(Seq("Hi"), "mistral-small-latest"))

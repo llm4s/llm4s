@@ -142,6 +142,22 @@ class CohereClientStreamingSpec extends AnyFlatSpec with Matchers {
       result.toOption.get.content shouldBe ""
     }
 
+  it should "handle message-end with missing or incomplete token counts gracefully" in
+    withServer("/v2/chat") { exchange =>
+      val missingTokens =
+        "data: {\"type\":\"message-start\",\"id\":\"x\"}\n\n" +
+          "data: {\"type\":\"content-delta\",\"index\":0,\"delta\":{\"message\":{\"content\":{\"text\":\"hi\"}}}}\n\n" +
+          "data: {\"type\":\"message-end\",\"delta\":{\"finish_reason\":\"COMPLETE\",\"usage\":{\"tokens\":{}}}}\n\n"
+      sendSseResponse(exchange, missingTokens)
+    } { baseUrl =>
+      val client = new CohereClient(localConfig(baseUrl))
+      val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+
+      result.isRight shouldBe true
+      result.toOption.get.content shouldBe "hi"
+      result.toOption.get.usage shouldBe None
+    }
+
   it should "set stream:true in the outgoing request body" in
     withServer("/v2/chat") { exchange =>
       val body = new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)

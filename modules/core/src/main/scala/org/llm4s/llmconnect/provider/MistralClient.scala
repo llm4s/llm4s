@@ -7,7 +7,7 @@ import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.MistralConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
-import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
+import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.{ Result, TryOps }
 
@@ -177,31 +177,8 @@ class MistralClient(
       val delta        = choice("delta")
       val content      = delta.obj.get("content").flatMap(_.strOpt)
       val finishReason = choice.obj.get("finish_reason").flatMap(_.strOpt).filter(r => r != "null" && r.nonEmpty)
-      val toolCalls = delta.obj.get("tool_calls").map(_.arr).getOrElse(Seq.empty).collect {
-        case call if call.obj.contains("function") =>
-          val function = call("function")
-          val rawArgs  = function.obj.get("arguments").flatMap(_.strOpt).getOrElse("")
-          ToolCall(
-            id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
-            name = function.obj.get("name").flatMap(_.strOpt).getOrElse(""),
-            arguments = StreamingToolArgumentParser.parse(rawArgs)
-          )
-      }
-      val chunkId = json.obj.get("id").flatMap(_.strOpt).getOrElse("")
-      if (toolCalls.isEmpty) {
-        Seq(StreamedChunk(id = chunkId, content = content, toolCall = None, finishReason = finishReason))
-      } else {
-        val first = StreamedChunk(
-          id = chunkId,
-          content = content,
-          toolCall = Some(toolCalls.head),
-          finishReason = finishReason
-        )
-        val rest = toolCalls
-          .drop(1)
-          .map(tc => StreamedChunk(id = chunkId, content = None, toolCall = Some(tc), finishReason = None))
-        Seq(first) ++ rest
-      }
+      val chunkId      = json.obj.get("id").flatMap(_.strOpt).getOrElse("")
+      Seq(StreamedChunk(id = chunkId, content = content, toolCall = None, finishReason = finishReason))
     } else Seq.empty
 
     val usage = json.obj.get("usage").flatMap { u =>
