@@ -3,7 +3,7 @@
 All notable changes to llm4s are documented here.
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
-Versioning: [Semantic Versioning](https://semver.org/). Binary compatibility is enforced by MiMa from this release forward — see [API Stability](docs/reference/api-stability.md).
+Versioning: [Semantic Versioning](https://semver.org/). Binary compatibility is enforced by MiMa against the previous release — see [API Stability](docs/reference/api-stability.md).
 
 ---
 

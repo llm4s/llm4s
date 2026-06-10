@@ -88,4 +88,4 @@ mimaBinaryIssueFilters ++= Seq(
 sbt mimaReportBinaryIssues
 ```
 
-This reports all binary incompatibilities between the current code and the previous release (`0.2.7`). Zero output means the public API is compatible.
+This reports all binary incompatibilities between the current code and the previous release (`0.3.2`). Zero output means the public API is compatible.
