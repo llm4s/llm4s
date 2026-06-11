@@ -1,24 +1,42 @@
 package org.llm4s.llmconnect.provider
 
+import com.anthropic.core.ObjectMappers
+import com.anthropic.models.messages.MessageCreateParams
+import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.model._
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.Schema
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import com.anthropic.models.messages.MessageCreateParams
 
 class AnthropicStructuredOutputSpec extends AnyFlatSpec with Matchers {
 
-  val dummyConfig: AnthropicConfig = AnthropicConfig.fromValues(
-    "claude-3-5-sonnet-20241022",
-    "sk-ant-dummy",
-    "https://api.anthropic.com"
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+
+  private val testConfig = AnthropicConfig(
+    apiKey            = "sk-ant-dummy",
+    model             = "claude-3-5-sonnet-20241022",
+    baseUrl           = "https://api.anthropic.com",
+    contextWindow     = 200000,
+    reserveCompletion = 4096
   )
-  val client: AnthropicClient = new AnthropicClient(dummyConfig)
+
+  private val client = new AnthropicClient(testConfig)
 
   val invoiceSchema = Schema
     .`object`[AnyRef]("Invoice schema")
     .withRequiredField("vendor", Schema.string("Vendor name"))
     .withRequiredField("amount", Schema.number("Amount"))
+
+  private def buildParamsJson(conversation: Conversation, opts: CompletionOptions = CompletionOptions()): String = {
+    val builder = MessageCreateParams
+      .builder()
+      .model("claude-3-5-sonnet-20241022")
+      .maxTokens(1024)
+    client.addMessagesToParams(conversation, builder, opts)
+    val params = builder.build()
+    ObjectMappers.jsonMapper().writeValueAsString(params._body())
+  }
 
   // ---- appendJsonInstruction ----
 
@@ -51,56 +69,37 @@ class AnthropicStructuredOutputSpec extends AnyFlatSpec with Matchers {
     result should include("\"vendor\"")
   }
 
-  // ---- addMessagesToParams ----
+  // ---- addMessagesToParams via JSON serialisation ----
 
-  def freshBuilder(): MessageCreateParams.Builder =
-    MessageCreateParams.builder().model("claude-3-5-sonnet-20241022").maxTokens(1024)
-
-  "addMessagesToParams" should "inject default system message when conversation has no system message" in {
-    val conv    = Conversation(Seq(UserMessage("hi")))
-    val builder = freshBuilder()
-    client.addMessagesToParams(conv, builder)
-    val params  = builder.build()
-    params.system().isPresent shouldBe true
-    params.system().get().asText().get().text() should include("Claude")
+  "addMessagesToParams" should "inject default system message when conversation has no SystemMessage" in {
+    val json = buildParamsJson(Conversation(Seq(UserMessage("hi"))))
+    json should include("You are Claude, a helpful AI assistant.")
   }
 
   it should "use the explicit system message from conversation" in {
-    val conv    = Conversation(Seq(SystemMessage("Custom instructions."), UserMessage("hi")))
-    val builder = freshBuilder()
-    client.addMessagesToParams(conv, builder)
-    val params  = builder.build()
-    params.system().get().asText().get().text() shouldBe "Custom instructions."
+    val json = buildParamsJson(Conversation(Seq(SystemMessage("Custom instructions."), UserMessage("hi"))))
+    json should include("Custom instructions.")
+    (json should not).include("You are Claude, a helpful AI assistant.")
   }
 
   it should "append JSON instruction to explicit system message when ResponseFormat.Json is set" in {
-    val opts    = CompletionOptions().withResponseFormat(ResponseFormat.Json)
-    val conv    = Conversation(Seq(SystemMessage("Custom instructions."), UserMessage("hi")))
-    val builder = freshBuilder()
-    client.addMessagesToParams(conv, builder, opts)
-    val params  = builder.build()
-    val system  = params.system().get().asText().get().text()
-    system should include("Custom instructions.")
-    system should include("valid JSON only")
+    val opts = CompletionOptions().withResponseFormat(ResponseFormat.Json)
+    val json = buildParamsJson(Conversation(Seq(SystemMessage("Custom instructions."), UserMessage("hi"))), opts)
+    json should include("Custom instructions.")
+    json should include("valid JSON only")
   }
 
-  it should "append JSON instruction to default system message when ResponseFormat.Json is set and no system message" in {
-    val opts    = CompletionOptions().withResponseFormat(ResponseFormat.Json)
-    val conv    = Conversation(Seq(UserMessage("hi")))
-    val builder = freshBuilder()
-    client.addMessagesToParams(conv, builder, opts)
-    val params  = builder.build()
-    val system  = params.system().get().asText().get().text()
-    system should include("Claude")
-    system should include("valid JSON only")
+  it should "append JSON instruction to default system message when no explicit SystemMessage and ResponseFormat.Json" in {
+    val opts = CompletionOptions().withResponseFormat(ResponseFormat.Json)
+    val json = buildParamsJson(Conversation(Seq(UserMessage("hi"))), opts)
+    json should include("Claude")
+    json should include("valid JSON only")
   }
 
   it should "not modify system message when responseFormat is None" in {
-    val opts    = CompletionOptions()
-    val conv    = Conversation(Seq(SystemMessage("Custom."), UserMessage("hi")))
-    val builder = freshBuilder()
-    client.addMessagesToParams(conv, builder, opts)
-    val params  = builder.build()
-    params.system().get().asText().get().text() shouldBe "Custom."
+    val json = buildParamsJson(Conversation(Seq(SystemMessage("Custom."), UserMessage("hi"))))
+    json should include("Custom.")
+    (json should not).include("valid JSON only")
+    (json should not).include("conforming exactly")
   }
 }
