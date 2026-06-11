@@ -37,6 +37,14 @@ object Versions {
 
   val cask       = "0.10.2"
 
+  // cats-effect + fs2
+  val catsEffect = "3.5.7"
+  val fs2        = "3.11.0"
+  val catsEffectTestingScalatest = "1.5.0"
+
+  // ZIO
+  val zio = "2.1.16"
+
   // AWS SDK
   val awsSdk     = "2.29.51"
   val opentelemetry = "1.34.1"
@@ -82,6 +90,18 @@ object Deps {
   val vosk        = "com.alphacephei"  % "vosk"         % Versions.vosk
 
   val cask       = "com.lihaoyi" %% "cask" % Versions.cask
+
+  // cats-effect + fs2
+  val catsEffect = "org.typelevel" %% "cats-effect" % Versions.catsEffect
+  val fs2        = "co.fs2"        %% "fs2-core"    % Versions.fs2
+  val catsEffectTestingScalatest =
+    "org.typelevel" %% "cats-effect-testing-scalatest" % Versions.catsEffectTestingScalatest
+
+  // ZIO
+  val zio        = "dev.zio" %% "zio"         % Versions.zio
+  val zioStreams  = "dev.zio" %% "zio-streams" % Versions.zio
+  val zioTest    = "dev.zio" %% "zio-test"    % Versions.zio
+  val zioTestSbt = "dev.zio" %% "zio-test-sbt" % Versions.zio
 
   // AWS SDK
   val awsS3      = "software.amazon.awssdk" % "s3"  % Versions.awsSdk
