@@ -170,7 +170,7 @@ object LLMConnect {
       case (ProviderKind.DeepSeek, cfg: DeepSeekConfig)   => DeepSeekClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.Cohere, cfg: CohereConfig)       => CohereClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.Mistral, cfg: MistralConfig)     => MistralClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.VertexAI, cfg: VertexAIConfig)    => VertexAIClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.VertexAI, cfg: VertexAIConfig)   => VertexAIClient(cfg, metrics, exchangeLogging)
       case (prov, wrongCfg) =>
         val cfgType = wrongCfg.getClass.getSimpleName
         val msg     = s"Invalid config type $cfgType for provider $prov"

@@ -23,28 +23,26 @@ import org.llm4s.llmconnect.model.{ Conversation, CompletionOptions, UserMessage
 object VertexAIExample extends App {
 
   val result = for {
-    registry   <- Llm4sConfig.modelRegistryService()
-    config      = VertexAIConfig(
-                    projectId = sys.env.getOrElse("VERTEX_PROJECT_ID", "my-gcp-project"),
-                    location = sys.env.getOrElse("VERTEX_LOCATION", "us-central1"),
-                    model = sys.env.getOrElse("VERTEX_MODEL", "gemini-2.0-flash"),
-                    credentialFilePath = sys.env.get("GOOGLE_APPLICATION_CREDENTIALS"),
-                    contextWindow = 1048576,
-                    reserveCompletion = 8192
-                  )
-    client     <- LLMConnect.getClient(config)(using registry)
+    registry <- Llm4sConfig.modelRegistryService()
+    config = VertexAIConfig(
+      projectId = sys.env.getOrElse("VERTEX_PROJECT_ID", "my-gcp-project"),
+      location = sys.env.getOrElse("VERTEX_LOCATION", "us-central1"),
+      model = sys.env.getOrElse("VERTEX_MODEL", "gemini-2.0-flash"),
+      credentialFilePath = sys.env.get("GOOGLE_APPLICATION_CREDENTIALS"),
+      contextWindow = 1048576,
+      reserveCompletion = 8192
+    )
+    client <- LLMConnect.getClient(config)(using registry)
     completion <- client.complete(
-                    Conversation(Seq(UserMessage("What is the capital of France? Reply in one sentence."))),
-                    CompletionOptions()
-                  )
+      Conversation(Seq(UserMessage("What is the capital of France? Reply in one sentence."))),
+      CompletionOptions()
+    )
   } yield completion
 
   result match {
     case Right(completion) =>
       println(s"Vertex AI response: ${completion.content}")
-      completion.usage.foreach(u =>
-        println(s"Token usage: prompt=${u.promptTokens}, completion=${u.completionTokens}")
-      )
+      completion.usage.foreach(u => println(s"Token usage: prompt=${u.promptTokens}, completion=${u.completionTokens}"))
     case Left(error) =>
       println(s"Error: ${error.message}")
       sys.exit(1)

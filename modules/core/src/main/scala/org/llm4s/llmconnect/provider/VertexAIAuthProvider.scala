@@ -136,8 +136,8 @@ class VertexAIAuthProvider(
 
     for {
       privateKey <- parsePrivateKey(privateKeyPem)
-      jwt         = createJwt(clientEmail, privateKey, tokenUri)
-      token      <- exchangeJwtForToken(jwt, tokenUri)
+      jwt = createJwt(clientEmail, privateKey, tokenUri)
+      token <- exchangeJwtForToken(jwt, tokenUri)
     } yield token
   }
 
@@ -149,9 +149,7 @@ class VertexAIAuthProvider(
         .replaceAll("\\s", "")
       val keyBytes = Base64.getDecoder.decode(cleaned)
       KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(keyBytes))
-    }.toEither.left.map(e =>
-      AuthenticationError("vertexai", s"Failed to parse private key: ${e.getMessage}")
-    )
+    }.toEither.left.map(e => AuthenticationError("vertexai", s"Failed to parse private key: ${e.getMessage}"))
 
   private def createJwt(serviceAccountEmail: String, privateKey: java.security.PrivateKey, tokenUri: String): String = {
     val now     = System.currentTimeMillis() / 1000
@@ -175,7 +173,7 @@ class VertexAIAuthProvider(
   }
 
   private def exchangeJwtForToken(jwt: String, tokenUri: String): Result[CachedToken] = {
-    val body     = s"grant_type=${enc("urn:ietf:params:oauth:grant-type:jwt-bearer")}&assertion=${enc(jwt)}"
+    val body = s"grant_type=${enc("urn:ietf:params:oauth:grant-type:jwt-bearer")}&assertion=${enc(jwt)}"
     val response = httpClient.post(
       tokenUri,
       Map("Content-Type" -> "application/x-www-form-urlencoded"),
@@ -231,7 +229,7 @@ class VertexAIAuthProvider(
 }
 
 object VertexAIAuthProvider {
-  private[provider] val TOKEN_ENDPOINT     = "https://oauth2.googleapis.com/token"
+  private[provider] val TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
   private[provider] val METADATA_TOKEN_URL =
     "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
 

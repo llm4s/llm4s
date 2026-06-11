@@ -92,7 +92,7 @@ class VertexAIClient(
         logger.debug(s"[VertexAI] Request body: $requestText")
 
         for {
-          token  <- authProvider.getAccessToken()
+          token <- authProvider.getAccessToken()
           headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token")
           attempt <- Try {
             val response = httpClient.post(url, headers, requestText, timeout = 120000)
@@ -133,7 +133,7 @@ class VertexAIClient(
         logger.debug(s"[VertexAI] Starting stream to $url")
 
         for {
-          token  <- authProvider.getAccessToken()
+          token <- authProvider.getAccessToken()
           headers = Map("Content-Type" -> "application/json", "Authorization" -> s"Bearer $token")
           result <- {
             val response = httpClient.postStream(url, headers, requestText, timeout = 600000)
@@ -188,7 +188,12 @@ class VertexAIClient(
                   }
                 )
                 .tapLeft(error =>
-                  recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), Left(error))
+                  recordExchange(
+                    startedAt,
+                    requestText,
+                    Option.when(rawStream.nonEmpty)(rawStream.result()),
+                    Left(error)
+                  )
                 )
             }
           }
@@ -200,9 +205,9 @@ class VertexAIClient(
   override def getReserveCompletion(): Int = config.reserveCompletion
 
   private def buildRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Value = {
-    val contents             = scala.collection.mutable.ArrayBuffer[ujson.Value]()
-    var systemInstr          = Option.empty[String]
-    val toolCallIdToName     = scala.collection.mutable.Map[String, String]()
+    val contents         = scala.collection.mutable.ArrayBuffer[ujson.Value]()
+    var systemInstr      = Option.empty[String]
+    val toolCallIdToName = scala.collection.mutable.Map[String, String]()
 
     conversation.messages.foreach {
       case SystemMessage(content) =>
@@ -344,10 +349,10 @@ class VertexAIClient(
     Try {
       val candidates = json("candidates").arr
       if (candidates.nonEmpty) {
-        val candidate   = candidates.head
-        val content     = candidate("content")
-        val parts       = content("parts").arr
-        val textContent = parts.filter(p => p.obj.contains("text")).map(_("text").str).mkString
+        val candidate    = candidates.head
+        val content      = candidate("content")
+        val parts        = content("parts").arr
+        val textContent  = parts.filter(p => p.obj.contains("text")).map(_("text").str).mkString
         val finishReason = Try(candidate("finishReason").str).toOption
 
         val toolCallOpt = parts

@@ -34,8 +34,8 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     reserveCompletion = 8192
   )
 
-  private val tokenBody    = """{"access_token":"ya29.test-token","expires_in":3600}"""
-  private val successBody  =
+  private val tokenBody = """{"access_token":"ya29.test-token","expires_in":3600}"""
+  private val successBody =
     """|{"candidates":[{"content":{"parts":[{"text":"Hello!"}],"role":"model"},"finishReason":"STOP"}],
        | "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}""".stripMargin
 
@@ -164,7 +164,12 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     }
     (mockHttp.get _).when(*, *, *, *).returns(HttpResponse(200, tokenBody, Map.empty))
 
-    val client = new VertexAIClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
+    val client = new VertexAIClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
     client.complete(conversation("Hi"), CompletionOptions())
 
     capturedHeaders.get("Authorization").value should startWith("Bearer ")
@@ -182,7 +187,12 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     }
     (mockHttp.get _).when(*, *, *, *).returns(HttpResponse(200, tokenBody, Map.empty))
 
-    val client = new VertexAIClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
+    val client = new VertexAIClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
     client.complete(conversation("Hi"), CompletionOptions())
 
     capturedUrl should include("us-central1-aiplatform.googleapis.com")
@@ -236,7 +246,12 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     (mockHttp.postStream _).when(*, *, *, *).returns(StreamingHttpResponse(200, inputStream))
 
     val chunks = scala.collection.mutable.Buffer[StreamedChunk]()
-    val client = new VertexAIClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
+    val client = new VertexAIClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
     val result = client.streamComplete(conversation("Hi"), CompletionOptions(), chunk => chunks += chunk)
 
     result.isRight shouldBe true
@@ -256,7 +271,12 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     (mockHttp.get _).when(*, *, *, *).returns(HttpResponse(200, tokenBody, Map.empty))
     (mockHttp.postStream _).when(*, *, *, *).returns(StreamingHttpResponse(200, inputStream))
 
-    val client = new VertexAIClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
+    val client = new VertexAIClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
     val result = client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
 
     result.isRight shouldBe true
@@ -274,7 +294,12 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
     (mockHttp.get _).when(*, *, *, *).returns(HttpResponse(200, tokenBody, Map.empty))
     (mockHttp.postStream _).when(*, *, *, *).returns(StreamingHttpResponse(401, inputStream))
 
-    val client = new VertexAIClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
+    val client = new VertexAIClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
     val result = client.streamComplete(conversation("Hi"), CompletionOptions(), _ => ())
 
     result.isLeft shouldBe true
@@ -298,7 +323,12 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
 
     val mockHttp = stub[Llm4sHttpClient]
     (mockHttp.get _).when(*, *, *, *).returns(HttpResponse(200, tokenBody, Map.empty))
-    val client = new VertexAIClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
+    val client = new VertexAIClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
 
     toolResult match {
       case Right(tool) =>
@@ -323,7 +353,12 @@ class VertexAIClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory 
 
     val mockHttp = stub[Llm4sHttpClient]
     (mockHttp.get _).when(*, *, *, *).returns(HttpResponse(200, tokenBody, Map.empty))
-    val client = new VertexAIClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled, mockHttp)
+    val client = new VertexAIClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
 
     toolResult match {
       case Right(tool) =>
