@@ -44,9 +44,11 @@ object StructuredOutputExample extends App {
   )
 
   val result = for {
-    providerConfig <- Llm4sConfig.defaultProvider()
-    client         <- LLMConnect.getClient(providerConfig)
-    invoice        <- client.completeStructured[Invoice](conversation, invoiceSchema)
+    providerConfig  <- Llm4sConfig.defaultProvider()
+    registryService <- Llm4sConfig.modelRegistryService()
+    given org.llm4s.model.ModelRegistryService = registryService
+    client  <- LLMConnect.getClient(providerConfig)
+    invoice <- client.completeStructured[Invoice](conversation, invoiceSchema)
   } yield invoice
 
   result match {
