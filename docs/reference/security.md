@@ -80,14 +80,14 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 
 **Residual risk:** DNS rebinding attacks (where a hostname resolves to a public IP during validation but a private IP at connection time) are not explicitly mitigated at the Java `HttpURLConnection` level.
 
-### 5. SQLite WAL and Journal Files
+### 5. SQLite Journal Files
 
-**Risk:** SQLite creates Write-Ahead Log (`.db-wal`) and shared-memory (`.db-shm`) files alongside the database file. If the database is stored in a predictable path, these temporary files may expose partial conversation history.
+**Risk:** SQLite creates a journal file (`.db-journal`) alongside the database file during write transactions. If the database is stored in a predictable path, this temporary file may expose partial conversation history. If WAL mode were enabled (`PRAGMA journal_mode=WAL`), additional `.db-wal` and `.db-shm` files would also be created — but `SQLiteMemoryStore` uses SQLite's default DELETE journal mode, so only `.db-journal` applies.
 
 **Mitigation:**
 - `SQLiteMemoryStore` path is chosen by the application developer. Use a path under a directory with restricted permissions (e.g., `chmod 700`).
 - For ephemeral use, pass `":memory:"` to `SQLiteMemoryStore.inMemory()` — no files are created.
-- Delete WAL files alongside the database file when decommissioning a store.
+- Delete the `.db-journal` file alongside the database file when decommissioning a store.
 
 ### 6. Workspace Sandbox Escapes
 
