@@ -129,6 +129,7 @@ lazy val commonSettings = Seq(
 lazy val llm4s = (project in file("."))
   .aggregate(
     core,
+    javaApi,
     samples,
     workspaceShared,
     workspaceRunner,
@@ -310,6 +311,16 @@ lazy val it = (project in file("modules/it"))
     commonSettings,
     publish / skip := true,
     Test / fork := true,
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    )
+  )
+
+lazy val javaApi = (project in file("modules/java-api"))
+  .dependsOn(core)
+  .settings(
+    name           := "java-api",
+    commonSettings,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
     )
