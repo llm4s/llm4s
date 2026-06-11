@@ -43,12 +43,12 @@ object VertexAIExample {
       providerCfg     <- Llm4sConfig.defaultProvider()
       registryService <- Llm4sConfig.modelRegistryService()
       given org.llm4s.model.ModelRegistryService = registryService
-      client     <- LLMConnect.getClient(providerCfg)
+      client <- LLMConnect.getClient(providerCfg)
       completion <- client.complete(
-                      Conversation(
-                        Seq(UserMessage("What is the capital of France? Reply in one sentence."))
-                      )
-                    )
+        Conversation(
+          Seq(UserMessage("What is the capital of France? Reply in one sentence."))
+        )
+      )
     } yield completion
 
     result match {
