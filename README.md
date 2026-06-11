@@ -848,6 +848,13 @@ Want to connect with maintainers? The LLM4S project is maintained by:
 - **Rory Graves** - [https://www.linkedin.com/in/roryjgraves/](https://www.linkedin.com/in/roryjgraves/) | Email: [rory@llm4s.org](mailto:rory@llm4s.org), [rory.graves@fieldmark.co.uk](mailto:rory.graves@fieldmark.co.uk) | Discord: `rorybot1`
 - **Kannupriya Kalra** - [https://www.linkedin.com/in/kannupriyakalra/](https://www.linkedin.com/in/kannupriyakalra/) | Email: [kannupriya@llm4s.org](mailto:kannupriya@llm4s.org), [kannupriyakalra@gmail.com](mailto:kannupriyakalra@gmail.com) | Discord: `kannupriyakalra_46520`
 
+## Changelog & Migration
+
+- [CHANGELOG.md](CHANGELOG.md) — full release history from v0.1.0 to present, following [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format
+- [Migration guides](docs/migrations/) — step-by-step upgrade instructions between versions
+  - [0.x → 1.0 consolidated guide](docs/migrations/0x-to-1x.md) — all breaking changes across the 0.x series
+  - [v0.2.9 → v0.3.0](docs/migrations/v0.2.9-to-v0.3.0.md) — migrate throwing APIs to type-safe `Result[T]`
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
