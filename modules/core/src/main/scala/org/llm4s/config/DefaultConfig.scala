@@ -17,4 +17,5 @@ object DefaultConfig {
   val DEFAULT_LANGFUSE_RELEASE          = "1.0.0"
   val DEFAULT_LANGFUSE_VERSION          = "1.0.0"
   val DEFAULT_AZURE_V2025_01_01_PREVIEW = "V2025_01_01_PREVIEW"
+  val DEFAULT_VERTEXAI_LOCATION        = "us-central1"
 }
