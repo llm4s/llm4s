@@ -14,10 +14,10 @@ class AnthropicStructuredOutputSpec extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val testConfig = AnthropicConfig(
-    apiKey            = "sk-ant-dummy",
-    model             = "claude-3-5-sonnet-20241022",
-    baseUrl           = "https://api.anthropic.com",
-    contextWindow     = 200000,
+    apiKey = "sk-ant-dummy",
+    model = "claude-3-5-sonnet-20241022",
+    baseUrl = "https://api.anthropic.com",
+    contextWindow = 200000,
     reserveCompletion = 4096
   )
 
