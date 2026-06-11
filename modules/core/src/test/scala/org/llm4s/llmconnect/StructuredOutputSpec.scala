@@ -20,10 +20,10 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
 
   def makeCompletion(content: String): Completion =
     Completion(
-      id = "test-id",
+      id      = "test-id",
       created = 0L,
       content = content,
-      model = "test-model",
+      model   = "test-model",
       message = AssistantMessage(Some(content))
     )
 
@@ -34,11 +34,7 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
       lastOptions = options
       stubResponse
     }
-    def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
-      onChunk: StreamedChunk => Unit
-    ): org.llm4s.types.Result[Completion] =
+    def streamComplete(conversation: Conversation, options: CompletionOptions, onChunk: StreamedChunk => Unit): org.llm4s.types.Result[Completion] =
       stubResponse
     def getContextWindow(): Int     = 4096
     def getReserveCompletion(): Int = 512
@@ -71,14 +67,18 @@ class StructuredOutputSpec extends AnyFlatSpec with Matchers {
     val stub   = new StubClient(Right(makeCompletion("not json at all")))
     val result = stub.completeStructured[Invoice](conversation, invoiceSchema)
     result.isLeft shouldBe true
-    result.swap.foreach(err => err.message should include("not valid JSON"))
+    result.swap.foreach { err =>
+      err.message should include("not valid JSON")
+    }
   }
 
   it should "return ValidationError when JSON does not match the expected schema" in {
     val stub   = new StubClient(Right(makeCompletion("""{"wrong":true}""")))
     val result = stub.completeStructured[Invoice](conversation, invoiceSchema)
     result.isLeft shouldBe true
-    result.swap.foreach(err => err.message should include("expected schema"))
+    result.swap.foreach { err =>
+      err.message should include("expected schema")
+    }
   }
 
   it should "propagate provider failures unchanged" in {
