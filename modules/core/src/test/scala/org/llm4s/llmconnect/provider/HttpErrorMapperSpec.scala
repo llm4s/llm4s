@@ -173,6 +173,35 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
     err.message should include("[REDACTED")
   }
 
+  it should "redact an AWS access key embedded in a provider error message" in {
+    val key    = "AKIA" + "B" * 16
+    val body   = s"""{"message": "invalid credentials: $key"}"""
+    val result = HttpErrorMapper.extractErrorDetails(body, 401, provider)
+    (result should not).include(key)
+    result should include("[REDACTED")
+  }
+
+  it should "redact a JWT token embedded in a provider error message" in {
+    val key    = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyMTIzIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+    val body   = s"""{"message": "unauthorized token: $key"}"""
+    val result = HttpErrorMapper.extractErrorDetails(body, 401, provider)
+    (result should not).include(key)
+    result should include("[REDACTED")
+  }
+
+  it should "fully redact a key that straddles the 256-char truncation boundary" in {
+    // prefix(250) + key(43) = 293 chars raw; after redact becomes prefix(250) + "[REDACTED]"(10) = 260 chars,
+    // which exceeds MaxErrorDetailLength(256) and triggers truncation.
+    // Without the fix (truncate-before-redact), the raw would be cut at 256 leaving a 6-char partial key.
+    val key    = "sk-" + "A" * 40
+    val prefix = "x" * 250
+    val body   = s"""{"message": "$prefix$key"}"""
+    val result = HttpErrorMapper.extractErrorDetails(body, 400, provider)
+    (result should not).include(key)   // full key must not appear
+    (result should not).include("sk-") // no partial key prefix either
+    result should endWith("…[truncated]")
+  }
+
   // ── Integration: provider name in error ──────────────────────────
 
   it should "include provider name in AuthenticationError" in {
