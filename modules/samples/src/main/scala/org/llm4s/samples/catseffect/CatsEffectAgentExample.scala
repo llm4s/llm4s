@@ -25,26 +25,26 @@ object CatsEffectAgentExample extends IOApp.Simple {
       for {
         // Direct completion — blocking call runs on the blocking pool
         completion <- client.complete(
-                        Conversation(Seq(UserMessage("What is 2 + 2?")))
-                      )
+          Conversation(Seq(UserMessage("What is 2 + 2?")))
+        )
         _ <- IO.println(s"Completion: ${completion.content}")
 
         // Streaming — chunks flow as fs2 Stream elements
         _ <- IO.println("Streaming response:")
         _ <- client
-               .streamComplete(Conversation(Seq(UserMessage("Count to 5 slowly."))))
-               .evalMap(chunk => IO.print(chunk.content.getOrElse("")))
-               .compile
-               .drain
+          .streamComplete(Conversation(Seq(UserMessage("Count to 5 slowly."))))
+          .evalMap(chunk => IO.print(chunk.content.getOrElse("")))
+          .compile
+          .drain
         _ <- IO.println("")
 
         // Agent with tool support
         agentIO = client.agent()
         state <- agentIO.run(
-                   query = "What day is it today?",
-                   tools = ToolRegistry.empty,
-                   context = AgentContext.Default
-                 )
+          query = "What day is it today?",
+          tools = ToolRegistry.empty,
+          context = AgentContext.Default
+        )
         _ <- IO.println(s"Agent: ${state.conversation.messages.last}")
       } yield ()
     }

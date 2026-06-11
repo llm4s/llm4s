@@ -30,17 +30,17 @@ object ZIOAgentExample extends ZIOAppDefault {
 
       // Streaming — chunks flow as ZStream elements, collected here
       chunks <- client
-                  .streamComplete(Conversation(Seq(UserMessage("Count to 5 slowly."))))
-                  .runCollect
-      _      <- ZIO.debug(chunks.map(_.content.getOrElse("")).mkString)
+        .streamComplete(Conversation(Seq(UserMessage("Count to 5 slowly."))))
+        .runCollect
+      _ <- ZIO.debug(chunks.map(_.content.getOrElse("")).mkString)
 
       // Agent with tool support
       agentZ = client.agent()
       state <- agentZ.run(
-                 query = "What day is it today?",
-                 tools = ToolRegistry.empty,
-                 context = AgentContext.Default
-               )
+        query = "What day is it today?",
+        tools = ToolRegistry.empty,
+        context = AgentContext.Default
+      )
       _ <- ZIO.debug(s"Agent: ${state.conversation.messages.last}")
     } yield ()).provide(LLMClientZ.layer)
 }
