@@ -107,7 +107,7 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
     val key    = "sk-" + "A" * 40
     val body   = s"""{"message": "invalid key: $key"}"""
     val result = HttpErrorMapper.extractErrorDetails(body, 401, provider)
-    result should not include key
+    (result should not).include(key)
     result should include("[REDACTED")
   }
 
@@ -115,7 +115,7 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
     val key    = "sk-ant-" + "B" * 30
     val body   = s"""{"error": {"message": "auth failure for key $key"}}"""
     val result = HttpErrorMapper.extractErrorDetails(body, 401, provider)
-    result should not include key
+    (result should not).include(key)
     result should include("[REDACTED")
   }
 
@@ -123,7 +123,7 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
     val key    = "AIza" + "C" * 35
     val body   = s"""{"error": "bad api key $key"}"""
     val result = HttpErrorMapper.extractErrorDetails(body, 403, provider)
-    result should not include key
+    (result should not).include(key)
     result should include("[REDACTED")
   }
 
@@ -131,7 +131,7 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
     val key    = "pa-" + "D" * 25
     val body   = s"""{"message": "unauthorized: $key"}"""
     val result = HttpErrorMapper.extractErrorDetails(body, 401, provider)
-    result should not include key
+    (result should not).include(key)
     result should include("[REDACTED")
   }
 
@@ -139,7 +139,7 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
     val key    = "sk-lf-" + "E" * 20
     val body   = s"""{"message": "invalid credentials: $key"}"""
     val result = HttpErrorMapper.extractErrorDetails(body, 401, provider)
-    result should not include key
+    (result should not).include(key)
     result should include("[REDACTED")
   }
 
@@ -150,10 +150,10 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "redact API key in the LLMError.message returned by mapHttpError for 401" in {
-    val key           = "sk-" + "F" * 40
-    val body          = s"""{"message": "invalid key $key"}"""
-    val Left(err)     = HttpErrorMapper.mapHttpError(401, body, provider): @unchecked
-    err.message should not include key
+    val key       = "sk-" + "F" * 40
+    val body      = s"""{"message": "invalid key $key"}"""
+    val Left(err) = HttpErrorMapper.mapHttpError(401, body, provider): @unchecked
+    (err.message should not).include(key)
     err.message should include("[REDACTED")
   }
 
@@ -161,7 +161,7 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
     val key       = "sk-ant-" + "G" * 30
     val body      = s"""{"message": "bad request with key $key"}"""
     val Left(err) = HttpErrorMapper.mapHttpError(400, body, provider): @unchecked
-    err.message should not include key
+    (err.message should not).include(key)
     err.message should include("[REDACTED")
   }
 
@@ -169,7 +169,7 @@ class HttpErrorMapperSpec extends AnyFlatSpec with Matchers {
     val key       = "AIza" + "H" * 35
     val body      = s"""{"message": "server error processing $key"}"""
     val Left(err) = HttpErrorMapper.mapHttpError(500, body, provider): @unchecked
-    err.message should not include key
+    (err.message should not).include(key)
     err.message should include("[REDACTED")
   }
 
