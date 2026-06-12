@@ -20,6 +20,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             organization = Some(" org-demo "),
             endpoint = None,
             apiVersion = None,
+            timeoutMs = None,
           ),
           ProviderName("gemini-main") -> RawNamedProviderSection(
             provider = Some("gemini"),
@@ -29,6 +30,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             organization = None,
             endpoint = None,
             apiVersion = None,
+            timeoutMs = None,
           )
         )
       )
@@ -65,6 +67,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             organization = None,
             endpoint = None,
             apiVersion = None,
+            timeoutMs = None,
           )
         )
       )
@@ -90,6 +93,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             organization = None,
             endpoint = None,
             apiVersion = None,
+            timeoutMs = None,
           )
         )
       )
@@ -113,6 +117,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             organization = None,
             endpoint = None,
             apiVersion = None,
+            timeoutMs = None,
           )
         )
       )

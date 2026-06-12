@@ -22,6 +22,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = Some(" org-demo "),
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -45,6 +46,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -66,6 +68,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = Some("https://my-resource.openai.azure.com"),
           apiVersion = Some("2024-02-01"),
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -89,6 +92,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -110,6 +114,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -132,6 +137,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -153,6 +159,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -174,6 +181,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -195,6 +203,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -216,6 +225,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -237,6 +247,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Left(err) =>
@@ -256,6 +267,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Left(err) =>
@@ -275,6 +287,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Left(err) =>
@@ -294,6 +307,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Left(err) =>
@@ -313,6 +327,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = Some("   "),
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Left(err) =>
@@ -332,6 +347,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Left(err) =>

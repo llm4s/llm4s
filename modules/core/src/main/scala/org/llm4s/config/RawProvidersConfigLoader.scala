@@ -11,7 +11,7 @@ import scala.jdk.CollectionConverters.*
 private[config] object RawProvidersConfigLoader:
 
   private given namedProviderSectionReader: PureConfigReader[RawNamedProviderSection] =
-    PureConfigReader.forProduct7("provider", "model", "baseUrl", "apiKey", "organization", "endpoint", "apiVersion")(
+    PureConfigReader.forProduct8("provider", "model", "baseUrl", "apiKey", "organization", "endpoint", "apiVersion", "timeoutMs")(
       RawNamedProviderSection.apply
     )
 
