@@ -628,11 +628,53 @@ jobs:
       - name: Check binary compatibility
         run: sbt mimaReportBinaryIssues
 
+  # Kotlin coroutine API - a separate Gradle build that consumes llm4s-java-api from local Maven.
+  kotlin-api:
+    name: Kotlin API
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Publish the library modules to local Maven
+        # Pin to 0.1.0-SNAPSHOT so build.gradle.kts can reference a stable coordinate without
+        # chasing dynver-generated versions. llm4s-java-api's POM depends on core, agent and the
+        # provider modules, so all of them must be in the local repository, not just llm4s-java-api.
+        run: sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' publishM2
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build and test Kotlin API with coverage check
+        working-directory: modules/kotlin-api
+        run: gradle check
+
+      - name: Upload Kotlin coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: kotlin-coverage-report
+          path: modules/kotlin-api/build/reports/jacoco/
+          retention-days: 14
+
   # All tests must pass
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, coverage, config-policy-check, scaladoc, integration-tests, mima-check]
+    needs: [test, coverage, config-policy-check, scaladoc, integration-tests, mima-check, kotlin-api]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -662,6 +704,10 @@ jobs:
           fi
           if [[ "${{ needs.mima-check.result }}" != "success" ]]; then
             echo "Binary compatibility check failed"
+            exit 1
+          fi
+          if [[ "${{ needs.kotlin-api.result }}" != "success" ]]; then
+            echo "Kotlin API tests failed"
             exit 1
           fi
           echo "All tests passed!"
