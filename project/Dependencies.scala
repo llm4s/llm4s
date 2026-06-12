@@ -46,6 +46,9 @@ object Versions {
 
   // Neo4j
   val neo4j = "5.27.0"
+
+  // Spring Boot
+  val springBoot = "3.3.6"
 }
 
 object Deps {
@@ -96,6 +99,12 @@ object Deps {
 
   // Neo4j
   val neo4jDriver = "org.neo4j.driver" % "neo4j-java-driver" % Versions.neo4j
+
+  // Spring Boot
+  val springBootAutoConfigure = "org.springframework.boot" % "spring-boot-autoconfigure" % Versions.springBoot
+  val springBootActuator       = "org.springframework.boot" % "spring-boot-actuator"       % Versions.springBoot
+  val springBootStarterTest    = "org.springframework.boot" % "spring-boot-starter-test"    % Versions.springBoot
+  val springBootTestAutoConfigure = "org.springframework.boot" % "spring-boot-test-autoconfigure" % Versions.springBoot
   // Note: neo4j-harness is not included as a dependency because neo4j-harness 5.26.x
   // has a hard-coded incompatibility with Netty 4.1.115.Final on modern JVMs.
   // Integration tests use a real Neo4j instance via Neo4jGraphStore.local().
