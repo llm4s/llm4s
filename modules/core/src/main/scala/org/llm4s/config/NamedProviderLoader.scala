@@ -63,7 +63,7 @@ private[config] object NamedProviderLoader:
           val defaultBaseUrl =
             if section.provider == ProviderKind.OpenRouter then DefaultConfig.DEFAULT_OPENROUTER_BASE_URL
             else DefaultConfig.DEFAULT_OPENAI_BASE_URL
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(defaultBaseUrl)
+          val baseUrl   = section.baseUrl.map(_.asUrl).getOrElse(defaultBaseUrl)
           val timeoutMs = section.timeoutMs.getOrElse(30000)
           OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl, timeoutMs)
       case ProviderKind.Azure =>
@@ -71,11 +71,11 @@ private[config] object NamedProviderLoader:
           endpoint <- required("endpoint", section.endpoint, "llm4s.providers.<name>.endpoint")
           apiKey   <- requiredApiKey("llm4s.providers.<name>.apiKey")
           apiVersion = section.apiVersion.getOrElse(DefaultConfig.DEFAULT_AZURE_V2025_01_01_PREVIEW)
-          timeoutMs = section.timeoutMs.getOrElse(30000)
+          timeoutMs  = section.timeoutMs.getOrElse(30000)
         yield AzureConfig.fromValues(section.model.asString, endpoint, apiKey, apiVersion, timeoutMs)
       case ProviderKind.Anthropic =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL)
+          val baseUrl   = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL)
           val timeoutMs = section.timeoutMs.getOrElse(30000)
           AnthropicConfig.fromValues(section.model.asString, apiKey, baseUrl, timeoutMs)
       case ProviderKind.Ollama =>
@@ -91,26 +91,26 @@ private[config] object NamedProviderLoader:
             OllamaConfig.fromValues(section.model.asString, url, timeoutMs)
       case ProviderKind.Zai =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(ZaiConfig.DEFAULT_BASE_URL)
+          val baseUrl   = section.baseUrl.map(_.asUrl).getOrElse(ZaiConfig.DEFAULT_BASE_URL)
           val timeoutMs = section.timeoutMs.getOrElse(30000)
           ZaiConfig.fromValues(section.model.asString, apiKey, baseUrl, timeoutMs)
       case ProviderKind.Gemini =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_GEMINI_BASE_URL)
+          val baseUrl   = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_GEMINI_BASE_URL)
           val timeoutMs = section.timeoutMs.getOrElse(30000)
           GeminiConfig.fromValues(section.model.asString, apiKey, baseUrl, timeoutMs)
       case ProviderKind.DeepSeek =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
+          val baseUrl   = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
           val timeoutMs = section.timeoutMs.getOrElse(30000)
           DeepSeekConfig.fromValues(section.model.asString, apiKey, baseUrl, timeoutMs)
       case ProviderKind.Cohere =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(CohereConfig.DEFAULT_BASE_URL)
+          val baseUrl   = section.baseUrl.map(_.asUrl).getOrElse(CohereConfig.DEFAULT_BASE_URL)
           val timeoutMs = section.timeoutMs.getOrElse(30000)
           CohereConfig.fromValues(section.model.asString, apiKey, baseUrl, timeoutMs)
       case ProviderKind.Mistral =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(MistralConfig.DEFAULT_BASE_URL)
+          val baseUrl   = section.baseUrl.map(_.asUrl).getOrElse(MistralConfig.DEFAULT_BASE_URL)
           val timeoutMs = section.timeoutMs.getOrElse(30000)
           MistralConfig.fromValues(section.model.asString, apiKey, baseUrl, timeoutMs)
