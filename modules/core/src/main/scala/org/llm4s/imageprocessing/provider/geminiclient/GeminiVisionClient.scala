@@ -14,7 +14,6 @@ import java.nio.file.{ Files, Paths }
 import java.time.{ Duration, Instant }
 import java.util.Base64
 import scala.util.Try
-import scala.util.control.NonFatal
 
 /**
  * Google Gemini Vision client for AI-powered image analysis.
@@ -109,33 +108,43 @@ class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageproc
 
   // ---- private helpers ----
 
-  private def callGeminiVisionAPI(
-    base64Image: String,
-    prompt: String,
-    mediaType: MediaType
-  ): Try[String] =
-    try {
-      val requestBody = GeminiRequestBody.serialize(prompt, base64Image, mediaType)
-      val url         = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
-
-      // Do NOT log the URL — it contains the API key as a query parameter
-      logger.debug(s"[GeminiVisionClient] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
-
+  /**
+   * Executes an HTTP POST request. Protected so tests can override without real network.
+   *
+   * @param url             The full URL to POST to.
+   * @param requestBodyJson The JSON request body string.
+   * @param timeoutSeconds  Request timeout in seconds.
+   * @return A [[scala.util.Try]] of (statusCode, responseBody).
+   */
+  protected def sendHttpRequest(url: String, requestBodyJson: String, timeoutSeconds: Int): Try[(Int, String)] =
+    Try {
       val httpRequest = HttpRequest
         .newBuilder()
         .uri(URI.create(url))
         .header("Content-Type", "application/json")
-        .timeout(Duration.ofSeconds(config.requestTimeoutSeconds))
-        .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+        .timeout(Duration.ofSeconds(timeoutSeconds))
+        .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
         .build()
-
       val response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
+      (response.statusCode(), response.body())
+    }
 
-      response.statusCode() match {
+  private def callGeminiVisionAPI(
+    base64Image: String,
+    prompt: String,
+    mediaType: MediaType
+  ): Try[String] = {
+    val requestBody = GeminiRequestBody.serialize(prompt, base64Image, mediaType)
+    val url         = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
+
+    // Do NOT log the URL — it contains the API key as a query parameter
+    logger.debug(s"[GeminiVisionClient] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
+
+    sendHttpRequest(url, requestBody, config.requestTimeoutSeconds).flatMap { case (statusCode, responseBody) =>
+      statusCode match {
         case 200 =>
-          scala.util.Success(extractContentFromResponse(response.body()))
-        case statusCode =>
-          val responseBody = response.body()
+          scala.util.Success(extractContentFromResponse(responseBody))
+        case _ =>
           val errorMessage =
             Try(read(responseBody)).toOption
               .flatMap(_.obj.get("error"))
@@ -158,13 +167,12 @@ class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageproc
           )
           scala.util.Failure(new RuntimeException(s"Gemini API call failed - $errorMessage"))
       }
-    } catch {
+    }.recoverWith {
       case e: InterruptedException =>
         Thread.currentThread().interrupt()
         scala.util.Failure(e)
-      case NonFatal(e) =>
-        scala.util.Failure(e)
     }
+  }
 
   private def extractContentFromResponse(jsonResponse: String): String =
     Try(read(jsonResponse)).toOption
