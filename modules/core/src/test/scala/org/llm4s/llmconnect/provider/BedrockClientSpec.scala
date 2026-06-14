@@ -238,8 +238,7 @@ class BedrockClientSpec extends AnyFlatSpec with Matchers {
   }
 
   "BedrockClient.streamComplete" should "emit full response as single chunk and return completion" in withServer {
-    exchange =>
-      sendJson(exchange, 200, bedrockSuccessResponse("Streamed response"))
+    exchange => sendJson(exchange, 200, bedrockSuccessResponse("Streamed response"))
   } { baseUrl =>
     val client = new BedrockClient(config(baseUrl))
     val chunks = ListBuffer.empty[org.llm4s.llmconnect.model.StreamedChunk]

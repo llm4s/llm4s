@@ -209,7 +209,8 @@ class BedrockClient(
     messages.flatMap {
       case UserMessage(content) =>
         Some(
-          BedrockMessage.builder()
+          BedrockMessage
+            .builder()
             .role(ConversationRole.USER)
             .content(ContentBlock.fromText(content))
             .build()
@@ -219,7 +220,8 @@ class BedrockClient(
         val textBlocks = msg.contentOpt.filter(_.nonEmpty).map(ContentBlock.fromText).toSeq
         val toolBlocks = msg.toolCalls.map { tc =>
           ContentBlock.fromToolUse(
-            ToolUseBlock.builder()
+            ToolUseBlock
+              .builder()
               .toolUseId(tc.id)
               .name(tc.name)
               .input(ujsonToDocument(tc.arguments))
@@ -232,12 +234,14 @@ class BedrockClient(
         else None
 
       case msg: ToolMessage =>
-        val resultBlock = ToolResultBlock.builder()
+        val resultBlock = ToolResultBlock
+          .builder()
           .toolUseId(msg.toolCallId)
           .content(ToolResultContentBlock.fromText(msg.content))
           .build()
         Some(
-          BedrockMessage.builder()
+          BedrockMessage
+            .builder()
             .role(ConversationRole.USER)
             .content(ContentBlock.fromToolResult(resultBlock))
             .build()
@@ -249,7 +253,8 @@ class BedrockClient(
   private def convertTool(toolFunction: ToolFunction[?, ?]): Tool = {
     val objectSchema = toolFunction.schema.asInstanceOf[ObjectSchema[?]]
     val schemaDoc    = ujsonToDocument(ujson.read(objectSchema.toJsonSchema(false).render()))
-    val toolSpec = ToolSpecification.builder()
+    val toolSpec = ToolSpecification
+      .builder()
       .name(toolFunction.name)
       .description(toolFunction.description)
       .inputSchema(ToolInputSchema.builder().json(schemaDoc).build())
@@ -335,23 +340,29 @@ class BedrockClient(
 
   private def serializeRequestForLogging(conversation: Conversation, options: CompletionOptions): String = {
     val msgs = conversation.messages.map {
-      case SystemMessage(content)    => ujson.Obj("role" -> "system", "content" -> content)
-      case UserMessage(content)      => ujson.Obj("role" -> "user", "content" -> content)
-      case msg: AssistantMessage     => ujson.Obj("role" -> "assistant", "content" -> msg.content)
-      case msg: ToolMessage          => ujson.Obj("role" -> "tool", "toolCallId" -> msg.toolCallId, "content" -> msg.content)
+      case SystemMessage(content) => ujson.Obj("role" -> "system", "content" -> content)
+      case UserMessage(content)   => ujson.Obj("role" -> "user", "content" -> content)
+      case msg: AssistantMessage  => ujson.Obj("role" -> "assistant", "content" -> msg.content)
+      case msg: ToolMessage => ujson.Obj("role" -> "tool", "toolCallId" -> msg.toolCallId, "content" -> msg.content)
     }
-    ujson.Obj(
-      "modelId"     -> config.model,
-      "region"      -> config.region,
-      "temperature" -> options.temperature,
-      "messages"    -> ujson.Arr(msgs: _*)
-    ).render()
+    ujson
+      .Obj(
+        "modelId"     -> config.model,
+        "region"      -> config.region,
+        "temperature" -> options.temperature,
+        "messages"    -> ujson.Arr(msgs: _*)
+      )
+      .render()
   }
 
   private def serializeResponseForLogging(
     response: software.amazon.awssdk.services.bedrockruntime.model.ConverseResponse
   ): String = {
-    val text = response.output().message().content().asScala
+    val text = response
+      .output()
+      .message()
+      .content()
+      .asScala
       .filter(_.`type`() == ContentBlock.Type.TEXT)
       .flatMap(b => Option(b.text()))
       .mkString
