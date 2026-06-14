@@ -9,7 +9,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default._
 
-import java.io.{ ByteArrayOutputStream, PrintStream }
+import java.io.ByteArrayOutputStream
 
 /**
  * Integration tests for ConsoleTracing.
@@ -26,17 +26,10 @@ class ConsoleTracingIntegrationSpec extends AnyFlatSpec with Matchers {
   // Helpers
   // -------------------------------------------------------------------------
 
-  /** Captures everything written to stdout during `body` and returns it. */
+  /** Captures everything written to Scala's Console.out during `body` and returns it. */
   private def captureStdout(body: => Unit): String = {
-    val buf    = new ByteArrayOutputStream()
-    val stream = new PrintStream(buf)
-    val old    = System.out
-    System.setOut(stream)
-    try body
-    finally {
-      System.out.flush()
-      System.setOut(old)
-    }
+    val buf = new ByteArrayOutputStream()
+    Console.withOut(buf)(body)
     buf.toString
   }
 
