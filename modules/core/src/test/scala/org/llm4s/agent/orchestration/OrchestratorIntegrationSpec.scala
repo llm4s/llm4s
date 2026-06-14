@@ -30,7 +30,7 @@ import java.util.concurrent.atomic.{ AtomicBoolean, AtomicInteger }
  */
 class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFutures {
 
-  implicit val ec: ExecutionContext                     = ExecutionContext.global
+  implicit val ec: ExecutionContext                    = ExecutionContext.global
   implicit override val patienceConfig: PatienceConfig = PatienceConfig(timeout = 10.seconds)
 
   // -------------------------------------------------------------------------
@@ -191,12 +191,10 @@ class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFu
     }
 
     // A merge node that accepts input from either branch
-    val merger = TypedAgent.fromFunction[String, String]("merger") { input =>
-      Right(s"merged:$input")
-    }
+    val merger = TypedAgent.fromFunction[String, String]("merger")(input => Right(s"merged:$input"))
 
-    val nodeB1 = Node("branch-1", branch1)
-    val nodeB2 = Node("branch-2", branch2)
+    val nodeB1    = Node("branch-1", branch1)
+    val nodeB2    = Node("branch-2", branch2)
     val nodeMerge = Node("merger", merger)
 
     val plan = Plan.builder
@@ -336,9 +334,7 @@ class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFu
     val N              = 4
     val executionFlags = (0 until N).map(_ => new AtomicBoolean(false))
 
-    val sourceAgent = TypedAgent.fromFunction[String, String]("source") { input =>
-      Right(s"source:$input")
-    }
+    val sourceAgent = TypedAgent.fromFunction[String, String]("source")(input => Right(s"source:$input"))
 
     val workerAgents = (0 until N).map { i =>
       TypedAgent.fromFunction[String, WorkerResult](s"worker-$i") { input =>
@@ -354,8 +350,8 @@ class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFu
       Right(AggregatedResults(List(firstResult)))
     }
 
-    val nodeSource = Node("source", sourceAgent)
-    val workerNodes = (0 until N).map(i => Node(s"worker-$i", workerAgents(i)))
+    val nodeSource     = Node("source", sourceAgent)
+    val workerNodes    = (0 until N).map(i => Node(s"worker-$i", workerAgents(i)))
     val nodeAggregator = Node("aggregator", aggregatorAgent)
 
     val planBuilder = Plan.builder
@@ -386,7 +382,7 @@ class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFu
 
       // All N workers must have executed
       executionFlags.zipWithIndex.foreach { case (flag, i) =>
-        withClue(s"worker-$i did not execute") { flag.get() shouldBe true }
+        withClue(s"worker-$i did not execute")(flag.get() shouldBe true)
       }
 
       // Aggregator produced output
@@ -435,9 +431,7 @@ class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFu
       // Plan execution must fail
       result.isLeft shouldBe true
 
-      result.left.foreach { error =>
-        error shouldBe an[OrchestrationError]
-      }
+      result.left.foreach(error => error shouldBe an[OrchestrationError])
 
       // Downstream must NOT have run
       downstreamExecuted.get() shouldBe false
@@ -461,9 +455,7 @@ class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFu
 
     whenReady(runner.execute(plan, initialInputs)) { result =>
       result.isLeft shouldBe true
-      result.left.foreach { error =>
-        error shouldBe a[NetworkError]
-      }
+      result.left.foreach(error => error shouldBe a[NetworkError])
     }
   }
 
@@ -563,7 +555,7 @@ class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFu
 
     val nodes = (1 to 4).map(i => slowNode(s"slow-$i")).toList
 
-    val plan = nodes.foldLeft(Plan.builder) { (b, n) => b.addNode(n) }.build
+    val plan = nodes.foldLeft(Plan.builder)((b, n) => b.addNode(n)).build
 
     val initialInputs = (1 to 4).map(i => s"slow-$i" -> s"input-$i").toMap[String, Any]
 
@@ -590,11 +582,17 @@ class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFu
 
     val workerCount = new AtomicInteger(0)
 
-    val source = TypedAgent.fromFunction[String, String]("src") { v => Right(s"src:$v") }
-    val w1     = TypedAgent.fromFunction[String, String]("w1") { v => workerCount.incrementAndGet(); Right(s"w1:$v") }
-    val w2     = TypedAgent.fromFunction[String, String]("w2") { v => workerCount.incrementAndGet(); Right(s"w2:$v") }
-    val w3     = TypedAgent.fromFunction[String, String]("w3") { v => workerCount.incrementAndGet(); Right(s"w3:$v") }
-    val cont   = TypedAgent.fromFunction[String, String]("cont") { v => Right(s"cont:$v") }
+    val source = TypedAgent.fromFunction[String, String]("src")(v => Right(s"src:$v"))
+    val w1 = TypedAgent.fromFunction[String, String]("w1") { v =>
+      workerCount.incrementAndGet(); Right(s"w1:$v")
+    }
+    val w2 = TypedAgent.fromFunction[String, String]("w2") { v =>
+      workerCount.incrementAndGet(); Right(s"w2:$v")
+    }
+    val w3 = TypedAgent.fromFunction[String, String]("w3") { v =>
+      workerCount.incrementAndGet(); Right(s"w3:$v")
+    }
+    val cont = TypedAgent.fromFunction[String, String]("cont")(v => Right(s"cont:$v"))
 
     val nSrc  = Node("src", source)
     val nW1   = Node("w1", w1)
