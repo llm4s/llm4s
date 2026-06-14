@@ -99,9 +99,7 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
       .withRequiredField("input", Schema.string("Value to echo"))
 
     ToolBuilder[Map[String, Any], EchoResult]("echo", "Echoes input back", schema)
-      .withHandler { extractor =>
-        extractor.getString("input").map(v => EchoResult(v))
-      }
+      .withHandler(extractor => extractor.getString("input").map(v => EchoResult(v)))
       .buildSafe()
   }
 
@@ -161,12 +159,12 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
 
     // Verify key event types are present
-    events.exists(_.isInstanceOf[AgentStarted])       shouldBe true
-    events.exists(_.isInstanceOf[StepStarted])        shouldBe true
-    events.exists(_.isInstanceOf[ToolCallStarted])    shouldBe true
-    events.exists(_.isInstanceOf[ToolCallCompleted])  shouldBe true
-    events.exists(_.isInstanceOf[StepCompleted])      shouldBe true
-    events.exists(_.isInstanceOf[AgentCompleted])     shouldBe true
+    events.exists(_.isInstanceOf[AgentStarted]) shouldBe true
+    events.exists(_.isInstanceOf[StepStarted]) shouldBe true
+    events.exists(_.isInstanceOf[ToolCallStarted]) shouldBe true
+    events.exists(_.isInstanceOf[ToolCallCompleted]) shouldBe true
+    events.exists(_.isInstanceOf[StepCompleted]) shouldBe true
+    events.exists(_.isInstanceOf[AgentCompleted]) shouldBe true
 
     // Verify strict ordering: AgentStarted before StepStarted before ToolCallStarted
     val agentStartedIdx   = events.indexWhere(_.isInstanceOf[AgentStarted])
@@ -176,16 +174,16 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
     val stepCompletedIdx  = events.indexWhere(_.isInstanceOf[StepCompleted])
     val agentCompletedIdx = events.indexWhere(_.isInstanceOf[AgentCompleted])
 
-    agentStartedIdx   should be >= 0
-    stepStartedIdx    should be >= 0
-    toolStartedIdx    should be >= 0
-    toolCompletedIdx  should be >= 0
-    stepCompletedIdx  should be >= 0
+    agentStartedIdx should be >= 0
+    stepStartedIdx should be >= 0
+    toolStartedIdx should be >= 0
+    toolCompletedIdx should be >= 0
+    stepCompletedIdx should be >= 0
     agentCompletedIdx should be >= 0
 
-    agentStartedIdx   should be < stepStartedIdx
-    stepStartedIdx    should be < toolStartedIdx
-    toolStartedIdx    should be < toolCompletedIdx
+    agentStartedIdx should be < stepStartedIdx
+    stepStartedIdx should be < toolStartedIdx
+    toolStartedIdx should be < toolCompletedIdx
     agentCompletedIdx should be > stepCompletedIdx
 
     // Verify tool call details
@@ -193,8 +191,8 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
     toolStarted.toolName shouldBe "echo"
 
     val toolCompleted = events.collectFirst { case e: ToolCallCompleted => e }.get
-    toolCompleted.toolName    shouldBe "echo"
-    toolCompleted.success     shouldBe true
+    toolCompleted.toolName shouldBe "echo"
+    toolCompleted.success shouldBe true
 
     // AgentCompleted should not come before last AgentStarted
     agentCompletedIdx should be > agentStartedIdx
@@ -242,7 +240,7 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
     val toolStartEvents    = events.collect { case e: ToolCallStarted => e }
     val toolCompleteEvents = events.collect { case e: ToolCallCompleted => e }
 
-    toolStartEvents.size    shouldBe 2
+    toolStartEvents.size shouldBe 2
     toolCompleteEvents.size shouldBe 2
 
     // Tool IDs should match
@@ -258,7 +256,7 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
 
     // Agent should complete (not fail)
     events.exists(_.isInstanceOf[AgentCompleted]) shouldBe true
-    events.exists(_.isInstanceOf[AgentFailed])    shouldBe false
+    events.exists(_.isInstanceOf[AgentFailed]) shouldBe false
 
     // Ordering: first tool start before second tool start
     val firstIdx  = events.indexWhere { case e: ToolCallStarted => e.toolCallId == "call-step1"; case _ => false }
@@ -294,14 +292,14 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
 
     // InputGuardrailStarted must be emitted
     val guardrailStarted = events.collectFirst { case e: InputGuardrailStarted => e }
-    guardrailStarted.isDefined           shouldBe true
-    guardrailStarted.get.guardrailName   shouldBe "AlwaysReject"
+    guardrailStarted.isDefined shouldBe true
+    guardrailStarted.get.guardrailName shouldBe "AlwaysReject"
 
     // InputGuardrailCompleted with passed=false must be emitted
     val guardrailCompleted = events.collectFirst { case e: InputGuardrailCompleted => e }
-    guardrailCompleted.isDefined           shouldBe true
-    guardrailCompleted.get.guardrailName   shouldBe "AlwaysReject"
-    guardrailCompleted.get.passed          shouldBe false
+    guardrailCompleted.isDefined shouldBe true
+    guardrailCompleted.get.guardrailName shouldBe "AlwaysReject"
+    guardrailCompleted.get.passed shouldBe false
 
     // InputGuardrailStarted must come before InputGuardrailCompleted
     val startedIdx   = events.indexWhere(_.isInstanceOf[InputGuardrailStarted])
@@ -340,14 +338,14 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
 
     // OutputGuardrailStarted must be emitted
     val outputStarted = events.collectFirst { case e: OutputGuardrailStarted => e }
-    outputStarted.isDefined         shouldBe true
+    outputStarted.isDefined shouldBe true
     outputStarted.get.guardrailName shouldBe "OutputRejecter"
 
     // OutputGuardrailCompleted with passed=false must be emitted
     val outputCompleted = events.collectFirst { case e: OutputGuardrailCompleted => e }
-    outputCompleted.isDefined         shouldBe true
+    outputCompleted.isDefined shouldBe true
     outputCompleted.get.guardrailName shouldBe "OutputRejecter"
-    outputCompleted.get.passed        shouldBe false
+    outputCompleted.get.passed shouldBe false
 
     // Ordering: OutputGuardrailStarted before OutputGuardrailCompleted
     val startedIdx   = events.indexWhere(_.isInstanceOf[OutputGuardrailStarted])
@@ -359,7 +357,7 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
     // so it may be present; what matters is the result is Left and OutputGuardrailCompleted
     // with passed=false was emitted.
     outputCompleted.get.passed shouldBe false
-    result.isLeft              shouldBe true
+    result.isLeft shouldBe true
   }
 
   // ============================================================
@@ -462,16 +460,16 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
     val toolCompletedPos  = orderedTypes.indexOf("ToolCallCompleted")
     val agentCompletedPos = orderedTypes.lastIndexOf("AgentCompleted")
 
-    agentStartedPos   should be >= 0
-    stepStartedPos    should be >= 0
-    toolStartedPos    should be >= 0
-    toolCompletedPos  should be >= 0
+    agentStartedPos should be >= 0
+    stepStartedPos should be >= 0
+    toolStartedPos should be >= 0
+    toolCompletedPos should be >= 0
     agentCompletedPos should be >= 0
 
     // Strict ordering checks
-    agentStartedPos  should be < stepStartedPos
-    stepStartedPos   should be < toolStartedPos
-    toolStartedPos   should be < toolCompletedPos
+    agentStartedPos should be < stepStartedPos
+    stepStartedPos should be < toolStartedPos
+    toolStartedPos should be < toolCompletedPos
     toolCompletedPos should be < agentCompletedPos
 
     // TextDelta events should appear (streaming emits chunks)
@@ -510,7 +508,7 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
     result.isLeft shouldBe true
 
     // Guardrail events must be present
-    events.exists(_.isInstanceOf[InputGuardrailStarted])   shouldBe true
+    events.exists(_.isInstanceOf[InputGuardrailStarted]) shouldBe true
     events.exists(_.isInstanceOf[InputGuardrailCompleted]) shouldBe true
 
     // AgentStarted must NOT be present (execution never started)
@@ -518,8 +516,8 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
 
     // The completed event must indicate failure
     val completed = events.collectFirst { case e: InputGuardrailCompleted => e }
-    completed.isDefined    shouldBe true
-    completed.get.passed   shouldBe false
+    completed.isDefined shouldBe true
+    completed.get.passed shouldBe false
   }
 
   // ============================================================
@@ -532,7 +530,7 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
     val tools      = ToolRegistry.empty
 
     val passingGuardrail = new InputGuardrail {
-      val name: String = "AlwaysPass"
+      val name: String                            = "AlwaysPass"
       def validate(value: String): Result[String] = Right(value)
     }
 
@@ -546,9 +544,9 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
 
     val completed = events.collectFirst { case e: InputGuardrailCompleted => e }
-    completed.isDefined          shouldBe true
-    completed.get.guardrailName  shouldBe "AlwaysPass"
-    completed.get.passed         shouldBe true
+    completed.isDefined shouldBe true
+    completed.get.guardrailName shouldBe "AlwaysPass"
+    completed.get.passed shouldBe true
   }
 
   // ============================================================
@@ -561,7 +559,7 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
     val tools      = ToolRegistry.empty
 
     val passingOutputGuardrail = new OutputGuardrail {
-      val name: String = "AlwaysPassOutput"
+      val name: String                            = "AlwaysPassOutput"
       def validate(value: String): Result[String] = Right(value)
     }
 
@@ -575,9 +573,9 @@ class AgentStreamingIntegrationSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
 
     val completed = events.collectFirst { case e: OutputGuardrailCompleted => e }
-    completed.isDefined         shouldBe true
+    completed.isDefined shouldBe true
     completed.get.guardrailName shouldBe "AlwaysPassOutput"
-    completed.get.passed        shouldBe true
+    completed.get.passed shouldBe true
 
     events.exists(_.isInstanceOf[AgentCompleted]) shouldBe true
   }
