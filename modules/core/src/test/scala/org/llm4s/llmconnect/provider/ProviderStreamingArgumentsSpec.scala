@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import com.sun.net.httpserver.HttpServer
-import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAIConfig, ZaiConfig }
+import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenRouterConfig, ZaiConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -70,10 +70,9 @@ final class ProviderStreamingArgumentsSpec extends AnyFlatSpec with Matchers {
     )
 
     withSseServer(payload) { baseUrl =>
-      val config = OpenAIConfig(
+      val config = OpenRouterConfig(
         apiKey = "test-key",
         model = "test-model",
-        organization = None,
         baseUrl = baseUrl,
         contextWindow = 8192,
         reserveCompletion = 4096

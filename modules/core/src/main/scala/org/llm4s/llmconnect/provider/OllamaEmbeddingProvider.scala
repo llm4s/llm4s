@@ -71,7 +71,7 @@ object OllamaEmbeddingProvider {
         .newBuilder()
         .uri(URI.create(url))
         .header("Content-Type", "application/json")
-        .timeout(Duration.ofMinutes(2))
+        .timeout(Duration.ofMillis(cfg.requestTimeout.toMillis))
         .POST(HttpRequest.BodyPublishers.ofString(payload.render()))
 
       if (cfg.apiKey.nonEmpty && cfg.apiKey != "not-required") {

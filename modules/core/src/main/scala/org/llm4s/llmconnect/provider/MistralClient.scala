@@ -59,7 +59,7 @@ class MistralClient(
         .uri(URI.create(s"${config.baseUrl}/v1/chat/completions"))
         .header("Content-Type", "application/json")
         .header("Authorization", s"Bearer ${config.apiKey}")
-        .timeout(Duration.ofMinutes(2))
+        .timeout(Duration.ofMillis(config.requestTimeout.toMillis))
         .POST(HttpRequest.BodyPublishers.ofString(requestText, StandardCharsets.UTF_8))
         .build()
 

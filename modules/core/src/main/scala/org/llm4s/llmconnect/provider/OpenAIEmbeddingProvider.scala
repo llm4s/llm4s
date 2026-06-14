@@ -60,7 +60,7 @@ object OpenAIEmbeddingProvider {
         .uri(URI.create(url))
         .header("Authorization", s"Bearer ${cfg.apiKey}")
         .header("Content-Type", "application/json")
-        .timeout(Duration.ofMinutes(2))
+        .timeout(Duration.ofMillis(cfg.requestTimeout.toMillis))
         .POST(HttpRequest.BodyPublishers.ofString(payload.render()))
         .build()
 

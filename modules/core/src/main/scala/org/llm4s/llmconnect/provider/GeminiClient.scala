@@ -102,7 +102,7 @@ class GeminiClient(
         val headers = Map("Content-Type" -> "application/json")
 
         val attempt = Try {
-          val response = httpClient.post(url, headers, requestText, timeout = 120000)
+          val response = httpClient.post(url, headers, requestText, timeout = config.requestTimeout.toMillis.toInt)
 
           if (response.statusCode >= 200 && response.statusCode < 300) {
             val completionResult = parseCompletionResponse(response.body)
@@ -145,7 +145,7 @@ class GeminiClient(
         logger.debug(s"[Gemini] Starting stream to ${config.baseUrl}/models/${config.model}:streamGenerateContent")
 
         val headers  = Map("Content-Type" -> "application/json")
-        val response = httpClient.postStream(url, headers, requestText, timeout = 600000)
+        val response = httpClient.postStream(url, headers, requestText, timeout = config.streamTimeout.toMillis.toInt)
 
         if (response.statusCode < 200 || response.statusCode >= 300) {
           val err = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)

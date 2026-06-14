@@ -372,6 +372,12 @@ private[providersetup] object ProviderSetupRuntime:
           apiKey = input.flatMap(_.apiKey).getOrElse(cfg.apiKey),
           baseUrl = input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl)
         )
+      case cfg: OpenRouterConfig =>
+        cfg.copy(
+          model = input.flatMap(_.model).getOrElse(cfg.model),
+          apiKey = input.flatMap(_.apiKey).getOrElse(cfg.apiKey),
+          baseUrl = input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl)
+        )
 
   def demoCompletionCmd(
     providerConfig: ProviderConfig,
@@ -571,12 +577,13 @@ private[providersetup] object ProviderSetupRuntime:
 
   private def overrideModel(provider: ProviderConfig, modelName: String): ProviderConfig =
     provider match
-      case cfg: OpenAIConfig    => cfg.copy(model = modelName)
-      case cfg: AzureConfig     => cfg.copy(model = modelName)
-      case cfg: AnthropicConfig => cfg.copy(model = modelName)
-      case cfg: OllamaConfig    => cfg.copy(model = modelName)
-      case cfg: GeminiConfig    => cfg.copy(model = modelName)
-      case cfg: DeepSeekConfig  => cfg.copy(model = modelName)
-      case cfg: CohereConfig    => cfg.copy(model = modelName)
-      case cfg: MistralConfig   => cfg.copy(model = modelName)
-      case cfg: ZaiConfig       => cfg.copy(model = modelName)
+      case cfg: OpenAIConfig     => cfg.copy(model = modelName)
+      case cfg: AzureConfig      => cfg.copy(model = modelName)
+      case cfg: AnthropicConfig  => cfg.copy(model = modelName)
+      case cfg: OllamaConfig     => cfg.copy(model = modelName)
+      case cfg: GeminiConfig     => cfg.copy(model = modelName)
+      case cfg: DeepSeekConfig   => cfg.copy(model = modelName)
+      case cfg: CohereConfig     => cfg.copy(model = modelName)
+      case cfg: MistralConfig    => cfg.copy(model = modelName)
+      case cfg: ZaiConfig        => cfg.copy(model = modelName)
+      case cfg: OpenRouterConfig => cfg.copy(model = modelName)

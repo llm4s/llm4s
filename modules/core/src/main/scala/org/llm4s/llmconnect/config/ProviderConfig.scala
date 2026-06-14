@@ -4,6 +4,8 @@ import org.llm4s.types.ProviderModelTypes.ProviderKind
 import org.slf4j.LoggerFactory
 import org.llm4s.util.Redaction
 
+import scala.concurrent.duration._
+
 /**
  * Identifies a specific LLM provider, model, and connection details.
  *
@@ -294,7 +296,9 @@ case class OllamaConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 2.minutes,
+  streamTimeout: FiniteDuration = 10.minutes
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.Ollama
 
@@ -355,7 +359,9 @@ case class ZaiConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 5.minutes,
+  streamTimeout: FiniteDuration = 5.minutes
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.Zai
   override def toString: String =
@@ -425,7 +431,9 @@ case class GeminiConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 2.minutes,
+  streamTimeout: FiniteDuration = 10.minutes
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.Gemini
   override def toString: String =
@@ -503,7 +511,9 @@ case class DeepSeekConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 5.minutes,
+  streamTimeout: FiniteDuration = 5.minutes
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.DeepSeek
   override def toString: String =
@@ -586,7 +596,8 @@ case class CohereConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 2.minutes
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.Cohere
   override def toString: String =
@@ -640,7 +651,8 @@ case class MistralConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 2.minutes
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.Mistral
   override def toString: String =
@@ -676,4 +688,44 @@ object MistralConfig:
       baseUrl = baseUrl,
       contextWindow = cw,
       reserveCompletion = rc
+    )
+
+// OpenRouter-specific config; uses streamTimeout = 5.minutes to match the previously hardcoded value
+case class OpenRouterConfig(
+  apiKey: String,
+  model: String,
+  baseUrl: String,
+  contextWindow: Int,
+  reserveCompletion: Int,
+  requestTimeout: FiniteDuration = 2.minutes,
+  streamTimeout: FiniteDuration = 5.minutes,
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.OpenRouter
+  override def toString: String =
+    s"OpenRouterConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, " +
+      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+
+object OpenRouterConfig:
+  private val standardReserve = 4096
+
+  def fromValues(
+    modelName: String,
+    apiKey: String,
+    baseUrl: String,
+  )(using resolver: ContextWindowResolver): OpenRouterConfig =
+    require(apiKey.trim.nonEmpty, "OpenRouter apiKey must be non-empty")
+    require(baseUrl.trim.nonEmpty, "OpenRouter baseUrl must be non-empty")
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("openai", "anthropic", "google", "meta-llama", "mistralai"),
+      modelName = modelName,
+      defaultContextWindow = 128000,
+      defaultReserve = standardReserve,
+      fallbackResolver = _ => (128000, standardReserve),
+    )
+    OpenRouterConfig(
+      apiKey = apiKey,
+      model = modelName,
+      baseUrl = baseUrl,
+      contextWindow = cw,
+      reserveCompletion = rc,
     )

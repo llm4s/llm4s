@@ -70,6 +70,7 @@ class ZaiClient(
           .header("Content-Type", "application/json")
           .header("Authorization", s"Bearer ${config.apiKey}")
           .header("User-Agent", "llm4s-coding-assistant/1.0")
+          .timeout(Duration.ofMillis(config.requestTimeout.toMillis))
           .POST(HttpRequest.BodyPublishers.ofString(requestText))
           .build()
 
@@ -115,7 +116,7 @@ class ZaiClient(
         .header("Content-Type", "application/json")
         .header("Authorization", s"Bearer ${config.apiKey}")
         .header("User-Agent", "llm4s-coding-assistant/1.0")
-        .timeout(Duration.ofMinutes(5))
+        .timeout(Duration.ofMillis(config.streamTimeout.toMillis))
         .POST(HttpRequest.BodyPublishers.ofString(requestText))
         .build()
       httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())

@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.OpenAIConfig
+import org.llm4s.llmconnect.config.OpenRouterConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.serialization.OpenRouterToolCallDeserializer
@@ -25,9 +25,10 @@ import scala.util.Try
  * [[LLMClient]] implementation for the OpenRouter unified model gateway.
  *
  * Sends requests to the OpenRouter REST API using the OpenAI-compatible
- * `/chat/completions` endpoint. Accepts `OpenAIConfig` — there is no
- * separate `OpenRouterConfig`; `LLMConnect` detects OpenRouter by checking
- * whether `baseUrl` contains `"openrouter.ai"` and routes accordingly.
+ * `/chat/completions` endpoint. Accepts an [[OpenRouterConfig]] (preferred);
+ * for legacy callers, an [[OpenAIConfig]] whose `baseUrl` contains
+ * `"openrouter.ai"` is also accepted and automatically converted to
+ * [[OpenRouterConfig]] by [[org.llm4s.llmconnect.LLMConnect]].
  *
  * == Required headers ==
  *
@@ -54,13 +55,13 @@ import scala.util.Try
  * populates: `message.thinking`, `message.reasoning`, or
  * `choice.thinking` (checked in that order).
  *
- * @param config  `OpenAIConfig` whose `baseUrl` must contain `"openrouter.ai"`;
- *                carries the API key and model name.
+ * @param config  [[OpenRouterConfig]] carrying the API key, model name, base URL,
+ *                and HTTP timeout configuration.
  * @param metrics Receives per-call latency and token-usage events.
  *                Defaults to `MetricsCollector.noop`.
  */
 class OpenRouterClient(
-  config: OpenAIConfig,
+  config: OpenRouterConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
 )(using val registryService: ModelRegistryService)
@@ -92,6 +93,7 @@ class OpenRouterClient(
             .header("Authorization", s"Bearer ${config.apiKey}")
             .header("HTTP-Referer", "https://github.com/llm4s/llm4s") // Required by OpenRouter
             .header("X-Title", "LLM4S")                               // Required by OpenRouter
+            .timeout(Duration.ofMillis(config.requestTimeout.toMillis))
             .POST(HttpRequest.BodyPublishers.ofString(requestText))
             .build()
 
@@ -142,7 +144,7 @@ class OpenRouterClient(
           .header("Authorization", s"Bearer ${config.apiKey}")
           .header("HTTP-Referer", "https://github.com/llm4s/llm4s")
           .header("X-Title", "LLM4S")
-          .timeout(Duration.ofMinutes(5))
+          .timeout(Duration.ofMillis(config.streamTimeout.toMillis))
           .POST(HttpRequest.BodyPublishers.ofString(requestText))
           .build()
         httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
@@ -472,20 +474,20 @@ object OpenRouterClient {
    * Constructs an [[OpenRouterClient]], wrapping any construction-time
    * exception in a `Left`.
    *
-   * @param config  `OpenAIConfig` with the OpenRouter API key, model, and
+   * @param config  `OpenRouterConfig` with the OpenRouter API key, model, and
    *                a `baseUrl` that contains `"openrouter.ai"`.
    * @param metrics Receives per-call latency and token-usage events.
    *                Defaults to `MetricsCollector.noop`.
    * @return `Right(client)` on success; `Left(LLMError)` if construction fails.
    */
   def apply(
-    config: OpenAIConfig,
+    config: OpenRouterConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
   )(using ModelRegistryService): Result[OpenRouterClient] =
     Try(new OpenRouterClient(config, metrics)).toResult
 
   def apply(
-    config: OpenAIConfig,
+    config: OpenRouterConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService): Result[OpenRouterClient] =
