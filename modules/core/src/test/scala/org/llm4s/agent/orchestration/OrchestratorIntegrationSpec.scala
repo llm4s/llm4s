@@ -545,7 +545,7 @@ class OrchestratorIntegrationSpec extends AnyFlatSpec with Matchers with ScalaFu
     def slowNode(id: String): Node[String, String] =
       Node(
         id,
-        TypedAgent.fromFuture[String, String](id) { input =>
+        TypedAgent.fromFuture[String, String](id) { _ =>
           Future {
             Thread.sleep(SLEEP_MS)
             Right(s"$id:done")
