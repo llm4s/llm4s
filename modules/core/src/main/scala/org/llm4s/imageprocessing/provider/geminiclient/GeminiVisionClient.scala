@@ -51,15 +51,15 @@ class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageproc
     prompt: Option[String] = None
   ): Either[LLMError, ImageAnalysisResult] =
     for {
-      basic     <- localProcessor.analyzeImage(imagePath, None)
-      metadata  = basic.metadata
+      basic <- localProcessor.analyzeImage(imagePath, None)
+      metadata = basic.metadata
       base64Image <- encodeImageToBase64(imagePath).toEither.left
         .map(e => LLMError.processingFailed("encode", s"Failed to encode image: ${e.getMessage}", Some(e)))
       analysisPrompt = prompt.getOrElse(
         "Analyze this image in detail. Describe what you see, identify any objects, text, or people present. " +
           "Provide tags that categorize the image content."
       )
-      mediaType      = MediaType.fromPath(imagePath)
+      mediaType = MediaType.fromPath(imagePath)
       visionResponse <- callGeminiVisionAPI(base64Image, analysisPrompt, mediaType).toEither.left
         .map(e => LLMError.apiCallFailed("Gemini", s"Gemini Vision API call failed: ${e.getMessage}"))
     } yield parseVisionResponse(visionResponse, metadata)
@@ -116,7 +116,7 @@ class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageproc
   ): Try[String] =
     try {
       val requestBody = GeminiRequestBody.serialize(prompt, base64Image, mediaType)
-      val url = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
+      val url         = s"${config.baseUrl}/models/${config.model}:generateContent?key=${config.apiKey}"
 
       // Do NOT log the URL — it contains the API key as a query parameter
       logger.debug(s"[GeminiVisionClient] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
@@ -181,22 +181,50 @@ class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageproc
   private def parseVisionResponse(response: String, metadata: ImageMetadata): ImageAnalysisResult =
     ImageAnalysisResult(
       description = response,
-      confidence  = 0.85,
-      tags        = extractTagsFromText(response),
-      objects     = extractObjectsFromText(response),
-      emotions    = List.empty,
-      text        = extractTextFromResponse(response),
-      metadata    = metadata.copy(processedAt = Instant.now())
+      confidence = 0.85,
+      tags = extractTagsFromText(response),
+      objects = extractObjectsFromText(response),
+      emotions = List.empty,
+      text = extractTextFromResponse(response),
+      metadata = metadata.copy(processedAt = Instant.now())
     )
 
   private def extractTagsFromText(text: String): List[String] = {
     val commonTags = Set(
-      "person", "people", "man", "woman", "child", "baby",
-      "dog", "cat", "animal", "car", "building", "house", "tree",
-      "outdoor", "indoor", "landscape", "portrait", "nature", "city",
-      "street", "water", "sky", "mountain", "beach", "food",
-      "restaurant", "kitchen", "bedroom", "technology", "computer",
-      "phone", "book", "art", "painting"
+      "person",
+      "people",
+      "man",
+      "woman",
+      "child",
+      "baby",
+      "dog",
+      "cat",
+      "animal",
+      "car",
+      "building",
+      "house",
+      "tree",
+      "outdoor",
+      "indoor",
+      "landscape",
+      "portrait",
+      "nature",
+      "city",
+      "street",
+      "water",
+      "sky",
+      "mountain",
+      "beach",
+      "food",
+      "restaurant",
+      "kitchen",
+      "bedroom",
+      "technology",
+      "computer",
+      "phone",
+      "book",
+      "art",
+      "painting"
     )
     val words = text.toLowerCase.split("\\W+").toSet
     commonTags.intersect(words).toList
@@ -208,7 +236,7 @@ class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageproc
       .filter(keyword => text.toLowerCase.contains(keyword))
       .map { obj =>
         DetectedObject(
-          label      = obj,
+          label = obj,
           confidence = 0.75,
           boundingBox = BoundingBox(0, 0, 100, 100)
         )
