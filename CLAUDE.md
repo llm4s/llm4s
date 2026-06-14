@@ -73,12 +73,17 @@ OPENAI_API_KEY=sk-...                          # reuses LLM API key
 EMBEDDING_MODEL=voyage/voyage-3
 VOYAGE_API_KEY=pa-...
 
+# Embeddings - Jina (cloud)
+EMBEDDING_MODEL=jina/jina-embeddings-v3
+JINA_API_KEY=jina-...
+
 # Embeddings - Ollama (local, no API key needed)
 EMBEDDING_MODEL=ollama/nomic-embed-text        # or mxbai-embed-large, all-minilm
 
 # Optional: Override default base URLs
 # OPENAI_EMBEDDING_BASE_URL=https://custom.openai.com/v1
 # VOYAGE_EMBEDDING_BASE_URL=https://custom.voyage.ai/v1
+# JINA_EMBEDDING_BASE_URL=https://custom.jina.ai/v1
 # OLLAMA_EMBEDDING_BASE_URL=http://custom-ollama:11434
 ```
 

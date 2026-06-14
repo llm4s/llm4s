@@ -5,6 +5,7 @@ import org.llm4s.llmconnect.encoding.UniversalEncoder
 import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse, EmbeddingVector }
 import org.llm4s.llmconnect.provider.{
   EmbeddingProvider,
+  JinaEmbeddingProvider,
   OllamaEmbeddingProvider,
   OpenAIEmbeddingProvider,
   VoyageAIEmbeddingProvider
@@ -133,6 +134,7 @@ object EmbeddingClient {
     p match {
       case "openai" => Right(new EmbeddingClient(OpenAIEmbeddingProvider.fromConfig(cfg)))
       case "voyage" => Right(new EmbeddingClient(VoyageAIEmbeddingProvider.fromConfig(cfg)))
+      case "jina"   => Right(new EmbeddingClient(JinaEmbeddingProvider.fromConfig(cfg)))
       case "ollama" => Right(new EmbeddingClient(OllamaEmbeddingProvider.fromConfig(cfg)))
       case other =>
         Left(
