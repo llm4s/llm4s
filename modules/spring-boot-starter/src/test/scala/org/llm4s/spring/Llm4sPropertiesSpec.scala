@@ -7,6 +7,7 @@ class Llm4sPropertiesSpec extends AnyFlatSpec with Matchers {
 
   "Llm4sProperties" should "default to empty strings and standard context window" in {
     val p = new Llm4sProperties
+    p.enabled shouldBe true
     p.provider shouldBe ""
     p.model shouldBe ""
     p.apiKey shouldBe ""
@@ -42,5 +43,11 @@ class Llm4sPropertiesSpec extends AnyFlatSpec with Matchers {
     p.provider shouldBe "anthropic"
     p.model shouldBe "claude-sonnet-4-5-latest"
     p.apiKey shouldBe ""
+  }
+
+  it should "set enabled to false" in {
+    val p = new Llm4sProperties
+    p.enabled = false
+    p.enabled shouldBe false
   }
 }
