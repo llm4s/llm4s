@@ -57,20 +57,31 @@ object JinaEmbeddingProvider {
         )
 
         val respEither: Either[EmbeddingError, Llm4sHttpResponse] =
-          try Right(httpClient.post(url, headers, payload.render(), timeout = 120000))
-          catch {
-            case e: InterruptedException =>
-              Thread.currentThread().interrupt()
-              Left(
-                EmbeddingError(
-                  code = None,
-                  message = s"HTTP request interrupted: ${e.getMessage}",
-                  provider = "jina"
-                )
-              )
-            case NonFatal(e) =>
-              Left(EmbeddingError(code = None, message = s"HTTP request failed: ${e.getMessage}", provider = "jina"))
-          }
+          Try {
+            httpClient.post(url, headers, payload.render(), timeout = 120000)
+          }.fold(
+            e =>
+              e match {
+                case ie: InterruptedException =>
+                  Thread.currentThread().interrupt()
+                  Left(
+                    EmbeddingError(
+                      code = None,
+                      message = s"HTTP request interrupted: ${ie.getMessage}",
+                      provider = "jina"
+                    )
+                  )
+                case NonFatal(other) =>
+                  Left(
+                    EmbeddingError(
+                      code = None,
+                      message = s"HTTP request failed: ${other.getMessage}",
+                      provider = "jina"
+                    )
+                  )
+              },
+            response => Right(response)
+          )
 
         respEither.flatMap { response =>
           response.statusCode match {
@@ -81,11 +92,13 @@ object JinaEmbeddingProvider {
                 val metadata =
                   Map("provider" -> "jina", "model" -> model, "count" -> input.size.toString)
                 EmbeddingResponse(embeddings = vectors, metadata = metadata)
-              }.toEither.left
-                .map { ex =>
-                  logger.error(s"[JinaEmbeddingProvider] Parse error: ${ex.getMessage}")
-                  EmbeddingError(code = None, message = s"Parsing error: ${ex.getMessage}", provider = "jina")
-                }
+              }.fold(
+                { e =>
+                  logger.error(s"[JinaEmbeddingProvider] Parse error: ${e.getMessage}")
+                  Left(EmbeddingError(code = None, message = s"Parsing error: ${e.getMessage}", provider = "jina"))
+                },
+                response => Right(response)
+              )
             case status =>
               val body = Redaction.truncateForLog(response.body)
               logger.error(s"[JinaEmbeddingProvider] HTTP error: $body")
