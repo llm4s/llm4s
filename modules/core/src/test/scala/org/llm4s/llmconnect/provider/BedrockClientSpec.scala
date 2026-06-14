@@ -400,9 +400,7 @@ class BedrockClientSpec extends AnyFlatSpec with Matchers {
   } { baseUrl =>
     val result = BedrockClient(config(baseUrl))
     result.isRight shouldBe true
-    result.foreach { client =>
-      client.complete(conversation, CompletionOptions()).isRight shouldBe true
-    }
+    result.foreach(client => client.complete(conversation, CompletionOptions()).isRight shouldBe true)
   }
 
   it should "construct a client via the three-arg factory method with exchange logging" in withServer { exchange =>
@@ -473,7 +471,7 @@ class BedrockClientSpec extends AnyFlatSpec with Matchers {
 
   "BedrockConfig.fromValues" should "resolve context window for claude models" in {
     given ContextWindowResolver = ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
-    val cfg = BedrockConfig.fromValues("anthropic.claude-3-5-sonnet-20241022-v2:0", "us-east-1")
+    val cfg                     = BedrockConfig.fromValues("anthropic.claude-3-5-sonnet-20241022-v2:0", "us-east-1")
     cfg.region shouldBe "us-east-1"
     cfg.model shouldBe "anthropic.claude-3-5-sonnet-20241022-v2:0"
     cfg.contextWindow should be > 0
@@ -482,26 +480,26 @@ class BedrockClientSpec extends AnyFlatSpec with Matchers {
 
   it should "apply the llama fallback for unregistered llama models" in {
     given ContextWindowResolver = ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
-    val cfg = BedrockConfig.fromValues("bedrock.fake-llama-experimental-v99", "eu-west-1")
+    val cfg                     = BedrockConfig.fromValues("bedrock.fake-llama-experimental-v99", "eu-west-1")
     cfg.contextWindow shouldBe 128000
     cfg.region shouldBe "eu-west-1"
   }
 
   it should "apply the mistral fallback for unregistered mistral models" in {
     given ContextWindowResolver = ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
-    val cfg = BedrockConfig.fromValues("bedrock.fake-mistral-experimental-v99", "us-west-2")
+    val cfg                     = BedrockConfig.fromValues("bedrock.fake-mistral-experimental-v99", "us-west-2")
     cfg.contextWindow shouldBe 32768
   }
 
   it should "apply the titan fallback for unregistered titan models" in {
     given ContextWindowResolver = ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
-    val cfg = BedrockConfig.fromValues("bedrock.fake-titan-experimental-v99", "us-east-1")
+    val cfg                     = BedrockConfig.fromValues("bedrock.fake-titan-experimental-v99", "us-east-1")
     cfg.contextWindow shouldBe 32000
   }
 
   it should "use a conservative default for completely unknown models" in {
     given ContextWindowResolver = ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
-    val cfg = BedrockConfig.fromValues("bedrock.totally-unknown-model-v99", "ap-southeast-1")
+    val cfg                     = BedrockConfig.fromValues("bedrock.totally-unknown-model-v99", "ap-southeast-1")
     cfg.contextWindow shouldBe 8192
   }
 
@@ -516,7 +514,7 @@ class BedrockClientSpec extends AnyFlatSpec with Matchers {
     val str = cfg.toString
     str should include("us-east-1")
     str should include("amazon.titan-text-express-v1")
-    str should not include "AKIAIOSFODNN7EXAMPLE"
+    (str should not).include("AKIAIOSFODNN7EXAMPLE")
   }
 
   it should "show default chain label when no access key is set" in {
