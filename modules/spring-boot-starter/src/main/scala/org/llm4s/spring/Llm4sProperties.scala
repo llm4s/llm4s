@@ -7,6 +7,8 @@ import scala.beans.BeanProperty
 @ConfigurationProperties(prefix = "llm4s")
 class Llm4sProperties {
 
+  @BeanProperty var enabled: Boolean = true
+
   @BeanProperty var provider: String = ""
 
   @BeanProperty var model: String = ""
