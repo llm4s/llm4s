@@ -32,9 +32,8 @@ class ConsoleTracingIntegrationSpec extends AnyFlatSpec with Matchers {
     val stream = new PrintStream(buf)
     val old    = System.out
     System.setOut(stream)
-    try {
-      body
-    } finally {
+    try body
+    finally {
       System.out.flush()
       System.setOut(old)
     }
@@ -77,9 +76,7 @@ class ConsoleTracingIntegrationSpec extends AnyFlatSpec with Matchers {
       "echo",
       "Echoes the supplied message back",
       schema
-    ).withHandler { extractor =>
-      extractor.getString("message").map(msg => EchoResult(msg))
-    }.buildSafe()
+    ).withHandler(extractor => extractor.getString("message").map(msg => EchoResult(msg))).buildSafe()
   }
 
   /** Result type for the echo tool (defined at top level to satisfy upickle macros). */
@@ -121,7 +118,7 @@ class ConsoleTracingIntegrationSpec extends AnyFlatSpec with Matchers {
 
   "ConsoleTracingIntegration" should "emit AGENT INITIALIZED span when an agent turn begins" in {
     val tracing = new ConsoleTracing()
-    val output  = captureStdout {
+    val output = captureStdout {
       tracing.traceEvent(TraceEvent.AgentInitialized("Test query", Vector("echo"))).isRight shouldBe true
     }
 
@@ -132,8 +129,9 @@ class ConsoleTracingIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "emit TOOL EXECUTED span with tool name and duration" in {
     val tracing = new ConsoleTracing()
-    val output  = captureStdout {
-      tracing.traceEvent(TraceEvent.ToolExecuted("echo", """{"message":"hello"}""", "hello", 42L, success = true))
+    val output = captureStdout {
+      tracing
+        .traceEvent(TraceEvent.ToolExecuted("echo", """{"message":"hello"}""", "hello", 42L, success = true))
         .isRight shouldBe true
     }
 
@@ -144,8 +142,9 @@ class ConsoleTracingIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "emit COMPLETION RECEIVED span with model name" in {
     val tracing = new ConsoleTracing()
-    val output  = captureStdout {
-      tracing.traceEvent(TraceEvent.CompletionReceived("comp-1", "test-model", toolCalls = 1, "Done."))
+    val output = captureStdout {
+      tracing
+        .traceEvent(TraceEvent.CompletionReceived("comp-1", "test-model", toolCalls = 1, "Done."))
         .isRight shouldBe true
     }
 
@@ -155,7 +154,7 @@ class ConsoleTracingIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "emit TOKEN USAGE span" in {
     val tracing = new ConsoleTracing()
-    val output  = captureStdout {
+    val output = captureStdout {
       tracing.traceTokenUsage(TokenUsage(20, 10, 30), "test-model", "agent_completion").isRight shouldBe true
     }
 
@@ -171,9 +170,9 @@ class ConsoleTracingIntegrationSpec extends AnyFlatSpec with Matchers {
     val echoTool = echoToolResult.getOrElse(fail("echo tool build failed"))
     val registry = new ToolRegistry(Seq(echoTool))
 
-    val tc1    = "call-abc-001"
-    val client = new SequencedMockClient(Seq(toolCallCompletion(tc1, "hello"), finalCompletion()))
-    val agent  = new Agent(client)
+    val tc1     = "call-abc-001"
+    val client  = new SequencedMockClient(Seq(toolCallCompletion(tc1, "hello"), finalCompletion()))
+    val agent   = new Agent(client)
     val tracing = new ConsoleTracing()
     val ctx     = AgentContext(tracing = Some(tracing))
 
@@ -201,9 +200,9 @@ class ConsoleTracingIntegrationSpec extends AnyFlatSpec with Matchers {
     val echoTool = echoToolResult.getOrElse(fail("echo tool build failed"))
     val registry = new ToolRegistry(Seq(echoTool))
 
-    val tc1    = "call-abc-002"
-    val client = new SequencedMockClient(Seq(toolCallCompletion(tc1, "world"), finalCompletion()))
-    val agent  = new Agent(client)
+    val tc1     = "call-abc-002"
+    val client  = new SequencedMockClient(Seq(toolCallCompletion(tc1, "world"), finalCompletion()))
+    val agent   = new Agent(client)
     val tracing = new ConsoleTracing()
     val ctx     = AgentContext(tracing = Some(tracing))
 
@@ -228,9 +227,8 @@ class ConsoleTracingIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "emit AGENT STATE UPDATED with message count and status" in {
     val tracing = new ConsoleTracing()
-    val output  = captureStdout {
-      tracing.traceEvent(TraceEvent.AgentStateUpdated("Complete", messageCount = 3, logCount = 2))
-        .isRight shouldBe true
+    val output = captureStdout {
+      tracing.traceEvent(TraceEvent.AgentStateUpdated("Complete", messageCount = 3, logCount = 2)).isRight shouldBe true
     }
 
     output should include("AGENT STATE UPDATED")
@@ -240,7 +238,7 @@ class ConsoleTracingIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "emit traceToolCall output with tool name and success flag" in {
     val tracing = new ConsoleTracing()
-    val output  = captureStdout {
+    val output = captureStdout {
       tracing.traceToolCall("echo", """{"message":"test"}""", "test").isRight shouldBe true
     }
 
