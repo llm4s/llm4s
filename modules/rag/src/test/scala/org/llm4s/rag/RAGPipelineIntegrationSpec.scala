@@ -31,8 +31,7 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
   private given ModelRegistryService = ModelRegistryTestSupport.defaultService()
 
   /** Deterministic mock embedding provider (uses text hash-code as seed). */
-  private class DeterministicEmbeddingProvider(dimensions: Int = 8)
-      extends EmbeddingProvider {
+  private class DeterministicEmbeddingProvider(dimensions: Int = 8) extends EmbeddingProvider {
     var callCount: Int = 0
 
     override def embed(request: EmbeddingRequest): Result[EmbeddingResponse] = {
@@ -76,10 +75,12 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
     val effectiveConfig =
       if (withLLM) config.withLLM(new MockLLMClients.SimpleMock(llmResponse))
       else config
-    RAG.buildWithClient(effectiveConfig, embeddingClient).fold(
-      err => fail(s"Failed to build RAG pipeline: ${err.message}"),
-      identity
-    )
+    RAG
+      .buildWithClient(effectiveConfig, embeddingClient)
+      .fold(
+        err => fail(s"Failed to build RAG pipeline: ${err.message}"),
+        identity
+      )
   }
 
   // -----------------------------------------------------------------------
@@ -92,10 +93,10 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
       val rag = buildRAG()
 
       val documents = Seq(
-        "doc-scala"  -> "Scala is a statically typed programming language that combines object-oriented and functional programming.",
+        "doc-scala" -> "Scala is a statically typed programming language that combines object-oriented and functional programming.",
         "doc-python" -> "Python is a dynamically typed interpreted language popular for data science and machine learning.",
-        "doc-java"   -> "Java is a class-based object-oriented language that was designed to be write-once run-anywhere.",
-        "doc-rust"   -> "Rust is a systems programming language focused on memory safety without a garbage collector.",
+        "doc-java" -> "Java is a class-based object-oriented language that was designed to be write-once run-anywhere.",
+        "doc-rust" -> "Rust is a systems programming language focused on memory safety without a garbage collector.",
         "doc-haskell" -> "Haskell is a purely functional programming language with strong static typing and lazy evaluation."
       )
 
@@ -103,9 +104,9 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
       val stats  = rag.ingest(loader).fold(err => fail(err.message), identity)
 
       stats.successful shouldBe 5
-      stats.failed     shouldBe 0
+      stats.failed shouldBe 0
       rag.documentCount shouldBe 5
-      rag.chunkCount    should be > 0
+      rag.chunkCount should be > 0
 
       val results = rag.query("functional programming language").fold(err => fail(err.message), identity)
       results should not be empty
@@ -114,15 +115,17 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "return search results that contain chunk content" in {
     val rag = buildRAG()
-    rag.ingestText(
-      "Scala supports higher-order functions and immutable data structures.",
-      "doc-functional"
-    ).fold(err => fail(err.message), identity)
+    rag
+      .ingestText(
+        "Scala supports higher-order functions and immutable data structures.",
+        "doc-functional"
+      )
+      .fold(err => fail(err.message), identity)
 
     val results = rag.query("immutable data").fold(err => fail(err.message), identity)
     results should not be empty
     results.head.content should not be empty
-    results.head.id      should not be empty
+    results.head.id should not be empty
   }
 
   // -----------------------------------------------------------------------
@@ -134,9 +137,15 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
 
       val rag = buildRAG()
 
-      rag.ingestText("Apache Kafka is a distributed event streaming platform.", "doc-kafka").fold(err => fail(err.message), identity)
-      rag.ingestText("Apache Spark is a unified analytics engine for big data.", "doc-spark").fold(err => fail(err.message), identity)
-      rag.ingestText("Flink provides stateful computations over data streams.",  "doc-flink").fold(err => fail(err.message), identity)
+      rag
+        .ingestText("Apache Kafka is a distributed event streaming platform.", "doc-kafka")
+        .fold(err => fail(err.message), identity)
+      rag
+        .ingestText("Apache Spark is a unified analytics engine for big data.", "doc-spark")
+        .fold(err => fail(err.message), identity)
+      rag
+        .ingestText("Flink provides stateful computations over data streams.", "doc-flink")
+        .fold(err => fail(err.message), identity)
 
       // RRF fusion (default) combines vector and keyword results
       val results = rag.query("Apache streaming data").fold(err => fail(err.message), identity)
@@ -147,8 +156,12 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
     val weightedConfig = RAGConfig.default.withWeightedScore(vectorWeight = 0.7, keywordWeight = 0.3)
     val rag            = buildRAG(config = weightedConfig)
 
-    rag.ingestText("Vector databases store embeddings for similarity search.", "doc-vectordb").fold(err => fail(err.message), identity)
-    rag.ingestText("Relational databases store structured tabular data.",       "doc-reldb").fold(err => fail(err.message), identity)
+    rag
+      .ingestText("Vector databases store embeddings for similarity search.", "doc-vectordb")
+      .fold(err => fail(err.message), identity)
+    rag
+      .ingestText("Relational databases store structured tabular data.", "doc-reldb")
+      .fold(err => fail(err.message), identity)
 
     val results = rag.query("database similarity").fold(err => fail(err.message), identity)
     results should not be empty
@@ -159,7 +172,9 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
     val vectorOnlyConfig = RAGConfig.default.vectorOnly
     val rag              = buildRAG(config = vectorOnlyConfig)
 
-    rag.ingestText("LLMs generate text by predicting the next token.", "doc-llm").fold(err => fail(err.message), identity)
+    rag
+      .ingestText("LLMs generate text by predicting the next token.", "doc-llm")
+      .fold(err => fail(err.message), identity)
 
     val results = rag.query("text generation token prediction").fold(err => fail(err.message), identity)
     results should not be empty
@@ -169,7 +184,9 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
     val keywordOnlyConfig = RAGConfig.default.keywordOnly
     val rag               = buildRAG(config = keywordOnlyConfig)
 
-    rag.ingestText("Transformers use self-attention mechanisms for sequence modelling.", "doc-transformer").fold(err => fail(err.message), identity)
+    rag
+      .ingestText("Transformers use self-attention mechanisms for sequence modelling.", "doc-transformer")
+      .fold(err => fail(err.message), identity)
 
     // Keyword search uses exact term matching
     val results = rag.query("Transformers self-attention").fold(err => fail(err.message), identity)
@@ -191,13 +208,19 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
       // reranking path is exercised without calling a real API.
       val llmClient  = new MockLLMClients.SimpleMock("reranked answer")
       val baseConfig = RAGConfig.default.withLLMReranking.withLLM(llmClient)
-      val rag        = RAG.buildWithClient(baseConfig, embeddingClient).fold(
-        err => fail(s"Build failed: ${err.message}"),
-        identity
-      )
+      val rag = RAG
+        .buildWithClient(baseConfig, embeddingClient)
+        .fold(
+          err => fail(s"Build failed: ${err.message}"),
+          identity
+        )
 
-      rag.ingestText("Scala is a functional programming language.", "doc-scala").fold(err => fail(err.message), identity)
-      rag.ingestText("Java is an object-oriented programming language.", "doc-java").fold(err => fail(err.message), identity)
+      rag
+        .ingestText("Scala is a functional programming language.", "doc-scala")
+        .fold(err => fail(err.message), identity)
+      rag
+        .ingestText("Java is an object-oriented programming language.", "doc-java")
+        .fold(err => fail(err.message), identity)
       rag.ingestText("Haskell is a purely functional language.", "doc-haskell").fold(err => fail(err.message), identity)
 
       // The built-in LLM reranker will call the mock LLM; it returns a fixed
@@ -211,7 +234,7 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
   it should "verify that a custom mock reranker changes ordering" in {
     // We can directly test the reranker itself to verify the scoring logic
     val reranker = new MockReranker(relevanceKeyword = "functional")
-    val request  = RerankRequest(
+    val request = RerankRequest(
       query = "functional programming",
       documents = Seq(
         "Java is object-oriented.",
@@ -238,19 +261,23 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
 
       val rag = buildRAG(withLLM = true, llmResponse = "The answer derived from context.")
 
-      rag.ingestText(
-        "The speed of light in a vacuum is approximately 299,792,458 metres per second.",
-        "doc-physics"
-      ).fold(err => fail(err.message), identity)
+      rag
+        .ingestText(
+          "The speed of light in a vacuum is approximately 299,792,458 metres per second.",
+          "doc-physics"
+        )
+        .fold(err => fail(err.message), identity)
 
-      rag.ingestText(
-        "The boiling point of water at sea level is 100 degrees Celsius.",
-        "doc-chemistry"
-      ).fold(err => fail(err.message), identity)
+      rag
+        .ingestText(
+          "The boiling point of water at sea level is 100 degrees Celsius.",
+          "doc-chemistry"
+        )
+        .fold(err => fail(err.message), identity)
 
       val answerResult = rag.queryWithAnswer("What is the speed of light?").fold(err => fail(err.message), identity)
 
-      answerResult.answer   should not be empty
+      answerResult.answer should not be empty
       answerResult.question shouldBe "What is the speed of light?"
       answerResult.contexts should not be empty
     }
@@ -260,10 +287,12 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
     val trackingMock = new MockLLMClients.SimpleMock("Context-based answer.")
     val provider     = new DeterministicEmbeddingProvider()
     val ragConfig    = RAGConfig.default.withLLM(trackingMock)
-    val rag          = RAG.buildWithClient(ragConfig, new EmbeddingClient(provider)).fold(
-      err => fail(s"Build failed: ${err.message}"),
-      identity
-    )
+    val rag = RAG
+      .buildWithClient(ragConfig, new EmbeddingClient(provider))
+      .fold(
+        err => fail(s"Build failed: ${err.message}"),
+        identity
+      )
 
     val knowledgeText = "Scala was created by Martin Odersky and first released in 2004."
     rag.ingestText(knowledgeText, "doc-scala-history").fold(err => fail(err.message), identity)
@@ -293,8 +322,8 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
     val rag   = buildRAG()
     val stats = rag.stats.fold(err => fail(err.message), identity)
     stats.documentCount shouldBe 0
-    stats.chunkCount    shouldBe 0
-    stats.vectorCount   shouldBe 0L
+    stats.chunkCount shouldBe 0
+    stats.vectorCount shouldBe 0L
   }
 
   // -----------------------------------------------------------------------
@@ -316,14 +345,16 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
       // Both ingestions succeed because the vector store uses upsert
       // The document count reflects two calls (tracker is additive)
       rag.documentCount should be >= 1
-      rag.chunkCount    should be > 0
+      rag.chunkCount should be > 0
     }
 
   it should "produce searchable results after re-indexing the same ID" in {
     val rag = buildRAG()
 
     rag.ingestText("Old data about topic X.", "doc-reindex").fold(err => fail(err.message), identity)
-    rag.ingestText("New updated data about topic X with better description.", "doc-reindex").fold(err => fail(err.message), identity)
+    rag
+      .ingestText("New updated data about topic X with better description.", "doc-reindex")
+      .fold(err => fail(err.message), identity)
 
     val results = rag.query("topic X").fold(err => fail(err.message), identity)
     results should not be empty
@@ -396,27 +427,30 @@ class RAGPipelineIntegrationSpec extends AnyFlatSpec with Matchers {
 
       // Step 2 – Verify indexing statistics
       rag.documentCount shouldBe 5
-      rag.chunkCount    should be >= 5
+      rag.chunkCount should be >= 5
       rag.stats.map(_.vectorCount).fold(err => fail(err.message), vc => vc should be > 0L)
 
       // Step 3 – Search for relevant chunks
-      val searchResults = rag.query("functional programming JVM", topK = Some(3)).fold(err => fail(err.message), identity)
+      val searchResults =
+        rag.query("functional programming JVM", topK = Some(3)).fold(err => fail(err.message), identity)
       searchResults.size should be <= 3
       searchResults should not be empty
 
       // Step 4 – Verify result structure
       searchResults.foreach { result =>
-        result.id      should not be empty
+        result.id should not be empty
         result.content should not be empty
-        result.score   should be >= 0.0
+        result.score should be >= 0.0
       }
 
       // Step 5 – Generate agent answer from retrieved context
-      val answerResult = rag.queryWithAnswer("What JVM languages support functional programming?").fold(err => fail(err.message), identity)
+      val answerResult = rag
+        .queryWithAnswer("What JVM languages support functional programming?")
+        .fold(err => fail(err.message), identity)
 
-      answerResult.answer                  shouldBe llmResponse
-      answerResult.question                shouldBe "What JVM languages support functional programming?"
-      answerResult.contexts                should not be empty
+      answerResult.answer shouldBe llmResponse
+      answerResult.question shouldBe "What JVM languages support functional programming?"
+      answerResult.contexts should not be empty
       answerResult.usage.map(_.totalTokens) should not be None
     }
 
