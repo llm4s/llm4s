@@ -377,7 +377,7 @@ class ErrorPropagationIntegrationSpec extends AnyFlatSpec with Matchers {
   it should "include missingKeys in context when present" in {
     val error = ConfigurationError("bad config", List("KEY_ONE", "KEY_TWO"))
 
-    error.context should contain key "missingKeys"
+    (error.context should contain).key("missingKeys")
     error.context("missingKeys") should include("KEY_ONE")
     error.context("missingKeys") should include("KEY_TWO")
   }
