@@ -53,8 +53,13 @@ sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 
 ```bash
 # Required for LLM
-LLM_MODEL=openai/gpt-4o              # or anthropic/claude-sonnet-4-5-latest, gemini/gemini-2.0-flash
+LLM_MODEL=openai/gpt-4o              # or anthropic/claude-sonnet-4-5-latest, gemini/gemini-2.0-flash, bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0
 OPENAI_API_KEY=sk-...                # or ANTHROPIC_API_KEY, GOOGLE_API_KEY
+
+# AWS Bedrock (optional — falls back to default AWS credential chain)
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=AKIA...            # or use instance profile / ~/.aws/credentials
+AWS_SECRET_ACCESS_KEY=...            # required when AWS_ACCESS_KEY_ID is set
 
 # Optional - Tracing
 TRACING_MODE=langfuse                # langfuse, opentelemetry, console, or none

@@ -677,3 +677,66 @@ object MistralConfig:
       contextWindow = cw,
       reserveCompletion = rc
     )
+
+/**
+ * Configuration for the AWS Bedrock Converse API.
+ *
+ * Authentication uses the AWS default credential chain (env vars, instance
+ * profile, `~/.aws/credentials`) unless `accessKeyId` and `secretAccessKey`
+ * are supplied explicitly.
+ *
+ * Prefer [[BedrockConfig.fromValues]] over the primary constructor; it
+ * resolves `contextWindow` and `reserveCompletion` from the model name.
+ *
+ * @param region          AWS region, e.g. `"us-east-1"`.
+ * @param model           Bedrock model ID, e.g. `"anthropic.claude-3-5-sonnet-20241022-v2:0"`.
+ * @param contextWindow   Model's total token capacity (prompt + completion combined).
+ * @param reserveCompletion Tokens held back from prompt history for the completion.
+ * @param accessKeyId     Optional explicit AWS access key; falls back to default chain when absent.
+ * @param secretAccessKey Optional explicit AWS secret key; required when `accessKeyId` is set.
+ * @param endpointUrl     Optional endpoint URL override (e.g. for VPC endpoints or tests).
+ */
+case class BedrockConfig(
+  region: String,
+  model: String,
+  contextWindow: Int,
+  reserveCompletion: Int,
+  accessKeyId: Option[String] = None,
+  secretAccessKey: Option[String] = None,
+  endpointUrl: Option[String] = None
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.Bedrock
+  override def toString: String =
+    s"BedrockConfig(region=$region, model=$model, contextWindow=$contextWindow, " +
+      s"reserveCompletion=$reserveCompletion, accessKeyId=${accessKeyId.map(k => Redaction.secret(k)).getOrElse("(default chain)")})"
+
+object BedrockConfig:
+  private val DefaultContextWindow     = 200000
+  private val DefaultReserveCompletion = 4096
+
+  private def bedrockFallback(modelName: String): (Int, Int) =
+    modelName.toLowerCase match
+      case name if name.contains("claude")  => (200000, DefaultReserveCompletion)
+      case name if name.contains("llama")   => (128000, DefaultReserveCompletion)
+      case name if name.contains("mistral") => (32768, DefaultReserveCompletion)
+      case name if name.contains("titan")   => (32000, DefaultReserveCompletion)
+      case _                                => (8192, DefaultReserveCompletion)
+
+  def fromValues(
+    modelName: String,
+    region: String
+  )(using resolver: ContextWindowResolver): BedrockConfig =
+    require(region.trim.nonEmpty, "Bedrock region must be non-empty")
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("bedrock"),
+      modelName = modelName,
+      defaultContextWindow = DefaultContextWindow,
+      defaultReserve = DefaultReserveCompletion,
+      fallbackResolver = bedrockFallback
+    )
+    BedrockConfig(
+      region = region,
+      model = modelName,
+      contextWindow = cw,
+      reserveCompletion = rc
+    )
