@@ -160,9 +160,7 @@ class GeminiVisionClientSpec extends AnyFlatSpec with Matchers with BeforeAndAft
     val client = new MockGeminiVisionClient(testConfig, Success((200, validGeminiJson)))
     val result = client.analyzeImage(tempImageFile.toString, None)
     result.isRight shouldBe true
-    result.foreach { r =>
-      r.text shouldBe Some("hello")
-    }
+    result.foreach(r => r.text shouldBe Some("hello"))
   }
 
   it should "return None for text when no text pattern is found" in {

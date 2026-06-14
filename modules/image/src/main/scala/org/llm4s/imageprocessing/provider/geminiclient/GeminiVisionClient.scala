@@ -140,38 +140,39 @@ class GeminiVisionClient(config: GeminiVisionConfig) extends org.llm4s.imageproc
     // Do NOT log the URL — it contains the API key as a query parameter
     logger.debug(s"[GeminiVisionClient] Sending request to ${config.baseUrl}/models/${config.model}:generateContent")
 
-    sendHttpRequest(url, requestBody, config.requestTimeoutSeconds).flatMap { case (statusCode, responseBody) =>
-      statusCode match {
-        case 200 =>
-          scala.util.Success(extractContentFromResponse(responseBody))
-        case _ =>
-          val errorMessage =
-            Try(read(responseBody)).toOption
-              .flatMap(_.obj.get("error"))
-              .map { err =>
-                val message = err.obj.get("message").flatMap(_.strOpt)
-                val status  = err.obj.get("status").flatMap(_.strOpt)
-                (message, status) match {
-                  case (Some(msg), Some(st)) => s"$st: $msg"
-                  case (Some(msg), None)     => msg
-                  case _                     => org.llm4s.util.Redaction.truncateForLog(responseBody)
+    sendHttpRequest(url, requestBody, config.requestTimeoutSeconds)
+      .flatMap { case (statusCode, responseBody) =>
+        statusCode match {
+          case 200 =>
+            scala.util.Success(extractContentFromResponse(responseBody))
+          case _ =>
+            val errorMessage =
+              Try(read(responseBody)).toOption
+                .flatMap(_.obj.get("error"))
+                .map { err =>
+                  val message = err.obj.get("message").flatMap(_.strOpt)
+                  val status  = err.obj.get("status").flatMap(_.strOpt)
+                  (message, status) match {
+                    case (Some(msg), Some(st)) => s"$st: $msg"
+                    case (Some(msg), None)     => msg
+                    case _                     => org.llm4s.util.Redaction.truncateForLog(responseBody)
+                  }
                 }
-              }
-              .map(d => s"Status $statusCode: $d")
-              .getOrElse(s"Status $statusCode: ${org.llm4s.util.Redaction.truncateForLog(responseBody)}")
+                .map(d => s"Status $statusCode: $d")
+                .getOrElse(s"Status $statusCode: ${org.llm4s.util.Redaction.truncateForLog(responseBody)}")
 
-          logger.error(
-            "[GeminiVisionClient] HTTP error {}: {}",
-            statusCode.asInstanceOf[AnyRef],
-            org.llm4s.util.Redaction.truncateForLog(responseBody)
-          )
-          scala.util.Failure(new RuntimeException(s"Gemini API call failed - $errorMessage"))
+            logger.error(
+              "[GeminiVisionClient] HTTP error {}: {}",
+              statusCode.asInstanceOf[AnyRef],
+              org.llm4s.util.Redaction.truncateForLog(responseBody)
+            )
+            scala.util.Failure(new RuntimeException(s"Gemini API call failed - $errorMessage"))
+        }
       }
-    }.recoverWith {
-      case e: InterruptedException =>
+      .recoverWith { case e: InterruptedException =>
         Thread.currentThread().interrupt()
         scala.util.Failure(e)
-    }
+      }
   }
 
   private def extractContentFromResponse(jsonResponse: String): String =
