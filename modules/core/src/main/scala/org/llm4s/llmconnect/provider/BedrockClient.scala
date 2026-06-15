@@ -179,15 +179,6 @@ class BedrockClient private[provider] (
             )
           )
         )
-      case other =>
-        Some(
-          Left(
-            ValidationError(
-              "conversation",
-              s"Bedrock does not support message type: ${other.getClass.getSimpleName}"
-            )
-          )
-        )
     }
 
     val errors = results.collect { case Left(e) => e }
