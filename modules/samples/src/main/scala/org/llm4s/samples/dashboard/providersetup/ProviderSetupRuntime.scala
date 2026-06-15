@@ -372,6 +372,10 @@ private[providersetup] object ProviderSetupRuntime:
           apiKey = input.flatMap(_.apiKey).getOrElse(cfg.apiKey),
           baseUrl = input.flatMap(_.baseUrl).getOrElse(cfg.baseUrl)
         )
+      case cfg: VertexAIConfig =>
+        cfg.copy(
+          model = input.flatMap(_.model).getOrElse(cfg.model)
+        )
 
   def demoCompletionCmd(
     providerConfig: ProviderConfig,
@@ -580,3 +584,4 @@ private[providersetup] object ProviderSetupRuntime:
       case cfg: CohereConfig    => cfg.copy(model = modelName)
       case cfg: MistralConfig   => cfg.copy(model = modelName)
       case cfg: ZaiConfig       => cfg.copy(model = modelName)
+      case cfg: VertexAIConfig  => cfg.copy(model = modelName)
