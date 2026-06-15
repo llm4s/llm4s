@@ -508,11 +508,34 @@ class BedrockClientSpec extends AnyFlatSpec with Matchers {
 }
 
 /**
- * A MockHttpClient that returns a pre-built [[org.llm4s.http.StreamingHttpResponse]] for postStream calls.
+ * A minimal [[org.llm4s.http.Llm4sHttpClient]] that returns a pre-built
+ * [[org.llm4s.http.StreamingHttpResponse]] for postStream calls and throws for all other methods.
  */
 private class MockStreamHttpClient(streamResponse: org.llm4s.http.StreamingHttpResponse)
-    extends org.llm4s.http.MockHttpClient(HttpResponse(200, "")) {
+    extends org.llm4s.http.Llm4sHttpClient {
 
+  private def notSupported: Nothing = throw new UnsupportedOperationException("not used in streaming tests")
+
+  override def get(url: String, headers: Map[String, String], params: Map[String, String], timeout: Int): HttpResponse =
+    notSupported
+  override def post(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse = notSupported
+  override def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): HttpResponse =
+    notSupported
+  override def postMultipart(
+    url: String,
+    headers: Map[String, String],
+    parts: Seq[org.llm4s.http.MultipartPart],
+    timeout: Int
+  ): HttpResponse = notSupported
+  override def put(url: String, headers: Map[String, String], body: String, timeout: Int): HttpResponse = notSupported
+  override def delete(url: String, headers: Map[String, String], timeout: Int): HttpResponse            = notSupported
+  override def postRaw(
+    url: String,
+    headers: Map[String, String],
+    body: String,
+    timeout: Int
+  ): org.llm4s.http.HttpRawResponse =
+    notSupported
   override def postStream(
     url: String,
     headers: Map[String, String],
