@@ -5,6 +5,7 @@ import org.llm4s.speech.config.{ STTConfig, TTSConfig }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+@scala.annotation.nowarn("msg=Could not verify")
 class SpeechProviderSelectorSpec extends AnyFlatSpec with Matchers {
 
   // ========== TTS Client Selection ===========
