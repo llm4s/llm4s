@@ -125,7 +125,7 @@ class WatsonXConfigSpec extends AnyFlatSpec with Matchers {
       projectId = "proj"
     )
     cfg.contextWindow shouldBe 8192
-    cfg.reserveCompletion shouldBe 4096
+    cfg.reserveCompletion shouldBe 8192
   }
 
   it should "resolve context window for mistral-large model" in {
@@ -134,8 +134,8 @@ class WatsonXConfigSpec extends AnyFlatSpec with Matchers {
       apiKey = "key",
       projectId = "proj"
     )
-    cfg.contextWindow shouldBe 32768
-    cfg.reserveCompletion shouldBe 4096
+    cfg.contextWindow shouldBe 131072
+    cfg.reserveCompletion shouldBe 16384
   }
 
   it should "resolve context window for unknown model with 8192 default" in {
