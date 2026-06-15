@@ -107,8 +107,8 @@ final class MockHttpClient(response: HttpResponse) extends Llm4sHttpClient {
     body: String,
     timeout: Int
   ): StreamingHttpResponse = {
-    record(url, headers, None, Some(body), timeout, countPost = true)
-    StreamingHttpResponse(response.statusCode, new java.io.ByteArrayInputStream(response.body.getBytes()))
+    val resp = record(url, headers, None, Some(body), timeout, countPost = true)
+    StreamingHttpResponse(resp.statusCode, new java.io.ByteArrayInputStream(resp.body.getBytes()))
   }
 }
 

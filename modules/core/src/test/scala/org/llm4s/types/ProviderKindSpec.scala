@@ -7,7 +7,7 @@ import org.scalatest.matchers.should.Matchers
 class ProviderKindSpec extends AnyFlatSpec with Matchers:
 
   "ProviderKind" should "expose all expected provider instances" in {
-    ProviderKind.all should have size 10
+    ProviderKind.all should have size 11
     (ProviderKind.all should contain).allOf(
       ProviderKind.OpenAI,
       ProviderKind.Azure,
@@ -18,7 +18,8 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
       ProviderKind.Gemini,
       ProviderKind.Cohere,
       ProviderKind.DeepSeek,
-      ProviderKind.Mistral
+      ProviderKind.Mistral,
+      ProviderKind.WatsonX
     )
   }
 
@@ -33,6 +34,7 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
     ProviderKind.DeepSeek.name shouldBe "deepseek"
     ProviderKind.Cohere.name shouldBe "cohere"
     ProviderKind.Mistral.name shouldBe "mistral"
+    ProviderKind.WatsonX.name shouldBe "watsonx"
   }
 
   "ProviderKind.fromName" should "parse supported providers case-insensitively" in {
@@ -47,6 +49,8 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
     ProviderKind.fromName("DEEPSEEK") shouldBe Some(ProviderKind.DeepSeek)
     ProviderKind.fromName("COHERE") shouldBe Some(ProviderKind.Cohere)
     ProviderKind.fromName("MISTRAL") shouldBe Some(ProviderKind.Mistral)
+    ProviderKind.fromName("watsonx") shouldBe Some(ProviderKind.WatsonX)
+    ProviderKind.fromName("WATSONX") shouldBe Some(ProviderKind.WatsonX)
   }
 
   it should "return None for unknown providers" in {
