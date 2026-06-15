@@ -161,6 +161,49 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     }
   }
 
+  test("Perplexity provider with PerplexityConfig returns PerplexityClient") {
+    val cfg: ProviderConfig = PerplexityConfig(
+      apiKey = "pplx-test-key",
+      model = "sonar",
+      baseUrl = "https://api.perplexity.ai",
+      contextWindow = 128000,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(ProviderKind.Perplexity, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "PerplexityClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
+  test("Perplexity provider with non-PerplexityConfig should return Left") {
+    val wrongCfg: ProviderConfig = OpenAIConfig(
+      apiKey = "key",
+      model = "gpt-4o",
+      organization = None,
+      baseUrl = "https://api.openai.com/v1",
+      contextWindow = 128000,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(ProviderKind.Perplexity, wrongCfg)
+    res.isLeft shouldBe true
+  }
+
+  test("LLMConnect.fromConfig routes PerplexityConfig to PerplexityClient") {
+    val cfg: ProviderConfig = PerplexityConfig(
+      apiKey = "pplx-test-key",
+      model = "sonar-pro",
+      baseUrl = "https://api.perplexity.ai",
+      contextWindow = 200000,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.fromConfig(cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "PerplexityClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
   test("OpenAI provider with non-OpenAIConfig should throw IllegalArgumentException") {
     val wrongCfg: ProviderConfig = AnthropicConfig(
       apiKey = "key",

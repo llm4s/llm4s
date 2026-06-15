@@ -21,7 +21,7 @@ LLM4S supports multiple LLM providers out of the box. Choose your provider, conf
 
 ## Supported Providers
 
-LLM4S supports 7 major LLM providers plus local models:
+LLM4S supports 8 major LLM providers plus local models:
 
 | Provider | Type | Best For | Setup |
 |----------|------|----------|-------|
@@ -31,6 +31,7 @@ LLM4S supports 7 major LLM providers plus local models:
 | **Azure OpenAI** | Cloud Enterprise | Enterprise deployments, VPC isolation | Hard |
 | **DeepSeek** | Cloud | Cost-effective, reasoning models | Easy |
 | **Cohere** | Cloud | Production RAG, low latency | Easy |
+| **Perplexity AI** | Cloud | Real-time web search, grounded answers | Easy |
 | **Ollama** | Local | Private, no API key, offline | Easy |
 
 ---
@@ -392,6 +393,59 @@ Competitive for production RAG use cases.
 - Optimized for retrieval-augmented generation
 - Fast token generation for streaming
 - Safe and reliable for enterprise use
+
+---
+
+## Perplexity AI
+
+Perplexity Sonar models combine LLM reasoning with real-time web search, returning
+grounded answers with citations. Ideal for enterprise applications requiring current
+data: financial news, regulatory updates, market intelligence.
+
+### Setup
+
+1. **Get API key** from [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api)
+2. **Set environment variables:**
+
+```bash
+export LLM_MODEL=perplexity/sonar
+export PERPLEXITY_API_KEY=pplx-your-key
+```
+
+### Configuration
+
+In `application.conf`:
+
+```hocon
+llm {
+  providers {
+    perplexity {
+      api-key = ${?PERPLEXITY_API_KEY}
+      base-url = "https://api.perplexity.ai"
+    }
+  }
+}
+```
+
+### Available Models
+
+- **`sonar`** — Cheapest, good for general queries with web search
+- **`sonar-pro`** — Higher quality, larger context (200K tokens)
+- **`sonar-reasoning`** — Enhanced reasoning with web search
+- **`sonar-reasoning-pro`** — Highest quality reasoning + web search
+
+### Why Use Perplexity?
+
+- Answers grounded in real-time web data — no knowledge cutoff
+- Responses include citations for compliance and verification
+- Fully OpenAI-compatible API — minimal integration effort
+- Excellent for: market research, news monitoring, competitive intelligence
+
+### Tips
+
+- Use `sonar` for cost-effective queries, `sonar-pro` for quality-critical tasks
+- Citations in responses help with enterprise compliance requirements
+- The API is stateless — each call performs fresh web search
 
 ---
 

@@ -7,7 +7,7 @@ import org.scalatest.matchers.should.Matchers
 class ProviderKindSpec extends AnyFlatSpec with Matchers:
 
   "ProviderKind" should "expose all expected provider instances" in {
-    ProviderKind.all should have size 10
+    ProviderKind.all should have size 11
     (ProviderKind.all should contain).allOf(
       ProviderKind.OpenAI,
       ProviderKind.Azure,
@@ -18,7 +18,8 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
       ProviderKind.Gemini,
       ProviderKind.Cohere,
       ProviderKind.DeepSeek,
-      ProviderKind.Mistral
+      ProviderKind.Mistral,
+      ProviderKind.Perplexity
     )
   }
 
@@ -33,6 +34,7 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
     ProviderKind.DeepSeek.name shouldBe "deepseek"
     ProviderKind.Cohere.name shouldBe "cohere"
     ProviderKind.Mistral.name shouldBe "mistral"
+    ProviderKind.Perplexity.name shouldBe "perplexity"
   }
 
   "ProviderKind.fromName" should "parse supported providers case-insensitively" in {
@@ -47,6 +49,9 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
     ProviderKind.fromName("DEEPSEEK") shouldBe Some(ProviderKind.DeepSeek)
     ProviderKind.fromName("COHERE") shouldBe Some(ProviderKind.Cohere)
     ProviderKind.fromName("MISTRAL") shouldBe Some(ProviderKind.Mistral)
+    ProviderKind.fromName("perplexity") shouldBe Some(ProviderKind.Perplexity)
+    ProviderKind.fromName("PERPLEXITY") shouldBe Some(ProviderKind.Perplexity)
+    ProviderKind.fromName("Perplexity") shouldBe Some(ProviderKind.Perplexity)
   }
 
   it should "return None for unknown providers" in {
@@ -62,16 +67,17 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
 
   it should "support pattern matching" in {
     def describe(provider: ProviderKind): String = provider match
-      case ProviderKind.OpenAI     => "cloud-openai"
-      case ProviderKind.Azure      => "cloud-azure"
-      case ProviderKind.Anthropic  => "cloud-anthropic"
-      case ProviderKind.OpenRouter => "cloud-openrouter"
-      case ProviderKind.Ollama     => "local"
-      case ProviderKind.Zai        => "cloud-zai"
-      case ProviderKind.Gemini     => "cloud-gemini"
-      case ProviderKind.DeepSeek   => "cloud-deepseek"
-      case ProviderKind.Cohere     => "cloud-cohere"
-      case ProviderKind.Mistral    => "cloud-mistral"
+      case ProviderKind.OpenAI      => "cloud-openai"
+      case ProviderKind.Azure       => "cloud-azure"
+      case ProviderKind.Anthropic   => "cloud-anthropic"
+      case ProviderKind.OpenRouter  => "cloud-openrouter"
+      case ProviderKind.Ollama      => "local"
+      case ProviderKind.Zai         => "cloud-zai"
+      case ProviderKind.Gemini      => "cloud-gemini"
+      case ProviderKind.DeepSeek    => "cloud-deepseek"
+      case ProviderKind.Cohere      => "cloud-cohere"
+      case ProviderKind.Mistral     => "cloud-mistral"
+      case ProviderKind.Perplexity  => "cloud-perplexity"
 
     describe(ProviderKind.OpenAI) shouldBe "cloud-openai"
     describe(ProviderKind.Ollama) shouldBe "local"
@@ -80,4 +86,5 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
     describe(ProviderKind.DeepSeek) shouldBe "cloud-deepseek"
     describe(ProviderKind.Cohere) shouldBe "cloud-cohere"
     describe(ProviderKind.Mistral) shouldBe "cloud-mistral"
+    describe(ProviderKind.Perplexity) shouldBe "cloud-perplexity"
   }

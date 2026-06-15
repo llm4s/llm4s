@@ -677,3 +677,77 @@ object MistralConfig:
       contextWindow = cw,
       reserveCompletion = rc
     )
+
+/**
+ * Configuration for the Perplexity AI Sonar API.
+ *
+ * Perplexity Sonar models combine LLM reasoning with real-time web search,
+ * returning grounded answers with citations. The API is fully OpenAI-compatible.
+ *
+ * Prefer [[PerplexityConfig.fromValues]] over the primary constructor; it
+ * resolves `contextWindow` and `reserveCompletion` automatically from the model name.
+ *
+ * @param apiKey        Perplexity API key; redacted in `toString`.
+ * @param model         Model identifier, e.g. `"sonar"`, `"sonar-pro"`.
+ * @param baseUrl       API base URL; defaults to [[PerplexityConfig.DEFAULT_BASE_URL]].
+ * @param contextWindow Model's total token capacity (prompt + completion combined).
+ * @param reserveCompletion Tokens held back from prompt history for the completion.
+ */
+case class PerplexityConfig(
+  apiKey: String,
+  model: String,
+  baseUrl: String,
+  contextWindow: Int,
+  reserveCompletion: Int
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.Perplexity
+  override def toString: String =
+    s"PerplexityConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, " +
+      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+
+object PerplexityConfig:
+  val DEFAULT_BASE_URL: String = "https://api.perplexity.ai"
+
+  private val DefaultContextWindow     = 128000
+  private val DefaultReserveCompletion = 4096
+
+  private def perplexityFallback(modelName: String): (Int, Int) =
+    modelName match {
+      case name if name.contains("sonar-reasoning-pro") => (128000, DefaultReserveCompletion)
+      case name if name.contains("sonar-reasoning")     => (128000, DefaultReserveCompletion)
+      case name if name.contains("sonar-pro")           => (200000, DefaultReserveCompletion)
+      case name if name.contains("sonar")               => (128000, DefaultReserveCompletion)
+      case _                                            => (DefaultContextWindow, DefaultReserveCompletion)
+    }
+
+  /**
+   * Constructs a [[PerplexityConfig]], resolving `contextWindow` and
+   * `reserveCompletion` from the model name automatically.
+   *
+   * @param modelName Model identifier, e.g. `"sonar"` or `"sonar-pro"`.
+   * @param apiKey    Perplexity API key; must be non-empty.
+   * @param baseUrl   API base URL; must be non-empty. Defaults to
+   *                  [[PerplexityConfig.DEFAULT_BASE_URL]] when loaded via
+   *                  [[org.llm4s.config.Llm4sConfig]].
+   */
+  def fromValues(
+    modelName: String,
+    apiKey: String,
+    baseUrl: String
+  )(using resolver: ContextWindowResolver): PerplexityConfig =
+    require(apiKey.trim.nonEmpty, "Perplexity apiKey must be non-empty")
+    require(baseUrl.trim.nonEmpty, "Perplexity baseUrl must be non-empty")
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("perplexity"),
+      modelName = modelName,
+      defaultContextWindow = DefaultContextWindow,
+      defaultReserve = DefaultReserveCompletion,
+      fallbackResolver = perplexityFallback
+    )
+    PerplexityConfig(
+      apiKey = apiKey,
+      model = modelName,
+      baseUrl = baseUrl,
+      contextWindow = cw,
+      reserveCompletion = rc
+    )

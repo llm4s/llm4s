@@ -58,6 +58,8 @@ object LLMConnect {
         CohereClient(cfg, metrics, exchangeLogging)
       case cfg: MistralConfig =>
         MistralClient(cfg, metrics, exchangeLogging)
+      case cfg: PerplexityConfig =>
+        PerplexityClient(cfg, metrics, exchangeLogging)
     }
 
   def fromConfig(
@@ -166,8 +168,9 @@ object LLMConnect {
       case (ProviderKind.Zai, cfg: ZaiConfig)             => ZaiClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.Gemini, cfg: GeminiConfig)       => GeminiClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.DeepSeek, cfg: DeepSeekConfig)   => DeepSeekClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Cohere, cfg: CohereConfig)       => CohereClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Mistral, cfg: MistralConfig)     => MistralClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Cohere, cfg: CohereConfig)           => CohereClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Mistral, cfg: MistralConfig)         => MistralClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Perplexity, cfg: PerplexityConfig)   => PerplexityClient(cfg, metrics, exchangeLogging)
       case (prov, wrongCfg) =>
         val cfgType = wrongCfg.getClass.getSimpleName
         val msg     = s"Invalid config type $cfgType for provider $prov"
