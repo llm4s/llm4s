@@ -107,7 +107,7 @@ class JinaEmbeddingProviderSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "send retrieval.passage task when encoded in the model name" in {
-    val passageCfg  = EmbeddingProviderConfig("http://jina-test", "jina-embeddings-v3", "jina-test-key")
+    val passageCfg   = EmbeddingProviderConfig("http://jina-test", "jina-embeddings-v3", "jina-test-key")
     val passageModel = EmbeddingModelConfig("jina-embeddings-v3::retrieval.passage", 1024)
     val passageReq   = EmbeddingRequest(Seq("long document text"), passageModel)
 
