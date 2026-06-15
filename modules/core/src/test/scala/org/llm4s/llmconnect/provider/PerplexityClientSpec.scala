@@ -151,9 +151,7 @@ class PerplexityClientSpec extends AnyFlatSpec with Matchers {
     }
 
   it should "map HTTP 502 to ServiceError" in
-    withServer("/chat/completions") { exchange =>
-      sendJsonResponse(exchange, 502, "Bad Gateway")
-    } { baseUrl =>
+    withServer("/chat/completions")(exchange => sendJsonResponse(exchange, 502, "Bad Gateway")) { baseUrl =>
       val client = new PerplexityClient(localConfig(baseUrl))
       val result = client.complete(conversation, CompletionOptions())
 
@@ -260,25 +258,23 @@ class PerplexityClientSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "PerplexityClient.createRequestBody" should "include model and messages in request" in
-    withServer("/chat/completions") { exchange =>
-      sendJsonResponse(exchange, 200, openAICompletion("ok", "sonar"))
-    } { baseUrl =>
-      val client      = new PerplexityClient(localConfig(baseUrl))
-      val requestBody = client.createRequestBody(conversation, CompletionOptions())
+    withServer("/chat/completions")(exchange => sendJsonResponse(exchange, 200, openAICompletion("ok", "sonar"))) {
+      baseUrl =>
+        val client      = new PerplexityClient(localConfig(baseUrl))
+        val requestBody = client.createRequestBody(conversation, CompletionOptions())
 
-      requestBody("model").str shouldBe "sonar"
-      requestBody("messages").arr should not be empty
-      requestBody("messages").arr.head("content").str shouldBe "What is the latest news?"
+        requestBody("model").str shouldBe "sonar"
+        requestBody("messages").arr should not be empty
+        requestBody("messages").arr.head("content").str shouldBe "What is the latest news?"
     }
 
   it should "include stream flag when streaming" in
-    withServer("/chat/completions") { exchange =>
-      sendSseResponse(exchange, openAISseBody(Seq("test"), "sonar"))
-    } { baseUrl =>
-      val client      = new PerplexityClient(localConfig(baseUrl))
-      val requestBody = client.createRequestBody(conversation, CompletionOptions())
-      requestBody("stream") = true
+    withServer("/chat/completions")(exchange => sendSseResponse(exchange, openAISseBody(Seq("test"), "sonar"))) {
+      baseUrl =>
+        val client      = new PerplexityClient(localConfig(baseUrl))
+        val requestBody = client.createRequestBody(conversation, CompletionOptions())
+        requestBody("stream") = true
 
-      requestBody("stream").bool shouldBe true
+        requestBody("stream").bool shouldBe true
     }
 }

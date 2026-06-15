@@ -61,7 +61,11 @@ class PerplexityConfigSpec extends AnyFlatSpec with Matchers:
 
   it should "return default context window for unknown model names" in {
     val cfg =
-      PerplexityConfig.fromValues("unknown-perplexity-model", apiKey = "key", baseUrl = PerplexityConfig.DEFAULT_BASE_URL)
+      PerplexityConfig.fromValues(
+        "unknown-perplexity-model",
+        apiKey = "key",
+        baseUrl = PerplexityConfig.DEFAULT_BASE_URL
+      )
     cfg.contextWindow shouldBe 128000
     cfg.reserveCompletion shouldBe 4096
   }

@@ -54,19 +54,19 @@ object ProviderModelTypes:
 
     def fromString(value: String): Option[ProviderKind] =
       value.trim.toLowerCase match
-        case "openai"      => Some(ProviderKind.OpenAI)
-        case "openrouter"  => Some(ProviderKind.OpenRouter)
-        case "azure"       => Some(ProviderKind.Azure)
-        case "anthropic"   => Some(ProviderKind.Anthropic)
-        case "ollama"      => Some(ProviderKind.Ollama)
-        case "zai"         => Some(ProviderKind.Zai)
-        case "gemini"      => Some(ProviderKind.Gemini)
-        case "google"      => Some(ProviderKind.Gemini)
-        case "deepseek"    => Some(ProviderKind.DeepSeek)
-        case "cohere"      => Some(ProviderKind.Cohere)
-        case "mistral"     => Some(ProviderKind.Mistral)
-        case "perplexity"  => Some(ProviderKind.Perplexity)
-        case _             => None
+        case "openai"     => Some(ProviderKind.OpenAI)
+        case "openrouter" => Some(ProviderKind.OpenRouter)
+        case "azure"      => Some(ProviderKind.Azure)
+        case "anthropic"  => Some(ProviderKind.Anthropic)
+        case "ollama"     => Some(ProviderKind.Ollama)
+        case "zai"        => Some(ProviderKind.Zai)
+        case "gemini"     => Some(ProviderKind.Gemini)
+        case "google"     => Some(ProviderKind.Gemini)
+        case "deepseek"   => Some(ProviderKind.DeepSeek)
+        case "cohere"     => Some(ProviderKind.Cohere)
+        case "mistral"    => Some(ProviderKind.Mistral)
+        case "perplexity" => Some(ProviderKind.Perplexity)
+        case _            => None
 
     def fromName(value: String): Option[ProviderKind] =
       fromString(value)
@@ -74,14 +74,14 @@ object ProviderModelTypes:
   extension (kind: ProviderKind)
     def name: String =
       kind match
-        case ProviderKind.OpenAI      => "openai"
-        case ProviderKind.OpenRouter  => "openrouter"
-        case ProviderKind.Azure       => "azure"
-        case ProviderKind.Anthropic   => "anthropic"
-        case ProviderKind.Ollama      => "ollama"
-        case ProviderKind.Zai         => "zai"
-        case ProviderKind.Gemini      => "gemini"
-        case ProviderKind.DeepSeek    => "deepseek"
-        case ProviderKind.Cohere      => "cohere"
-        case ProviderKind.Mistral     => "mistral"
-        case ProviderKind.Perplexity  => "perplexity"
+        case ProviderKind.OpenAI     => "openai"
+        case ProviderKind.OpenRouter => "openrouter"
+        case ProviderKind.Azure      => "azure"
+        case ProviderKind.Anthropic  => "anthropic"
+        case ProviderKind.Ollama     => "ollama"
+        case ProviderKind.Zai        => "zai"
+        case ProviderKind.Gemini     => "gemini"
+        case ProviderKind.DeepSeek   => "deepseek"
+        case ProviderKind.Cohere     => "cohere"
+        case ProviderKind.Mistral    => "mistral"
+        case ProviderKind.Perplexity => "perplexity"

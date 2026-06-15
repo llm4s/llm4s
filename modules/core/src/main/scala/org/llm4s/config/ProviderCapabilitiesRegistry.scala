@@ -20,7 +20,7 @@ private[llm4s] object ProviderCapabilitiesRegistry:
     ProviderKind.Zai        -> ProviderCapabilities.Zai,
     ProviderKind.Gemini     -> ProviderCapabilities.Gemini,
     ProviderKind.DeepSeek   -> ProviderCapabilities.DeepSeek,
-    ProviderKind.Cohere      -> ProviderCapabilities.Cohere,
-    ProviderKind.Mistral     -> ProviderCapabilities.Mistral,
-    ProviderKind.Perplexity  -> ProviderCapabilities.Perplexity,
+    ProviderKind.Cohere     -> ProviderCapabilities.Cohere,
+    ProviderKind.Mistral    -> ProviderCapabilities.Mistral,
+    ProviderKind.Perplexity -> ProviderCapabilities.Perplexity,
   )

@@ -67,17 +67,17 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
 
   it should "support pattern matching" in {
     def describe(provider: ProviderKind): String = provider match
-      case ProviderKind.OpenAI      => "cloud-openai"
-      case ProviderKind.Azure       => "cloud-azure"
-      case ProviderKind.Anthropic   => "cloud-anthropic"
-      case ProviderKind.OpenRouter  => "cloud-openrouter"
-      case ProviderKind.Ollama      => "local"
-      case ProviderKind.Zai         => "cloud-zai"
-      case ProviderKind.Gemini      => "cloud-gemini"
-      case ProviderKind.DeepSeek    => "cloud-deepseek"
-      case ProviderKind.Cohere      => "cloud-cohere"
-      case ProviderKind.Mistral     => "cloud-mistral"
-      case ProviderKind.Perplexity  => "cloud-perplexity"
+      case ProviderKind.OpenAI     => "cloud-openai"
+      case ProviderKind.Azure      => "cloud-azure"
+      case ProviderKind.Anthropic  => "cloud-anthropic"
+      case ProviderKind.OpenRouter => "cloud-openrouter"
+      case ProviderKind.Ollama     => "local"
+      case ProviderKind.Zai        => "cloud-zai"
+      case ProviderKind.Gemini     => "cloud-gemini"
+      case ProviderKind.DeepSeek   => "cloud-deepseek"
+      case ProviderKind.Cohere     => "cloud-cohere"
+      case ProviderKind.Mistral    => "cloud-mistral"
+      case ProviderKind.Perplexity => "cloud-perplexity"
 
     describe(ProviderKind.OpenAI) shouldBe "cloud-openai"
     describe(ProviderKind.Ollama) shouldBe "local"
