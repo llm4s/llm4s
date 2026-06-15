@@ -1,6 +1,5 @@
 package org.llm4s.llmconnect.provider
 
-import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.XAIConfig
@@ -10,8 +9,6 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.OptionValues._
 
-import java.net.InetSocketAddress
-import java.nio.charset.StandardCharsets
 import scala.collection.mutable.ListBuffer
 import org.llm4s.model.ModelRegistryService
 
