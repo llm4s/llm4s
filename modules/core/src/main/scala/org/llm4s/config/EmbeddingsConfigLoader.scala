@@ -31,12 +31,19 @@ private[config] object EmbeddingsConfigLoader {
     model: Option[String]
   )
 
+  final private case class EmbeddingsJinaSection(
+    apiKey: Option[String],
+    baseUrl: Option[String],
+    model: Option[String]
+  )
+
   final private case class EmbeddingsSection(
     model: Option[String],    // Unified format: provider/model (e.g., openai/text-embedding-3-small)
     provider: Option[String], // Legacy fallback
     openai: Option[EmbeddingsOpenAISection],
     voyage: Option[EmbeddingsVoyageSection],
-    ollama: Option[EmbeddingsOllamaSection]
+    ollama: Option[EmbeddingsOllamaSection],
+    jina: Option[EmbeddingsJinaSection]
   )
 
   final private case class EmbeddingsRoot(embeddings: Option[EmbeddingsSection])
@@ -52,8 +59,11 @@ private[config] object EmbeddingsConfigLoader {
   implicit private val embeddingsOllamaSectionReader: PureConfigReader[EmbeddingsOllamaSection] =
     PureConfigReader.forProduct3("apiKey", "baseUrl", "model")(EmbeddingsOllamaSection.apply)
 
+  implicit private val embeddingsJinaSectionReader: PureConfigReader[EmbeddingsJinaSection] =
+    PureConfigReader.forProduct3("apiKey", "baseUrl", "model")(EmbeddingsJinaSection.apply)
+
   implicit private val embeddingsSectionReader: PureConfigReader[EmbeddingsSection] =
-    PureConfigReader.forProduct5("model", "provider", "openai", "voyage", "ollama")(EmbeddingsSection.apply)
+    PureConfigReader.forProduct6("model", "provider", "openai", "voyage", "ollama", "jina")(EmbeddingsSection.apply)
 
   implicit private val embeddingsRootReader: PureConfigReader[EmbeddingsRoot] =
     PureConfigReader.forProduct1("embeddings")(EmbeddingsRoot.apply)
@@ -100,7 +110,7 @@ private[config] object EmbeddingsConfigLoader {
     root: EmbeddingsRoot,
     source: ConfigSource,
   ): Result[(String, EmbeddingProviderConfig)] = {
-    val emb = root.embeddings.getOrElse(EmbeddingsSection(None, None, None, None, None))
+    val emb = root.embeddings.getOrElse(EmbeddingsSection(None, None, None, None, None, None))
 
     // Check for unified model format first (e.g., "openai/text-embedding-3-small")
     emb.model.map(_.trim).filter(_.nonEmpty) match {
@@ -116,6 +126,8 @@ private[config] object EmbeddingsConfigLoader {
               buildVoyageEmbeddings(emb.voyage, Some(modelName)).map("voyage" -> _)
             case "ollama" =>
               buildOllamaEmbeddings(emb.ollama, Some(modelName)).map("ollama" -> _)
+            case "jina" =>
+              buildJinaEmbeddings(emb.jina, Some(modelName)).map("jina" -> _)
             case other =>
               Left(ConfigurationError(s"Unknown embedding provider: $other in '$modelSpec'"))
           }
@@ -136,6 +148,8 @@ private[config] object EmbeddingsConfigLoader {
             buildVoyageEmbeddings(emb.voyage, None).map("voyage" -> _)
           case Some("ollama") =>
             buildOllamaEmbeddings(emb.ollama, None).map("ollama" -> _)
+          case Some("jina") =>
+            buildJinaEmbeddings(emb.jina, None).map("jina" -> _)
           case Some(other) =>
             Left(ConfigurationError(s"Unknown embedding provider: $other"))
           case None =>
@@ -151,6 +165,7 @@ private[config] object EmbeddingsConfigLoader {
   private val DefaultOpenAIEmbeddingBaseUrl = "https://api.openai.com/v1"
   private val DefaultVoyageEmbeddingBaseUrl = "https://api.voyageai.com/v1"
   private val DefaultOllamaEmbeddingBaseUrl = "http://localhost:11434"
+  private val DefaultJinaEmbeddingBaseUrl   = "https://api.jina.ai"
 
   private def buildOpenAIEmbeddings(
     section: Option[EmbeddingsOpenAISection],
@@ -255,6 +270,39 @@ private[config] object EmbeddingsConfigLoader {
       modelOpt.toRight(
         ConfigurationError(
           "Missing Voyage embeddings model (set EMBEDDING_MODEL=voyage/model-name or VOYAGE_EMBEDDING_MODEL)"
+        )
+      )
+
+    for {
+      apiKey <- apiKeyResult
+      model  <- modelResult
+    } yield EmbeddingProviderConfig(baseUrl = baseUrl, model = model, apiKey = apiKey)
+  }
+
+  private def buildJinaEmbeddings(
+    section: Option[EmbeddingsJinaSection],
+    modelOverride: Option[String]
+  ): Result[EmbeddingProviderConfig] = {
+    // Use model from unified format, or fall back to section model
+    val modelOpt = modelOverride.orElse(section.flatMap(_.model)).map(_.trim).filter(_.nonEmpty)
+
+    // Use section baseUrl if provided, otherwise default
+    val baseUrl = section
+      .flatMap(_.baseUrl)
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .getOrElse(DefaultJinaEmbeddingBaseUrl)
+
+    val apiKeyOpt = section.flatMap(_.apiKey).map(_.trim).filter(_.nonEmpty)
+
+    val apiKeyResult: Result[String] =
+      apiKeyOpt.toRight(
+        ConfigurationError("Missing Jina embeddings apiKey (llm4s.embeddings.jina.apiKey / JINA_API_KEY)")
+      )
+    val modelResult: Result[String] =
+      modelOpt.toRight(
+        ConfigurationError(
+          "Missing Jina embeddings model (set EMBEDDING_MODEL=jina/model-name or JINA_EMBEDDING_MODEL)"
         )
       )
 
