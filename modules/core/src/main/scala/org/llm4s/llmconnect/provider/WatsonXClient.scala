@@ -1,4 +1,3 @@
-// scalafix:off DisableSyntax.NoKeywordTry
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.ThrowableOps._

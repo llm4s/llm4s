@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
-import org.llm4s.http.{ HttpResponse, MockHttpClient, FailingHttpClient, StreamingHttpResponse }
+import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.WatsonXConfig
 import org.llm4s.llmconnect.model.{ AssistantMessage, CompletionOptions, Conversation, SystemMessage, UserMessage }
 import org.llm4s.model.ModelRegistryService
@@ -476,21 +476,9 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
         "data: [DONE]\n\n"
 
     val iamMock = new MockHttpClient(Seq(iamSuccessResponse))
-    val streamingResponse = StreamingHttpResponse(
-      statusCode = 200,
-      body = new java.io.ByteArrayInputStream(sseBody.getBytes("UTF-8"))
-    )
-
-    val apiMock = new MockHttpClient(HttpResponse(200, sseBody)) {
-      override def postStream(
-        url: String,
-        headers: Map[String, String],
-        body: String,
-        timeout: Int
-      ): StreamingHttpResponse = streamingResponse
-    }
-    val client = WatsonXClient.forTest(testConfig, apiMock, iamMock)
-    val chunks = scala.collection.mutable.ListBuffer.empty[org.llm4s.llmconnect.model.StreamedChunk]
+    val apiMock = new MockHttpClient(HttpResponse(200, sseBody))
+    val client  = WatsonXClient.forTest(testConfig, apiMock, iamMock)
+    val chunks  = scala.collection.mutable.ListBuffer.empty[org.llm4s.llmconnect.model.StreamedChunk]
 
     val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
 
@@ -503,19 +491,8 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
   it should "handle streaming error status" in {
     val errorBody = """{"error":"Unauthorized"}"""
     val iamMock   = new MockHttpClient(Seq(iamSuccessResponse))
-    val streamingResponse = StreamingHttpResponse(
-      statusCode = 401,
-      body = new java.io.ByteArrayInputStream(errorBody.getBytes("UTF-8"))
-    )
-    val apiMock = new MockHttpClient(HttpResponse(401, errorBody)) {
-      override def postStream(
-        url: String,
-        headers: Map[String, String],
-        body: String,
-        timeout: Int
-      ): StreamingHttpResponse = streamingResponse
-    }
-    val client = WatsonXClient.forTest(testConfig, apiMock, iamMock)
+    val apiMock   = new MockHttpClient(HttpResponse(401, errorBody))
+    val client    = WatsonXClient.forTest(testConfig, apiMock, iamMock)
 
     val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
 
@@ -531,20 +508,9 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
     ).mkString
 
     val iamMock = new MockHttpClient(Seq(iamSuccessResponse))
-    val streamingResponse = StreamingHttpResponse(
-      statusCode = 200,
-      body = new java.io.ByteArrayInputStream(sseBody.getBytes("UTF-8"))
-    )
-    val apiMock = new MockHttpClient(HttpResponse(200, sseBody)) {
-      override def postStream(
-        url: String,
-        headers: Map[String, String],
-        body: String,
-        timeout: Int
-      ): StreamingHttpResponse = streamingResponse
-    }
-    val client = WatsonXClient.forTest(testConfig, apiMock, iamMock)
-    val chunks = scala.collection.mutable.ListBuffer.empty[org.llm4s.llmconnect.model.StreamedChunk]
+    val apiMock = new MockHttpClient(HttpResponse(200, sseBody))
+    val client  = WatsonXClient.forTest(testConfig, apiMock, iamMock)
+    val chunks  = scala.collection.mutable.ListBuffer.empty[org.llm4s.llmconnect.model.StreamedChunk]
 
     val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c)
 
@@ -564,28 +530,13 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "mark stream request body with stream=true" in {
-    val sseBody            = "data: {\"results\":[{\"generated_text\":\"ok\"}]}\n\n"
-    val iamMock            = new MockHttpClient(Seq(iamSuccessResponse))
-    var capturedStreamBody = Option.empty[String]
-    val streamingResponse = StreamingHttpResponse(
-      statusCode = 200,
-      body = new java.io.ByteArrayInputStream(sseBody.getBytes("UTF-8"))
-    )
-    val apiMock = new MockHttpClient(HttpResponse(200, sseBody)) {
-      override def postStream(
-        url: String,
-        headers: Map[String, String],
-        body: String,
-        timeout: Int
-      ): StreamingHttpResponse = {
-        capturedStreamBody = Some(body)
-        streamingResponse
-      }
-    }
-    val client = WatsonXClient.forTest(testConfig, apiMock, iamMock)
+    val sseBody = "data: {\"results\":[{\"generated_text\":\"ok\"}]}\n\n"
+    val iamMock = new MockHttpClient(Seq(iamSuccessResponse))
+    val apiMock = new MockHttpClient(HttpResponse(200, sseBody))
+    val client  = WatsonXClient.forTest(testConfig, apiMock, iamMock)
 
     client.streamComplete(conversation, CompletionOptions(), _ => ())
 
-    capturedStreamBody.value should include("\"stream\":true")
+    apiMock.lastBody.value should include("\"stream\":true")
   }
 }
