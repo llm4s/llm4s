@@ -677,3 +677,95 @@ object MistralConfig:
       contextWindow = cw,
       reserveCompletion = rc
     )
+
+/**
+ * Configuration for Google Vertex AI.
+ *
+ * Vertex AI exposes Gemini models (and optionally Claude models via Anthropic
+ * on Vertex) through regional REST endpoints. Authentication uses a bearer token
+ * obtained from Application Default Credentials (ADC) rather than an API key.
+ *
+ * Prefer [[VertexAIConfig.fromValues]] over the primary constructor; it resolves
+ * `contextWindow` and `reserveCompletion` automatically from the model name.
+ *
+ * @param project         GCP project ID (e.g. `"my-gcp-project"`).
+ * @param location        GCP region (e.g. `"us-central1"`, `"europe-west1"`).
+ * @param model           Model identifier (e.g. `"gemini-1.5-flash"`, `"claude-3-haiku@20240307"`).
+ * @param accessToken     Bearer token for authentication; typically obtained from ADC.
+ *                        Pass an empty string to trigger a [[org.llm4s.error.ConfigurationError]]
+ *                        on the first request.
+ * @param baseUrl         API base URL override; defaults to the standard Vertex AI endpoint.
+ * @param contextWindow   Model's total token capacity (prompt + completion combined).
+ * @param reserveCompletion Tokens held back from prompt history for the completion.
+ */
+case class VertexAIConfig(
+  project: String,
+  location: String,
+  model: String,
+  accessToken: String,
+  baseUrl: String,
+  contextWindow: Int,
+  reserveCompletion: Int,
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.VertexAI
+  override def toString: String =
+    s"VertexAIConfig(project=$project, location=$location, model=$model, " +
+      s"accessToken=${Redaction.secret(accessToken)}, baseUrl=$baseUrl, " +
+      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+
+object VertexAIConfig:
+  private val DefaultContextWindow     = 1048576
+  private val DefaultReserveCompletion = 8192
+
+  /** Base URL template; `{location}` is substituted at construction time. */
+  val DEFAULT_BASE_URL_TEMPLATE: String =
+    "https://{location}-aiplatform.googleapis.com/v1"
+
+  private def vertexFallback(modelName: String): (Int, Int) =
+    modelName match
+      case name if name.contains("gemini-2")   => (1048576, DefaultReserveCompletion)
+      case name if name.contains("gemini-1.5") => (1048576, DefaultReserveCompletion)
+      case name if name.contains("gemini-1.0") => (32768, DefaultReserveCompletion)
+      case name if name.contains("claude-3")   => (200000, DefaultReserveCompletion)
+      case _                                   => (DefaultContextWindow, DefaultReserveCompletion)
+
+  /**
+   * Constructs a [[VertexAIConfig]], resolving `contextWindow` and
+   * `reserveCompletion` from the model name automatically.
+   *
+   * @param project      GCP project ID; must be non-empty.
+   * @param location     GCP region (e.g. `"us-central1"`); must be non-empty.
+   * @param modelName    Model identifier (e.g. `"gemini-1.5-flash"`).
+   * @param accessToken  Bearer token for authentication; must be non-empty.
+   * @param baseUrl      API base URL; defaults to the regional Vertex AI endpoint
+   *                     derived from `location`.
+   */
+  def fromValues(
+    project: String,
+    location: String,
+    modelName: String,
+    accessToken: String,
+    baseUrl: String = "",
+  )(using resolver: ContextWindowResolver): VertexAIConfig =
+    require(project.trim.nonEmpty, "VertexAI project must be non-empty")
+    require(location.trim.nonEmpty, "VertexAI location must be non-empty")
+    require(accessToken.trim.nonEmpty, "VertexAI accessToken must be non-empty")
+    val resolvedBaseUrl =
+      if baseUrl.trim.nonEmpty then baseUrl.trim
+      else DEFAULT_BASE_URL_TEMPLATE.replace("{location}", location.trim)
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("vertex", "gemini", "google", "anthropic"),
+      modelName = modelName,
+      defaultContextWindow = DefaultContextWindow,
+      defaultReserve = DefaultReserveCompletion,
+      fallbackResolver = vertexFallback
+    )
+    VertexAIConfig(
+      project = project.trim,
+      location = location.trim,
+      model = modelName,
+      accessToken = accessToken,
+      baseUrl = resolvedBaseUrl,
+      contextWindow = cw,
+      reserveCompletion = rc,
+    )

@@ -104,3 +104,15 @@ private[config] object NamedProviderLoader:
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(MistralConfig.DEFAULT_BASE_URL)
           MistralConfig.fromValues(section.model.asString, apiKey, baseUrl)
+      case ProviderKind.VertexAI =>
+        for
+          project     <- required("project", section.organization, "llm4s.providers.<name>.organization")
+          location    <- required("location", section.endpoint, "llm4s.providers.<name>.endpoint")
+          accessToken <- requiredApiKey("llm4s.providers.<name>.apiKey")
+        yield VertexAIConfig.fromValues(
+          project = project,
+          location = location,
+          modelName = section.model.asString,
+          accessToken = accessToken,
+          baseUrl = section.baseUrl.map(_.asUrl).getOrElse(""),
+        )

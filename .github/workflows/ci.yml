@@ -234,3 +234,31 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: sbt testSmoke
+
+  # Vertex AI smoke tests — requires a GCP service account with Vertex AI access.
+  # Triggered manually (workflow_dispatch) or as part of pre-release checks.
+  vertex-smoke:
+    name: Vertex AI Smoke Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Run Vertex AI smoke tests
+        env:
+          GOOGLE_CLOUD_PROJECT: ${{ secrets.GOOGLE_CLOUD_PROJECT }}
+          GOOGLE_CLOUD_LOCATION: ${{ secrets.GOOGLE_CLOUD_LOCATION }}
+          VERTEX_ACCESS_TOKEN: ${{ secrets.VERTEX_ACCESS_TOKEN }}
+          VERTEX_ANTHROPIC_MODEL: ${{ secrets.VERTEX_ANTHROPIC_MODEL }}
+        run: sbt "it/testOnly org.llm4s.llmconnect.smoke.VertexAISmokeSpec"
