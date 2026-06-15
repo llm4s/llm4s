@@ -677,3 +677,103 @@ object MistralConfig:
       contextWindow = cw,
       reserveCompletion = rc
     )
+
+/**
+ * Configuration for Google Vertex AI.
+ *
+ * Vertex AI is the enterprise GCP offering for AI — preferred over the direct Gemini API
+ * by organisations that require GCP IAM-based authentication, VPC Service Controls,
+ * data residency, and billing through GCP.
+ *
+ * Prefer [[VertexAIConfig.fromValues]] over the primary constructor; it resolves
+ * `contextWindow` and `reserveCompletion` automatically from the model name.
+ *
+ * Authentication is done via an OAuth2 access token. In production, use Application
+ * Default Credentials (ADC): run `gcloud auth application-default login` or set
+ * `GOOGLE_APPLICATION_CREDENTIALS` to the path of a service-account JSON key file.
+ * The token is passed directly as a Bearer token header.
+ *
+ * == Model families supported ==
+ *
+ *  - Gemini models: `vertex/gemini-1.5-pro`, `vertex/gemini-2.0-flash`, etc.
+ *  - Claude on Vertex (Anthropic proxy): `vertex/claude-3-5-sonnet@20241022`, etc.
+ *  - Third-party models (Llama, Mistral): `vertex/meta/llama-3.1-405b-instruct-maas`, etc.
+ *
+ * == Endpoint routing ==
+ *
+ * Gemini models reach:
+ * `https://{location}-aiplatform.googleapis.com/v1/projects/{project}/locations/{location}/publishers/google/models/{model}:generateContent`
+ *
+ * Claude on Vertex models (model name contains "claude") route through the
+ * Anthropic-compatible Vertex endpoint.
+ *
+ * @param projectId         GCP project ID (e.g. `"my-project-123"`).
+ * @param location          GCP region (e.g. `"us-central1"`, `"europe-west4"`).
+ * @param model             Model identifier (without the `vertex/` prefix).
+ * @param accessToken       OAuth2 Bearer access token for GCP IAM auth.
+ * @param contextWindow     Model's total token capacity (prompt + completion combined).
+ * @param reserveCompletion Tokens held back from prompt history for the completion.
+ */
+case class VertexAIConfig(
+  projectId: String,
+  location: String,
+  model: String,
+  accessToken: String,
+  contextWindow: Int,
+  reserveCompletion: Int
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.VertexAI
+  override def toString: String =
+    s"VertexAIConfig(projectId=$projectId, location=$location, model=$model, " +
+      s"accessToken=${Redaction.secret(accessToken)}, contextWindow=$contextWindow, " +
+      s"reserveCompletion=$reserveCompletion)"
+
+object VertexAIConfig:
+  private val standardReserve = 8192
+
+  val DEFAULT_LOCATION: String = "us-central1"
+
+  private def vertexFallback(modelName: String): (Int, Int) =
+    modelName.toLowerCase match
+      case name if name.contains("gemini-2")   => (1048576, standardReserve)
+      case name if name.contains("gemini-1.5") => (1048576, standardReserve)
+      case name if name.contains("gemini-1.0") => (32768, standardReserve)
+      case name if name.contains("claude-3-5") => (200000, standardReserve)
+      case name if name.contains("claude-3")   => (200000, standardReserve)
+      case name if name.contains("llama")      => (128000, standardReserve)
+      case name if name.contains("mistral")    => (32768, standardReserve)
+      case _                                   => (128000, standardReserve)
+
+  /**
+   * Constructs a [[VertexAIConfig]], resolving `contextWindow` and
+   * `reserveCompletion` from the model name automatically.
+   *
+   * @param modelName   Model identifier (without the `vertex/` prefix).
+   * @param projectId   GCP project ID; must be non-empty.
+   * @param location    GCP region, e.g. `"us-central1"`; must be non-empty.
+   * @param accessToken OAuth2 Bearer access token; must be non-empty.
+   */
+  def fromValues(
+    modelName: String,
+    projectId: String,
+    location: String,
+    accessToken: String
+  )(using resolver: ContextWindowResolver): VertexAIConfig =
+    require(projectId.trim.nonEmpty, "Vertex AI projectId must be non-empty")
+    require(location.trim.nonEmpty, "Vertex AI location must be non-empty")
+    require(accessToken.trim.nonEmpty, "Vertex AI accessToken must be non-empty")
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("vertex", "gemini", "google"),
+      modelName = modelName,
+      defaultContextWindow = 128000,
+      defaultReserve = standardReserve,
+      fallbackResolver = vertexFallback
+    )
+    VertexAIConfig(
+      projectId = projectId,
+      location = location,
+      model = modelName,
+      accessToken = accessToken,
+      contextWindow = cw,
+      reserveCompletion = rc
+    )
