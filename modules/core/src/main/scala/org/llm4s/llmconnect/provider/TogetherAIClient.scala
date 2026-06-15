@@ -120,7 +120,7 @@ class TogetherAIClient(
 
       Try {
         try {
-          val sseParser = SSEParser.createStreamingParser()
+          val sseParser    = SSEParser.createStreamingParser()
           var line: String = null
           while ({ line = reader.readLine(); line != null }) {
             rawStream.append(line).append('\n')

@@ -164,7 +164,7 @@ object ConfigKeys {
 
   // Together AI
   /** Together AI API key. Required when using Together AI-hosted open-source models. */
-  val TOGETHER_API_KEY  = "TOGETHER_API_KEY"
+  val TOGETHER_API_KEY = "TOGETHER_API_KEY"
 
   /** Overrides the Together AI API base URL. Defaults to `"https://api.together.xyz/v1"`. */
   val TOGETHER_BASE_URL = "TOGETHER_BASE_URL"

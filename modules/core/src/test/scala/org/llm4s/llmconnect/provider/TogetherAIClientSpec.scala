@@ -69,10 +69,10 @@ class TogetherAIClientSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "populate token usage from response" in {
-    val mock      = new MockHttpClient(HttpResponse(200, validCompletionResponse))
-    val client    = TogetherAIClient.forTest(testConfig, mock)
-    val result    = client.complete(conversationWithUser, CompletionOptions())
-    val usage     = result.toOption.get.usage
+    val mock   = new MockHttpClient(HttpResponse(200, validCompletionResponse))
+    val client = TogetherAIClient.forTest(testConfig, mock)
+    val result = client.complete(conversationWithUser, CompletionOptions())
+    val usage  = result.toOption.get.usage
 
     usage.isDefined shouldBe true
     usage.get.promptTokens shouldBe 10
@@ -250,7 +250,7 @@ class TogetherAIClientSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "redact apiKey in toString" in {
-    testConfig.toString should not include "test-api-key"
+    (testConfig.toString should not).include("test-api-key")
     testConfig.toString should include("***")
   }
 

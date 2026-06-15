@@ -160,16 +160,16 @@ object LLMConnect {
     val metrics         = options.metrics
     val exchangeLogging = options.exchangeLogging
     (provider, config) match {
-      case (ProviderKind.OpenAI, cfg: OpenAIConfig)       => OpenAIClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.OpenRouter, cfg: OpenAIConfig)   => OpenRouterClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Azure, cfg: AzureConfig)         => OpenAIClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Anthropic, cfg: AnthropicConfig) => AnthropicClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Ollama, cfg: OllamaConfig)       => OllamaClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Zai, cfg: ZaiConfig)             => ZaiClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Gemini, cfg: GeminiConfig)       => GeminiClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.DeepSeek, cfg: DeepSeekConfig)   => DeepSeekClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Cohere, cfg: CohereConfig)       => CohereClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Mistral, cfg: MistralConfig)         => MistralClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.OpenAI, cfg: OpenAIConfig)         => OpenAIClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.OpenRouter, cfg: OpenAIConfig)     => OpenRouterClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Azure, cfg: AzureConfig)           => OpenAIClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Anthropic, cfg: AnthropicConfig)   => AnthropicClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Ollama, cfg: OllamaConfig)         => OllamaClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Zai, cfg: ZaiConfig)               => ZaiClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Gemini, cfg: GeminiConfig)         => GeminiClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.DeepSeek, cfg: DeepSeekConfig)     => DeepSeekClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Cohere, cfg: CohereConfig)         => CohereClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Mistral, cfg: MistralConfig)       => MistralClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.TogetherAI, cfg: TogetherAIConfig) => TogetherAIClient(cfg, metrics, exchangeLogging)
       case (prov, wrongCfg) =>
         val cfgType = wrongCfg.getClass.getSimpleName
