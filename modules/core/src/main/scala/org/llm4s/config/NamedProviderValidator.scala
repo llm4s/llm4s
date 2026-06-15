@@ -133,6 +133,18 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  object VertexAI extends NamedProviderValidator:
+    def validate(
+      providerName: ProviderName,
+      section: RawNamedProviderSection
+    ): Result[NamedProviderConfig] =
+      validateNamedProviderConfig(
+        providerName = providerName,
+        providerKind = ProviderKind.VertexAI,
+        section = section,
+        requireApiKey = true,
+      )
+
   private def validateNamedProviderConfig(
     providerName: ProviderName,
     providerKind: ProviderKind,
