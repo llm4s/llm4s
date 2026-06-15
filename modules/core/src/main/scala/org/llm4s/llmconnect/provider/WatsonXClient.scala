@@ -92,7 +92,7 @@ class WatsonXClient(
 
   private def parseIamResponse(body: String): Result[String] =
     Try {
-      val json = ujson.read(body)
+      val json     = ujson.read(body)
       val tokenOpt = json.obj.get("access_token").flatMap(_.strOpt).filter(_.nonEmpty)
       val expiresInOpt =
         json.obj.get("expires_in").flatMap(_.numOpt).map(_.toLong)
@@ -113,25 +113,26 @@ class WatsonXClient(
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
     for {
-      token       <- getBearerToken()
-      prompt      <- buildPrompt(conversation)
-      requestBody  = buildRequestBody(prompt, options)
-      requestText  = requestBody.render()
-      url          = s"${config.baseUrl}/ml/v1/text/generation?version=2023-05-29"
-      headers      = Map(
-        "Content-Type" -> "application/json",
+      token  <- getBearerToken()
+      prompt <- buildPrompt(conversation)
+      requestBody = buildRequestBody(prompt, options)
+      requestText = requestBody.render()
+      url         = s"${config.baseUrl}/ml/v1/text/generation?version=2023-05-29"
+      headers = Map(
+        "Content-Type"  -> "application/json",
         "Authorization" -> s"Bearer $token"
       )
-      response    <- Try(httpClient.post(url, headers, requestText, timeout = 120000)).toEither.left.map(_.toLLMError)
-      result      <- if (response.statusCode >= 200 && response.statusCode < 300) {
-        val r = parseCompletionResponse(response.body)
-        recordExchange(startedAt, requestText, Some(response.body), r)
-        r
-      } else {
-        val err = handleErrorResponse(response.statusCode, response.body, token)
-        recordExchange(startedAt, requestText, Some(response.body), err)
-        err
-      }
+      response <- Try(httpClient.post(url, headers, requestText, timeout = 120000)).toEither.left.map(_.toLLMError)
+      result <-
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          val r = parseCompletionResponse(response.body)
+          recordExchange(startedAt, requestText, Some(response.body), r)
+          r
+        } else {
+          val err = handleErrorResponse(response.statusCode, response.body, token)
+          recordExchange(startedAt, requestText, Some(response.body), err)
+          err
+        }
     } yield result
   }
 
@@ -142,26 +143,27 @@ class WatsonXClient(
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
     for {
-      token       <- getBearerToken()
-      prompt      <- buildPrompt(conversation)
-      requestBody  = buildRequestBody(prompt, options)
-      requestText  = requestBody.render()
-      url          = s"${config.baseUrl}/ml/v1/text/generation_stream?version=2023-05-29"
-      headers      = Map(
+      token  <- getBearerToken()
+      prompt <- buildPrompt(conversation)
+      requestBody = buildRequestBody(prompt, options)
+      requestText = requestBody.render()
+      url         = s"${config.baseUrl}/ml/v1/text/generation_stream?version=2023-05-29"
+      headers = Map(
         "Content-Type"  -> "application/json",
         "Authorization" -> s"Bearer $token",
         "Accept"        -> "text/event-stream"
       )
-      streamResp   = httpClient.postStream(url, headers, requestText, timeout = 600000)
-      result       <- if (streamResp.statusCode < 200 || streamResp.statusCode >= 300) {
-        val errBody = new String(streamResp.body.readAllBytes(), StandardCharsets.UTF_8)
-        streamResp.body.close()
-        val err = handleErrorResponse(streamResp.statusCode, errBody, token)
-        recordExchange(startedAt, requestText, Some(errBody), err)
-        err
-      } else {
-        processStreamResponse(startedAt, requestText, streamResp.body, onChunk)
-      }
+      streamResp = httpClient.postStream(url, headers, requestText, timeout = 600000)
+      result <-
+        if (streamResp.statusCode < 200 || streamResp.statusCode >= 300) {
+          val errBody = new String(streamResp.body.readAllBytes(), StandardCharsets.UTF_8)
+          streamResp.body.close()
+          val err = handleErrorResponse(streamResp.statusCode, errBody, token)
+          recordExchange(startedAt, requestText, Some(errBody), err)
+          err
+        } else {
+          processStreamResponse(startedAt, requestText, streamResp.body, onChunk)
+        }
     } yield result
   }
 
@@ -171,12 +173,12 @@ class WatsonXClient(
     body: java.io.InputStream,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
-    val reader      = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))
-    val rawStream   = new StringBuilder()
-    val accumulated = new StringBuilder()
+    val reader                        = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))
+    val rawStream                     = new StringBuilder()
+    val accumulated                   = new StringBuilder()
     var promptTokens: Option[Int]     = None
     var completionTokens: Option[Int] = None
-    val messageId = java.util.UUID.randomUUID().toString
+    val messageId                     = java.util.UUID.randomUUID().toString
 
     val result = Try {
       try {
@@ -208,7 +210,7 @@ class WatsonXClient(
 
                 // Extract token usage if present
                 for {
-                  results   <- json.obj.get("results").flatMap(_.arrOpt)
+                  results     <- json.obj.get("results").flatMap(_.arrOpt)
                   firstResult <- results.headOption
                   inputTokens <- firstResult.obj.get("input_token_count").flatMap(_.numOpt)
                 } promptTokens = Some(inputTokens.toInt)
@@ -228,46 +230,48 @@ class WatsonXClient(
       }
     }.toEither.left.map(_.toLLMError)
 
-    result.flatMap { _ =>
-      val text = accumulated.toString()
-      if (text.isEmpty) {
-        Left(ValidationError("response", "Empty streaming response from WatsonX"))
-      } else {
-        val usageOpt = for {
-          pt <- promptTokens
-          ct <- completionTokens
-        } yield TokenUsage(promptTokens = pt, completionTokens = ct, totalTokens = pt + ct)
+    result
+      .flatMap { _ =>
+        val text = accumulated.toString()
+        if (text.isEmpty) {
+          Left(ValidationError("response", "Empty streaming response from WatsonX"))
+        } else {
+          val usageOpt = for {
+            pt <- promptTokens
+            ct <- completionTokens
+          } yield TokenUsage(promptTokens = pt, completionTokens = ct, totalTokens = pt + ct)
 
-        val costOpt = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
-        val completion = Completion(
-          id = messageId,
-          created = System.currentTimeMillis() / 1000L,
-          content = text,
-          model = config.model,
-          message = AssistantMessage(contentOpt = Some(text), toolCalls = Seq.empty),
-          toolCalls = List.empty,
-          usage = usageOpt,
-          thinking = None,
-          estimatedCost = costOpt
-        )
-        recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
-        Right(completion)
+          val costOpt = usageOpt.flatMap(u => CostEstimator.estimate(config.model, u))
+          val completion = Completion(
+            id = messageId,
+            created = System.currentTimeMillis() / 1000L,
+            content = text,
+            model = config.model,
+            message = AssistantMessage(contentOpt = Some(text), toolCalls = Seq.empty),
+            toolCalls = List.empty,
+            usage = usageOpt,
+            thinking = None,
+            estimatedCost = costOpt
+          )
+          recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
+          Right(completion)
+        }
       }
-    }.tapLeft(err =>
-      recordExchange(
-        startedAt,
-        requestText,
-        Option.when(rawStream.nonEmpty)(rawStream.result()),
-        Left(err)
+      .tapLeft(err =>
+        recordExchange(
+          startedAt,
+          requestText,
+          Option.when(rawStream.nonEmpty)(rawStream.result()),
+          Left(err)
+        )
       )
-    )
   }
 
   override def getContextWindow(): Int = config.contextWindow
 
   override def getReserveCompletion(): Int = config.reserveCompletion
 
-  private def buildPrompt(conversation: Conversation): Result[String] = {
+  private def buildPrompt(conversation: Conversation): Result[String] =
     if (conversation.messages.isEmpty) {
       Left(ValidationError("conversation", "WatsonX requires at least one message"))
     } else {
@@ -285,7 +289,6 @@ class WatsonXClient(
       sb.append("Assistant:")
       Right(sb.toString())
     }
-  }
 
   private def buildRequestBody(prompt: String, options: CompletionOptions): ujson.Obj = {
     val params = ujson.Obj(
@@ -350,14 +353,13 @@ class WatsonXClient(
       }
     }.toEither.left.map(_.toLLMError).flatten
 
-  private def handleErrorResponse(statusCode: Int, body: String, token: String): Result[Nothing] = {
+  private def handleErrorResponse(statusCode: Int, body: String, token: String): Result[Nothing] =
     // Detect invalid project_id: WatsonX returns a specific error message
     if (body.contains("project_id") || body.contains("BXZAI0001E")) {
       Left(ValidationError("project_id", s"Invalid project_id: ${body.take(200)}"))
     } else {
       HttpErrorMapper.mapHttpError(statusCode, body, providerName)
     }
-  }
 
   private def recordExchange(
     startedAt: Instant,

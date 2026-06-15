@@ -112,8 +112,8 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return ValidationError for an empty conversation" in {
-    val mock = new MockHttpClient(HttpResponse(200, iamResponse))
-    val client = WatsonXClient.forTest(testConfig, mock)
+    val mock      = new MockHttpClient(HttpResponse(200, iamResponse))
+    val client    = WatsonXClient.forTest(testConfig, mock)
     val emptyConv = Conversation(Seq.empty)
 
     val result = client.complete(emptyConv, CompletionOptions())
@@ -259,7 +259,7 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "WatsonXClient IAM token" should "return ConfigurationError when IAM exchange fails (non-2xx)" in {
-    val mock = new MockHttpClient(HttpResponse(400, """{"error": "Bad request"}"""))
+    val mock   = new MockHttpClient(HttpResponse(400, """{"error": "Bad request"}"""))
     val client = WatsonXClient.forTest(testConfig, mock)
 
     val result = client.complete(conversation, CompletionOptions())
@@ -271,7 +271,7 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
 
   it should "return ConfigurationError when IAM response has no access_token" in {
     val badIam = """{"token_type": "Bearer", "expires_in": 3600}"""
-    val mock = new MockHttpClient(HttpResponse(200, badIam))
+    val mock   = new MockHttpClient(HttpResponse(200, badIam))
     val client = WatsonXClient.forTest(testConfig, mock)
 
     val result = client.complete(conversation, CompletionOptions())
@@ -282,7 +282,7 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return ConfigurationError when IAM returns invalid JSON" in {
-    val mock = new MockHttpClient(HttpResponse(200, "not-json"))
+    val mock   = new MockHttpClient(HttpResponse(200, "not-json"))
     val client = WatsonXClient.forTest(testConfig, mock)
 
     val result = client.complete(conversation, CompletionOptions())
@@ -438,7 +438,7 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
 
   it should "return UnknownError on network failure during WatsonX call" in {
     val failingClient = new FailingHttpClient(new java.io.IOException("connection refused"))
-    val client = WatsonXClient.forTest(testConfig, failingClient)
+    val client        = WatsonXClient.forTest(testConfig, failingClient)
 
     val result = client.complete(conversation, CompletionOptions())
 
@@ -592,7 +592,7 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
     val cfg = testConfig
     val str = cfg.toString
     str should include("projectId=test-project-id-1234")
-    str should not include "test-ibm-api-key"
+    (str should not).include("test-ibm-api-key")
     str should include("ibm/granite-3-8b-instruct")
   }
 
@@ -607,7 +607,7 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
 
   "WatsonXClient" should "propagate IAM network failure as error" in {
     val failingClient = new FailingHttpClient(new java.net.ConnectException("IAM unreachable"))
-    val client = WatsonXClient.forTest(testConfig, failingClient)
+    val client        = WatsonXClient.forTest(testConfig, failingClient)
 
     val result = client.complete(conversation, CompletionOptions())
 
