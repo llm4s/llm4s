@@ -133,13 +133,26 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  object Bedrock extends NamedProviderValidator:
+    def validate(
+      providerName: ProviderName,
+      section: RawNamedProviderSection
+    ): Result[NamedProviderConfig] =
+      validateNamedProviderConfig(
+        providerName = providerName,
+        providerKind = ProviderKind.Bedrock,
+        section = section,
+        requireRegion = true,
+      )
+
   private def validateNamedProviderConfig(
     providerName: ProviderName,
     providerKind: ProviderKind,
     section: RawNamedProviderSection,
     requireApiKey: Boolean = false,
     requireBaseUrl: Boolean = false,
-    requireEndpoint: Boolean = false
+    requireEndpoint: Boolean = false,
+    requireRegion: Boolean = false
   ): Result[NamedProviderConfig] =
     for
       normalized <- NamedProviderConfigNormalizer.normalize(providerName, section)
@@ -147,6 +160,7 @@ private[llm4s] object NamedProviderValidators:
       _          <- validateRequiredApiKey(providerName, section, requireApiKey)
       _          <- validateRequiredBaseUrl(providerName, section, requireBaseUrl)
       _          <- validateRequiredEndpoint(providerName, section, requireEndpoint)
+      _          <- validateRequiredRegion(providerName, section, requireRegion)
     yield normalized
 
   private def validateProviderKind(
@@ -202,6 +216,21 @@ private[llm4s] object NamedProviderValidators:
         .map(_ => ())
         .toRight(
           ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `endpoint`")
+        )
+    else Right(())
+
+  private def validateRequiredRegion(
+    providerName: ProviderName,
+    section: RawNamedProviderSection,
+    required: Boolean
+  ): Result[Unit] =
+    if required then
+      section.region
+        .map(_.trim)
+        .filter(_.nonEmpty)
+        .map(_ => ())
+        .toRight(
+          ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `region`")
         )
     else Right(())
 

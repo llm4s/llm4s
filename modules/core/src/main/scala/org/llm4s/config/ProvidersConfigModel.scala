@@ -14,7 +14,8 @@ object ProvidersConfigModel:
     apiKey: Option[String],
     organization: Option[String],
     endpoint: Option[String],
-    apiVersion: Option[String]
+    apiVersion: Option[String],
+    region: Option[String] = None
   )
 
   final case class RawProvidersConfig(
@@ -29,7 +30,8 @@ object ProvidersConfigModel:
     apiKey: Option[ApiKey],
     organization: Option[String],
     endpoint: Option[String],
-    apiVersion: Option[String]
+    apiVersion: Option[String],
+    region: Option[String] = None
   ):
     def requireProvider(expected: ProviderKind): Result[NamedProviderConfig] =
       if provider == expected then Right(this)

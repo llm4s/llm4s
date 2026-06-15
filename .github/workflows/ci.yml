@@ -234,3 +234,32 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: sbt testSmoke
+
+  # Tier 3b: AWS Bedrock smoke tests — requires AWS credentials.
+  # Manual trigger only (workflow_dispatch) to avoid unintended API costs.
+  # Tests are skipped gracefully when AWS_* secrets are absent.
+  bedrock-smoke:
+    name: AWS Bedrock Smoke Tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Run Bedrock smoke tests
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+        run: sbt "it/testOnly org.llm4s.llmconnect.smoke.BedrockSmokeSpec"
