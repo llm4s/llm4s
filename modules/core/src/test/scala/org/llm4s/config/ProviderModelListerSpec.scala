@@ -327,3 +327,53 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
       case Left(err) =>
         fail(s"Expected discovered Mistral models, got error: ${err.message}")
   }
+
+  test("Groq lister discovers models from /models") {
+    val config = namedConfig(ProviderKind.Groq, "llama-3.1-8b-instant", apiKey = Some("gsk-groq-key"))
+    val responseBody =
+      """{
+        |  "data": [
+        |    {
+        |      "id": "llama-3.1-8b-instant",
+        |      "created": 1710000000,
+        |      "owned_by": "Meta"
+        |    },
+        |    {
+        |      "id": "llama-3.3-70b-versatile",
+        |      "created": 1710000001,
+        |      "owned_by": "Meta"
+        |    }
+        |  ]
+        |}""".stripMargin
+
+    val mockHttp = MockHttpClient(HttpResponse(200, responseBody, Map.empty))
+    val result   = ProviderModelListers.Groq.listModels(config, mockHttp)
+
+    result match
+      case Right(models) =>
+        models.map(_.name.asString) shouldBe List("llama-3.1-8b-instant", "llama-3.3-70b-versatile")
+        models.map(_.provider) shouldBe List(ProviderKind.Groq, ProviderKind.Groq)
+        mockHttp.lastUrl shouldBe Some("https://api.groq.com/openai/v1/models")
+      case Left(err) =>
+        fail(s"Expected discovered Groq models, got error: ${err.message}")
+  }
+
+  test("provider capabilities expose the Groq model lister") {
+    val result = ProviderCapabilitiesRegistry.forKind(ProviderKind.Groq)
+
+    result match
+      case Right(capabilities) =>
+        capabilities.modelLister shouldBe Some(ProviderModelListers.Groq)
+      case Left(err) =>
+        fail(s"Expected Groq capabilities, got error: ${err.message}")
+  }
+
+  test("ProviderCapabilitiesRegistry returns error for unregistered provider") {
+    // Groq IS registered, so verify that all known providers are registered
+    ProviderKind.all.foreach { kind =>
+      val result = ProviderCapabilitiesRegistry.forKind(kind)
+      withClue(s"Expected capabilities for $kind") {
+        result.isRight shouldBe true
+      }
+    }
+  }

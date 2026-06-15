@@ -161,6 +161,49 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     }
   }
 
+  test("Groq provider with GroqConfig returns OpenAIClient (OpenAI-compatible)") {
+    val cfg: ProviderConfig = GroqConfig(
+      apiKey = "gsk-test-key",
+      model = "llama-3.1-8b-instant",
+      baseUrl = "https://api.groq.com/openai/v1",
+      contextWindow = 131072,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(ProviderKind.Groq, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "OpenAIClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
+  test("LLMConnect.fromConfig routes GroqConfig to OpenAIClient") {
+    val cfg: ProviderConfig = GroqConfig(
+      apiKey = "gsk-test-key",
+      model = "llama-3.1-8b-instant",
+      baseUrl = "https://api.groq.com/openai/v1",
+      contextWindow = 131072,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.fromConfig(cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "OpenAIClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
+  test("Groq provider with non-GroqConfig returns ConfigurationError") {
+    val wrongCfg: ProviderConfig = OpenAIConfig(
+      apiKey = "key",
+      model = "gpt-4o",
+      organization = None,
+      baseUrl = "https://api.openai.com/v1",
+      contextWindow = 128000,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(ProviderKind.Groq, wrongCfg)
+    res.isLeft shouldBe true
+  }
+
   test("OpenAI provider with non-OpenAIConfig should throw IllegalArgumentException") {
     val wrongCfg: ProviderConfig = AnthropicConfig(
       apiKey = "key",

@@ -635,6 +635,86 @@ object CohereConfig {
   }
 }
 
+/**
+ * Configuration for the Groq ultra-low latency inference API.
+ *
+ * Groq's API is fully OpenAI-compatible, so [[org.llm4s.llmconnect.LLMConnect]]
+ * routes this config to [[org.llm4s.llmconnect.provider.OpenAIClient]] with the
+ * Groq base URL. The `baseUrl` defaults to `"https://api.groq.com/openai/v1"`.
+ *
+ * Prefer [[GroqConfig.fromValues]] over the primary constructor; it resolves
+ * `contextWindow` and `reserveCompletion` from the model name automatically.
+ *
+ * @param apiKey        Groq API key; redacted in `toString`.
+ * @param model         Model identifier, e.g. `"llama-3.1-8b-instant"`.
+ * @param baseUrl       API base URL; defaults to [[GroqConfig.DEFAULT_BASE_URL]].
+ * @param contextWindow Model's total token capacity (prompt + completion combined).
+ * @param reserveCompletion Tokens held back from prompt history for the completion.
+ */
+case class GroqConfig(
+  apiKey: String,
+  model: String,
+  baseUrl: String,
+  contextWindow: Int,
+  reserveCompletion: Int
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.Groq
+  override def toString: String =
+    s"GroqConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
+      s"reserveCompletion=$reserveCompletion)"
+
+object GroqConfig {
+  private val standardReserve = 4096
+
+  val DEFAULT_BASE_URL: String = "https://api.groq.com/openai/v1"
+
+  private def groqFallback(modelName: String): (Int, Int) =
+    modelName match {
+      case name if name.contains("llama-3.3-70b") => (128000, standardReserve)
+      case name if name.contains("llama-3.1-70b") => (131072, standardReserve)
+      case name if name.contains("llama-3.1-8b")  => (131072, standardReserve)
+      case name if name.contains("llama-3-70b")   => (8192, standardReserve)
+      case name if name.contains("llama-3-8b")    => (8192, standardReserve)
+      case name if name.contains("mixtral-8x7b")  => (32768, standardReserve)
+      case name if name.contains("gemma2-9b")     => (8192, standardReserve)
+      case name if name.contains("gemma-7b")      => (8192, standardReserve)
+      case _                                      => (32768, standardReserve)
+    }
+
+  /**
+   * Constructs a [[GroqConfig]], resolving `contextWindow` and
+   * `reserveCompletion` from the model name automatically.
+   *
+   * @param modelName Model identifier, e.g. `"llama-3.1-8b-instant"`.
+   * @param apiKey    Groq API key; must be non-empty.
+   * @param baseUrl   API base URL; must be non-empty. Defaults to
+   *                  [[GroqConfig.DEFAULT_BASE_URL]] when loaded via
+   *                  [[org.llm4s.config.Llm4sConfig]].
+   */
+  def fromValues(
+    modelName: String,
+    apiKey: String,
+    baseUrl: String
+  )(using resolver: ContextWindowResolver): GroqConfig = {
+    require(apiKey.trim.nonEmpty, "Groq apiKey must be non-empty")
+    require(baseUrl.trim.nonEmpty, "Groq baseUrl must be non-empty")
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("groq"),
+      modelName = modelName,
+      defaultContextWindow = 32768,
+      defaultReserve = standardReserve,
+      fallbackResolver = groqFallback
+    )
+    GroqConfig(
+      apiKey = apiKey,
+      model = modelName,
+      baseUrl = baseUrl,
+      contextWindow = cw,
+      reserveCompletion = rc
+    )
+  }
+}
+
 case class MistralConfig(
   apiKey: String,
   model: String,

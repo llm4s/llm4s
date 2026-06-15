@@ -162,6 +162,13 @@ object ConfigKeys {
   val MISTRAL_API_KEY  = "MISTRAL_API_KEY"
   val MISTRAL_BASE_URL = "MISTRAL_BASE_URL"
 
+  // Groq
+  /** Groq API key. Required when using Groq ultra-low latency inference. */
+  val GROQ_API_KEY = "GROQ_API_KEY"
+
+  /** Overrides the Groq API base URL. Defaults to `"https://api.groq.com/openai/v1"`. */
+  val GROQ_BASE_URL = "GROQ_BASE_URL"
+
   // Tool API Keys
   // ---- Tool API keys ------------------------------------------------------
 

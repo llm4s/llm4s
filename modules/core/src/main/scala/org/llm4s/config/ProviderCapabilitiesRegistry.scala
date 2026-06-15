@@ -22,4 +22,5 @@ private[llm4s] object ProviderCapabilitiesRegistry:
     ProviderKind.DeepSeek   -> ProviderCapabilities.DeepSeek,
     ProviderKind.Cohere     -> ProviderCapabilities.Cohere,
     ProviderKind.Mistral    -> ProviderCapabilities.Mistral,
+    ProviderKind.Groq       -> ProviderCapabilities.Groq,
   )

@@ -104,3 +104,7 @@ private[config] object NamedProviderLoader:
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(MistralConfig.DEFAULT_BASE_URL)
           MistralConfig.fromValues(section.model.asString, apiKey, baseUrl)
+      case ProviderKind.Groq =>
+        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
+          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(GroqConfig.DEFAULT_BASE_URL)
+          GroqConfig.fromValues(section.model.asString, apiKey, baseUrl)
