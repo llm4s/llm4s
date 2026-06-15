@@ -72,6 +72,7 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
       case ProviderKind.DeepSeek   => "cloud-deepseek"
       case ProviderKind.Cohere     => "cloud-cohere"
       case ProviderKind.Mistral    => "cloud-mistral"
+      case ProviderKind.WatsonX    => "cloud-watsonx"
 
     describe(ProviderKind.OpenAI) shouldBe "cloud-openai"
     describe(ProviderKind.Ollama) shouldBe "local"
