@@ -7,7 +7,7 @@ import org.llm4s.speech.stt.{ STTError, STTOptions }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.nio.file.{ Files, Paths }
+import java.nio.file.Files
 
 class OpenAISTTClientSpec extends AnyFlatSpec with Matchers {
 
