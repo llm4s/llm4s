@@ -2,8 +2,6 @@ package org.llm4s.speech
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.speech.config.{ STTConfig, TTSConfig }
-import org.llm4s.speech.stt.provider.{ AzureSTTClient, OpenAISTTClient }
-import org.llm4s.speech.tts.provider.{ AzureTTSClient, ElevenLabsTTSClient, OpenAITTSClient }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
