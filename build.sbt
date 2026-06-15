@@ -135,7 +135,8 @@ lazy val llm4s = (project in file("."))
     workspaceClient,
     workspaceSamples,
     traceOpentelemetry,
-    knowledgegraphNeo4j
+    knowledgegraphNeo4j,
+    benchmarks
   )
   .settings(
     publish / skip := true
@@ -310,6 +311,18 @@ lazy val it = (project in file("modules/it"))
     commonSettings,
     publish / skip := true,
     Test / fork := true,
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    )
+  )
+
+lazy val benchmarks = (project in file("modules/benchmarks"))
+  .dependsOn(core)
+  .enablePlugins(JmhPlugin)
+  .settings(
+    name           := "benchmarks",
+    commonSettings,
+    publish / skip := true,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
     )
