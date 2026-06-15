@@ -7,7 +7,7 @@ import org.llm4s.config.DefaultConfig
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.ProvidersConfigModel.{ BaseUrl, NamedProviderConfig, ProviderKind }
-import org.llm4s.llmconnect.config.MistralConfig
+import org.llm4s.llmconnect.config.{ MistralConfig, XAIConfig }
 
 import scala.util.Try
 
@@ -141,6 +141,16 @@ private[llm4s] object ProviderModelListers:
         provider = ProviderKind.Mistral,
         defaultBaseUrl = MistralConfig.DEFAULT_BASE_URL,
         modelsPath = "/v1/models",
+        httpClient = httpClient
+      )
+
+  object XAI extends ProviderModelLister:
+    def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
+      listOpenAICompatibleModels(
+        config = config,
+        expected = ProviderKind.XAI,
+        provider = ProviderKind.XAI,
+        defaultBaseUrl = XAIConfig.DEFAULT_BASE_URL,
         httpClient = httpClient
       )
 

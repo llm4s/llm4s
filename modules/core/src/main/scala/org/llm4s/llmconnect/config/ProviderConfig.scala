@@ -677,3 +677,74 @@ object MistralConfig:
       contextWindow = cw,
       reserveCompletion = rc
     )
+
+/**
+ * Configuration for the xAI Grok API.
+ *
+ * xAI's Grok models (e.g. `grok-2-latest`, `grok-2-vision-latest`, `grok-beta`) are served
+ * via an OpenAI-compatible REST API, so [[org.llm4s.llmconnect.provider.XAIClient]] delegates
+ * to [[org.llm4s.llmconnect.provider.OpenAIClient]] internally.
+ *
+ * Prefer [[XAIConfig.fromValues]] over the primary constructor; it resolves `contextWindow`
+ * and `reserveCompletion` automatically from the model name.
+ *
+ * @param apiKey            xAI API key (`xai-...`); redacted in `toString`.
+ * @param model             Model identifier, e.g. `"grok-2-latest"`.
+ * @param baseUrl           API base URL; defaults to [[XAIConfig.DEFAULT_BASE_URL]].
+ * @param contextWindow     Model's total token capacity (prompt + completion combined).
+ * @param reserveCompletion Tokens held back from prompt history for the completion.
+ */
+case class XAIConfig(
+  apiKey: String,
+  model: String,
+  baseUrl: String,
+  contextWindow: Int,
+  reserveCompletion: Int,
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.XAI
+  override def toString: String =
+    s"XAIConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, " +
+      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+
+object XAIConfig:
+  val DEFAULT_BASE_URL: String = "https://api.x.ai/v1"
+
+  private val DefaultContextWindow     = 131072
+  private val DefaultReserveCompletion = 4096
+
+  private def xaiFallback(modelName: String): (Int, Int) =
+    modelName.toLowerCase match
+      case name if name.contains("grok-2") => (131072, DefaultReserveCompletion)
+      case name if name.contains("grok")   => (131072, DefaultReserveCompletion)
+      case _                               => (131072, DefaultReserveCompletion)
+
+  /**
+   * Constructs an [[XAIConfig]], resolving `contextWindow` and `reserveCompletion` from the model
+   * name automatically.
+   *
+   * @param modelName Model identifier, e.g. `"grok-2-latest"`.
+   * @param apiKey    xAI API key; must be non-empty.
+   * @param baseUrl   API base URL; must be non-empty. Defaults to [[XAIConfig.DEFAULT_BASE_URL]]
+   *                  when loaded via [[org.llm4s.config.Llm4sConfig]].
+   */
+  def fromValues(
+    modelName: String,
+    apiKey: String,
+    baseUrl: String,
+  )(using resolver: ContextWindowResolver): XAIConfig =
+    require(apiKey.trim.nonEmpty, "xAI apiKey must be non-empty")
+    require(baseUrl.trim.nonEmpty, "xAI baseUrl must be non-empty")
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("xai"),
+      modelName = modelName,
+      defaultContextWindow = DefaultContextWindow,
+      defaultReserve = DefaultReserveCompletion,
+      fallbackResolver = xaiFallback
+    )
+    XAIConfig(
+      apiKey = apiKey,
+      model = modelName,
+      baseUrl = baseUrl,
+      contextWindow = cw,
+      reserveCompletion = rc,
+    )

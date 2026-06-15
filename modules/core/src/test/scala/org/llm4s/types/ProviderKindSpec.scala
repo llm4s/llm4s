@@ -7,7 +7,7 @@ import org.scalatest.matchers.should.Matchers
 class ProviderKindSpec extends AnyFlatSpec with Matchers:
 
   "ProviderKind" should "expose all expected provider instances" in {
-    ProviderKind.all should have size 10
+    ProviderKind.all should have size 11
     (ProviderKind.all should contain).allOf(
       ProviderKind.OpenAI,
       ProviderKind.Azure,
@@ -18,7 +18,8 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
       ProviderKind.Gemini,
       ProviderKind.Cohere,
       ProviderKind.DeepSeek,
-      ProviderKind.Mistral
+      ProviderKind.Mistral,
+      ProviderKind.XAI
     )
   }
 
@@ -33,6 +34,7 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
     ProviderKind.DeepSeek.name shouldBe "deepseek"
     ProviderKind.Cohere.name shouldBe "cohere"
     ProviderKind.Mistral.name shouldBe "mistral"
+    ProviderKind.XAI.name shouldBe "xai"
   }
 
   "ProviderKind.fromName" should "parse supported providers case-insensitively" in {
@@ -47,6 +49,8 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
     ProviderKind.fromName("DEEPSEEK") shouldBe Some(ProviderKind.DeepSeek)
     ProviderKind.fromName("COHERE") shouldBe Some(ProviderKind.Cohere)
     ProviderKind.fromName("MISTRAL") shouldBe Some(ProviderKind.Mistral)
+    ProviderKind.fromName("xai") shouldBe Some(ProviderKind.XAI)
+    ProviderKind.fromName("XAI") shouldBe Some(ProviderKind.XAI)
   }
 
   it should "return None for unknown providers" in {
@@ -72,6 +76,7 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
       case ProviderKind.DeepSeek   => "cloud-deepseek"
       case ProviderKind.Cohere     => "cloud-cohere"
       case ProviderKind.Mistral    => "cloud-mistral"
+      case ProviderKind.XAI        => "cloud-xai"
 
     describe(ProviderKind.OpenAI) shouldBe "cloud-openai"
     describe(ProviderKind.Ollama) shouldBe "local"
@@ -80,4 +85,5 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
     describe(ProviderKind.DeepSeek) shouldBe "cloud-deepseek"
     describe(ProviderKind.Cohere) shouldBe "cloud-cohere"
     describe(ProviderKind.Mistral) shouldBe "cloud-mistral"
+    describe(ProviderKind.XAI) shouldBe "cloud-xai"
   }
