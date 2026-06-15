@@ -28,7 +28,7 @@ object ElevenLabsTTSClient {
   def fromConfig(cfg: TTSConfig): TextToSpeech =
     create(cfg, Llm4sHttpClient.create())
 
-  private[provider] def forTest(cfg: TTSConfig, httpClient: Llm4sHttpClient): TextToSpeech =
+  private[tts] def forTest(cfg: TTSConfig, httpClient: Llm4sHttpClient): TextToSpeech =
     create(cfg, httpClient)
 
   private def create(cfg: TTSConfig, httpClient: Llm4sHttpClient): TextToSpeech =
