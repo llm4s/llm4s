@@ -39,8 +39,7 @@ final class ElevenLabsTTSClient private (
 
     Try {
       http.postRaw(url, headers, body)
-    }.toEither
-      .left
+    }.toEither.left
       .map(t => CloudSpeechError.fromThrowable(t, url): LLMError)
       .flatMap { (raw: HttpRawResponse) =>
         if (raw.statusCode >= 200 && raw.statusCode < 300) {

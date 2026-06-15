@@ -39,8 +39,7 @@ final class OpenAITTSClient private (
 
     Try {
       http.postRaw(s"$baseUrl/audio/speech", headers, body)
-    }.toEither
-      .left
+    }.toEither.left
       .map(t => CloudSpeechError.fromThrowable(t, s"$baseUrl/audio/speech"): LLMError)
       .flatMap { (raw: HttpRawResponse) =>
         if (raw.statusCode >= 200 && raw.statusCode < 300) {

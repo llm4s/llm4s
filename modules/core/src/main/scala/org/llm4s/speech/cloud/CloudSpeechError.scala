@@ -1,13 +1,6 @@
 package org.llm4s.speech.cloud
 
-import org.llm4s.error.{
-  AuthenticationError,
-  ConfigurationError,
-  LLMError,
-  NetworkError,
-  RateLimitError,
-  ServiceError
-}
+import org.llm4s.error.{ AuthenticationError, ConfigurationError, LLMError, NetworkError, RateLimitError, ServiceError }
 
 /** Utilities for mapping HTTP status codes to typed LLMErrors for cloud speech providers. */
 object CloudSpeechError {

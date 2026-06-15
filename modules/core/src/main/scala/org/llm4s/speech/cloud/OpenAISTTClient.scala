@@ -42,17 +42,11 @@ final class OpenAISTTClient private (
       case AudioInput.FileAudio(path) =>
         transcribeFile(path, url, headers, options)
       case AudioInput.BytesAudio(bytes, _, _) =>
-        withTempFile(bytes, "audio.wav") { tmp =>
-          transcribeFile(tmp, url, headers, options)
-        }
+        withTempFile(bytes, "audio.wav")(tmp => transcribeFile(tmp, url, headers, options))
       case AudioInput.StreamAudio(stream, _, _) =>
         val bytes = Try(stream.readAllBytes()).toEither.left
           .map(t => CloudSpeechError.fromThrowable(t, url): LLMError)
-        bytes.flatMap { bs =>
-          withTempFile(bs, "audio.wav") { tmp =>
-            transcribeFile(tmp, url, headers, options)
-          }
-        }
+        bytes.flatMap(bs => withTempFile(bs, "audio.wav")(tmp => transcribeFile(tmp, url, headers, options)))
     }
 
     result
@@ -72,8 +66,7 @@ final class OpenAISTTClient private (
 
     Try {
       http.postMultipart(url, headers, parts)
-    }.toEither
-      .left
+    }.toEither.left
       .map(t => CloudSpeechError.fromThrowable(t, url): LLMError)
       .flatMap { response =>
         if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -98,7 +91,7 @@ final class OpenAISTTClient private (
     }
   }
 
-  private def parseTranscription(body: String, options: STTOptions): Result[Transcription] = {
+  private def parseTranscription(body: String, options: STTOptions): Result[Transcription] =
     Try {
       val json = ujson.read(body)
       val text = json("text").str
@@ -106,10 +99,7 @@ final class OpenAISTTClient private (
         text = text,
         language = options.language
       )
-    }.toEither.left.map { t =>
-      CloudSpeechError.fromThrowable(t, s"parse-response"): LLMError
-    }
-  }
+    }.toEither.left.map(t => CloudSpeechError.fromThrowable(t, s"parse-response"): LLMError)
 }
 
 object OpenAISTTClient {

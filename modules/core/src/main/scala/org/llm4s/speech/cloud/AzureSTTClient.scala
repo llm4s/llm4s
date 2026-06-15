@@ -32,8 +32,8 @@ final class AzureSTTClient private (
     List("audio/wav", "audio/ogg", "audio/mp3")
 
   override def transcribe(input: AudioInput, options: STTOptions): Result[Transcription] = {
-    val lang   = options.language.getOrElse("en-US")
-    val url    = s"$baseUrl?language=$lang&format=simple"
+    val lang = options.language.getOrElse("en-US")
+    val url  = s"$baseUrl?language=$lang&format=simple"
     val headers = Map(
       "Ocp-Apim-Subscription-Key" -> subscriptionKey,
       "Content-Type"              -> "audio/wav; codecs=audio/pcm; samplerate=16000",
@@ -60,8 +60,7 @@ final class AzureSTTClient private (
   ): Result[Transcription] =
     Try {
       http.postBytes(url, headers, bytes)
-    }.toEither
-      .left
+    }.toEither.left
       .map(t => CloudSpeechError.fromThrowable(t, url): LLMError)
       .flatMap { response =>
         if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -79,9 +78,7 @@ final class AzureSTTClient private (
         text = text,
         language = options.language
       )
-    }.toEither.left.map { t =>
-      CloudSpeechError.fromThrowable(t, "parse-response"): LLMError
-    }
+    }.toEither.left.map(t => CloudSpeechError.fromThrowable(t, "parse-response"): LLMError)
 }
 
 object AzureSTTClient {

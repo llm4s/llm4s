@@ -1,11 +1,6 @@
 package org.llm4s.speech
 
-import org.llm4s.error.{
-  AuthenticationError,
-  ConfigurationError,
-  NetworkError,
-  RateLimitError
-}
+import org.llm4s.error.{ AuthenticationError, ConfigurationError, NetworkError, RateLimitError }
 import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 import org.llm4s.speech.cloud.{
   AzureSTTClient,
@@ -27,7 +22,7 @@ import org.scalatest.matchers.should.Matchers
 class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers {
 
   // Minimal valid MP3 magic bytes string (UTF-8 encoding of binary-safe content for mock)
-  private val fakeAudioBytes: String = "FAKE_AUDIO_BYTES_FOR_TESTING"
+  private val fakeAudioBytes: String  = "FAKE_AUDIO_BYTES_FOR_TESTING"
   private val sttJsonResponse: String = """{"text": "hello world"}"""
 
   // ===== OpenAITTSClient =====

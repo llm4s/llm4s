@@ -44,8 +44,7 @@ final class AzureTTSClient private (
 
     Try {
       http.postRaw(baseUrl, headers, ssml)
-    }.toEither
-      .left
+    }.toEither.left
       .map(t => CloudSpeechError.fromThrowable(t, baseUrl): LLMError)
       .flatMap { (raw: HttpRawResponse) =>
         if (raw.statusCode >= 200 && raw.statusCode < 300) {
