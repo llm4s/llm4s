@@ -677,3 +677,80 @@ object MistralConfig:
       contextWindow = cw,
       reserveCompletion = rc
     )
+
+/**
+ * Configuration for the Fireworks AI inference platform.
+ *
+ * Fireworks AI is an enterprise OpenAI-compatible inference platform for open-source models
+ * (Llama, Mixtral, Qwen, FireFunction, etc.) with SLA guarantees and SOC 2 compliance.
+ * The API is fully OpenAI-compatible; this config routes to [[org.llm4s.llmconnect.provider.FireworksClient]].
+ *
+ * Prefer [[FireworksConfig.fromValues]] over the primary constructor; it resolves
+ * `contextWindow` and `reserveCompletion` automatically from the model name.
+ *
+ * @param apiKey        Fireworks AI API key; redacted in `toString`.
+ * @param model         Model identifier, e.g. `"accounts/fireworks/models/llama-v3p1-8b-instruct"`.
+ * @param baseUrl       API base URL; defaults to [[FireworksConfig.DEFAULT_BASE_URL]].
+ * @param contextWindow Model's total token capacity (prompt + completion combined).
+ * @param reserveCompletion Tokens held back from prompt history for the completion.
+ */
+case class FireworksConfig(
+  apiKey: String,
+  model: String,
+  baseUrl: String,
+  contextWindow: Int,
+  reserveCompletion: Int
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.Fireworks
+  override def toString: String =
+    s"FireworksConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, " +
+      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+
+object FireworksConfig:
+  val DEFAULT_BASE_URL: String = "https://api.fireworks.ai/inference/v1"
+
+  private val DefaultContextWindow     = 131072
+  private val DefaultReserveCompletion = 4096
+
+  private def fireworksFallback(modelName: String): (Int, Int) =
+    modelName.toLowerCase match {
+      case name if name.contains("llama-v3p1-405b") => (131072, DefaultReserveCompletion)
+      case name if name.contains("llama-v3p1-70b")  => (131072, DefaultReserveCompletion)
+      case name if name.contains("llama-v3p1-8b")   => (131072, DefaultReserveCompletion)
+      case name if name.contains("mixtral-8x7b")    => (32768, DefaultReserveCompletion)
+      case name if name.contains("mixtral-8x22b")   => (65536, DefaultReserveCompletion)
+      case name if name.contains("firefunction")     => (32768, DefaultReserveCompletion)
+      case _                                         => (DefaultContextWindow, DefaultReserveCompletion)
+    }
+
+  /**
+   * Constructs a [[FireworksConfig]], resolving `contextWindow` and
+   * `reserveCompletion` from the model name automatically.
+   *
+   * @param modelName Model identifier, e.g. `"accounts/fireworks/models/llama-v3p1-8b-instruct"`.
+   * @param apiKey    Fireworks AI API key; must be non-empty.
+   * @param baseUrl   API base URL; must be non-empty. Defaults to
+   *                  [[FireworksConfig.DEFAULT_BASE_URL]] when loaded via
+   *                  [[org.llm4s.config.Llm4sConfig]].
+   */
+  def fromValues(
+    modelName: String,
+    apiKey: String,
+    baseUrl: String
+  )(using resolver: ContextWindowResolver): FireworksConfig =
+    require(apiKey.trim.nonEmpty, "Fireworks apiKey must be non-empty")
+    require(baseUrl.trim.nonEmpty, "Fireworks baseUrl must be non-empty")
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("fireworks"),
+      modelName = modelName,
+      defaultContextWindow = DefaultContextWindow,
+      defaultReserve = DefaultReserveCompletion,
+      fallbackResolver = fireworksFallback
+    )
+    FireworksConfig(
+      apiKey = apiKey,
+      model = modelName,
+      baseUrl = baseUrl,
+      contextWindow = cw,
+      reserveCompletion = rc
+    )

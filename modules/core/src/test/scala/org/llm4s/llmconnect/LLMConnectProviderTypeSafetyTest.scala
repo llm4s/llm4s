@@ -202,6 +202,35 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     res.isLeft shouldBe true
   }
 
+  test("Fireworks provider with FireworksConfig returns FireworksClient") {
+    val cfg: ProviderConfig = FireworksConfig(
+      apiKey = "key",
+      model = "accounts/fireworks/models/llama-v3p1-8b-instruct",
+      baseUrl = "https://example.invalid/v1",
+      contextWindow = 131072,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(ProviderKind.Fireworks, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "FireworksClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
+  test("Fireworks provider with non-FireworksConfig should return Left") {
+    val wrongCfg: ProviderConfig = OpenAIConfig(
+      apiKey = "key",
+      model = "gpt-4o",
+      organization = None,
+      baseUrl = "https://api.openai.com/v1",
+      contextWindow = 128000,
+      reserveCompletion = 4096
+    )
+
+    val res = LLMConnect.getClient(ProviderKind.Fireworks, wrongCfg)
+    res.isLeft shouldBe true
+  }
+
   test("Zai provider with non-ZaiConfig should throw IllegalArgumentException") {
     val wrongCfg: ProviderConfig = OpenAIConfig(
       apiKey = "key",

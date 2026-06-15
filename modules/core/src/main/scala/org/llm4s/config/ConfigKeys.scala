@@ -162,6 +162,11 @@ object ConfigKeys {
   val MISTRAL_API_KEY  = "MISTRAL_API_KEY"
   val MISTRAL_BASE_URL = "MISTRAL_BASE_URL"
 
+  // Fireworks AI
+  /** Fireworks AI API key. Required when using Fireworks-hosted models. */
+  val FIREWORKS_API_KEY  = "FIREWORKS_API_KEY"
+  val FIREWORKS_BASE_URL = "FIREWORKS_BASE_URL"
+
   // Tool API Keys
   // ---- Tool API keys ------------------------------------------------------
 
