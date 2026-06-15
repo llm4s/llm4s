@@ -107,60 +107,64 @@ class TogetherAIClient(
     val accumulator = StreamingAccumulator.create()
     val rawStream   = StringBuilder()
 
-    val response = httpClient.postStream(url, headers, requestText, timeout = 600000)
+    val responseResult = Try(httpClient.postStream(url, headers, requestText, timeout = 600000)).toEither.left
+      .map(_.toLLMError)
+      .tapLeft(error => recordExchange(startedAt, requestText, None, Left(error)))
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      val errBody     = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)
-      val errorResult = HttpErrorMapper.mapHttpError(response.statusCode, errBody, providerName)
-      recordExchange(startedAt, requestText, Some(errBody), errorResult)
-      response.body.close()
-      errorResult
-    } else {
-      val reader = new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))
+    responseResult.flatMap { response =>
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        val errBody     = new String(response.body.readAllBytes(), StandardCharsets.UTF_8)
+        val errorResult = HttpErrorMapper.mapHttpError(response.statusCode, errBody, providerName)
+        recordExchange(startedAt, requestText, Some(errBody), errorResult)
+        response.body.close()
+        errorResult
+      } else {
+        val reader = new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))
 
-      Try {
-        try {
-          val sseParser    = SSEParser.createStreamingParser()
-          var line: String = null
-          while ({ line = reader.readLine(); line != null }) {
-            rawStream.append(line).append('\n')
-            sseParser.addChunk(line + "\n")
-            while (sseParser.hasEvents)
-              sseParser.nextEvent().foreach { event =>
-                event.data.foreach { data =>
-                  if (data != "[DONE]") {
-                    val json   = ujson.read(data)
-                    val chunks = parseStreamingChunks(json)
-                    chunks.foreach { c =>
-                      accumulator.addChunk(c)
-                      onChunk(c)
+        Try {
+          try {
+            val sseParser    = SSEParser.createStreamingParser()
+            var line: String = null
+            while ({ line = reader.readLine(); line != null }) {
+              rawStream.append(line).append('\n')
+              sseParser.addChunk(line + "\n")
+              while (sseParser.hasEvents)
+                sseParser.nextEvent().foreach { event =>
+                  event.data.foreach { data =>
+                    if (data != "[DONE]") {
+                      val json   = ujson.read(data)
+                      val chunks = parseStreamingChunks(json)
+                      chunks.foreach { c =>
+                        accumulator.addChunk(c)
+                        onChunk(c)
+                      }
                     }
                   }
                 }
-              }
+            }
+          } finally {
+            Try(reader.close())
+            Try(response.body.close())
           }
-        } finally {
-          Try(reader.close())
-          Try(response.body.close())
-        }
-      }.toEither.left
-        .map(_.toLLMError)
-        .flatMap(_ =>
-          accumulator.toCompletion.map { c =>
-            val cost       = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            val completion = c.copy(model = config.model, estimatedCost = cost)
-            recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
-            completion
-          }
-        )
-        .tapLeft(error =>
-          recordExchange(
-            startedAt,
-            requestText,
-            Option.when(rawStream.nonEmpty)(rawStream.result()),
-            Left(error)
+        }.toEither.left
+          .map(_.toLLMError)
+          .flatMap(_ =>
+            accumulator.toCompletion.map { c =>
+              val cost       = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
+              val completion = c.copy(model = config.model, estimatedCost = cost)
+              recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
+              completion
+            }
           )
-        )
+          .tapLeft(error =>
+            recordExchange(
+              startedAt,
+              requestText,
+              Option.when(rawStream.nonEmpty)(rawStream.result()),
+              Left(error)
+            )
+          )
+      }
     }
   }
 
