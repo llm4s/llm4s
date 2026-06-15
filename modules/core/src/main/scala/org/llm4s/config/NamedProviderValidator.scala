@@ -133,6 +133,18 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  object TogetherAI extends NamedProviderValidator:
+    def validate(
+      providerName: ProviderName,
+      section: RawNamedProviderSection
+    ): Result[NamedProviderConfig] =
+      validateNamedProviderConfig(
+        providerName = providerName,
+        providerKind = ProviderKind.TogetherAI,
+        section = section,
+        requireApiKey = true,
+      )
+
   private def validateNamedProviderConfig(
     providerName: ProviderName,
     providerKind: ProviderKind,

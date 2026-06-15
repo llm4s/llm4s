@@ -677,3 +677,81 @@ object MistralConfig:
       contextWindow = cw,
       reserveCompletion = rc
     )
+
+/**
+ * Configuration for the Together AI API.
+ *
+ * Together AI hosts open-source models (Llama, Mistral, Qwen, DBRX, StableLM) at scale
+ * and exposes a fully OpenAI-compatible REST API. The [[org.llm4s.llmconnect.provider.TogetherAIClient]]
+ * delegates directly to the OpenAI-compatible `/v1/chat/completions` endpoint.
+ *
+ * Prefer [[TogetherAIConfig.fromValues]] over the primary constructor; it resolves
+ * `contextWindow` and `reserveCompletion` automatically from the model name.
+ *
+ * @param apiKey        Together AI API key; redacted in `toString`.
+ * @param model         Model identifier, e.g. `"meta-llama/Llama-3.3-70B-Instruct-Turbo"`.
+ * @param baseUrl       API base URL; defaults to [[TogetherAIConfig.DEFAULT_BASE_URL]].
+ * @param contextWindow Model's total token capacity (prompt + completion combined).
+ * @param reserveCompletion Tokens held back from prompt history for the completion.
+ */
+case class TogetherAIConfig(
+  apiKey: String,
+  model: String,
+  baseUrl: String,
+  contextWindow: Int,
+  reserveCompletion: Int
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.TogetherAI
+  override def toString: String =
+    s"TogetherAIConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, " +
+      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+
+object TogetherAIConfig:
+  val DEFAULT_BASE_URL: String = "https://api.together.xyz/v1"
+
+  private val DefaultContextWindow     = 131072
+  private val DefaultReserveCompletion = 4096
+
+  private def togetherFallback(modelName: String): (Int, Int) =
+    modelName.toLowerCase match
+      case name if name.contains("llama-3.3-70b") => (131072, DefaultReserveCompletion)
+      case name if name.contains("llama-3.2")     => (131072, DefaultReserveCompletion)
+      case name if name.contains("llama-3.1")     => (131072, DefaultReserveCompletion)
+      case name if name.contains("llama-3")       => (8192, DefaultReserveCompletion)
+      case name if name.contains("mixtral")       => (32768, DefaultReserveCompletion)
+      case name if name.contains("mistral")       => (32768, DefaultReserveCompletion)
+      case name if name.contains("qwen2.5")       => (131072, DefaultReserveCompletion)
+      case name if name.contains("qwen")          => (32768, DefaultReserveCompletion)
+      case _                                      => (DefaultContextWindow, DefaultReserveCompletion)
+
+  /**
+   * Constructs a [[TogetherAIConfig]], resolving `contextWindow` and
+   * `reserveCompletion` from the model name automatically.
+   *
+   * @param modelName Model identifier, e.g. `"meta-llama/Llama-3.3-70B-Instruct-Turbo"`.
+   * @param apiKey    Together AI API key; must be non-empty.
+   * @param baseUrl   API base URL; must be non-empty. Defaults to
+   *                  [[TogetherAIConfig.DEFAULT_BASE_URL]] when loaded via
+   *                  [[org.llm4s.config.Llm4sConfig]].
+   */
+  def fromValues(
+    modelName: String,
+    apiKey: String,
+    baseUrl: String
+  )(using resolver: ContextWindowResolver): TogetherAIConfig =
+    require(apiKey.trim.nonEmpty, "Together AI apiKey must be non-empty")
+    require(baseUrl.trim.nonEmpty, "Together AI baseUrl must be non-empty")
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("together"),
+      modelName = modelName,
+      defaultContextWindow = DefaultContextWindow,
+      defaultReserve = DefaultReserveCompletion,
+      fallbackResolver = togetherFallback
+    )
+    TogetherAIConfig(
+      apiKey = apiKey,
+      model = modelName,
+      baseUrl = baseUrl,
+      contextWindow = cw,
+      reserveCompletion = rc
+    )
