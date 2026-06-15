@@ -245,25 +245,23 @@ class FireworksClientSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   it should "map HTTP 401 to AuthenticationError" in
-    withServer("/chat/completions") { exchange =>
-      sendJsonResponse(exchange, 401, """{"error":"Unauthorized"}""")
-    } { baseUrl =>
-      val client = new FireworksClient(localConfig(baseUrl))
-      val result = client.complete(conversation, CompletionOptions())
+    withServer("/chat/completions")(exchange => sendJsonResponse(exchange, 401, """{"error":"Unauthorized"}""")) {
+      baseUrl =>
+        val client = new FireworksClient(localConfig(baseUrl))
+        val result = client.complete(conversation, CompletionOptions())
 
-      result.isLeft shouldBe true
-      result.swap.toOption.get shouldBe an[AuthenticationError]
+        result.isLeft shouldBe true
+        result.swap.toOption.get shouldBe an[AuthenticationError]
     }
 
   it should "map HTTP 403 to AuthenticationError" in
-    withServer("/chat/completions") { exchange =>
-      sendJsonResponse(exchange, 403, """{"error":"Forbidden"}""")
-    } { baseUrl =>
-      val client = new FireworksClient(localConfig(baseUrl))
-      val result = client.complete(conversation, CompletionOptions())
+    withServer("/chat/completions")(exchange => sendJsonResponse(exchange, 403, """{"error":"Forbidden"}""")) {
+      baseUrl =>
+        val client = new FireworksClient(localConfig(baseUrl))
+        val result = client.complete(conversation, CompletionOptions())
 
-      result.isLeft shouldBe true
-      result.swap.toOption.get shouldBe an[AuthenticationError]
+        result.isLeft shouldBe true
+        result.swap.toOption.get shouldBe an[AuthenticationError]
     }
 
   it should "map HTTP 429 to RateLimitError" in
@@ -289,9 +287,7 @@ class FireworksClientSpec extends AnyFlatSpec with Matchers {
     }
 
   it should "map HTTP 502 to ServiceError" in
-    withServer("/chat/completions") { exchange =>
-      sendJsonResponse(exchange, 502, "Bad Gateway")
-    } { baseUrl =>
+    withServer("/chat/completions")(exchange => sendJsonResponse(exchange, 502, "Bad Gateway")) { baseUrl =>
       val client = new FireworksClient(localConfig(baseUrl))
       val result = client.complete(conversation, CompletionOptions())
 
@@ -343,9 +339,7 @@ class FireworksClientSpec extends AnyFlatSpec with Matchers {
     }
 
   it should "handle [DONE] termination signal without error" in
-    withServer("/chat/completions") { exchange =>
-      sendSseResponse(exchange, "data: [DONE]\n\n")
-    } { baseUrl =>
+    withServer("/chat/completions")(exchange => sendSseResponse(exchange, "data: [DONE]\n\n")) { baseUrl =>
       val client     = new FireworksClient(localConfig(baseUrl))
       var chunkCount = 0
       val result     = client.streamComplete(conversation, CompletionOptions(), _ => chunkCount += 1)
@@ -359,14 +353,13 @@ class FireworksClientSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   it should "map HTTP 401 to AuthenticationError" in
-    withServer("/chat/completions") { exchange =>
-      sendJsonResponse(exchange, 401, """{"error":"Invalid API key"}""")
-    } { baseUrl =>
-      val client = new FireworksClient(localConfig(baseUrl))
-      val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+    withServer("/chat/completions")(exchange => sendJsonResponse(exchange, 401, """{"error":"Invalid API key"}""")) {
+      baseUrl =>
+        val client = new FireworksClient(localConfig(baseUrl))
+        val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
 
-      result.isLeft shouldBe true
-      result.swap.toOption.get shouldBe an[AuthenticationError]
+        result.isLeft shouldBe true
+        result.swap.toOption.get shouldBe an[AuthenticationError]
     }
 
   it should "map HTTP 429 to RateLimitError during streaming" in

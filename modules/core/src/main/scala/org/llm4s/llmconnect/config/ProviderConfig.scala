@@ -719,8 +719,8 @@ object FireworksConfig:
       case name if name.contains("llama-v3p1-8b")   => (131072, DefaultReserveCompletion)
       case name if name.contains("mixtral-8x7b")    => (32768, DefaultReserveCompletion)
       case name if name.contains("mixtral-8x22b")   => (65536, DefaultReserveCompletion)
-      case name if name.contains("firefunction")     => (32768, DefaultReserveCompletion)
-      case _                                         => (DefaultContextWindow, DefaultReserveCompletion)
+      case name if name.contains("firefunction")    => (32768, DefaultReserveCompletion)
+      case _                                        => (DefaultContextWindow, DefaultReserveCompletion)
     }
 
   /**

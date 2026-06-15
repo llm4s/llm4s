@@ -11,7 +11,7 @@ import org.scalatest.matchers.should.Matchers
  */
 class FireworksConfigSpec extends AnyFlatSpec with Matchers {
 
-  private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
+  private given mrs: ModelRegistryService       = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private given resolver: ContextWindowResolver = ContextWindowResolver(mrs)
 
   private val defaultModel = "accounts/fireworks/models/llama-v3p1-8b-instruct"
@@ -52,7 +52,7 @@ class FireworksConfigSpec extends AnyFlatSpec with Matchers {
       reserveCompletion = 4096
     )
     val str = cfg.toString
-    str should not include "fw-super-secret-key"
+    (str should not).include("fw-super-secret-key")
     str should include("FireworksConfig")
     str should include(defaultModel)
   }
