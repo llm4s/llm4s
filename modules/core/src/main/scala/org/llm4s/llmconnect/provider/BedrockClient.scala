@@ -141,7 +141,7 @@ class BedrockClient private[provider] (
     conversation: Conversation
   ): Result[(Option[String], Seq[ujson.Value])] = {
     var systemPrompt: Option[String] = None
-    val results = conversation.messages.flatMap {
+    val results: Seq[Either[org.llm4s.error.LLMError, ujson.Value]] = conversation.messages.flatMap {
       case SystemMessage(content) =>
         systemPrompt = Some(content)
         None
