@@ -129,7 +129,7 @@ class WatsonXClient(
           recordExchange(startedAt, requestText, Some(response.body), r)
           r
         } else {
-          val err = handleErrorResponse(response.statusCode, response.body, token)
+          val err = handleErrorResponse(response.statusCode, response.body)
           recordExchange(startedAt, requestText, Some(response.body), err)
           err
         }
@@ -158,7 +158,7 @@ class WatsonXClient(
         if (streamResp.statusCode < 200 || streamResp.statusCode >= 300) {
           val errBody = new String(streamResp.body.readAllBytes(), StandardCharsets.UTF_8)
           streamResp.body.close()
-          val err = handleErrorResponse(streamResp.statusCode, errBody, token)
+          val err = handleErrorResponse(streamResp.statusCode, errBody)
           recordExchange(startedAt, requestText, Some(errBody), err)
           err
         } else {
@@ -353,7 +353,7 @@ class WatsonXClient(
       }
     }.toEither.left.map(_.toLLMError).flatten
 
-  private def handleErrorResponse(statusCode: Int, body: String, token: String): Result[Nothing] =
+  private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] =
     // Detect invalid project_id: WatsonX returns a specific error message
     if (body.contains("project_id") || body.contains("BXZAI0001E")) {
       Left(ValidationError("project_id", s"Invalid project_id: ${body.take(200)}"))
