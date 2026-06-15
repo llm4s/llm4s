@@ -226,6 +226,27 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           fail(s"Expected Mistral NamedProviderConfig, got error: ${err.message}")
     }
 
+    "validate and normalize a Together AI named provider section" in {
+      validate(
+        "together-main",
+        RawNamedProviderSection(
+          provider = Some("together"),
+          model = Some("meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+          baseUrl = Some("https://api.together.xyz/v1"),
+          apiKey = Some("together-key"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.provider shouldBe ProviderKind.TogetherAI
+          cfg.model.asString shouldBe "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+          cfg.apiKey.map(_.asKey) shouldBe Some("together-key")
+        case Left(err) =>
+          fail(s"Expected Together AI NamedProviderConfig, got error: ${err.message}")
+    }
+
     "fail clearly when provider field is missing" in {
       validate(
         "broken",

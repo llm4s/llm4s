@@ -161,6 +161,21 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     }
   }
 
+  test("TogetherAI provider with TogetherAIConfig returns TogetherAIClient") {
+    val cfg: ProviderConfig = TogetherAIConfig(
+      apiKey = "key",
+      model = "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      baseUrl = "https://api.together.xyz/v1",
+      contextWindow = 131072,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(ProviderKind.TogetherAI, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "TogetherAIClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
   test("OpenAI provider with non-OpenAIConfig should throw IllegalArgumentException") {
     val wrongCfg: ProviderConfig = AnthropicConfig(
       apiKey = "key",
