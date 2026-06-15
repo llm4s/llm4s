@@ -100,7 +100,7 @@ class XAIConfigSpec extends AnyFlatSpec with Matchers {
       reserveCompletion = 4096,
     )
     val str = cfg.toString
-    str should not include "xai-super-secret-key-12345"
+    (str should not).include("xai-super-secret-key-12345")
     str should include("grok-beta")
     str should include("https://api.x.ai/v1")
   }

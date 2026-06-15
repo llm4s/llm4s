@@ -169,8 +169,8 @@ object LLMConnect {
       case (ProviderKind.Gemini, cfg: GeminiConfig)       => GeminiClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.DeepSeek, cfg: DeepSeekConfig)   => DeepSeekClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.Cohere, cfg: CohereConfig)       => CohereClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Mistral, cfg: MistralConfig) => MistralClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.XAI, cfg: XAIConfig)         => XAIClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Mistral, cfg: MistralConfig)     => MistralClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.XAI, cfg: XAIConfig)             => XAIClient(cfg, metrics, exchangeLogging)
       case (prov, wrongCfg) =>
         val cfgType = wrongCfg.getClass.getSimpleName
         val msg     = s"Invalid config type $cfgType for provider $prov"

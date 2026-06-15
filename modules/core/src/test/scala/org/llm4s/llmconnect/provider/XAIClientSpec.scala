@@ -158,7 +158,7 @@ class XAIClientSpec extends AnyFlatSpec with Matchers {
       result.isLeft shouldBe true
       val err = result.swap.toOption.get
       err shouldBe a[ServiceError]
-      err.message should not include "xai-secret-123"
+      (err.message should not).include("xai-secret-123")
       err.message should include("xai API error")
     }
 
