@@ -133,6 +133,19 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  /** NVIDIA NIM — API key is optional (not required for on-premise deployments). */
+  object NvidiaNIM extends NamedProviderValidator:
+    def validate(
+      providerName: ProviderName,
+      section: RawNamedProviderSection
+    ): Result[NamedProviderConfig] =
+      validateNamedProviderConfig(
+        providerName = providerName,
+        providerKind = ProviderKind.NvidiaNIM,
+        section = section,
+        requireApiKey = false,
+      )
+
   private def validateNamedProviderConfig(
     providerName: ProviderName,
     providerKind: ProviderKind,

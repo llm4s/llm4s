@@ -215,4 +215,47 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     val res = LLMConnect.getClient(ProviderKind.Zai, wrongCfg)
     res.isLeft shouldBe true
   }
+
+  test("NvidiaNIM provider with NvidiaNIMConfig returns NvidiaNIMClient") {
+    val cfg: ProviderConfig = NvidiaNIMConfig(
+      apiKey = "nvapi-test-key",
+      model = "meta/llama-3.1-8b-instruct",
+      baseUrl = "https://example.invalid/v1",
+      contextWindow = 128000,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(ProviderKind.NvidiaNIM, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "NvidiaNIMClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
+  test("NvidiaNIM provider with on-premise config (no API key) returns NvidiaNIMClient") {
+    val cfg: ProviderConfig = NvidiaNIMConfig(
+      apiKey = "",
+      model = "meta/llama-3.1-8b-instruct",
+      baseUrl = "http://nim-server:8000/v1",
+      contextWindow = 128000,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(ProviderKind.NvidiaNIM, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "NvidiaNIMClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
+  test("NvidiaNIM provider with non-NvidiaNIMConfig returns ConfigurationError") {
+    val wrongCfg: ProviderConfig = OpenAIConfig(
+      apiKey = "key",
+      model = "gpt-4o",
+      organization = None,
+      baseUrl = "https://api.openai.com/v1",
+      contextWindow = 128000,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(ProviderKind.NvidiaNIM, wrongCfg)
+    res.isLeft shouldBe true
+  }
 }

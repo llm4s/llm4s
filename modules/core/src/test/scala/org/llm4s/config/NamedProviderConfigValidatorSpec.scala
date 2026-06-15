@@ -226,6 +226,48 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           fail(s"Expected Mistral NamedProviderConfig, got error: ${err.message}")
     }
 
+    "validate and normalize an NVIDIA NIM named provider section (cloud mode with API key)" in {
+      validate(
+        "nvidia-nim-cloud",
+        RawNamedProviderSection(
+          provider = Some("nim"),
+          model = Some("meta/llama-3.1-8b-instruct"),
+          baseUrl = Some("https://integrate.api.nvidia.com/v1"),
+          apiKey = Some("nvapi-key"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.provider shouldBe ProviderKind.NvidiaNIM
+          cfg.model.asString shouldBe "meta/llama-3.1-8b-instruct"
+          cfg.apiKey.map(_.asKey) shouldBe Some("nvapi-key")
+        case Left(err) =>
+          fail(s"Expected NvidiaNIM NamedProviderConfig, got error: ${err.message}")
+    }
+
+    "validate and normalize an NVIDIA NIM named provider section (on-premise without API key)" in {
+      validate(
+        "nvidia-nim-onprem",
+        RawNamedProviderSection(
+          provider = Some("nim"),
+          model = Some("meta/llama-3.1-8b-instruct"),
+          baseUrl = Some("http://nim-server:8000/v1"),
+          apiKey = None,
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.provider shouldBe ProviderKind.NvidiaNIM
+          cfg.model.asString shouldBe "meta/llama-3.1-8b-instruct"
+          cfg.apiKey shouldBe None
+        case Left(err) =>
+          fail(s"Expected NvidiaNIM NamedProviderConfig for on-premise, got error: ${err.message}")
+    }
+
     "fail clearly when provider field is missing" in {
       validate(
         "broken",
