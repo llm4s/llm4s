@@ -72,6 +72,7 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
       case ProviderKind.DeepSeek   => "cloud-deepseek"
       case ProviderKind.Cohere     => "cloud-cohere"
       case ProviderKind.Mistral    => "cloud-mistral"
+      case ProviderKind.Bedrock    => "cloud-bedrock"
 
     describe(ProviderKind.OpenAI) shouldBe "cloud-openai"
     describe(ProviderKind.Ollama) shouldBe "local"
@@ -80,4 +81,5 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
     describe(ProviderKind.DeepSeek) shouldBe "cloud-deepseek"
     describe(ProviderKind.Cohere) shouldBe "cloud-cohere"
     describe(ProviderKind.Mistral) shouldBe "cloud-mistral"
+    describe(ProviderKind.Bedrock) shouldBe "cloud-bedrock"
   }

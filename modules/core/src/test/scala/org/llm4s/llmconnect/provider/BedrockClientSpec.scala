@@ -10,7 +10,7 @@ import org.llm4s.error.{
 }
 import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.BedrockConfig
-import org.llm4s.llmconnect.model.{ AssistantMessage, CompletionOptions, Conversation, SystemMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, SystemMessage, UserMessage }
 import org.llm4s.model.ModelRegistryTestSupport
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
