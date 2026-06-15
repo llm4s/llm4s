@@ -11,7 +11,7 @@ import org.llm4s.llmconnect.provider.ProviderResultOps._
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.ToolRegistry
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
 import java.io.{ BufferedReader, InputStreamReader }
