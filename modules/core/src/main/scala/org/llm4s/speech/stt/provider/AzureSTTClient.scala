@@ -1,4 +1,4 @@
-// scalafix:off DisableSyntax.NoKeywordCatch
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.speech.stt.provider
 
 import org.llm4s.http.Llm4sHttpClient
