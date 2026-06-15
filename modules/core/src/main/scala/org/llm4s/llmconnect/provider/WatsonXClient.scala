@@ -253,7 +253,7 @@ class WatsonXClient(
           val errorBody = Try(new String(streamResponse.body.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8))
             .getOrElse("")
           Try(streamResponse.body.close())
-          Left(HttpErrorMapper.mapHttpError(streamResponse.statusCode, errorBody, providerName))
+          HttpErrorMapper.mapHttpError(streamResponse.statusCode, errorBody, providerName)
         }
       }.toEither.left.map(_.toLLMError).flatten
 
