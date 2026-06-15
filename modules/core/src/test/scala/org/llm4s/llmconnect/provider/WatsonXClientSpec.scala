@@ -31,8 +31,7 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
 
   private def watsonxSuccessResponse(text: String, id: String = "gen-123"): HttpResponse = HttpResponse(
     statusCode = 200,
-    body =
-      s"""|{
+    body = s"""|{
           |  "id": "$id",
           |  "model_id": "ibm/granite-13b-instruct-v2",
           |  "results": [
@@ -54,11 +53,11 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
 
   "WatsonXClient IAM token exchange" should "obtain a token and cache it" in {
     // Two responses: IAM token, then generation
-    val iamResponse  = iamSuccessResponse
-    val genResponse  = watsonxSuccessResponse("Hello from WatsonX!")
-    val iamMock      = new MockHttpClient(Seq(iamResponse))
-    val apiMock      = new MockHttpClient(Seq(genResponse))
-    val client       = WatsonXClient.forTest(testConfig, apiMock, iamMock)
+    val iamResponse = iamSuccessResponse
+    val genResponse = watsonxSuccessResponse("Hello from WatsonX!")
+    val iamMock     = new MockHttpClient(Seq(iamResponse))
+    val apiMock     = new MockHttpClient(Seq(genResponse))
+    val client      = WatsonXClient.forTest(testConfig, apiMock, iamMock)
 
     val result = client.complete(conversation, CompletionOptions())
 
@@ -154,8 +153,7 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
     val iamMock = new MockHttpClient(Seq(iamSuccessResponse))
     val genResponse = HttpResponse(
       statusCode = 200,
-      body =
-        """|{
+      body = """|{
            |  "id": "gen-empty",
            |  "results": [
            |    {
@@ -179,8 +177,7 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
     val iamMock = new MockHttpClient(Seq(iamSuccessResponse))
     val genResponse = HttpResponse(
       statusCode = 200,
-      body =
-        """|{
+      body = """|{
            |  "results": [
            |    {
            |      "generated_text": "Hello",
@@ -203,8 +200,7 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
     val iamMock = new MockHttpClient(Seq(iamSuccessResponse))
     val genResponse = HttpResponse(
       statusCode = 200,
-      body =
-        """|{
+      body = """|{
            |  "id": "gen-nousage",
            |  "results": [
            |    {
@@ -315,7 +311,7 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
     val requestBody = apiMock.lastBody.value
     requestBody should include("project_id")
     requestBody should include("test-project-id")
-    requestBody should not include "space_id"
+    (requestBody should not).include("space_id")
   }
 
   it should "include space_id in request body when spaceId is set" in {
@@ -330,7 +326,7 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
     val requestBody = apiMock.lastBody.value
     requestBody should include("space_id")
     requestBody should include("my-space-123")
-    requestBody should not include "project_id"
+    (requestBody should not).include("project_id")
   }
 
   it should "include model_id in request body" in {
@@ -568,7 +564,7 @@ class WatsonXClientSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "mark stream request body with stream=true" in {
-    val sseBody = "data: {\"results\":[{\"generated_text\":\"ok\"}]}\n\n"
+    val sseBody            = "data: {\"results\":[{\"generated_text\":\"ok\"}]}\n\n"
     val iamMock            = new MockHttpClient(Seq(iamSuccessResponse))
     var capturedStreamBody = Option.empty[String]
     val streamingResponse = StreamingHttpResponse(

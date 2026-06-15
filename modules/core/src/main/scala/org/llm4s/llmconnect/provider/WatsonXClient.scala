@@ -178,8 +178,8 @@ class WatsonXClient(
       val attempt = Try {
         val streamResponse = httpClient.postStream(url = url, headers = headers, body = requestText)
         if (streamResponse.statusCode >= 200 && streamResponse.statusCode < 300) {
-          val accumulated = new StringBuilder()
-          var lastId      = java.util.UUID.randomUUID().toString
+          val accumulated           = new StringBuilder()
+          var lastId                = java.util.UUID.randomUUID().toString
           var totalPromptTokens     = 0
           var totalCompletionTokens = 0
           val reader = new java.io.BufferedReader(
@@ -211,9 +211,7 @@ class WatsonXClient(
                         }
                       }
                       // Extract usage from streaming response if present
-                      result.obj.get("input_token_count").flatMap(_.numOpt).foreach { n =>
-                        totalPromptTokens = n.toInt
-                      }
+                      result.obj.get("input_token_count").flatMap(_.numOpt).foreach(n => totalPromptTokens = n.toInt)
                       result.obj.get("generated_token_count").flatMap(_.numOpt).foreach { n =>
                         totalCompletionTokens = n.toInt
                       }
@@ -270,7 +268,7 @@ class WatsonXClient(
     }
   }
 
-  override def getContextWindow(): Int    = config.contextWindow
+  override def getContextWindow(): Int     = config.contextWindow
   override def getReserveCompletion(): Int = config.reserveCompletion
 
   override protected def releaseResources(): Unit = ()
@@ -332,9 +330,13 @@ class WatsonXClient(
         .getOrElse("")
 
       val promptTokenCount =
-        firstResult.obj.get("input_token_count").flatMap(_.numOpt).map(_.toInt).orElse(
-          json.obj.get("input_token_count").flatMap(_.numOpt).map(_.toInt)
-        )
+        firstResult.obj
+          .get("input_token_count")
+          .flatMap(_.numOpt)
+          .map(_.toInt)
+          .orElse(
+            json.obj.get("input_token_count").flatMap(_.numOpt).map(_.toInt)
+          )
       val generatedTokenCount =
         firstResult.obj.get("generated_token_count").flatMap(_.numOpt).map(_.toInt)
 

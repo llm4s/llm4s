@@ -714,7 +714,7 @@ case class WatsonXConfig(
       s"baseUrl=$baseUrl, apiVersion=$apiVersion, contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
 
 object WatsonXConfig:
-  val DEFAULT_BASE_URL: String  = "https://us-south.ml.cloud.ibm.com"
+  val DEFAULT_BASE_URL: String    = "https://us-south.ml.cloud.ibm.com"
   val DEFAULT_API_VERSION: String = "2024-05-31"
 
   private val DefaultContextWindow     = 8192

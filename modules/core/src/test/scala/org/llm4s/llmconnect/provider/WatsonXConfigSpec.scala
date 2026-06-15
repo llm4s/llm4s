@@ -43,7 +43,7 @@ class WatsonXConfigSpec extends AnyFlatSpec with Matchers {
       reserveCompletion = 4096
     )
     val str = cfg.toString
-    str should not include "super-secret-key-12345"
+    (str should not).include("super-secret-key-12345")
     str should include("WatsonXConfig")
     str should include("proj-abc")
   }
