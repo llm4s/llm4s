@@ -58,6 +58,16 @@ object LLMConnect {
         CohereClient(cfg, metrics, exchangeLogging)
       case cfg: MistralConfig =>
         MistralClient(cfg, metrics, exchangeLogging)
+      case cfg: GroqConfig =>
+        val openAICfg = OpenAIConfig(
+          apiKey = cfg.apiKey,
+          model = cfg.model,
+          organization = None,
+          baseUrl = cfg.baseUrl,
+          contextWindow = cfg.contextWindow,
+          reserveCompletion = cfg.reserveCompletion
+        )
+        OpenAIClient(openAICfg, metrics, exchangeLogging)
     }
 
   def fromConfig(
@@ -168,6 +178,16 @@ object LLMConnect {
       case (ProviderKind.DeepSeek, cfg: DeepSeekConfig)   => DeepSeekClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.Cohere, cfg: CohereConfig)       => CohereClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.Mistral, cfg: MistralConfig)     => MistralClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Groq, cfg: GroqConfig) =>
+        val openAICfg = OpenAIConfig(
+          apiKey = cfg.apiKey,
+          model = cfg.model,
+          organization = None,
+          baseUrl = cfg.baseUrl,
+          contextWindow = cfg.contextWindow,
+          reserveCompletion = cfg.reserveCompletion
+        )
+        OpenAIClient(openAICfg, metrics, exchangeLogging)
       case (prov, wrongCfg) =>
         val cfgType = wrongCfg.getClass.getSimpleName
         val msg     = s"Invalid config type $cfgType for provider $prov"

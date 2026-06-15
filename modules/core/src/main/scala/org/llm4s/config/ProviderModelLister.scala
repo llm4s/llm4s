@@ -7,7 +7,7 @@ import org.llm4s.config.DefaultConfig
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.ProvidersConfigModel.{ BaseUrl, NamedProviderConfig, ProviderKind }
-import org.llm4s.llmconnect.config.MistralConfig
+import org.llm4s.llmconnect.config.{ GroqConfig, MistralConfig }
 
 import scala.util.Try
 
@@ -141,6 +141,17 @@ private[llm4s] object ProviderModelListers:
         provider = ProviderKind.Mistral,
         defaultBaseUrl = MistralConfig.DEFAULT_BASE_URL,
         modelsPath = "/v1/models",
+        httpClient = httpClient
+      )
+
+  object Groq extends ProviderModelLister:
+    def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
+      listOpenAICompatibleModels(
+        config = config,
+        expected = ProviderKind.Groq,
+        provider = ProviderKind.Groq,
+        defaultBaseUrl = GroqConfig.DEFAULT_BASE_URL,
+        modelsPath = "/models",
         httpClient = httpClient
       )
 

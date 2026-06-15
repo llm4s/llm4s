@@ -56,6 +56,10 @@ sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 LLM_MODEL=openai/gpt-4o              # or anthropic/claude-sonnet-4-5-latest, gemini/gemini-2.0-flash
 OPENAI_API_KEY=sk-...                # or ANTHROPIC_API_KEY, GOOGLE_API_KEY
 
+# Groq - ultra-low latency inference (up to 800 tokens/sec)
+LLM_MODEL=groq/llama-3.1-8b-instant  # or groq/llama-3.3-70b-versatile, groq/mixtral-8x7b-32768, groq/gemma2-9b-it
+GROQ_API_KEY=gsk-...                  # get from https://console.groq.com
+
 # Optional - Tracing
 TRACING_MODE=langfuse                # langfuse, opentelemetry, console, or none
 LANGFUSE_PUBLIC_KEY=pk-lf-...
