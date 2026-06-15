@@ -35,6 +35,7 @@ object ProviderModelTypes:
     case DeepSeek
     case Cohere
     case Mistral
+    case VertexAI
 
   object ProviderKind:
     val all: Seq[ProviderKind] = Seq(
@@ -47,23 +48,25 @@ object ProviderModelTypes:
       ProviderKind.Gemini,
       ProviderKind.DeepSeek,
       ProviderKind.Cohere,
-      ProviderKind.Mistral
+      ProviderKind.Mistral,
+      ProviderKind.VertexAI
     )
 
     def fromString(value: String): Option[ProviderKind] =
       value.trim.toLowerCase match
-        case "openai"     => Some(ProviderKind.OpenAI)
+        case "openai"    => Some(ProviderKind.OpenAI)
         case "openrouter" => Some(ProviderKind.OpenRouter)
-        case "azure"      => Some(ProviderKind.Azure)
-        case "anthropic"  => Some(ProviderKind.Anthropic)
-        case "ollama"     => Some(ProviderKind.Ollama)
-        case "zai"        => Some(ProviderKind.Zai)
-        case "gemini"     => Some(ProviderKind.Gemini)
-        case "google"     => Some(ProviderKind.Gemini)
-        case "deepseek"   => Some(ProviderKind.DeepSeek)
-        case "cohere"     => Some(ProviderKind.Cohere)
-        case "mistral"    => Some(ProviderKind.Mistral)
-        case _            => None
+        case "azure"     => Some(ProviderKind.Azure)
+        case "anthropic" => Some(ProviderKind.Anthropic)
+        case "ollama"    => Some(ProviderKind.Ollama)
+        case "zai"       => Some(ProviderKind.Zai)
+        case "gemini"    => Some(ProviderKind.Gemini)
+        case "google"    => Some(ProviderKind.Gemini)
+        case "deepseek"  => Some(ProviderKind.DeepSeek)
+        case "cohere"    => Some(ProviderKind.Cohere)
+        case "mistral"   => Some(ProviderKind.Mistral)
+        case "vertex" | "vertexai" | "vertex_ai" => Some(ProviderKind.VertexAI)
+        case _           => None
 
     def fromName(value: String): Option[ProviderKind] =
       fromString(value)
@@ -81,3 +84,4 @@ object ProviderModelTypes:
         case ProviderKind.DeepSeek   => "deepseek"
         case ProviderKind.Cohere     => "cohere"
         case ProviderKind.Mistral    => "mistral"
+        case ProviderKind.VertexAI   => "vertex"
