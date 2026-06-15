@@ -133,6 +133,18 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  object Perplexity extends NamedProviderValidator:
+    def validate(
+      providerName: ProviderName,
+      section: RawNamedProviderSection
+    ): Result[NamedProviderConfig] =
+      validateNamedProviderConfig(
+        providerName = providerName,
+        providerKind = ProviderKind.Perplexity,
+        section = section,
+        requireApiKey = true,
+      )
+
   private def validateNamedProviderConfig(
     providerName: ProviderName,
     providerKind: ProviderKind,

@@ -162,6 +162,14 @@ object ConfigKeys {
   val MISTRAL_API_KEY  = "MISTRAL_API_KEY"
   val MISTRAL_BASE_URL = "MISTRAL_BASE_URL"
 
+  // ---- Perplexity AI -------------------------------------------------------
+
+  /** Perplexity AI API key. Required for Sonar models (real-time web search). */
+  val PERPLEXITY_API_KEY = "PERPLEXITY_API_KEY"
+
+  /** Overrides the Perplexity AI API base URL. Defaults to `"https://api.perplexity.ai"`. */
+  val PERPLEXITY_BASE_URL = "PERPLEXITY_BASE_URL"
+
   // Tool API Keys
   // ---- Tool API keys ------------------------------------------------------
 

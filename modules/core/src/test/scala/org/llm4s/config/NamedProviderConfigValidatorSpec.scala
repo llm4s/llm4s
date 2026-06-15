@@ -339,4 +339,45 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         case Right(cfg) =>
           fail(s"Expected missing Ollama baseUrl failure, got config: $cfg")
     }
+
+    "validate and normalize a Perplexity named provider section" in {
+      validate(
+        "perplexity-main",
+        RawNamedProviderSection(
+          provider = Some("perplexity"),
+          model = Some("sonar"),
+          baseUrl = Some("https://api.perplexity.ai"),
+          apiKey = Some("pplx-test-key"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.provider shouldBe ProviderKind.Perplexity
+          cfg.model.asString shouldBe "sonar"
+          cfg.baseUrl.map(_.asUrl) shouldBe Some("https://api.perplexity.ai")
+          cfg.apiKey.map(_.asKey) shouldBe Some("pplx-test-key")
+        case Left(err) =>
+          fail(s"Expected Perplexity NamedProviderConfig, got error: ${err.message}")
+    }
+
+    "fail clearly when Perplexity apiKey is missing" in {
+      validate(
+        "perplexity-main",
+        RawNamedProviderSection(
+          provider = Some("perplexity"),
+          model = Some("sonar"),
+          baseUrl = None,
+          apiKey = None,
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+        )
+      ) match
+        case Left(err) =>
+          err.message should include("missing required field `apiKey`")
+        case Right(cfg) =>
+          fail(s"Expected missing Perplexity apiKey failure, got config: $cfg")
+    }
   }
