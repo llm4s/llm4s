@@ -677,3 +677,96 @@ object MistralConfig:
       contextWindow = cw,
       reserveCompletion = rc
     )
+
+/**
+ * Configuration for IBM WatsonX AI.
+ *
+ * WatsonX is IBM's enterprise AI platform supporting IBM Granite models,
+ * Llama, Mistral, and other open-source models via a governed, auditable API.
+ * Auth uses IBM Cloud IAM token exchange — the `apiKey` is exchanged for a
+ * short-lived bearer token before every request (tokens expire after 1 hour).
+ *
+ * Prefer [[WatsonXConfig.fromValues]] over the primary constructor; it resolves
+ * `contextWindow` and `reserveCompletion` automatically from the model name.
+ *
+ * @param apiKey        IBM Cloud API key used to obtain IAM bearer tokens; redacted in `toString`.
+ * @param projectId     WatsonX project ID — required for all inference requests.
+ * @param spaceId       Optional WatsonX space ID (alternative to project ID for deployments).
+ * @param model         Model identifier, e.g. `"ibm/granite-13b-instruct-v2"`.
+ * @param baseUrl       WatsonX ML API base URL; defaults to [[WatsonXConfig.DEFAULT_BASE_URL]].
+ * @param apiVersion    WatsonX API version string, e.g. `"2024-05-31"`.
+ * @param contextWindow Model's total token capacity (prompt + completion combined).
+ * @param reserveCompletion Tokens held back from prompt history for the completion.
+ */
+case class WatsonXConfig(
+  apiKey: String,
+  projectId: String,
+  spaceId: Option[String],
+  model: String,
+  baseUrl: String,
+  apiVersion: String,
+  contextWindow: Int,
+  reserveCompletion: Int
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.WatsonX
+  override def toString: String =
+    s"WatsonXConfig(apiKey=${Redaction.secret(apiKey)}, projectId=$projectId, spaceId=$spaceId, model=$model, " +
+      s"baseUrl=$baseUrl, apiVersion=$apiVersion, contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+
+object WatsonXConfig:
+  val DEFAULT_BASE_URL: String  = "https://us-south.ml.cloud.ibm.com"
+  val DEFAULT_API_VERSION: String = "2024-05-31"
+
+  private val DefaultContextWindow     = 8192
+  private val DefaultReserveCompletion = 4096
+
+  private def watsonxFallback(modelName: String): (Int, Int) =
+    modelName match {
+      case name if name.contains("granite-13b")   => (8192, DefaultReserveCompletion)
+      case name if name.contains("granite-20b")   => (8192, DefaultReserveCompletion)
+      case name if name.contains("llama-3")       => (8192, DefaultReserveCompletion)
+      case name if name.contains("llama-2")       => (4096, DefaultReserveCompletion)
+      case name if name.contains("mistral-large") => (32768, DefaultReserveCompletion)
+      case _                                      => (8192, DefaultReserveCompletion)
+    }
+
+  /**
+   * Constructs a [[WatsonXConfig]], resolving `contextWindow` and
+   * `reserveCompletion` from the model name automatically.
+   *
+   * @param modelName  Model identifier, e.g. `"ibm/granite-13b-instruct-v2"`.
+   * @param apiKey     IBM Cloud API key; must be non-empty.
+   * @param projectId  WatsonX project ID; must be non-empty.
+   * @param spaceId    Optional WatsonX space ID.
+   * @param baseUrl    API base URL; must be non-empty. Defaults to [[DEFAULT_BASE_URL]]
+   *                   when loaded via [[org.llm4s.config.Llm4sConfig]].
+   * @param apiVersion WatsonX API version string.
+   */
+  def fromValues(
+    modelName: String,
+    apiKey: String,
+    projectId: String,
+    spaceId: Option[String] = None,
+    baseUrl: String = DEFAULT_BASE_URL,
+    apiVersion: String = DEFAULT_API_VERSION
+  )(using resolver: ContextWindowResolver): WatsonXConfig =
+    require(apiKey.trim.nonEmpty, "WatsonX apiKey must be non-empty")
+    require(projectId.trim.nonEmpty, "WatsonX projectId must be non-empty")
+    require(baseUrl.trim.nonEmpty, "WatsonX baseUrl must be non-empty")
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("watsonx"),
+      modelName = modelName,
+      defaultContextWindow = DefaultContextWindow,
+      defaultReserve = DefaultReserveCompletion,
+      fallbackResolver = watsonxFallback
+    )
+    WatsonXConfig(
+      apiKey = apiKey,
+      projectId = projectId,
+      spaceId = spaceId,
+      model = modelName,
+      baseUrl = baseUrl,
+      apiVersion = apiVersion,
+      contextWindow = cw,
+      reserveCompletion = rc
+    )

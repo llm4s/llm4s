@@ -35,6 +35,7 @@ object ProviderModelTypes:
     case DeepSeek
     case Cohere
     case Mistral
+    case WatsonX
 
   object ProviderKind:
     val all: Seq[ProviderKind] = Seq(
@@ -47,7 +48,8 @@ object ProviderModelTypes:
       ProviderKind.Gemini,
       ProviderKind.DeepSeek,
       ProviderKind.Cohere,
-      ProviderKind.Mistral
+      ProviderKind.Mistral,
+      ProviderKind.WatsonX
     )
 
     def fromString(value: String): Option[ProviderKind] =
@@ -63,6 +65,7 @@ object ProviderModelTypes:
         case "deepseek"   => Some(ProviderKind.DeepSeek)
         case "cohere"     => Some(ProviderKind.Cohere)
         case "mistral"    => Some(ProviderKind.Mistral)
+        case "watsonx"    => Some(ProviderKind.WatsonX)
         case _            => None
 
     def fromName(value: String): Option[ProviderKind] =
@@ -81,3 +84,4 @@ object ProviderModelTypes:
         case ProviderKind.DeepSeek   => "deepseek"
         case ProviderKind.Cohere     => "cohere"
         case ProviderKind.Mistral    => "mistral"
+        case ProviderKind.WatsonX    => "watsonx"
