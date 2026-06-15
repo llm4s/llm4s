@@ -101,7 +101,8 @@ class VertexAIClientSpec extends AnyFlatSpec with Matchers {
        |}""".stripMargin
 
   private def ok(body: String): HttpResponse = HttpResponse(200, body, Map.empty)
-  private def err(status: Int): HttpResponse = HttpResponse(status, s"""{"error":{"message":"Error $status"}}""", Map.empty)
+  private def err(status: Int): HttpResponse =
+    HttpResponse(status, s"""{"error":{"message":"Error $status"}}""", Map.empty)
 
   // -----------------------------------------------------------------------
   // complete() — Gemini-on-Vertex response format
@@ -471,7 +472,7 @@ class VertexAIClientSpec extends AnyFlatSpec with Matchers {
 
   "VertexAIConfig" should "redact the access token in toString" in {
     val config = geminiConfig(token = "super-secret-token")
-    config.toString should not include "super-secret-token"
+    (config.toString should not).include("super-secret-token")
     config.toString should include("project=my-project")
     config.toString should include("location=us-central1")
   }

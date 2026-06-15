@@ -109,43 +109,44 @@ class VertexAIClient(
     val startedAt = Instant.now()
     if (config.accessToken.trim.isEmpty) {
       Left(ConfigurationError("VertexAI accessToken is required but was empty"))
-    } else TransformationResult
-      .transform(
-        config.model,
-        options,
-        conversation.messages,
-        dropUnsupported = true,
-        org.llm4s.model.RequestTransformer.default(registryService),
-      )
-      .flatMap { transformed =>
-        val transformedConversation = conversation.copy(messages = transformed.messages)
-        val requestBody =
-          if (isClaudeModel) buildClaudeRequestBody(transformedConversation, transformed.options)
-          else buildGeminiRequestBody(transformedConversation, transformed.options)
-        val requestText = requestBody.render()
-        val url         = endpointUrl
+    } else
+      TransformationResult
+        .transform(
+          config.model,
+          options,
+          conversation.messages,
+          dropUnsupported = true,
+          org.llm4s.model.RequestTransformer.default(registryService),
+        )
+        .flatMap { transformed =>
+          val transformedConversation = conversation.copy(messages = transformed.messages)
+          val requestBody =
+            if (isClaudeModel) buildClaudeRequestBody(transformedConversation, transformed.options)
+            else buildGeminiRequestBody(transformedConversation, transformed.options)
+          val requestText = requestBody.render()
+          val url         = endpointUrl
 
-        logger.debug(s"[VertexAI] Sending request to $url")
+          logger.debug(s"[VertexAI] Sending request to $url")
 
-        val attempt = Try {
-          val response = httpClient.post(url, authHeaders, requestText, timeout = 120000)
-          if (response.statusCode >= 200 && response.statusCode < 300) {
-            val completionResult =
-              if (isClaudeModel) parseClaudeCompletionResponse(response.body)
-              else parseGeminiCompletionResponse(response.body)
-            recordExchange(startedAt, requestText, Some(response.body), completionResult)
-            completionResult
-          } else {
-            val errorResult = handleErrorResponse(response.statusCode, response.body)
-            recordExchange(startedAt, requestText, Some(response.body), errorResult)
-            errorResult
-          }
-        }.toEither.left
-          .map(e => e.toLLMError)
-          .flatten
+          val attempt = Try {
+            val response = httpClient.post(url, authHeaders, requestText, timeout = 120000)
+            if (response.statusCode >= 200 && response.statusCode < 300) {
+              val completionResult =
+                if (isClaudeModel) parseClaudeCompletionResponse(response.body)
+                else parseGeminiCompletionResponse(response.body)
+              recordExchange(startedAt, requestText, Some(response.body), completionResult)
+              completionResult
+            } else {
+              val errorResult = handleErrorResponse(response.statusCode, response.body)
+              recordExchange(startedAt, requestText, Some(response.body), errorResult)
+              errorResult
+            }
+          }.toEither.left
+            .map(e => e.toLLMError)
+            .flatten
 
-        attempt
-      }
+          attempt
+        }
   }
 
   override def streamComplete(
@@ -252,8 +253,8 @@ class VertexAIClient(
     conversation: Conversation,
     options: CompletionOptions,
   ): ujson.Value = {
-    val contents    = scala.collection.mutable.ArrayBuffer[ujson.Value]()
-    var systemInstr = Option.empty[String]
+    val contents         = scala.collection.mutable.ArrayBuffer[ujson.Value]()
+    var systemInstr      = Option.empty[String]
     val toolCallIdToName = scala.collection.mutable.Map[String, String]()
 
     conversation.messages.foreach {
@@ -358,9 +359,7 @@ class VertexAIClient(
       case UserMessage(content) =>
         messages += ujson.Obj("role" -> "user", "content" -> content)
       case AssistantMessage(contentOpt, _) =>
-        contentOpt.foreach { c =>
-          messages += ujson.Obj("role" -> "assistant", "content" -> c)
-        }
+        contentOpt.foreach(c => messages += ujson.Obj("role" -> "assistant", "content" -> c))
       case ToolMessage(content, toolCallId) =>
         messages += ujson.Obj(
           "role"    -> "user",
@@ -477,7 +476,7 @@ class VertexAIClient(
         .mkString
 
       val usageOpt = Try {
-        val usage = json("usage")
+        val usage  = json("usage")
         val input  = usage("input_tokens").num.toInt
         val output = usage("output_tokens").num.toInt
         TokenUsage(promptTokens = input, completionTokens = output, totalTokens = input + output)
