@@ -139,8 +139,8 @@ class BedrockClientSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "pass system message to Bedrock system field" in {
-    val mock = new MockHttpClient(HttpResponse(200, successResponse))
-    val client = BedrockClient.forTest(testConfig, mock)
+    val mock           = new MockHttpClient(HttpResponse(200, successResponse))
+    val client         = BedrockClient.forTest(testConfig, mock)
     val convWithSystem = Conversation(Seq(SystemMessage("You are helpful."), UserMessage("Hello")))
 
     val result = client.complete(convWithSystem, CompletionOptions())
@@ -181,9 +181,7 @@ class BedrockClientSpec extends AnyFlatSpec with Matchers {
 
     val result = client.complete(conversation, CompletionOptions(maxTokens = Some(512)))
     result.isRight shouldBe true
-    mock.lastBody.foreach { body =>
-      body should include("maxTokens")
-    }
+    mock.lastBody.foreach(body => body should include("maxTokens"))
   }
 
   // ===========================================================================
@@ -191,8 +189,8 @@ class BedrockClientSpec extends AnyFlatSpec with Matchers {
   // ===========================================================================
 
   it should "return ValidationError for empty conversation" in {
-    val mock   = new MockHttpClient(HttpResponse(200, successResponse))
-    val client = BedrockClient.forTest(testConfig, mock)
+    val mock              = new MockHttpClient(HttpResponse(200, successResponse))
+    val client            = BedrockClient.forTest(testConfig, mock)
     val emptyConversation = Conversation(Seq.empty)
 
     val result = client.complete(emptyConversation, CompletionOptions())
@@ -228,8 +226,8 @@ class BedrockClientSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return ValidationError for conversation with only system message" in {
-    val mock   = new MockHttpClient(HttpResponse(200, successResponse))
-    val client = BedrockClient.forTest(testConfig, mock)
+    val mock                   = new MockHttpClient(HttpResponse(200, successResponse))
+    val client                 = BedrockClient.forTest(testConfig, mock)
     val systemOnlyConversation = Conversation(Seq(SystemMessage("Only system")))
 
     val result = client.complete(systemOnlyConversation, CompletionOptions())

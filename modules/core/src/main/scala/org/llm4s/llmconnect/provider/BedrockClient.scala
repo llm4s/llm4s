@@ -125,9 +125,7 @@ class BedrockClient private[provider] (
           "messages" -> ujson.Arr(messages: _*)
         )
 
-        systemOpt.foreach { systemText =>
-          req("system") = ujson.Arr(ujson.Obj("text" -> systemText))
-        }
+        systemOpt.foreach(systemText => req("system") = ujson.Arr(ujson.Obj("text" -> systemText)))
 
         val inferenceConfig = ujson.Obj(
           "temperature" -> options.temperature
@@ -285,9 +283,7 @@ class BedrockClient private[provider] (
                   }
               }
               json.obj.get("metadata").foreach { meta =>
-                meta.obj.get("requestId").flatMap(_.strOpt).foreach { rid =>
-                  streamId = rid
-                }
+                meta.obj.get("requestId").flatMap(_.strOpt).foreach(rid => streamId = rid)
               }
             }
           }
