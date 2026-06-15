@@ -15,13 +15,11 @@ import scala.util.Try
  * Transcribes audio via `POST /speech/recognition/conversation/cognitiveservices/v1`.
  *
  * @param subscriptionKey Azure Speech subscription key
- * @param region          Azure region, e.g. "eastus"
  * @param baseUrl         Override endpoint URL (for testing or sovereign clouds)
  * @param http            HTTP client (injected for testing)
  */
 final class AzureSTTClient private (
   subscriptionKey: String,
-  region: String,
   baseUrl: String,
   http: Llm4sHttpClient
 ) extends SpeechToText {
@@ -90,13 +88,12 @@ object AzureSTTClient {
     subscriptionKey: String,
     region: String
   ): AzureSTTClient =
-    new AzureSTTClient(subscriptionKey, region, sttUrl(region), Llm4sHttpClient.create())
+    new AzureSTTClient(subscriptionKey, sttUrl(region), Llm4sHttpClient.create())
 
   private[speech] def forTest(
     subscriptionKey: String,
-    region: String,
     http: Llm4sHttpClient,
     baseUrl: String = "https://eastus.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1"
   ): AzureSTTClient =
-    new AzureSTTClient(subscriptionKey, region, baseUrl, http)
+    new AzureSTTClient(subscriptionKey, baseUrl, http)
 }

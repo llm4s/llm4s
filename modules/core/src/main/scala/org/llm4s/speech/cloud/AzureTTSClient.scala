@@ -14,14 +14,12 @@ import scala.util.Try
  * Synthesizes audio via SSML POST to the Azure TTS endpoint.
  *
  * @param subscriptionKey Azure Speech subscription key
- * @param region          Azure region, e.g. "eastus"
  * @param voiceName       SSML voice name, e.g. "en-US-JennyNeural"
  * @param baseUrl         Override endpoint URL (for testing or sovereign clouds)
  * @param http            HTTP client (injected for testing)
  */
 final class AzureTTSClient private (
   subscriptionKey: String,
-  region: String,
   voiceName: String,
   baseUrl: String,
   http: Llm4sHttpClient
@@ -74,14 +72,13 @@ object AzureTTSClient {
     region: String,
     voiceName: String = DEFAULT_VOICE_NAME
   ): AzureTTSClient =
-    new AzureTTSClient(subscriptionKey, region, voiceName, ttsUrl(region), Llm4sHttpClient.create())
+    new AzureTTSClient(subscriptionKey, voiceName, ttsUrl(region), Llm4sHttpClient.create())
 
   private[speech] def forTest(
     subscriptionKey: String,
-    region: String,
     http: Llm4sHttpClient,
     voiceName: String = DEFAULT_VOICE_NAME,
     baseUrl: String = "https://eastus.tts.speech.microsoft.com/cognitiveservices/v1"
   ): AzureTTSClient =
-    new AzureTTSClient(subscriptionKey, region, voiceName, baseUrl, http)
+    new AzureTTSClient(subscriptionKey, voiceName, baseUrl, http)
 }

@@ -178,7 +178,7 @@ class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers {
 
   "AzureTTSClient.synthesize" should "return non-empty Array[Byte] for a 200 OK response" in {
     val mock   = new MockHttpClient(HttpResponse(200, fakeAudioBytes))
-    val client = AzureTTSClient.forTest("test-sub-key", "eastus", mock)
+    val client = AzureTTSClient.forTest("test-sub-key", mock)
 
     val result = client.synthesize("hello", TTSOptions())
 
@@ -188,7 +188,7 @@ class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "include SSML with the text in the request body" in {
     val mock   = new MockHttpClient(HttpResponse(200, fakeAudioBytes))
-    val client = AzureTTSClient.forTest("test-sub-key", "eastus", mock)
+    val client = AzureTTSClient.forTest("test-sub-key", mock)
 
     client.synthesize("hello world", TTSOptions())
 
@@ -197,7 +197,7 @@ class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "set Ocp-Apim-Subscription-Key header" in {
     val mock   = new MockHttpClient(HttpResponse(200, fakeAudioBytes))
-    val client = AzureTTSClient.forTest("my-sub-key-123", "eastus", mock)
+    val client = AzureTTSClient.forTest("my-sub-key-123", mock)
 
     client.synthesize("hello", TTSOptions())
 
@@ -206,7 +206,7 @@ class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "use a custom voice when provided in TTSOptions" in {
     val mock   = new MockHttpClient(HttpResponse(200, fakeAudioBytes))
-    val client = AzureTTSClient.forTest("test-key", "eastus", mock)
+    val client = AzureTTSClient.forTest("test-key", mock)
 
     client.synthesize("hi", TTSOptions(voice = Some("en-US-GuyNeural")))
 
@@ -215,7 +215,7 @@ class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "map HTTP 401 to AuthenticationError" in {
     val mock401 = new MockHttpClient(HttpResponse(401, "Unauthorized"))
-    val client  = AzureTTSClient.forTest("bad-key", "eastus", mock401)
+    val client  = AzureTTSClient.forTest("bad-key", mock401)
 
     val result = client.synthesize("hello", TTSOptions())
 
@@ -225,7 +225,7 @@ class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "map HTTP 429 to RateLimitError" in {
     val mock429 = new MockHttpClient(HttpResponse(429, "Too Many Requests"))
-    val client  = AzureTTSClient.forTest("test-key", "eastus", mock429)
+    val client  = AzureTTSClient.forTest("test-key", mock429)
 
     val result = client.synthesize("hello", TTSOptions())
 
@@ -235,7 +235,7 @@ class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "map network exception to NetworkError" in {
     val failing = new FailingHttpClient(new java.io.IOException("timeout"))
-    val client  = AzureTTSClient.forTest("test-key", "eastus", failing)
+    val client  = AzureTTSClient.forTest("test-key", failing)
 
     val result = client.synthesize("hello", TTSOptions())
 
@@ -332,7 +332,7 @@ class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers {
   "AzureSTTClient.transcribe" should "return non-empty String for a 200 OK response" in {
     val azureResponse = """{"DisplayText": "hello world", "RecognitionStatus": "Success"}"""
     val mock          = new MockHttpClient(HttpResponse(200, azureResponse))
-    val client        = AzureSTTClient.forTest("test-sub-key", "eastus", mock)
+    val client        = AzureSTTClient.forTest("test-sub-key", mock)
     val input         = AudioInput.BytesAudio(Array[Byte](0x52, 0x49, 0x46, 0x46), 16000)
 
     val result = client.transcribe(input, STTOptions())
@@ -345,7 +345,7 @@ class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers {
   it should "set Ocp-Apim-Subscription-Key header" in {
     val azureResponse = """{"DisplayText": "test", "RecognitionStatus": "Success"}"""
     val mock          = new MockHttpClient(HttpResponse(200, azureResponse))
-    val client        = AzureSTTClient.forTest("my-sub-key-456", "eastus", mock)
+    val client        = AzureSTTClient.forTest("my-sub-key-456", mock)
     val input         = AudioInput.BytesAudio(Array[Byte](0, 1, 2, 3), 16000)
 
     client.transcribe(input, STTOptions())
@@ -355,7 +355,7 @@ class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "map HTTP 401 to AuthenticationError" in {
     val mock401 = new MockHttpClient(HttpResponse(401, "Authentication failed"))
-    val client  = AzureSTTClient.forTest("bad-key", "eastus", mock401)
+    val client  = AzureSTTClient.forTest("bad-key", mock401)
     val input   = AudioInput.BytesAudio(Array[Byte](0, 1, 2, 3), 16000)
 
     val result = client.transcribe(input, STTOptions())
@@ -366,7 +366,7 @@ class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "map HTTP 429 to RateLimitError" in {
     val mock429 = new MockHttpClient(HttpResponse(429, "Rate limit exceeded"))
-    val client  = AzureSTTClient.forTest("test-key", "eastus", mock429)
+    val client  = AzureSTTClient.forTest("test-key", mock429)
     val input   = AudioInput.BytesAudio(Array[Byte](0, 1, 2, 3), 16000)
 
     val result = client.transcribe(input, STTOptions())
@@ -377,7 +377,7 @@ class CloudSpeechProviderIntegrationSpec extends AnyFlatSpec with Matchers {
 
   it should "map network exception to NetworkError" in {
     val failing = new FailingHttpClient(new java.io.IOException("timeout"))
-    val client  = AzureSTTClient.forTest("test-key", "eastus", failing)
+    val client  = AzureSTTClient.forTest("test-key", failing)
     val input   = AudioInput.BytesAudio(Array[Byte](0, 1, 2, 3), 16000)
 
     val result = client.transcribe(input, STTOptions())
