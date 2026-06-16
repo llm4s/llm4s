@@ -7,7 +7,8 @@ import org.llm4s.llmconnect.provider.{
   EmbeddingProvider,
   OllamaEmbeddingProvider,
   OpenAIEmbeddingProvider,
-  VoyageAIEmbeddingProvider
+  VoyageAIEmbeddingProvider,
+  CohereEmbeddingProvider
 }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.trace.Tracing
@@ -134,6 +135,7 @@ object EmbeddingClient {
       case "openai" => Right(new EmbeddingClient(OpenAIEmbeddingProvider.fromConfig(cfg)))
       case "voyage" => Right(new EmbeddingClient(VoyageAIEmbeddingProvider.fromConfig(cfg)))
       case "ollama" => Right(new EmbeddingClient(OllamaEmbeddingProvider.fromConfig(cfg)))
+      case "cohere" => Right(new EmbeddingClient(CohereEmbeddingProvider.fromConfig(cfg)))
       case other =>
         Left(
           EmbeddingError(
