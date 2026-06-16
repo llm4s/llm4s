@@ -129,6 +129,8 @@ lazy val commonSettings = Seq(
 lazy val llm4s = (project in file("."))
   .aggregate(
     core,
+    javaApi,
+    springBootStarter,
     samples,
     workspaceShared,
     workspaceRunner,
@@ -312,5 +314,32 @@ lazy val it = (project in file("modules/it"))
     Test / fork := true,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
+    )
+  )
+
+lazy val javaApi = (project in file("modules/java-api"))
+  .dependsOn(core)
+  .settings(
+    name           := "java-api",
+    commonSettings,
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    )
+  )
+
+lazy val springBootStarter = (project in file("modules/spring-boot-starter"))
+  .dependsOn(javaApi)
+  .settings(
+    name           := "spring-boot-starter",
+    commonSettings,
+    coverageMinimumStmtTotal := 80,
+    coverageFailOnMinimum    := true,
+    libraryDependencies ++= Seq(
+      Deps.springBootAutoConfigure,
+      Deps.springBootActuator % Provided,
+      Deps.scalatest              % Test,
+      Deps.springBootStarterTest  % Test,
+      Deps.springBootTestAutoConfigure % Test,
+      Deps.springBootActuator     % Test
     )
   )
