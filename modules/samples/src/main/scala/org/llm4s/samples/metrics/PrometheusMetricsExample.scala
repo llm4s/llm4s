@@ -132,15 +132,16 @@ object PrometheusMetricsExample {
 
             case Right(config) =>
               val providerName = config match {
-                case _: org.llm4s.llmconnect.config.OpenAIConfig    => "openai"
-                case _: org.llm4s.llmconnect.config.AnthropicConfig => "anthropic"
-                case _: org.llm4s.llmconnect.config.OllamaConfig    => "ollama"
-                case _: org.llm4s.llmconnect.config.AzureConfig     => "azure"
-                case _: org.llm4s.llmconnect.config.ZaiConfig       => "zai"
-                case _: org.llm4s.llmconnect.config.GeminiConfig    => "gemini"
-                case _: org.llm4s.llmconnect.config.DeepSeekConfig  => "deepseek"
-                case _: org.llm4s.llmconnect.config.CohereConfig    => "cohere"
-                case _: org.llm4s.llmconnect.config.MistralConfig   => "mistral"
+                case _: org.llm4s.llmconnect.config.OpenAIConfig            => "openai"
+                case _: org.llm4s.llmconnect.config.AnthropicConfig         => "anthropic"
+                case _: org.llm4s.llmconnect.config.OllamaConfig            => "ollama"
+                case _: org.llm4s.llmconnect.config.AzureConfig             => "azure"
+                case _: org.llm4s.llmconnect.config.ZaiConfig               => "zai"
+                case _: org.llm4s.llmconnect.config.GeminiConfig            => "gemini"
+                case _: org.llm4s.llmconnect.config.DeepSeekConfig          => "deepseek"
+                case _: org.llm4s.llmconnect.config.CohereConfig            => "cohere"
+                case _: org.llm4s.llmconnect.config.MistralConfig           => "mistral"
+                case _: org.llm4s.llmconnect.config.BedrockAnthropicConfig  => "bedrock-anthropic"
               }
 
               println(s"Using model: ${config.model}")

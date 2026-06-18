@@ -69,7 +69,8 @@ object Deps {
 
 
   val azureOpenAI = "com.azure"     % "azure-ai-openai" % Versions.azureOpenAI
-  val anthropic   = "com.anthropic" % "anthropic-java"  % Versions.anthropic
+  val anthropic        = "com.anthropic" % "anthropic-java"         % Versions.anthropic
+  val anthropicBedrock = "com.anthropic" % "anthropic-java-bedrock" % Versions.anthropic
   val jtokkit     = "com.knuddels"  % "jtokkit"         % Versions.jtokkit
   val websocket   = "org.java-websocket" % "Java-WebSocket" % Versions.websocket
   val ujson       = "com.lihaoyi"  %% "ujson"           % Versions.ujson

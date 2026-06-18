@@ -677,3 +677,59 @@ object MistralConfig:
       contextWindow = cw,
       reserveCompletion = rc
     )
+
+/**
+ * Configuration for Anthropic Claude models accessed via AWS Bedrock.
+ *
+ * Authentication uses the AWS Default Credential Provider Chain (environment
+ * variables, `~/.aws/credentials`, IAM roles, etc.) — no explicit API key is
+ * required. Prefer [[BedrockAnthropicConfig.fromValues]] over the primary
+ * constructor; it resolves `contextWindow` and `reserveCompletion` from the
+ * model name automatically.
+ *
+ * @param region           AWS region hosting the Bedrock endpoint, e.g. `"us-east-1"`.
+ * @param model            Bedrock model identifier, e.g. `"anthropic.claude-3-5-sonnet-20241022-v2:0"`.
+ * @param contextWindow    Model's total token capacity (prompt + completion combined).
+ * @param reserveCompletion Tokens held back from prompt history for the completion.
+ */
+case class BedrockAnthropicConfig(
+  region: String,
+  model: String,
+  contextWindow: Int,
+  reserveCompletion: Int,
+  profile: Option[String] = None
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.BedrockAnthropic
+  override def toString: String =
+    s"BedrockAnthropicConfig(region=$region, model=$model, profile=${profile.getOrElse("default-chain")}, " +
+      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+
+object BedrockAnthropicConfig:
+  private val standardReserve = 4096
+
+  private def bedrockAnthropicFallback(modelName: String): (Int, Int) =
+    modelName match
+      case name if name.contains("claude-3")       => (200000, standardReserve)
+      case name if name.contains("claude-instant") => (100000, standardReserve)
+      case _                                       => (200000, standardReserve)
+
+  def fromValues(
+    modelName: String,
+    region: String,
+    profile: Option[String] = None
+  )(using resolver: ContextWindowResolver): BedrockAnthropicConfig =
+    require(region.trim.nonEmpty, "Bedrock Anthropic region must be non-empty")
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("bedrock", "anthropic"),
+      modelName = modelName,
+      defaultContextWindow = 200000,
+      defaultReserve = standardReserve,
+      fallbackResolver = bedrockAnthropicFallback
+    )
+    BedrockAnthropicConfig(
+      region = region,
+      model = modelName,
+      contextWindow = cw,
+      reserveCompletion = rc,
+      profile = profile
+    )
