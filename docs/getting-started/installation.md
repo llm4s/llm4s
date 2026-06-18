@@ -67,6 +67,52 @@ ThisBuild / scalaVersion := "3.7.1"
 
 ```
 
+### Gradle (Kotlin DSL)
+
+Gradle does **not** resolve Scala cross-version suffixes automatically — you must append `_3` (Scala 3) or `_2.13` explicitly:
+
+```kotlin
+// build.gradle.kts
+repositories { mavenCentral() }
+
+dependencies {
+    implementation("org.llm4s:core_3:0.1.16")
+}
+
+// Pin Scala library to avoid binary-incompatibility from transitive deps
+configurations.all {
+    resolutionStrategy.eachDependency {
+        if (requested.group == "org.scala-lang") {
+            useVersion("3.7.1")
+        }
+    }
+}
+```
+
+### Gradle (Groovy DSL)
+
+```groovy
+// build.gradle
+repositories { mavenCentral() }
+
+dependencies {
+    implementation 'org.llm4s:core_3:0.1.16'
+}
+
+configurations.all {
+    resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == 'org.scala-lang') {
+            details.useVersion '3.7.1'
+        }
+    }
+}
+```
+
+> **Using Spring Boot, Ktor, or encountering dependency conflicts?**
+> See the full [Gradle integration guide](gradle) for dependency exclusion recipes
+> and the [dependency conflicts reference](/reference/dependency-conflicts).
+
+
 ### Multi-Module Project
 
 If you have a multi-module project:

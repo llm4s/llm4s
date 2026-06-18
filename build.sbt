@@ -135,7 +135,8 @@ lazy val llm4s = (project in file("."))
     workspaceClient,
     workspaceSamples,
     traceOpentelemetry,
-    knowledgegraphNeo4j
+    knowledgegraphNeo4j,
+    gradleDemo
   )
   .settings(
     publish / skip := true
@@ -313,4 +314,17 @@ lazy val it = (project in file("modules/it"))
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
     )
+  )
+
+lazy val gradleDemo = (project in file("modules/gradle-demo"))
+  .dependsOn(core)
+  .settings(
+    name           := "gradle-demo",
+    commonSettings,
+    publish / skip := true,
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    ),
+    coverageMinimumStmtTotal := 100,
+    coverageFailOnMinimum    := true
   )
