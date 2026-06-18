@@ -104,3 +104,7 @@ private[config] object NamedProviderLoader:
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(MistralConfig.DEFAULT_BASE_URL)
           MistralConfig.fromValues(section.model.asString, apiKey, baseUrl)
+      case ProviderKind.Fireworks =>
+        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
+          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(FireworksConfig.DEFAULT_BASE_URL)
+          FireworksConfig.fromValues(section.model.asString, apiKey, baseUrl)
