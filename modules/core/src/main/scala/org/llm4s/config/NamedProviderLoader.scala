@@ -104,3 +104,11 @@ private[config] object NamedProviderLoader:
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(MistralConfig.DEFAULT_BASE_URL)
           MistralConfig.fromValues(section.model.asString, apiKey, baseUrl)
+      case ProviderKind.WatsonX =>
+        for
+          apiKey    <- requiredApiKey("llm4s.providers.<name>.apiKey")
+          projectId <- required("project ID", section.endpoint, "llm4s.providers.<name>.endpoint")
+        yield
+          val baseUrl    = section.baseUrl.map(_.asUrl).getOrElse(WatsonXConfig.DEFAULT_BASE_URL)
+          val apiVersion = section.apiVersion.getOrElse(WatsonXConfig.DEFAULT_API_VERSION)
+          WatsonXConfig.fromValues(section.model.asString, apiKey, projectId, None, baseUrl, apiVersion)

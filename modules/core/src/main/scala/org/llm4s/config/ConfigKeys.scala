@@ -162,6 +162,17 @@ object ConfigKeys {
   val MISTRAL_API_KEY  = "MISTRAL_API_KEY"
   val MISTRAL_BASE_URL = "MISTRAL_BASE_URL"
 
+  // ---- IBM WatsonX --------------------------------------------------------
+
+  /** IBM Cloud API key used to obtain an IAM bearer token for WatsonX. */
+  val WATSONX_API_KEY = "WATSONX_API_KEY"
+
+  /** WatsonX project ID (or space ID when using deployments). */
+  val IBM_CLOUD_PROJECT_ID = "IBM_CLOUD_PROJECT_ID"
+
+  /** Overrides the WatsonX ML API base URL. Defaults to `"https://us-south.ml.cloud.ibm.com"`. */
+  val WATSONX_BASE_URL = "WATSONX_BASE_URL"
+
   // Tool API Keys
   // ---- Tool API keys ------------------------------------------------------
 

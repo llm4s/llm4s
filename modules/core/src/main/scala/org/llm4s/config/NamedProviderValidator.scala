@@ -133,6 +133,19 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  object WatsonX extends NamedProviderValidator:
+    def validate(
+      providerName: ProviderName,
+      section: RawNamedProviderSection
+    ): Result[NamedProviderConfig] =
+      validateNamedProviderConfig(
+        providerName = providerName,
+        providerKind = ProviderKind.WatsonX,
+        section = section,
+        requireApiKey = true,
+        requireEndpoint = true,
+      )
+
   private def validateNamedProviderConfig(
     providerName: ProviderName,
     providerKind: ProviderKind,
