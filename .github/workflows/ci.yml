@@ -142,11 +142,52 @@ jobs:
             **/target/scala-3.7.1/test-reports/
           retention-days: 5
 
+  # Kotlin coroutine API — separate Gradle build, depends on java-api published to local Maven
+  kotlin-api:
+    name: Kotlin API
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Publish core and java-api to local Maven
+        # Pin to 0.1.0-SNAPSHOT so the Gradle build.gradle.kts can reference a
+        # stable coordinate without chasing dynver-generated snapshot versions.
+        run: sbt 'set ThisBuild / version := "0.1.0-SNAPSHOT"' "core/publishM2" "javaApi/publishM2"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build and test Kotlin API with coverage check
+        working-directory: modules/kotlin-api
+        run: gradle check
+
+      - name: Upload Kotlin coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kotlin-coverage-report
+          path: modules/kotlin-api/build/reports/jacoco/
+          retention-days: 14
+
   # All tests must pass
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, coverage]
+    needs: [test, coverage, kotlin-api]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -160,6 +201,10 @@ jobs:
           fi
           if [[ "${{ needs.coverage.result }}" != "success" ]]; then
             echo "Coverage job failed"
+            exit 1
+          fi
+          if [[ "${{ needs.kotlin-api.result }}" != "success" ]]; then
+            echo "Kotlin API tests failed"
             exit 1
           fi
           echo "All tests passed!"
