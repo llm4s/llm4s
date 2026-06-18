@@ -42,3 +42,7 @@ private[llm4s] object ProviderCapabilities:
   object Mistral extends ProviderCapabilities:
     val validator: NamedProviderValidator                 = NamedProviderValidators.Mistral
     override val modelLister: Option[ProviderModelLister] = Some(ProviderModelListers.Mistral)
+
+  object NvidiaNIM extends ProviderCapabilities:
+    val validator: NamedProviderValidator                 = NamedProviderValidators.NvidiaNIM
+    override val modelLister: Option[ProviderModelLister] = Some(ProviderModelListers.NvidiaNIM)

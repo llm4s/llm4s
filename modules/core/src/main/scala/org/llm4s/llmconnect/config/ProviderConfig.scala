@@ -635,6 +635,94 @@ object CohereConfig {
   }
 }
 
+/**
+ * Configuration for NVIDIA NIM (NVIDIA Inference Microservices).
+ *
+ * NVIDIA NIM provides optimised GPU inference for Llama, Mistral, Nemotron and many other
+ * models. It exposes a fully OpenAI-compatible REST API. Two deployment modes are supported:
+ *
+ *  - '''Cloud (hosted)''': Connect to NVIDIA's hosted API at `integrate.api.nvidia.com` using
+ *    an `NVIDIA_API_KEY`. This is the default when `baseUrl` is not overridden.
+ *  - '''On-premise''': Point `baseUrl` at a local NIM container (e.g. `http://nim-server:8000/v1`).
+ *    On-premise NIM containers do not require authentication by default, so `apiKey` may be
+ *    empty (use `""` or an empty string in that case).
+ *
+ * Prefer [[NvidiaNIMConfig.fromValues]] over the primary constructor; it resolves `contextWindow`
+ * and `reserveCompletion` automatically.
+ *
+ * @param apiKey         NVIDIA API key; redacted in `toString`. May be empty for on-premise deployments.
+ * @param model          Model identifier, e.g. `"meta/llama-3.1-8b-instruct"`.
+ * @param baseUrl        API base URL. Defaults to [[NvidiaNIMConfig.DEFAULT_BASE_URL]] (NVIDIA cloud).
+ *                       Override with `NVIDIA_NIM_BASE_URL` env var for on-premise.
+ * @param contextWindow  Model's total token capacity (prompt + completion combined).
+ * @param reserveCompletion Tokens held back from prompt history for the completion.
+ */
+case class NvidiaNIMConfig(
+  apiKey: String,
+  model: String,
+  baseUrl: String,
+  contextWindow: Int,
+  reserveCompletion: Int
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.NvidiaNIM
+  override def toString: String =
+    s"NvidiaNIMConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, " +
+      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+
+object NvidiaNIMConfig {
+  private val standardReserve = 4096
+
+  /** Default base URL for NVIDIA's hosted NIM cloud API. */
+  val DEFAULT_BASE_URL: String = "https://integrate.api.nvidia.com/v1"
+
+  /** Default on-premise base URL for locally-running NIM containers. */
+  val DEFAULT_ON_PREMISE_BASE_URL: String = "http://localhost:8000/v1"
+
+  private def nimFallback(modelName: String): (Int, Int) =
+    modelName match {
+      case name if name.contains("llama-3.1-8b")    => (128000, standardReserve)
+      case name if name.contains("llama-3.1-70b")   => (128000, standardReserve)
+      case name if name.contains("llama-3.1-405b")  => (128000, standardReserve)
+      case name if name.contains("mistral-7b")      => (32768, standardReserve)
+      case name if name.contains("nemotron-4-340b") => (4096, standardReserve)
+      case name if name.contains("codellama")       => (16384, standardReserve)
+      case _                                        => (128000, standardReserve)
+    }
+
+  /**
+   * Constructs a [[NvidiaNIMConfig]], resolving `contextWindow` and `reserveCompletion`
+   * from the model name automatically.
+   *
+   * For on-premise deployments where no API key is required, pass an empty string for `apiKey`.
+   *
+   * @param modelName Model identifier, e.g. `"meta/llama-3.1-8b-instruct"`.
+   * @param apiKey    NVIDIA API key. May be empty (`""`) for on-premise NIM deployments.
+   * @param baseUrl   API base URL. Must be non-empty. Use [[DEFAULT_BASE_URL]] for NVIDIA cloud
+   *                  or [[DEFAULT_ON_PREMISE_BASE_URL]] for local containers.
+   */
+  def fromValues(
+    modelName: String,
+    apiKey: String,
+    baseUrl: String
+  )(using resolver: ContextWindowResolver): NvidiaNIMConfig = {
+    require(baseUrl.trim.nonEmpty, "NvidiaNIM baseUrl must be non-empty")
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("nvidia", "openai"),
+      modelName = modelName,
+      defaultContextWindow = 128000,
+      defaultReserve = standardReserve,
+      fallbackResolver = nimFallback
+    )
+    NvidiaNIMConfig(
+      apiKey = apiKey,
+      model = modelName,
+      baseUrl = baseUrl.trim,
+      contextWindow = cw,
+      reserveCompletion = rc
+    )
+  }
+}
+
 case class MistralConfig(
   apiKey: String,
   model: String,

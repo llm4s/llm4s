@@ -104,3 +104,7 @@ private[config] object NamedProviderLoader:
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(MistralConfig.DEFAULT_BASE_URL)
           MistralConfig.fromValues(section.model.asString, apiKey, baseUrl)
+      case ProviderKind.NvidiaNIM =>
+        val apiKey  = section.apiKey.map(_.asKey).getOrElse("")
+        val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(NvidiaNIMConfig.DEFAULT_BASE_URL)
+        Right(NvidiaNIMConfig.fromValues(section.model.asString, apiKey, baseUrl))

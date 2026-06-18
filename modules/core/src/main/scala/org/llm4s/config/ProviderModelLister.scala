@@ -7,7 +7,7 @@ import org.llm4s.config.DefaultConfig
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.ProvidersConfigModel.{ BaseUrl, NamedProviderConfig, ProviderKind }
-import org.llm4s.llmconnect.config.MistralConfig
+import org.llm4s.llmconnect.config.{ MistralConfig, NvidiaNIMConfig }
 
 import scala.util.Try
 
@@ -143,6 +143,20 @@ private[llm4s] object ProviderModelListers:
         modelsPath = "/v1/models",
         httpClient = httpClient
       )
+
+  object NvidiaNIM extends ProviderModelLister:
+    def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
+      for
+        nim <- config.requireProvider(ProviderKind.NvidiaNIM)
+        baseUrl = nim.baseUrlOrDefault(NvidiaNIMConfig.DEFAULT_BASE_URL)
+        headers = nim.apiKey.map(k => Map("Authorization" -> s"Bearer ${k.asKey}")).getOrElse(Map.empty)
+        response <- httpClient
+          .getResult(s"${baseUrl.asUrl}/models", headers = headers, timeout = 10000)
+          .mapServiceError("nvidia-nim", "Failed to discover NVIDIA NIM models")
+        okResponse   <- response.ensureSuccess("nvidia-nim")
+        jsonResponse <- okResponse.toJson("responseBody")
+        models       <- parseOpenAICompatibleModels(jsonResponse.body, ProviderKind.NvidiaNIM)
+      yield models
 
   object Ollama extends ProviderModelLister:
     def listModels(
