@@ -7,44 +7,49 @@ object Dependencies {
 
 object Versions {
   val cats     = "2.13.0"
-  val upickle  = "4.2.1"
-  val logback  = "1.5.18"
-  val log4j    = "2.24.3"
+  val upickle  = "4.4.3"
+  val logback  = "1.5.34"
+  val log4j    = "2.26.0"
   val monocle  = "3.3.0"
   val termflow = "0.4.0"
-  val scalatest               = "3.2.19"
-  val scalamock               = "7.4.2"
+  val scalatest               = "3.2.20"
+  val scalamock               = "7.5.5"
   val scalatestplusScalacheck = "3.2.19.0"
-  val fansi    = "0.5.0"
-  val postgres = "42.7.3"
-  val sqlite   = "3.45.3.0"
-  val config   = "1.4.3"
+  val fansi    = "0.5.1"
+  val postgres = "42.7.11"
+  val sqlite   = "3.53.2.0"
+  val config   = "1.4.9"
+  // NOTE: HikariCP 7.x is available but is a 2-major jump (5->6->7) with a higher
+  // JDK baseline; held for separate review.
   val hikariCP = "5.1.0"
-  val pureconfig = "0.17.6"
+  val pureconfig = "0.17.10"
 
   val azureOpenAI = "1.0.0-beta.16"
-  val anthropic   = "2.11.1"
+  val anthropic   = "2.42.0"
   val jtokkit     = "1.1.0"
   val websocket   = "1.6.0"
-  val ujson       = "4.2.1"
-  val pdfbox      = "3.0.5"
-  val commonsIO   = "2.18.0"
-  val tika        = "3.2.1"
-  val poi         = "5.4.1"
-  val jsoup       = "1.21.1"
-  val jna         = "5.13.0"
+  val ujson       = "4.4.3"
+  val pdfbox      = "3.0.7"
+  val commonsIO   = "2.22.0"
+  val tika        = "3.3.1"
+  val poi         = "5.5.1"
+  val jsoup       = "1.22.2"
+  val jna         = "5.19.1"
   val vosk        = "0.3.45"
 
+  // NOTE: cask 0.11.x is available but 0.x minor bumps can be breaking; held for review.
   val cask       = "0.10.2"
 
   // AWS SDK
-  val awsSdk     = "2.29.51"
-  val opentelemetry = "1.34.1"
+  val awsSdk     = "2.46.14"
+  val opentelemetry = "1.63.0"
 
   // Prometheus (1.x stable)
-  val prometheus = "1.4.3"
+  val prometheus = "1.8.0"
 
   // Neo4j
+  // NOTE: neo4j-java-driver 6.x is available but is a major bump; held for separate
+  // review alongside the existing neo4j-harness/Netty compatibility constraint.
   val neo4j = "5.27.0"
 }
 

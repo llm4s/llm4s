@@ -587,13 +587,18 @@ curl https://api.anthropic.com/v1/messages \
   private def serializeStreamEvent(event: RawMessageStreamEvent): String =
     ObjectMappers.jsonMapper().writeValueAsString(event)
 
+  // NOTE: anthropic-java 2.42 deprecated `temperature` entirely — models released after
+  // Claude Opus 4.6 reject any value other than 1.0 with a 400 error. We still set it for the
+  // older models that do support it, so the (unavoidable) deprecation warning is suppressed here.
+  // TODO: gate temperature on model capability and drop this once legacy models are unsupported.
+  @scala.annotation.nowarn("cat=deprecation")
   private def applySamplingParameters(
     builder: MessageCreateParams.Builder,
     options: CompletionOptions
   ): Unit =
     // Anthropic rejects some requests that specify both temperature and top_p.
     // Prefer temperature as the single sampling control for our default path.
-    builder.temperature(options.temperature.floatValue())
+    builder.temperature(options.temperature.doubleValue())
 
   override protected def releaseResources(): Unit =
     client.close()
