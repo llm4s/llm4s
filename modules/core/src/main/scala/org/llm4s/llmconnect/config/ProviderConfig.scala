@@ -677,3 +677,78 @@ object MistralConfig:
       contextWindow = cw,
       reserveCompletion = rc
     )
+
+/**
+ * Configuration for AWS Bedrock.
+ *
+ * AWS Bedrock uses the Converse API and authenticates via AWS Signature V4
+ * (credentials are resolved from the standard AWS credential chain:
+ * environment variables, shared credentials file, EC2 instance metadata, etc.).
+ * No API key is required — credentials are picked up automatically.
+ *
+ * The `model` field must be a fully-qualified Bedrock model ID, e.g.
+ * `"amazon.titan-text-express-v1"` or `"anthropic.claude-3-5-sonnet-20241022-v2:0"`.
+ *
+ * Prefer [[BedrockConfig.fromValues]] over the primary constructor; it resolves
+ * `contextWindow` and `reserveCompletion` from the model name automatically.
+ *
+ * @param model         Bedrock model ID, e.g. `"amazon.titan-text-express-v1"`.
+ * @param region        AWS region hosting the Bedrock endpoint, e.g. `"us-east-1"`.
+ * @param baseUrl       Optional custom Bedrock endpoint URL; defaults to the regional endpoint.
+ * @param contextWindow Model's total token capacity (prompt + completion combined).
+ * @param reserveCompletion Tokens held back from prompt history for the completion.
+ */
+case class BedrockConfig(
+  model: String,
+  region: String,
+  baseUrl: String,
+  contextWindow: Int,
+  reserveCompletion: Int
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.Bedrock
+
+object BedrockConfig:
+  private val DefaultContextWindow     = 200000
+  private val DefaultReserveCompletion = 4096
+
+  private def bedrockFallback(modelName: String): (Int, Int) =
+    modelName match
+      case name if name.startsWith("anthropic.claude-3") => (200000, DefaultReserveCompletion)
+      case name if name.startsWith("anthropic.")         => (100000, DefaultReserveCompletion)
+      case name if name.startsWith("amazon.titan")       => (32000, DefaultReserveCompletion)
+      case name if name.startsWith("meta.llama")         => (128000, DefaultReserveCompletion)
+      case name if name.startsWith("mistral.")           => (32000, DefaultReserveCompletion)
+      case _                                             => (DefaultContextWindow, DefaultReserveCompletion)
+
+  def defaultBaseUrl(region: String): String =
+    s"https://bedrock-runtime.$region.amazonaws.com"
+
+  /**
+   * Constructs a [[BedrockConfig]], resolving `contextWindow` and
+   * `reserveCompletion` from the model name automatically.
+   *
+   * @param modelName  Bedrock model ID, e.g. `"amazon.titan-text-express-v1"`.
+   * @param region     AWS region, e.g. `"us-east-1"`; must be non-empty.
+   * @param baseUrlOpt Optional custom endpoint URL; defaults to the regional Bedrock endpoint.
+   */
+  def fromValues(
+    modelName: String,
+    region: String,
+    baseUrlOpt: Option[String] = None
+  )(using resolver: ContextWindowResolver): BedrockConfig =
+    require(region.trim.nonEmpty, "Bedrock region must be non-empty")
+    val resolvedBaseUrl = baseUrlOpt.filter(_.trim.nonEmpty).getOrElse(defaultBaseUrl(region))
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("bedrock"),
+      modelName = modelName,
+      defaultContextWindow = DefaultContextWindow,
+      defaultReserve = DefaultReserveCompletion,
+      fallbackResolver = bedrockFallback
+    )
+    BedrockConfig(
+      model = modelName,
+      region = region,
+      baseUrl = resolvedBaseUrl,
+      contextWindow = cw,
+      reserveCompletion = rc
+    )

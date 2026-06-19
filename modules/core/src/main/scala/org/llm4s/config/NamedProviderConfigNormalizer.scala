@@ -37,5 +37,6 @@ private[config] object NamedProviderConfigNormalizer:
       apiKey = section.apiKey.map(_.trim).filter(_.nonEmpty).map(ApiKey(_)),
       organization = section.organization.map(_.trim).filter(_.nonEmpty),
       endpoint = section.endpoint.map(_.trim).filter(_.nonEmpty),
-      apiVersion = section.apiVersion.map(_.trim).filter(_.nonEmpty)
+      apiVersion = section.apiVersion.map(_.trim).filter(_.nonEmpty),
+      region = section.region.map(_.trim).filter(_.nonEmpty)
     )

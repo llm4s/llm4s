@@ -162,6 +162,12 @@ object ConfigKeys {
   val MISTRAL_API_KEY  = "MISTRAL_API_KEY"
   val MISTRAL_BASE_URL = "MISTRAL_BASE_URL"
 
+  // AWS Bedrock
+  val AWS_ACCESS_KEY_ID     = "AWS_ACCESS_KEY_ID"
+  val AWS_SECRET_ACCESS_KEY = "AWS_SECRET_ACCESS_KEY"
+  val AWS_REGION            = "AWS_REGION"
+  val AWS_SESSION_TOKEN     = "AWS_SESSION_TOKEN"
+
   // Tool API Keys
   // ---- Tool API keys ------------------------------------------------------
 
