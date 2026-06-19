@@ -197,6 +197,7 @@ lazy val core = (project in file("modules/core"))
       Deps.hikariCP,
       Deps.awsS3,
       Deps.awsSts,
+      Deps.awsBedrockRuntime,
       Deps.prometheusCore,
       Deps.prometheusHttp
     )
