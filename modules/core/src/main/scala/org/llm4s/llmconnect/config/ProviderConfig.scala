@@ -677,3 +677,89 @@ object MistralConfig:
       contextWindow = cw,
       reserveCompletion = rc
     )
+
+/**
+ * Configuration for IBM WatsonX AI.
+ *
+ * IBM WatsonX uses IAM token-based authentication: the `apiKey` is exchanged for
+ * a short-lived bearer token at `iamUrl`. The bearer token is then used in
+ * all WatsonX API calls along with the `projectId`.
+ *
+ * Prefer [[WatsonXConfig.fromValues]] over the primary constructor; it resolves
+ * `contextWindow` and `reserveCompletion` automatically from the model name.
+ *
+ * @param apiKey        IBM Cloud API key; redacted in `toString`.
+ * @param projectId     IBM WatsonX project ID.
+ * @param model         Model identifier, e.g. `"ibm/granite-3-8b-instruct"`.
+ * @param baseUrl       WatsonX API base URL; defaults to [[WatsonXConfig.DEFAULT_BASE_URL]].
+ * @param iamUrl        IBM IAM token endpoint; defaults to [[WatsonXConfig.DEFAULT_IAM_URL]].
+ * @param contextWindow Model's total token capacity (prompt + completion combined).
+ * @param reserveCompletion Tokens held back from prompt history for the completion.
+ */
+case class WatsonXConfig(
+  apiKey: String,
+  projectId: String,
+  model: String,
+  baseUrl: String,
+  iamUrl: String,
+  contextWindow: Int,
+  reserveCompletion: Int
+) extends ProviderConfig:
+  override val provider: ProviderKind = ProviderKind.WatsonX
+  override def toString: String =
+    s"WatsonXConfig(apiKey=${Redaction.secret(apiKey)}, projectId=$projectId, model=$model, baseUrl=$baseUrl, " +
+      s"iamUrl=$iamUrl, contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+
+object WatsonXConfig {
+  val DEFAULT_BASE_URL: String = "https://us-south.ml.cloud.ibm.com"
+  val DEFAULT_IAM_URL: String  = "https://iam.cloud.ibm.com/identity/token"
+
+  private val DefaultContextWindow     = 8192
+  private val DefaultReserveCompletion = 2048
+
+  private val watsonxFallback: String => (Int, Int) = {
+    case name if name.contains("granite-3-8b") => (8192, DefaultReserveCompletion)
+    case name if name.contains("granite-13b")  => (8192, DefaultReserveCompletion)
+    case name if name.contains("granite")      => (8192, DefaultReserveCompletion)
+    case _                                     => (DefaultContextWindow, DefaultReserveCompletion)
+  }
+
+  /**
+   * Constructs a [[WatsonXConfig]], resolving `contextWindow` and
+   * `reserveCompletion` from the model name automatically.
+   *
+   * @param modelName Model identifier, e.g. `"ibm/granite-3-8b-instruct"`.
+   * @param apiKey    IBM Cloud API key; must be non-empty.
+   * @param projectId IBM WatsonX project ID; must be non-empty.
+   * @param baseUrl   WatsonX API base URL; must be non-empty.
+   * @param iamUrl    IBM IAM token endpoint URL; must be non-empty.
+   */
+  def fromValues(
+    modelName: String,
+    apiKey: String,
+    projectId: String,
+    baseUrl: String = DEFAULT_BASE_URL,
+    iamUrl: String = DEFAULT_IAM_URL
+  )(using resolver: ContextWindowResolver): WatsonXConfig = {
+    require(apiKey.trim.nonEmpty, "WatsonX apiKey must be non-empty")
+    require(projectId.trim.nonEmpty, "WatsonX projectId must be non-empty")
+    require(baseUrl.trim.nonEmpty, "WatsonX baseUrl must be non-empty")
+    require(iamUrl.trim.nonEmpty, "WatsonX iamUrl must be non-empty")
+    val (cw, rc) = resolver.resolve(
+      lookupProviders = Seq("watsonx"),
+      modelName = modelName,
+      defaultContextWindow = DefaultContextWindow,
+      defaultReserve = DefaultReserveCompletion,
+      fallbackResolver = watsonxFallback
+    )
+    WatsonXConfig(
+      apiKey = apiKey,
+      projectId = projectId,
+      model = modelName,
+      baseUrl = baseUrl,
+      iamUrl = iamUrl,
+      contextWindow = cw,
+      reserveCompletion = rc
+    )
+  }
+}
