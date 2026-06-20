@@ -39,37 +39,36 @@ The `LLMProvider` sealed trait was removed and replaced with `ProviderKind`. Any
 ### Before (0.x)
 
 ```scala
-import org.llm4s.llmconnect.LLMProvider
+import org.llm4s.llmconnect.provider.LLMProvider
 
 config.provider match {
   case LLMProvider.OpenAI     => ...
   case LLMProvider.Anthropic  => ...
   case LLMProvider.Azure      => ...
   case LLMProvider.Ollama     => ...
-  case LLMProvider.Google     => ...
+  case LLMProvider.Gemini     => ...
 }
 ```
 
 ### After (0.3.2+)
 
 ```scala
-import org.llm4s.llmconnect.ProviderKind
+import org.llm4s.types.ProviderModelTypes.ProviderKind
 
-config.providerKind match {
+config.provider match {
   case ProviderKind.OpenAI     => ...
   case ProviderKind.Anthropic  => ...
   case ProviderKind.Azure      => ...
   case ProviderKind.Ollama     => ...
-  case ProviderKind.Google     => ...
+  case ProviderKind.Gemini     => ...
 }
 ```
 
 ### Migration steps
 
-1. Replace all imports of `LLMProvider` with `ProviderKind`.
-2. Replace all uses of the `LLMProvider.*` cases with `ProviderKind.*` equivalents.
-3. Replace `config.provider` accessor calls with `config.providerKind`.
-4. Recompile — exhaustive pattern-match warnings will surface any remaining gaps.
+1. Replace imports of `org.llm4s.llmconnect.provider.LLMProvider` with `org.llm4s.types.ProviderModelTypes.ProviderKind`.
+2. Replace all `LLMProvider.*` cases with their `ProviderKind.*` equivalents (e.g. `LLMProvider.OpenAI` → `ProviderKind.OpenAI`). The `config.provider` accessor name is unchanged — only its type changed from `LLMProvider` to `ProviderKind`.
+3. Recompile — exhaustive pattern-match warnings will surface any remaining gaps.
 
 ---
 

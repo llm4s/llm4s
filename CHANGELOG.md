@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-06-19
+
+### Changed
+- Updated build dependencies; fixed Docker image `apt-key` removal
+
+### Docs
+- Added ScalaDoc for `LLMCompressor` and `ContextManager`
+- Clarified that `LLMCompressor` cost is charged per digest, not per over-cap message
+- Aligned production-readiness documentation
+
+## [0.3.3] - 2026-06-14
+
+### Added
+- SSE transport (2024-11-05 spec) and bearer-token authentication for `MCPServer`
+- Image generation with integrated cost tracking and metrics
+- LLM-driven memory entity extraction
+- Streaming chat-TUI sample built on termflow
+
+### Changed
+- Enabled Scalafix configuration-boundary enforcement across the codebase
+
+### Security
+- Redact API keys from provider error messages
+- Added Dependabot and published a threat model
+- Constant-time MCP auth comparison, public-bind guard, and bounded connection pool
+
+### Fixed
+- ReDoS vulnerability in regex handling (workspace and core)
+- Incorrect WAV headers and metadata in `WavFileGenerator`
+- Validate SQLite metadata keys and table names
+
 ## [0.3.2] - 2026-04-26
 
 ### Added
@@ -236,7 +267,9 @@ Initial release. Versions 0.1.0 through 0.1.7 were primarily focused on establis
 
 ---
 
-[Unreleased]: https://github.com/llm4s/llm4s/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/llm4s/llm4s/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/llm4s/llm4s/compare/v0.3.3...v0.3.4
+[0.3.3]: https://github.com/llm4s/llm4s/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/llm4s/llm4s/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/llm4s/llm4s/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/llm4s/llm4s/compare/v0.2.9...v0.3.0
