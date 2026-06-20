@@ -286,6 +286,24 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
 
     ModelRegistryService.fromUrl(dataUrl).isLeft shouldBe true
 
+  it should "let override entries take precedence when merging the embedded overrides" in:
+    val base = ModelRegistryService
+      .parseMetadataJson("""{ "gemini/gemini-1.5-flash": { "litellm_provider": "gemini", "mode": "embedding" } }""")
+      .toOption
+      .get
+
+    val merged = ModelRegistryService.mergeOverrides(base, ModelRegistryConfig.DefaultOverridesResourcePath)
+    merged("gemini/gemini-1.5-flash").mode shouldBe ModelMode.Chat
+    (merged should contain).key("claude-3-7-sonnet-latest")
+
+  it should "fall back to the base snapshot when the overrides resource is missing" in:
+    val base = ModelRegistryService
+      .parseMetadataJson("""{ "base-only-model": { "litellm_provider": "custom", "mode": "chat" } }""")
+      .toOption
+      .get
+
+    ModelRegistryService.mergeOverrides(base, "/modeldata/does-not-exist.json") shouldBe base
+
   private def defaultServiceResult(): Result[ModelRegistryService] =
     ModelRegistryTestSupport.defaultServiceResult()
 

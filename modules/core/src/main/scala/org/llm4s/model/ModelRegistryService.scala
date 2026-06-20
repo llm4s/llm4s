@@ -101,28 +101,29 @@ object ModelRegistryService:
     parseMetadataJson(jsonContent).map(metadata => DefaultModelRegistryService(metadata))
 
   def fromResource(resourcePath: String): Result[ModelRegistryService] =
-    for {
-      base <- loadResource(resourcePath).flatMap(parseMetadataJson)
-      metadata <-
-        if resourcePath == ModelRegistryConfig.DefaultResourcePath then withEmbeddedOverrides(base)
-        else Right(base)
-    } yield DefaultModelRegistryService(metadata)
+    loadResource(resourcePath).flatMap(parseMetadataJson).map { base =>
+      val metadata =
+        if resourcePath == ModelRegistryConfig.DefaultResourcePath then
+          mergeOverrides(base, ModelRegistryConfig.DefaultOverridesResourcePath)
+        else base
+      DefaultModelRegistryService(metadata)
+    }
 
   /**
-   * Layers the curated llm4s corrections
-   * ([[ModelRegistryConfig.DefaultOverridesResourcePath]]) over the embedded
+   * Layers the curated llm4s corrections at `overridesResourcePath` over a base
    * snapshot, with override entries taking precedence. The overlay is optional:
-   * if the resource is absent or unparseable the base snapshot is used as-is so
-   * a packaging slip can never make the registry unloadable.
+   * if the resource is absent or unparseable the base snapshot is returned
+   * unchanged so a packaging slip can never make the registry unloadable.
    */
-  private def withEmbeddedOverrides(
-    base: Map[String, ModelMetadata]
-  ): Result[Map[String, ModelMetadata]] =
-    loadResource(ModelRegistryConfig.DefaultOverridesResourcePath).flatMap(parseMetadataJson) match
-      case Right(overrides) => Right(base ++ overrides)
+  private[model] def mergeOverrides(
+    base: Map[String, ModelMetadata],
+    overridesResourcePath: String
+  ): Map[String, ModelMetadata] =
+    loadResource(overridesResourcePath).flatMap(parseMetadataJson) match
+      case Right(overrides) => base ++ overrides
       case Left(error) =>
         logger.warn(s"Skipping embedded model metadata overrides: ${error.message}")
-        Right(base)
+        base
 
   def fromFile(filePath: String): Result[ModelRegistryService] =
     loadFile(filePath).flatMap(fromJsonString)
