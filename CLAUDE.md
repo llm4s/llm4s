@@ -65,7 +65,7 @@ LANGFUSE_SECRET_KEY=sk-lf-...
 OTEL_SERVICE_NAME=llm4s-agent
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
-# Embeddings - Unified format (recommended)
+# Optional - Embeddings - Unified format (recommended)
 EMBEDDING_MODEL=openai/text-embedding-3-small  # provider/model format, uses default base URL
 OPENAI_API_KEY=sk-...                          # reuses LLM API key
 
@@ -80,6 +80,11 @@ EMBEDDING_MODEL=ollama/nomic-embed-text        # or mxbai-embed-large, all-minil
 # OPENAI_EMBEDDING_BASE_URL=https://custom.openai.com/v1
 # VOYAGE_EMBEDDING_BASE_URL=https://custom.voyage.ai/v1
 # OLLAMA_EMBEDDING_BASE_URL=http://custom-ollama:11434
+
+# Optional - HTTP Provider Timeout
+LLM_PROVIDER_TIMEOUT_MS=30000        # HTTP timeout in milliseconds (default: 30000ms = 30 seconds)
+                                     # Set lower for fast-responding APIs, higher for batch operations
+                                     # Example: 5000 for 5-second chatbot timeout, 120000 for 120-second batch jobs
 ```
 
 ## Code Conventions

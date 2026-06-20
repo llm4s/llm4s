@@ -63,7 +63,8 @@ case class OpenAIConfig(
   organization: Option[String],
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  timeoutMs: Int = 30000
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.OpenAI
   override def toString: String =
@@ -103,7 +104,8 @@ object OpenAIConfig {
     modelName: String,
     apiKey: String,
     organization: Option[String],
-    baseUrl: String
+    baseUrl: String,
+    timeoutMs: Int = 30000
   )(using resolver: ContextWindowResolver): OpenAIConfig = {
     require(apiKey.trim.nonEmpty, "OpenAI apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "OpenAI baseUrl must be non-empty")
@@ -120,7 +122,8 @@ object OpenAIConfig {
       organization = organization,
       baseUrl = baseUrl,
       contextWindow = cw,
-      reserveCompletion = rc
+      reserveCompletion = rc,
+      timeoutMs = timeoutMs
     )
   }
 }
@@ -151,7 +154,8 @@ case class AzureConfig(
   model: String,
   apiVersion: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  timeoutMs: Int = 30000
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.Azure
   override def toString: String =
@@ -187,7 +191,8 @@ object AzureConfig {
     modelName: String,
     endpoint: String,
     apiKey: String,
-    apiVersion: String
+    apiVersion: String,
+    timeoutMs: Int = 30000
   )(using resolver: ContextWindowResolver): AzureConfig = {
     require(endpoint.trim.nonEmpty, "Azure endpoint must be non-empty")
     require(apiKey.trim.nonEmpty, "Azure apiKey must be non-empty")
@@ -205,7 +210,8 @@ object AzureConfig {
       model = modelName,
       apiVersion = apiVersion,
       contextWindow = cw,
-      reserveCompletion = rc
+      reserveCompletion = rc,
+      timeoutMs = timeoutMs
     )
   }
 }
@@ -228,7 +234,8 @@ case class AnthropicConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  timeoutMs: Int = 30000
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.Anthropic
   override def toString: String =
@@ -257,7 +264,8 @@ object AnthropicConfig {
   def fromValues(
     modelName: String,
     apiKey: String,
-    baseUrl: String
+    baseUrl: String,
+    timeoutMs: Int = 30000
   )(using resolver: ContextWindowResolver): AnthropicConfig = {
     require(apiKey.trim.nonEmpty, "Anthropic apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Anthropic baseUrl must be non-empty")
@@ -273,7 +281,8 @@ object AnthropicConfig {
       model = modelName,
       baseUrl = baseUrl,
       contextWindow = cw,
-      reserveCompletion = rc
+      reserveCompletion = rc,
+      timeoutMs = timeoutMs
     )
   }
 }
@@ -294,7 +303,8 @@ case class OllamaConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  timeoutMs: Int = 30000
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.Ollama
 
@@ -319,7 +329,8 @@ object OllamaConfig {
    */
   def fromValues(
     modelName: String,
-    baseUrl: String
+    baseUrl: String,
+    timeoutMs: Int = 30000
   )(using resolver: ContextWindowResolver): OllamaConfig = {
     require(baseUrl.trim.nonEmpty, "Ollama baseUrl must be non-empty")
     val (cw, rc) = resolver.resolve(
@@ -333,7 +344,8 @@ object OllamaConfig {
       model = modelName,
       baseUrl = baseUrl,
       contextWindow = cw,
-      reserveCompletion = rc
+      reserveCompletion = rc,
+      timeoutMs = timeoutMs
     )
   }
 }
@@ -355,7 +367,8 @@ case class ZaiConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  timeoutMs: Int = 30000
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.Zai
   override def toString: String =
@@ -387,7 +400,8 @@ object ZaiConfig {
   def fromValues(
     modelName: String,
     apiKey: String,
-    baseUrl: String
+    baseUrl: String,
+    timeoutMs: Int = 30000
   )(using resolver: ContextWindowResolver): ZaiConfig = {
     require(apiKey.trim.nonEmpty, "Zai apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Zai baseUrl must be non-empty")
@@ -403,7 +417,8 @@ object ZaiConfig {
       model = modelName,
       baseUrl = baseUrl,
       contextWindow = cw,
-      reserveCompletion = rc
+      reserveCompletion = rc,
+      timeoutMs = timeoutMs
     )
   }
 }
@@ -425,7 +440,8 @@ case class GeminiConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  timeoutMs: Int = 30000
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.Gemini
   override def toString: String =
@@ -457,7 +473,8 @@ object GeminiConfig {
   def fromValues(
     modelName: String,
     apiKey: String,
-    baseUrl: String
+    baseUrl: String,
+    timeoutMs: Int = 30000
   )(using resolver: ContextWindowResolver): GeminiConfig = {
     require(apiKey.trim.nonEmpty, "Gemini apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Gemini baseUrl must be non-empty")
@@ -474,7 +491,8 @@ object GeminiConfig {
       model = modelName,
       baseUrl = normalizedBaseUrl,
       contextWindow = cw,
-      reserveCompletion = rc
+      reserveCompletion = rc,
+      timeoutMs = timeoutMs
     )
   }
 
@@ -503,7 +521,8 @@ case class DeepSeekConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  timeoutMs: Int = 30000
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.DeepSeek
   override def toString: String =
@@ -548,7 +567,8 @@ object DeepSeekConfig {
   def fromValues(
     modelName: String,
     apiKey: String,
-    baseUrl: String
+    baseUrl: String,
+    timeoutMs: Int = 30000
   )(using resolver: ContextWindowResolver): DeepSeekConfig = {
     require(apiKey.trim.nonEmpty, "DeepSeek apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "DeepSeek baseUrl must be non-empty")
@@ -564,7 +584,8 @@ object DeepSeekConfig {
       model = modelName,
       baseUrl = baseUrl,
       contextWindow = cw,
-      reserveCompletion = rc
+      reserveCompletion = rc,
+      timeoutMs = timeoutMs
     )
   }
 }
@@ -586,7 +607,8 @@ case class CohereConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  timeoutMs: Int = 30000
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.Cohere
   override def toString: String =
@@ -614,7 +636,8 @@ object CohereConfig {
   def fromValues(
     modelName: String,
     apiKey: String,
-    baseUrl: String
+    baseUrl: String,
+    timeoutMs: Int = 30000
   )(using resolver: ContextWindowResolver): CohereConfig = {
     require(apiKey.trim.nonEmpty, "Cohere apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Cohere baseUrl must be non-empty")
@@ -630,7 +653,8 @@ object CohereConfig {
       model = modelName,
       baseUrl = baseUrl,
       contextWindow = cw,
-      reserveCompletion = rc
+      reserveCompletion = rc,
+      timeoutMs = timeoutMs
     )
   }
 }
@@ -640,12 +664,13 @@ case class MistralConfig(
   model: String,
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  timeoutMs: Int = 30000
 ) extends ProviderConfig:
   override val provider: ProviderKind = ProviderKind.Mistral
   override def toString: String =
     s"MistralConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion)"
+      s"reserveCompletion=$reserveCompletion, timeoutMs=$timeoutMs)"
 
 object MistralConfig:
   val DEFAULT_BASE_URL: String = "https://api.mistral.ai"
@@ -659,7 +684,8 @@ object MistralConfig:
   def fromValues(
     modelName: String,
     apiKey: String,
-    baseUrl: String
+    baseUrl: String,
+    timeoutMs: Int = 30000
   )(using resolver: ContextWindowResolver): MistralConfig =
     require(apiKey.trim.nonEmpty, "Mistral apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Mistral baseUrl must be non-empty")
@@ -675,5 +701,6 @@ object MistralConfig:
       model = modelName,
       baseUrl = baseUrl,
       contextWindow = cw,
-      reserveCompletion = rc
+      reserveCompletion = rc,
+      timeoutMs = timeoutMs
     )

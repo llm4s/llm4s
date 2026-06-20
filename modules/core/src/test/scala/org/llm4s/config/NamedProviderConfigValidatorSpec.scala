@@ -22,6 +22,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = Some(" org-demo "),
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -32,6 +33,206 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           cfg.organization shouldBe Some("org-demo")
         case Left(err) =>
           fail(s"Expected OpenAI NamedProviderConfig, got error: ${err.message}")
+    }
+
+    "apply default timeout of 30000ms when timeoutMs is not specified" in {
+      validate(
+        "openai-main",
+        RawNamedProviderSection(
+          provider = Some("openai"),
+          model = Some("gpt-4o-mini"),
+          baseUrl = Some("https://api.openai.com/v1"),
+          apiKey = Some("sk-test"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+          timeoutMs = None,
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.timeoutMs shouldBe Some(30000)
+        case Left(err) =>
+          fail(s"Expected timeoutMs to be Some(30000), got error: ${err.message}")
+    }
+
+    "accept custom timeoutMs when specified for OpenAI" in {
+      validate(
+        "openai-custom-timeout",
+        RawNamedProviderSection(
+          provider = Some("openai"),
+          model = Some("gpt-4o"),
+          baseUrl = Some("https://api.openai.com/v1"),
+          apiKey = Some("sk-test"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+          timeoutMs = Some(5000),
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.timeoutMs shouldBe Some(5000)
+        case Left(err) =>
+          fail(s"Expected timeoutMs to be Some(5000), got error: ${err.message}")
+    }
+
+    "accept custom timeoutMs when specified for Azure" in {
+      validate(
+        "azure-custom-timeout",
+        RawNamedProviderSection(
+          provider = Some("azure"),
+          model = Some("gpt-4o"),
+          baseUrl = None,
+          apiKey = Some("azure-key"),
+          organization = None,
+          endpoint = Some("https://my-resource.openai.azure.com"),
+          apiVersion = Some("2024-02-01"),
+          timeoutMs = Some(15000),
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.timeoutMs shouldBe Some(15000)
+        case Left(err) =>
+          fail(s"Expected timeoutMs to be Some(15000), got error: ${err.message}")
+    }
+
+    "accept custom timeoutMs when specified for Anthropic" in {
+      validate(
+        "anthropic-custom-timeout",
+        RawNamedProviderSection(
+          provider = Some("anthropic"),
+          model = Some("claude-sonnet-4-20250514"),
+          baseUrl = Some("https://api.anthropic.com"),
+          apiKey = Some("sk-ant-test"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+          timeoutMs = Some(60000),
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.timeoutMs shouldBe Some(60000)
+        case Left(err) =>
+          fail(s"Expected timeoutMs to be Some(60000), got error: ${err.message}")
+    }
+
+    "accept custom timeoutMs when specified for Ollama" in {
+      validate(
+        "ollama-custom-timeout",
+        RawNamedProviderSection(
+          provider = Some("ollama"),
+          model = Some("llama3:latest"),
+          baseUrl = Some("http://localhost:11434"),
+          apiKey = None,
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+          timeoutMs = Some(120000),
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.timeoutMs shouldBe Some(120000)
+        case Left(err) =>
+          fail(s"Expected timeoutMs to be Some(120000), got error: ${err.message}")
+    }
+
+    "accept custom timeoutMs when specified for Gemini" in {
+      validate(
+        "gemini-custom-timeout",
+        RawNamedProviderSection(
+          provider = Some("gemini"),
+          model = Some("gemini-2.5-flash"),
+          baseUrl = Some("https://generativelanguage.googleapis.com/v1beta"),
+          apiKey = Some("google-key"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+          timeoutMs = Some(45000),
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.timeoutMs shouldBe Some(45000)
+        case Left(err) =>
+          fail(s"Expected timeoutMs to be Some(45000), got error: ${err.message}")
+    }
+
+    "accept custom timeoutMs when specified for Mistral" in {
+      validate(
+        "mistral-custom-timeout",
+        RawNamedProviderSection(
+          provider = Some("mistral"),
+          model = Some("mistral-large-latest"),
+          baseUrl = Some("https://api.mistral.ai"),
+          apiKey = Some("mistral-key"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+          timeoutMs = Some(35000),
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.timeoutMs shouldBe Some(35000)
+        case Left(err) =>
+          fail(s"Expected timeoutMs to be Some(35000), got error: ${err.message}")
+    }
+
+    "accept custom timeoutMs when specified for Cohere" in {
+      validate(
+        "cohere-custom-timeout",
+        RawNamedProviderSection(
+          provider = Some("cohere"),
+          model = Some("command-r-plus"),
+          baseUrl = Some("https://api.cohere.com"),
+          apiKey = Some("cohere-key"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+          timeoutMs = Some(25000),
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.timeoutMs shouldBe Some(25000)
+        case Left(err) =>
+          fail(s"Expected timeoutMs to be Some(25000), got error: ${err.message}")
+    }
+
+    "accept custom timeoutMs when specified for DeepSeek" in {
+      validate(
+        "deepseek-custom-timeout",
+        RawNamedProviderSection(
+          provider = Some("deepseek"),
+          model = Some("deepseek-chat"),
+          baseUrl = Some("https://api.deepseek.com"),
+          apiKey = Some("deepseek-key"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+          timeoutMs = Some(20000),
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.timeoutMs shouldBe Some(20000)
+        case Left(err) =>
+          fail(s"Expected timeoutMs to be Some(20000), got error: ${err.message}")
+    }
+
+    "accept custom timeoutMs when specified for Z.ai" in {
+      validate(
+        "zai-custom-timeout",
+        RawNamedProviderSection(
+          provider = Some("zai"),
+          model = Some("GLM-4.7"),
+          baseUrl = Some("https://api.z.ai/api/paas/v4"),
+          apiKey = Some("zai-key"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+          timeoutMs = Some(40000),
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.timeoutMs shouldBe Some(40000)
+        case Left(err) =>
+          fail(s"Expected timeoutMs to be Some(40000), got error: ${err.message}")
     }
 
     "validate and normalize an OpenRouter named provider section" in {
@@ -45,6 +246,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -66,6 +268,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = Some("https://my-resource.openai.azure.com"),
           apiVersion = Some("2024-02-01"),
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -89,6 +292,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -110,6 +314,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -132,6 +337,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -153,6 +359,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -174,6 +381,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -195,6 +403,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -216,6 +425,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Right(cfg) =>
@@ -237,6 +447,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Left(err) =>
@@ -256,6 +467,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Left(err) =>
@@ -275,6 +487,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Left(err) =>
@@ -294,6 +507,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Left(err) =>
@@ -313,6 +527,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = Some("   "),
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Left(err) =>
@@ -332,6 +547,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           organization = None,
           endpoint = None,
           apiVersion = None,
+          timeoutMs = None,
         )
       ) match
         case Left(err) =>

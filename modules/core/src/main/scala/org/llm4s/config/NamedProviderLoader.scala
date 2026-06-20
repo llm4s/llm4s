@@ -63,18 +63,21 @@ private[config] object NamedProviderLoader:
           val defaultBaseUrl =
             if section.provider == ProviderKind.OpenRouter then DefaultConfig.DEFAULT_OPENROUTER_BASE_URL
             else DefaultConfig.DEFAULT_OPENAI_BASE_URL
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(defaultBaseUrl)
-          OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl)
+          val baseUrl   = section.baseUrl.map(_.asUrl).getOrElse(defaultBaseUrl)
+          val timeoutMs = section.timeoutMs.getOrElse(30000)
+          OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl, timeoutMs)
       case ProviderKind.Azure =>
         for
           endpoint <- required("endpoint", section.endpoint, "llm4s.providers.<name>.endpoint")
           apiKey   <- requiredApiKey("llm4s.providers.<name>.apiKey")
           apiVersion = section.apiVersion.getOrElse(DefaultConfig.DEFAULT_AZURE_V2025_01_01_PREVIEW)
-        yield AzureConfig.fromValues(section.model.asString, endpoint, apiKey, apiVersion)
+          timeoutMs  = section.timeoutMs.getOrElse(30000)
+        yield AzureConfig.fromValues(section.model.asString, endpoint, apiKey, apiVersion, timeoutMs)
       case ProviderKind.Anthropic =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL)
-          AnthropicConfig.fromValues(section.model.asString, apiKey, baseUrl)
+          val baseUrl   = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL)
+          val timeoutMs = section.timeoutMs.getOrElse(30000)
+          AnthropicConfig.fromValues(section.model.asString, apiKey, baseUrl, timeoutMs)
       case ProviderKind.Ollama =>
         section.baseUrl
           .map(_.asUrl)
@@ -83,24 +86,31 @@ private[config] object NamedProviderLoader:
               s"Configured provider '$providerName' is missing base URL (llm4s.providers.<name>.baseUrl)"
             )
           )
-          .map(url => OllamaConfig.fromValues(section.model.asString, url))
+          .map: url =>
+            val timeoutMs = section.timeoutMs.getOrElse(30000)
+            OllamaConfig.fromValues(section.model.asString, url, timeoutMs)
       case ProviderKind.Zai =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(ZaiConfig.DEFAULT_BASE_URL)
-          ZaiConfig.fromValues(section.model.asString, apiKey, baseUrl)
+          val baseUrl   = section.baseUrl.map(_.asUrl).getOrElse(ZaiConfig.DEFAULT_BASE_URL)
+          val timeoutMs = section.timeoutMs.getOrElse(30000)
+          ZaiConfig.fromValues(section.model.asString, apiKey, baseUrl, timeoutMs)
       case ProviderKind.Gemini =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_GEMINI_BASE_URL)
-          GeminiConfig.fromValues(section.model.asString, apiKey, baseUrl)
+          val baseUrl   = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_GEMINI_BASE_URL)
+          val timeoutMs = section.timeoutMs.getOrElse(30000)
+          GeminiConfig.fromValues(section.model.asString, apiKey, baseUrl, timeoutMs)
       case ProviderKind.DeepSeek =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
-          DeepSeekConfig.fromValues(section.model.asString, apiKey, baseUrl)
+          val baseUrl   = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
+          val timeoutMs = section.timeoutMs.getOrElse(30000)
+          DeepSeekConfig.fromValues(section.model.asString, apiKey, baseUrl, timeoutMs)
       case ProviderKind.Cohere =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(CohereConfig.DEFAULT_BASE_URL)
-          CohereConfig.fromValues(section.model.asString, apiKey, baseUrl)
+          val baseUrl   = section.baseUrl.map(_.asUrl).getOrElse(CohereConfig.DEFAULT_BASE_URL)
+          val timeoutMs = section.timeoutMs.getOrElse(30000)
+          CohereConfig.fromValues(section.model.asString, apiKey, baseUrl, timeoutMs)
       case ProviderKind.Mistral =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(MistralConfig.DEFAULT_BASE_URL)
-          MistralConfig.fromValues(section.model.asString, apiKey, baseUrl)
+          val baseUrl   = section.baseUrl.map(_.asUrl).getOrElse(MistralConfig.DEFAULT_BASE_URL)
+          val timeoutMs = section.timeoutMs.getOrElse(30000)
+          MistralConfig.fromValues(section.model.asString, apiKey, baseUrl, timeoutMs)
