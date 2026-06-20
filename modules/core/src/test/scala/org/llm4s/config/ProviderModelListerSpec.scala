@@ -327,3 +327,28 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
       case Left(err) =>
         fail(s"Expected discovered Mistral models, got error: ${err.message}")
   }
+
+  test("xAI lister discovers models from /models endpoint") {
+    val config = namedConfig(ProviderKind.XAI, "grok-beta", apiKey = Some("xai-key"))
+    val responseBody =
+      """{
+        |  "data": [
+        |    {
+        |      "id": "grok-beta",
+        |      "created": 1710000000,
+        |      "owned_by": "xai"
+        |    }
+        |  ]
+        |}""".stripMargin
+
+    val mockHttp = MockHttpClient(HttpResponse(200, responseBody, Map.empty))
+    val result   = ProviderModelListers.XAI.listModels(config, mockHttp)
+
+    result match
+      case Right(models) =>
+        models.map(_.name.asString) shouldBe List("grok-beta")
+        models.map(_.provider) shouldBe List(ProviderKind.XAI)
+        mockHttp.lastUrl shouldBe Some("https://api.x.ai/v1/models")
+      case Left(err) =>
+        fail(s"Expected discovered xAI models, got error: ${err.message}")
+  }

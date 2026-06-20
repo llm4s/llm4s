@@ -226,6 +226,27 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           fail(s"Expected Mistral NamedProviderConfig, got error: ${err.message}")
     }
 
+    "validate and normalize an xAI named provider section" in {
+      validate(
+        "xai-main",
+        RawNamedProviderSection(
+          provider = Some("xai"),
+          model = Some("grok-beta"),
+          baseUrl = Some("https://api.x.ai/v1"),
+          apiKey = Some("xai-test-key"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.provider shouldBe ProviderKind.XAI
+          cfg.model.asString shouldBe "grok-beta"
+          cfg.apiKey.map(_.asKey) shouldBe Some("xai-test-key")
+        case Left(err) =>
+          fail(s"Expected XAI NamedProviderConfig, got error: ${err.message}")
+    }
+
     "fail clearly when provider field is missing" in {
       validate(
         "broken",

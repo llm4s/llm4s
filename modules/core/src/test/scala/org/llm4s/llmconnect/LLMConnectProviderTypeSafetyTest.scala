@@ -161,6 +161,34 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     }
   }
 
+  test("XAI provider with XAIConfig returns XAIClient") {
+    val cfg: ProviderConfig = XAIConfig(
+      apiKey = "xai-key",
+      model = "grok-beta",
+      baseUrl = "https://api.x.ai/v1",
+      contextWindow = 131072,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(ProviderKind.XAI, cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "XAIClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
+  test("XAI provider with non-XAIConfig returns Left(ConfigurationError)") {
+    val wrongCfg: ProviderConfig = OpenAIConfig(
+      apiKey = "key",
+      model = "gpt-4o",
+      organization = None,
+      baseUrl = "https://api.openai.com/v1",
+      contextWindow = 128000,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(ProviderKind.XAI, wrongCfg)
+    res.isLeft shouldBe true
+  }
+
   test("OpenAI provider with non-OpenAIConfig should throw IllegalArgumentException") {
     val wrongCfg: ProviderConfig = AnthropicConfig(
       apiKey = "key",

@@ -162,6 +162,13 @@ object ConfigKeys {
   val MISTRAL_API_KEY  = "MISTRAL_API_KEY"
   val MISTRAL_BASE_URL = "MISTRAL_BASE_URL"
 
+  // xAI (Grok)
+  /** xAI API key. Required for Grok models (`grok-2-latest`, `grok-beta`, etc.). */
+  val XAI_API_KEY = "XAI_API_KEY"
+
+  /** Overrides the xAI API base URL. Defaults to `"https://api.x.ai/v1"`. */
+  val XAI_BASE_URL = "XAI_BASE_URL"
+
   // Tool API Keys
   // ---- Tool API keys ------------------------------------------------------
 
