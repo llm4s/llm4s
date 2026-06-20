@@ -218,10 +218,8 @@ class VertexAIAuthProvider(
 
   private def fetchTokenFromMetadataServer(): Result[CachedToken] = {
     logger.debug("[VertexAI] Attempting to fetch token from GCE metadata server")
-    // The metadata server is only reachable on GCE/GKE. Off-GCP it is an unknown host
-    // and the request throws, so a connection failure is treated the same as a non-200
-    // response: both mean "no usable credentials", and the user gets actionable guidance
-    // rather than a low-level networking error.
+    // The metadata server is only reachable on GCE/GKE. An unresolved host means we are
+    // off-GCP (no credentials), while other failures are transient and must stay retryable.
     Try(httpClient.get(METADATA_TOKEN_URL, Map("Metadata-Flavor" -> "Google"))) match {
       case Success(response) if response.statusCode >= 200 && response.statusCode < 300 =>
         Try {
@@ -234,10 +232,29 @@ class VertexAIAuthProvider(
       case Success(response) =>
         logger.debug(s"[VertexAI] Metadata server returned HTTP ${response.statusCode}")
         Left(noCredentialsError)
-      case Failure(e) =>
-        logger.debug(s"[VertexAI] Metadata server unreachable: ${e.getMessage}")
+      case Failure(e) if isUnknownHost(e) =>
+        // Host does not resolve, so this process is not on GCE/GKE — there genuinely are no
+        // credentials. Give actionable guidance (non-recoverable) rather than a network error.
+        logger.debug(s"[VertexAI] Metadata server host unresolved (not on GCE/GKE): ${e.getMessage}")
         Left(noCredentialsError)
+      case Failure(e) =>
+        // Host resolved but the request failed transiently (timeout, connection refused).
+        // Preserve it as a recoverable error so LLMClientRetry can retry through a momentary
+        // metadata-server outage on GCE/GKE.
+        logger.debug(s"[VertexAI] Metadata server request failed transiently: ${e.getMessage}")
+        Left(e.toLLMError)
     }
+  }
+
+  /** True if `t` or any exception in its cause chain is a [[java.net.UnknownHostException]]. */
+  private def isUnknownHost(t: Throwable): Boolean = {
+    @annotation.tailrec
+    def loop(cause: Throwable): Boolean = cause match {
+      case null                             => false
+      case _: java.net.UnknownHostException => true
+      case other                            => loop(other.getCause)
+    }
+    loop(t)
   }
 
   private def enc(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8)

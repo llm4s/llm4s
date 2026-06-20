@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.error.AuthenticationError
+import org.llm4s.error.{ AuthenticationError, LLMError, NetworkError }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
@@ -186,9 +186,9 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
     result.left.toOption.get shouldBe a[AuthenticationError]
   }
 
-  it should "return actionable no-credentials guidance when the metadata server is unreachable" in {
-    // Off-GCP the metadata host does not resolve, so the HTTP call throws rather
-    // than returning a non-200. The user should still get the helpful message.
+  it should "return actionable no-credentials guidance when the metadata host does not resolve" in {
+    // Off-GCP the metadata host does not resolve, so the HTTP call throws UnknownHostException.
+    // That signals "not on GCP" → the user should get the helpful no-credentials message.
     val mockHttp = stub[Llm4sHttpClient]
     (mockHttp.get _).when(*, *, *, *).throws(new java.net.UnknownHostException("metadata.google.internal"))
 
@@ -204,6 +204,26 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
     val err = result.left.toOption.get
     err shouldBe a[AuthenticationError]
     err.message should include("No credentials found")
+  }
+
+  it should "preserve a transient metadata-server failure as a recoverable error" in {
+    // On GCE/GKE the host resolves but may momentarily time out; that must stay retryable
+    // (RecoverableError) rather than being reported as missing credentials.
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.get _).when(*, *, *, *).throws(new java.net.SocketTimeoutException("metadata timeout"))
+
+    val provider = new VertexAIAuthProvider(
+      credentialFilePath = None,
+      httpClient = mockHttp,
+      envReader = _ => None
+    )
+
+    val result = provider.getAccessToken()
+
+    result.isLeft shouldBe true
+    val err = result.left.toOption.get
+    err shouldBe a[NetworkError]
+    LLMError.isRecoverable(err) shouldBe true
   }
 
   "CachedToken" should "not be expired when expiresAtMillis is in the future" in {
