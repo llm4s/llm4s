@@ -216,7 +216,7 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers {
       baseUrl = "https://api.z.ai/api/paas/v4"
     )
 
-    config.contextWindow shouldBe 128000
+    config.contextWindow shouldBe 200000
   }
 
   test("ZaiConfig.fromValues sets correct context window for GLM-4.5-air") {
@@ -226,7 +226,7 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers {
       baseUrl = "https://api.z.ai/api/paas/v4"
     )
 
-    config.contextWindow shouldBe 32000
+    config.contextWindow shouldBe 128000
   }
 
   test("ZaiConfig.fromValues throws for empty apiKey") {

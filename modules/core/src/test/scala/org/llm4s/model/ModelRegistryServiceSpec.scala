@@ -42,6 +42,25 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
         metadata.modelId shouldBe "gpt-4o"
         metadata.provider shouldBe "openai"
 
+  it should "apply embedded overrides so gemini/gemini-1.5-flash stays a chat model" in:
+    defaultServiceResult().flatMap(_.lookup("gemini/gemini-1.5-flash")) match
+      case Left(error) =>
+        fail(error.message)
+      case Right(metadata) =>
+        metadata.provider shouldBe "gemini"
+        metadata.mode shouldBe ModelMode.Chat
+        metadata.contextWindow shouldBe Some(1048576)
+        metadata.reserveCompletion shouldBe Some(8192)
+
+  it should "apply embedded overrides so claude-3-7-sonnet-latest resolves to Anthropic metadata" in:
+    defaultServiceResult().flatMap(_.lookup("claude-3-7-sonnet-latest")) match
+      case Left(error) =>
+        fail(error.message)
+      case Right(metadata) =>
+        metadata.provider shouldBe "anthropic"
+        metadata.mode shouldBe ModelMode.Chat
+        metadata.contextWindow shouldBe Some(200000)
+
   it should "load a registry service from a configured URL" in:
     val json =
       """{

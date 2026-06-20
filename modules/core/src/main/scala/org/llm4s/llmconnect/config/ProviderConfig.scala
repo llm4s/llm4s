@@ -369,8 +369,8 @@ object ZaiConfig {
 
   private def zaiFallback(modelName: String): (Int, Int) =
     modelName match {
-      case name if name.contains("GLM-4.7") => (128000, standardReserve)
-      case name if name.contains("GLM-4.5") => (32000, standardReserve)
+      case name if name.contains("GLM-4.7") => (200000, standardReserve)
+      case name if name.contains("GLM-4.5") => (128000, standardReserve)
       case _                                => (128000, standardReserve)
     }
 
