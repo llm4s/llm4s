@@ -14,7 +14,7 @@ import java.security.KeyFactory
 import java.security.Signature
 import java.security.spec.PKCS8EncodedKeySpec
 import java.util.Base64
-import scala.util.Try
+import scala.util.{ Failure, Success, Try }
 
 /**
  * Provides Google Cloud OAuth2 access tokens for Vertex AI via ADC.
@@ -29,6 +29,18 @@ import scala.util.Try
  *  3. GCE / GKE metadata server — Workload Identity path for production deployments.
  *
  * Tokens are cached until one minute before expiry to minimise round-trips.
+ *
+ * == Config-boundary exemption ==
+ *
+ * This class reads `GOOGLE_ACCESS_TOKEN` and `GOOGLE_APPLICATION_CREDENTIALS`
+ * directly (hence the `scalafix:off NoSystemGetenv` at the top of the file),
+ * rather than receiving them through [[org.llm4s.config.Llm4sConfig]] like other
+ * settings. This is deliberate: Application Default Credentials is a runtime
+ * discovery protocol whose inputs (a possibly-rotated access token, the ambient
+ * credentials path, and the GCE/GKE metadata server) must be resolved lazily at
+ * token-fetch time, not frozen into static config at startup. The reads are
+ * funnelled through the injectable [[envReader]] so the class stays fully
+ * testable without touching the real environment.
  *
  * @param credentialFilePath Optional explicit path to a Google JSON credential file.
  * @param httpClient         HTTP client for token-endpoint calls.
@@ -61,21 +73,17 @@ class VertexAIAuthProvider(
       t.token
     }
 
-  private def fetchToken(): Result[CachedToken] = {
-    envReader("GOOGLE_ACCESS_TOKEN") match {
-      case Some(tok) if tok.nonEmpty =>
+  private def fetchToken(): Result[CachedToken] =
+    envReader("GOOGLE_ACCESS_TOKEN").filter(_.nonEmpty) match {
+      case Some(tok) =>
         logger.debug("[VertexAI] Using GOOGLE_ACCESS_TOKEN from environment")
-        return Right(CachedToken(tok, Long.MaxValue))
-      case _ => ()
-    }
-
-    resolveCredentialFilePath() match {
-      case Some(path) =>
-        fileReader(path).flatMap(fetchTokenFromCredentialFile)
+        Right(CachedToken(tok, Long.MaxValue))
       case None =>
-        fetchTokenFromMetadataServer()
+        resolveCredentialFilePath() match {
+          case Some(path) => fileReader(path).flatMap(fetchTokenFromCredentialFile)
+          case None       => fetchTokenFromMetadataServer()
+        }
     }
-  }
 
   private def resolveCredentialFilePath(): Option[String] =
     credentialFilePath
@@ -156,10 +164,20 @@ class VertexAIAuthProvider(
     val encoder = Base64.getUrlEncoder.withoutPadding()
 
     val header = encoder.encodeToString(
-      """{"alg":"RS256","typ":"JWT"}""".getBytes(StandardCharsets.UTF_8)
+      ujson.Obj("alg" -> "RS256", "typ" -> "JWT").render().getBytes(StandardCharsets.UTF_8)
     )
     val payload = encoder.encodeToString(
-      s"""{"iss":"$serviceAccountEmail","scope":"https://www.googleapis.com/auth/cloud-platform","aud":"$tokenUri","exp":${now + 3600},"iat":$now}"""
+      ujson
+        .Obj(
+          "iss"   -> serviceAccountEmail,
+          "scope" -> "https://www.googleapis.com/auth/cloud-platform",
+          "aud"   -> tokenUri,
+          // ujson serialises Long as a JSON string to avoid precision loss; JWT
+          // NumericDate claims must be JSON numbers, so build them as ujson.Num.
+          "exp" -> ujson.Num((now + 3600).toDouble),
+          "iat" -> ujson.Num(now.toDouble)
+        )
+        .render()
         .getBytes(StandardCharsets.UTF_8)
     )
 
@@ -200,12 +218,12 @@ class VertexAIAuthProvider(
 
   private def fetchTokenFromMetadataServer(): Result[CachedToken] = {
     logger.debug("[VertexAI] Attempting to fetch token from GCE metadata server")
-    Try {
-      val response = httpClient.get(
-        METADATA_TOKEN_URL,
-        Map("Metadata-Flavor" -> "Google")
-      )
-      if (response.statusCode >= 200 && response.statusCode < 300) {
+    // The metadata server is only reachable on GCE/GKE. Off-GCP it is an unknown host
+    // and the request throws, so a connection failure is treated the same as a non-200
+    // response: both mean "no usable credentials", and the user gets actionable guidance
+    // rather than a low-level networking error.
+    Try(httpClient.get(METADATA_TOKEN_URL, Map("Metadata-Flavor" -> "Google"))) match {
+      case Success(response) if response.statusCode >= 200 && response.statusCode < 300 =>
         Try {
           val json      = ujson.read(response.body)
           val token     = json("access_token").str
@@ -213,16 +231,13 @@ class VertexAIAuthProvider(
           val expiresAt = System.currentTimeMillis() + (expiresIn.toLong - 60) * 1000
           CachedToken(token, expiresAt)
         }.toEither.left.map(_.toLLMError)
-      } else {
-        Left(
-          AuthenticationError(
-            "vertexai",
-            "No credentials found. Set GOOGLE_ACCESS_TOKEN, GOOGLE_APPLICATION_CREDENTIALS, " +
-              "run 'gcloud auth application-default login', or deploy on GCE/GKE for Workload Identity."
-          )
-        )
-      }
-    }.toEither.left.map(_.toLLMError).flatten
+      case Success(response) =>
+        logger.debug(s"[VertexAI] Metadata server returned HTTP ${response.statusCode}")
+        Left(noCredentialsError)
+      case Failure(e) =>
+        logger.debug(s"[VertexAI] Metadata server unreachable: ${e.getMessage}")
+        Left(noCredentialsError)
+    }
   }
 
   private def enc(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8)
@@ -232,6 +247,13 @@ object VertexAIAuthProvider {
   private[provider] val TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
   private[provider] val METADATA_TOKEN_URL =
     "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+
+  private val noCredentialsError: AuthenticationError =
+    AuthenticationError(
+      "vertexai",
+      "No credentials found. Set GOOGLE_ACCESS_TOKEN, GOOGLE_APPLICATION_CREDENTIALS, " +
+        "run 'gcloud auth application-default login', or deploy on GCE/GKE for Workload Identity."
+    )
 
   private[provider] case class CachedToken(token: String, expiresAtMillis: Long) {
     def isExpired: Boolean = System.currentTimeMillis() >= expiresAtMillis

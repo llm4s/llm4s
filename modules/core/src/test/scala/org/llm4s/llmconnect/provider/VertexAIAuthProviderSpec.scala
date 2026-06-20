@@ -186,6 +186,26 @@ class VertexAIAuthProviderSpec extends AnyFlatSpec with Matchers with MockFactor
     result.left.toOption.get shouldBe a[AuthenticationError]
   }
 
+  it should "return actionable no-credentials guidance when the metadata server is unreachable" in {
+    // Off-GCP the metadata host does not resolve, so the HTTP call throws rather
+    // than returning a non-200. The user should still get the helpful message.
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.get _).when(*, *, *, *).throws(new java.net.UnknownHostException("metadata.google.internal"))
+
+    val provider = new VertexAIAuthProvider(
+      credentialFilePath = None,
+      httpClient = mockHttp,
+      envReader = _ => None
+    )
+
+    val result = provider.getAccessToken()
+
+    result.isLeft shouldBe true
+    val err = result.left.toOption.get
+    err shouldBe a[AuthenticationError]
+    err.message should include("No credentials found")
+  }
+
   "CachedToken" should "not be expired when expiresAtMillis is in the future" in {
     val future = System.currentTimeMillis() + 60000
     val token  = CachedToken("tok", future)

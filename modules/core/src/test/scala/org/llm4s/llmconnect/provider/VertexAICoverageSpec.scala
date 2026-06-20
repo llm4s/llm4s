@@ -160,6 +160,49 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     result.toOption.get shouldBe "ya29.test-token"
   }
 
+  it should "build a JWT whose numeric exp/iat claims render as integers" in {
+    val kpg = KeyPairGenerator.getInstance("RSA")
+    kpg.initialize(1024)
+    val kp = kpg.generateKeyPair()
+    val pem = "-----BEGIN PRIVATE KEY-----\n" +
+      Base64.getMimeEncoder(64, "\n".getBytes(StandardCharsets.UTF_8)).encodeToString(kp.getPrivate.getEncoded) +
+      "\n-----END PRIVATE KEY-----\n"
+    val credJson = ujson
+      .Obj(
+        "type"         -> "service_account",
+        "client_email" -> "test@my-project.iam.gserviceaccount.com",
+        "private_key"  -> pem,
+        "token_uri"    -> "https://oauth2.googleapis.com/token"
+      )
+      .render()
+
+    var capturedBody = ""
+    val mockHttp     = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).onCall { (_: String, _: Map[String, String], body: String, _: Int) =>
+      capturedBody = body
+      HttpResponse(200, tokenBody, Map.empty)
+    }
+
+    val provider = new VertexAIAuthProvider(
+      credentialFilePath = Some("/fake/sa_creds.json"),
+      httpClient = mockHttp,
+      envReader = _ => None,
+      fileReader = _ => Right(credJson)
+    )
+
+    provider.getAccessToken().isRight shouldBe true
+
+    // Request body is `grant_type=...&assertion=<url-encoded JWT>`.
+    val jwt     = java.net.URLDecoder.decode(capturedBody.split("assertion=").last, StandardCharsets.UTF_8)
+    val payload = new String(Base64.getUrlDecoder.decode(jwt.split("\\.")(1)), StandardCharsets.UTF_8)
+    // exp/iat must be JSON integers (no decimal point, no exponent) or the token endpoint rejects them.
+    (payload should include).regex(""""exp":\d+[,}]""")
+    (payload should include).regex(""""iat":\d+[,}]""")
+    val parsed = ujson.read(payload)
+    parsed("iss").str shouldBe "test@my-project.iam.gserviceaccount.com"
+    parsed("aud").str shouldBe "https://oauth2.googleapis.com/token"
+  }
+
   it should "return AuthenticationError when JWT exchange returns non-200" in {
     val kpg = KeyPairGenerator.getInstance("RSA")
     kpg.initialize(1024)
