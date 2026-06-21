@@ -58,7 +58,7 @@ jobs:
           sbt "benchmarks/Jmh/run -f 1 -wi 3 -w 1s -i 5 -r 1s -rf json -rff target/jmh-results.json" 2>&1 | tee target/jmh-output.txt
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jmh-results-${{ github.sha }}
           path: |
