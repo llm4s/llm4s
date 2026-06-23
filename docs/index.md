@@ -56,7 +56,7 @@ result match {
 <div class="feature-grid" markdown="1">
 
 #### 🔌 Multi-Provider Support
-Connect to **OpenAI**, **Anthropic**, **Azure OpenAI**, **Google Gemini**, **DeepSeek**, **Cohere**, **Mistral**, **OpenRouter**, **Z.ai**, and **Ollama** with a unified API. Switch providers with configuration.
+Connect to **OpenAI**, **Anthropic**, **Azure OpenAI**, **Google Gemini**, **DeepSeek**, **Cohere**, **Mistral**, **OpenRouter**, **Requesty**, **Z.ai**, and **Ollama** with a unified API. Switch providers with configuration.
 [Learn more →](/examples/#basic-examples)
 
 #### 📡 Streaming Responses

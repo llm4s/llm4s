@@ -14,6 +14,7 @@ private[llm4s] object ProviderCapabilitiesRegistry:
   private val registry: Map[ProviderKind, ProviderCapabilities] = Map(
     ProviderKind.OpenAI     -> ProviderCapabilities.OpenAI,
     ProviderKind.OpenRouter -> ProviderCapabilities.OpenRouter,
+    ProviderKind.Requesty   -> ProviderCapabilities.Requesty,
     ProviderKind.Azure      -> ProviderCapabilities.Azure,
     ProviderKind.Anthropic  -> ProviderCapabilities.Anthropic,
     ProviderKind.Ollama     -> ProviderCapabilities.Ollama,

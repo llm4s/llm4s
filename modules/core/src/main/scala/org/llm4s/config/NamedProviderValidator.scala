@@ -36,6 +36,18 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  object Requesty extends NamedProviderValidator:
+    def validate(
+      providerName: ProviderName,
+      section: RawNamedProviderSection
+    ): Result[NamedProviderConfig] =
+      validateNamedProviderConfig(
+        providerName = providerName,
+        providerKind = ProviderKind.Requesty,
+        section = section,
+        requireApiKey = true,
+      )
+
   object Azure extends NamedProviderValidator:
     def validate(
       providerName: ProviderName,

@@ -27,6 +27,7 @@ object ProviderModelTypes:
   enum ProviderKind:
     case OpenAI
     case OpenRouter
+    case Requesty
     case Azure
     case Anthropic
     case Ollama
@@ -41,6 +42,7 @@ object ProviderModelTypes:
     val all: Seq[ProviderKind] = Seq(
       ProviderKind.OpenAI,
       ProviderKind.OpenRouter,
+      ProviderKind.Requesty,
       ProviderKind.Azure,
       ProviderKind.Anthropic,
       ProviderKind.Ollama,
@@ -56,6 +58,7 @@ object ProviderModelTypes:
       value.trim.toLowerCase match
         case "openai"              => Some(ProviderKind.OpenAI)
         case "openrouter"          => Some(ProviderKind.OpenRouter)
+        case "requesty"            => Some(ProviderKind.Requesty)
         case "azure"               => Some(ProviderKind.Azure)
         case "anthropic"           => Some(ProviderKind.Anthropic)
         case "ollama"              => Some(ProviderKind.Ollama)
@@ -76,6 +79,7 @@ object ProviderModelTypes:
       kind match
         case ProviderKind.OpenAI     => "openai"
         case ProviderKind.OpenRouter => "openrouter"
+        case ProviderKind.Requesty   => "requesty"
         case ProviderKind.Azure      => "azure"
         case ProviderKind.Anthropic  => "anthropic"
         case ProviderKind.Ollama     => "ollama"

@@ -162,6 +162,7 @@ object LLMConnect {
     (provider, config) match {
       case (ProviderKind.OpenAI, cfg: OpenAIConfig)       => OpenAIClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.OpenRouter, cfg: OpenAIConfig)   => OpenRouterClient(cfg, metrics, exchangeLogging)
+      case (ProviderKind.Requesty, cfg: OpenAIConfig)     => OpenAIClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.Azure, cfg: AzureConfig)         => OpenAIClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.Anthropic, cfg: AnthropicConfig) => AnthropicClient(cfg, metrics, exchangeLogging)
       case (ProviderKind.Ollama, cfg: OllamaConfig)       => OllamaClient(cfg, metrics, exchangeLogging)

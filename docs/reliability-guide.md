@@ -238,6 +238,14 @@ val client = ReliableProviders.openai(
   )
 )
 
+// Requesty
+  OpenAIConfig(
+    apiKey = "rqsty-sk-...",
+    model = "openai/gpt-4o-mini",
+    baseUrl = Some("https://router.requesty.ai/v1")
+  )
+)
+
 // Zai
   ZaiConfig(
     apiKey = "...",

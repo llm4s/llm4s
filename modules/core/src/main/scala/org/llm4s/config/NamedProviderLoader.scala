@@ -58,10 +58,11 @@ private[config] object NamedProviderLoader:
       required("api key", section.apiKey.map(_.asKey), envHint)
 
     section.provider match
-      case ProviderKind.OpenAI | ProviderKind.OpenRouter =>
+      case ProviderKind.OpenAI | ProviderKind.OpenRouter | ProviderKind.Requesty =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
           val defaultBaseUrl =
             if section.provider == ProviderKind.OpenRouter then DefaultConfig.DEFAULT_OPENROUTER_BASE_URL
+            else if section.provider == ProviderKind.Requesty then DefaultConfig.DEFAULT_REQUESTY_BASE_URL
             else DefaultConfig.DEFAULT_OPENAI_BASE_URL
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(defaultBaseUrl)
           OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl)

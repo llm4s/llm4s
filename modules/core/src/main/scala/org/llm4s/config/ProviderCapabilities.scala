@@ -14,6 +14,10 @@ private[llm4s] object ProviderCapabilities:
     val validator: NamedProviderValidator                 = NamedProviderValidators.OpenRouter
     override val modelLister: Option[ProviderModelLister] = Some(ProviderModelListers.OpenRouter)
 
+  object Requesty extends ProviderCapabilities:
+    val validator: NamedProviderValidator                 = NamedProviderValidators.Requesty
+    override val modelLister: Option[ProviderModelLister] = Some(ProviderModelListers.Requesty)
+
   object Azure extends ProviderCapabilities:
     val validator: NamedProviderValidator = NamedProviderValidators.Azure
 

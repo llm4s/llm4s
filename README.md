@@ -61,7 +61,7 @@ The current roadmap is focused on production readiness rather than adding isolat
 
 ## Features
 
-- **Multi-Provider Support**: Connect to multiple LLM providers, including OpenAI, Anthropic, Azure OpenAI, Google Gemini, DeepSeek, Cohere, Mistral, OpenRouter, Z.ai, and Ollama.
+- **Multi-Provider Support**: Connect to multiple LLM providers, including OpenAI, Anthropic, Azure OpenAI, Google Gemini, DeepSeek, Cohere, Mistral, OpenRouter, Requesty, Z.ai, and Ollama.
 - **Execution Environments**: Run LLM-driven operations in secure, containerized or non-containerized setups.
 - **Error Handling**: Robust mechanisms to catch, log, and recover from failures gracefully.
 - **MCP Support**: Model Context Protocol primitives for richer tool and context integration.

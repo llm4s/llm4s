@@ -43,6 +43,18 @@ object ConfigKeys {
    */
   val OPENROUTER_BASE_URL = OPENAI_BASE_URL // alias via base URL
 
+  // ---- Requesty (OpenAI-compatible) ---------------------------------------
+
+  /**
+   * Requesty base URL alias.
+   *
+   * Requesty is an OpenAI-compatible gateway and uses the same `OPENAI_BASE_URL`
+   * variable — there is no separate `REQUESTY_BASE_URL`. Point `OPENAI_BASE_URL`
+   * at the Requesty router endpoint and configure a named provider with
+   * `provider = "requesty"`.
+   */
+  val REQUESTY_BASE_URL = OPENAI_BASE_URL // alias via base URL
+
   // ---- Azure OpenAI -------------------------------------------------------
 
   /** Azure OpenAI deployment endpoint URL, e.g. `"https://my-resource.openai.azure.com/..."`. */

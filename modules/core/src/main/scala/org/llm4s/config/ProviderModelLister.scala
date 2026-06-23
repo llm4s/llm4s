@@ -45,6 +45,16 @@ private[llm4s] object ProviderModelListers:
         httpClient = httpClient
       )
 
+  object Requesty extends ProviderModelLister:
+    def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
+      listOpenAICompatibleModels(
+        config = config,
+        expected = ProviderKind.Requesty,
+        provider = ProviderKind.Requesty,
+        defaultBaseUrl = DefaultConfig.DEFAULT_REQUESTY_BASE_URL,
+        httpClient = httpClient
+      )
+
   object Anthropic extends ProviderModelLister:
     private val AnthropicVersion = "2023-06-01"
     private val DefaultLimit     = "100"

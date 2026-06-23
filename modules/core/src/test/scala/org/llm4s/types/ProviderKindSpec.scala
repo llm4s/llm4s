@@ -7,12 +7,13 @@ import org.scalatest.matchers.should.Matchers
 class ProviderKindSpec extends AnyFlatSpec with Matchers:
 
   "ProviderKind" should "expose all expected provider instances" in {
-    ProviderKind.all should have size 11
+    ProviderKind.all should have size 12
     (ProviderKind.all should contain).allOf(
       ProviderKind.OpenAI,
       ProviderKind.Azure,
       ProviderKind.Anthropic,
       ProviderKind.OpenRouter,
+      ProviderKind.Requesty,
       ProviderKind.Ollama,
       ProviderKind.Zai,
       ProviderKind.Gemini,
@@ -28,6 +29,7 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
     ProviderKind.Azure.name shouldBe "azure"
     ProviderKind.Anthropic.name shouldBe "anthropic"
     ProviderKind.OpenRouter.name shouldBe "openrouter"
+    ProviderKind.Requesty.name shouldBe "requesty"
     ProviderKind.Ollama.name shouldBe "ollama"
     ProviderKind.Zai.name shouldBe "zai"
     ProviderKind.Gemini.name shouldBe "gemini"
@@ -42,6 +44,7 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
     ProviderKind.fromName("AZURE") shouldBe Some(ProviderKind.Azure)
     ProviderKind.fromName("Anthropic") shouldBe Some(ProviderKind.Anthropic)
     ProviderKind.fromName("OpenRouter") shouldBe Some(ProviderKind.OpenRouter)
+    ProviderKind.fromName("Requesty") shouldBe Some(ProviderKind.Requesty)
     ProviderKind.fromName("OLLAMA") shouldBe Some(ProviderKind.Ollama)
     ProviderKind.fromName("ZAI") shouldBe Some(ProviderKind.Zai)
     ProviderKind.fromName("GEMINI") shouldBe Some(ProviderKind.Gemini)
@@ -71,6 +74,7 @@ class ProviderKindSpec extends AnyFlatSpec with Matchers:
       case ProviderKind.Azure      => "cloud-azure"
       case ProviderKind.Anthropic  => "cloud-anthropic"
       case ProviderKind.OpenRouter => "cloud-openrouter"
+      case ProviderKind.Requesty   => "cloud-requesty"
       case ProviderKind.Ollama     => "local"
       case ProviderKind.Zai        => "cloud-zai"
       case ProviderKind.Gemini     => "cloud-gemini"
