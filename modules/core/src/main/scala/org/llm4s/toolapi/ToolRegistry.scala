@@ -146,6 +146,20 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
         lastResult
     }
 
+  /**
+   * Executes a single tool attempt with an optional wall-clock timeout.
+   *
+   * When a timeout is configured and the tool exceeds it, this method returns
+   * [[ToolCallError.Timeout]] and performs a best-effort interrupt of the worker
+   * thread. The interrupt signal will unblock standard Java/Scala interruptible
+   * operations such as `Thread.sleep`, socket I/O, and `Await.result`. CPU-bound
+   * operations that never call a blocking primitive cannot be interrupted this way;
+   * that is a JVM-level limitation.
+   *
+   * @param request    The tool call request to execute.
+   * @param timeoutOpt Optional maximum duration; `None` means no timeout.
+   * @param ec         ExecutionContext on which the tool Future is dispatched.
+   */
   private def runOneAttemptWithTimeout(
     request: ToolCallRequest,
     timeoutOpt: Option[FiniteDuration]
@@ -157,18 +171,41 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
         val promise = Promise[Either[ToolCallError, ujson.Value]]()
         val timeoutError =
           Left(ToolCallError.Timeout(request.functionName, duration)): Either[ToolCallError, ujson.Value]
-        val runFuture = Future(blocking(runOneAttempt(request)))
+
+        // Capture the worker thread so we can interrupt it if the timeout fires.
+        // @volatile ensures the write in the Future is visible to the scheduler thread.
+        @volatile var workerThread: Thread = null
+
+        val runFuture = Future {
+          workerThread = Thread.currentThread()
+          val resultOrEx =
+            scala.util.control.Exception.nonFatalCatch.either(blocking(runOneAttempt(request)))
+          // Clear interrupt status before returning the thread to the pool.
+          Thread.interrupted()
+          // Re-throw non-fatal exceptions, or return the successful result.
+          resultOrEx.fold(throw _, identity)
+        }
+
         val scheduled = ToolRegistry.timeoutScheduler.schedule(
           new Runnable {
-            override def run(): Unit = promise.trySuccess(timeoutError)
+            override def run(): Unit =
+              // trySuccess returns true only if this is the first completer of the promise,
+              // preventing a spurious interrupt when the tool finishes just before us.
+              if (promise.trySuccess(timeoutError)) {
+                // Best-effort interrupt: unblocks Thread.sleep, socket I/O, Await.result, etc.
+                val t = workerThread
+                if (t != null) t.interrupt()
+              }
           },
           duration.length,
           duration.unit
         )
+
         runFuture.onComplete { result =>
           scheduled.cancel(false)
           promise.tryComplete(result)
         }
+
         Await.result(promise.future, duration + 1.second)
     }
 

@@ -3,11 +3,11 @@ package org.llm4s.configpolicy
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-class CheckPoliciesSpec extends AnyFunSpec with Matchers {
+class EnvCheckPoliciesSpec extends AnyFunSpec with Matchers {
 
-  describe("CheckPolicies argument parser") {
+  describe("EnvCheckPolicies argument parser") {
     it("should parse --env argument correctly") {
-      val parsed = CheckPolicies.parseArgs(Array("--env=prod", "--preset=prod-safe", "--verbose"))
+      val parsed = EnvCheckPolicies.parseArgs(Array("--env=prod", "--preset=prod-safe", "--verbose"))
       parsed.env shouldBe "prod"
       parsed.preset shouldBe "prod-safe"
       parsed.verbose shouldBe true
@@ -31,7 +31,7 @@ class CheckPoliciesSpec extends AnyFunSpec with Matchers {
         "OPENAI_BASE_URL"      -> "https://api.openai.com"
       )
 
-      val snapshot = CheckPolicies.snapshotFromEnv(env.get)
+      val snapshot = EnvCheckPolicies.snapshotFromEnv(env.get)
       snapshot.provider shouldBe Some("openai")
       snapshot.model shouldBe Some("gpt-4o-mini")
       snapshot.maxTokens shouldBe Some(2048)
@@ -41,7 +41,7 @@ class CheckPoliciesSpec extends AnyFunSpec with Matchers {
     }
 
     it("should handle missing optional fields") {
-      val snapshot = CheckPolicies.snapshotFromEnv(_ => None)
+      val snapshot = EnvCheckPolicies.snapshotFromEnv(_ => None)
       snapshot.provider shouldBe None
       snapshot.model shouldBe None
       snapshot.maxTokens shouldBe None
@@ -60,7 +60,7 @@ class CheckPoliciesSpec extends AnyFunSpec with Matchers {
         "LLM_REGION"           -> "eastus"
       )
 
-      val code = CheckPolicies.run(CheckPolicies.Options(env = "prod", preset = "prod-safe"), env.get)
+      val code = EnvCheckPolicies.run(EnvCheckPolicies.Options(env = "prod", preset = "prod-safe"), env.get)
       code shouldBe 0
     }
 
@@ -72,7 +72,7 @@ class CheckPoliciesSpec extends AnyFunSpec with Matchers {
         "LLM_REASONING_BUDGET" -> "999999"
       )
 
-      val code = CheckPolicies.run(CheckPolicies.Options(env = "prod", preset = "prod-safe"), env.get)
+      val code = EnvCheckPolicies.run(EnvCheckPolicies.Options(env = "prod", preset = "prod-safe"), env.get)
       code shouldBe 1
     }
   }
@@ -94,7 +94,7 @@ class CheckPoliciesSpec extends AnyFunSpec with Matchers {
         "LLM_REGION"           -> "eastus"
       )
 
-      CheckPolicies.run(CheckPolicies.Options(env = "prod", preset = "prod-safe"), env.get) shouldBe 0
+      EnvCheckPolicies.run(EnvCheckPolicies.Options(env = "prod", preset = "prod-safe"), env.get) shouldBe 0
     }
 
     it("should show failure status when policies fail") {
@@ -106,7 +106,7 @@ class CheckPoliciesSpec extends AnyFunSpec with Matchers {
         "LLM_REGION"           -> "moon"
       )
 
-      CheckPolicies.run(CheckPolicies.Options(env = "prod", preset = "prod-safe"), env.get) shouldBe 1
+      EnvCheckPolicies.run(EnvCheckPolicies.Options(env = "prod", preset = "prod-safe"), env.get) shouldBe 1
     }
   }
 }

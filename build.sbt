@@ -130,12 +130,12 @@ lazy val llm4s = (project in file("."))
   .aggregate(
     core,
     samples,
+    configPolicy,
     workspaceShared,
     workspaceRunner,
     workspaceClient,
     workspaceSamples,
     traceOpentelemetry,
-    configPolicy,
     knowledgegraphNeo4j,
     benchmarks
   )
@@ -268,6 +268,24 @@ lazy val samples = (project in file("modules//samples"))
     libraryDependencies += Deps.termflow
   )
 
+lazy val configPolicy = (project in file("modules/config-policy"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-config-policy",
+    commonSettings,
+    publish / skip := true,
+    coverageEnabled := false,
+    // Env-var-based engine CLI (EnvCheckPolicies) calls sys.exit, so its runMain
+    // is forked. Keep the forked working directory at the repo root so the
+    // catalog engine's relative --config paths (CheckPolicies) still resolve.
+    run / fork  := true,
+    Test / fork := true,
+    run / baseDirectory := (LocalRootProject / baseDirectory).value,
+    // Both engines compile here; Deps.config is also available transitively via core.
+    libraryDependencies += Deps.config,
+    Compile / mainClass := Some("org.llm4s.configpolicy.CheckPolicies")
+  )
+
 lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))
   .dependsOn(workspaceShared, workspaceRunner, workspaceClient, samples)
   .settings(
@@ -286,19 +304,6 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
       Deps.opentelemetryApi,
       Deps.opentelemetrySdk,
       Deps.opentelemetryExporterOtlp
-    )
-  )
-
-lazy val configPolicy = (project in file("modules/config-policy"))
-  .settings(
-    name := "config-policy",
-    commonSettings,
-    run / fork := true,
-    Test / fork := true,
-    Compile / mainClass := Some("org.llm4s.configpolicy.CheckPolicies"),
-    libraryDependencies ++= Seq(
-      Deps.config,
-      Deps.scalatest % Test
     )
   )
 

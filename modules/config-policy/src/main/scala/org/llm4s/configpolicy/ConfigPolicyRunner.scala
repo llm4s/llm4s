@@ -1,7 +1,7 @@
 package org.llm4s.configpolicy
 
 object ConfigPolicyRunner {
-  def evaluate(config: ConfigSnapshot, env: String, policies: List[ConfigPolicy]): PolicyEvaluationResult =
+  def evaluate(config: ConfigSnapshot, env: String, policies: List[EnvConfigPolicy]): PolicyEvaluationResult =
     PolicyEvaluationResult(policies.map(_.evaluate(config, env)))
 
   def formatReport(result: PolicyEvaluationResult, verbose: Boolean = false): String = {

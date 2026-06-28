@@ -1,49 +1,38 @@
+// scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.configpolicy
 
+import org.llm4s.config.Llm4sConfig
+import pureconfig.ConfigSource
+
 object CheckPolicies {
-  final case class Options(
-    env: String = "prod",
-    preset: String = "prod-safe",
-    verbose: Boolean = false
-  )
-
-  def parseArgs(args: Array[String]): Options =
-    args.foldLeft(Options()) { (acc, arg) =>
-      if (arg.startsWith("--env=")) acc.copy(env = arg.stripPrefix("--env=").trim.toLowerCase)
-      else if (arg.startsWith("--preset=")) acc.copy(preset = arg.stripPrefix("--preset=").trim.toLowerCase)
-      else if (arg == "--verbose") acc.copy(verbose = true)
-      else acc
-    }
-
-  def snapshotFromEnv(getEnv: String => Option[String]): ConfigSnapshot =
-    ConfigSnapshot(
-      provider = getEnv("LLM_PROVIDER").map(_.toLowerCase),
-      model = getEnv("LLM_MODEL"),
-      maxTokens = getEnv("LLM_MAX_TOKENS").flatMap(PolicyBuilder.parseInt),
-      reasoningBudget = getEnv("LLM_REASONING_BUDGET").flatMap(PolicyBuilder.parseInt),
-      region = getEnv("LLM_REGION").orElse(getEnv("AZURE_REGION")),
-      baseUrl = getEnv("OPENAI_BASE_URL")
-    )
-
-  // Note: This CLI tool deliberately reads raw env vars for pre-config validation
-  // (before Llm4sConfig is available), which is acceptable for a standalone entry point.
-  // scalafix:off DisableSyntax.NoSysEnv
-  def run(options: Options, getEnv: String => Option[String] = key => sys.env.get(key)): Int =
-    // scalafix:on DisableSyntax.NoSysEnv
-    DefaultPolicies.getPreset(options.preset) match {
-      case None =>
-        println(s"Unknown preset '${options.preset}'. Available presets: ${DefaultPolicies.listPresets.mkString(", ")}")
-        2
-      case Some(policies) =>
-        val snapshot = snapshotFromEnv(getEnv)
-        val result   = ConfigPolicyRunner.evaluate(snapshot, options.env, policies)
-        println(ConfigPolicyRunner.formatReport(result, options.verbose))
-        if (result.passed) 0 else 1
-    }
-
   def main(args: Array[String]): Unit = {
-    val options = parseArgs(args)
-    val code    = run(options)
-    if (code != 0) throw new RuntimeException(s"Exiting with code $code")
+    val envName   = parseArg(args, "--env").getOrElse("prod")
+    val configOpt = parseArg(args, "--config")
+
+    val environment = CatalogEnvironment.fromString(envName)
+    val policy      = ConfigPolicy.preset(envName).getOrElse(ConfigPolicy.prodSafeDefaults)
+    val source      = configOpt.map(ConfigSource.file).getOrElse(ConfigSource.default)
+
+    Llm4sConfig.providerFrom(source) match {
+      case Right(providerConfig) =>
+        val violations = ConfigPolicyEngine.check(providerConfig, policy, environment)
+        if (violations.isEmpty) {
+          println(s"Config policy check passed for env=$envName")
+          sys.exit(0)
+        } else {
+          Console.err.println(s"Config policy check failed for env=$envName")
+          violations.foreach(v => Console.err.println(s" - [${v.rule}] ${v.message}"))
+          sys.exit(1)
+        }
+      case Left(error) =>
+        Console.err.println(s"Failed to load provider config: ${error.formatted}")
+        sys.exit(1)
+    }
+  }
+
+  private def parseArg(args: Array[String], name: String): Option[String] = {
+    val idx = args.indexOf(name)
+    if (idx >= 0 && idx + 1 < args.length) Some(args(idx + 1))
+    else args.find(_.startsWith(name + "=")).map(_.stripPrefix(name + "="))
   }
 }

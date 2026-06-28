@@ -3,7 +3,7 @@ package org.llm4s.configpolicy
 import org.scalatest.funspec.AnyFunSpec
 import org.scalatest.matchers.should.Matchers
 
-class ConfigPolicySpec extends AnyFunSpec with Matchers {
+class EnvConfigPolicySpec extends AnyFunSpec with Matchers {
 
   private val base = ConfigSnapshot(
     provider = Some("openai"),

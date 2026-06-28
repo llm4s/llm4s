@@ -192,6 +192,16 @@ object Llm4sConfig {
     yield models
 
   /**
+   * Loads the default LLM provider configuration from a custom PureConfig source.
+   *
+   * Useful for policy checks and validation workflows that need to evaluate a
+   * specific config source (for example, file overlays in CI). The source must
+   * define named providers under `llm4s.providers` with a selected default.
+   */
+  def providerFrom(source: ConfigSource): Result[ProviderConfig] =
+    defaultProvider(source)
+
+  /**
    * Loads PostgreSQL vector-search index configuration from the current environment.
    *
    * @return the PgConfig, or a [[org.llm4s.error.ConfigurationError]] when

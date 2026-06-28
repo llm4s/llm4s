@@ -1,192 +1,170 @@
 package org.llm4s.configpolicy
 
-import scala.util.Try
+import org.llm4s.llmconnect.config._
 
-final case class ConfigSnapshot(
-  provider: Option[String],
-  model: Option[String],
-  maxTokens: Option[Int],
-  reasoningBudget: Option[Int],
-  region: Option[String],
-  baseUrl: Option[String]
-)
+import scala.util.{ Failure, Success, Try }
+import scala.util.matching.Regex
 
-sealed trait PolicyResult {
-  def policyName: String
-  def message: String
+final case class ConfigPolicy(
+  allowedProviders: Set[String] = Set.empty,
+  allowedModelPatterns: List[String] = Nil,
+  maxContextWindowByEnv: Map[CatalogEnvironment, Int] = Map.empty,
+  requiredBaseUrlPatternByEnv: Map[CatalogEnvironment, String] = Map.empty
+) {
+  def withAllowedProviders(values: String*): ConfigPolicy =
+    copy(allowedProviders = values.map(_.toLowerCase).toSet)
+
+  def withAllowedModelPatterns(values: String*): ConfigPolicy =
+    copy(allowedModelPatterns = values.toList)
+
+  def withMaxContextWindow(environment: CatalogEnvironment, max: Int): ConfigPolicy =
+    copy(maxContextWindowByEnv = maxContextWindowByEnv + (environment -> max))
+
+  def withRequiredBaseUrlPattern(environment: CatalogEnvironment, pattern: String): ConfigPolicy =
+    copy(requiredBaseUrlPatternByEnv = requiredBaseUrlPatternByEnv + (environment -> pattern))
 }
 
-final case class PolicyPass(policyName: String, message: String = "passed")                       extends PolicyResult
-final case class PolicyFail(policyName: String, message: String)                                  extends PolicyResult
-final case class PolicyWarn(policyName: String, message: String)                                  extends PolicyResult
-final case class PolicySkip(policyName: String, message: String = "skipped for this environment") extends PolicyResult
+object ConfigPolicy {
+  val permissive: ConfigPolicy = ConfigPolicy()
 
-final case class PolicyEvaluationResult(results: List[PolicyResult]) {
-  val failures: List[PolicyFail] = results.collect { case f: PolicyFail => f }
-  val warnings: List[PolicyWarn] = results.collect { case w: PolicyWarn => w }
-  val skipped: List[PolicySkip]  = results.collect { case s: PolicySkip => s }
+  val devSandbox: ConfigPolicy =
+    ConfigPolicy()
+      .withAllowedProviders("openai", "anthropic", "ollama", "gemini", "deepseek")
+      .withMaxContextWindow(CatalogEnvironment.Dev, 128000)
 
-  def passed: Boolean = failures.isEmpty
+  val prodSafeDefaults: ConfigPolicy =
+    ConfigPolicy()
+      .withAllowedProviders("openai", "anthropic", "azure", "gemini", "deepseek")
+      .withAllowedModelPatterns(
+        "openai/gpt-4o",
+        "openai/gpt-4o-mini",
+        "anthropic/claude-3-5-sonnet.*",
+        "azure/.*",
+        "gemini/gemini-2\\..*",
+        "deepseek/deepseek-chat"
+      )
+      .withMaxContextWindow(CatalogEnvironment.Prod, 128000)
+
+  def preset(name: String): Option[ConfigPolicy] =
+    name.toLowerCase match {
+      case "permissive" | "none" => Some(permissive)
+      case "dev" | "dev-sandbox" => Some(devSandbox)
+      case "prod" | "prod-safe"  => Some(prodSafeDefaults)
+      case _                     => None
+    }
 }
 
-trait ConfigPolicy {
-  def name: String
-  def evaluate(config: ConfigSnapshot, env: String): PolicyResult
-}
+final case class PolicyViolation(rule: String, message: String)
 
-object PolicyBuilder {
+object ConfigPolicyEngine {
 
-  private def shouldRun(targetEnvs: Set[String], env: String): Boolean =
-    targetEnvs.isEmpty || targetEnvs.contains(env)
-
-  def allowedProviders(allowed: Set[String], envs: Set[String] = Set.empty): ConfigPolicy =
-    new ConfigPolicy {
-      override val name: String = "allowed-providers"
-
-      override def evaluate(config: ConfigSnapshot, env: String): PolicyResult =
-        if (!shouldRun(envs, env)) PolicySkip(name)
-        else {
-          val provider = config.provider.getOrElse("")
-          if (provider.nonEmpty && allowed.contains(provider.toLowerCase)) PolicyPass(name)
-          else PolicyFail(name, s"provider '$provider' is not allowed in env '$env'")
+  private def compileRegexList(
+    patterns: List[String],
+    rule: String
+  ): Either[List[PolicyViolation], List[Regex]] =
+    patterns.zipWithIndex.foldLeft[Either[List[PolicyViolation], List[Regex]]](Right(Nil)) {
+      case (Left(errs), _) => Left(errs)
+      case (Right(acc), (raw, idx)) =>
+        Try(new Regex(raw)) match {
+          case Success(r) => Right(acc :+ r)
+          case Failure(e) =>
+            Left(
+              List(
+                PolicyViolation(
+                  rule,
+                  s"Invalid regex at index $idx ('$raw'): ${e.getMessage}"
+                )
+              )
+            )
         }
     }
 
-  def allowedModels(allowed: Set[String], envs: Set[String] = Set.empty): ConfigPolicy =
-    new ConfigPolicy {
-      override val name: String = "allowed-models"
-
-      override def evaluate(config: ConfigSnapshot, env: String): PolicyResult =
-        if (!shouldRun(envs, env)) PolicySkip(name)
-        else {
-          val model = config.model.getOrElse("")
-          if (model.nonEmpty && allowed.contains(model)) PolicyPass(name)
-          else PolicyFail(name, s"model '$model' is not allowed in env '$env'")
-        }
+  /** `@unchecked`: keep a default branch for future [[ProviderConfig]] subtypes without failing -Werror. */
+  def providerName(config: ProviderConfig): String =
+    (config: @unchecked) match {
+      case _: OpenAIConfig    => "openai"
+      case _: AzureConfig     => "azure"
+      case _: AnthropicConfig => "anthropic"
+      case _: OllamaConfig    => "ollama"
+      case _: ZaiConfig       => "zai"
+      case _: GeminiConfig    => "gemini"
+      case _: DeepSeekConfig  => "deepseek"
+      case _: CohereConfig    => "cohere"
+      case _: MistralConfig   => "mistral"
+      case other =>
+        val simple = other.getClass.getSimpleName.stripSuffix("Config")
+        if (simple.isEmpty) "unknown"
+        else simple.toLowerCase
     }
 
-  def maxTokensLimit(max: Int, envs: Set[String] = Set.empty): ConfigPolicy =
-    new ConfigPolicy {
-      override val name: String = "max-tokens-limit"
+  def providerModel(config: ProviderConfig): String =
+    s"${providerName(config)}/${config.model}"
 
-      override def evaluate(config: ConfigSnapshot, env: String): PolicyResult =
-        if (!shouldRun(envs, env)) PolicySkip(name)
-        else {
-          config.maxTokens match {
-            case Some(value) if value <= max => PolicyPass(name)
-            case Some(value) =>
-              PolicyFail(name, s"maxTokens $value exceeds allowed limit $max for env '$env'")
-            case None =>
-              PolicyWarn(name, s"maxTokens is not set for env '$env'")
+  def baseUrlOrEndpoint(config: ProviderConfig): Option[String] =
+    (config: @unchecked) match {
+      case c: OpenAIConfig    => Some(c.baseUrl)
+      case c: AzureConfig     => Some(c.endpoint)
+      case c: AnthropicConfig => Some(c.baseUrl)
+      case c: OllamaConfig    => Some(c.baseUrl)
+      case c: ZaiConfig       => Some(c.baseUrl)
+      case c: GeminiConfig    => Some(c.baseUrl)
+      case c: DeepSeekConfig  => Some(c.baseUrl)
+      case c: CohereConfig    => Some(c.baseUrl)
+      case c: MistralConfig   => Some(c.baseUrl)
+      case _                  => None
+    }
+
+  def check(config: ProviderConfig, policy: ConfigPolicy, environment: CatalogEnvironment): List[PolicyViolation] = {
+    val provider = providerName(config)
+    val fullSpec = providerModel(config)
+
+    val providerViolations =
+      if (policy.allowedProviders.nonEmpty && !policy.allowedProviders(provider)) {
+        List(PolicyViolation("allowedProviders", s"Provider '$provider' is not allowed"))
+      } else Nil
+
+    val modelViolations =
+      if (policy.allowedModelPatterns.isEmpty) Nil
+      else
+        compileRegexList(policy.allowedModelPatterns, "allowedModelPatterns") match {
+          case Left(violations) => violations
+          case Right(compiled) =>
+            if (compiled.exists(_.findFirstIn(fullSpec).isDefined)) Nil
+            else
+              List(
+                PolicyViolation(
+                  "allowedModels",
+                  s"Model '$fullSpec' does not match configured allowlist"
+                )
+              )
+        }
+
+    val maxContextViolations =
+      policy.maxContextWindowByEnv
+        .get(environment)
+        .filter(max => config.contextWindow > max)
+        .map(max => PolicyViolation("maxContextWindow", s"contextWindow ${config.contextWindow} exceeds $max"))
+        .toList
+
+    val baseUrlViolations =
+      policy.requiredBaseUrlPatternByEnv
+        .get(environment)
+        .toList
+        .flatMap { rawPattern =>
+          compileRegexList(List(rawPattern), "requiredBaseUrl") match {
+            case Left(violations) => violations
+            case Right(compiled) =>
+              val pattern = compiled.head
+              baseUrlOrEndpoint(config) match {
+                case Some(url) if pattern.findFirstIn(url).isDefined => Nil
+                case Some(_) =>
+                  List(PolicyViolation("requiredBaseUrl", s"Endpoint must match $rawPattern"))
+                case None =>
+                  List(PolicyViolation("requiredBaseUrl", "No endpoint/baseUrl found"))
+              }
           }
         }
-    }
 
-  def reasoningBudgetLimit(max: Int, envs: Set[String] = Set.empty): ConfigPolicy =
-    new ConfigPolicy {
-      override val name: String = "reasoning-budget-limit"
-
-      override def evaluate(config: ConfigSnapshot, env: String): PolicyResult =
-        if (!shouldRun(envs, env)) PolicySkip(name)
-        else {
-          config.reasoningBudget match {
-            case Some(value) if value <= max => PolicyPass(name)
-            case Some(value) =>
-              PolicyFail(name, s"reasoningBudget $value exceeds allowed limit $max for env '$env'")
-            case None =>
-              PolicyPass(name, "reasoning budget not set")
-          }
-        }
-    }
-
-  def requiredRegion(allowedRegions: Set[String] = Set.empty, envs: Set[String] = Set.empty): ConfigPolicy =
-    new ConfigPolicy {
-      override val name: String = "required-region"
-
-      override def evaluate(config: ConfigSnapshot, env: String): PolicyResult =
-        if (!shouldRun(envs, env)) PolicySkip(name)
-        else {
-          config.region match {
-            case None | Some("") => PolicyFail(name, s"region is required for env '$env'")
-            case Some(value) if allowedRegions.isEmpty || allowedRegions.contains(value) => PolicyPass(name)
-            case Some(value) => PolicyFail(name, s"region '$value' is not allowed for env '$env'")
-          }
-        }
-    }
-
-  def customPolicy(
-    policyName: String,
-    envs: Set[String] = Set.empty
-  )(rule: (ConfigSnapshot, String) => Either[String, String]): ConfigPolicy =
-    new ConfigPolicy {
-      override val name: String = policyName
-
-      override def evaluate(config: ConfigSnapshot, env: String): PolicyResult =
-        if (!shouldRun(envs, env)) PolicySkip(name)
-        else {
-          rule(config, env) match {
-            case Right(msg) => PolicyPass(name, msg)
-            case Left(err)  => PolicyFail(name, err)
-          }
-        }
-    }
-
-  def parseInt(value: String): Option[Int] = Try(value.trim.toInt).toOption
-}
-
-object DefaultPolicies {
-  import PolicyBuilder._
-
-  val productionSafeDefaults: List[ConfigPolicy] = List(
-    allowedProviders(Set("openai", "anthropic", "azure"), Set("prod")),
-    maxTokensLimit(4096, Set("prod")),
-    reasoningBudgetLimit(10000, Set("prod")),
-    requiredRegion(Set("eastus", "westeurope", "uksouth"), Set("prod"))
-  )
-
-  val devSandboxDefaults: List[ConfigPolicy] = List(
-    maxTokensLimit(16384, Set("dev")),
-    reasoningBudgetLimit(50000, Set("dev"))
-  )
-
-  val stagingBalancedDefaults: List[ConfigPolicy] = List(
-    allowedProviders(Set("openai", "anthropic", "gemini", "azure"), Set("staging")),
-    allowedModels(
-      Set(
-        "gpt-4o-mini",
-        "gpt-4o",
-        "claude-3-5-sonnet",
-        "gemini-1.5-pro"
-      ),
-      Set("staging")
-    ),
-    maxTokensLimit(8192, Set("staging")),
-    requiredRegion(Set("eastus", "westeurope", "uksouth"), Set("staging"))
-  )
-
-  val costControlledDefaults: List[ConfigPolicy] = List(
-    maxTokensLimit(4096),
-    reasoningBudgetLimit(10000)
-  )
-
-  val complianceDefaults: List[ConfigPolicy] = List(
-    allowedProviders(Set("azure", "openai", "anthropic")),
-    requiredRegion(Set("eastus", "westeurope", "uksouth"))
-  )
-
-  val allDefaults: List[ConfigPolicy] =
-    productionSafeDefaults ++ devSandboxDefaults ++ stagingBalancedDefaults ++ costControlledDefaults ++ complianceDefaults
-
-  def getPreset(name: String): Option[List[ConfigPolicy]] = name match {
-    case "prod-safe"        => Some(productionSafeDefaults)
-    case "dev-sandbox"      => Some(devSandboxDefaults)
-    case "staging-balanced" => Some(stagingBalancedDefaults)
-    case "cost-controlled"  => Some(costControlledDefaults)
-    case "compliance"       => Some(complianceDefaults)
-    case "all"              => Some(allDefaults)
-    case _                  => None
+    providerViolations ++ modelViolations ++ maxContextViolations ++ baseUrlViolations
   }
-
-  def listPresets: List[String] =
-    List("prod-safe", "dev-sandbox", "staging-balanced", "cost-controlled", "compliance", "all")
 }
