@@ -31,6 +31,12 @@ final class WhisperSpeechToText(
     val wavResult             = inputToWavPath(input)
     val effectiveOutputFormat = WhisperSpeechToText.effectiveOutputFormat(outputFormat, options)
 
+    // Snapshot which sibling output paths already exist, so cleanup below only removes transcript files
+    // this invocation actually created and never touches a user's pre-existing files.
+    val preExistingOutputs: Set[Path] = wavResult.toOption
+      .map { case (path, _) => WhisperSpeechToText.existingGeneratedOutputs(path, effectiveOutputFormat) }
+      .getOrElse(Set.empty)
+
     val result = for {
       wavAndTemp <- wavResult
       args = buildWhisperArgs(wavAndTemp._1, options)
@@ -51,11 +57,12 @@ final class WhisperSpeechToText(
     } yield transcription
 
     // Clean up regardless of transcription success or failure: the temp WAV (if we created one) and any
-    // sibling transcript file Whisper wrote next to the input. The latter matters for FileAudio inputs,
+    // sibling transcript file Whisper newly wrote next to the input. The latter matters for FileAudio inputs,
     // where the input is a real user file and the generated <stem>.<format> would otherwise be left behind.
+    // Files that already existed before the run (see preExistingOutputs) are preserved.
     wavResult.foreach { case (path, isTemp) =>
       if (isTemp) Try(Files.deleteIfExists(path))
-      WhisperSpeechToText.deleteGeneratedOutputs(path, effectiveOutputFormat)
+      WhisperSpeechToText.deleteGeneratedOutputs(path, effectiveOutputFormat, preserve = preExistingOutputs)
     }
 
     result
@@ -194,9 +201,23 @@ object WhisperSpeechToText {
     candidates.collectFirst(Function.unlift(readIfExists)).getOrElse(stdout)
   }
 
-  /** Delete any transcript files Whisper generated next to the input, so they don't litter the user's directory. */
-  private[stt] def deleteGeneratedOutputs(inputPath: Path, outputFormat: String): Unit =
-    outputPathCandidates(inputPath, outputFormat).foreach(p => Try(Files.deleteIfExists(p)))
+  /** Candidate sibling output paths that already exist on disk before a run (so they can be preserved). */
+  private[stt] def existingGeneratedOutputs(inputPath: Path, outputFormat: String): Set[Path] =
+    outputPathCandidates(inputPath, outputFormat).filter(p => Files.exists(p)).toSet
+
+  /**
+   * Delete transcript files Whisper generated next to the input, so they don't litter the user's directory.
+   * Paths in `preserve` (typically those that already existed before the run) are left untouched, so a user's
+   * pre-existing transcript/metadata sidecar is never removed.
+   */
+  private[stt] def deleteGeneratedOutputs(
+    inputPath: Path,
+    outputFormat: String,
+    preserve: Set[Path] = Set.empty
+  ): Unit =
+    outputPathCandidates(inputPath, outputFormat)
+      .filterNot(preserve.contains)
+      .foreach(p => Try(Files.deleteIfExists(p)))
 
   private def outputPathCandidates(inputPath: Path, outputFormat: String): List[Path] = {
     val fileName = inputPath.getFileName.toString
