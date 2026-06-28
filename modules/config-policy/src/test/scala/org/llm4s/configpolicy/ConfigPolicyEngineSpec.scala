@@ -1,10 +1,14 @@
 package org.llm4s.configpolicy
 
-import org.llm4s.llmconnect.config.{ OllamaConfig, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OllamaConfig, OpenAIConfig }
+import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers {
+
+  private given ContextWindowResolver =
+    ContextWindowResolver(ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get)
 
   "ConfigPolicyEngine.check" should {
     "pass for dev ollama config under dev policy" in {
