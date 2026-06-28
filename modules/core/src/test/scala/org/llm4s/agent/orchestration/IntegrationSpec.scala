@@ -1,8 +1,11 @@
 package org.llm4s.agent.orchestration
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.Outcome
+import org.slf4j.LoggerFactory
 import scala.concurrent.duration._
 import scala.concurrent.{ Future, ExecutionContext }
 
@@ -11,6 +14,33 @@ import scala.concurrent.{ Future, ExecutionContext }
  */
 class IntegrationSpec extends AnyFlatSpec with Matchers with ScalaFutures {
   implicit val ec: ExecutionContext = ExecutionContext.global
+
+  override def withFixture(test: NoArgTest): Outcome = {
+    val typedAgentLogger = LoggerFactory
+      .getLogger("org.llm4s.agent.orchestration.TypedAgent$")
+      .asInstanceOf[LBLogger]
+    val policiesLogger = LoggerFactory
+      .getLogger("org.llm4s.agent.orchestration.Policies$")
+      .asInstanceOf[LBLogger]
+    val planRunnerLogger = LoggerFactory
+      .getLogger("org.llm4s.agent.orchestration.PlanRunner")
+      .asInstanceOf[LBLogger]
+
+    val previousTypedAgentLevel = typedAgentLogger.getLevel
+    val previousPoliciesLevel   = policiesLogger.getLevel
+    val previousPlanRunnerLevel = planRunnerLogger.getLevel
+
+    typedAgentLogger.setLevel(Level.OFF)
+    policiesLogger.setLevel(Level.OFF)
+    planRunnerLogger.setLevel(Level.OFF)
+
+    try super.withFixture(test)
+    finally {
+      typedAgentLogger.setLevel(previousTypedAgentLevel)
+      policiesLogger.setLevel(previousPoliciesLevel)
+      planRunnerLogger.setLevel(previousPlanRunnerLevel)
+    }
+  }
 
   // Domain models for a document processing workflow
   case class Document(content: String, metadata: Map[String, String] = Map.empty)

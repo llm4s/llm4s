@@ -179,8 +179,8 @@ sbt test
 # Run specific test suites
 sbt "testOnly org.llm4s.speech.*"
 
-# Cross-compile and test
-sbt +test
+# Run the current supported Scala build
+sbt test
 ```
 
 ---

@@ -6,6 +6,9 @@ import org.scalatest.matchers.should.Matchers
 
 class ProviderConfigSpec extends AnyFunSuite with Matchers {
 
+  private given ContextWindowResolver =
+    ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
+
   // ================================= OPENAI CONFIG =================================
 
   test("OpenAIConfig.fromValues creates config with correct model") {
@@ -98,6 +101,28 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers {
     }
   }
 
+  // ================================= GEMINI CONFIG =================================
+
+  test("GeminiConfig.fromValues appends v1beta when baseUrl is the API host root") {
+    val config = GeminiConfig.fromValues(
+      modelName = "gemini-1.5-flash",
+      apiKey = "test-key",
+      baseUrl = "https://generativelanguage.googleapis.com"
+    )
+
+    config.baseUrl shouldBe "https://generativelanguage.googleapis.com/v1beta"
+  }
+
+  test("GeminiConfig.fromValues preserves explicit versioned baseUrl") {
+    val config = GeminiConfig.fromValues(
+      modelName = "gemini-1.5-flash",
+      apiKey = "test-key",
+      baseUrl = "https://generativelanguage.googleapis.com/v1beta"
+    )
+
+    config.baseUrl shouldBe "https://generativelanguage.googleapis.com/v1beta"
+  }
+
   // ================================= AZURE CONFIG =================================
 
   test("AzureConfig.fromValues creates config with correct model") {
@@ -151,7 +176,7 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers {
       baseUrl = "http://localhost:11434"
     )
 
-    // Context window may come from ModelRegistry or fallback logic
+    // Context window may come from registry metadata or fallback logic
     config.contextWindow should be > 0
   }
 
@@ -166,7 +191,7 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers {
 
   test("OllamaConfig.fromValues sets reserveCompletion for all models") {
     val config = OllamaConfig.fromValues("llama3", "http://localhost:11434")
-    // reserveCompletion may come from ModelRegistry or fallback logic
+    // reserveCompletion may come from registry metadata or fallback logic
     config.reserveCompletion should be > 0
   }
 
@@ -191,7 +216,7 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers {
       baseUrl = "https://api.z.ai/api/paas/v4"
     )
 
-    config.contextWindow shouldBe 128000
+    config.contextWindow shouldBe 200000
   }
 
   test("ZaiConfig.fromValues sets correct context window for GLM-4.5-air") {
@@ -201,7 +226,7 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers {
       baseUrl = "https://api.z.ai/api/paas/v4"
     )
 
-    config.contextWindow shouldBe 32000
+    config.contextWindow shouldBe 128000
   }
 
   test("ZaiConfig.fromValues throws for empty apiKey") {

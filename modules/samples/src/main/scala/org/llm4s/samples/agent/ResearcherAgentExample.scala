@@ -1,14 +1,15 @@
+// scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.samples.agent
 
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
-import com.typesafe.config.ConfigFactory
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.builtin.search.{ BraveSearchTool, SafeSearch }
 import org.llm4s.toolapi.builtin.search.BraveSearchCategory
 import org.llm4s.toolapi.builtin.search.BraveSearchConfig
 import org.slf4j.LoggerFactory
+import pureconfig.ConfigSource
 
 /**
  * Researcher Agent Example - Demonstrates all four Brave Search tools in an intelligent research workflow.
@@ -22,10 +23,10 @@ import org.slf4j.LoggerFactory
  *
  * @example
  * {{{
- * export LLM_MODEL=openai/gpt-4o
+ * export LLM4S_PROVIDER=openai-main
  * export OPENAI_API_KEY=sk-...
  * export BRAVE_SEARCH_API_KEY=your-brave-api-key
- * ,
+ * sbt "samples/runMain org.llm4s.samples.agent.ResearcherAgentExample"
  * }}}
  */
 
@@ -33,16 +34,20 @@ object ResearcherAgentExample {
   private val logger = LoggerFactory.getLogger(getClass)
 
   def main(args: Array[String]): Unit = {
-    val config        = ConfigFactory.load()
-    val researchTopic = config.getString("llm4s.samples.agent.research-topic")
+    val researchTopic = ConfigSource.default
+      .at("llm4s.samples.agent.research-topic")
+      .load[String]
+      .getOrElse("artificial intelligence")
     logger.info("🔬 === Researcher Agent Example ===\n")
     logger.info("Research Topic: {}", researchTopic)
     logger.info("=" * 70)
 
     // Create LLM client and load Brave Search configuration
     val clientResult = for {
-      providerCfg <- Llm4sConfig.provider()
-      client      <- LLMConnect.getClient(providerCfg)
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
     } yield client
 
     val braveConfigResult = Llm4sConfig.loadBraveSearchTool()
@@ -50,8 +55,8 @@ object ResearcherAgentExample {
     (clientResult, braveConfigResult) match {
       case (Left(error), _) =>
         logger.error("Failed to create LLM client: {}", error)
-        logger.error("Make sure LLM_MODEL and appropriate API key are set")
-        logger.error("Example: export LLM_MODEL=openai/gpt-4o")
+        logger.error("Make sure a default named provider and appropriate API key are configured")
+        logger.error("Example: export LLM4S_PROVIDER=openai-main")
 
       case (_, Left(error)) =>
         logger.error("Failed to load Brave Search configuration: {}", error)

@@ -22,8 +22,7 @@ class JsonGraphStoreTest extends AnyFunSuite with Matchers {
 
       val loaded = store.load()
       loaded should be(Right(graph))
-    } finally
-      Files.deleteIfExists(tempFile)
+    } finally Files.deleteIfExists(tempFile)
   }
 
   test("JsonGraphStore should fail loading non-existent file") {
@@ -62,8 +61,7 @@ class JsonGraphStoreTest extends AnyFunSuite with Matchers {
       val graph = loaded.toOption.get
       graph.nodes("1").properties shouldBe empty
       graph.edges.head.properties shouldBe empty
-    } finally
-      Files.deleteIfExists(tempFile)
+    } finally Files.deleteIfExists(tempFile)
   }
 
   test("JsonGraphStore should fail loading malformed JSON") {
@@ -76,8 +74,7 @@ class JsonGraphStoreTest extends AnyFunSuite with Matchers {
       val loaded = store.load()
 
       loaded should be(a[Left[_, _]])
-    } finally
-      Files.deleteIfExists(tempFile)
+    } finally Files.deleteIfExists(tempFile)
   }
 
   test("JsonGraphStore should save and load empty graph") {
@@ -90,8 +87,7 @@ class JsonGraphStoreTest extends AnyFunSuite with Matchers {
 
       val loaded = store.load()
       loaded should be(Right(emptyGraph))
-    } finally
-      Files.deleteIfExists(tempFile)
+    } finally Files.deleteIfExists(tempFile)
   }
 
   test("JsonGraphStore should handle properties with special characters") {
@@ -124,7 +120,6 @@ class JsonGraphStoreTest extends AnyFunSuite with Matchers {
 
       val loaded = store.load()
       loaded should be(Right(graph))
-    } finally
-      Files.deleteIfExists(tempFile)
+    } finally Files.deleteIfExists(tempFile)
   }
 }

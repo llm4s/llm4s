@@ -1,5 +1,15 @@
 package org.llm4s.error
 
+/**
+ * Raised when there is an issue with the client or operation configuration.
+ *
+ * This is a [[NonRecoverableError]]: it indicates a permanent failure due to missing or
+ * invalid configuration values (e.g., missing base URL, invalid model name).
+ * The user must correct the configuration to resolve this error.
+ *
+ * @param message human-readable description of the configuration error
+ * @param missingKeys list of configuration keys that were missing or invalid
+ */
 final case class ConfigurationError private (
   override val message: String,
   missingKeys: List[String]

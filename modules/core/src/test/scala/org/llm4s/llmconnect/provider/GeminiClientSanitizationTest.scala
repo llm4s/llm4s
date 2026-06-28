@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.config.GeminiConfig
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolFunction }
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -20,6 +21,8 @@ import org.scalatest.matchers.should.Matchers
  *    manually-constructed ujson for the anyOf / oneOf / allOf test cases.
  */
 class GeminiClientSanitizationTest extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   // ─────────────────────────────────────────────────────────────────────────
   // Shared dummy client (no real network calls are made)

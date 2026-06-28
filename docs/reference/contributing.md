@@ -15,7 +15,7 @@ This guide covers everything you need to know before opening your first pull req
 
 1. **Read this guide** and the [Code Review Guidelines](review-guidelines)
 2. **Fork and clone** the repository
-3. **Verify your setup** — run `sbt buildAll` and `sbt +test` to confirm everything compiles and passes
+3. **Verify your setup** — run `sbt buildAll` and `sbt test` to confirm everything compiles and passes
 4. **Read `CLAUDE.md`** in the repo root — it contains project conventions, architecture notes, and common commands
 
 ---
@@ -70,7 +70,7 @@ Run **all** of these locally before pushing:
 
 ```bash
 sbt scalafmtAll         # Format code
-sbt +test               # Tests pass on both Scala 2.13 and 3.x
+sbt test                # Tests pass on the current Scala 3.7.1 build
 ```
 
 Also check:
@@ -141,7 +141,7 @@ git checkout -b your-branch-name
 
 PRs will be closed without detailed review if they:
 
-- **Don't compile or pass tests** — run `sbt +test` locally first
+- **Don't compile or pass tests** — run `sbt test` locally first
 - **Include unrelated changes** from stacked branches (rebase onto `main`)
 - **Are very large without prior discussion** — start a conversation on the issue first
 - **Ignore feedback** from a previous review round
@@ -208,7 +208,7 @@ Every PR with new code needs tests. See the [Testing Guide](testing-guide) for d
 git clone https://github.com/YOUR-USERNAME/llm4s.git
 cd llm4s
 sbt buildAll              # Verify everything compiles
-sbt +test                 # Verify tests pass
+sbt test                  # Verify tests pass
 ```
 
 ### IDE Setup
@@ -228,7 +228,7 @@ git checkout -b fix/short-description    # Use a descriptive branch name
 # Make your changes...
 
 sbt scalafmtAll           # Format
-sbt +test                 # Test both Scala versions
+sbt test                  # Test the current Scala 3.7.1 build
 git add <specific-files>  # Stage only your changes
 git commit -m "Fix: short description of what and why"
 git push origin fix/short-description

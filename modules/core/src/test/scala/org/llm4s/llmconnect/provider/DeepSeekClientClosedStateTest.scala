@@ -5,6 +5,7 @@ import org.scalatest.matchers.should.Matchers
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.llmconnect.model.{ Conversation, CompletionOptions, UserMessage }
+import org.llm4s.model.ModelRegistryService
 
 /**
  * Tests for DeepSeekClient closed state handling.
@@ -14,6 +15,8 @@ import org.llm4s.llmconnect.model.{ Conversation, CompletionOptions, UserMessage
  * - close() is idempotent (can be called multiple times safely)
  */
 class DeepSeekClientClosedStateTest extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def createTestConfig: DeepSeekConfig = DeepSeekConfig(
     apiKey = "test-api-key-for-closed-state-testing",

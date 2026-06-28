@@ -139,7 +139,7 @@ object NetworkSecurity {
     val normalizedHostname = hostname.toLowerCase.trim
     val allBlocked         = DefaultBlockedHostnames ++ additionalBlocked.map(_.toLowerCase)
 
-    allBlocked.exists(blocked => normalizedHostname == blocked || normalizedHostname.endsWith("." + blocked))
+    allBlocked.exists(blocked => normalizedHostname == blocked || normalizedHostname.endsWith(s".$blocked"))
   }
 
   /**

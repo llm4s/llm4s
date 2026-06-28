@@ -50,14 +50,14 @@ final class PgPrincipalStore(getConnection: () => Connection) extends PrincipalS
         stmt.setString(1, external.externalId)
         Using.resource(stmt.executeQuery()) { rs =>
           if (rs.next()) {
-            PrincipalId(rs.getInt("id"))
+            Right(PrincipalId(rs.getInt("id")))
           } else {
-            throw new RuntimeException(s"Failed to create principal: no ID returned")
+            Left(ProcessingError("pg-principal-create", "Failed to create principal: no ID returned"))
           }
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-principal-create", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-principal-create", e.getMessage)).flatMap(identity)
 
   override def getOrCreateBatch(externals: Seq[ExternalPrincipal]): Result[Map[ExternalPrincipal, PrincipalId]] =
     // First lookup all existing

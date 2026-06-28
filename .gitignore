@@ -20,3 +20,12 @@ data/
 
 # Developer local overlays
 **/application.local.conf
+
+# llm4s-pr-manager artifacts
+Pull requests/
+*_out.json
+*_out*.json
+test_log*.txt
+init_*.json
+generate_*.json
+review*.md

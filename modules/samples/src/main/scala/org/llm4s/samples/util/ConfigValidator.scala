@@ -14,9 +14,9 @@ object ConfigValidator {
   /**
    * Validates that provider configuration is present and well-formed.
    *
-   * Delegates to Llm4sConfig.provider() and discards the
+   * Delegates to Llm4sConfig.defaultProvider() and discards the
    * successful ProviderConfig value, returning only success/failure.
    */
   def validateEnvironment(): Result[Unit] =
-    Llm4sConfig.provider().map(_ => ())
+    Llm4sConfig.defaultProvider().map(_ => ())
 }

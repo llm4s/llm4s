@@ -23,7 +23,7 @@ Get LLM4S up and running in minutes.
 
 Before installing LLM4S, ensure you have:
 
-- **Java Development Kit (JDK) 11 or higher** (JDK 21 recommended)
+- **Java Development Kit (JDK) 21**
 - **Scala 3.7.1**
 - **SBT 1.10.6** or higher
 - An API key from at least one LLM provider (OpenAI, Anthropic, Azure OpenAI, or Ollama)
@@ -32,7 +32,7 @@ Before installing LLM4S, ensure you have:
 
 ```bash
 # Check Java version
-java -version  # Should show 11 or higher
+java -version  # Should show 21
 
 # Check Scala version
 scala -version  # 3.7.1
@@ -51,7 +51,7 @@ Add LLM4S to your `build.sbt`:
 
 ```scala
 // Scala 3
-libraryDependencies += "org.llm4s" %% "core" % "0.1.16"
+libraryDependencies += "org.llm4s" %% "core" % "0.3.2"
 ThisBuild / scalaVersion := "3.7.1"
 ```
 
@@ -62,7 +62,7 @@ ThisBuild / scalaVersion := "3.7.1"
 <dependency>
     <groupId>org.llm4s</groupId>
     <artifactId>core_3</artifactId>
-    <version>0.1.16</version>
+    <version>0.3.2</version>
 </dependency>
 
 ```
@@ -77,7 +77,7 @@ lazy val myProject = (project in file("."))
     name := "my-llm-project",
     scalaVersion := "3.7.1",
     libraryDependencies ++= Seq(
-      "org.llm4s" %% "core" % "0.1.16"
+      "org.llm4s" %% "core" % "0.3.2"
     )
   )
 ```
@@ -88,7 +88,7 @@ To use the latest development snapshot:
 
 ```scala
 resolvers += Resolver.sonatypeRepo("snapshots")
-libraryDependencies += "org.llm4s" %% "core" % "0.1.0-SNAPSHOT"
+libraryDependencies += "org.llm4s" %% "core" % "0.3.2-SNAPSHOT"
 ```
 
 ---
@@ -105,7 +105,7 @@ sbt new llm4s/llm4s.g8
 # name [My LLM Project]: my-awesome-agent
 # organization [com.example]: com.mycompany
 # scala_version [3.7.1]:
-# llm4s_version [0.1.16]:
+# llm4s_version [0.3.2]:
 
 cd my-awesome-agent
 sbt run
@@ -126,13 +126,13 @@ The starter kit includes:
 ## Optional Dependencies
 
 {: .note }
-> Additional modules are coming soon. The core library includes most functionality.
+> Additional modules are published separately. The core library includes most functionality.
 > Check [Maven Central](https://central.sonatype.com/namespace/org.llm4s) for available artifacts.
 
 ### For Workspace (Containerized Execution)
 
 ```scala
-libraryDependencies += "org.llm4s" %% "workspaceClient" % "0.1.16"
+libraryDependencies += "org.llm4s" %% "workspaceClient" % "0.3.2"
 ```
 
 And install Docker:

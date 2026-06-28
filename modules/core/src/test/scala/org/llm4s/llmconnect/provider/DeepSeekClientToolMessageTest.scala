@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.llmconnect.config.DeepSeekConfig
@@ -18,6 +19,7 @@ import org.llm4s.llmconnect.model.{
  * Delegates to the real production implementation to ensure tests validate actual behavior.
  */
 private[provider] object DeepSeekRequestBodyTestHelper {
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private val testConfig = DeepSeekConfig(
     apiKey = "test-key",
     model = "deepseek-chat",

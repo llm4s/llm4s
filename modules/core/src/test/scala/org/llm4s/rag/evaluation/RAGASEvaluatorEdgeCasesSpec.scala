@@ -4,6 +4,7 @@ import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.EmbeddingModelConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -12,6 +13,8 @@ import org.scalatest.matchers.should.Matchers
  * Edge case tests for RAGASEvaluator.
  */
 class RAGASEvaluatorEdgeCasesSpec extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   class MockLLMClient(responses: Seq[String] = Seq("[]")) extends LLMClient {
     private var responseIndex = 0

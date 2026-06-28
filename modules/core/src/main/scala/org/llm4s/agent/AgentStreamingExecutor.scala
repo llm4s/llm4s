@@ -62,7 +62,7 @@ final private[agent] class AgentStreamingExecutor(
         case Left(error) =>
           error match {
             case UnknownError(msg, cause) =>
-              logger.debug("Tracing failed: " + msg, cause)
+              logger.debug(s"Tracing failed: $msg", cause)
             case _ =>
               logger.debug("Tracing failed: {}", error)
           }
@@ -483,9 +483,9 @@ final private[agent] class AgentStreamingExecutor(
       validatedQuery <- GuardrailApplicator.validateInput(query, inputGuardrails)
 
       _ = if (context.debug) {
-        logger.info("[DEBUG] Initializing agent with tool execution strategy: {}", toolExecutionStrategy)
-        logger.info("[DEBUG] Query: {}", validatedQuery)
-        logger.info("[DEBUG] Tools: {}", tools.tools.map(_.name).mkString(", "))
+        logger.debug("Initializing agent with tool execution strategy: {}", toolExecutionStrategy)
+        logger.debug("Query: {}", validatedQuery)
+        logger.debug("Tools: {}", tools.tools.map(_.name).mkString(", "))
       }
       initialState <- initializeSafe(validatedQuery, tools, handoffs, systemPromptAddition, completionOptions)
       finalState <- runWithStrategyInternal(
@@ -518,9 +518,9 @@ final private[agent] class AgentStreamingExecutor(
     context: AgentContext
   )(implicit ec: ExecutionContext): Result[AgentState] = {
     if (context.debug) {
-      logger.info("[DEBUG] Starting runWithStrategy")
-      logger.info("[DEBUG] Strategy: {}", strategy)
-      logger.info("[DEBUG] Max steps: {}", maxSteps.getOrElse("unlimited"))
+      logger.debug("Starting runWithStrategy")
+      logger.debug("Strategy: {}", strategy)
+      logger.debug("Max steps: {}", maxSteps.getOrElse("unlimited"))
     }
 
     context.traceLogPath.foreach(path => AgentTraceFormatter.writeTraceLog(initialState, path))
@@ -534,7 +534,7 @@ final private[agent] class AgentStreamingExecutor(
       (state.status, stepsRemaining) match {
         case (s, Some(0)) if s == AgentStatus.InProgress || s == AgentStatus.WaitingForTools =>
           if (context.debug) {
-            logger.warn("[DEBUG] Step limit reached!")
+            logger.debug("Step limit reached!")
           }
           val updatedState =
             state.log("[system] Step limit reached").withStatus(AgentStatus.Failed("Maximum step limit reached"))
@@ -543,7 +543,7 @@ final private[agent] class AgentStreamingExecutor(
 
         case (AgentStatus.InProgress, _) =>
           if (context.debug) {
-            logger.info("[DEBUG] ITERATION {}: InProgress -> requesting LLM completion", iteration)
+            logger.debug("ITERATION {}: InProgress -> requesting LLM completion", iteration)
           }
 
           runStep(state, context) match {
@@ -556,7 +556,7 @@ final private[agent] class AgentStreamingExecutor(
 
             case Left(error) =>
               if (context.debug) {
-                logger.error("[DEBUG] LLM completion failed: {}", error.message)
+                logger.debug("LLM completion failed: {}", error.message)
               }
               Left(error)
           }
@@ -570,8 +570,8 @@ final private[agent] class AgentStreamingExecutor(
               val toolNames = assistantMessage.toolCalls.map(_.name).mkString(", ")
 
               if (context.debug) {
-                logger.info(
-                  "[DEBUG] ITERATION {}: WaitingForTools -> processing {} tools with {}",
+                logger.debug(
+                  "ITERATION {}: WaitingForTools -> processing {} tools with {}",
                   iteration,
                   assistantMessage.toolCalls.size,
                   strategy
@@ -590,13 +590,13 @@ final private[agent] class AgentStreamingExecutor(
                   HandoffExecutor.detectHandoff(newState) match {
                     case Some((handoff, reason)) =>
                       if (context.debug) {
-                        logger.info("[DEBUG] Handoff detected: {}", handoff.handoffName)
+                        logger.debug("Handoff detected: {}", handoff.handoffName)
                       }
                       Right(newState.withStatus(AgentStatus.HandoffRequested(handoff, Some(reason))))
 
                     case None =>
                       if (context.debug) {
-                        logger.info("[DEBUG] Tools processed -> InProgress")
+                        logger.debug("Tools processed -> InProgress")
                       }
                       context.traceLogPath.foreach(path => AgentTraceFormatter.writeTraceLog(newState, path))
                       runUntilCompletion(newState.withStatus(AgentStatus.InProgress), stepsRemaining, iteration + 1)
@@ -613,14 +613,14 @@ final private[agent] class AgentStreamingExecutor(
 
         case (AgentStatus.HandoffRequested(handoff, reason), _) =>
           if (context.debug) {
-            logger.info("[DEBUG] Executing handoff: {}", handoff.handoffName)
+            logger.debug("Executing handoff: {}", handoff.handoffName)
           }
           context.traceLogPath.foreach(path => AgentTraceFormatter.writeTraceLog(state, path))
           HandoffExecutor.executeHandoff(state, handoff, reason, maxSteps, context)
 
         case (_, _) =>
           if (context.debug) {
-            logger.info("[DEBUG] Agent completed with status: {}", state.status)
+            logger.debug("Agent completed with status: {}", state.status)
           }
           context.traceLogPath.foreach(path => AgentTraceFormatter.writeTraceLog(state, path))
           Right(state)

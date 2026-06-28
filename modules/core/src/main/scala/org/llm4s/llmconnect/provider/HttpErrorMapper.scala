@@ -44,7 +44,7 @@ object HttpErrorMapper {
    *  2. `"error"` object → `"message"` string  (OpenAI / Mistral style)
    *  3. `"error"` as a plain string  (some providers)
    *
-   * @return a sanitised (trimmed + truncated) error detail string
+   * @return a sanitised (redacted + trimmed + truncated) error detail string
    */
   private[provider] def extractErrorDetails(body: String, statusCode: Int, provider: String): String = {
     val defaultMsg = s"$provider API error (HTTP $statusCode)"
@@ -67,7 +67,8 @@ object HttpErrorMapper {
   }
 
   private def sanitize(raw: String): String = {
-    val trimmed = raw.trim
+    val redacted = org.llm4s.util.Redaction.redact(raw)
+    val trimmed  = redacted.trim
     if (trimmed.length <= MaxErrorDetailLength) trimmed
     else trimmed.take(MaxErrorDetailLength) + "…[truncated]"
   }

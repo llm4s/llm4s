@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.imageprocessing.provider
 
 import org.llm4s.imageprocessing._

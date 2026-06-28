@@ -56,12 +56,12 @@ final class PgCollectionStore(
         stmt.setString(5, metadataJson)
 
         Using.resource(stmt.executeQuery()) { rs =>
-          if (rs.next()) rowToCollection(rs)
-          else throw new RuntimeException("Failed to create collection: no row returned")
+          if (rs.next()) Right(rowToCollection(rs))
+          else Left(ProcessingError("pg-collection-create", "Failed to create collection: no row returned"))
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-create", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-collection-create", e.getMessage)).flatMap(identity)
 
   private def markAsNonLeaf(path: CollectionPath): Result[Unit] = Try {
     withConnection { conn =>
@@ -230,12 +230,12 @@ final class PgCollectionStore(
         stmt.setString(2, path.value)
 
         Using.resource(stmt.executeQuery()) { rs =>
-          if (rs.next()) rowToCollection(rs)
-          else throw new RuntimeException(s"Collection not found: ${path.value}")
+          if (rs.next()) Right(rowToCollection(rs))
+          else Left(ProcessingError("pg-collection-update-perms", s"Collection not found: ${path.value}"))
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-update-perms", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-collection-update-perms", e.getMessage)).flatMap(identity)
 
   override def updateMetadata(
     path: CollectionPath,
@@ -254,12 +254,12 @@ final class PgCollectionStore(
         stmt.setString(2, path.value)
 
         Using.resource(stmt.executeQuery()) { rs =>
-          if (rs.next()) rowToCollection(rs)
-          else throw new RuntimeException(s"Collection not found: ${path.value}")
+          if (rs.next()) Right(rowToCollection(rs))
+          else Left(ProcessingError("pg-collection-update-metadata", s"Collection not found: ${path.value}"))
         }
       }
     }
-  }.toEither.left.map(e => ProcessingError("pg-collection-update-metadata", e.getMessage))
+  }.toEither.left.map(e => ProcessingError("pg-collection-update-metadata", e.getMessage)).flatMap(identity)
 
   override def delete(path: CollectionPath): Result[Unit] =
     for {

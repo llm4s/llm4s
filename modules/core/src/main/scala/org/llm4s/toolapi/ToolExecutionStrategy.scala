@@ -1,63 +1,61 @@
 package org.llm4s.toolapi
 
 /**
- * Strategy for executing multiple tool calls.
+ * Determines how multiple tool calls in a single agent step are executed by
+ * [[ToolRegistry.executeAll]].
  *
- * When an LLM requests multiple tool calls, they can be executed
- * either sequentially (one at a time) or in parallel (simultaneously).
+ * Choose [[ToolExecutionStrategy.Sequential]] when calls depend on one another
+ * or mutate shared state. Choose [[ToolExecutionStrategy.Parallel]] when calls
+ * are independent and mostly wait on I/O. Choose
+ * [[ToolExecutionStrategy.ParallelWithLimit]] when calls can run concurrently
+ * but external systems or local resources need bounded concurrency.
  *
  * @example
  * {{{
- * // Execute tools in parallel
- * agent.runWithStrategy(
- *   query = "Get weather in London, Paris, and Tokyo",
- *   tools = weatherTools,
- *   toolExecutionStrategy = ToolExecutionStrategy.Parallel
+ * val results = registry.executeAll(
+ *   requests,
+ *   strategy = ToolExecutionStrategy.ParallelWithLimit(2)
  * )
  *
- * // Limit concurrency to 2 at a time
- * agent.runWithStrategy(
- *   query = "Search 10 different topics",
- *   tools = searchTools,
- *   toolExecutionStrategy = ToolExecutionStrategy.ParallelWithLimit(2)
+ * val agentState = agent.runWithStrategy(
+ *   query = "Get weather in London, Paris, and Tokyo",
+ *   tools = registry,
+ *   toolExecutionStrategy = ToolExecutionStrategy.Parallel,
+ *   maxSteps = Some(5)
  * )
  * }}}
  */
 sealed trait ToolExecutionStrategy
 
+/**
+ * Factory and singleton values for [[ToolExecutionStrategy]].
+ */
 object ToolExecutionStrategy {
 
   /**
    * Execute tools one at a time, in order.
    *
-   * This is the safest strategy and the default behavior.
-   * Use when:
-   * - Tools have dependencies on each other
-   * - Order of execution matters
-   * - Debugging tool behavior
+   * This is the safest strategy and the default behavior. Use it when tools
+   * have dependencies on each other, order of execution matters, or you are
+   * debugging tool behavior.
    */
   case object Sequential extends ToolExecutionStrategy
 
   /**
    * Execute all tools simultaneously.
    *
-   * Best for independent, IO-bound tools like:
-   * - Multiple API calls
-   * - Database queries
-   * - File operations
-   *
-   * Caution: May cause rate limiting with external APIs.
+   * Best for independent, I/O-bound tools such as multiple API calls,
+   * database queries, or read-only file operations. Avoid it for side effects
+   * that must not overlap, and watch for rate limiting from external APIs.
    */
   case object Parallel extends ToolExecutionStrategy
 
   /**
    * Execute tools in parallel with a concurrency limit.
    *
-   * Balances performance with resource constraints.
-   * Use when:
-   * - External APIs have rate limits
-   * - System has limited resources
-   * - Want parallel execution but controlled
+   * Balances parallel execution with resource constraints. Use it when
+   * external APIs have rate limits, the system has limited local resources, or
+   * parallel execution is useful but must remain controlled.
    *
    * @param maxConcurrency Maximum number of tools executing simultaneously
    */

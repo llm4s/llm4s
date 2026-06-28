@@ -16,3 +16,4 @@
 - [ ] New code includes tests
 - [ ] No unrelated changes included (branched from `main`, not from another PR)
 - [ ] Commit messages explain the "why"
+- [ ] Updated `CHANGELOG.md` under `[Unreleased]` if this adds a feature, fixes a bug, or introduces a breaking change

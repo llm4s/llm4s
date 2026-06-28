@@ -5,9 +5,9 @@ import org.scalatest.matchers.should.Matchers
 
 class ConfigReaderTest extends AnyFlatSpec with Matchers {
 
-  "Llm4sConfig.provider" should "expose values for present keys" in {
+  "Llm4sConfig.defaultProvider" should "expose values for present keys" in {
     val cfg = Llm4sConfig
-      .provider()
+      .defaultProvider()
       .fold(err => fail(err.toString), identity)
 
     cfg.model should not be empty

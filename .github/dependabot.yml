@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Keeps GitHub Actions pinned to non-vulnerable versions.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+# Note: Dependabot does not support SBT. For Scala/SBT dependency CVE scanning
+# use Scala Steward (https://github.com/scala-steward-org/scala-steward) or
+# run `sbt dependencyUpdates` locally against the OWASP NVD.

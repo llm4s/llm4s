@@ -1,12 +1,28 @@
 package org.llm4s.http
 
+import scala.collection.mutable
+
 final class MockHttpClient(response: HttpResponse) extends Llm4sHttpClient {
-  var lastUrl: Option[String]                  = None
-  var lastHeaders: Option[Map[String, String]] = None
-  var lastParams: Option[Map[String, String]]  = None
-  var lastBody: Option[String]                 = None
-  var lastTimeout: Option[Int]                 = None
-  var postCallCount: Int                       = 0
+  def this(responses: Seq[HttpResponse]) =
+    this(responses.headOption.getOrElse(HttpResponse(200, "", Map.empty)))
+    enqueueResponses(responses.drop(1))
+
+  var lastUrl: Option[String]                                                              = None
+  var lastHeaders: Option[Map[String, String]]                                             = None
+  var lastParams: Option[Map[String, String]]                                              = None
+  var lastBody: Option[String]                                                             = None
+  var lastTimeout: Option[Int]                                                             = None
+  var postCallCount: Int                                                                   = 0
+  val getRequests: mutable.Buffer[(String, Map[String, String], Map[String, String], Int)] = mutable.Buffer.empty
+
+  private val queuedResponses: mutable.Queue[HttpResponse] = mutable.Queue(response)
+
+  def enqueueResponses(responses: Seq[HttpResponse]): Unit =
+    queuedResponses.enqueueAll(responses)
+
+  private def nextResponse: HttpResponse =
+    if queuedResponses.sizeCompare(1) > 0 then queuedResponses.dequeue()
+    else queuedResponses.head
 
   private def record(
     url: String,
@@ -21,10 +37,11 @@ final class MockHttpClient(response: HttpResponse) extends Llm4sHttpClient {
     lastParams = params
     lastBody = body
     lastTimeout = Some(timeout)
+    params.foreach(ps => getRequests.append((url, headers, ps, timeout)))
     if (countPost) {
       postCallCount += 1
     }
-    response
+    nextResponse
   }
 
   override def get(

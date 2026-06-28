@@ -3,10 +3,20 @@ package org.llm4s.agent.memory
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 
+/**
+ * Shared implementation of [[MemoryManager]] record/retrieve operations.
+ *
+ * Concrete memory managers extend this trait and provide a [[MemoryStore]] and
+ * a factory method (`withStore`) for creating updated copies after mutations.
+ * All public `record*` and `get*Context` methods delegate to the underlying store
+ * and return an updated manager instance on success.
+ */
 private[memory] trait BaseMemoryManagerOps extends MemoryManager {
 
+  /** Configuration controlling default importance, limits, etc. */
   def config: MemoryManagerConfig
 
+  /** Create a new manager instance backed by the given updated store. */
   protected def withStore(updatedStore: MemoryStore): MemoryManager
 
   override def recordMessage(
@@ -186,6 +196,16 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
       )
     }
 
+  /**
+   * Format a sequence of memories into a structured context string grouped by memory type.
+   *
+   * Sections are emitted in a fixed priority order (Knowledge, Entity, UserFact, Conversation,
+   * Task, then any Custom types) and truncated to fit within `maxChars`.
+   *
+   * @param memories the memories to format
+   * @param maxChars approximate character budget for the output
+   * @return formatted context string, or empty string if no memories
+   */
   final protected def formatMemoriesAsContext(memories: Seq[Memory], maxChars: Int): String = {
     if (memories.isEmpty) return ""
 

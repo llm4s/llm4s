@@ -86,7 +86,7 @@ git checkout -b feature/description
 **Write tests:**
 - Unit tests for new code
 - Edge case coverage
-- Cross-version tests if needed
+- Module-level tests when behavior crosses boundaries
 
 **Update docs:**
 - Scaladoc for public APIs
@@ -100,15 +100,15 @@ git checkout -b feature/description
 sbt scalafmtAll
 
 # Compile
-sbt +compile
+sbt compile
 
 # Run all tests
-sbt +test
+sbt test
 
 # Check coverage
 sbt coverage test coverageReport
 
-# Cross-compile everything
+# Compile and test aggregated modules
 sbt buildAll
 ```
 
@@ -168,7 +168,7 @@ See [CONTRIBUTING.md](../../CONTRIBUTING.md#testing) for testing requirements an
 - ✅ Use ScalaTest's FlatSpec style
 - ✅ Mock external dependencies with ScalaMock
 - ✅ Maintain 80%+ statement coverage (excluding samples)
-- ✅ Run `sbt +test` before submitting PR
+- ✅ Run `sbt test` before submitting PR
 
 ---
 
@@ -193,7 +193,7 @@ The LLM4S team manages releases. Your contributions will be included automatical
 
 **Pre-release (0.x.y):**
 - API may change between versions
-- Current stable: 0.1.0-SNAPSHOT
+- Current documented release: 0.3.2
 
 **Stable (1.0.0+):**
 - Follows semantic versioning

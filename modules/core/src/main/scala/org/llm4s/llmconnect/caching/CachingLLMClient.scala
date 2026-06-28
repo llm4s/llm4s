@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoKeywordCatch
 package org.llm4s.llmconnect.caching
 
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }

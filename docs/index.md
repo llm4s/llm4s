@@ -12,7 +12,7 @@ permalink: /
 A comprehensive, type-safe framework for building LLM-powered applications in Scala.
 {: .fs-6 .fw-300 }
 
-[![Maven Central](https://img.shields.io/maven-central/v/org.llm4s/llm4s-core_3.svg?label=Maven%20Central)](https://search.maven.org/search?q=g:org.llm4s%20AND%20a:llm4s-core_3)
+[![Maven Central](https://img.shields.io/maven-central/v/org.llm4s/core_3.svg?label=Maven%20Central)](https://search.maven.org/search?q=g:org.llm4s%20AND%20a:core_3)
 [![CI](https://github.com/llm4s/llm4s/actions/workflows/ci.yml/badge.svg)](https://github.com/llm4s/llm4s/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Discord](https://img.shields.io/discord/1234567890?color=7289da&label=Discord&logo=discord&logoColor=white)](https://discord.gg/4uvTPn6qww)
@@ -24,7 +24,7 @@ A comprehensive, type-safe framework for building LLM-powered applications in Sc
 
 ## Why LLM4S?
 
-LLM4S brings the power of large language models to the Scala ecosystem with a focus on **type safety**, **functional programming**, and **production readiness**.
+LLM4S brings the power of large language models to the Scala ecosystem with a focus on **type safety**, **functional programming**, and **production-oriented design**.
 
 ```scala
 import org.llm4s.config.Llm4sConfig
@@ -56,7 +56,7 @@ result match {
 <div class="feature-grid" markdown="1">
 
 #### 🔌 Multi-Provider Support
-Connect seamlessly to **OpenAI**, **Anthropic**, **Azure OpenAI**, **Google Gemini**, and **Ollama** with a unified API. Switch providers with a single environment variable.
+Connect to **OpenAI**, **Anthropic**, **Azure OpenAI**, **Google Gemini**, **DeepSeek**, **Cohere**, **Mistral**, **OpenRouter**, **Requesty**, **Z.ai**, and **Ollama** with a unified API. Switch providers with configuration.
 [Learn more →](/examples/#basic-examples)
 
 #### 📡 Streaming Responses
@@ -134,12 +134,12 @@ Containerized workspace for safe tool execution with Docker isolation.
 Add LLM4S to your `build.sbt`:
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s-core" % "{{ site.data.project.version }}"
+libraryDependencies += "org.llm4s" %% "core" % "{{ site.data.project.version }}"
 ```
 
 {: .note }
 > **Current Version:** `{{ site.data.project.version }}`
-> Check [Maven Central](https://search.maven.org/search?q=g:org.llm4s%20AND%20a:llm4s-core_3) for the latest release.
+> Check [Maven Central](https://search.maven.org/search?q=g:org.llm4s%20AND%20a:core_3) for the latest release.
 
 ### Configuration
 

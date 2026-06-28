@@ -73,16 +73,16 @@ class AgentStateSerializationSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  // upickle 4.4 routes reads through a tracing visitor, so the reader's
+  // IllegalArgumentException surfaces as the cause of the thrown exception.
   it should "throw on invalid string" in {
-    an[IllegalArgumentException] should be thrownBy {
-      read[ReasoningEffort](ujson.Str("invalid"))
-    }
+    val ex = intercept[Exception](read[ReasoningEffort](ujson.Str("invalid")))
+    ex.getCause shouldBe an[IllegalArgumentException]
   }
 
   it should "throw on non-string value" in {
-    an[IllegalArgumentException] should be thrownBy {
-      read[ReasoningEffort](ujson.Num(42))
-    }
+    val ex = intercept[Exception](read[ReasoningEffort](ujson.Num(42)))
+    ex.getCause shouldBe an[IllegalArgumentException]
   }
 
   // ==========================================================================

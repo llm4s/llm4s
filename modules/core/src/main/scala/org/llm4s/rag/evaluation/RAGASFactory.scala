@@ -2,9 +2,9 @@ package org.llm4s.rag.evaluation
 
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ModelDimensionRegistry, ProviderConfig }
-import org.llm4s.rag.evaluation.metrics._
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.rag.evaluation.metrics.*
 import org.llm4s.types.Result
-import scala.util.Try
 
 /**
  * Factory for creating RAGAS evaluators and individual metrics.
@@ -35,12 +35,12 @@ object RAGASFactory {
   def fromConfigs(
     providerCfg: ProviderConfig,
     embedding: (String, org.llm4s.llmconnect.config.EmbeddingProviderConfig)
-  ): Result[RAGASEvaluator] =
+  )(using ModelRegistryService): Result[RAGASEvaluator] =
     for {
-      llmClient <- LLMConnect.getClient(providerCfg)
+      llmClient <- LLMConnect.fromConfig(providerCfg)
       (providerName, embeddingConfig) = embedding
       embeddingClient <- EmbeddingClient.from(providerName, embeddingConfig)
-      dims              = Try(ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model)).getOrElse(1536)
+      dims              = ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model).getOrElse(1536)
       embeddingModelCfg = EmbeddingModelConfig(embeddingConfig.model, dims)
     } yield RAGASEvaluator(llmClient, embeddingClient, embeddingModelCfg)
 
@@ -105,12 +105,12 @@ object RAGASFactory {
   def basicFromConfigs(
     providerCfg: ProviderConfig,
     embedding: (String, org.llm4s.llmconnect.config.EmbeddingProviderConfig)
-  ): Result[RAGASEvaluator] =
+  )(using ModelRegistryService): Result[RAGASEvaluator] =
     for {
-      llmClient <- LLMConnect.getClient(providerCfg)
+      llmClient <- LLMConnect.fromConfig(providerCfg)
       (providerName, embeddingConfig) = embedding
       embeddingClient <- EmbeddingClient.from(providerName, embeddingConfig)
-      dims              = Try(ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model)).getOrElse(1536)
+      dims              = ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model).getOrElse(1536)
       embeddingModelCfg = EmbeddingModelConfig(embeddingConfig.model, dims)
     } yield RAGASEvaluator.basic(llmClient, embeddingClient, embeddingModelCfg)
 

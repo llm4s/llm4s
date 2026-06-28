@@ -3,16 +3,17 @@ package org.llm4s.error
 import scala.concurrent.duration.Duration
 
 /**
- * Timeout errors that can potentially succeed with a different timeout or retry.
+ * Raised when an operation exceeds its specified time limit.
  *
- * Represents operations that exceeded their time limit. As a [[RecoverableError]],
- * these can be retried with longer timeouts or exponential backoff strategies.
+ * Represents operations that timed out. As a [[RecoverableError]],
+ * these can potentially succeed with a different timeout, or by retrying
+ * with exponential backoff strategies, assuming the service was temporarily slow.
  *
- * @param message Human-readable error description
- * @param timeoutDuration The timeout duration that was exceeded
- * @param operation The operation that timed out (e.g., "api-call", "completion")
- * @param cause Optional underlying exception
- * @param context Additional key-value context for debugging
+ * @param message human-readable error description
+ * @param timeoutDuration the timeout duration that was exceeded
+ * @param operation the operation that timed out (e.g., "api-call", "completion")
+ * @param cause optional underlying exception
+ * @param context additional key-value context for debugging
  *
  * @example
  * {{{

@@ -201,6 +201,63 @@ class KeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach
       orResults.toOption.get.size shouldBe 2
     }
 
+    "reject unsafe metadata keys in filters" in {
+      val docs = Seq(
+        KeywordDocument("doc-1", "Scala content", Map("lang" -> "en"))
+      )
+      index.indexBatch(docs) shouldBe Right(())
+
+      val unsafeKey = "lang') OR 1=1 --"
+      val result    = index.search("Scala", topK = 10, filter = Some(MetadataFilter.Equals(unsafeKey, "en")))
+
+      result.isLeft shouldBe true
+      result.left.toOption.get.formatted should include("Invalid metadata key")
+    }
+
+    "propagate invalid metadata keys through composite filters" in {
+      val docs = Seq(
+        KeywordDocument("doc-1", "Scala content", Map("lang" -> "en"))
+      )
+      index.indexBatch(docs) shouldBe Right(())
+
+      val unsafeKey = "lang') OR 1=1 --"
+      val composite = MetadataFilter.And(
+        MetadataFilter.Equals("lang", "en"),
+        MetadataFilter.Or(
+          MetadataFilter.HasKey(unsafeKey),
+          MetadataFilter.Not(MetadataFilter.Contains("lang", "fr"))
+        )
+      )
+
+      val result = index.search("Scala", topK = 10, filter = Some(composite))
+      result.isLeft shouldBe true
+      result.left.toOption.get.formatted should include("Invalid metadata key")
+    }
+
+    "reject empty metadata keys in filters" in {
+      val docs = Seq(
+        KeywordDocument("doc-1", "Scala content", Map("lang" -> "en"))
+      )
+      index.indexBatch(docs) shouldBe Right(())
+
+      val result = index.search("Scala", topK = 10, filter = Some(MetadataFilter.Equals("   ", "en")))
+
+      result.isLeft shouldBe true
+      result.left.toOption.get.formatted should include("Invalid metadata key")
+    }
+
+    "allow metadata keys that begin with digits" in {
+      val docs = Seq(
+        KeywordDocument("doc-2024", "Scala release notes", Map("2024" -> "yes"))
+      )
+      index.indexBatch(docs) shouldBe Right(())
+
+      val result = index.search("Scala", topK = 10, filter = Some(MetadataFilter.Equals("2024", "yes")))
+
+      result.isRight shouldBe true
+      result.toOption.get.map(_.id).toSet shouldBe Set("doc-2024")
+    }
+
     "return correct statistics" in {
       val docs = Seq(
         KeywordDocument("s1", "Short content"),
@@ -245,6 +302,29 @@ class KeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach
     "create index from config" in {
       val config = SQLiteKeywordIndex.Config.inMemory.withTableName("test_docs")
       val result = SQLiteKeywordIndex(config)
+
+      result.isRight shouldBe true
+      result.toOption.get.close()
+    }
+
+    "reject invalid table names" in {
+      val invalidName = "docs; DROP TABLE users; --"
+      val result      = SQLiteKeywordIndex.inMemory(invalidName)
+
+      result.isLeft shouldBe true
+      result.left.toOption.get.formatted should include("Invalid table name")
+    }
+
+    "reject empty table names" in {
+      val result = SQLiteKeywordIndex.inMemory("   ")
+
+      result.isLeft shouldBe true
+      result.left.toOption.get.formatted should include("Table name must not be empty")
+    }
+
+    "allow SQLite-compatible table names longer than 63 characters" in {
+      val longTableName = "docs_" + ("x" * 80)
+      val result        = SQLiteKeywordIndex.inMemory(longTableName)
 
       result.isRight shouldBe true
       result.toOption.get.close()

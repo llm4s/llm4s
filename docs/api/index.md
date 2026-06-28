@@ -119,7 +119,7 @@ val upper: Result[String] = content.map(_.toUpperCase)
 
 ## Core Module Structure
 
-The main `llm4s-core` module contains:
+The main `core` module contains:
 
 ```
 org.llm4s/
@@ -152,15 +152,14 @@ LLM4S follows semantic versioning:
 - **MINOR**: New features, backwards compatible
 - **PATCH**: Bug fixes
 
-Currently: `0.1.0-SNAPSHOT` (pre-release)
+Currently documented release: `0.3.2` (pre-1.0, API stabilizing)
 
 ## Scala Version Compatibility
 
 LLM4S supports:
-- **Scala 2.13.16**
 - **Scala 3.7.1**
 
-Cross-compilation ensures the same API on both versions.
+The current build is Scala 3.7.1 only. Older design notes may mention historical cross-building, but that is not part of the current supported build matrix.
 
 ## Migration Guides
 

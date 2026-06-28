@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.samples.cookbook
 
 import org.llm4s.config.Llm4sConfig
@@ -16,8 +17,10 @@ object HallucinationDetector {
 
   def main(args: Array[String]): Unit = {
     val clientResult = for {
-      providerCfg <- Llm4sConfig.provider()
-      client      <- LLMConnect.getClient(providerCfg)
+      providerCfg     <- Llm4sConfig.defaultProvider()
+      registryService <- Llm4sConfig.modelRegistryService()
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
     } yield client
 
     val exaConfigResult      = Llm4sConfig.loadExaSearchTool()

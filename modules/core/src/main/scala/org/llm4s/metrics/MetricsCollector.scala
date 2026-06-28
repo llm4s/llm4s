@@ -5,6 +5,11 @@ import scala.concurrent.duration.FiniteDuration
 /**
  * Minimal algebra for collecting metrics about LLM operations.
  *
+ * The core metrics model tracks request latency, request outcome, token usage,
+ * estimated cost, retry attempts, circuit-breaker transitions, generic errors,
+ * and image generation usage. Concrete implementations decide where these
+ * observations are stored or exported.
+ *
  * Implementations should be safe: failures must not propagate to callers.
  * All methods should catch and log errors internally without throwing.
  *
@@ -30,9 +35,14 @@ trait MetricsCollector {
   /**
    * Record an LLM request with its outcome and duration.
    *
+   * The `outcome` dimension separates successful requests from failures. Error
+   * outcomes carry a stable [[ErrorKind]] such as [[ErrorKind.RateLimit]],
+   * [[ErrorKind.Timeout]], or [[ErrorKind.ServiceError]] so metrics backends can
+   * aggregate failures without depending on exception class names.
+   *
    * @param provider Provider name (e.g., "openai", "anthropic", "ollama")
    * @param model Model name (e.g., "gpt-4o", "claude-3-5-sonnet-latest")
-   * @param outcome Success or Error with error kind
+   * @param outcome Success or Error with stable error kind
    * @param duration Request duration
    */
   def observeRequest(
@@ -44,6 +54,9 @@ trait MetricsCollector {
 
   /**
    * Record token usage.
+   *
+   * Implementations typically record input and output tokens separately so
+   * dashboards can show prompt and completion usage independently.
    *
    * @param provider Provider name
    * @param model Model name
@@ -60,6 +73,10 @@ trait MetricsCollector {
   /**
    * Record estimated cost in USD.
    *
+   * Use this after pricing metadata is available for a request or image
+   * generation operation. Implementations should treat the value as an
+   * additive counter.
+   *
    * @param provider Provider name
    * @param model Model name
    * @param costUsd Estimated cost in USD
@@ -73,6 +90,9 @@ trait MetricsCollector {
   /**
    * Record a retry attempt for reliability tracking.
    *
+   * The first retry after the original request fails should use
+   * `attemptNumber = 1`.
+   *
    * @param provider Provider name
    * @param attemptNumber Which retry attempt (1 = first retry, 2 = second, etc.)
    */
@@ -83,6 +103,9 @@ trait MetricsCollector {
 
   /**
    * Record circuit breaker state transition.
+   *
+   * Expected states are stable labels such as "open", "closed", and
+   * "half-open".
    *
    * @param provider Provider name
    * @param newState New circuit breaker state ("open", "closed", "half-open")
@@ -95,6 +118,9 @@ trait MetricsCollector {
   /**
    * Record a generic error for metrics (when full request tracking not applicable).
    *
+   * Use this for failures that occur outside a complete request timing scope,
+   * such as configuration, validation, or setup failures.
+   *
    * @param errorKind Type of error
    * @param provider Provider name
    */
@@ -102,14 +128,48 @@ trait MetricsCollector {
     errorKind: ErrorKind,
     provider: String
   ): Unit = () // Default no-op
+
+  /**
+   * Record an image generation operation.
+   *
+   * The `outcome` dimension has the same meaning as in [[observeRequest]].
+   * `imageCount` records the number of generated images only for successful
+   * operations.
+   *
+   * @param provider Provider name (e.g., "openai", "stability-ai")
+   * @param model Model name (e.g., "gpt-image-1", "dall-e-3")
+   * @param operation Operation type: "generate" or "edit"
+   * @param outcome Success or Error with stable error kind
+   * @param duration Request duration
+   * @param imageCount Number of images generated
+   */
+  def observeImageGeneration(
+    provider: String,
+    model: String,
+    operation: String,
+    outcome: Outcome,
+    duration: FiniteDuration,
+    imageCount: Int
+  ): Unit = () // Default no-op
+
+  /**
+   * Record estimated image generation cost in USD.
+   *
+   * @param provider Provider name
+   * @param model Model name
+   * @param costUsd Estimated cost in USD
+   * @param imageCount Number of images
+   */
+  def recordImageGenerationCost(
+    provider: String,
+    model: String,
+    costUsd: Double,
+    imageCount: Int
+  ): Unit = () // Default no-op
 }
 
 object MetricsCollector {
 
-  /**
-   * No-op implementation that does nothing.
-   * Use as default when metrics are disabled.
-   */
   /**
    * Combine multiple collectors into one that fans out every call to all of them.
    *
@@ -159,6 +219,11 @@ object MetricsCollector {
     ): Unit = safeForEach(_.recordError(errorKind, provider))
   }
 
+  /**
+   * No-op implementation that does nothing.
+   *
+   * Use as the default collector when metrics are disabled.
+   */
   val noop: MetricsCollector = new MetricsCollector {
     override def observeRequest(
       provider: String,
@@ -184,6 +249,9 @@ object MetricsCollector {
 
 /**
  * Outcome of an LLM request.
+ *
+ * Use [[Outcome.Success]] when the operation completed normally and
+ * [[Outcome.Error]] when it failed with a categorized [[ErrorKind]].
  */
 sealed trait Outcome
 
@@ -209,14 +277,30 @@ object Outcome {
 sealed trait ErrorKind
 
 object ErrorKind {
-  case object RateLimit      extends ErrorKind
-  case object Timeout        extends ErrorKind
+
+  /** Provider or gateway rate limit. */
+  case object RateLimit extends ErrorKind
+
+  /** Request or operation timeout. */
+  case object Timeout extends ErrorKind
+
+  /** Missing, invalid, or unauthorized credentials. */
   case object Authentication extends ErrorKind
-  case object Network        extends ErrorKind
-  case object Validation     extends ErrorKind
-  case object ServiceError   extends ErrorKind
+
+  /** Network transport or connectivity failure. */
+  case object Network extends ErrorKind
+
+  /** Invalid request, schema, or configuration input. */
+  case object Validation extends ErrorKind
+
+  /** Provider-side service error. */
+  case object ServiceError extends ErrorKind
+
+  /** Local execution failure outside the provider API. */
   case object ExecutionError extends ErrorKind
-  case object Unknown        extends ErrorKind
+
+  /** Fallback category when no more specific kind is available. */
+  case object Unknown extends ErrorKind
 
   /**
    * Map LLMError to stable ErrorKind.

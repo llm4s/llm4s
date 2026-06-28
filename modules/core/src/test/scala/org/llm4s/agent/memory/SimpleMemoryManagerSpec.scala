@@ -246,6 +246,33 @@ class SimpleMemoryManagerSpec extends AnyFlatSpec with Matchers {
     result shouldBe Right(Some(0.95))
   }
 
+  it should "not change state when extractEntities is called" in {
+    val manager = SimpleMemoryManager.empty
+
+    val result = for {
+      m1 <- manager.recordUserFact("User likes Scala", Some("user-1"), None)
+
+      beforeStats <- m1.stats
+      beforeAll   <- m1.store.recall(MemoryFilter.All, 100)
+
+      m2 <- m1.extractEntities("Scala is a programming language", Some("conv-1"))
+
+      afterStats <- m2.stats
+      afterAll   <- m2.store.recall(MemoryFilter.All, 100)
+    } yield (
+      beforeStats.totalMemories,
+      afterStats.totalMemories,
+      beforeAll.length,
+      afterAll.length
+    )
+
+    result.isRight shouldBe true
+    val (beforeTotal, afterTotal, beforeCount, afterCount) = result.toOption.get
+
+    afterTotal shouldBe beforeTotal
+    afterCount shouldBe beforeCount
+  }
+
   "SimpleMemoryManager.forTesting" should "create a testing instance" in {
     val manager = SimpleMemoryManager.forTesting
     manager.config.autoRecordMessages shouldBe false

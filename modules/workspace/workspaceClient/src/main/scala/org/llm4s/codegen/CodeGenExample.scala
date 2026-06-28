@@ -31,8 +31,12 @@ object CodeGenExample {
       _ = logger.info(s"Using workspace directory: ${ws.workspaceDir}")
       _ = logger.info(s"Trace log will be written to: ${ws.traceLogPath}")
 
-      providerCfg <- Llm4sConfig.provider()
-      client      <- LLMConnect.getClient(providerCfg)
+      providerCfg <- Llm4sConfig.defaultProvider()
+
+      registryService <- Llm4sConfig.modelRegistryService()
+
+      given org.llm4s.model.ModelRegistryService = registryService
+      client <- LLMConnect.getClient(providerCfg)
 
       finalState <- Using.resource(
         new CodeWorker(ws.workspaceDir, ws.imageName, ws.hostPort, client)

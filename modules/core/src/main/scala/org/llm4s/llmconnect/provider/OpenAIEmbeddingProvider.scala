@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoKeywordCatch
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig

@@ -117,4 +117,20 @@ package org.llm4s.toolapi.builtin
  * }
  * }}}
  */
-package object search {}
+package object search {
+
+  /**
+   * Detects whether a thrown exception represents malformed JSON.
+   *
+   * upickle/ujson 4.4 routes reads through a tracing visitor, so a parse failure surfaces
+   * as `upickle.core.TraceVisitor$TraceException` with the original `ujson.ParseException`
+   * (or `ujson.IncompleteParseException`) as its cause rather than being thrown directly.
+   * Walking the cause chain for the shared `ujson.ParsingFailedException` interface keeps
+   * malformed-JSON detection working regardless of how the failure is wrapped.
+   */
+  private[search] def isJsonParseFailure(t: Throwable): Boolean =
+    Iterator
+      .iterate(t)(_.getCause)
+      .takeWhile(_ != null)
+      .exists(_.isInstanceOf[ujson.ParsingFailedException])
+}

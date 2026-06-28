@@ -1,8 +1,11 @@
 package org.llm4s.agent.orchestration
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.concurrent.ScalaFutures
+import org.scalatest.Outcome
+import org.slf4j.LoggerFactory
 import scala.concurrent.duration._
 import scala.concurrent.{ Future, ExecutionContext }
 
@@ -11,6 +14,14 @@ import scala.concurrent.{ Future, ExecutionContext }
  */
 class TypedAgentSpec extends AnyFlatSpec with Matchers with ScalaFutures {
   implicit val ec: ExecutionContext = ExecutionContext.global
+
+  override def withFixture(test: NoArgTest): Outcome = {
+    val logger   = LoggerFactory.getLogger("org.llm4s.agent.orchestration.TypedAgent$").asInstanceOf[LBLogger]
+    val previous = logger.getLevel
+    logger.setLevel(Level.OFF)
+    try super.withFixture(test)
+    finally logger.setLevel(previous)
+  }
 
   "TypedAgent.fromFunction" should "create a working functional agent" in {
     val agent = TypedAgent.fromFunction[String, Int]("test-agent")(input => Right(input.length))

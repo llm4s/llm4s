@@ -1,12 +1,36 @@
 package org.llm4s.context
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.llm4s.error.TokenizerError
 import org.llm4s.identity.TokenizerId
 import org.llm4s.llmconnect.model._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.Outcome
+import org.slf4j.LoggerFactory
 
 class ConversationTokenCounterSpec extends AnyFlatSpec with Matchers {
+
+  override def withFixture(test: NoArgTest): Outcome = {
+    val tokenizerMappingLogger = LoggerFactory
+      .getLogger("org.llm4s.context.tokens.TokenizerMapping$")
+      .asInstanceOf[LBLogger]
+    val conversationCounterLogger = LoggerFactory
+      .getLogger("org.llm4s.context.ConversationTokenCounter$")
+      .asInstanceOf[LBLogger]
+
+    val previousTokenizerMappingLevel    = tokenizerMappingLogger.getLevel
+    val previousConversationCounterLevel = conversationCounterLogger.getLevel
+
+    tokenizerMappingLogger.setLevel(Level.OFF)
+    conversationCounterLogger.setLevel(Level.OFF)
+
+    try super.withFixture(test)
+    finally {
+      tokenizerMappingLogger.setLevel(previousTokenizerMappingLevel)
+      conversationCounterLogger.setLevel(previousConversationCounterLevel)
+    }
+  }
 
   // ============ Factory Methods ============
 

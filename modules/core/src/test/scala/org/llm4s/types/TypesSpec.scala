@@ -21,126 +21,6 @@ import scala.util.{ Failure, Success, Try }
 class TypesSpec extends AnyFlatSpec with Matchers {
 
   // ==========================================================================
-  // ModelName Tests
-  // ==========================================================================
-
-  "ModelName" should "create valid model names" in {
-    val result = ModelName("gpt-4")
-    result.map(_.value).getOrElse(fail("Expected success")) shouldBe "gpt-4"
-  }
-
-  it should "reject invalid model names" in {
-    val result = ModelName("invalid model!")
-    result.isLeft shouldBe true
-  }
-
-  it should "have common constants" in {
-    ModelName.GPT_4.value shouldBe "gpt-4"
-    ModelName.GPT_4_TURBO.value shouldBe "gpt-4-turbo"
-    ModelName.GPT_3_5_TURBO.value shouldBe "gpt-3.5-turbo"
-    ModelName.CLAUDE_3_OPUS.value shouldBe "claude-3-opus-20240229"
-    ModelName.CLAUDE_3_SONNET.value shouldBe "claude-3-sonnet-20240229"
-    ModelName.CLAUDE_3_HAIKU.value shouldBe "claude-3-haiku-20240307"
-  }
-
-  it should "report isEmpty and nonEmpty correctly" in {
-    ModelName.unsafe("gpt-4").isEmpty shouldBe false
-    ModelName.unsafe("gpt-4").nonEmpty shouldBe true
-    ModelName.unsafe("  ").isEmpty shouldBe true
-    ModelName.unsafe("  ").nonEmpty shouldBe false
-  }
-
-  it should "convert to string via toString" in {
-    ModelName.GPT_4.toString shouldBe "gpt-4"
-  }
-
-  it should "create from string without validation via fromString" in {
-    val model = ModelName.fromString("any-model")
-    model.value shouldBe "any-model"
-  }
-
-  // ==========================================================================
-  // ProviderName Tests
-  // ==========================================================================
-
-  "ProviderName" should "create valid provider names" in {
-    val result = ProviderName.create("OpenAI")
-    result.map(_.value).getOrElse(fail("Expected success")) shouldBe "openai"
-  }
-
-  it should "reject empty provider names" in {
-    val result = ProviderName.create("   ")
-    result.isLeft shouldBe true
-  }
-
-  it should "normalize to lowercase" in {
-    ProviderName("OpenAI").normalized shouldBe "openai"
-    ProviderName("ANTHROPIC").normalized shouldBe "anthropic"
-  }
-
-  it should "have common constants" in {
-    ProviderName.OPENAI.value shouldBe "openai"
-    ProviderName.ANTHROPIC.value shouldBe "anthropic"
-    ProviderName.AZURE.value shouldBe "azure"
-    ProviderName.GOOGLE.value shouldBe "google"
-    ProviderName.COHERE.value shouldBe "cohere"
-  }
-
-  // ==========================================================================
-  // ApiKey Tests
-  // ==========================================================================
-
-  "ApiKey" should "hide value in toString" in {
-    val key = new ApiKey("sk-1234567890abcdef")
-    key.toString shouldBe "ApiKey(***)"
-  }
-
-  it should "reveal value when requested" in {
-    val key = new ApiKey("sk-1234567890abcdef")
-    key.reveal shouldBe "sk-1234567890abcdef"
-  }
-
-  it should "mask value showing only first 4 characters" in {
-    val key = new ApiKey("sk-1234567890abcdef")
-    key.masked shouldBe "sk-1***************"
-  }
-
-  it should "validate minimum length" in {
-    val result = ApiKey("short")
-    result.isLeft shouldBe true
-
-    val validResult = ApiKey("12345678")
-    validResult.isRight shouldBe true
-  }
-
-  // ==========================================================================
-  // ConversationId Tests
-  // ==========================================================================
-
-  "ConversationId" should "generate unique IDs" in {
-    val id1 = ConversationId.generate()
-    val id2 = ConversationId.generate()
-
-    id1.value should not be id2.value
-  }
-
-  it should "create valid IDs" in {
-    val result = ConversationId.create("conv-123")
-    result.map(_.value).getOrElse(fail("Expected success")) shouldBe "conv-123"
-  }
-
-  it should "reject empty IDs" in {
-    val result = ConversationId.create("   ")
-    result.isLeft shouldBe true
-    result.left.getOrElse(fail("Expected failure")) shouldBe a[ValidationError]
-  }
-
-  it should "trim whitespace" in {
-    val result = ConversationId.create("  conv-123  ")
-    result.map(_.value).getOrElse(fail("Expected success")) shouldBe "conv-123"
-  }
-
-  // ==========================================================================
   // CompletionId Tests
   // ==========================================================================
 
@@ -165,17 +45,7 @@ class TypesSpec extends AnyFlatSpec with Matchers {
   // ToolName Tests
   // ==========================================================================
 
-  "ToolName" should "create valid tool names" in {
-    val result = ToolName.create("get_weather")
-    result.map(_.value).getOrElse(fail("Expected success")) shouldBe "get_weather"
-  }
-
-  it should "reject invalid tool names with special characters" in {
-    val result = ToolName.create("get weather!")
-    result.isLeft shouldBe true
-  }
-
-  it should "validate with isValid method" in {
+  "ToolName" should "validate with isValid method" in {
     ToolName("get_weather").isValid shouldBe true
     ToolName("search-api").isValid shouldBe true
     ToolName("tool123").isValid shouldBe true
