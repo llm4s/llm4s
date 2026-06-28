@@ -14,9 +14,12 @@ object ProvidersConfigModel:
    *  @param provider    the provider kind string (e.g. "openai", "anthropic")
    *  @param model       the model name string
    *  @param baseUrl     optional override for the provider's base URL
-   *  @param apiKey      optional API key for authenticating with the provider
-   *  @param organization optional organisation identifier (OpenAI-specific)
-   *  @param endpoint    optional endpoint URL (Azure-specific)
+   *  @param apiKey      provider-dependent credential: an API key for most providers,
+   *                     or a path to a service-account credentials file for VertexAI
+   *  @param organization provider-dependent: the organisation identifier for OpenAI,
+   *                     or the GCP region/location for VertexAI
+   *  @param endpoint    provider-dependent: the endpoint URL for Azure, or the GCP
+   *                     project ID for VertexAI
    *  @param apiVersion  optional API version string (Azure-specific)
    */
   final case class RawNamedProviderSection(
@@ -46,10 +49,13 @@ object ProvidersConfigModel:
    *  @param provider     the resolved `ProviderKind`
    *  @param model        the model name to use
    *  @param baseUrl      optional base URL override
-   *  @param apiKey       optional API key
-   *  @param organization optional organisation identifier
-   *  @param endpoint     optional endpoint URL
-   *  @param apiVersion   optional API version string
+   *  @param apiKey       provider-dependent credential: an API key for most providers,
+   *                      or a path to a service-account credentials file for VertexAI
+   *  @param organization provider-dependent: the organisation identifier for OpenAI,
+   *                      or the GCP region/location for VertexAI
+   *  @param endpoint     provider-dependent: the endpoint URL for Azure, or the GCP
+   *                      project ID for VertexAI
+   *  @param apiVersion   optional API version string (Azure-specific)
    */
   final case class NamedProviderConfig(
     provider: ProviderKind,
