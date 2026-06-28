@@ -1,6 +1,6 @@
 package org.llm4s.assistant
 
-import org.llm4s.agent.{ Agent, AgentState, AgentStatus }
+import org.llm4s.agent.{ Agent, AgentContext, AgentState, AgentStatus }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.error.{ AssistantError, LLMError, ConfigurationError }
@@ -49,8 +49,18 @@ class AssistantAgent(
   client: LLMClient,
   tools: ToolRegistry,
   sessionDir: String = "./sessions",
-  consoleConfig: ConsoleConfig = ConsoleConfig()
+  consoleConfig: ConsoleConfig = ConsoleConfig(),
+  agentContext: AgentContext = AgentContext.Default
 ) {
+  // Preserves the pre-AgentContext 4-arg <init> signature so callers compiled
+  // against the prior artifact keep linking without recompilation.
+  def this(
+    client: LLMClient,
+    tools: ToolRegistry,
+    sessionDir: String,
+    consoleConfig: ConsoleConfig
+  ) = this(client, tools, sessionDir, consoleConfig, AgentContext.Default)
+
   private val logger         = LoggerFactory.getLogger(getClass)
   private val agent          = new Agent(client)
   private val sessionManager = new SessionManager(DirectoryPath(sessionDir), agent)
@@ -124,7 +134,7 @@ class AssistantAgent(
     logger.debug("Processing user query: {}", query.take(100))
     for {
       updatedState <- addUserMessage(query, state)
-      finalState <- runAgentToCompletion(updatedState).leftMap(llmError =>
+      finalState <- runAgentToCompletion(updatedState, agentContext).leftMap(llmError =>
         AssistantError.SessionError(
           s"Agent execution failed: ${llmError.message}",
           state.sessionId,
@@ -329,14 +339,17 @@ class AssistantAgent(
   /**
    * Runs the agent until completion or failure
    */
-  private[assistant] def runAgentToCompletion(state: SessionState): Either[LLMError, SessionState] =
+  private[assistant] def runAgentToCompletion(
+    state: SessionState,
+    context: AgentContext = AgentContext.Default
+  ): Either[LLMError, SessionState] =
     state.agentState match {
       case None => Left(ConfigurationError("No agent state to run"))
       case Some(agentState) =>
         def runSteps(currentState: AgentState): Either[org.llm4s.error.LLMError, AgentState] =
           currentState.status match {
             case AgentStatus.InProgress | AgentStatus.WaitingForTools =>
-              agent.runStep(currentState) match {
+              agent.runStep(currentState, context) match {
                 case Right(newState) => runSteps(newState)
                 case Left(error)     => Left(error)
               }

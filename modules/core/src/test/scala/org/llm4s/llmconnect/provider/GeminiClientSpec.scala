@@ -3,8 +3,11 @@ package org.llm4s.llmconnect.provider
 import org.scalatest.funsuite.AnyFunSuite
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.metrics.MockMetricsCollector
+import org.llm4s.model.ModelRegistryService
 
 class GeminiClientSpec extends AnyFunSuite {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private val testConfig = GeminiConfig(
     apiKey = "test-key",

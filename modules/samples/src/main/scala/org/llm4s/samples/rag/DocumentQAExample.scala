@@ -1,6 +1,6 @@
 package org.llm4s.samples.rag
 
-import org.llm4s.agent.memory._
+import org.llm4s.agent.memory.*
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient, LLMConnect }
@@ -8,10 +8,11 @@ import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ModelDimensionRegistr
 import org.llm4s.llmconnect.extractors.UniversalExtractor
 import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
 import org.llm4s.llmconnect.utils.ChunkingUtils
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
-import scala.util.chaining._
 
+import scala.util.chaining.*
 import java.io.File
 import java.nio.file.{ Files, Path }
 
@@ -58,7 +59,10 @@ object DocumentQAExample extends App {
   )
 
   // Main execution
-  val result = runRAGDemo(config)
+  val result = for
+    service <- Llm4sConfig.modelRegistryService()
+    res     <- runRAGDemo(config, service)
+  yield res
 
   result match {
     case Right(_) =>
@@ -79,7 +83,8 @@ object DocumentQAExample extends App {
   // Main RAG Flow
   // ============================================================
 
-  def runRAGDemo(config: RAGConfig): Result[Unit] = {
+  def runRAGDemo(config: RAGConfig, service: ModelRegistryService): Result[Unit] = {
+    given ModelRegistryService = service
     // Create temporary database
     val dbPath: Path = Files.createTempFile("llm4s-rag-demo-", ".db")
 
@@ -88,7 +93,7 @@ object DocumentQAExample extends App {
       Llm4sConfig
         .embeddings()
         .flatMap { case (provider, cfg) =>
-          val dims     = scala.util.Try(ModelDimensionRegistry.getDimension(provider, cfg.model)).getOrElse(1536)
+          val dims     = ModelDimensionRegistry.getDimension(provider, cfg.model).getOrElse(1536)
           val modelCfg = EmbeddingModelConfig(cfg.model, dims)
           EmbeddingClient.from(provider, cfg).map(client => LLMEmbeddingService(client, modelCfg))
         } match {
@@ -121,7 +126,7 @@ object DocumentQAExample extends App {
       _ = logger.info("-" * 40)
       _ = logger.info("Step 2: Connecting to LLM")
       _ = logger.info("-" * 40)
-      providerCfg <- Llm4sConfig.provider()
+      providerCfg <- Llm4sConfig.defaultProvider()
       client      <- LLMConnect.getClient(providerCfg)
       _ = logger.info("LLM client connected successfully")
 

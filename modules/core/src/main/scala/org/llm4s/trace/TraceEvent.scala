@@ -296,6 +296,53 @@ object TraceEvent {
     )
 
   /**
+   * Tracks completion of an image generation operation.
+   *
+   * @param model Image generation model name (e.g., "gpt-image-1", "dall-e-3")
+   * @param provider Provider name (e.g., "openai", "stability-ai")
+   * @param operation Type of operation: "generate", "edit"
+   * @param imageCount Number of images generated
+   * @param size Image size descriptor (e.g., "1024x1024")
+   * @param quality Quality level (e.g., "standard", "hd")
+   * @param durationMs Wall-clock duration in milliseconds
+   * @param costUsd Estimated cost in USD, if available
+   * @param success Whether the operation succeeded
+   * @param errorMessage Error message if the operation failed
+   */
+  case class ImageGenerationCompleted(
+    model: String,
+    provider: String,
+    operation: String,
+    imageCount: Int,
+    size: String,
+    quality: String,
+    durationMs: Long,
+    costUsd: Option[Double] = None,
+    success: Boolean = true,
+    errorMessage: Option[String] = None,
+    timestamp: Instant = Instant.now()
+  ) extends TraceEvent {
+    def eventType: String = "image_generation_completed"
+    def toJson: ujson.Value = {
+      val base = ujson.Obj(
+        "event_type"  -> eventType,
+        "timestamp"   -> timestamp.toString,
+        "model"       -> model,
+        "provider"    -> provider,
+        "operation"   -> operation,
+        "image_count" -> imageCount,
+        "size"        -> size,
+        "quality"     -> quality,
+        "duration_ms" -> durationMs.toDouble,
+        "success"     -> success
+      )
+      costUsd.foreach(c => base("cost_usd") = c)
+      errorMessage.foreach(m => base("error_message") = m)
+      base
+    }
+  }
+
+  /**
    * Cache hit event for semantic caching
    */
   case class CacheHit(

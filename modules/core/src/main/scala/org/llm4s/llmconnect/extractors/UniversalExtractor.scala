@@ -17,6 +17,21 @@ import org.apache.pdfbox.text.PDFTextStripper
 import javax.imageio.ImageIO
 import java.awt.image.BufferedImage
 
+/**
+ * Extracts text and multimedia content from files of various formats.
+ *
+ * MIME type detection is performed by Apache Tika. Supported formats include:
+ *  - PDF (via PDFBox)
+ *  - DOCX (via Apache POI)
+ *  - Plain text and other text types
+ *  - Images (via ImageIO)
+ *  - Unknown types (Tika fallback)
+ *
+ * Three entry points are provided:
+ *  - `extract` -- text-only extraction from a file path
+ *  - `extractAny` -- multimedia-aware extraction returning an [[Extracted]] ADT
+ *  - `extractFromBytes` / `extractFromStream` -- source-agnostic text extraction from raw bytes
+ */
 object UniversalExtractor {
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -26,12 +41,20 @@ object UniversalExtractor {
   private val PdfMime  = "application/pdf"
   private val DocxMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
-  // ----- ADT for multimedia extraction -----
+  /** ADT representing extracted content from a file, discriminated by media type. */
   sealed trait Extracted
-  final case class TextContent(text: String)                            extends Extracted
-  final case class ImageContent(image: BufferedImage)                   extends Extracted
+
+  /** Extracted text content (from PDF, DOCX, plain text, etc.). */
+  final case class TextContent(text: String) extends Extracted
+
+  /** Extracted image content. */
+  final case class ImageContent(image: BufferedImage) extends Extracted
+
+  /** Extracted audio content as mono PCM samples with a sample rate. */
   final case class AudioContent(samples: Array[Float], sampleRate: Int) extends Extracted
-  final case class VideoContent(frames: Seq[BufferedImage], fps: Int)   extends Extracted
+
+  /** Extracted video content as a sequence of frames at a given frame rate. */
+  final case class VideoContent(frames: Seq[BufferedImage], fps: Int) extends Extracted
 
   // ----- Path normalization (quotes/whitespace) -----
   private def normalizeInputPath(raw: String): File = {
@@ -43,7 +66,12 @@ object UniversalExtractor {
     new File(s).getAbsoluteFile
   }
 
-  // ----- MIME type checking -----
+  /**
+   * Check whether a MIME type represents text-extractable content (PDF, DOCX, text types, JSON, XML).
+   *
+   * @param mime the MIME type string to check
+   * @return true if the MIME type can be processed as text
+   */
   def isTextLike(mime: String): Boolean =
     mime == PdfMime ||
       mime == DocxMime ||
@@ -51,7 +79,15 @@ object UniversalExtractor {
       mime == "application/json" ||
       mime == "application/xml"
 
-  // ================================= TEXT-ONLY API =================================
+  /**
+   * Extract text content from a file at the given path.
+   *
+   * Supports PDF, DOCX, plain text, and Tika-parseable formats. Returns an error
+   * for files that cannot be found or whose MIME type is unsupported.
+   *
+   * @param inputPath path to the file (quotes and whitespace are trimmed)
+   * @return extracted text or an [[ExtractorError]]
+   */
   def extract(inputPath: String): Either[ExtractorError, String] = {
     val file = normalizeInputPath(inputPath)
     if (!file.exists() || !file.isFile) {
@@ -134,7 +170,13 @@ object UniversalExtractor {
     }
   }
 
-  // ================================= MULTIMEDIA API =================================
+  /**
+   * Extract content from a file, returning the appropriate [[Extracted]] subtype
+   * based on MIME type (text, image, audio, or video).
+   *
+   * @param inputPath path to the file (quotes and whitespace are trimmed)
+   * @return extracted content as an [[Extracted]] ADT variant, or an [[ExtractorError]]
+   */
   def extractAny(inputPath: String): Either[ExtractorError, Extracted] = {
     val file = normalizeInputPath(inputPath)
     if (!file.exists() || !file.isFile) {

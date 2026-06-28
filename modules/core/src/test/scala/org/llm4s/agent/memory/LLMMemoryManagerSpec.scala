@@ -1,10 +1,12 @@
 package org.llm4s.agent.memory
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
 import java.time.Instant
 import java.time.temporal.ChronoUnit
@@ -15,6 +17,14 @@ import java.time.temporal.ChronoUnit
  * These tests verify LLM-powered memory consolidation behavior.
  */
 class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
+
+  private def withLLMMemoryManagerLoggerSilenced[A](body: => A): A = {
+    val logger   = LoggerFactory.getLogger(classOf[LLMMemoryManager]).asInstanceOf[LBLogger]
+    val previous = logger.getLevel
+    logger.setLevel(Level.OFF)
+    try body
+    finally logger.setLevel(previous)
+  }
 
   // ============================================================
   // Mock LLM Client for testing
@@ -31,7 +41,22 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
       // Extract the prompt to determine what kind of consolidation
       val prompt = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
 
-      val response = if (prompt.contains("conversation")) {
+      val response = if (prompt.contains("Return JSON array only")) {
+        """[
+          |  {
+          |    "entity_name": "Martin Odersky",
+          |    "entity_type": "person",
+          |    "fact": "Martin Odersky created Scala.",
+          |    "importance": 0.9
+          |  },
+          |  {
+          |    "entity_name": "Scala",
+          |    "entity_type": "technology",
+          |    "fact": "Scala is used for functional programming.",
+          |    "importance": 0.8
+          |  }
+          |]""".stripMargin
+      } else if (prompt.contains("conversation")) {
         "Consolidated conversation summary: User and assistant discussed various topics."
       } else if (prompt.contains("entity")) {
         "Consolidated entity description: An entity with multiple important characteristics."
@@ -58,6 +83,77 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     }
 
     // Implement other required methods
+    def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] =
+      complete(conversation, options)
+
+    def getContextWindow(): Int = 4096
+
+    def getReserveCompletion(): Int = 1024
+  }
+
+  /**
+   * Mock LLM client that returns malformed JSON for entity extraction prompts.
+   */
+  class MalformedEntityExtractionMockLLMClient extends LLMClient {
+    override def complete(
+      conversation: Conversation,
+      options: CompletionOptions
+    ): Result[Completion] = {
+      val prompt = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
+      val response =
+        if (prompt.contains("Return JSON array only")) "{not-valid-json]" else "Consolidated memory content."
+
+      Right(
+        Completion(
+          id = "mock-completion-malformed",
+          created = System.currentTimeMillis(),
+          content = response,
+          model = "mock-model",
+          message = AssistantMessage(response),
+          usage = None
+        )
+      )
+    }
+
+    def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] =
+      complete(conversation, options)
+
+    def getContextWindow(): Int = 4096
+
+    def getReserveCompletion(): Int = 1024
+  }
+
+  /**
+   * Mock LLM client that returns no entities.
+   */
+  class NoEntityExtractionMockLLMClient extends LLMClient {
+    override def complete(
+      conversation: Conversation,
+      options: CompletionOptions
+    ): Result[Completion] = {
+      val prompt   = conversation.messages.collectFirst { case UserMessage(content) => content }.getOrElse("")
+      val response = if (prompt.contains("Return JSON array only")) "[]" else "Consolidated memory content."
+
+      Right(
+        Completion(
+          id = "mock-completion-empty",
+          created = System.currentTimeMillis(),
+          content = response,
+          model = "mock-model",
+          message = AssistantMessage(response),
+          usage = None
+        )
+      )
+    }
+
     def streamComplete(
       conversation: Conversation,
       options: CompletionOptions,
@@ -103,6 +199,16 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
 
   def createFailingManager(): LLMMemoryManager = {
     val client = new FailingMockLLMClient()
+    LLMMemoryManager.forTesting(client)
+  }
+
+  def createMalformedExtractionManager(): LLMMemoryManager = {
+    val client = new MalformedEntityExtractionMockLLMClient()
+    LLMMemoryManager.forTesting(client)
+  }
+
+  def createNoEntityManager(): LLMMemoryManager = {
+    val client = new NoEntityExtractionMockLLMClient()
     LLMMemoryManager.forTesting(client)
   }
 
@@ -221,6 +327,50 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
 
     val memories = result.toOption.get.store.recall(MemoryFilter.tasks, 100)
     (memories.toOption.get should have).length(1)
+  }
+
+  it should "extract entity memories with importance scores and conversation metadata" in {
+    val manager = createManager()
+
+    val result = for {
+      m1        <- manager.recordUserFact("User prefers functional programming", Some("user-1"), Some(0.8))
+      extracted <- m1.extractEntities("Scala was created by Martin Odersky and used for FP", Some("conv-1"))
+      entities  <- extracted.store.recall(MemoryFilter.entities, 100)
+    } yield entities
+
+    result.isRight shouldBe true
+    val entities = result.toOption.get
+
+    entities.length should be >= 2
+    entities.foreach { memory =>
+      memory.importance should not be None
+      memory.conversationId shouldBe Some("conv-1")
+      memory.getMetadata("entity_id") should not be None
+      memory.getMetadata("entity_name") should not be None
+      memory.getMetadata("entity_type") should not be None
+    }
+  }
+
+  it should "return error when entity extraction JSON is malformed" in {
+    val manager = createMalformedExtractionManager()
+
+    val result = manager.extractEntities("Scala was created by Martin Odersky", Some("conv-1"))
+
+    result.isLeft shouldBe true
+  }
+
+  it should "not add memories when entity extraction returns empty array" in {
+    val manager = createNoEntityManager()
+
+    val result = for {
+      before  <- manager.store.recall(MemoryFilter.All, 100)
+      updated <- manager.extractEntities("No notable entities here.", Some("conv-1"))
+      after   <- updated.store.recall(MemoryFilter.All, 100)
+    } yield (before.length, after.length)
+
+    result.isRight shouldBe true
+    val (beforeCount, afterCount) = result.toOption.get
+    afterCount shouldBe beforeCount
   }
 
   it should "not consolidate if below minimum count" in {
@@ -630,16 +780,18 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
   it should "handle LLM failures during consolidation" in {
     val manager = createFailingManager()
 
-    val result = for {
-      m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
-      m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
-      m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
+    val result = withLLMMemoryManagerLoggerSilenced {
+      for {
+        m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
+        m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
+        m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
 
-      consolidated <- m3.consolidateMemories(
-        olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
-        minCount = 3
-      )
-    } yield consolidated
+        consolidated <- m3.consolidateMemories(
+          olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
+          minCount = 3
+        )
+      } yield consolidated
+    }
 
     // Should succeed (non-fatal error recovery) but preserve original memories
     result.isRight shouldBe true
@@ -650,19 +802,21 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
   it should "preserve original memories when LLM consolidation fails" in {
     val manager = createFailingManager()
 
-    val result = for {
-      m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
-      m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
-      m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
+    val result = withLLMMemoryManagerLoggerSilenced {
+      for {
+        m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
+        m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
+        m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
 
-      // Try to consolidate (should continue despite LLM failure)
-      consolidated <- m3.consolidateMemories(
-        olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
-        minCount = 3
-      )
+        // Try to consolidate (should continue despite LLM failure)
+        consolidated <- m3.consolidateMemories(
+          olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
+          minCount = 3
+        )
 
-      memories <- consolidated.store.recall(MemoryFilter.All, 100)
-    } yield memories
+        memories <- consolidated.store.recall(MemoryFilter.All, 100)
+      } yield memories
+    }
 
     // Should succeed and preserve original memories (non-fatal error recovery)
     result.isRight shouldBe true
@@ -677,17 +831,19 @@ class LLMMemoryManagerSpec extends AnyFlatSpec with Matchers {
     val store   = InMemoryStore.empty
     val manager = LLMMemoryManager(strictConfig, store, client)
 
-    val result = for {
-      m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
-      m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
-      m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
+    val result = withLLMMemoryManagerLoggerSilenced {
+      for {
+        m1 <- manager.recordUserFact("Fact 1", Some("user-1"), None)
+        m2 <- m1.recordUserFact("Fact 2", Some("user-1"), None)
+        m3 <- m2.recordUserFact("Fact 3", Some("user-1"), None)
 
-      // Try to consolidate in strict mode (should fail fast)
-      consolidated <- m3.consolidateMemories(
-        olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
-        minCount = 3
-      )
-    } yield consolidated
+        // Try to consolidate in strict mode (should fail fast)
+        consolidated <- m3.consolidateMemories(
+          olderThan = Instant.now().plus(1, ChronoUnit.DAYS),
+          minCount = 3
+        )
+      } yield consolidated
+    }
 
     // Should fail fast in strict mode
     result.isLeft shouldBe true

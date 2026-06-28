@@ -111,7 +111,10 @@ class SessionManagerSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEa
     manager.saveSession(state, Some("Test/Session:With*Special?Chars"))
 
     // Filename should be sanitized
-    val files = Files.list(tempDir).toArray.map(_.asInstanceOf[Path]).toSeq
+    val stream = Files.list(tempDir)
+    val files =
+      try stream.toArray.map(_.asInstanceOf[Path]).toSeq
+      finally stream.close()
     files.foreach { file =>
       (file.getFileName.toString should not).include("/")
       (file.getFileName.toString should not).include(":")

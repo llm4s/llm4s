@@ -1,8 +1,10 @@
 package org.llm4s.trace
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
+import org.slf4j.LoggerFactory
 
 import java.util.Base64
 
@@ -17,6 +19,14 @@ class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
   private def testEvents = Seq(
     ujson.Obj("type" -> "trace-create", "body" -> ujson.Obj("id" -> "trace-1", "name" -> "test"))
   )
+
+  private def withLangfuseBatchSenderLoggerSilenced[A](body: => A): A = {
+    val logger   = LoggerFactory.getLogger(classOf[DefaultLangfuseBatchSender]).asInstanceOf[LBLogger]
+    val previous = logger.getLevel
+    logger.setLevel(Level.OFF)
+    try body
+    finally logger.setLevel(previous)
+  }
 
   "DefaultLangfuseBatchSender" should "send correct URL, headers, and body on success" in {
     val mockClient = new MockHttpClient(HttpResponse(200, """{"successes":1}"""))
@@ -56,7 +66,9 @@ class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
     val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
 
     noException should be thrownBy {
-      sender.sendBatch(testEvents, testConfig)
+      withLangfuseBatchSenderLoggerSilenced {
+        sender.sendBatch(testEvents, testConfig)
+      }
     }
     mockClient.postCallCount shouldBe 1
   }
@@ -66,7 +78,9 @@ class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
     val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
 
     noException should be thrownBy {
-      sender.sendBatch(testEvents, testConfig)
+      withLangfuseBatchSenderLoggerSilenced {
+        sender.sendBatch(testEvents, testConfig)
+      }
     }
     mockClient.postCallCount shouldBe 1
   }
@@ -76,7 +90,9 @@ class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
     val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
     val config     = testConfig.copy(publicKey = "")
 
-    sender.sendBatch(testEvents, config)
+    withLangfuseBatchSenderLoggerSilenced {
+      sender.sendBatch(testEvents, config)
+    }
 
     mockClient.postCallCount shouldBe 0
   }
@@ -86,7 +102,9 @@ class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
     val sender     = new DefaultLangfuseBatchSender(httpClient = mockClient, restoreInterrupt = () => ())
     val config     = testConfig.copy(secretKey = "")
 
-    sender.sendBatch(testEvents, config)
+    withLangfuseBatchSenderLoggerSilenced {
+      sender.sendBatch(testEvents, config)
+    }
 
     mockClient.postCallCount shouldBe 0
   }
@@ -98,7 +116,9 @@ class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
     val sender            = new DefaultLangfuseBatchSender(httpClient = failingClient, restoreInterrupt = mockRestore)
 
     noException should be thrownBy {
-      sender.sendBatch(testEvents, testConfig)
+      withLangfuseBatchSenderLoggerSilenced {
+        sender.sendBatch(testEvents, testConfig)
+      }
     }
     interruptRestored shouldBe true
   }
@@ -108,7 +128,9 @@ class LangfuseBatchSenderSpec extends AnyFlatSpec with Matchers {
     val sender        = new DefaultLangfuseBatchSender(httpClient = failingClient, restoreInterrupt = () => ())
 
     noException should be thrownBy {
-      sender.sendBatch(testEvents, testConfig)
+      withLangfuseBatchSenderLoggerSilenced {
+        sender.sendBatch(testEvents, testConfig)
+      }
     }
   }
 

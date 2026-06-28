@@ -1,8 +1,14 @@
+// scalafix:off DisableSyntax.NoConfigFactory, DisableSyntax.NoSysEnv, DisableSyntax.NoSystemGetenv, DisableSyntax.NoPureConfigDefault
 package org.llm4s.config
 
-import org.llm4s.llmconnect.config._
+import org.llm4s.llmconnect.ProviderExchangeLogging
+import org.llm4s.llmconnect.config.*
 import org.llm4s.metrics.{ MetricsCollector, PrometheusEndpoint }
 import org.llm4s.types.Result
+import org.llm4s.config.ProvidersConfigModel.{ ProviderName, ProvidersConfig }
+import org.llm4s.error.LLMError
+import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import pureconfig.ConfigSource
 
 /**
@@ -14,19 +20,24 @@ import pureconfig.ConfigSource
  * `System.getenv`, or `ConfigFactory.load()` directly.
  *
  * == Provider setup ==
- * Set `LLM_MODEL` to `provider/model` (e.g. `"openai/gpt-4o"`,
- * `"anthropic/claude-sonnet-4-5-latest"`, `"gemini/gemini-2.0-flash"`) and
- * the corresponding API key environment variable. Then call [[provider]] to
- * obtain a [[org.llm4s.llmconnect.config.ProviderConfig]] ready for
- * [[org.llm4s.llmconnect.LLMConnect.getClient]].
+ * Define named providers under `llm4s.providers.<name>` and optionally set
+ * `llm4s.providers.provider` to choose the default provider. Then call
+ * [[defaultProvider]] or resolve a named provider directly with
+ * [[provider(name)*]].
+ *
+ * Then call [[defaultProvider]] to obtain a
+ * [[org.llm4s.llmconnect.config.ProviderConfig]] ready for
+ * [[org.llm4s.llmconnect.LLMConnect.getClient]]. Apps that need multiple
+ * configured providers can call [[provider(name)*]] directly.
  *
  * @example
  * {{{
  * for {
- *   cfg    <- Llm4sConfig.provider()
- *   client <- LLMConnect.getClient(cfg)
- *   agent  = new Agent(client)
- *   state  <- agent.run("Hello", ToolRegistry.empty)
+ *   registry <- Llm4sConfig.modelRegistryService()
+ *   cfg      <- Llm4sConfig.defaultProvider()
+ *   client   <- LLMConnect.getClient(cfg)(using registry)
+ *   agent     = new Agent(client)
+ *   state    <- agent.run("Hello", ToolRegistry.empty)
  * } yield state
  * }}}
  *
@@ -35,19 +46,150 @@ import pureconfig.ConfigSource
  */
 object Llm4sConfig {
 
+  def modelRegistryConfig(): Result[ModelRegistryConfig] =
+    modelRegistryConfig(ConfigSource.default)
+
+  private[config] def modelRegistryConfig(source: ConfigSource): Result[ModelRegistryConfig] = {
+    val modelRegistrySource = source.at("llm4s.modelRegistry")
+    val resourcePath       = modelRegistrySource.at("resourcePath").load[String].toOption.map(_.trim).filter(_.nonEmpty)
+    val filePathFromConfig = modelRegistrySource.at("filePath").load[String].toOption.map(_.trim).filter(_.nonEmpty)
+    val urlFromConfig      = modelRegistrySource.at("url").load[String].toOption.map(_.trim).filter(_.nonEmpty)
+    val useDefaultResource = resourcePath.isEmpty && filePathFromConfig.isEmpty && urlFromConfig.isEmpty
+
+    Right(
+      ModelRegistryConfig(
+        resourcePath =
+          resourcePath.orElse(if useDefaultResource then Some(ModelRegistryConfig.DefaultResourcePath) else None),
+        filePath = filePathFromConfig,
+        url = urlFromConfig
+      )
+    )
+  }
+
+  def modelRegistryService(): Result[ModelRegistryService] =
+    modelRegistryConfig().flatMap(ModelRegistryService.fromConfig)
+
+  private[config] def modelRegistryService(source: ConfigSource): Result[ModelRegistryService] =
+    modelRegistryConfig(source).flatMap(ModelRegistryService.fromConfig)
+
   /**
-   * Loads LLM provider configuration from the current environment.
+   * Loads a named provider from `llm4s.providers.<name>`.
    *
-   * Reads `LLM_MODEL` (format: `provider/model`) and the matching
-   * credential variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, etc.) to
-   * build a typed [[org.llm4s.llmconnect.config.ProviderConfig]].
-   *
-   * @return the provider configuration, or a
-   *         [[org.llm4s.error.ConfigurationError]] when required variables are
-   *         missing or the provider prefix is unrecognised.
+   * Useful for applications that need to resolve multiple configured provider
+   * instances, including multiple accounts for the same provider type.
    */
-  def provider(): Result[ProviderConfig] =
-    org.llm4s.config.ProviderConfigLoader.load(ConfigSource.default)
+  def provider(name: String): Result[ProviderConfig] =
+    for
+      service <- modelRegistryService()
+      given ContextWindowResolver = ContextWindowResolver(service)
+      config <- org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name)
+    yield config
+
+  def providerConfigs(): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
+    for
+      service <- modelRegistryService()
+      given ContextWindowResolver = ContextWindowResolver(service)
+      result <- org.llm4s.config.NamedProviderLoader.loadProviderConfigs(ConfigSource.default)
+    yield result
+
+  def providerConfigs(
+    map: Map[ProviderName, ProvidersConfigModel.NamedProviderConfig]
+  ): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
+    modelRegistryService() match
+      case Right(service) =>
+        given ContextWindowResolver = ContextWindowResolver(service)
+        org.llm4s.config.NamedProviderLoader.getProviderConfigs(map)
+      case Left(err) =>
+        val errors = map.map { case (name, _) => name -> (err: LLMError) }
+        (errors, Map.empty)
+
+  private[config] def provider(source: ConfigSource, name: String): Result[ProviderConfig] =
+    for
+      service <- modelRegistryService(source)
+      given ContextWindowResolver = ContextWindowResolver(service)
+      config <- org.llm4s.config.NamedProviderLoader.load(source, name)
+    yield config
+
+  /**
+   * Loads the full validated named-providers configuration from `llm4s.providers`.
+   */
+  def providers(): Result[ProvidersConfig] =
+    org.llm4s.config.ProvidersConfigLoader.load(ConfigSource.default)
+
+  private[config] def providers(source: ConfigSource): Result[ProvidersConfig] =
+    org.llm4s.config.ProvidersConfigLoader.load(source)
+
+  /**
+   * Loads the configured default provider name from `llm4s.providers.provider`.
+   */
+  def defaultProviderName(): Result[ProviderName] =
+    providers().flatMap(_.defaultProviderName)
+
+  private[config] def defaultProviderName(source: ConfigSource): Result[ProviderName] =
+    providers(source).flatMap(_.defaultProviderName)
+
+  /**
+   * Loads the configured default named provider as a runtime [[ProviderConfig]].
+   */
+  def defaultProvider(): Result[ProviderConfig] =
+    for
+      service <- modelRegistryService()
+      given ContextWindowResolver = ContextWindowResolver(service)
+      name   <- defaultProviderName()
+      config <- org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name.asName)
+    yield config
+
+  private[config] def defaultProvider(source: ConfigSource): Result[ProviderConfig] =
+    for
+      service <- modelRegistryService(source)
+      given ContextWindowResolver = ContextWindowResolver(service)
+      name   <- defaultProviderName(source)
+      config <- org.llm4s.config.NamedProviderLoader.load(source, name.asName)
+    yield config
+
+  /**
+   * Lists models for the configured default named provider.
+   */
+  def listModels(): Result[List[DiscoveredModel]] =
+    listModels(ConfigSource.default)
+
+  private[config] def listModels(source: ConfigSource): Result[List[DiscoveredModel]] =
+    listModels(source, Llm4sHttpClient.create())
+
+  private[config] def listModels(
+    source: ConfigSource,
+    httpClient: Llm4sHttpClient
+  ): Result[List[DiscoveredModel]] =
+    for
+      defaultName <- defaultProviderName(source)
+      models      <- listModels(defaultName.asName, source, httpClient)
+    yield models
+
+  /**
+   * Lists models for a named provider configured under `llm4s.providers.<name>`.
+   */
+  def listModels(name: String): Result[List[DiscoveredModel]] =
+    listModels(name, ConfigSource.default, Llm4sHttpClient.create())
+
+  private[config] def listModels(
+    name: String,
+    source: ConfigSource,
+    httpClient: Llm4sHttpClient
+  ): Result[List[DiscoveredModel]] =
+    for
+      providers <- providers(source)
+      namedProvider <- providers.namedProviders
+        .get(ProviderName(name))
+        .toRight(org.llm4s.error.ConfigurationError(s"Configured provider '$name' was not found"))
+      capabilities <- ProviderCapabilitiesRegistry.forKind(namedProvider.provider)
+      lister <- capabilities.modelLister
+        .toRight(
+          org.llm4s.error.ConfigurationError(
+            s"Model discovery is not supported yet for provider '${namedProvider.provider.toString.toLowerCase}'"
+          )
+        )
+      models <- lister.listModels(namedProvider, httpClient)
+    yield models
 
   /**
    * Loads PostgreSQL vector-search index configuration from the current environment.
@@ -80,6 +222,18 @@ object Llm4sConfig {
    */
   def metrics(): Result[(MetricsCollector, Option[PrometheusEndpoint])] =
     org.llm4s.config.MetricsConfigLoader.load(ConfigSource.default)
+
+  /**
+   * Loads provider exchange logging configuration from the current environment.
+   *
+   * Reads the optional `llm4s.exchangeLogging` section. When absent or disabled,
+   * exchange logging remains off. When enabled, a JSONL sink is constructed
+   * from a configured directory and writes to a new per-run file.
+   */
+  // TODO: As part of the wider Llm4sConfig cleanup, accept an optional ConfigSource
+  // parameter here instead of hard-wiring ConfigSource.default inside the method body.
+  def exchangeLogging(): Result[ProviderExchangeLogging] =
+    org.llm4s.config.ProviderExchangeLoggingConfigLoader.load(ConfigSource.default)
 
   final case class EmbeddingsChunkingSettings(
     enabled: Boolean,
@@ -235,10 +389,11 @@ object Llm4sConfig {
    *         when `EMBEDDING_MODEL` is absent or unrecognised.
    */
   def loadTextEmbeddingModel(): Result[TextEmbeddingModelSettings] =
-    org.llm4s.config.EmbeddingsConfigLoader.loadProvider(ConfigSource.default).map { case (provider, cfg) =>
-      val p    = provider.toLowerCase
-      val dims = ModelDimensionRegistry.getDimension(p, cfg.model)
-      TextEmbeddingModelSettings(provider = p, modelName = cfg.model, dimensions = dims)
+    org.llm4s.config.EmbeddingsConfigLoader.loadProvider(ConfigSource.default).flatMap { case (provider, cfg) =>
+      val p = provider.toLowerCase
+      ModelDimensionRegistry.getDimension(p, cfg.model).map { dims =>
+        TextEmbeddingModelSettings(provider = p, modelName = cfg.model, dimensions = dims)
+      }
     }
 
   /** Alias for [[loadTextEmbeddingModel]]. */
@@ -255,19 +410,6 @@ object Llm4sConfig {
     val source     = ConfigSource.default.at("llm4s.embeddings")
     val configured = source.at("experimentalStubs").load[Boolean].toOption
     configured.getOrElse(false)
-  }
-
-  /**
-   * Returns the path to a user-supplied model-metadata override file, if configured.
-   *
-   * When set via `llm4s.modelMetadata.file`, the override file is consulted
-   * before the bundled model catalogue when resolving context-window sizes.
-   * Returns `None` when the key is absent or blank.
-   */
-  def modelMetadataOverridePath: Option[String] = {
-    val source   = ConfigSource.default.at("llm4s.modelMetadata")
-    val fromConf = source.at("file").load[String].toOption.map(_.trim).filter(_.nonEmpty)
-    fromConf
   }
 
   /**

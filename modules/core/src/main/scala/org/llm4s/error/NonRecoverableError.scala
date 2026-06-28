@@ -17,6 +17,6 @@ package org.llm4s.error
  *
  * @see [[RecoverableError]] for errors that may succeed on retry
  */
-protected trait NonRecoverableError extends LLMError {
+trait NonRecoverableError extends LLMError {
   final override def isRecoverable: Boolean = false
 }

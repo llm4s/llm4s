@@ -13,8 +13,7 @@ class UniversalExtractorSpec extends AnyFunSuite with Matchers {
     try {
       Files.write(file.toPath, content.getBytes("UTF-8"))
       test(file)
-    } finally
-      file.delete()
+    } finally file.delete()
   }
 
   // ================================= TEXT EXTRACTION =================================

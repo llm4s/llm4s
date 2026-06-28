@@ -3,7 +3,10 @@ package org.llm4s.llmconnect.utils
 import java.time.Instant
 
 /**
- * Connection status for LLM clients
+ * Connection status for LLM clients.
+ *
+ * Represents the current state of a provider connection: connected, disconnected,
+ * connecting, or in an error state with an optional underlying cause.
  */
 sealed trait ConnectionStatus
 
@@ -15,7 +18,15 @@ object ConnectionStatus {
 }
 
 /**
- * Provider capabilities information
+ * Describes the capabilities supported by an LLM provider.
+ *
+ * @param supportsStreaming whether the provider supports streaming responses
+ * @param supportsToolCalls whether the provider supports tool/function calling
+ * @param supportsFunctionCalling whether the provider supports legacy function calling
+ * @param supportsVision whether the provider supports image/vision inputs
+ * @param maxTokens maximum token limit for completions, if known
+ * @param supportedModels list of model identifiers the provider offers
+ * @param metadata additional provider-specific key-value metadata
  */
 final case class ProviderCapabilities(
   supportsStreaming: Boolean,
@@ -28,7 +39,13 @@ final case class ProviderCapabilities(
 )
 
 /**
- * Health check information
+ * Health check snapshot for an LLM client connection.
+ *
+ * @param status current connection status
+ * @param lastHealthCheck timestamp of the most recent health check
+ * @param responseTimeMs round-trip time of the last successful health check in milliseconds
+ * @param errorCount cumulative number of errors observed on this connection
+ * @param capabilities provider capabilities discovered during the health check
  */
 final case class ClientHealth(
   status: ConnectionStatus,

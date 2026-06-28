@@ -13,6 +13,8 @@ import org.llm4s.imagegeneration.provider.{
 import scala.annotation.unused
 import scala.util.Try
 import scala.concurrent.{ Future, ExecutionContext }
+import org.llm4s.metrics.MetricsCollector
+import org.llm4s.trace.Tracing
 
 // ===== ERROR HANDLING =====
 
@@ -344,23 +346,34 @@ object ImageGeneration {
   def client(
     config: ImageGenerationConfig
   ): Either[ImageGenerationError, ImageGenerationClient] =
-    // metrics and tracing are ignored in this PR 1 version as instrumentation is added in a later PR
-    config match {
-      case sdConfig: StableDiffusionConfig =>
-        val httpClient = HttpClient.create()
-        Right(new StableDiffusionClient(sdConfig, httpClient))
-      case hfConfig: HuggingFaceConfig =>
-        val httpClient = HttpClient.create()
-        Right(new HuggingFaceClient(hfConfig, httpClient))
-      case openAIConfig: OpenAIConfig =>
-        val httpClient = HttpClient.create()
-        Right(new OpenAIImageClient(openAIConfig, httpClient))
-      case stabilityAIConfig: StabilityAIConfig =>
-        val httpClient = HttpClient.create()
-        Right(new StabilityAIClient(stabilityAIConfig, httpClient))
-      case _ =>
-        Left(UnsupportedOperation(s"Provider ${config.provider} is not supported."))
-    }
+    createBaseClient(config)
+
+  /** Factory method for getting an instrumented client with metrics and tracing */
+  def client(
+    config: ImageGenerationConfig,
+    metrics: MetricsCollector,
+    tracing: Tracing
+  ): Either[ImageGenerationError, ImageGenerationClient] =
+    createBaseClient(config).map(c => new InstrumentedImageGenerationClient(c, config, metrics, tracing))
+
+  private def createBaseClient(
+    config: ImageGenerationConfig
+  ): Either[ImageGenerationError, ImageGenerationClient] = config match {
+    case sdConfig: StableDiffusionConfig =>
+      val httpClient = HttpClient.create()
+      Right(new StableDiffusionClient(sdConfig, httpClient))
+    case hfConfig: HuggingFaceConfig =>
+      val httpClient = HttpClient.create()
+      Right(new HuggingFaceClient(hfConfig, httpClient))
+    case openAIConfig: OpenAIConfig =>
+      val httpClient = HttpClient.create()
+      Right(new OpenAIImageClient(openAIConfig, httpClient))
+    case stabilityAIConfig: StabilityAIConfig =>
+      val httpClient = HttpClient.create()
+      Right(new StabilityAIClient(stabilityAIConfig, httpClient))
+    case _ =>
+      Left(UnsupportedOperation(s"Provider ${config.provider} is not supported."))
+  }
 
   /** Convenience method for quick image generation */
   def generateImage(

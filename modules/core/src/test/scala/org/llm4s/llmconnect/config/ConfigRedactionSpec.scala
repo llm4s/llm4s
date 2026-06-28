@@ -5,6 +5,9 @@ import org.scalatest.matchers.should.Matchers
 
 class ConfigRedactionSpec extends AnyFlatSpec with Matchers {
 
+  private given ContextWindowResolver =
+    ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
+
   private val secret = "SECRET_TEST_VALUE_12345"
 
   "Provider config toString" should "not leak apiKey values" in {

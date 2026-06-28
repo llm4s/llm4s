@@ -162,6 +162,15 @@ class TokenWindowSpec extends AnyFlatSpec with Matchers {
     infoOver.withinBudget shouldBe false
   }
 
+  it should "return zero utilization when budget is zero" in {
+    val conversation = ContextTestFixtures.smallConversation
+    val info         = TokenWindow.getUsageInfo(conversation, counter, 0)
+
+    info.utilizationPercentage shouldBe 0
+    info.withinBudget shouldBe false
+    info.budgetLimit shouldBe 0
+  }
+
   // ============ Edge Cases ============
 
   "TokenWindow" should "handle single message conversation" in {

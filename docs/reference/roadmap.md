@@ -7,314 +7,148 @@ nav_order: 5
 
 # LLM4S Roadmap
 
-The single source of truth for LLM4S project status and future direction.
+This page reflects the current pre-1.0 roadmap as of June 2026. It replaces the older 2025 plan, which mixed implemented features with production-readiness goals.
 
----
+LLM4S has broad, working framework functionality today: provider clients, agents, tool calling, RAG/vector stores, memory, guardrails, tracing, metrics, reliability wrappers, workspace isolation, and multimodal APIs. The remaining v1.0 work is productization: stable contracts, JVM interop, provider capability parity, security hardening, deterministic CI, runnable docs, and polished reference applications.
 
 ## Quick Status
 
 | | |
 |---|---|
-| **Version** | 0.1.0-SNAPSHOT (Pre-release) |
-| **Stability** | Active development, API stabilizing |
-| **Target** | v1.0.0 Production-Ready |
-| **Timeline** | Q2-Q3 2025 |
+| **Latest release tag** | v0.3.2 |
+| **Main branch** | Active development after v0.3.2 |
+| **Stability** | Pre-1.0, API stabilizing |
+| **Scala support** | Scala 3.7.1 |
+| **Java support** | JDK 21 recommended and used in CI |
+| **Target** | v1.0 production-ready stable modules |
+| **Timeline** | 2026 stabilization phases; v1.0 date intentionally not fixed |
 
----
+## Maturity Legend
 
-## What's Complete
+| Status | Meaning |
+|--------|---------|
+| **Stable path** | Implemented, documented, covered by normal CI, and intended to remain compatible. |
+| **Beta** | Implemented and usable, but API, provider behavior, or docs still need hardening before v1.0. |
+| **Experimental** | Useful prototype or advanced feature; expect changes. |
+| **Planned** | Roadmap item, design, issue, or PR queue item; not a stable user contract. |
 
-### Core Platform Features
+## Current Capability Map
 
-| Category | Feature | Status | Documentation |
-|----------|---------|--------|---------------|
-| **LLM Connectivity** | Multi-Provider Support | ✅ Complete | [Providers](../guide/providers) |
-| | OpenAI Integration | ✅ Complete | [Basic Usage](../guide/basic-usage) |
-| | Anthropic Integration | ✅ Complete | [Providers](../guide/providers) |
-| | Google Gemini Integration | ✅ Complete | [Providers](../guide/providers) |
-| | Azure OpenAI Integration | ✅ Complete | [Providers](../guide/providers) |
-| | DeepSeek Integration | ✅ Complete | [Providers](../guide/providers) |
-| | Ollama (Local Models) | ✅ Complete | [Providers](../guide/providers) |
-| | Streaming Responses | ✅ Complete | [Streaming](/guide/streaming) |
-| | Model Metadata API | ✅ Complete | [API Reference](/api/llm-client) |
-| **Content** | Image Generation | ✅ Complete | [Image Generation](/guide/image-generation) |
-| | Speech-to-Text (STT) | ✅ Complete | [Speech](/guide/speech) |
-| | Text-to-Speech (TTS) | ✅ Complete | [Speech](/guide/speech) |
-| | Embeddings API | ✅ Complete | [Embeddings](/guide/embeddings) |
-| **Tools** | Tool Calling API | ✅ Complete | [Tools](/guide/tools) |
-| | MCP Server Support | ✅ Complete | [MCP](/guide/mcp) |
-| | Built-in Tools Module | ✅ Complete | [Examples](/examples/#tool-examples) |
-| | Workspace Isolation | ✅ Complete | [Workspace](/advanced/workspace) |
-| **Infrastructure** | Type-Safe Configuration | ✅ Complete | [Configuration](/guide/configuration) |
-| | Result-Based Errors | ✅ Complete | [Error Handling](/guide/error-handling) |
-| | Langfuse Observability | ✅ Complete | [Observability](../guide/observability) |
-| | OpenTelemetry Tracing | ✅ Complete | [Tracing](../guide/observability) |
-| | Cross-Version (2.13/3.x) | ✅ Complete | [Installation](/getting-started/installation) |
+| Area | Current state | v1.0 gap |
+|------|---------------|----------|
+| **Provider clients** | OpenAI, Anthropic, Azure OpenAI, Gemini, DeepSeek, Cohere, Mistral, OpenRouter, Requesty, Z.ai, and Ollama clients/configs exist. | Publish a generated provider capability matrix and contract tests for chat, streaming, tools, structured output, embeddings, image/audio, timeouts, retries, cost, and raw exchange logging. |
+| **Agents** | Core agents, tool calling, handoffs, guardrails, memory, streaming events, async tools, reasoning modes, and state serialization are implemented. | Freeze stable agent APIs, document limitations, add replay/debug workflows, and compile-test reference apps. |
+| **RAG and vector stores** | Document loading, chunking, SQLite/pgvector/Qdrant stores, keyword indexes, hybrid search, reranking, RAGAS-style evaluation, permission-aware RAG, and benchmarking harnesses exist. | Finish cost/latency tracking, runnable golden-path RAG tutorials, provider capability docs, and production reference deployments. |
+| **Tooling and MCP** | Tool schema/execution APIs, built-in tools, workspace isolation, MCP client/server primitives, Streamable HTTP, HTTP+SSE, bearer-token auth, and public-bind protection exist. | Treat tools and MCP as security boundaries: allowlists, capability scoping, audit logs, prompt-injection guidance, tool poisoning mitigations, and strict schema validation. |
+| **Observability** | Console/Langfuse-style tracing, OpenTelemetry module, metrics, Prometheus support, and raw provider exchange logging exist. | Standardize production metrics, cost tracking, retention/redaction guidance, and agent run replay. |
+| **Reliability** | `ReliableClient` supports retry, circuit breaker, deadlines, and metrics. | Make timeouts/retries/fallbacks consistent across providers and easy to apply by default. |
+| **JVM interop** | Scala-first APIs are the main supported path. Java/Kotlin/Spring/Gradle work is active in the backlog and PR queue. | Land Java-friendly facades, Kotlin coroutine wrappers, Spring Boot starter, and Maven/Gradle sample projects in CI. |
+| **Docs and examples** | Broad docs and many samples exist. | Remove or clearly label pseudocode placeholders, compile docs examples where practical, and align support/version claims. |
+| **Security and governance** | Secret scanning, redaction utilities, workspace sandboxing, path/ReDoS tests, shell allowlist work, and MCP bearer-token/public-bind protections exist. | Land a versioned threat model, SBOM/dependency scanning, default-deny tool/MCP policies, audit guidance, and release-gate security tests. |
 
-### Agent Framework
+## Production Readiness Pillars
 
-The agent framework extends core LLM4S with advanced capabilities. [Detailed design →](https://github.com/llm4s/llm4s/blob/main/docs/design/agent-framework-roadmap.md)
+| Pillar | Current status | Next deliverable |
+|--------|----------------|------------------|
+| **Testing and CI** | Broad test suite, CI on Ubuntu/Windows, smoke/integration tiers exist. | Isolate or fix any hanging local suites, add suite timeouts, split fast/integration/Docker/provider/benchmark jobs. |
+| **API stability** | Pre-1.0 APIs are still stabilizing. | Define stable modules, land binary compatibility checks, publish compatibility/deprecation policy. |
+| **Provider parity** | Broad provider coverage, uneven feature parity. | Generated provider capability matrix, fake-provider contract tests, manual live smoke gates. |
+| **JVM adoption** | Strong Scala-native design. | Java, Kotlin, Spring Boot, Maven, and Gradle paths with runnable samples. |
+| **Security** | Good foundations around sandboxing and secret handling. | Threat model, SBOM, dependency scanning, tool/MCP policies, audit guidance. |
+| **Performance and cost** | Metrics and reliability primitives exist. | JMH baselines, regression thresholds, request/agent/session/RAG/image/audio cost tracking. |
+| **Documentation trust** | Coverage is broad but inconsistent. | Runnable golden-path tutorials and docs generated from tested capability metadata. |
 
-| Phase | Feature | Status | Key Capabilities |
-|-------|---------|--------|------------------|
-| 1.0 | Core Agent | ✅ Complete | Basic execution, tool calling, streaming |
-| 1.1 | Conversations | ✅ Complete | Immutable state, `continueConversation()`, pruning |
-| 1.2 | Guardrails | ✅ Complete | Input/output validation, LLM-as-Judge |
-| 1.3 | Handoffs | ✅ Complete | Agent-to-agent delegation, context preservation |
-| 1.4 | Memory | ✅ Complete | Short/long-term memory, SQLite, vector search |
-| 2.1 | Streaming Events | ✅ Complete | Lifecycle events, `runWithEvents()` |
-| 2.2 | Async Tools | ✅ Complete | Parallel execution strategies |
-| 3.2 | Built-in Tools | ✅ Complete | DateTime, Calculator, HTTP, file ops |
-| 4.1 | Reasoning Modes | ✅ Complete | Extended thinking for o1/o3, Claude |
-| 4.3 | Serialization | ✅ Complete | AgentState save/load to JSON |
+## 2026 Stabilization Roadmap
 
----
+### Phase 0: Stabilize The Signal
 
-## Production Readiness
+Priority: immediate.
 
-### The Seven Pillars
+| Deliverable | Outcome |
+|-------------|---------|
+| Fix or isolate local `sbt test` non-reporting/hang behavior. | Full test runs either complete or clearly exclude known slow/flaky suites. |
+| Add suite/test timeouts. | CI cannot silently hang. |
+| Align README, roadmap, docs metadata, release tags, Scala/JDK support, and provider status. | New users see one coherent project state. |
+| Remove, replace, or label `???` placeholders in user-facing docs. | Guides are either runnable or explicitly pseudocode. |
+| Publish stable/beta/experimental/planned status. | Users know which APIs are safe to build on. |
 
-Production readiness is measured across seven pillars:
+### Phase 1: Define The Stable Spine
 
-```mermaid
-graph TD
-    PR[Production Readiness]
-    PR --> P1[Testing & Quality]
-    PR --> P2[API Stability]
-    PR --> P3[Performance]
-    PR --> P4[Security]
-    PR --> P5[Documentation]
-    PR --> P6[Observability]
-    PR --> P7[Community]
-```
+Target: next stabilization window.
 
-### Pillar Status
+| Deliverable | Outcome |
+|-------------|---------|
+| Name stable module boundaries: core, agents, rag, tools, observability, workspace, and interop. | v1.0 compatibility surface is explicit. |
+| Mark experimental features and modules. | Advanced features can evolve without surprising production users. |
+| Land MiMa or equivalent binary compatibility checks. | Compatibility regressions are caught before release. |
+| Publish compatibility, deprecation, and migration policy. | Users can plan upgrades. |
+| Add package-level Scaladoc for stable modules. | Public API intent is documented. |
 
-| Pillar | Goal | Status | Key Deliverable |
-|--------|------|--------|-----------------|
-| **Testing & Quality** | Catch bugs before runtime | 🚧 In Progress | 80%+ coverage target |
-| **API Stability** | Safe upgrades with clear compatibility | 🚧 In Progress | MiMa checks, SemVer policy |
-| **Performance** | Predictable behavior under load | 📋 Planned | JMH benchmarks, baselines |
-| **Security** | Prevent data leaks, audit data flows | 📋 Planned | Threat model, dependency scanning |
-| **Documentation** | Clone to working example quickly | 🚧 In Progress | Complete guides, Scaladoc |
-| **Observability** | See what's happening in production | ✅ Complete | Langfuse, OpenTelemetry, structured logging |
-| **Community** | Healthy contributor ecosystem | 🚧 In Progress | 10+ contributors target |
+### Phase 2: Provider Capability Matrix And Contract Tests
 
-### Additional Completed Features
+Target: after stable spine is defined.
 
-The following features have been implemented and are production-ready but were not part of the original roadmap:
+| Deliverable | Outcome |
+|-------------|---------|
+| Capability model for chat, streaming, tools, structured output, reasoning, embeddings, image/audio, timeout/retry, usage/cost, and raw exchange logging. | Provider behavior is comparable and explicit. |
+| Fake-provider contract servers for protocol families. | Behavior is testable without live API calls. |
+| Generated provider capability docs. | Docs stay aligned with code/tests. |
+| Standardized provider options for base URL, headers, proxy, request IDs, user agent, retry-after, and error mapping. | Provider integrations behave consistently. |
 
-| Feature | Status | Description | Documentation |
-|---------|--------|-------------|---------------|
-| **Google Gemini Provider** | ✅ Complete | Full integration with Google's Gemini models (2.0-flash, 1.5-pro) | [Providers](../guide/providers) |
-| **DeepSeek Provider** | ✅ Complete | Support for DeepSeek LLM models including reasoning-capable deepseek-reasoner | [Providers](../guide/providers) |
-| **OpenTelemetry Module** | ✅ Complete | Dedicated tracing module with OTLP export support | [Observability](/guide/observability) |
-| **Metrics Collection** | ✅ Complete | Token usage tracking, cost estimation, latency metrics | [API Reference](/api/llm-client) |
-| **Prometheus Metrics** | ✅ Complete | Production-grade metrics with PrometheusMetrics, MetricsCollector, PrometheusEndpoint, health checks | [Metrics Samples](/samples/metrics) |
-| **Context Management System** | ✅ Complete | Multi-layered context compression: LLMCompressor, DeterministicCompressor, ToolOutputCompressor, HistoryCompressor, SemanticBlocks, TokenWindow, ConversationTokenCounter, ContextManager | [Context Samples](/samples/context) |
-| **Assistant API** | ✅ Complete | Interactive assistant framework with AssistantAgent, SessionManager, SessionState, ConsoleInterface | [Assistant Samples](/samples/assistant) |
-| **Image Processing/Vision** | ✅ Complete | Vision capabilities for image understanding with OpenAI Vision and Anthropic Claude Vision support | [Image Processing Examples](/samples/basic) |
-| **Enhanced Error Context** | ✅ Complete | Detailed error messages with provider-specific diagnostics | [Error Handling](/guide/error-handling) |
-| **Tracing Composition** | ✅ Complete | Compose multiple tracing backends (Langfuse + Console + OpenTelemetry) | [Examples](/examples/) |
-| **Agent Context Bundling** | ✅ Complete | Unified AgentContext for cross-cutting concerns | [Agent Framework](/examples/#agent-examples) |
-| **Exa Search Tool** | ✅ Complete | Built-in tool for web search using Exa API | [Built-in Tools](/examples/#tool-examples) |
-| **Voyage AI Embeddings** | ✅ Complete | Support for Voyage AI embedding models (voyage-3, voyage-code-3) | [Embedding Providers](/guide/embeddings) |
-| **Reasoning Modes** | ✅ Complete | Support for reasoning LLMs: OpenAI o1/o3, DeepSeek reasoner with configurable effort levels | [Reasoning Examples](/samples/reasoning) |
-| **Session Serialization** | ✅ Complete | Save and restore agent state including conversation history for long-running workflows | [Agent Persistence](/design/phase-4.3-session-serialization)
+### Phase 3: JVM Interop And Adoption
 
-### Known Limitations (v1.0)
+Target: before v1.0 beta.
 
-- Tool registries are not serialized; tools must be re-attached when restoring `AgentState`
-- Reasoning modes are provider-specific and may not be available on all models
-- Memory stores have size and TTL limits; long-term retention belongs in external systems
-- Hardware design extension is in proposal stage; not yet implemented in production
+| Deliverable | Outcome |
+|-------------|---------|
+| Java facade with builders, Java collections, and Java-friendly error boundaries. | Java users do not need Scala-specific ergonomics. |
+| Kotlin coroutine wrapper. | Kotlin services can use idiomatic `suspend` APIs. |
+| Spring Boot starter. | Spring users get auto-configuration, properties binding, health checks, metrics, and test slices. |
+| Maven and Gradle quickstarts. | JVM users can start without sbt. |
+| CI-tested sample projects. | Interop docs remain runnable. |
 
----
+### Phase 4: Security And Governance
 
-## Ongoing Features in Development
+Target: before v1.0 release candidate.
 
-| Feature | Progress | Description | Status |
-|---------|----------|-------------|--------|
-| **MCP Full Implementation** | ~60% | Complete Model Context Protocol implementation with bidirectional communication, server scaffolding, and standardized tool protocols | Active development - client complete, server in progress |
-| **Advanced Embedding Cache** | ~40% | Multi-layer caching for embeddings (in-memory + persistent) to reduce API costs and latency | Design phase - initial prototypes exist |
-| **Prompt Optimization System** | ~30% | A/B testing framework, regression testing, systematic prompt improvement with performance tracking | Planning - initial issue templates created |
-| **RAG Cost Tracking** | ~25% | Per-query cost tracking, embedding drift detection, latency percentiles (p50/p95/p99) | Requirements gathering |
-| **Hardware Design Extension** | ~10% | LLM-powered hardware design toolkit for Chisel/FIRRTL ecosystem with agents for verification, DSE, and documentation | Proposal stage - comprehensive roadmap defined in [llm4s-hardware-design-roadmap.md](/roadmap/llm4s-hardware-design-roadmap) |
-| **Output Grounding System** | ~15% | Claim extraction, fact-checking against RAG sources, hallucination detection, citation verification | Scoping phase |
-| **HITL Evaluation System** | ~20% | Human-in-the-loop feedback collection, rating infrastructure, training signal generation for agent improvement | Architecture design |
-| **BigQuery Observability** | ~10% | Production telemetry export to BigQuery for SQL-based analytics and dashboarding | Requirements  definition |
-| **Vertex AI Provider** | ~15% | Google Cloud Vertex AI integration with ADC authentication, streaming, and tool calling support | Initial exploration |
+| Deliverable | Outcome |
+|-------------|---------|
+| Versioned threat model. | Tool, MCP, RAG, workspace, and provider-log risks are explicit. |
+| Default-deny policies for tools, shell/workspace access, file/network access, MCP servers, and provider exchange logging. | Production users start from safer defaults. |
+| MCP hardening: retain auth and public-bind protection, then add allowlists, capability scoping, audit logs, prompt-injection guidance, and tool poisoning mitigations. | MCP is treated as a production security boundary. |
+| SBOM and dependency/security scanning in CI/release. | Release artifacts have auditable supply-chain metadata. |
+| PII redaction, retention, and multi-tenant logging examples. | Observability guidance is safe for real deployments. |
 
----
+### Phase 5: Reliability, Cost, Observability, And Scale
 
-## What's In Progress
+Target: v1.0 release candidate.
 
-| Feature | Progress | Blocking Issues |
-|---------|----------|-----------------|
-| **RAG Core Engine** | ✅ Complete | Retrieval pipeline shipped |
-| **RAG Evaluation** | ✅ Complete | RAGAS metrics + benchmarking harness |
-| **RAG Benchmarking** | ✅ Complete | Chunking, fusion, embedding comparison |
-| **RAG in a Box** | ✅ Complete | [Separate project](https://github.com/llm4s/rag_in_a_box) - 194 tests, production-ready |
-| **MCP Full Implementation** | ~50% | Full protocol, server implementation |
-| **Advanced Embeddings** | ~60% | Multi-provider support, caching |
-| **Enhanced Observability** | Planning | Plugin architecture, multi-backend |
+| Deliverable | Outcome |
+|-------------|---------|
+| Consistent retries, circuit breakers, deadlines, rate-limit handling, and provider fallback APIs. | Production services can bound failure behavior. |
+| Health checks for provider clients where practical. | Services can expose meaningful readiness state. |
+| Cost tracking across requests, agents, sessions, embeddings, RAG, image, and audio operations. | Users can control spend. |
+| Standard metrics for latency, tokens, cost, retries, circuit state, tool duration, and retrieval quality. | Operations teams get useful dashboards. |
+| JMH benchmarks and regression thresholds. | Performance claims are measured. |
+| Reference applications. | Users can copy complete, maintained production patterns. |
 
-### RAG Pipeline Roadmap
+## Reference Applications Needed For v1.0
 
-The RAG pipeline follows a 5-phase roadmap toward a production-grade retrieval system. The core library (Phases 1-3) lives in LLM4S; deployment tooling (Phase 5) is provided by the separate [RAG in a Box](https://github.com/llm4s/rag_in_a_box) project.
+| Application | Purpose |
+|-------------|---------|
+| Spring Boot RAG API with pgvector or Qdrant | JVM production service with auth, metrics, tracing, cost tracking, and deployment notes. |
+| Sandboxed tool-calling agent with MCP | Secure agent workflow with explicit policies and audit logging. |
+| Kotlin coroutine service | Kotlin-native API usage and error handling. |
+| Java/Gradle quickstart | Minimal non-Scala adoption path. |
+| Observability and evaluation sample | Langfuse/OpenTelemetry/Prometheus plus RAG evaluation and replay/debugging. |
 
-#### Phase 1: Foundation ✅ COMPLETE
+## Release Policy Direction
 
-| Component | Status | Notes |
-|-----------|--------|-------|
-| VectorStore Abstraction | ✅ Complete | Backend-agnostic trait |
-| SQLite Backend | ✅ Complete | File-based and in-memory |
-| pgvector Backend | ✅ Complete | PostgreSQL + pgvector extension |
-| Qdrant Backend | ✅ Complete | REST API, local + cloud |
-| BM25 Keyword Index | ✅ Complete | SQLite FTS5 + PostgreSQL native full-text search |
-| Hybrid Search Fusion | ✅ Complete | RRF + weighted score strategies |
-
-#### Phase 2: Intelligence ✅ COMPLETE
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| Reranking Pipeline | ✅ Complete | Cohere + LLM-based reranking |
-| Document Chunking | ✅ Complete | Simple, sentence-aware, markdown-aware, semantic chunkers |
-| Ollama Embeddings | ✅ Complete | Local embedding support |
-
-#### Phase 3: Evaluation & Quality ✅ COMPLETE
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| RAGAS Evaluation | ✅ Complete | Faithfulness, answer relevancy, context precision/recall metrics |
-| RAG Benchmarking Harness | ✅ Complete | Systematic comparison of chunking, fusion, embedding strategies |
-| RAG-Specific Guardrails | ✅ Complete | PII detection/masking, prompt injection, grounding, context relevance, source attribution, topic boundary |
-| RAG Cost Tracking | 📋 Planned | Per-query cost, latency percentiles (p50/p95/p99) |
-| Embedding Drift Detection | 📋 Planned | Monitor embedding quality over time |
-| Prompt Tuning & Optimization | 📋 Planned | Systematic prompt improvement, A/B testing, performance tracking |
-
-#### Phase 4: Extended Integrations 📋 PLANNED
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| Milvus Backend | 📋 Planned | GPU-accelerated vector search |
-| Pinecone Backend | 📋 Planned | Cloud-managed vector DB |
-| Cohere Embeddings | 📋 Planned | Multilingual embed-v3 |
-| ONNX Embeddings | 📋 Planned | Local sentence-transformers |
-| Embedding Cache | 📋 Planned | Reduce redundant embedding calls |
-| Metadata Extraction | 📋 Planned | Titles, TOC, links, code blocks |
-
-#### Phase 5: RAG in a Box Server ✅ COMPLETE
-
-RAG in a Box is a production-ready RAG server built on the LLM4S framework, providing a complete REST API for document ingestion, semantic search, and AI-powered question answering.
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| REST API Layer | ✅ Complete | Document ingestion, query endpoints, streaming responses |
-| Docker Compose | ✅ Complete | Single-command deployment with PostgreSQL/pgvector |
-| Kubernetes | ✅ Complete | Namespace, ConfigMap, Secrets, Deployments, Ingress templates |
-| Admin UI | ✅ Complete | Vue.js dashboard with real-time stats, document browser, chunking preview |
-| Security | ✅ Complete | JWT auth, PBKDF2 password hashing, CORS, input validation |
-| Observability | ✅ Complete | Prometheus metrics, health checks (/health, /ready, /live) |
-| CI/CD | ✅ Complete | 194 backend tests, security scanning (OWASP, Anchore) |
-
-**Key Features:**
-- Multi-format document ingestion (text, markdown, PDF, URLs)
-- Configurable chunking strategies (simple, sentence, markdown, semantic)
-- Collection-based organization with per-collection settings
-- Hybrid search with RRF fusion (vector + keyword)
-- Multi-provider support for embeddings (OpenAI, Voyage, Ollama) and LLM (OpenAI, Anthropic, Ollama)
-- Production infrastructure: HikariCP connection pooling, structured logging, graceful shutdown
-
-**Repository:** [github.com/llm4s/rag_in_a_box](https://github.com/llm4s/rag_in_a_box)
-
----
-
-## What's Planned
-
-### Near Term (Q1-Q2 2025)
-
-| Feature | Priority | Description |
-|---------|----------|-------------|
-| RAG Vector Integrations | ✅ Done | SQLite, pgvector, Qdrant complete |
-| RAG Hybrid Search | ✅ Done | BM25 + vector fusion with RRF |
-| RAG Reranking Pipeline | ✅ Done | Cohere cross-encoder + LLM-based |
-| RAG Document Chunking | ✅ Done | Sentence-aware, semantic, markdown chunking |
-| **RAGAS Evaluation** | ✅ Done | Context precision/recall, faithfulness, answer relevancy |
-| **RAG Benchmarking Harness** | ✅ Done | Systematic comparison of RAG configurations |
-| **RAG Guardrails** | ✅ Done | PII detection/masking, prompt injection, grounding, context relevance, source attribution, topic boundary |
-| Reliable Calling | P0 | Retry with backoff, circuit breakers, deadlines |
-| Performance Benchmarks | P1 | JMH framework, baseline metrics |
-| Security Audit | P1 | Threat model, vulnerability scanning |
-
-### Medium Term (H2 2025)
-
-| Feature | Priority | Description |
-|---------|----------|-------------|
-| **Prompt Tuning & Optimization** | P1 | Systematic prompt improvement, A/B testing, variant tracking |
-| **RAG Cost & Latency Tracking** | P1 | Per-query metrics, embedding drift detection |
-| Prompt Management | P2 | Template system with variable substitution |
-| Caching Layer | P2 | LLM response + embedding caching for cost/latency |
-| Cost Tracking | P2 | Token usage tracking and estimation |
-| Provider Expansion | P2 | Cohere, Mistral, Gemini, LiteLLM |
-| **Extended Vector DBs** | P2 | Milvus (GPU), Pinecone (cloud) |
-| **ONNX Embeddings** | P2 | Local sentence-transformers runtime |
-
-### Long Term (Post-1.0)
-
-| Feature | Description |
-|---------|-------------|
-| Fine-tuning Support | Model adaptation, LoRA integration |
-| Workflow Engines | Camunda/Temporal integration |
-| Plugin Architecture | Community-contributed providers and tools |
-| Advanced Multi-Agent | DAG orchestration, complex workflows |
-| ~~**RAG in a Box**~~ | ✅ Complete - See [RAG in a Box](https://github.com/llm4s/rag_in_a_box) |
-
----
-
-## Timeline Overview
-
-```mermaid
-graph LR
-    M1[Months 1-2<br/>Testing + API] --> M2[Months 2-3<br/>Integration + Perf]
-    M2 --> M3[Months 3-4<br/>Security + Reliability]
-    M3 --> M4[Month 5<br/>Stabilization]
-    M4 --> M5[Month 6+<br/>v1.0.0 Launch]
-```
-
-| Phase | Focus | Key Outcomes |
-|-------|-------|--------------|
-| Months 1-2 | Testing + API audit | Coverage audit, public API documented |
-| Months 2-3 | Integration + performance | Integration tests, JMH benchmarks |
-| Months 3-4 | Security + reliability | Threat model, reliable calling |
-| Month 5 | Stabilization | RC releases, API freeze |
-| Month 6+ | Launch | v1.0.0 release, ecosystem growth |
-
----
-
-## Reference Deployments
-
-Three deployment patterns will be documented for production use:
-
-| Pattern | Use Case | Key Components |
-|---------|----------|----------------|
-| **Laptop/Dev** | Experiments, learning | Single-node, local Ollama or single provider, console tracing |
-| **Small K8s** | Single-tenant production | llm4s app + workspace, Langfuse, pgvector, K8s secrets |
-| **Enterprise VPC** | Multi-tenant, regulated | Private networking, Vault, centralized logging, audit trails |
-
----
-
-## Success Metrics (v1.0 Targets)
-
-| Category | Metric | Current | Target |
-|----------|--------|---------|--------|
-| Quality | Statement Coverage | ~21% | 80% |
-| Quality | Critical Bugs | - | 0 |
-| Community | Contributors | 6 | 10+ |
-| Adoption | Maven Downloads | - | 500/mo |
-| Docs | ScalaDoc Coverage | <50% | 100% |
-
----
+| Area | Direction |
+|------|-----------|
+| **Pre-1.0 releases** | Continue regular preview releases while APIs stabilize. |
+| **v1.0** | Freeze stable modules, publish migration guide, document known limitations, and require compatibility/security/performance gates. |
+| **Post-1.0** | Use Semantic Versioning with binary compatibility checks for stable modules. Experimental modules may retain separate compatibility notes. |
 
 ## Design Documents
 
@@ -322,18 +156,16 @@ Detailed technical designs are in [docs/design](https://github.com/llm4s/llm4s/t
 
 | Document | Purpose |
 |----------|---------|
-| [Agent Framework Roadmap](https://github.com/llm4s/llm4s/blob/main/docs/design/agent-framework-roadmap.md) | Comprehensive agent feature comparison and roadmap |
-| [Phase 1.1: Conversations](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.1-functional-conversation-management.md) | Functional conversation management design |
-| [Phase 1.2: Guardrails](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.2-guardrails-framework.md) | Input/output validation framework |
-| [Phase 1.3: Handoffs](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.3-handoff-mechanism.md) | Agent-to-agent delegation |
-| [Phase 1.4: Memory](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.4-memory-system.md) | Short/long-term memory system |
-| [Phase 2.1: Streaming](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-2.1-streaming-events.md) | Agent lifecycle events |
-| [Phase 2.2: Async Tools](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-2.2-async-tools.md) | Parallel tool execution |
-| [Phase 3.2: Built-in Tools](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-3.2-builtin-tools.md) | Standard tool library |
-| [Phase 4.1: Reasoning](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-4.1-reasoning-modes.md) | Extended thinking support |
-| [Phase 4.3: Serialization](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-4.3-session-serialization.md) | State persistence |
-
----
+| [Agent Framework Roadmap](https://github.com/llm4s/llm4s/blob/main/docs/design/agent-framework-roadmap.md) | Agent feature comparison and implementation history. |
+| [Phase 1.1: Conversations](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.1-functional-conversation-management.md) | Functional conversation management design. |
+| [Phase 1.2: Guardrails](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.2-guardrails-framework.md) | Input/output validation framework. |
+| [Phase 1.3: Handoffs](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.3-handoff-mechanism.md) | Agent-to-agent delegation. |
+| [Phase 1.4: Memory](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-1.4-memory-system.md) | Short/long-term memory system. |
+| [Phase 2.1: Streaming](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-2.1-streaming-events.md) | Agent lifecycle events. |
+| [Phase 2.2: Async Tools](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-2.2-async-tools.md) | Parallel tool execution. |
+| [Phase 3.2: Built-in Tools](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-3.2-builtin-tools.md) | Standard tool library. |
+| [Phase 4.1: Reasoning](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-4.1-reasoning-modes.md) | Extended thinking support. |
+| [Phase 4.3: Serialization](https://github.com/llm4s/llm4s/blob/main/docs/design/phase-4.3-session-serialization.md) | State persistence. |
 
 ## Get Involved
 
@@ -341,16 +173,3 @@ Detailed technical designs are in [docs/design](https://github.com/llm4s/llm4s/t
 - **GitHub**: [llm4s/llm4s](https://github.com/llm4s/llm4s)
 - **Feature Requests**: [GitHub Issues](https://github.com/llm4s/llm4s/issues)
 - **Dev Hour**: Sundays 9am London time
-
----
-
-## Release Schedule
-
-| Type | Frequency |
-|------|-----------|
-| SNAPSHOT builds | Weekly |
-| Feature previews | Monthly |
-| Milestone releases | Quarterly |
-| **v1.0.0** | Q2-Q3 2025 |
-
-After 1.0.0: Semantic Versioning with MiMa binary compatibility checks.

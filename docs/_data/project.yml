@@ -1,43 +1,54 @@
 # Project version information
 # This file is updated during CI builds or manually for releases
 
-# Current version - used in documentation
-# For SNAPSHOT, this shows the development version
-# CI will update this with the actual version from sbt-dynver
-version: "0.1.0-SNAPSHOT"
+# Current version displayed in documentation
+version: "0.3.2"
 
 # Latest stable release (updated by CI on release)
-latest_release: "0.1.16"
+latest_release: "0.3.2"
 
 # Supported versions
 scala_versions:
-  - "2.13.16"
   - "3.7.1"
 
 java_versions:
   - "21"
-  - "17"
 
 # Provider support
 providers:
   - name: "OpenAI"
-    status: "complete"
+    status: "stable path"
     models: "GPT-4o, GPT-4, GPT-3.5, o1, o3"
   - name: "Anthropic"
-    status: "complete"
+    status: "stable path"
     models: "Claude 3.5, Claude 3, Claude 2"
   - name: "Azure OpenAI"
-    status: "complete"
+    status: "stable path"
     models: "All Azure-hosted OpenAI models"
   - name: "Ollama"
-    status: "complete"
+    status: "stable path"
     models: "Llama, Mistral, and all local models"
   - name: "Google Gemini"
-    status: "complete"
+    status: "stable path"
     models: "Gemini 2.0, Gemini 1.5 Pro, Gemini 1.5 Flash"
+  - name: "DeepSeek"
+    status: "stable path"
+    models: "deepseek-chat, deepseek-reasoner"
   - name: "Cohere"
-    status: "planned"
-    models: "Coming soon"
+    status: "beta"
+    models: "command-r-plus, command-r; chat client available, streaming still pending"
+  - name: "Mistral"
+    status: "beta"
+    models: "Mistral chat models; streaming still pending"
+  - name: "OpenRouter"
+    status: "beta"
+    models: "OpenAI-compatible models through OpenRouter"
+  - name: "Requesty"
+    status: "beta"
+    models: "OpenAI-compatible models through Requesty (provider/model naming)"
+  - name: "Z.ai"
+    status: "beta"
+    models: "GLM models"
 
 # Repository info
 repo_url: "https://github.com/llm4s/llm4s"

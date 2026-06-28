@@ -26,6 +26,7 @@ Start here if you want to contribute to the project.
 - **[Test Coverage](test-coverage)** - Coverage tooling and thresholds
 - **[Release Process](release)** - How releases are created
 - **[Postgres Memory Store](postgres-memory-store)** - PostgreSQL-backed agent memory persistence
+- **[Troubleshooting / FAQ](troubleshooting)** - Common errors and solutions
 
 ## Roadmap & Planning
 

@@ -1,7 +1,7 @@
 Test Coverage (scoverage)
 
 Overview
-- Uses `sbt-scoverage` to measure line and branch coverage for Scala 2.13 and Scala 3 builds.
+- Uses `sbt-scoverage` to measure line and branch coverage for the current Scala 3.7.1 build.
 - CI enforces a minimum coverage threshold (currently 50%); builds fail if coverage drops below this.
 - Production target is 80% coverage for core library code.
 

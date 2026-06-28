@@ -1,0 +1,73 @@
+{
+  "$schema": "https://fundingjson.org/schema/v1.1.0.json",
+  "version": "v1.1.0",
+  "entity": {
+    "type": "group",
+    "role": "steward",
+    "name": "LLM4S Foundation",
+    "email": "kannupriya@llm4s.org",
+    "description": "LLM4S Foundation is a community-led open-source group stewarding LLM4S, a Scala-native framework for building production-grade LLM applications. LLM4S Foundation is not yet a registered legal entity, but we are actively raising funds to complete legal registration and establish a stronger long-term governance structure. Until registration is complete, public donations and grants are handled transparently through Open Collective. The project is maintained by a small core team and supported by a global community of Scala, JVM, AI, and open-source contributors through GitHub, Discord, public documentation, and weekly Dev Hours. LLM4S also participated in Google Summer of Code 2025 under the Scala Center umbrella, where four interns from the United States, Switzerland, and India were funded to work on the project during summer 2025.",
+    "webpageUrl": {
+      "url": "https://llm4s.org/"
+    }
+  },
+  "projects": [
+    {
+      "guid": "llm4s",
+      "name": "LLM4S",
+      "description": "LLM4S is an open-source Scala-native framework for building production-grade LLM applications. Most LLM tooling today is Python-first, while many production systems in finance, telecom, data platforms, enterprise software, and distributed systems are built on Scala and the JVM. LLM4S closes this ecosystem gap by giving Scala developers open infrastructure for building AI-powered applications without abandoning their existing production stack. The project provides multi-provider LLM integration, agentic workflows, tool calling, RAG pipelines, memory, streaming, observability, tracing, metrics, secure execution, and production-oriented examples. LLM4S has already received external ecosystem validation through Google Summer of Code 2025, where four funded interns worked on the project under the Scala Center umbrella. FLOSS/fund support would help LLM4S become sustainable Scala/JVM AI infrastructure rather than remaining a purely volunteer-led effort.",
+      "webpageUrl": {
+        "url": "https://llm4s.org/"
+      },
+      "repositoryUrl": {
+        "url": "https://github.com/llm4s/llm4s"
+      },
+      "licenses": [
+        "spdx:MIT"
+      ],
+      "tags": [
+        "ai",
+        "llm",
+        "scala",
+        "jvm",
+        "functional-programming",
+        "developer-tools",
+        "agents",
+        "rag",
+        "observability",
+        "enterprise-ai"
+      ]
+    }
+  ],
+  "funding": {
+    "channels": [
+      {
+        "guid": "open-collective",
+        "type": "payment-provider",
+        "address": "https://opencollective.com/llm4s",
+        "description": "Preferred public funding channel for LLM4S. Open Collective is used for transparent financial management while LLM4S Foundation works toward legal registration."
+      },
+      {
+        "guid": "bank-transfer",
+        "type": "bank",
+        "address": "Available on request via kannupriya@llm4s.org",
+        "description": "Bank transfer details can be shared privately with funders if required for grant disbursement paperwork."
+      }
+    ],
+    "plans": [
+      {
+        "guid": "maintainer-sustainability",
+        "status": "active",
+        "name": "Maintainer sustainability for LLM4S",
+        "description": "One-time support for LLM4S maintainer time, contributor onboarding, documentation, examples, release engineering, CI, testing, security hardening, community Dev Hours, production readiness, and transition toward stronger governance and legal registration.",
+        "amount": 25000,
+        "currency": "USD",
+        "frequency": "one-time",
+        "channels": [
+          "open-collective",
+          "bank-transfer"
+        ]
+      }
+    ]
+  }
+}

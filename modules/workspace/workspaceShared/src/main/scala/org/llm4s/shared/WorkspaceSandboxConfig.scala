@@ -19,6 +19,10 @@ import upickle.default.{ ReadWriter, macroRW }
  * @param readOnlyPaths        Paths under workspace root that are read-only (writes denied)
  * @param allowedPaths         If non-empty, only these paths are accessible; if empty, whole workspace
  * @param networkAllowed       Documentation: whether network access from commands is assumed (Phase 2: enforce)
+ * @param allowedCommands      Set of bare executable names permitted by executeCommand.
+ *                             Defaults to [[WorkspaceSandboxConfig.ReadOnlyCommands]].
+ *                             Use [[WorkspaceSandboxConfig.ReadWriteCommands]] to also permit
+ *                             write-capable commands (cp, mv, rm, mkdir, …).
  */
 final case class WorkspaceSandboxConfig(
   limits: WorkspaceLimits = WorkspaceSandboxConfig.DefaultLimits,
@@ -27,10 +31,56 @@ final case class WorkspaceSandboxConfig(
   defaultCommandTimeoutSeconds: Int = 30,
   readOnlyPaths: List[String] = Nil,
   allowedPaths: List[String] = Nil,
-  networkAllowed: Boolean = false
+  networkAllowed: Boolean = false,
+  allowedCommands: Set[String] = WorkspaceSandboxConfig.ReadOnlyCommands
 )
 
 object WorkspaceSandboxConfig {
+
+  /**
+   * Read-only command allowlist: safe, non-destructive commands suitable for
+   * inspection and navigation. This is the default for new sandbox configs.
+   */
+  val ReadOnlyCommands: Set[String] = Set(
+    // POSIX / common Unix
+    "ls",
+    "cat",
+    "grep",
+    "pwd",
+    "echo",
+    "git",
+    "find",
+    "head",
+    "tail",
+    "wc",
+    "sort",
+    "uniq",
+    "diff",
+    "whoami",
+    "hostname",
+    // Windows equivalents / built-ins
+    "dir",
+    "type",
+    "findstr"
+  )
+
+  /**
+   * Read-write command allowlist: extends [[ReadOnlyCommands]] with commands
+   * that can create, modify, or delete files. Opt-in; use when the agent
+   * legitimately needs write access to the workspace.
+   */
+  val ReadWriteCommands: Set[String] = ReadOnlyCommands ++ Set(
+    // POSIX write commands
+    "cp",
+    "mv",
+    "mkdir",
+    "rm",
+    "touch",
+    "chmod",
+    // Windows write commands
+    "copy",
+    "move"
+  )
 
   val DefaultLimits: WorkspaceLimits = WorkspaceLimits(
     maxFileSize = 1048576L, // 1MB
@@ -58,11 +108,12 @@ object WorkspaceSandboxConfig {
     defaultCommandTimeoutSeconds = 10,
     readOnlyPaths = Nil,
     allowedPaths = Nil,
-    networkAllowed = false
+    networkAllowed = false,
+    allowedCommands = ReadOnlyCommands
   )
 
-  /** Default permissive sandbox (current behavior) */
-  val Permissive: WorkspaceSandboxConfig = WorkspaceSandboxConfig()
+  /** Default permissive sandbox (current behavior). Allows both read-only and write commands. */
+  val Permissive: WorkspaceSandboxConfig = WorkspaceSandboxConfig(allowedCommands = ReadWriteCommands)
 
   implicit val rw: ReadWriter[WorkspaceSandboxConfig] = macroRW
 

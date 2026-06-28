@@ -3,7 +3,7 @@ package org.llm4s.agent
 import org.llm4s.agent.streaming.AgentEvent
 import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.model.ToolMessage
-import org.llm4s.toolapi.{ ToolCallErrorJson, ToolCallRequest }
+import org.llm4s.toolapi.{ ToolCallErrorJson, ToolCallRequest, ToolExecutionConfig }
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -51,7 +51,7 @@ private[agent] object ToolProcessor {
         case Left(error) =>
           error match {
             case UnknownError(msg, cause) =>
-              logger.debug("Tracing failed: " + msg, cause)
+              logger.debug(s"Tracing failed: $msg", cause)
             case _ =>
               logger.debug("Tracing failed: {}", error)
           }
@@ -81,7 +81,7 @@ private[agent] object ToolProcessor {
     val toolRegistry = state.tools
 
     if (context.debug) {
-      logger.info("[DEBUG] processToolCalls: Processing {} tool calls", toolCalls.size)
+      logger.debug("processToolCalls: Processing {} tool calls", toolCalls.size)
     }
 
     val (finalState, toolMessages) = toolCalls.zipWithIndex.foldLeft((state, Seq.empty[ToolMessage])) {
@@ -89,34 +89,36 @@ private[agent] object ToolProcessor {
         val startTime = System.currentTimeMillis()
 
         if (context.debug) {
-          logger.info("[DEBUG] Tool call {}/{}: {}", index + 1, toolCalls.size, toolCall.name)
-          logger.info("[DEBUG]   Tool call ID: {}", toolCall.id)
-          logger.info("[DEBUG]   Arguments (raw JSON): {}", toolCall.arguments)
-          logger.info("[DEBUG]   Arguments type: {}", toolCall.arguments.getClass.getSimpleName)
+          logger.debug("Tool call {}/{}: {}", index + 1, toolCalls.size, toolCall.name)
+          logger.debug("  Tool call ID: {}", toolCall.id)
+          logger.debug("  Arguments (raw JSON): {}", toolCall.arguments)
+          logger.debug("  Arguments type: {}", toolCall.arguments.getClass.getSimpleName)
         } else {
-          logger.info("Executing tool: {} with arguments: {}", toolCall.name, toolCall.arguments)
+          logger.debug("Executing tool: {} with arguments: {}", toolCall.name, toolCall.arguments)
         }
 
         val request = ToolCallRequest(toolCall.name, toolCall.arguments)
 
         if (context.debug) {
-          logger.info("[DEBUG]   Created ToolCallRequest")
-          logger.info("[DEBUG]   Executing via ToolRegistry...")
+          logger.debug("  Created ToolCallRequest")
+          logger.debug("  Executing via ToolRegistry...")
         }
 
-        val result   = toolRegistry.execute(request)
-        val endTime  = System.currentTimeMillis()
-        val duration = endTime - startTime
+        implicit val ec: ExecutionContext = scala.concurrent.ExecutionContext.global
+        val config                        = context.toolExecutionConfig.getOrElse(ToolExecutionConfig())
+        val result                        = toolRegistry.execute(request, config)
+        val endTime                       = System.currentTimeMillis()
+        val duration                      = endTime - startTime
 
         val resultContent = result match {
           case Right(json) =>
             val jsonStr = json.render()
             if (context.debug) {
-              logger.info("[DEBUG]   Tool {} SUCCESS in {}ms", toolCall.name, duration)
-              logger.info("[DEBUG]   Result (raw JSON): {}", jsonStr)
-              logger.info("[DEBUG]   Result type: {}", json.getClass.getSimpleName)
+              logger.debug("  Tool {} SUCCESS in {}ms", toolCall.name, duration)
+              logger.debug("  Result (raw JSON): {}", jsonStr)
+              logger.debug("  Result type: {}", json.getClass.getSimpleName)
             } else {
-              logger.info("Tool {} completed successfully in {}ms. Result: {}", toolCall.name, duration, jsonStr)
+              logger.debug("Tool {} completed successfully in {}ms. Result: {}", toolCall.name, duration, jsonStr)
             }
             safeTrace(context.tracing)(tracer =>
               tracer.traceToolCall(toolCall.name, toolCall.arguments.render(), jsonStr)
@@ -125,9 +127,9 @@ private[agent] object ToolProcessor {
           case Left(error) =>
             val errorMessage = error.getFormattedMessage
             if (context.debug) {
-              logger.error("[DEBUG]   Tool {} FAILED in {}ms", toolCall.name, duration)
-              logger.error("[DEBUG]   Error type: {}", error.getClass.getSimpleName)
-              logger.error("[DEBUG]   Error message: {}", errorMessage)
+              logger.error("  Tool {} FAILED in {}ms", toolCall.name, duration)
+              logger.error("  Error type: {}", error.getClass.getSimpleName)
+              logger.error("  Error message: {}", errorMessage)
             }
             val errorJson = ToolCallErrorJson.toJson(error).render()
             if (!context.debug) {
@@ -140,7 +142,7 @@ private[agent] object ToolProcessor {
         }
 
         if (context.debug) {
-          logger.info("[DEBUG]   Creating ToolMessage with ID: {}", toolCall.id)
+          logger.debug("  Creating ToolMessage with ID: {}", toolCall.id)
         }
 
         val stateWithLog = currentState.log(s"[tool] ${toolCall.name} (${duration}ms): $resultContent")
@@ -149,8 +151,8 @@ private[agent] object ToolProcessor {
     }
 
     if (context.debug) {
-      logger.info("[DEBUG] All {} tool calls processed successfully", toolCalls.size)
-      logger.info("[DEBUG] Adding {} tool messages to conversation", toolMessages.size)
+      logger.debug("All {} tool calls processed successfully", toolCalls.size)
+      logger.debug("Adding {} tool messages to conversation", toolMessages.size)
     }
 
     finalState.addMessages(toolMessages)
@@ -179,8 +181,8 @@ private[agent] object ToolProcessor {
     val toolRegistry = state.tools
 
     if (context.debug) {
-      logger.info(
-        "[DEBUG] processToolCallsAsync: Processing {} tool calls with strategy {}",
+      logger.debug(
+        "processToolCallsAsync: Processing {} tool calls with strategy {}",
         toolCalls.size,
         strategy
       )
@@ -189,9 +191,10 @@ private[agent] object ToolProcessor {
     val requests   = toolCalls.map(tc => ToolCallRequest(tc.name, tc.arguments))
     val startTimes = toolCalls.map(_ => System.currentTimeMillis())
 
-    val resultsFuture = toolRegistry.executeAll(requests, strategy)
-    val timeout       = 5.minutes
-    val results       = Await.result(resultsFuture, timeout)
+    val config        = context.toolExecutionConfig.getOrElse(ToolExecutionConfig())
+    val resultsFuture = toolRegistry.executeAll(requests, strategy, config)
+    val batchTimeout  = config.timeout.fold(5.minutes)(t => t + 10.seconds)
+    val results       = Await.result(resultsFuture, batchTimeout)
 
     val toolMessages = toolCalls.zip(results).zipWithIndex.map { case ((toolCall, result), index) =>
       val duration = System.currentTimeMillis() - startTimes(index)
@@ -200,7 +203,7 @@ private[agent] object ToolProcessor {
         case Right(json) =>
           val jsonStr = json.render()
           if (context.debug) {
-            logger.info("[DEBUG] Tool {} SUCCESS in {}ms", toolCall.name, duration)
+            logger.debug("Tool {} SUCCESS in {}ms", toolCall.name, duration)
           } else {
             logger.info("Tool {} completed successfully in {}ms", toolCall.name, duration)
           }
@@ -212,7 +215,7 @@ private[agent] object ToolProcessor {
         case Left(error) =>
           val errorMessage = error.getFormattedMessage
           if (context.debug) {
-            logger.error("[DEBUG] Tool {} FAILED in {}ms: {}", toolCall.name, duration, errorMessage)
+            logger.error("Tool {} FAILED in {}ms: {}", toolCall.name, duration, errorMessage)
           }
           val errorJson = ToolCallErrorJson.toJson(error).render()
           safeTrace(context.tracing)(tracer =>
@@ -225,7 +228,7 @@ private[agent] object ToolProcessor {
     }
 
     if (context.debug) {
-      logger.info("[DEBUG] All {} tool calls processed with strategy {}", toolCalls.size, strategy)
+      logger.debug("All {} tool calls processed with strategy {}", toolCalls.size, strategy)
     }
 
     state.addMessages(toolMessages)
@@ -259,8 +262,10 @@ private[agent] object ToolProcessor {
 
       onEvent(AgentEvent.toolStarted(toolCall.id, toolCall.name, toolCall.arguments.render()))
 
-      val request = ToolCallRequest(toolCall.name, toolCall.arguments)
-      val result  = toolRegistry.execute(request)
+      val request                       = ToolCallRequest(toolCall.name, toolCall.arguments)
+      implicit val ec: ExecutionContext = scala.concurrent.ExecutionContext.global
+      val config                        = context.toolExecutionConfig.getOrElse(ToolExecutionConfig())
+      val result                        = toolRegistry.execute(request, config)
 
       val toolEndTime = System.currentTimeMillis()
       val duration    = toolEndTime - toolStartTime
@@ -269,7 +274,7 @@ private[agent] object ToolProcessor {
         case Right(json) =>
           val jsonStr = json.render()
           if (context.debug) {
-            logger.info("[DEBUG] Tool {} SUCCESS in {}ms", toolCall.name, duration)
+            logger.debug("Tool {} SUCCESS in {}ms", toolCall.name, duration)
           }
           safeTrace(context.tracing)(tracer =>
             tracer.traceToolCall(toolCall.name, toolCall.arguments.render(), jsonStr)
@@ -280,7 +285,7 @@ private[agent] object ToolProcessor {
           val errorMessage = error.getFormattedMessage
           val errorJson    = ToolCallErrorJson.toJson(error).render()
           if (context.debug) {
-            logger.error("[DEBUG] Tool {} FAILED in {}ms: {}", toolCall.name, duration, errorMessage)
+            logger.error("Tool {} FAILED in {}ms: {}", toolCall.name, duration, errorMessage)
           }
           safeTrace(context.tracing)(tracer =>
             tracer.traceToolCall(toolCall.name, toolCall.arguments.render(), errorJson)

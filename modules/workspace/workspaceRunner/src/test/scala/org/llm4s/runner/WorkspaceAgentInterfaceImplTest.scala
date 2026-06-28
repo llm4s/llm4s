@@ -7,6 +7,9 @@ import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import scala.concurrent.duration._
+import scala.concurrent.{ Await, Future }
+import scala.concurrent.ExecutionContext.Implicits.global
 import scala.jdk.CollectionConverters._
 import scala.util.Using
 
@@ -17,6 +20,10 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
   val workspacePath         = tempDir.toString
   private val isWindowsHost = System.getProperty("os.name").startsWith("Windows")
   val interface             = new WorkspaceAgentInterfaceImpl(workspacePath, isWindowsHost)
+
+  /** Creates a fresh interface with the given sandbox config for isolation. */
+  private def newInterface(config: WorkspaceSandboxConfig) =
+    new WorkspaceAgentInterfaceImpl(workspacePath, isWindowsHost, Some(config))
 
   // Create some test files
   val testFile1 = tempDir.resolve("test1.txt")
@@ -117,6 +124,99 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
     response.isTruncated shouldBe false
   }
 
+  it should "fallback to literal matching for unsafe regex in searchFiles" in {
+    interface.writeFile("redos-search.txt", "payload ((a+)+)+b marker")
+
+    val response = interface.searchFiles(
+      paths = List("."),
+      query = "((a+)+)+b",
+      searchType = "regex",
+      recursive = Some(true)
+    )
+
+    response.matches.exists(_.path == "redos-search.txt") shouldBe true
+  }
+
+  it should "fallback to literal matching for overlapping alternation regex" in {
+    interface.writeFile("redos-alt-search.txt", "token (a|aa)+X token")
+
+    val response = interface.searchFiles(
+      paths = List("."),
+      query = "(a|aa)+X",
+      searchType = "regex",
+      recursive = Some(true)
+    )
+
+    response.matches.exists(_.path == "redos-alt-search.txt") shouldBe true
+  }
+
+  it should "complete blocklisted regex search within bounded time" in {
+    // ((a+)+)+b is rejected by the shape blocklist, so the search degrades to a
+    // literal substring match and never runs the dangerous regex.
+    interface.writeFile("redos-time.txt", "a" * 28 + "X")
+
+    val eventual = Future {
+      interface.searchFiles(
+        paths = List("redos-time.txt"),
+        query = "((a+)+)+b",
+        searchType = "regex",
+        recursive = Some(false)
+      )
+    }
+
+    val response = Await.result(eventual, 2.seconds)
+    response.matches shouldBe empty
+  }
+
+  it should "bound regex search for catastrophic patterns the blocklist misses" in {
+    // (.*a){25}b is genuinely catastrophic in the JDK engine but slips past the
+    // shape blocklist (the group is quantified with {25}, not +/*), so it
+    // compiles as a real regex. The per-line step budget must abort the
+    // catastrophic match rather than hang. Without the bound this search never
+    // returns and the Await below would time out.
+    interface.writeFile("redos-brace-search.txt", "a" * 40)
+
+    val eventual = Future {
+      interface.searchFiles(
+        paths = List("redos-brace-search.txt"),
+        query = "(.*a){25}b",
+        searchType = "regex",
+        recursive = Some(false)
+      )
+    }
+
+    val response = Await.result(eventual, 10.seconds)
+    response.matches shouldBe empty
+  }
+
+  it should "bound regexReplace for catastrophic patterns the blocklist misses" in {
+    interface.writeFile("redos-brace-replace.txt", "a" * 40)
+
+    val op = RegexReplaceOperation(
+      pattern = "(.*a){25}b",
+      replacement = "SAFE",
+      flags = Some("g")
+    )
+
+    val eventual = Future(interface.modifyFile("redos-brace-replace.txt", List(op)))
+    val result   = Await.result(eventual, 10.seconds)
+    result.success shouldBe true
+  }
+
+  it should "fallback to literal replacement for unsafe regexReplace operations" in {
+    interface.writeFile("redos-replace.txt", "prefix ((a+)+)+b suffix ((a+)+)+b")
+
+    val op = RegexReplaceOperation(
+      pattern = "((a+)+)+b",
+      replacement = "SAFE",
+      flags = Some("g")
+    )
+
+    interface.modifyFile("redos-replace.txt", List(op)).success shouldBe true
+    val content = interface.readFile("redos-replace.txt").content
+    content should include("prefix SAFE suffix SAFE")
+  }
+
   it should "set isTruncated when result cap is reached" in {
     // prepare a file with multiple matches
     val bigFile = tempDir.resolve("big.txt")
@@ -175,24 +275,88 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
   }
 
   it should "execute commands" in {
-    // This test is platform-dependent, so we'll use a simple command
-    val testCommand = if (System.getProperty("os.name").startsWith("Windows")) {
-      "echo test command"
-    } else {
-      "echo 'test command'"
-    }
-    val response = interface.executeCommand(testCommand)
+    // Use 'git --version': a real cross-platform executable that is in
+    // AllowedExecutables and does not rely on shell built-ins.
+    val response = interface.executeCommand("git --version")
     response.exitCode shouldBe 0
-    response.stdout should include("test command")
+    response.stdout should include("git")
+  }
+
+  it should "execute built-in echo command on Windows via cmd.exe /c" in {
+    // On Windows, echo is a cmd.exe built-in. WorkspaceAgentInterfaceImpl should
+    // detect this and prepend "cmd.exe /c" automatically.
+    // On Unix, echo is a real executable on PATH and works directly.
+    val response = interface.executeCommand("echo hello world")
+    response.exitCode shouldBe 0
+    response.stdout should include("hello world")
+  }
+
+  it should "block shell metacharacters before execution, not merely treat them as literal args" in {
+    // Previously this test verified that 'git --version ; echo INJECTED' ran
+    // git with ';' and 'echo' as literal args.  With the FORBIDDEN_CHARACTERS
+    // layer the command is now rejected outright before any process is
+    // launched – a strictly stronger guarantee.
+    val ex = the[WorkspaceAgentException] thrownBy
+      interface.executeCommand("git --version ; echo INJECTED")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include(";")
+  }
+
+  it should "reject executeCommand for executables not in the allowlist" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("curl https://evil.example")
+    ex.code shouldBe "EXECUTABLE_NOT_ALLOWED"
+    ex.error should include("curl")
+  }
+
+  it should "reject executeCommand for executables specified with a path separator" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("/usr/bin/ls -la")
+    ex.code shouldBe "EXECUTABLE_PATH_NOT_ALLOWED"
+    ex.error should include("/usr/bin/ls")
+  }
+
+  it should "treat an unclosed double-quote as consuming the rest of the string into the token" in {
+    // "git --version" with an unclosed leading quote on the flag:
+    // tokenizeCommand("git \"--version") => Seq("git", "--version")
+    // git receives "--version" as a literal arg and succeeds normally.
+    val response = interface.executeCommand("git \"--version")
+    response.exitCode shouldBe 0
+    response.stdout should include("git")
+  }
+
+  it should "treat an unclosed single-quote as consuming the rest of the string into the token" in {
+    // tokenizeCommand("git '--version") => Seq("git", "--version")
+    val response = interface.executeCommand("git '--version")
+    response.exitCode shouldBe 0
+    response.stdout should include("git")
+  }
+
+  it should "block echo hello & whoami due to forbidden character '&'" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("echo hello & whoami")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include("&")
+  }
+
+  it should "block git --version ; echo pwned due to forbidden character ';'" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("git --version ; echo pwned")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include(";")
+  }
+
+  it should "block commands containing pipe character '|'" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("echo foo | grep foo")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include("|")
+  }
+
+  it should "block commands containing percent expansion '%'" in {
+    val ex = the[WorkspaceAgentException] thrownBy interface.executeCommand("echo %PATH%")
+    ex.code shouldBe "FORBIDDEN_CHARACTERS"
+    ex.error should include("%")
   }
 
   it should "reject executeCommand when sandbox has shellAllowed=false" in {
-    val lockedInterface = new WorkspaceAgentInterfaceImpl(
-      workspacePath,
-      isWindowsHost,
-      Some(WorkspaceSandboxConfig.LockedDown)
-    )
-    val ex = the[WorkspaceAgentException] thrownBy lockedInterface.executeCommand("echo hello")
+    val ex = the[WorkspaceAgentException] thrownBy
+      newInterface(WorkspaceSandboxConfig.LockedDown).executeCommand("echo hello")
     ex.code shouldBe "SHELL_DISABLED"
     ex.error should include("shellAllowed")
   }
@@ -202,7 +366,8 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
     // The fix should escalate to destroyForcibly after destroy() fails
     if (!isWindowsHost) {
       val shortTimeoutConfig = WorkspaceSandboxConfig(
-        defaultCommandTimeoutSeconds = 1
+        defaultCommandTimeoutSeconds = 1,
+        allowedCommands = WorkspaceSandboxConfig.ReadOnlyCommands + "sleep"
       )
       val timedInterface = new WorkspaceAgentInterfaceImpl(
         workspacePath,
@@ -215,6 +380,43 @@ class WorkspaceAgentInterfaceImplTest extends AnyFlatSpec with Matchers with org
       }
       ex.code shouldBe "TIMEOUT"
       ex.error should include("timed out")
+    }
+  }
+
+  it should "reject destructive commands under a read-only sandbox configuration" in {
+    // ReadOnlyCommands excludes write-capable commands like 'rm'. Verify that
+    // 'rm test.txt' is blocked at the allowlist check with EXECUTABLE_NOT_ALLOWED.
+    val ex = the[WorkspaceAgentException] thrownBy
+      newInterface(WorkspaceSandboxConfig(allowedCommands = WorkspaceSandboxConfig.ReadOnlyCommands))
+        .executeCommand("rm test.txt")
+    ex.code shouldBe "EXECUTABLE_NOT_ALLOWED"
+    ex.error should include("rm")
+  }
+
+  it should "reject destructive commands under default sandbox policy" in {
+    // WorkspaceSandboxConfig() defaults to shellAllowed=true and ReadOnlyCommands.
+    val ex = the[WorkspaceAgentException] thrownBy
+      newInterface(WorkspaceSandboxConfig())
+        .executeCommand("rm test.txt")
+    ex.code shouldBe "EXECUTABLE_NOT_ALLOWED"
+    ex.error should include("rm")
+  }
+
+  it should "allow write commands under a read-write sandbox configuration" in {
+    // ReadWriteCommands must pass the allowlist gate for write-capable commands.
+    // The command may fail at the OS level but must NOT throw EXECUTABLE_NOT_ALLOWED.
+    val cmd =
+      if (isWindowsHost) "mkdir test-write-sandbox-check"
+      else "rm nonexistent-file-12345.txt"
+    try {
+      newInterface(WorkspaceSandboxConfig(allowedCommands = WorkspaceSandboxConfig.ReadWriteCommands))
+        .executeCommand(cmd)
+      succeed
+    } catch {
+      case e: WorkspaceAgentException if e.code == "EXECUTABLE_NOT_ALLOWED" =>
+        fail(s"Write command was incorrectly rejected by the allowlist: ${e.error}")
+      case _: WorkspaceAgentException =>
+        succeed // EXECUTION_FAILED / TIMEOUT means allowlist check passed
     }
   }
 

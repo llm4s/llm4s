@@ -206,23 +206,27 @@ class DatasetManager {
     Try {
       val dir = Paths.get(path)
       if (!Files.isDirectory(dir)) {
-        throw new IllegalArgumentException(s"Not a directory: $path")
+        Left(EvaluationError(s"Not a directory: $path"))
+      } else {
+        import scala.jdk.CollectionConverters._
+        Right(
+          Files
+            .walk(dir)
+            .iterator()
+            .asScala
+            .filter(p => Files.isRegularFile(p))
+            .filter(p => extensions.exists(ext => p.toString.toLowerCase.endsWith(ext)))
+            .map { p =>
+              val filename = dir.relativize(p).toString
+              val content  = new String(Files.readAllBytes(p))
+              (filename, content)
+            }
+            .toSeq
+        )
       }
-
-      import scala.jdk.CollectionConverters._
-      Files
-        .walk(dir)
-        .iterator()
-        .asScala
-        .filter(p => Files.isRegularFile(p))
-        .filter(p => extensions.exists(ext => p.toString.toLowerCase.endsWith(ext)))
-        .map { p =>
-          val filename = dir.relativize(p).toString
-          val content  = new String(Files.readAllBytes(p))
-          (filename, content)
-        }
-        .toSeq
-    }.toResult.left.map(e => EvaluationError(s"Failed to load documents: ${e.message}"))
+    }.toResult.left
+      .map(e => EvaluationError(s"Failed to load documents: ${e.message}"))
+      .flatMap(identity)
 
   /**
    * Detect dataset format from file.

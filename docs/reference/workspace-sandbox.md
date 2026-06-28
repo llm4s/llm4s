@@ -72,7 +72,7 @@ Run the containerized runner with locked sandbox:
    ```bash
    docker images llm4s/workspace-runner --format "{{.Tag}}"
    ```
-   Use that tag (e.g. `0.1.0-SNAPSHOT` or `0.1.0-abc123-SNAPSHOT`) in place of `TAG` below.
+   Use that tag (for example `0.3.2` or a dynver snapshot such as `0.3.2+abc123-SNAPSHOT`) in place of `TAG` below.
 
 2. Run the container (replace `TAG` and the host path to your workspace):
    ```bash

@@ -1,13 +1,26 @@
 package org.llm4s.llmconnect.provider
 
+import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.EmbeddingRequest
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.Outcome
+import org.slf4j.LoggerFactory
 
 class VoyageAIEmbeddingProviderSpec extends AnyFlatSpec with Matchers with MockFactory {
+
+  override def withFixture(test: NoArgTest): Outcome = {
+    val logger = LoggerFactory
+      .getLogger("org.llm4s.llmconnect.provider.VoyageAIEmbeddingProvider$$anon$1")
+      .asInstanceOf[LBLogger]
+    val previous = logger.getLevel
+    logger.setLevel(Level.OFF)
+    try super.withFixture(test)
+    finally logger.setLevel(previous)
+  }
 
   private val cfg = EmbeddingProviderConfig(
     baseUrl = "http://voyage-test",

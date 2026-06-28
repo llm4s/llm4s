@@ -442,9 +442,9 @@ object HybridSearcher {
       hikariConfig.setPassword(password)
       hikariConfig.setMaximumPoolSize(20) // Larger pool for shared usage
       hikariConfig.setMinimumIdle(2)
-      hikariConfig.setConnectionTimeout(30000)
-      hikariConfig.setIdleTimeout(600000)
-      hikariConfig.setMaxLifetime(1800000)
+      hikariConfig.setConnectionTimeout(HikariDefaults.CONNECTION_TIMEOUT_MS)
+      hikariConfig.setIdleTimeout(HikariDefaults.IDLE_TIMEOUT_MS)
+      hikariConfig.setMaxLifetime(HikariDefaults.MAX_LIFETIME_MS)
 
       new HikariDataSource(hikariConfig)
     }.toEither.left

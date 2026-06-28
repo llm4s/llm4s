@@ -6,6 +6,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.config.LocalEmbeddingModels
 import org.llm4s.llmconnect.utils.ModelSelector
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -24,6 +25,8 @@ import javax.imageio.ImageIO
  * - We never call real HTTP providers; a stub EmbeddingProvider is used.
  */
 class EmbedxV2Spec extends AnyFunSuite with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   // ----------------- Test scaffolding -----------------
 
@@ -224,8 +227,14 @@ class EmbedxV2Spec extends AnyFunSuite with Matchers {
     val audModel = ModelSelector.selectModel(Audio, localModels).fold(err => fail(err.formatted), identity)
     val vidModel = ModelSelector.selectModel(Video, localModels).fold(err => fail(err.formatted), identity)
 
-    imgModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", imgModel.name)
-    audModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", audModel.name)
-    vidModel.dimensions shouldBe ModelDimensionRegistry.getDimension("local", vidModel.name)
+    imgModel.dimensions shouldBe ModelDimensionRegistry
+      .getDimension("local", imgModel.name)
+      .fold(err => fail(err.formatted), identity)
+    audModel.dimensions shouldBe ModelDimensionRegistry
+      .getDimension("local", audModel.name)
+      .fold(err => fail(err.formatted), identity)
+    vidModel.dimensions shouldBe ModelDimensionRegistry
+      .getDimension("local", vidModel.name)
+      .fold(err => fail(err.formatted), identity)
   }
 }

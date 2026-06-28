@@ -1,11 +1,15 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ServiceError }
+import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
 import org.llm4s.testutil.LocalProviderTestServer._
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.OptionValues._
+import scala.collection.mutable.ListBuffer
+import org.llm4s.model.ModelRegistryService
 
 /**
  * Local HTTP server tests for DeepSeekClient (Tier 1).
@@ -15,6 +19,8 @@ import org.scalatest.matchers.should.Matchers
  * No API keys or external services required — runs unconditionally as part of `sbt test`.
  */
 class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   private def localConfig(baseUrl: String): DeepSeekConfig =
     DeepSeekConfig(
@@ -47,6 +53,36 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
       completion.usage.get.promptTokens shouldBe 10
       completion.usage.get.completionTokens shouldBe 5
       completion.usage.get.totalTokens shouldBe 15
+    }
+
+  it should "record a provider exchange when logging is enabled" in
+    withServer("/chat/completions") { exchange =>
+      sendJsonResponse(exchange, 200, openAICompletion("DeepSeek logged response", "deepseek-chat"))
+    } { baseUrl =>
+      val recorded = ListBuffer.empty[ProviderExchange]
+      val sink = new ProviderExchangeSink:
+        override def record(exchange: ProviderExchange): Unit =
+          recorded += exchange
+
+      val client = new DeepSeekClient(
+        localConfig(baseUrl),
+        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      )
+      val result = client.complete(conversation, CompletionOptions())
+
+      result.isRight shouldBe true
+      recorded should have size 1
+
+      val exchange = recorded.head
+      exchange.provider shouldBe "deepseek"
+      exchange.model shouldBe Some("deepseek-chat")
+      exchange.requestBody should include("\"messages\"")
+      exchange.requestBody should include("hello")
+      exchange.responseBody shouldBe defined
+      exchange.responseBody.get should include("chatcmpl-test")
+      exchange.responseBody.get should include("DeepSeek logged response")
+      exchange.errorMessage shouldBe empty
+      exchange.durationMs should be >= 0L
     }
 
   // ==========================================================================
@@ -114,6 +150,31 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
       val completion = result.toOption.get
       completion.content shouldBe "test"
       completion.model shouldBe "deepseek-chat"
+    }
+
+  it should "record provider exchanges for streaming responses when logging is enabled" in
+    withServer("/chat/completions") { exchange =>
+      sendSseResponse(exchange, openAISseBody(Seq("Hello", " world"), "deepseek-chat"))
+    } { baseUrl =>
+      val recorded = ListBuffer.empty[ProviderExchange]
+      val sink = new ProviderExchangeSink:
+        override def record(exchange: ProviderExchange): Unit =
+          recorded += exchange
+
+      val client = new DeepSeekClient(
+        localConfig(baseUrl),
+        exchangeLogging = ProviderExchangeLogging.enabled(sink)
+      )
+      val result = client.streamComplete(conversation, CompletionOptions(), _ => ())
+
+      result.isRight shouldBe true
+      recorded should have size 1
+      recorded.head.provider shouldBe "deepseek"
+      recorded.head.requestBody should include("\"stream\":true")
+      recorded.head.responseBody.value should include("data:")
+      recorded.head.responseBody.value should include("Hello")
+      recorded.head.responseBody.value should include("[DONE]")
+      recorded.head.errorMessage shouldBe empty
     }
 
   // ==========================================================================

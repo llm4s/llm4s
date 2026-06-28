@@ -89,7 +89,7 @@ class MCPToolRegistry(
             }.flatten
           case None =>
             logger.warn(s"Tool ${request.functionName} not found in any registry (local or MCP)")
-            Left(ToolCallError.UnknownFunction(request.functionName))
+            Left(ToolCallError.UnknownFunction(request.functionName, getAllTools.map(_.name)))
         }
     }
   }

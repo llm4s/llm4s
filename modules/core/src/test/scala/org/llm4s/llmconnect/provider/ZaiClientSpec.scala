@@ -5,6 +5,7 @@ import org.scalatest.matchers.should.Matchers
 import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.metrics.MockMetricsCollector
+import org.llm4s.model.ModelRegistryService
 
 /**
  * Unit tests for ZaiClient.
@@ -12,6 +13,8 @@ import org.llm4s.metrics.MockMetricsCollector
  * Tests the JSON request/response formatting logic without requiring actual API calls.
  */
 class ZaiClientSpec extends AnyFlatSpec with Matchers {
+
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   // Test configuration
   private val testConfig = ZaiConfig(
@@ -597,7 +600,7 @@ class ZaiClientSpec extends AnyFlatSpec with Matchers {
 /**
  * Test helper class that exposes private methods for unit testing.
  */
-class ZaiClientTestHelper(config: ZaiConfig) extends ZaiClient(config) {
+class ZaiClientTestHelper(config: ZaiConfig)(using ModelRegistryService) extends ZaiClient(config) {
   import scala.util.Try
 
   def testCreateRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj =
@@ -729,6 +732,7 @@ class ZaiClientTestHelper(config: ZaiConfig) extends ZaiClient(config) {
 
 // ============ Metrics Tests ============
 class ZaiClientMetricsSpec extends AnyFlatSpec with Matchers {
+  private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private val testConfig = ZaiConfig(
     apiKey = "test-key",
     model = "test-model",

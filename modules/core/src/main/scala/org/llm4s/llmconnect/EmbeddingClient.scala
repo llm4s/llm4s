@@ -9,7 +9,7 @@ import org.llm4s.llmconnect.provider.{
   OpenAIEmbeddingProvider,
   VoyageAIEmbeddingProvider
 }
-import org.llm4s.model.ModelRegistry
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
@@ -20,7 +20,7 @@ class EmbeddingClient(
   provider: EmbeddingProvider,
   tracer: Option[Tracing] = None,
   operation: String = "embedding"
-) {
+)(using service: ModelRegistryService) {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** Text embeddings via the configured HTTP provider. */
@@ -42,7 +42,48 @@ class EmbeddingClient(
           )
 
           // Try to calculate and emit cost
-          ModelRegistry.lookup(request.model.name).foreach { meta =>
+          service.lookup(request.model.name).foreach { meta =>
+            meta.pricing.estimateCost(usage.promptTokens, 0).foreach { cost =>
+              t.traceCost(
+                costUsd = cost,
+                model = request.model.name,
+                operation = operation,
+                tokenCount = usage.totalTokens,
+                costType = "embedding"
+              )
+            }
+          }
+        }
+      }
+    }
+
+    result
+  }
+
+  /** Multimodal embeddings via the configured HTTP provider. */
+  def embedMultimodal(
+    request: org.llm4s.llmconnect.model.MultimediaEmbeddingRequest
+  ): Result[EmbeddingResponse] = {
+    logger.debug(
+      s"[EmbeddingClient] Multimodal embedding with model=${request.model.name}, modality=${request.modality}"
+    )
+
+    val result = provider.embedMultimodal(request)
+
+    // Emit trace events if tracing is enabled and we got a response with usage
+    result.foreach { response =>
+      tracer.foreach { t =>
+        response.usage.foreach { usage =>
+          // Emit embedding usage event
+          t.traceEmbeddingUsage(
+            usage = usage,
+            model = request.model.name,
+            operation = operation,
+            inputCount = request.inputs.size
+          )
+
+          // Try to calculate and emit cost
+          service.lookup(request.model.name).foreach { meta =>
             meta.pricing.estimateCost(usage.promptTokens, 0).foreach { cost =>
               t.traceCost(
                 costUsd = cost,
@@ -74,9 +115,11 @@ class EmbeddingClient(
     textModel: EmbeddingModelConfig,
     chunking: UniversalEncoder.TextChunkingConfig,
     experimentalStubsEnabled: Boolean,
-    localModels: LocalEmbeddingModels
+    localModels: LocalEmbeddingModels,
+    maxMediaFileSize: Long = UniversalEncoder.DEFAULT_MAX_MEDIA_FILE_SIZE
   ): Result[Seq[EmbeddingVector]] =
-    UniversalEncoder.encodeFromPath(path, this, textModel, chunking, experimentalStubsEnabled, localModels)
+    UniversalEncoder
+      .encodeFromPath(path, this, textModel, chunking, experimentalStubsEnabled, localModels, maxMediaFileSize)
 }
 
 object EmbeddingClient {
@@ -85,7 +128,7 @@ object EmbeddingClient {
    * Typed factory: build client from resolved provider name and typed provider config.
    * Avoids reading any additional configuration at runtime.
    */
-  def from(provider: String, cfg: EmbeddingProviderConfig): Result[EmbeddingClient] = {
+  def from(provider: String, cfg: EmbeddingProviderConfig)(using ModelRegistryService): Result[EmbeddingClient] = {
     val p = provider.toLowerCase
     p match {
       case "openai" => Right(new EmbeddingClient(OpenAIEmbeddingProvider.fromConfig(cfg)))

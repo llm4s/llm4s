@@ -1,12 +1,13 @@
 package org.llm4s.samples.rag
 
 import org.llm4s.rag.{ EmbeddingProvider, RAG }
-import org.llm4s.rag.RAG.RAGConfigOps
-import org.llm4s.rag.permissions._
+
+import org.llm4s.rag.permissions.*
 import org.llm4s.rag.permissions.pg.PgSearchIndex
 import org.llm4s.config.Llm4sConfig
 import org.slf4j.LoggerFactory
-import scala.util.chaining._
+
+import scala.util.chaining.*
 
 /**
  * Permission-Based RAG Example
@@ -254,14 +255,15 @@ object PermissionBasedRAGExample extends App {
               // Build RAG with SearchIndex
               logger.info("--- Building RAG with Permission Support ---")
 
-              val ragResult = for {
-                rag <- RAG
-                  .builder()
-                  .withEmbeddings(EmbeddingProvider.OpenAI)
-                  .withSearchIndex(searchIndex)
-                  .withTopK(5)
-                  .build()
-              } yield rag
+              val ragResult = Llm4sConfig.modelRegistryService().flatMap { service =>
+                RAG.build(
+                  RAG
+                    .builder()
+                    .withEmbeddings(EmbeddingProvider.OpenAI)
+                    .withSearchIndex(searchIndex)
+                    .withTopK(5)
+                )(using service)
+              }
 
               ragResult match {
                 case Left(error) =>

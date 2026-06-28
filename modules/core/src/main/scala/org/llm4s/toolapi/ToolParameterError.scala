@@ -1,7 +1,10 @@
 package org.llm4s.toolapi
 
 /**
- * Structured error information for tool parameter validation
+ * Structured error information for tool parameter validation.
+ *
+ * Represents specific validation failures when parsing tool call arguments,
+ * including missing parameters, type mismatches, null values, and invalid nesting.
  */
 sealed trait ToolParameterError {
   def parameterName: String
@@ -11,7 +14,11 @@ sealed trait ToolParameterError {
 object ToolParameterError {
 
   /**
-   * A required parameter is completely missing from the arguments
+   * A required parameter is completely missing from the arguments.
+   *
+   * @param parameterName name of the missing parameter
+   * @param expectedType the expected type of the parameter
+   * @param availableParameters list of parameter names that were provided (hint for self-correction)
    */
   case class MissingParameter(
     parameterName: String,
@@ -27,7 +34,10 @@ object ToolParameterError {
   }
 
   /**
-   * A required parameter is present but has a null value
+   * A required parameter is present but has a null value.
+   *
+   * @param parameterName name of the null parameter
+   * @param expectedType the expected non-null type
    */
   case class NullParameter(
     parameterName: String,
@@ -38,7 +48,11 @@ object ToolParameterError {
   }
 
   /**
-   * A parameter has the wrong type
+   * A parameter has the wrong type.
+   *
+   * @param parameterName name of the mistyped parameter
+   * @param expectedType the type that was expected
+   * @param actualType the type that was received
    */
   case class TypeMismatch(
     parameterName: String,
@@ -50,7 +64,11 @@ object ToolParameterError {
   }
 
   /**
-   * Cannot access a nested property because parent is not an object
+   * Cannot access a nested property because parent is not an object.
+   *
+   * @param parameterName name of the parameter being accessed
+   * @param parentPath JSON path to the parent element
+   * @param parentType actual type of the parent element (e.g. "string", "array")
    */
   case class InvalidNesting(
     parameterName: String,
@@ -62,7 +80,9 @@ object ToolParameterError {
   }
 
   /**
-   * Multiple parameter errors
+   * Aggregation of multiple parameter errors from a single tool call.
+   *
+   * @param errors the individual parameter errors
    */
   case class MultipleErrors(
     errors: List[ToolParameterError]
@@ -78,7 +98,10 @@ object ToolParameterError {
 }
 
 /**
- * Enhanced tool call errors with consistent formatting
+ * Enhanced tool call errors with consistent formatting.
+ *
+ * Covers the full lifecycle of a tool invocation: unknown function, null arguments,
+ * invalid arguments, handler errors, and execution exceptions.
  */
 sealed trait ToolCallError {
   def toolName: String
@@ -89,10 +112,32 @@ sealed trait ToolCallError {
 object ToolCallError {
 
   /**
+   * Whether this error is considered retryable (e.g. timeout, transient execution failure).
+   * UnknownFunction, NullArguments, InvalidArguments, HandlerError are not retryable.
+   * ExecutionError is retryable when the cause is IOException or TimeoutException (transient).
+   */
+  def isRetryable(error: ToolCallError): Boolean = error match {
+    case _: UnknownFunction | _: NullArguments | _: InvalidArguments | _: HandlerError =>
+      false
+    case _: Timeout =>
+      true
+    case ExecutionError(_, cause) =>
+      import java.io.IOException
+      import java.util.concurrent.TimeoutException
+      cause.isInstanceOf[IOException] || cause.isInstanceOf[TimeoutException]
+  }
+
+  /**
    * Tool function doesn't exist
    */
-  case class UnknownFunction(toolName: String) extends ToolCallError {
-    def getMessage: String = "is not a recognized tool"
+  case class UnknownFunction(
+    toolName: String,
+    availableTools: Seq[String] = Seq.empty
+  ) extends ToolCallError {
+    def getMessage: String = {
+      val toolsInfo = if (availableTools.nonEmpty) s" Available tools: [${availableTools.mkString(", ")}]." else ""
+      s"is not a recognized tool.$toolsInfo Check the tool name matches exactly (case-sensitive)."
+    }
   }
 
   /**
@@ -137,6 +182,19 @@ object ToolCallError {
     error: String
   ) extends ToolCallError {
     def getMessage: String = s"failed with error: $error"
+  }
+
+  /**
+   * Tool execution did not complete within the configured timeout.
+   *
+   * @param toolName  Name of the tool that timed out
+   * @param duration Timeout duration that was exceeded
+   */
+  case class Timeout(
+    toolName: String,
+    duration: scala.concurrent.duration.FiniteDuration
+  ) extends ToolCallError {
+    def getMessage: String = s"$toolName timed out after $duration"
   }
 }
 
@@ -246,7 +304,7 @@ object ToolCallErrorJson {
     )
 
     error match {
-      case ToolCallError.UnknownFunction(_) =>
+      case ToolCallError.UnknownFunction(_, _) =>
         base("errorType") = "unknown_function"
         base
 
@@ -268,6 +326,12 @@ object ToolCallErrorJson {
         base("errorType") = "execution_error"
         // Optionally include exception class name for debugging (safe, no stack trace)
         base("exceptionType") = cause.getClass.getSimpleName
+        base
+
+      case ToolCallError.Timeout(_, duration) =>
+        base("errorType") = "timeout"
+        base("code") = "timeout"
+        base("duration") = duration.toString
         base
     }
   }

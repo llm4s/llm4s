@@ -51,7 +51,7 @@ case class HttpConfig(
 
     // Check blocked domains first
     val isBlocked = blockedDomains.exists { blocked =>
-      normalizedDomain == blocked.toLowerCase || normalizedDomain.endsWith("." + blocked.toLowerCase)
+      normalizedDomain == blocked.toLowerCase || normalizedDomain.endsWith(s".${blocked.toLowerCase}")
     }
 
     if (isBlocked) false
@@ -61,7 +61,7 @@ case class HttpConfig(
         case Some(allowed) =>
           allowed.exists { a =>
             val normalizedAllowed = a.toLowerCase.stripPrefix("www.")
-            normalizedDomain == normalizedAllowed || normalizedDomain.endsWith("." + normalizedAllowed)
+            normalizedDomain == normalizedAllowed || normalizedDomain.endsWith(s".$normalizedAllowed")
           }
         case None => true
       }

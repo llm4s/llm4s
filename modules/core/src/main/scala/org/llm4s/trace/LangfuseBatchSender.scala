@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.trace
 
 import org.llm4s.http.Llm4sHttpClient

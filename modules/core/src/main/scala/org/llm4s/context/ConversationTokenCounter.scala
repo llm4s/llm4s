@@ -23,9 +23,18 @@ import org.slf4j.LoggerFactory
  *
  * @example
  * {{{
- * val counter = ConversationTokenCounter.forModel("gpt-4o").getOrElse(???)
- * val tokens = counter.countConversation(conversation)
- * println(s"Conversation uses \$tokens tokens")
+ * val result = for {
+ *   counter <- ConversationTokenCounter.forModel("gpt-4o")
+ * } yield {
+ *   counter.countConversation(conversation)
+ * }
+ *
+ * result match {
+ *   case Right(tokens) =>
+ *     println(s"Conversation uses $$tokens tokens")
+ *   case Left(error) =>
+ *     println(s"Error: $${error.message}")
+ * }
  * }}}
  *
  * @see [[ConversationTokenCounter.forModel]] for model-aware counter creation

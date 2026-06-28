@@ -1,9 +1,18 @@
 package org.llm4s.error
 
 /**
- * Rate limiting errors - typically recoverable with exponential backoff
+ * Raised when the LLM provider rejects the request due to rate limiting.
+ *
+ * This is a [[RecoverableError]]: it is safe to retry after waiting.
+ * The client can handle this automatically when configured with a retry policy.
+ * It provides intelligent retry delays, utilizing provider hints when available.
+ *
+ * @param message human-readable description of the rate limit
+ * @param retryAfter optional delay hint in seconds from the provider (e.g., from Retry-After header)
+ * @param provider the name of the LLM provider (e.g., "openai", "anthropic")
+ * @param requestsRemaining optional number of requests remaining in the current window
+ * @param resetTime optional timestamp (in milliseconds) when the rate limit will reset
  */
-
 final case class RateLimitError private (
   override val message: String,
   retryAfter: Option[Long],

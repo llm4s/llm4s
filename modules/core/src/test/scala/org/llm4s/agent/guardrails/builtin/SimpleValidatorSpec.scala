@@ -229,10 +229,47 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
     validator.validate("hello") shouldBe Right("hello")
   }
 
+  it should "not throw for invalid regex patterns in apply(String)" in {
+    val validator = RegexValidator("(")
+    val result    = validator.validate("anything")
+    result.isLeft shouldBe true
+    result.swap.toOption.get.message should include("Invalid or unsafe regex pattern")
+  }
+
+  it should "reject known ReDoS regex patterns safely" in {
+    val validator = RegexValidator("((a+)+)+b")
+    val result    = validator.validate("a" * 28 + "X")
+    result.isLeft shouldBe true
+    result.swap.toOption.get.message should include("Invalid or unsafe regex pattern")
+  }
+
   it should "create with custom error message via apply(String, String)" in {
     val validator = RegexValidator("^[0-9]+$", "Numbers only please")
     val result    = validator.validate("abc")
     result.swap.toOption.get.message should include("Numbers only please")
+  }
+
+  it should "create from Regex via apply(Regex)" in {
+    val validator = RegexValidator("^[a-z]+$".r)
+    validator.validate("letters") shouldBe Right("letters")
+    validator.validate("letters123").isLeft shouldBe true
+  }
+
+  it should "support constructor with custom error message" in {
+    val validator = new RegexValidator("^[0-9]+$".r, Some("Digits required"))
+    val result    = validator.validate("abc")
+    result.swap.toOption.get.message should include("Digits required")
+  }
+
+  it should "return fallback error when constructor receives one" in {
+    val validator = new RegexValidator(
+      "^[0-9]+$".r,
+      Some("Digits required"),
+      Some("Forced fallback path")
+    )
+    val result = validator.validate("123")
+    result.isLeft shouldBe true
+    result.swap.toOption.get.message should include("Forced fallback path")
   }
 
   // -- Phone preset --

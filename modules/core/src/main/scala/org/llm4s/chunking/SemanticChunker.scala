@@ -22,13 +22,21 @@ import scala.util.matching.Regex
  * Usage:
  * {{{
  * val (provider, embeddingProviderCfg) = /* load embedding provider config */
- * val embeddingClient = EmbeddingClient.from(provider, embeddingProviderCfg).getOrElse(???)
- * val modelConfig = EmbeddingModelConfig("text-embedding-3-small", 1536)
- * val chunker = SemanticChunker(embeddingClient, modelConfig, similarityThreshold = 0.5)
- * val chunks = chunker.chunk(documentText, ChunkingConfig(targetSize = 800))
+ * val result = for {
+ *   embeddingClient <- EmbeddingClient.from(provider, embeddingProviderCfg)
+ * } yield {
+ *   val modelConfig = EmbeddingModelConfig("text-embedding-3-small", 1536)
+ *   val chunker = SemanticChunker(embeddingClient, modelConfig, similarityThreshold = 0.5)
+ *   chunker.chunk(documentText, ChunkingConfig(targetSize = 800))
+ * }
  *
- * chunks.foreach { c =>
- *   println(s"[$${c.index}] $${c.content.take(50)}...")
+ * result match {
+ *   case Right(chunks) =>
+ *     chunks.foreach { c =>
+ *       println(s"[$${c.index}] $${c.content.take(50)}...")
+ *     }
+ *   case Left(error) =>
+ *     println(s"Error: $${error.message}")
  * }
  * }}}
  *

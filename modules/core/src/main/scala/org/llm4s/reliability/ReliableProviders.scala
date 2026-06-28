@@ -4,6 +4,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.provider._
 import org.llm4s.llmconnect.config._
 import org.llm4s.metrics.MetricsCollector
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 
 /**
@@ -43,7 +44,7 @@ object ReliableProviders {
     config: OpenAIConfig,
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
-  ): Result[LLMClient] =
+  )(using ModelRegistryService): Result[LLMClient] =
     OpenAIClient(config, metrics).map(client => new ReliableClient(client, "openai", reliabilityConfig, Some(metrics)))
 
   /**
@@ -58,7 +59,7 @@ object ReliableProviders {
     config: AzureConfig,
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
-  ): Result[LLMClient] =
+  )(using ModelRegistryService): Result[LLMClient] =
     OpenAIClient(config, metrics).map(client =>
       new ReliableClient(client, "azure-openai", reliabilityConfig, Some(metrics))
     )
@@ -75,7 +76,7 @@ object ReliableProviders {
     config: AnthropicConfig,
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
-  ): Result[LLMClient] =
+  )(using ModelRegistryService): Result[LLMClient] =
     AnthropicClient(config, metrics).map(client =>
       new ReliableClient(client, "anthropic", reliabilityConfig, Some(metrics))
     )
@@ -92,7 +93,7 @@ object ReliableProviders {
     config: GeminiConfig,
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
-  ): Result[LLMClient] =
+  )(using ModelRegistryService): Result[LLMClient] =
     GeminiClient(config, metrics).map(client => new ReliableClient(client, "gemini", reliabilityConfig, Some(metrics)))
 
   /**
@@ -107,7 +108,7 @@ object ReliableProviders {
     config: OllamaConfig,
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
-  ): Result[LLMClient] =
+  )(using ModelRegistryService): Result[LLMClient] =
     OllamaClient(config, metrics).map(client => new ReliableClient(client, "ollama", reliabilityConfig, Some(metrics)))
 
   /**
@@ -124,7 +125,7 @@ object ReliableProviders {
     config: OpenAIConfig,
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
-  ): Result[LLMClient] =
+  )(using ModelRegistryService): Result[LLMClient] =
     OpenRouterClient(config, metrics).map(client =>
       new ReliableClient(client, "openrouter", reliabilityConfig, Some(metrics))
     )
@@ -141,7 +142,7 @@ object ReliableProviders {
     config: ZaiConfig,
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: MetricsCollector = MetricsCollector.noop
-  ): Result[LLMClient] =
+  )(using ModelRegistryService): Result[LLMClient] =
     ZaiClient(config, metrics).map(client => new ReliableClient(client, "zai", reliabilityConfig, Some(metrics)))
 
   /**
