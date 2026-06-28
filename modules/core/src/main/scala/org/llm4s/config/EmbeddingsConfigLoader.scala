@@ -31,12 +31,19 @@ private[config] object EmbeddingsConfigLoader {
     model: Option[String]
   )
 
+  final private case class EmbeddingsCohereSection(
+    apiKey: Option[String],
+    baseUrl: Option[String],
+    model: Option[String]
+  )
+
   final private case class EmbeddingsSection(
     model: Option[String],    // Unified format: provider/model (e.g., openai/text-embedding-3-small)
     provider: Option[String], // Legacy fallback
     openai: Option[EmbeddingsOpenAISection],
     voyage: Option[EmbeddingsVoyageSection],
-    ollama: Option[EmbeddingsOllamaSection]
+    ollama: Option[EmbeddingsOllamaSection],
+    cohere: Option[EmbeddingsCohereSection]
   )
 
   final private case class EmbeddingsRoot(embeddings: Option[EmbeddingsSection])
@@ -52,8 +59,11 @@ private[config] object EmbeddingsConfigLoader {
   implicit private val embeddingsOllamaSectionReader: PureConfigReader[EmbeddingsOllamaSection] =
     PureConfigReader.forProduct3("apiKey", "baseUrl", "model")(EmbeddingsOllamaSection.apply)
 
+  implicit private val embeddingsCohereSectionReader: PureConfigReader[EmbeddingsCohereSection] =
+    PureConfigReader.forProduct3("apiKey", "baseUrl", "model")(EmbeddingsCohereSection.apply)
+
   implicit private val embeddingsSectionReader: PureConfigReader[EmbeddingsSection] =
-    PureConfigReader.forProduct5("model", "provider", "openai", "voyage", "ollama")(EmbeddingsSection.apply)
+    PureConfigReader.forProduct6("model", "provider", "openai", "voyage", "ollama", "cohere")(EmbeddingsSection.apply)
 
   implicit private val embeddingsRootReader: PureConfigReader[EmbeddingsRoot] =
     PureConfigReader.forProduct1("embeddings")(EmbeddingsRoot.apply)
@@ -100,7 +110,7 @@ private[config] object EmbeddingsConfigLoader {
     root: EmbeddingsRoot,
     source: ConfigSource,
   ): Result[(String, EmbeddingProviderConfig)] = {
-    val emb = root.embeddings.getOrElse(EmbeddingsSection(None, None, None, None, None))
+    val emb = root.embeddings.getOrElse(EmbeddingsSection(None, None, None, None, None, None))
 
     // Check for unified model format first (e.g., "openai/text-embedding-3-small")
     emb.model.map(_.trim).filter(_.nonEmpty) match {
@@ -114,6 +124,8 @@ private[config] object EmbeddingsConfigLoader {
               buildOpenAIEmbeddings(emb.openai, source, Some(modelName)).map("openai" -> _)
             case "voyage" =>
               buildVoyageEmbeddings(emb.voyage, Some(modelName)).map("voyage" -> _)
+            case "cohere" =>
+              buildCohereEmbeddings(emb.cohere, Some(modelName), source).map("cohere" -> _)
             case "ollama" =>
               buildOllamaEmbeddings(emb.ollama, Some(modelName)).map("ollama" -> _)
             case other =>
@@ -134,6 +146,8 @@ private[config] object EmbeddingsConfigLoader {
             buildOpenAIEmbeddings(emb.openai, source, None).map("openai" -> _)
           case Some("voyage") =>
             buildVoyageEmbeddings(emb.voyage, None).map("voyage" -> _)
+          case Some("cohere") =>
+            buildCohereEmbeddings(emb.cohere, None, source).map("cohere" -> _)
           case Some("ollama") =>
             buildOllamaEmbeddings(emb.ollama, None).map("ollama" -> _)
           case Some(other) =>
@@ -209,6 +223,30 @@ private[config] object EmbeddingsConfigLoader {
       }
   }
 
+  private def loadCohereSharedApiKey(source: ConfigSource): Result[String] = {
+    final case class CohereSection(apiKey: Option[String])
+    final case class Root(cohere: Option[CohereSection])
+
+    given PureConfigReader[CohereSection] = PureConfigReader.forProduct1("apiKey")(CohereSection.apply)
+    given PureConfigReader[Root]          = PureConfigReader.forProduct1("cohere")(Root.apply)
+
+    source
+      .at("llm4s")
+      .load[Root]
+      .left
+      .map { failures =>
+        val msg = failures.toList.map(_.description).mkString("; ")
+        ConfigurationError(s"Failed to load llm4s provider config via PureConfig when resolving Cohere API key: $msg")
+      }
+      .flatMap { root =>
+        root.cohere
+          .flatMap(_.apiKey)
+          .map(_.trim)
+          .filter(_.nonEmpty)
+          .toRight(ConfigurationError("Missing Cohere API key (llm4s.cohere.apiKey / COHERE_API_KEY)"))
+      }
+  }
+
   private def buildOllamaEmbeddings(
     section: Option[EmbeddingsOllamaSection],
     modelOverride: Option[String]
@@ -255,6 +293,41 @@ private[config] object EmbeddingsConfigLoader {
       modelOpt.toRight(
         ConfigurationError(
           "Missing Voyage embeddings model (set EMBEDDING_MODEL=voyage/model-name or VOYAGE_EMBEDDING_MODEL)"
+        )
+      )
+
+    for {
+      apiKey <- apiKeyResult
+      model  <- modelResult
+    } yield EmbeddingProviderConfig(baseUrl = baseUrl, model = model, apiKey = apiKey)
+  }
+
+  private def buildCohereEmbeddings(
+    section: Option[EmbeddingsCohereSection],
+    modelOverride: Option[String],
+    source: ConfigSource
+  ): Result[EmbeddingProviderConfig] = {
+    // Use model from unified format, or fall back to section model
+    val modelOpt = modelOverride.orElse(section.flatMap(_.model)).map(_.trim).filter(_.nonEmpty)
+
+    // Use section baseUrl if provided, otherwise default
+    val baseUrl = section
+      .flatMap(_.baseUrl)
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .getOrElse(org.llm4s.llmconnect.config.CohereConfig.DEFAULT_BASE_URL)
+
+    val apiKeyOpt = section.flatMap(_.apiKey).map(_.trim).filter(_.nonEmpty)
+
+    val apiKeyResult: Result[String] = apiKeyOpt match {
+      case Some(k) => Right(k)
+      case None    => loadCohereSharedApiKey(source)
+    }
+
+    val modelResult: Result[String] =
+      modelOpt.toRight(
+        ConfigurationError(
+          "Missing Cohere embeddings model (set EMBEDDING_MODEL=cohere/model-name or COHERE_EMBEDDING_MODEL)"
         )
       )
 

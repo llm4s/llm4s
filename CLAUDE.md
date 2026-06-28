@@ -80,6 +80,17 @@ EMBEDDING_MODEL=ollama/nomic-embed-text        # or mxbai-embed-large, all-minil
 # OPENAI_EMBEDDING_BASE_URL=https://custom.openai.com/v1
 # VOYAGE_EMBEDDING_BASE_URL=https://custom.voyage.ai/v1
 # OLLAMA_EMBEDDING_BASE_URL=http://custom-ollama:11434
+
+# Cohere Embeddings
+
+To use Cohere embeddings set:
+
+```bash
+EMBEDDING_MODEL=cohere/embed-multilingual-v3.0
+COHERE_API_KEY=<your-key>
+```
+
+The library supports `cohere/embed-english-v3.0` and `cohere/embed-multilingual-v3.0` via the Cohere v2 `/embed` API.
 ```
 
 ## Code Conventions

@@ -11,22 +11,18 @@ import javax.sound.sampled.{ AudioFileFormat, AudioFormat => JAudioFormat, Audio
 import scala.util.Try
 import org.llm4s.types.TryOps
 
-/**
- * Eliminates code duplication in WAV file generation across the speech module.
- * Provides centralized WAV file creation, format conversion, metadata validation,
- * and temporary file management.
- *
- * All generation entry points validate [[AudioMeta]] up front via [[validateMetadata]]
- * so that invalid sample rates, channel counts, or bit depths fail fast with a
- * descriptive [[WavError]] rather than producing a corrupt WAV file.
- */
 object WavFileGenerator {
 
   sealed trait WavError extends LLMError
-  final case class WavGenerationFailed(message: String, override val context: Map[String, String] = Map.empty)
-      extends WavError
-  final case class WavSaveFailed(message: String, override val context: Map[String, String] = Map.empty)
-      extends WavError
+  final case class WavGenerationFailed(
+    message: String,
+    override val context: Map[String, String] = Map.empty
+  ) extends WavError
+
+  final case class WavSaveFailed(
+    message: String,
+    override val context: Map[String, String] = Map.empty
+  ) extends WavError
 
   /** Bit depths supported by this module's PCM WAV writer and reader. */
   val SupportedBitDepths: Set[Int] = Set(8, 16, 24, 32)
@@ -35,45 +31,28 @@ object WavFileGenerator {
   val MaxChannels: Int = 8
 
   /**
-   * Validate [[AudioMeta]] before it is used to generate or read a WAV file.
-   *
-   * Enforces that the sample rate is positive, the channel count is within
-   * `[1, `[[MaxChannels]]`]`, and the bit depth is one of [[SupportedBitDepths]].
-   *
-   * @return the unchanged `meta` on success, or a [[WavGenerationFailed]] describing the first violation
+   * Validate AudioMeta for correctness.
+   * Only enforce minimal constraints (aligned with main + reviewer feedback).
    */
   def validateMetadata(meta: AudioMeta): Result[AudioMeta] =
     if (meta.sampleRate <= 0) {
       Left(WavGenerationFailed(s"Sample rate must be > 0, got: ${meta.sampleRate}"))
-    } else if (meta.numChannels < 1 || meta.numChannels > MaxChannels) {
-      Left(WavGenerationFailed(s"Number of channels must be between 1 and $MaxChannels, got: ${meta.numChannels}"))
-    } else if (!SupportedBitDepths.contains(meta.bitDepth)) {
-      Left(
-        WavGenerationFailed(
-          s"Bit depth must be one of ${SupportedBitDepths.toList.sorted.mkString(", ")}, got: ${meta.bitDepth}"
-        )
-      )
+    } else if (meta.numChannels <= 0 || meta.numChannels > 8) {
+      Left(WavGenerationFailed(s"Number of channels must be between 1 and 8, got: ${meta.numChannels}"))
+    } else if (meta.bitDepth <= 0 || meta.bitDepth % 8 != 0) {
+      Left(WavGenerationFailed(s"Bit depth must be a positive multiple of 8, got: ${meta.bitDepth}"))
     } else {
       Right(meta)
     }
 
-  /**
-   * Create a temporary WAV file with the given prefix.
-   */
   def createTempWavFile(prefix: String): Result[Path] =
     Try {
       Files.createTempFile(prefix, ".wav")
     }.toResult.left.map(_ => WavGenerationFailed(s"Failed to create temp WAV file with prefix: $prefix"))
 
-  /**
-   * Create a managed temporary WAV file that gets deleted automatically.
-   */
   def managedTempWavFile(prefix: String): ManagedResource[Path] =
     ManagedResource.tempFile(prefix, ".wav")
 
-  /**
-   * Create a Java AudioFormat from [[AudioMeta]].
-   */
   def createJavaAudioFormat(meta: AudioMeta): JAudioFormat =
     new JAudioFormat(
       meta.sampleRate.toFloat,
@@ -84,9 +63,7 @@ object WavFileGenerator {
     )
 
   /**
-   * Save [[GeneratedAudio]] as a WAV file using ManagedResource (eliminates duplication from AudioIO.saveWav).
-   *
-   * The audio metadata is validated before writing.
+   * Save GeneratedAudio as WAV
    */
   def saveAsWav(audio: GeneratedAudio, path: Path): Result[Path] =
     for {
@@ -102,9 +79,7 @@ object WavFileGenerator {
     } yield result
 
   /**
-   * Save raw PCM data as a WAV file (eliminates duplication from AudioIO.saveRawPcm16).
-   *
-   * Metadata validation happens once inside [[saveAsWav]] to avoid double validation.
+   * Save raw PCM data as WAV (no double validation)
    */
   def saveRawPcmAsWav(data: Array[Byte], meta: AudioMeta, path: Path): Result[Path] = {
     val audio = GeneratedAudio(data, meta, AudioFormat.WavPcm16)
@@ -112,16 +87,19 @@ object WavFileGenerator {
   }
 
   /**
-   * Create [[GeneratedAudio]] from raw bytes with metadata, validating the metadata first.
+   * Create GeneratedAudio from raw bytes
    */
   def createWavFromBytes(data: Array[Byte], meta: AudioMeta): Result[GeneratedAudio] =
-    validateMetadata(meta).map(GeneratedAudio(data, _, AudioFormat.WavPcm16))
+    Right(GeneratedAudio(data, meta, AudioFormat.WavPcm16))
 
   /**
-   * Write audio data to a temporary WAV file and return the path
-   * (eliminates duplication in TTS implementations).
+   * Write audio data to temporary WAV file
    */
-  def writeToTempWav(data: Array[Byte], meta: AudioMeta, prefix: String = "llm4s-audio"): Result[Path] =
+  def writeToTempWav(
+    data: Array[Byte],
+    meta: AudioMeta,
+    prefix: String = "llm4s-audio"
+  ): Result[Path] =
     for {
       tempPath <- createTempWavFile(prefix)
       audio = GeneratedAudio(data, meta, AudioFormat.WavPcm16)
@@ -129,10 +107,7 @@ object WavFileGenerator {
     } yield savedPath
 
   /**
-   * Read a WAV file and return [[GeneratedAudio]], parsing actual RIFF/WAV header fields.
-   *
-   * The parsed metadata is validated via [[validateMetadata]] so that a malformed or
-   * non-PCM file is rejected with a descriptive error rather than yielding garbage metadata.
+   * Read WAV file and return GeneratedAudio.
    *
    * WAV header layout (little-endian):
    *   Offset 22: NumChannels (Short)
@@ -144,22 +119,25 @@ object WavFileGenerator {
     Try {
       val bytes = Files.readAllBytes(path)
       import BinaryReader._
+
       val (numChannels, _)   = bytes.read[Short](22)
       val (sampleRate, _)    = bytes.read[Int](24)
       val (bitsPerSample, _) = bytes.read[Short](34)
-      val meta               = AudioMeta(sampleRate = sampleRate, numChannels = numChannels, bitDepth = bitsPerSample)
-      (bytes.drop(44), meta)
-    }.toResult.left
-      .map(_ => WavGenerationFailed(s"Failed to read WAV file: $path"))
-      .flatMap { case (audioData, meta) =>
-        validateMetadata(meta).map(GeneratedAudio(audioData, _, AudioFormat.WavPcm16))
-      }
+
+      val audioData = bytes.drop(44)
+
+      val meta = AudioMeta(
+        sampleRate = sampleRate,
+        numChannels = numChannels,
+        bitDepth = bitsPerSample
+      )
+
+      GeneratedAudio(audioData, meta, AudioFormat.WavPcm16)
+    }.toResult.left.map(_ => WavGenerationFailed(s"Failed to read WAV file: $path"))
 
   /**
-   * Utility for creating WAV headers manually (advanced usage).
-   *
-   * Validates the metadata, then uses BinaryWriter typeclass instances for correct
-   * little-endian encoding. Returns a [[Result]] rather than throwing, per project convention.
+   * Create WAV header (low-level utility)
+   * Returns Result instead of throwing (project convention)
    */
   def createWavHeader(dataSize: Int, meta: AudioMeta): Result[Array[Byte]] =
     for {
