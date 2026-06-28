@@ -26,8 +26,10 @@ object CheckPolicies {
     )
 
   // Note: This CLI tool deliberately reads raw env vars for pre-config validation
-  // (before Llm4sConfig is available), which is acceptable for a standalone entry point
+  // (before Llm4sConfig is available), which is acceptable for a standalone entry point.
+  // scalafix:off DisableSyntax.NoSysEnv
   def run(options: Options, getEnv: String => Option[String] = key => sys.env.get(key)): Int =
+    // scalafix:on DisableSyntax.NoSysEnv
     DefaultPolicies.getPreset(options.preset) match {
       case None =>
         println(s"Unknown preset '${options.preset}'. Available presets: ${DefaultPolicies.listPresets.mkString(", ")}")

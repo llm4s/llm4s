@@ -135,7 +135,7 @@ lazy val llm4s = (project in file("."))
     workspaceClient,
     workspaceSamples,
     traceOpentelemetry,
-    configPolicy
+    configPolicy,
     knowledgegraphNeo4j,
     benchmarks
   )
@@ -298,6 +298,10 @@ lazy val configPolicy = (project in file("modules/config-policy"))
     Compile / mainClass := Some("org.llm4s.configpolicy.CheckPolicies"),
     libraryDependencies ++= Seq(
       Deps.config,
+      Deps.scalatest % Test
+    )
+  )
+
 lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   .dependsOn(core)
   .settings(
