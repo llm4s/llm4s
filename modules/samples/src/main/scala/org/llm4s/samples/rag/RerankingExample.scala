@@ -4,7 +4,7 @@ import org.llm4s.agent.memory.*
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.reranker.{LLMReranker, RerankRequest}
+import org.llm4s.reranker.{ LLMReranker, RerankRequest }
 
 import java.nio.file.Files
 
