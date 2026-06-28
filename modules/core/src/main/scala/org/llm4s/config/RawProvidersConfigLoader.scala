@@ -8,6 +8,7 @@ import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 
 import scala.jdk.CollectionConverters.*
 
+/** Reads the raw providers configuration block from a PureConfig source without validation. */
 private[config] object RawProvidersConfigLoader:
 
   private given namedProviderSectionReader: PureConfigReader[RawNamedProviderSection] =
@@ -51,6 +52,12 @@ private[config] object RawProvidersConfigLoader:
       }
     }
 
+  /**
+   * Reads the `llm4s.providers` config block and returns an unvalidated `RawProvidersConfig`.
+   *
+   *  @param source the PureConfig source to read from
+   *  @return `Right(RawProvidersConfig)` on success, or `Left` with a `ConfigurationError`
+   */
   def load(source: ConfigSource): Result[RawProvidersConfig] =
     source
       .at("llm4s.providers")

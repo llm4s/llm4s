@@ -95,6 +95,27 @@ jobs:
       - name: Compile
         run: sbt compile
 
+  scaladoc:
+    name: ScalaDoc
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Generate ScalaDoc
+        run: sbt doc
+
   # Code coverage (runs on one configuration to avoid duplication)
   coverage:
     name: Code Coverage
@@ -198,7 +219,7 @@ jobs:
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, coverage, config-policy-check]
+    needs: [test, coverage, config-policy-check, scaladoc]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -216,6 +237,10 @@ jobs:
           fi
           if [[ "${{ needs.config-policy-check.result }}" != "success" ]]; then
             echo "Config policy check failed"
+            exit 1
+          fi
+          if [[ "${{ needs.scaladoc.result }}" != "success" ]]; then
+            echo "ScalaDoc job failed"
             exit 1
           fi
           echo "All tests passed!"

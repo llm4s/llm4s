@@ -6,6 +6,7 @@ import org.llm4s.types.Result
 import java.time.Instant
 import scala.util.Try
 
+/** Records completed provider exchanges to the configured logging sink. */
 private[provider] object ProviderExchangeRecorder {
 
   def record(

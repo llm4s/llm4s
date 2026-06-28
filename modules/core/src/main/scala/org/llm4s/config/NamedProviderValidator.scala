@@ -4,14 +4,24 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
 
+/** Validates a raw named provider section for a specific provider type. */
 private[llm4s] trait NamedProviderValidator:
+  /**
+   * Validates the raw provider section and returns a normalised `NamedProviderConfig`.
+   *
+   *  @param providerName the logical name of the provider entry, used in error messages
+   *  @param section      the raw unvalidated provider section
+   *  @return `Right(NamedProviderConfig)` on success, or `Left` with a `ConfigurationError`
+   */
   def validate(
     providerName: ProviderName,
     section: RawNamedProviderSection
   ): Result[NamedProviderConfig]
 
+/** Per-provider validator implementations for each supported `ProviderKind`. */
 private[llm4s] object NamedProviderValidators:
 
+  /** Validator for OpenAI provider configurations. */
   object OpenAI extends NamedProviderValidator:
     def validate(
       providerName: ProviderName,
@@ -24,6 +34,7 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  /** Validator for OpenRouter provider configurations. */
   object OpenRouter extends NamedProviderValidator:
     def validate(
       providerName: ProviderName,
@@ -36,6 +47,7 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  /** Validator for Requesty provider configurations. */
   object Requesty extends NamedProviderValidator:
     def validate(
       providerName: ProviderName,
@@ -48,6 +60,7 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  /** Validator for Azure provider configurations. */
   object Azure extends NamedProviderValidator:
     def validate(
       providerName: ProviderName,
@@ -61,6 +74,7 @@ private[llm4s] object NamedProviderValidators:
         requireEndpoint = true,
       )
 
+  /** Validator for Anthropic provider configurations. */
   object Anthropic extends NamedProviderValidator:
     def validate(
       providerName: ProviderName,
@@ -73,6 +87,7 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  /** Validator for Ollama provider configurations. */
   object Ollama extends NamedProviderValidator:
     def validate(
       providerName: ProviderName,
@@ -85,6 +100,7 @@ private[llm4s] object NamedProviderValidators:
         requireBaseUrl = true,
       )
 
+  /** Validator for Zai provider configurations. */
   object Zai extends NamedProviderValidator:
     def validate(
       providerName: ProviderName,
@@ -97,6 +113,7 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  /** Validator for Gemini provider configurations. */
   object Gemini extends NamedProviderValidator:
     def validate(
       providerName: ProviderName,
@@ -109,6 +126,7 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  /** Validator for DeepSeek provider configurations. */
   object DeepSeek extends NamedProviderValidator:
     def validate(
       providerName: ProviderName,
@@ -121,6 +139,7 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  /** Validator for Cohere provider configurations. */
   object Cohere extends NamedProviderValidator:
     def validate(
       providerName: ProviderName,
@@ -133,6 +152,7 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
       )
 
+  /** Validator for Mistral provider configurations. */
   object Mistral extends NamedProviderValidator:
     def validate(
       providerName: ProviderName,
@@ -191,8 +211,16 @@ private[llm4s] object NamedProviderValidators:
         else Right(normalized)
     }
 
+/** Dispatches validation of a raw named provider section to the appropriate provider-specific validator. */
 private[llm4s] object NamedProviderConfigValidator:
 
+  /**
+   * Validates a raw provider section by normalizing it and delegating to the registry-resolved validator.
+   *
+   *  @param providerName the logical name of the provider entry, used in error messages
+   *  @param section      the raw unvalidated provider section
+   *  @return `Right(NamedProviderConfig)` on success, or `Left` with a `ConfigurationError`
+   */
   def validate(
     providerName: ProviderName,
     section: RawNamedProviderSection

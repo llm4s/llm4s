@@ -11,20 +11,37 @@ import org.llm4s.llmconnect.config.MistralConfig
 
 import scala.util.Try
 
+/**
+ * A model discovered from a provider's live model-listing endpoint.
+ *
+ *  @param name     the model identifier as reported by the provider
+ *  @param provider the `ProviderKind` that owns this model
+ *  @param metadata optional key/value pairs of additional model metadata (e.g. display name, token limits)
+ */
 final case class DiscoveredModel(
   name: ModelName,
   provider: ProviderKind,
   metadata: Map[String, String] = Map.empty
 )
 
+/** Discovers available models from a provider's live API endpoint. */
 private[llm4s] trait ProviderModelLister:
+  /**
+   * Fetches the list of available models for the given provider configuration.
+   *
+   *  @param config     the validated named provider configuration containing credentials and base URL
+   *  @param httpClient the HTTP client to use for API requests
+   *  @return `Right` with the list of discovered models, or `Left` with an error
+   */
   def listModels(
     config: NamedProviderConfig,
     httpClient: Llm4sHttpClient
   ): Result[List[DiscoveredModel]]
 
+/** Per-provider `ProviderModelLister` implementations for each supported provider. */
 private[llm4s] object ProviderModelListers:
 
+  /** Model lister for the OpenAI provider. */
   object OpenAI extends ProviderModelLister:
     def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
       listOpenAICompatibleModels(
@@ -35,6 +52,7 @@ private[llm4s] object ProviderModelListers:
         httpClient = httpClient
       )
 
+  /** Model lister for the OpenRouter provider. */
   object OpenRouter extends ProviderModelLister:
     def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
       listOpenAICompatibleModels(
@@ -45,6 +63,7 @@ private[llm4s] object ProviderModelListers:
         httpClient = httpClient
       )
 
+  /** Model lister for the Requesty provider. */
   object Requesty extends ProviderModelLister:
     def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
       listOpenAICompatibleModels(
@@ -55,6 +74,7 @@ private[llm4s] object ProviderModelListers:
         httpClient = httpClient
       )
 
+  /** Model lister for the Anthropic provider, using paginated API requests. */
   object Anthropic extends ProviderModelLister:
     private val AnthropicVersion = "2023-06-01"
     private val DefaultLimit     = "100"
@@ -99,6 +119,7 @@ private[llm4s] object ProviderModelListers:
           else Right(all)
       yield models
 
+  /** Model lister for the Gemini provider, using paginated API requests. */
   object Gemini extends ProviderModelLister:
     def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
       for
@@ -133,6 +154,7 @@ private[llm4s] object ProviderModelListers:
           case _                             => Right(all)
       yield models
 
+  /** Model lister for the DeepSeek provider using the OpenAI-compatible models endpoint. */
   object DeepSeek extends ProviderModelLister:
     def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
       listOpenAICompatibleModels(
@@ -143,6 +165,7 @@ private[llm4s] object ProviderModelListers:
         httpClient = httpClient
       )
 
+  /** Model lister for the Mistral provider using the OpenAI-compatible models endpoint. */
   object Mistral extends ProviderModelLister:
     def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
       listOpenAICompatibleModels(
@@ -154,6 +177,7 @@ private[llm4s] object ProviderModelListers:
         httpClient = httpClient
       )
 
+  /** Model lister for the Ollama provider using the local `/api/tags` endpoint. */
   object Ollama extends ProviderModelLister:
     def listModels(
       config: NamedProviderConfig,
