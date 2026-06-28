@@ -59,7 +59,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       result match
         case Left(err) =>
           err.message should include("Gemini provider 'broken-gemini' is missing required fields")
-          err.message should include("- apiKey: set GEMINI_API_KEY")
+          err.message should include("- apiKey: set it in llm4s.conf under providers.broken-gemini.apiKey")
         case Right(cfg) =>
           fail(s"Expected invalid sibling named provider to fail whole config, got config: $cfg")
     }

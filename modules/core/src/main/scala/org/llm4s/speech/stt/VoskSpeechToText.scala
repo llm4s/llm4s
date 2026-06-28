@@ -161,6 +161,7 @@ final class VoskSpeechToText(
 }
 
 object VoskSpeechToText {
+  import SttJsonSupport.{ stringField, doubleField, arrayField }
 
   /** Default Vosk model path for small English model */
   val DEFAULT_MODEL_PATH: String = "models/vosk-model-small-en-us-0.15"
@@ -196,12 +197,10 @@ object VoskSpeechToText {
     if (threshold <= 0.0) words else words.filter(_.meetsConfidence(threshold))
 
   private[stt] def renderWords(words: Seq[WordTimestamp]): String =
-    words.map(_.word.trim).filter(_.nonEmpty).mkString(" ").trim
+    SttJsonSupport.renderWords(words)
 
-  private[stt] def averageConfidence(words: Seq[WordTimestamp]): Option[Double] = {
-    val confidences = words.flatMap(_.confidence)
-    if (confidences.nonEmpty) Some(confidences.sum / confidences.size) else None
-  }
+  private[stt] def averageConfidence(words: Seq[WordTimestamp]): Option[Double] =
+    SttJsonSupport.averageConfidence(words)
 
   private[stt] def buildTranscription(
     parsedSegments: Seq[ParsedSegment],
@@ -238,16 +237,4 @@ object VoskSpeechToText {
         )
         .toOption
     } yield timestamp
-
-  private def field(value: Value, key: String): Option[Value] =
-    Try(value(key)).toOption
-
-  private def stringField(value: Value, key: String): Option[String] =
-    field(value, key).flatMap(v => Try(v.str).toOption)
-
-  private def doubleField(value: Value, key: String): Option[Double] =
-    field(value, key).flatMap(v => Try(v.num).toOption)
-
-  private def arrayField(value: Value, key: String): Seq[Value] =
-    field(value, key).flatMap(v => Try(v.arr.toSeq).toOption).getOrElse(Seq.empty)
 }

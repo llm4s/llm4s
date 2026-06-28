@@ -230,7 +230,8 @@ object WordTimestamp {
  *
  * @param text Full transcription text
  * @param language Detected or specified language
- * @param confidence Overall confidence of the transcription
+ * @param confidence Overall confidence of the transcription. May be present even when `timestamps` is empty
+ *                   (e.g. derived from segment/word metadata while `STTOptions.enableTimestamps` is false).
  * @param timestamps Word-level timing information (only if enabled)
  * @param meta Source audio metadata
  * @param processingTimeMs Time taken to process (for metrics/monitoring)

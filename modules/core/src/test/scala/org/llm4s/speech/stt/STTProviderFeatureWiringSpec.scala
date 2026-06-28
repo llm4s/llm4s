@@ -237,7 +237,8 @@ class STTProviderFeatureWiringSpec extends AnyFlatSpec with Matchers {
         "en",
         "--initial_prompt",
         "hello",
-        "--word-timestamps"
+        "--word_timestamps",
+        "True"
       )
     } finally Files.deleteIfExists(inputPath)
   }
@@ -266,6 +267,24 @@ class STTProviderFeatureWiringSpec extends AnyFlatSpec with Matchers {
       Files.deleteIfExists(stemOutput)
       WhisperSpeechToText.resolveCliOutput(inputPath, "json", stdoutPayload) shouldBe stdoutPayload
     } finally {
+      Files.deleteIfExists(stemOutput)
+      Files.deleteIfExists(inputPath)
+    }
+  }
+
+  it should "delete generated transcript files left next to the input" in {
+    val inputPath  = Files.createTempFile("whisper-cleanup", ".wav")
+    val nameOutput = inputPath.resolveSibling(inputPath.getFileName.toString + ".json")
+    val stemOutput = inputPath.resolveSibling(inputPath.getFileName.toString.stripSuffix(".wav") + ".json")
+    Files.writeString(nameOutput, "{}")
+    Files.writeString(stemOutput, "{}")
+
+    try {
+      WhisperSpeechToText.deleteGeneratedOutputs(inputPath, "json")
+      Files.exists(nameOutput) shouldBe false
+      Files.exists(stemOutput) shouldBe false
+    } finally {
+      Files.deleteIfExists(nameOutput)
       Files.deleteIfExists(stemOutput)
       Files.deleteIfExists(inputPath)
     }

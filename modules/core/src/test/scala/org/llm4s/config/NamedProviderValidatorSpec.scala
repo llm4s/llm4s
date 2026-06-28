@@ -25,7 +25,7 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
 
     err.message should include("Azure OpenAI provider 'my-azure' is missing required fields")
     err.message should include(
-      "- apiKey: set AZURE_API_KEY or provide it in llm4s.conf under providers.my-azure.apiKey"
+      "- apiKey: set it in llm4s.conf under providers.my-azure.apiKey (optionally from an env var, e.g. apiKey = ${?AZURE_API_KEY})"
     )
     err.message should include("- endpoint: the model endpoint/deployment name in your Azure OpenAI resource")
   }
@@ -47,7 +47,7 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
 
     err.message should include("OpenAI provider 'my-openai' is missing required fields")
     err.message should include(
-      "- apiKey: set OPENAI_API_KEY or provide it in llm4s.conf under providers.my-openai.apiKey"
+      "- apiKey: set it in llm4s.conf under providers.my-openai.apiKey (optionally from an env var, e.g. apiKey = ${?OPENAI_API_KEY})"
     )
   }
 

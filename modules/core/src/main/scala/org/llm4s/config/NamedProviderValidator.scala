@@ -187,7 +187,9 @@ private[llm4s] object NamedProviderValidators:
         val providerDisplayName = if (providerKind == ProviderKind.Azure) "Azure OpenAI" else providerKind.toString
 
         if requireApiKey && section.apiKey.map(_.trim).forall(_.isEmpty) then
-          missingFields += s"  - apiKey: set ${envPrefix}_API_KEY or provide it in llm4s.conf under providers.${providerName.asName}.apiKey"
+          // Named providers resolve from HOCON, not an automatic <PROVIDER>_API_KEY binding, so lead with the
+          // conf path (the real fix) and show how to bind an env var explicitly via a HOCON substitution.
+          missingFields += s"  - apiKey: set it in llm4s.conf under providers.${providerName.asName}.apiKey (optionally from an env var, e.g. apiKey = $${?${envPrefix}_API_KEY})"
 
         if requireBaseUrl && section.baseUrl.map(_.trim).forall(_.isEmpty) then
           val exampleUrl = providerKind match

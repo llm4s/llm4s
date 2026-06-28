@@ -680,11 +680,17 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
         val config = ToolExecutionConfig(
           retryPolicy = Some(ToolRetryPolicy(maxAttempts = 4, baseDelay = 50.millis, backoffFactor = 2.0))
         )
-        val result = registry.execute(ToolCallRequest("tracked", ujson.Obj("x" -> 1.0)), config)
+        val start   = System.currentTimeMillis()
+        val result  = registry.execute(ToolCallRequest("tracked", ujson.Obj("x" -> 1.0)), config)
+        val elapsed = System.currentTimeMillis() - start
         // 3 failures then success on 4th attempt
         result.isRight shouldBe true
         result.toOption.get("result").num shouldBe 1.0
         callCount.get() shouldBe 4
+        // With baseDelay=50ms and factor=2.0 the three backoff waits are 50+100+200 = 350ms.
+        // Assert a lower bound that a constant/linear backoff (~150ms) could not reach, so this
+        // test actually distinguishes exponential growth rather than only counting retries.
+        elapsed should be >= 300L
       }
     )
   }

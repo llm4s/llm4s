@@ -21,11 +21,12 @@ data/
 # Developer local overlays
 **/application.local.conf
 
-# llm4s-pr-manager artifacts
-Pull requests/
-*_out.json
-*_out*.json
-test_log*.txt
-init_*.json
-generate_*.json
-review*.md
+# llm4s-pr-manager artifacts (anchored to repo root so they don't match nested files,
+# e.g. docs/review-*.md). Personal-tooling patterns; prefer a global ~/.config/git/ignore
+# for anything not shared.
+/Pull requests/
+/*_out.json
+/test_log*.txt
+/init_*.json
+/generate_*.json
+/review*.md
