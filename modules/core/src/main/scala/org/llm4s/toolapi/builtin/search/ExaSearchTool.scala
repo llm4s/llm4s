@@ -462,7 +462,7 @@ object ExaSearchTool {
             // Restore interrupt flag for proper thread shutdown and timeout semantics
             restoreInterrupt()
             Left("Response parsing was cancelled or interrupted.")
-          case _: ujson.ParseException =>
+          case e if isJsonParseFailure(e) =>
             Left("Failed to parse search results. The response format may be invalid.")
           case NonFatal(_) =>
             // Catch all other non-fatal exceptions

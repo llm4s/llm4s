@@ -78,6 +78,12 @@ The metadata file is:
 - **Loadable** at boot from a classpath resource, local file, or URL
 - **Extensible** by constructing custom immutable registry snapshots
 
+### Embedded overrides
+
+The vendored LiteLLM file is a verbatim upstream copy, refreshed periodically. Upstream occasionally drops or mis-shapes entries llm4s relies on (e.g. a chat model regressing to an `embedding` row, or a canonical alias being removed so a substring fallback resolves to a third-party-hosted variant).
+
+To keep the vendored snapshot a clean, refreshable copy, llm4s layers a small curated corrections file on top of it: `modules/core/src/main/resources/modeldata/llm4s_model_overrides.json`. Entries there take precedence over the snapshot and survive future refreshes. The overlay is applied **only** when loading the embedded default resource — explicit file/URL/resource sources are loaded verbatim with no overlay. A missing or unparseable overrides file is non-fatal: the base snapshot is used as-is.
+
 ## Usage Examples
 
 ### Basic Model Lookup

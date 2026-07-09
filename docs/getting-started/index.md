@@ -47,8 +47,8 @@ By the end of this section, you'll:
 
 Before starting, you should have:
 
-- **Java 11+** (JDK 21 recommended)
-- **Scala 2.13.16 or 3.7.1**
+- **JDK 21**
+- **Scala 3.7.1**
 - **SBT 1.10.6+**
 - An API key from OpenAI, Anthropic, Azure OpenAI, or Ollama installed
 

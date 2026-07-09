@@ -1,3 +1,6 @@
+ignore:
+  - "modules/benchmarks/**"
+
 coverage:
   status:
     project:

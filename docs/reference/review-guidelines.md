@@ -86,7 +86,7 @@ This document captures coding best practices derived from PR review feedback, pa
 ### 1.4 Bot prompt template
 
 ```
-You are reviewing a PR for llm4s (Scala 2.13 + 3.x LLM library).
+You are reviewing a PR for llm4s (currently Scala 3.7.1).
 
 INPUTS:
 - PR diff: {files_changed}
@@ -330,7 +330,7 @@ Run through sections 5-17 in order for HIGH-risk PRs.
 - [ ] No `sys.env` or `ConfigFactory` outside `config/` (see 5.2)
 - [ ] Pattern matches on sealed traits are exhaustive (see 5.3)
 - [ ] Public APIs use newtypes, not primitives (see 5.4)
-- [ ] Cross-build compatibility (Scala 2.13 + 3.x) (see 5.5)
+- [ ] Current Scala 3.7.1 build compatibility (see 5.5)
 - [ ] New public APIs have ScalaDoc (see 12.1)
 - [ ] Logic changes have tests (see 11.1)
 - [ ] No secrets in code/logs (see 14.1)
@@ -1771,7 +1771,7 @@ def run(
 - [ ] `build.sbt`: Version bump follows semver
 - [ ] `Deps.scala`: Library updates checked for CVEs
 - [ ] `.scalafix.conf`: Rule changes documented in PR
-- [ ] `Common.scala`: Cross-build settings preserve Scala 2.13 + 3.x
+- [ ] `project/Dependencies.scala`: Scala build settings remain aligned with the supported version matrix
 
 ### 13.2 CI/CD changes
 
@@ -1870,7 +1870,7 @@ Before adding a new library, check if an existing dependency already provides wh
 - [ ] Check if existing deps provide functionality: `ujson` (JSON), `sttp` (HTTP), `PureConfig` (config), `ScalaTest` (
   testing)
 - [ ] Run `sbt dependencyCheck` for CVEs
-- [ ] Major version bumps tested across Scala 2.13 + 3.x
+- [ ] Major version bumps tested against the current Scala 3.7.1 build
 - [ ] Strictly NO use of dependencies (libraries) which are in development version (0.x or 0.x.x)
 
 **Don't commit generated/large files**:
@@ -2390,7 +2390,7 @@ Before submitting a PR, verify:
 **Testing:**
 - [ ] Unit tests for new behavior
 - [ ] Tests for failure/edge cases
-- [ ] Tests pass with `sbt +test`
+- [ ] Tests pass with `sbt test`
 
 **Hygiene:**
 - [ ] No new heavy dependencies in core without discussion
@@ -2427,7 +2427,7 @@ Before submitting a PR, verify:
 
 - [ ] Unit tests for new behavior
 - [ ] Tests for failure/edge cases
-- [ ] Tests pass with `sbt +test`
+- [ ] Tests pass with `sbt test`
 - [ ] No `Thread.sleep` or timing assertions
 - [ ] No `???` in mocks - use safe stubs
 

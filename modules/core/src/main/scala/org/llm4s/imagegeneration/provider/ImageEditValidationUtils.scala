@@ -6,6 +6,7 @@ import java.nio.file.{ Files, Path }
 import javax.imageio.ImageIO
 import scala.util.Try
 
+/** Validation utilities for image edit requests used by image generation providers. */
 private[provider] object ImageEditValidationUtils {
 
   def readImageFile(path: Path, label: String): Either[ImageGenerationError, Array[Byte]] =

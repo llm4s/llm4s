@@ -297,7 +297,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Left(err) =>
-          err.message should include("missing required field `apiKey`")
+          err.message should include("- apiKey: set it in llm4s.conf under providers.openai-main.apiKey")
         case Right(cfg) =>
           fail(s"Expected missing OpenAI apiKey failure, got config: $cfg")
     }
@@ -316,7 +316,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Left(err) =>
-          err.message should include("missing required field `endpoint`")
+          err.message should include("- endpoint: the model endpoint/deployment name in your Azure OpenAI resource")
         case Right(cfg) =>
           fail(s"Expected missing Azure endpoint failure, got config: $cfg")
     }
@@ -335,7 +335,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Left(err) =>
-          err.message should include("missing required field `baseUrl`")
+          err.message should include("- baseUrl: set OLLAMA_BASE_URL")
         case Right(cfg) =>
           fail(s"Expected missing Ollama baseUrl failure, got config: $cfg")
     }

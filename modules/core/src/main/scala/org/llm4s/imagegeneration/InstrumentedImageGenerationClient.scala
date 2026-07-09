@@ -161,6 +161,10 @@ class InstrumentedImageGenerationClient(
         size.flatMap { s =>
           val cost = ImagePricingRegistry.estimateCost(model, quality, s, imageCount)
           cost.foreach { c =>
+            // Record to both the image-specific cost counter (for a per-provider/model image
+            // breakdown) and the unified cost counter (so total spend across all operations,
+            // LLM and image, stays correct). This dual recording is intentional, not double
+            // counting within a single series.
             metrics.recordImageGenerationCost(providerName, model, c, imageCount)
             metrics.recordCost(providerName, model, c)
           }

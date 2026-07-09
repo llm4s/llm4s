@@ -172,7 +172,7 @@ class EnhancedErrorMessagesTest extends AnyFlatSpec with Matchers {
   "ToolCallError messages" should "have consistent format" in {
     // Test UnknownFunction
     val unknown = ToolCallError.UnknownFunction("foo_bar")
-    unknown.getFormattedMessage shouldBe "Tool call 'foo_bar' is not a recognized tool"
+    unknown.getFormattedMessage should include("Tool call 'foo_bar' is not a recognized tool")
 
     // Test NullArguments
     val nullArgs = ToolCallError.NullArguments("process_data")

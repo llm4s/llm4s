@@ -1,7 +1,16 @@
 package org.llm4s.error
 
 /**
- * Processing errors for operations like image processing, audio processing, etc.
+ * Raised when an internal processing operation fails, such as image or audio processing.
+ *
+ * This is a [[NonRecoverableError]]: it indicates a failure in processing
+ * multimodal inputs (e.g., resampling audio, converting image formats) before
+ * sending them to the provider. This usually requires fixing the input media
+ * or addressing the underlying cause.
+ *
+ * @param message human-readable description of the processing failure
+ * @param operation the specific processing operation that failed (e.g., "audio-resample")
+ * @param cause optional underlying exception that caused the processing to fail
  */
 final case class ProcessingError private (
   override val message: String,

@@ -75,7 +75,7 @@ final case class S3DocumentSource(
     val builder = S3Client
       .builder()
       .region(Region.of(region))
-      .credentialsProvider(credentials.getOrElse(DefaultCredentialsProvider.create()))
+      .credentialsProvider(credentials.getOrElse(DefaultCredentialsProvider.builder().build()))
 
     endpointOverride.foreach { endpoint =>
       builder.endpointOverride(URI.create(endpoint))

@@ -6,27 +6,70 @@ import org.llm4s.types.{ Result, TokenBudget, HeadroomPercent, ContextWindowSize
 import org.slf4j.LoggerFactory
 
 /**
- * Orchestrates a 4-step context management pipeline (early-exit if budget is met at any step):
+ * Orchestrates the 4-step context management pipeline for llm4s conversations.
  *
- * 1) ToolDeterministicCompaction
- *    - Run DeterministicCompressor.compressToCap() with compressToolOutputs first (subjective edits OFF).
- *    - Goal: shrink/cap tool outputs (JSON/logs/binary) without touching user/assistant text.
+ * `ContextManager` is the primary entry point for keeping a conversation within a
+ * model's token limit. Each step is applied in order of increasing cost; the pipeline
+ * exits early as soon as the conversation fits the requested budget.
  *
- * 2) HistoryCompression
- *    - Run HistoryCompressor.compressToDigest(...):
- *      • Keep last K semantic blocks as is (K = config.maxSemanticBlocks).
- *      • Replace older blocks with a deterministic [HISTORY_SUMMARY] digest capped to config.summaryTokenTarget.
+ * ==Compressor Comparison==
  *
- * 3) LLMHistorySqueeze
- *    - If still over budget AND LLM enabled:
- *      • Compress the digest string only to summaryTokenTarget via LLMCompressor.squeezeDigest().
- *      • No whole-conversation LLM compression.
+ * {{{
+ * Strategy                | Cost        | Quality | Latency | What it touches
+ * ------------------------|-------------|---------|---------|-------------------------
+ * DeterministicCompressor | Free        | Lower   | Fast    | Tool outputs only
+ * HistoryCompressor       | Free        | Medium  | Fast    | Older history → digest
+ * LLMCompressor           | 1 LLM call  | High    | Slow    | Digest messages only
+ * }}}
  *
- * 4) FinalTokenTrim
- *    - TokenWindow.trimToBudget() with headroom.
- *    - Pin [HISTORY_SUMMARY] so it’s never dropped; pack remaining messages newest-first.
+ * ==4-Step Pipeline==
+ *
+ * Each step exits immediately if the budget is already met:
+ *
+ *  1. '''ToolDeterministicCompaction''' ([[DeterministicCompressor]]):
+ *     Shrinks and caps tool outputs (JSON, logs, binary content) without modifying
+ *     user or assistant messages. No API calls; always runs first.
+ *
+ *  2. '''HistoryCompression''' ([[HistoryCompressor]]):
+ *     Keeps the last `config.maxSemanticBlocks` semantic blocks verbatim and
+ *     replaces older blocks with compact `[HISTORY_SUMMARY]` digests, capped to
+ *     `config.summaryTokenTarget` tokens. No API calls.
+ *
+ *  3. '''LLMHistorySqueeze''' ([[LLMCompressor]]):
+ *     If still over budget and `config.enableLLMCompression` is `true`, compresses
+ *     only the digest messages further via one LLM inference call per digest.
+ *
+ *  4. '''FinalTokenTrim''' ([[TokenWindow]]):
+ *     Hard-trims to `budget` tokens (with `config.headroomPercent`), always pinning
+ *     `[HISTORY_SUMMARY]` messages so they are never dropped.
+ *
+ * ==Usage==
+ *
+ * {{{
+ * // Quick setup with defaults:
+ * val manager = ContextManager.withDefaults(tokenCounter).getOrElse(???)
+ * val result  = manager.manageContext(conversation, budget = 8000)
+ * result.foreach(managed => println(managed.summary))
+ *
+ * // With an LLM client for Step 3:
+ * val manager = ContextManager.create(tokenCounter, ContextConfig.default, Some(llmClient))
+ *   .getOrElse(???)
+ * }}}
+ *
+ * @param tokenCounter  Token counter calibrated to the target model's tokenizer
+ * @param config        Pipeline configuration — controls headroom, semantic block count,
+ *                      and which steps are enabled
+ * @param llmClient     Optional LLM client; required for Step 3 (LLMHistorySqueeze);
+ *                      Step 3 is skipped if `None`
+ * @param artifactStore Optional store for externalized binary/large content from Step 1;
+ *                      defaults to an in-memory store if `None`
+ *
+ * @see [[DeterministicCompressor]] for Step 1 implementation
+ * @see [[HistoryCompressor]] for Step 2 implementation
+ * @see [[LLMCompressor]] for Step 3 implementation
+ * @see [[TokenWindow]] for Step 4 implementation
+ * @see [[ContextConfig]] for all configuration options
  */
-
 class ContextManager(
   tokenCounter: ConversationTokenCounter,
   config: ContextConfig,

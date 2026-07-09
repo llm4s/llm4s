@@ -107,6 +107,12 @@ object ChatTuiConfig:
           OpenAIConfig.fromValues(model, apiKey, None, baseUrl)
         }
 
+      case "requesty" =>
+        requireKey("REQUESTY_API_KEY").map { apiKey =>
+          val baseUrl = ChatTuiEnv.getOrElse("OPENAI_BASE_URL", DefaultConfig.DEFAULT_REQUESTY_BASE_URL)
+          OpenAIConfig.fromValues(model, apiKey, None, baseUrl)
+        }
+
       case "anthropic" =>
         requireKey("ANTHROPIC_API_KEY").map { apiKey =>
           val baseUrl = ChatTuiEnv.getOrElse("ANTHROPIC_BASE_URL", DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL)
@@ -156,7 +162,7 @@ object ChatTuiConfig:
         Left(
           ConfigurationError(
             s"LLM_MODEL provider '$other' is not supported by chat-tui. " +
-              "Use openai|anthropic|ollama|gemini|zai|deepseek|openrouter|mistral|cohere or unset LLM_MODEL " +
+              "Use openai|anthropic|ollama|gemini|zai|deepseek|openrouter|requesty|mistral|cohere or unset LLM_MODEL " +
               "to fall back to the named-providers config."
           )
         )

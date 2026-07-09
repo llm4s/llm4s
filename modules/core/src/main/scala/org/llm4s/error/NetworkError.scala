@@ -1,10 +1,15 @@
 package org.llm4s.error
 
 /**
- * Network-related errors
- * @param message
- * @param cause
- * @param endpoint
+ * Raised when a network-level failure occurs during communication with the LLM provider.
+ *
+ * This is a [[RecoverableError]]: it indicates transient failures such as connection
+ * drops, DNS resolution failures, or temporary unreachability. Retrying the operation
+ * may succeed.
+ *
+ * @param message human-readable description of the network failure
+ * @param cause optional underlying exception that caused the failure (e.g., java.net.ConnectException)
+ * @param endpoint the URL or endpoint that was being accessed
  */
 final case class NetworkError private (
   override val message: String,

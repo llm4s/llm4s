@@ -110,11 +110,30 @@ object STTOptions {
   }
 
   /**
-   * Batch-pass already-constructed STTOptions through. Each element has
-   * already cleared the case-class `require` checks at construction time, so
-   * this is a passthrough kept for symmetry with [[validate]].
+   * Validate a batch of options using the same stricter checks as [[validate]].
    */
-  def validateBatch(options: Seq[STTOptions]): Result[Seq[STTOptions]] = Right(options)
+  def validateBatch(options: Seq[STTOptions]): Result[Seq[STTOptions]] = {
+    val errors = options.zipWithIndex.flatMap { case (option, index) =>
+      validate(
+        language = option.language,
+        prompt = option.prompt,
+        enableTimestamps = option.enableTimestamps,
+        diarization = option.diarization,
+        confidenceThreshold = option.confidenceThreshold
+      ).left.toOption.map(error => s"options[$index]: ${error.message}")
+    }
+
+    if (errors.isEmpty) {
+      Right(options)
+    } else {
+      Left(
+        STTError.InvalidInput(
+          errors.mkString("; "),
+          context = Map("optionCount" -> options.size.toString)
+        )
+      )
+    }
+  }
 }
 
 /**
@@ -211,7 +230,8 @@ object WordTimestamp {
  *
  * @param text Full transcription text
  * @param language Detected or specified language
- * @param confidence Overall confidence of the transcription
+ * @param confidence Overall confidence of the transcription. May be present even when `timestamps` is empty
+ *                   (e.g. derived from segment/word metadata while `STTOptions.enableTimestamps` is false).
  * @param timestamps Word-level timing information (only if enabled)
  * @param meta Source audio metadata
  * @param processingTimeMs Time taken to process (for metrics/monitoring)
@@ -252,7 +272,7 @@ final case class Transcription(
    * Get word count (based on timestamps if available, otherwise estimate from text)
    */
   def wordCount: Int =
-    if (timestamps.nonEmpty) timestamps.length else text.split("\\s+").length
+    if (timestamps.nonEmpty) timestamps.length else text.trim.split("\\s+").count(_.nonEmpty)
 
   /**
    * Get average confidence of all timestamped words
@@ -386,7 +406,6 @@ trait SpeechToText {
    * @param input Audio data to transcribe
    * @param options Configuration for transcription
    * @return Result containing Transcription or STTError
-   * @throws STTError if transcription fails (wrapped in Result)
    */
   def transcribe(input: AudioInput, options: STTOptions = STTOptions()): Result[Transcription]
 

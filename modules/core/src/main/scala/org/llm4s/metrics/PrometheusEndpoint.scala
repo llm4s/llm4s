@@ -11,20 +11,20 @@ import org.slf4j.LoggerFactory
  * HTTP endpoint for exposing Prometheus metrics.
  *
  * Wraps the Prometheus HTTPServer and provides lifecycle management.
- * Use this to expose metrics at /metrics for Prometheus scraping.
+ * Use this to expose metrics at `/metrics` for Prometheus scraping.
  *
- * Example:
+ * @example
  * {{{
  * val registry = new PrometheusRegistry()
- * val endpointResult = PrometheusEndpoint.start(9090, registry)
+ * val metrics = new PrometheusMetrics(registry)
  *
- * endpointResult match {
+ * PrometheusEndpoint.start(9090, registry) match {
  *   case Right(endpoint) =>
- *     println(s"Metrics at: \${endpoint.url}")
- *     // ... application runs ...
+ *     // Use `metrics` with LLM clients while Prometheus scrapes:
+ *     // http://localhost:9090/metrics
  *     endpoint.stop()
  *   case Left(error) =>
- *     println(s"Failed to start: \${error.message}")
+ *     println(s"Failed to start Prometheus endpoint: \${error.message}")
  * }
  * }}}
  *
@@ -40,11 +40,16 @@ final class PrometheusEndpoint private (
 
   /**
    * Get the metrics endpoint URL.
+   *
+   * Prometheus should scrape this URL, for example
+   * `http://localhost:9090/metrics` when the endpoint was started on port
+   * 9090.
    */
   def url: String = s"http://localhost:$port/metrics"
 
   /**
    * Stop the HTTP server.
+   *
    * Safe to call multiple times.
    */
   def stop(): Unit =
@@ -65,7 +70,9 @@ object PrometheusEndpoint {
    * Start Prometheus HTTP endpoint.
    *
    * Creates an HTTP server that exposes the metrics from the given registry
-   * at the /metrics endpoint on the specified port.
+   * at the `/metrics` endpoint on the specified port. Passing port `0` lets
+   * the operating system choose an available port; the returned endpoint's
+   * [[PrometheusEndpoint.url]] includes the actual bound port when available.
    *
    * @param port Port to listen on (default: 9090)
    * @param registry Prometheus collector registry containing metrics

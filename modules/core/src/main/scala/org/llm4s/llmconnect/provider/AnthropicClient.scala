@@ -587,13 +587,38 @@ curl https://api.anthropic.com/v1/messages \
   private def serializeStreamEvent(event: RawMessageStreamEvent): String =
     ObjectMappers.jsonMapper().writeValueAsString(event)
 
+  // anthropic-java 2.42 deprecated `temperature`: models released after Claude Opus 4.6
+  // reject any value other than 1.0 with a 400 error. We omit the parameter entirely for
+  // those models so that even a default `CompletionOptions()` (temperature 0.7) works;
+  // models that still accept it receive the configured value. The deprecation warning is
+  // unavoidable on the supported-model path, hence the suppression.
+  //
+  // Anthropic rejects some requests that specify both temperature and top_p, so we prefer
+  // temperature as the single sampling control for our default path.
+  @scala.annotation.nowarn("cat=deprecation")
   private def applySamplingParameters(
     builder: MessageCreateParams.Builder,
     options: CompletionOptions
   ): Unit =
-    // Anthropic rejects some requests that specify both temperature and top_p.
-    // Prefer temperature as the single sampling control for our default path.
-    builder.temperature(options.temperature.floatValue())
+    if (modelSupportsTemperature)
+      builder.temperature(options.temperature.doubleValue())
+
+  /**
+   * Whether `config.model` accepts the (deprecated) `temperature` sampling parameter.
+   *
+   * A model-registry capability override (`disallowedParams` containing `"temperature"`)
+   * takes precedence; otherwise we fall back to a name-based check for the Anthropic models
+   * that dropped sampling support (Claude Opus 4.7 and newer).
+   */
+  private def modelSupportsTemperature: Boolean = {
+    val disallowedByRegistry =
+      registryService
+        .lookup(config.model)
+        .toOption
+        .flatMap(_.capabilities.disallowedParams)
+        .exists(_.contains("temperature"))
+    !disallowedByRegistry && !AnthropicClient.rejectsSamplingTemperature(config.model)
+  }
 
   override protected def releaseResources(): Unit =
     client.close()
@@ -623,6 +648,37 @@ curl https://api.anthropic.com/v1/messages \
 
 object AnthropicClient {
   import org.llm4s.types.TryOps
+
+  /**
+   * Whether an Anthropic model rejects the deprecated `temperature` sampling parameter.
+   *
+   * anthropic-java 2.42 deprecated `temperature`: models released after Claude Opus 4.6
+   * accept only `1.0` and return a 400 for any other value. We detect those models by name
+   * (Claude Opus 4.7+ and any Opus 5+) so the parameter can be omitted; this mirrors the
+   * name-based handling of O-series models in [[org.llm4s.model.DefaultRequestTransformer]].
+   * Other models can be flagged via a registry `disallowedParams = ["temperature"]` override.
+   *
+   * Model identifiers may carry a provider prefix and/or a date suffix
+   * (e.g. `anthropic/claude-opus-4-8`, `claude-opus-4-1-20250805`); only short (1-2 digit)
+   * leading segments after `opus-` are treated as version numbers so date suffixes such as
+   * `claude-opus-4-20250514` (Opus 4.0) and legacy names like `claude-3-opus-20240229` are
+   * not misread as high versions.
+   */
+  private[provider] def rejectsSamplingTemperature(model: String): Boolean = {
+    val normalized = model.toLowerCase
+    val marker     = "opus-"
+    val idx        = normalized.indexOf(marker)
+    if (idx < 0) false
+    else {
+      val parts = normalized.substring(idx + marker.length).split("-")
+      def shortVersion(s: String): Option[Int] =
+        if (s.length <= 2 && s.nonEmpty && s.forall(_.isDigit)) s.toIntOption else None
+      parts.headOption.flatMap(shortVersion).exists { major =>
+        val minor = parts.lift(1).flatMap(shortVersion).getOrElse(0)
+        major > 4 || (major == 4 && minor >= 7)
+      }
+    }
+  }
 
   /**
    * Constructs an [[AnthropicClient]], wrapping any construction-time

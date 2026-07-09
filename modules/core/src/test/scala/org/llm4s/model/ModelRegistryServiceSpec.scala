@@ -42,6 +42,25 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
         metadata.modelId shouldBe "gpt-4o"
         metadata.provider shouldBe "openai"
 
+  it should "apply embedded overrides so gemini/gemini-1.5-flash stays a chat model" in:
+    defaultServiceResult().flatMap(_.lookup("gemini/gemini-1.5-flash")) match
+      case Left(error) =>
+        fail(error.message)
+      case Right(metadata) =>
+        metadata.provider shouldBe "gemini"
+        metadata.mode shouldBe ModelMode.Chat
+        metadata.contextWindow shouldBe Some(1048576)
+        metadata.reserveCompletion shouldBe Some(8192)
+
+  it should "apply embedded overrides so claude-3-7-sonnet-latest resolves to Anthropic metadata" in:
+    defaultServiceResult().flatMap(_.lookup("claude-3-7-sonnet-latest")) match
+      case Left(error) =>
+        fail(error.message)
+      case Right(metadata) =>
+        metadata.provider shouldBe "anthropic"
+        metadata.mode shouldBe ModelMode.Chat
+        metadata.contextWindow shouldBe Some(200000)
+
   it should "load a registry service from a configured URL" in:
     val json =
       """{
@@ -266,6 +285,24 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
     val dataUrl = s"data:application/json,${URLEncoder.encode(badJson, "UTF-8")}"
 
     ModelRegistryService.fromUrl(dataUrl).isLeft shouldBe true
+
+  it should "let override entries take precedence when merging the embedded overrides" in:
+    val base = ModelRegistryService
+      .parseMetadataJson("""{ "gemini/gemini-1.5-flash": { "litellm_provider": "gemini", "mode": "embedding" } }""")
+      .toOption
+      .get
+
+    val merged = ModelRegistryService.mergeOverrides(base, ModelRegistryConfig.DefaultOverridesResourcePath)
+    merged("gemini/gemini-1.5-flash").mode shouldBe ModelMode.Chat
+    (merged should contain).key("claude-3-7-sonnet-latest")
+
+  it should "fall back to the base snapshot when the overrides resource is missing" in:
+    val base = ModelRegistryService
+      .parseMetadataJson("""{ "base-only-model": { "litellm_provider": "custom", "mode": "chat" } }""")
+      .toOption
+      .get
+
+    ModelRegistryService.mergeOverrides(base, "/modeldata/does-not-exist.json") shouldBe base
 
   private def defaultServiceResult(): Result[ModelRegistryService] =
     ModelRegistryTestSupport.defaultServiceResult()

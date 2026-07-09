@@ -8,10 +8,22 @@ import scala.concurrent.duration.FiniteDuration
 import scala.util.Try
 
 /**
- * Prometheus implementation of MetricsCollector.
+ * Prometheus implementation of [[MetricsCollector]].
  *
  * Tracks request volumes, token usage, errors, and latency across
  * different providers and models using Prometheus metrics.
+ *
+ * Registered metric names:
+ * - `llm4s_requests_total`
+ * - `llm4s_tokens_total`
+ * - `llm4s_cost_usd_total`
+ * - `llm4s_errors_total`
+ * - `llm4s_request_duration_seconds`
+ * - `llm4s_image_generations_total`
+ * - `llm4s_images_generated_total`
+ * - `llm4s_image_generation_duration_seconds`
+ * - `llm4s_image_generation_cost_usd_total`
+ * - `llm4s_image_generation_errors_total`
  *
  * All operations are wrapped in try-catch to ensure metric failures
  * never propagate to callers. This implementation is thread-safe.
@@ -128,6 +140,10 @@ final class PrometheusMetrics(
   /**
    * Record an LLM request with its outcome and duration.
    *
+   * Updates `llm4s_requests_total` and
+   * `llm4s_request_duration_seconds`. Error outcomes also increment
+   * `llm4s_errors_total`.
+   *
    * Safe: catches and logs any Prometheus errors without propagating.
    */
   override def observeRequest(
@@ -157,6 +173,8 @@ final class PrometheusMetrics(
   /**
    * Record token usage.
    *
+   * Updates `llm4s_tokens_total` with `type` labels of `input` and `output`.
+   *
    * Safe: catches and logs any Prometheus errors without propagating.
    */
   override def addTokens(
@@ -175,6 +193,8 @@ final class PrometheusMetrics(
   /**
    * Record estimated cost in USD.
    *
+   * Updates `llm4s_cost_usd_total`.
+   *
    * Safe: catches and logs any Prometheus errors without propagating.
    */
   override def recordCost(
@@ -190,6 +210,11 @@ final class PrometheusMetrics(
 
   /**
    * Record an image generation operation.
+   *
+   * Updates `llm4s_image_generations_total` and
+   * `llm4s_image_generation_duration_seconds`. Successful operations with
+   * images also update `llm4s_images_generated_total`; error outcomes update
+   * `llm4s_errors_total` and `llm4s_image_generation_errors_total`.
    *
    * Safe: catches and logs any Prometheus errors without propagating.
    */
@@ -227,6 +252,8 @@ final class PrometheusMetrics(
 
   /**
    * Record estimated image generation cost in USD.
+   *
+   * Updates `llm4s_image_generation_cost_usd_total`.
    *
    * Safe: catches and logs any Prometheus errors without propagating.
    */

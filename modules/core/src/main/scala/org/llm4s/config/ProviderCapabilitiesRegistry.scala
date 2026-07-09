@@ -4,8 +4,15 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.ProviderKind
 
+/** Registry mapping each `ProviderKind` to its `ProviderCapabilities` instance. */
 private[llm4s] object ProviderCapabilitiesRegistry:
 
+  /**
+   * Looks up the `ProviderCapabilities` for the given provider kind.
+   *
+   *  @param kind the `ProviderKind` to look up
+   *  @return `Right(ProviderCapabilities)` when registered, or `Left` with a `ConfigurationError`
+   */
   def forKind(kind: ProviderKind): Result[ProviderCapabilities] =
     registry
       .get(kind)
@@ -14,6 +21,7 @@ private[llm4s] object ProviderCapabilitiesRegistry:
   private val registry: Map[ProviderKind, ProviderCapabilities] = Map(
     ProviderKind.OpenAI     -> ProviderCapabilities.OpenAI,
     ProviderKind.OpenRouter -> ProviderCapabilities.OpenRouter,
+    ProviderKind.Requesty   -> ProviderCapabilities.Requesty,
     ProviderKind.Azure      -> ProviderCapabilities.Azure,
     ProviderKind.Anthropic  -> ProviderCapabilities.Anthropic,
     ProviderKind.Ollama     -> ProviderCapabilities.Ollama,

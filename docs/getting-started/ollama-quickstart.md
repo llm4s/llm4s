@@ -35,8 +35,8 @@ Perfect for **development**, **testing**, and **production** workloads where pri
 
 ## Prerequisites
 
-- **Java 11+** (JDK 21 recommended)
-- **Scala 2.13.16** or **3.7.1**
+- **JDK 21**
+- **Scala 3.7.1**
 - **SBT 1.10.6+**
 - **4-8GB RAM** (depending on model size)
 

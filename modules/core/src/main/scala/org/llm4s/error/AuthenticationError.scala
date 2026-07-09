@@ -1,7 +1,15 @@
 package org.llm4s.error
 
 /**
- * Authentication-related errors
+ * Raised when the LLM provider rejects the request due to authentication failures.
+ *
+ * This is a [[NonRecoverableError]]: it cannot be fixed by retrying. The user must
+ * provide valid credentials (e.g., API key, token) to resolve this error.
+ * Examples include invalid API keys, expired tokens, or unauthorized access to a model.
+ *
+ * @param message human-readable description of the authentication failure
+ * @param provider the name of the LLM provider (e.g., "openai", "anthropic")
+ * @param code optional error code returned by the provider (e.g., "401", "INVALID_KEY")
  */
 final case class AuthenticationError private (
   override val message: String,

@@ -11,6 +11,7 @@ import java.nio.file.Files
 import org.llm4s.core.safety.Safety
 import org.llm4s.speech.processing.AudioPreprocessing
 import org.slf4j.LoggerFactory
+import ujson.Value
 
 /**
  * Vosk-based speech-to-text implementation.
@@ -111,41 +112,24 @@ final class VoskSpeechToText(
     bufferSize: Int,
     options: STTOptions
   ): Transcription = {
+    recognizer.setWords(VoskSpeechToText.shouldRequestWordMetadata(options))
 
     val buffer   = new Array[Byte](bufferSize)
-    val segments = List.newBuilder[String]
+    val segments = List.newBuilder[VoskSpeechToText.ParsedSegment]
 
     var bytesRead = audio.read(buffer)
 
     while (bytesRead > 0) {
       if (recognizer.acceptWaveForm(buffer, bytesRead)) {
-        segments += extractText(recognizer.getResult)
+        segments += VoskSpeechToText.parseSegment(recognizer.getResult)
       }
       bytesRead = audio.read(buffer)
     }
 
-    segments += extractText(recognizer.getFinalResult)
+    segments += VoskSpeechToText.parseSegment(recognizer.getFinalResult)
 
-    val finalText = segments.result().mkString(" ").trim
-
-    Transcription(
-      text = finalText,
-      language = options.language.orElse(Some("en")),
-      confidence = None,
-      timestamps = Nil,
-      meta = None
-    )
+    VoskSpeechToText.buildTranscription(segments.result(), options)
   }
-
-  /**
-   * Extract "text" field from Vosk JSON response.
-   *  Vosk returns JSON with format: {"text": "transcribed words"}
-   */
-  private def extractText(json: String): String =
-    "\"text\"\\s*:\\s*\"([^\"]*)\"".r
-      .findFirstMatchIn(json)
-      .map(_.group(1))
-      .getOrElse("")
 
   /**
    * Prepare audio input by converting to raw bytes and standardizing format.
@@ -177,6 +161,7 @@ final class VoskSpeechToText(
 }
 
 object VoskSpeechToText {
+  import SttJsonSupport.{ stringField, doubleField, arrayField }
 
   /** Default Vosk model path for small English model */
   val DEFAULT_MODEL_PATH: String = "models/vosk-model-small-en-us-0.15"
@@ -186,4 +171,70 @@ object VoskSpeechToText {
 
   /** Default buffer size for audio processing (bytes) */
   val DEFAULT_BUFFER_SIZE: Int = 4096
+
+  final private[stt] case class ParsedSegment(
+    text: String,
+    words: List[WordTimestamp]
+  )
+
+  private[stt] def shouldRequestWordMetadata(options: STTOptions): Boolean =
+    options.enableTimestamps || options.confidenceThreshold > 0.0
+
+  private[stt] def parseSegment(json: String): ParsedSegment =
+    Try(ujson.read(json)).toOption match {
+      case Some(value) =>
+        ParsedSegment(
+          text = stringField(value, "text").getOrElse("").trim,
+          words = arrayField(value, "result").flatMap(parseWord).toList
+        )
+      case None => ParsedSegment("", Nil)
+    }
+
+  private[stt] def applyConfidenceThreshold(
+    words: Seq[WordTimestamp],
+    threshold: Double
+  ): Seq[WordTimestamp] =
+    if (threshold <= 0.0) words else words.filter(_.meetsConfidence(threshold))
+
+  private[stt] def renderWords(words: Seq[WordTimestamp]): String =
+    SttJsonSupport.renderWords(words)
+
+  private[stt] def averageConfidence(words: Seq[WordTimestamp]): Option[Double] =
+    SttJsonSupport.averageConfidence(words)
+
+  private[stt] def buildTranscription(
+    parsedSegments: Seq[ParsedSegment],
+    options: STTOptions
+  ): Transcription = {
+    val parsedWords       = parsedSegments.flatMap(_.words)
+    val filteredWords     = applyConfidenceThreshold(parsedWords, options.confidenceThreshold)
+    val retainedWords     = if (filteredWords.nonEmpty) filteredWords else parsedWords
+    val filteredText      = renderWords(filteredWords)
+    val unfilteredText    = parsedSegments.map(_.text).mkString(" ").trim
+    val finalText         = if (filteredText.nonEmpty) filteredText else unfilteredText
+    val overallConfidence = averageConfidence(retainedWords)
+
+    Transcription(
+      text = finalText,
+      language = options.language,
+      confidence = overallConfidence,
+      timestamps = if (options.enableTimestamps) retainedWords.toList else Nil,
+      meta = None
+    )
+  }
+
+  private def parseWord(value: Value): Option[WordTimestamp] =
+    for {
+      word  <- stringField(value, "word").map(_.trim).filter(_.nonEmpty)
+      start <- doubleField(value, "start")
+      end   <- doubleField(value, "end")
+      timestamp <- WordTimestamp
+        .validate(
+          word = word,
+          startSec = start,
+          endSec = end,
+          confidence = doubleField(value, "conf").orElse(doubleField(value, "confidence"))
+        )
+        .toOption
+    } yield timestamp
 }

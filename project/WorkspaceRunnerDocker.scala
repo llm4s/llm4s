@@ -15,13 +15,16 @@ object WorkspaceRunnerDocker {
   val devToolingCommands: Seq[CmdLike] = Seq(
     Cmd("USER", "root"),
     Cmd("RUN", "apt-get update && apt-get install -y curl gnupg apt-transport-https ca-certificates zip unzip"),
+    // Use the modern signed-by keyring approach. `apt-key` was deprecated long ago and
+    // is no longer present in recent base images (Ubuntu 24.04+/temurin), so piping the
+    // key into `apt-key add` fails with "apt-key: not found".
     Cmd(
       "RUN",
-      "echo 'deb https://repo.scala-sbt.org/scalasbt/debian all main' | tee /etc/apt/sources.list.d/sbt.list"
+      "curl -sL 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823' | gpg --dearmor -o /usr/share/keyrings/scalasbt-keyring.gpg"
     ),
     Cmd(
       "RUN",
-      "curl -sL 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823' | apt-key add"
+      "echo 'deb [signed-by=/usr/share/keyrings/scalasbt-keyring.gpg] https://repo.scala-sbt.org/scalasbt/debian all main' | tee /etc/apt/sources.list.d/sbt.list"
     ),
     Cmd("RUN", "apt-get update && apt-get install -y sbt"),
     Cmd("RUN", "curl -s 'https://get.sdkman.io' | bash"),

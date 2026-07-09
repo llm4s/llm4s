@@ -17,7 +17,7 @@ Configuration shape
 
 Plugin and rule type
 - Plugin: `sbt-scalafix` (see `project/plugins.sbt`).
-- Rule type: syntactic regex (no SemanticDB required, works on Scala 2.13 and 3).
+- Rule type: syntactic regex (no SemanticDB required; currently run on the Scala 3.7.1 build).
 
 Running Scalafix
 - Compile-time enforcement: enabled in CI only (`scalafixOnCompile := sys.env.getOrElse("CI", "false").toBoolean`).

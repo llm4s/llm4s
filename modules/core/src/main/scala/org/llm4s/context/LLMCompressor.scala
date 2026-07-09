@@ -7,14 +7,47 @@ import org.llm4s.types.{ Result, CompressionRatio, TokenBudget }
 import org.slf4j.LoggerFactory
 
 /**
- * Implements digest-only compression for [HISTORY_SUMMARY] messages.
- * Replaces full LLM-powered compression with targeted digest compression.
+ * Applies LLM-powered compression to `[HISTORY_SUMMARY]` digest messages.
  *
- * This is step 3 in the new 4-stage context management pipeline:
- * 1. Tool deterministic compaction
- * 2. History compression
- * 3. LLM digest squeeze (this module)
- * 4. Final token trim
+ * This is Step 3 in the 4-stage context management pipeline. It targets only the
+ * structured digest messages produced by [[HistoryCompressor]] — it never touches
+ * user messages, assistant messages, or tool outputs directly.
+ *
+ * ==When to Use==
+ *
+ * Use `LLMCompressor` (via [[ContextManager]] with `enableLLMCompression = true`) when:
+ *  - The conversation is long-running and history digests have grown too large to fit
+ *    within the remaining token budget after [[HistoryCompressor]] has run.
+ *  - Preserving semantic fidelity in the digest is important — you cannot afford to
+ *    simply truncate or drop structured information (IDs, decisions, error codes).
+ *  - An extra LLM API call per compression event is acceptable (latency and cost).
+ *
+ * ==When NOT to Use==
+ *
+ * Prefer [[DeterministicCompressor]] or [[HistoryCompressor]] alone when:
+ *  - Latency is critical (e.g., interactive chatbots where each round-trip matters).
+ *  - Cost per token must be minimised — an extra inference call adds to compression cost.
+ *  - The conversation fits within budget after deterministic steps; `ContextManager`
+ *    skips this step automatically in that case.
+ *
+ * ==Cost==
+ *
+ * When the combined size of all `[HISTORY_SUMMARY]` messages exceeds the cap,
+ * [[squeezeDigest]] makes one LLM API call per `[HISTORY_SUMMARY]` message (the cap
+ * is a combined budget, not a per-message threshold). Budget for this accordingly.
+ *
+ * ==Pipeline Position==
+ *
+ * {{{
+ * Step 1: DeterministicCompressor — free, fast, tool-output focused
+ * Step 2: HistoryCompressor       — free, fast, deterministic digest
+ * Step 3: LLMCompressor           — 1 LLM call per digest, slower, high quality  ← this object
+ * Step 4: TokenWindow.trimToBudget — free, last resort
+ * }}}
+ *
+ * @see [[HistoryCompressor]] for digest generation that this compressor further shrinks
+ * @see [[DeterministicCompressor]] for the cheaper alternative with no API calls
+ * @see [[ContextManager]] for the orchestrator that chooses when to invoke each step
  */
 object LLMCompressor {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -27,8 +60,18 @@ object LLMCompressor {
 - Target 50% size reduction"""
 
   /**
-   * Apply digest-only LLM compression to [HISTORY_SUMMARY] messages only.
-   * Leaves other message types unchanged.
+   * Compresses `[HISTORY_SUMMARY]` digest messages using an LLM, leaving all other
+   * message types (user, assistant, tool) completely untouched.
+   *
+   * If no digest messages are found, or if their combined token count already fits
+   * within `capTokens`, the original messages are returned unchanged with no API call.
+   *
+   * @param messages     Full conversation message sequence (digests interleaved with others)
+   * @param tokenCounter Token counter calibrated to the target model's tokenizer
+   * @param llmClient    LLM client used to perform the compression inference call
+   * @param capTokens    Maximum allowed tokens for all digest messages combined
+   * @return             Compressed messages on success, or a
+   *                     [[org.llm4s.error.ContextError]] if the LLM call fails
    */
   def squeezeDigest(
     messages: Seq[Message],
@@ -316,7 +359,17 @@ object LLMCompressor {
 }
 
 /**
- * Result of LLM-powered compression process
+ * Result of a legacy full-conversation LLM compression operation.
+ *
+ * Produced by the deprecated [[LLMCompressor.compress]] method. Prefer
+ * [[LLMCompressor.squeezeDigest]] for the current pipeline.
+ *
+ * @param conversation     The compressed conversation
+ * @param originalTokens   Token count before compression
+ * @param compressedTokens Token count after compression
+ * @param compressionRatio `compressedTokens / originalTokens` (lower = more compressed)
+ * @param targetBudget     The token budget this compression was targeting
+ * @param budgetAchieved   `true` if `compressedTokens <= targetBudget` after compression
  */
 case class LLMCompressedConversation(
   conversation: Conversation,

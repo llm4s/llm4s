@@ -7,6 +7,7 @@ import java.time.Instant
 
 import scala.util.Try
 
+/** Provides JSON serialisation and deserialisation helpers for trace model types. */
 object TraceModelJson {
 
   private def parseError(field: String, reason: String): Left[ValidationError, Nothing] =
@@ -15,15 +16,36 @@ object TraceModelJson {
   private def nullableJson[T](opt: Option[T])(f: T => ujson.Value): ujson.Value =
     opt.map(f).getOrElse(ujson.Null)
 
+  /** Extension methods that add JSON serialisation to `SpanId` values. */
   implicit class SpanIdJson(val spanId: SpanId) {
+
+    /**
+     * Serialises this span identifier to a JSON string value.
+     *
+     * @return A `ujson.Str` containing the span ID string.
+     */
     def toJson: ujson.Value = ujson.Str(spanId.value)
   }
 
+  /** Extension methods that add JSON serialisation to `TraceId` values. */
   implicit class TraceIdJson(val traceId: TraceId) {
+
+    /**
+     * Serialises this trace identifier to a JSON string value.
+     *
+     * @return A `ujson.Str` containing the trace ID string.
+     */
     def toJson: ujson.Value = ujson.Str(traceId.value)
   }
 
+  /** Extension methods that add JSON serialisation to `SpanValue` variants. */
   implicit class SpanValueJson(val sv: SpanValue) extends AnyVal {
+
+    /**
+     * Serialises this span attribute value to its typed JSON representation.
+     *
+     * @return A `ujson.Value` encoding the type tag and value.
+     */
     def toJson: ujson.Value = sv match {
       case SpanValue.StringValue(v)  => ujson.Obj("type" -> "String", "value" -> ujson.Str(v))
       case SpanValue.LongValue(v)    => ujson.Obj("type" -> "Long", "value" -> ujson.Str(v.toString))
@@ -34,7 +56,14 @@ object TraceModelJson {
     }
   }
 
+  /** Extension methods that add JSON serialisation to `SpanStatus` values. */
   implicit class SpanStatusJson(val status: SpanStatus) extends AnyVal {
+
+    /**
+     * Serialises this span status to its JSON object representation.
+     *
+     * @return A `ujson.Value` encoding the status type and optional error message.
+     */
     def toJson: ujson.Value = status match {
       case SpanStatus.Ok         => ujson.Obj("type" -> "Ok")
       case SpanStatus.Error(msg) => ujson.Obj("type" -> "Error", "message" -> msg)
@@ -42,7 +71,14 @@ object TraceModelJson {
     }
   }
 
+  /** Extension methods that add JSON serialisation to `SpanKind` values. */
   implicit class SpanKindJson(val kind: SpanKind) extends AnyVal {
+
+    /**
+     * Serialises this span kind to a JSON string.
+     *
+     * @return A `ujson.Str` representing the span kind name.
+     */
     def toJson: ujson.Value = kind match {
       case SpanKind.Internal      => ujson.Str("Internal")
       case SpanKind.LlmCall       => ujson.Str("LlmCall")
@@ -55,7 +91,14 @@ object TraceModelJson {
     }
   }
 
+  /** Extension methods that add JSON serialisation to `SpanEvent` values. */
   implicit class SpanEventJson(val event: SpanEvent) extends AnyVal {
+
+    /**
+     * Serialises this span event to a JSON object containing name, timestamp, and attributes.
+     *
+     * @return A `ujson.Value` representing the span event.
+     */
     def toJson: ujson.Value = ujson.Obj(
       "name"       -> event.name,
       "timestamp"  -> event.timestamp.toString,
@@ -63,7 +106,14 @@ object TraceModelJson {
     )
   }
 
+  /** Extension methods that add JSON serialisation to `Span` values. */
   implicit class SpanJson(val span: Span) extends AnyVal {
+
+    /**
+     * Serialises this span to a JSON object with all span fields.
+     *
+     * @return A `ujson.Value` representing the full span.
+     */
     def toJson: ujson.Value = ujson.Obj(
       "spanId"       -> span.spanId.toJson,
       "traceId"      -> span.traceId.toJson,
@@ -78,7 +128,14 @@ object TraceModelJson {
     )
   }
 
+  /** Extension methods that add JSON serialisation to `Trace` values. */
   implicit class TraceJson(val trace: Trace) extends AnyVal {
+
+    /**
+     * Serialises this trace to a JSON object with all trace fields.
+     *
+     * @return A `ujson.Value` representing the full trace.
+     */
     def toJson: ujson.Value = ujson.Obj(
       "traceId"    -> trace.traceId.toJson,
       "rootSpanId" -> nullableJson(trace.rootSpanId)(_.toJson),
@@ -89,16 +146,34 @@ object TraceModelJson {
     )
   }
 
+  /**
+   * Parses a `SpanId` from a JSON value.
+   *
+   * @param json The JSON value expected to be a string.
+   * @return `Right(SpanId)` on success, or `Left(ValidationError)` if the value is not a string.
+   */
   def parseSpanId(json: ujson.Value): Result[SpanId] = json match {
     case ujson.Str(v) => Right(SpanId(v))
     case _            => parseError("spanId", s"Expected string, got: ${json.getClass.getSimpleName}")
   }
 
+  /**
+   * Parses a `TraceId` from a JSON value.
+   *
+   * @param json The JSON value expected to be a string.
+   * @return `Right(TraceId)` on success, or `Left(ValidationError)` if the value is not a string.
+   */
   def parseTraceId(json: ujson.Value): Result[TraceId] = json match {
     case ujson.Str(v) => Right(TraceId(v))
     case _            => parseError("traceId", s"Expected string, got: ${json.getClass.getSimpleName}")
   }
 
+  /**
+   * Parses a `SpanValue` from a JSON value, supporting typed and legacy untyped formats.
+   *
+   * @param json The JSON value representing a span attribute value.
+   * @return `Right(SpanValue)` on success, or `Left(ValidationError)` if the format is unrecognised.
+   */
   def parseSpanValue(json: ujson.Value): Result[SpanValue] =
     json match {
       case ujson.Obj(obj) =>
@@ -155,6 +230,12 @@ object TraceModelJson {
       case _ => parseError("SpanValue", s"Cannot parse from ${json.getClass.getSimpleName}")
     }
 
+  /**
+   * Parses a `SpanStatus` from a JSON object with a `type` field.
+   *
+   * @param json The JSON value representing a span status.
+   * @return `Right(SpanStatus)` on success, or `Left(ValidationError)` on unknown or malformed input.
+   */
   def parseSpanStatus(json: ujson.Value): Result[SpanStatus] =
     json match {
       case ujson.Obj(obj) =>
@@ -171,6 +252,12 @@ object TraceModelJson {
       case _ => parseError("SpanStatus", s"Expected object, got: ${json.getClass.getSimpleName}")
     }
 
+  /**
+   * Parses a `SpanKind` from a JSON string value.
+   *
+   * @param json The JSON value expected to be a string matching a known span kind name.
+   * @return `Right(SpanKind)` on success, or `Left(ValidationError)` for unknown or non-string input.
+   */
   def parseSpanKind(json: ujson.Value): Result[SpanKind] = json match {
     case ujson.Str("Internal")      => Right(SpanKind.Internal)
     case ujson.Str("LlmCall")       => Right(SpanKind.LlmCall)
@@ -184,6 +271,12 @@ object TraceModelJson {
     case _                          => parseError("SpanKind", s"Expected string, got: ${json.getClass.getSimpleName}")
   }
 
+  /**
+   * Parses a `SpanEvent` from a JSON object with name, timestamp, and attributes fields.
+   *
+   * @param json The JSON value representing a span event.
+   * @return `Right(SpanEvent)` on success, or `Left(ValidationError)` on malformed input.
+   */
   def parseSpanEvent(json: ujson.Value): Result[SpanEvent] =
     json match {
       case ujson.Obj(obj) =>
@@ -212,6 +305,12 @@ object TraceModelJson {
       case _ => parseError("SpanEvent", s"Expected object, got: ${json.getClass.getSimpleName}")
     }
 
+  /**
+   * Parses a `Span` from a JSON object containing all required span fields.
+   *
+   * @param json The JSON value representing a span.
+   * @return `Right(Span)` on success, or `Left(ValidationError)` on missing or malformed fields.
+   */
   def parseSpan(json: ujson.Value): Result[Span] =
     json match {
       case ujson.Obj(obj) =>
@@ -278,6 +377,12 @@ object TraceModelJson {
       case _ => parseError("Span", s"Expected object, got: ${json.getClass.getSimpleName}")
     }
 
+  /**
+   * Parses a `Trace` from a JSON object containing all required trace fields.
+   *
+   * @param json The JSON value representing a trace.
+   * @return `Right(Trace)` on success, or `Left(ValidationError)` on missing or malformed fields.
+   */
   def parseTrace(json: ujson.Value): Result[Trace] =
     json match {
       case ujson.Obj(obj) =>

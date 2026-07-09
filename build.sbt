@@ -130,12 +130,14 @@ lazy val llm4s = (project in file("."))
   .aggregate(
     core,
     samples,
+    configPolicy,
     workspaceShared,
     workspaceRunner,
     workspaceClient,
     workspaceSamples,
     traceOpentelemetry,
-    knowledgegraphNeo4j
+    knowledgegraphNeo4j,
+    benchmarks
   )
   .settings(
     publish / skip := true
@@ -257,13 +259,31 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules//samples"))
-  .dependsOn(core)
+  .dependsOn(core, knowledgegraphNeo4j)
   .settings(
     name := "samples",
     commonSettings,
     publish / skip := true,
     coverageEnabled := false,
     libraryDependencies += Deps.termflow
+  )
+
+lazy val configPolicy = (project in file("modules/config-policy"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-config-policy",
+    commonSettings,
+    publish / skip := true,
+    coverageEnabled := false,
+    // Env-var-based engine CLI (EnvCheckPolicies) calls sys.exit, so its runMain
+    // is forked. Keep the forked working directory at the repo root so the
+    // catalog engine's relative --config paths (CheckPolicies) still resolve.
+    run / fork  := true,
+    Test / fork := true,
+    run / baseDirectory := (LocalRootProject / baseDirectory).value,
+    // Both engines compile here; Deps.config is also available transitively via core.
+    libraryDependencies += Deps.config,
+    Compile / mainClass := Some("org.llm4s.configpolicy.CheckPolicies")
   )
 
 lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))
@@ -310,6 +330,18 @@ lazy val it = (project in file("modules/it"))
     commonSettings,
     publish / skip := true,
     Test / fork := true,
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    )
+  )
+
+lazy val benchmarks = (project in file("modules/benchmarks"))
+  .dependsOn(core)
+  .enablePlugins(JmhPlugin)
+  .settings(
+    name           := "benchmarks",
+    commonSettings,
+    publish / skip := true,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
     )

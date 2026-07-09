@@ -31,7 +31,7 @@ This client connects to an instance of the [AUTOMATIC1111/stable-diffusion-webui
 First, ensure your `build.sbt` includes the LLM4S dependency.
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.1.0-SNAPSHOT"
+libraryDependencies += "org.llm4s" %% "core" % "0.3.2"
 ```
 
 ### Example Usage

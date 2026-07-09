@@ -130,8 +130,14 @@ object ToolCallError {
   /**
    * Tool function doesn't exist
    */
-  case class UnknownFunction(toolName: String) extends ToolCallError {
-    def getMessage: String = "is not a recognized tool"
+  case class UnknownFunction(
+    toolName: String,
+    availableTools: Seq[String] = Seq.empty
+  ) extends ToolCallError {
+    def getMessage: String = {
+      val toolsInfo = if (availableTools.nonEmpty) s" Available tools: [${availableTools.mkString(", ")}]." else ""
+      s"is not a recognized tool.$toolsInfo Check the tool name matches exactly (case-sensitive)."
+    }
   }
 
   /**
@@ -298,7 +304,7 @@ object ToolCallErrorJson {
     )
 
     error match {
-      case ToolCallError.UnknownFunction(_) =>
+      case ToolCallError.UnknownFunction(_, _) =>
         base("errorType") = "unknown_function"
         base
 

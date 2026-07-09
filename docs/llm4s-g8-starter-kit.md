@@ -17,14 +17,14 @@ Features
 - ✅ Produces production-ready directory layout, CI hooks, formatting, and more
 - ✅ Uses [giter8][g8] project creation using `sbt new`,
 - ✅ Includes `Main.scala` + `PromptExecutor` for quick onboarding & getting started with [llm4s]
-- ✅ Supports [Scala 3] and [Scala 2]
+- ✅ Supports the current LLM4S Scala 3 setup
 
 Pre-configured prerequisites
 -----------
 - JDK 21+
 - SBT
 - OpenAI API key
-- [Scala 3][Scala 3] or [Scala 2][Scala 2]
+- [Scala 3][Scala 3]
 - [MUnit] for unit testing
 - [LLM4S SDK][llm4s]
 - Logging library [logback][logback], [scala-logging][scala-logging]
@@ -38,9 +38,9 @@ Using `sbt`, do:
 sbt new llm4s/llm4s.g8 \
 --name=llm4s-template \
 --package=org.llm4s.template \
---version=0.1.0-SNAPSHOT \
---llm4s_version=0.1.1 \
---scala_version=2.13.16 \
+--version=0.1.0 \
+--llm4s_version=0.3.2 \
+--scala_version=3.7.1 \
 --munit_version=1.1.1 \
 --directory=org.llm4s.template \
 --force
@@ -55,9 +55,9 @@ Using `sbt`, do:
 sbt new file:///<absolute-path>/llm4s/llm4s.g8 \
 --name=llm4s-template \
 --package=org.llm4s.template \
---version=0.1.0-SNAPSHOT \
---llm4s_version=0.1.1 \
---scala_version=2.13.16 \
+--version=0.1.0 \
+--llm4s_version=0.3.2 \
+--scala_version=3.7.1 \
 --munit_version=1.1.1 \
 --directory=org.llm4s.template \
 --force
@@ -137,7 +137,6 @@ Written in July 2025 by [Vitthal Mirji]
 [g8]: http://www.foundweekends.org/giter8/
 [llm4s]: https://github.com/llm4s/llm4s
 [Scala 3]: https://www.scala-lang.org/
-[Scala 2]: https://www.scala-lang.org/
 [logback]: https://logback.qos.ch/
 [scala-logging]: https://github.com/lightbend-labs/scala-logging
 [MUnit]: https://scalameta.org/munit/

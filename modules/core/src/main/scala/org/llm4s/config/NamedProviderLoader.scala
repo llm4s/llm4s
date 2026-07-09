@@ -6,8 +6,16 @@ import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
 import pureconfig.ConfigSource
 
+/** Loads and resolves a named provider's `ProviderConfig` from a `ConfigSource`. */
 private[config] object NamedProviderLoader:
 
+  /**
+   * Loads the `ProviderConfig` for a single named provider from the given config source.
+   *
+   *  @param source       the PureConfig source to read from
+   *  @param providerName the name of the provider entry to look up
+   *  @return `Right(ProviderConfig)` on success, or `Left` with a `ConfigurationError`
+   */
   def load(source: ConfigSource, providerName: String)(using ContextWindowResolver): Result[ProviderConfig] =
     val trimmed = providerName.trim
     if trimmed.isEmpty then Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
@@ -20,6 +28,12 @@ private[config] object NamedProviderLoader:
         config <- buildConfigFromNamedConfig(trimmed, normalized)
       yield config
 
+  /**
+   * Loads all named provider configs from the given config source, returning errors and successes separately.
+   *
+   *  @param source the PureConfig source to read from
+   *  @return `Right` of a pair: failed entries mapped to their errors, and successful entries mapped to their configs
+   */
   def loadProviderConfigs(
     source: ConfigSource
   )(using ContextWindowResolver): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
@@ -29,6 +43,12 @@ private[config] object NamedProviderLoader:
       r              = getProviderConfigs(namedProviders)
     yield r
 
+  /**
+   * Converts a map of validated named provider configs into separate error and success maps.
+   *
+   *  @param namedProviders the validated named providers to process
+   *  @return a pair: provider names mapped to build errors, and provider names mapped to resolved `ProviderConfig`s
+   */
   def getProviderConfigs(
     namedProviders: Map[ProviderName, NamedProviderConfig]
   )(using ContextWindowResolver): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
@@ -58,10 +78,11 @@ private[config] object NamedProviderLoader:
       required("api key", section.apiKey.map(_.asKey), envHint)
 
     section.provider match
-      case ProviderKind.OpenAI | ProviderKind.OpenRouter =>
+      case ProviderKind.OpenAI | ProviderKind.OpenRouter | ProviderKind.Requesty =>
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
           val defaultBaseUrl =
             if section.provider == ProviderKind.OpenRouter then DefaultConfig.DEFAULT_OPENROUTER_BASE_URL
+            else if section.provider == ProviderKind.Requesty then DefaultConfig.DEFAULT_REQUESTY_BASE_URL
             else DefaultConfig.DEFAULT_OPENAI_BASE_URL
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(defaultBaseUrl)
           OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl)
@@ -104,3 +125,9 @@ private[config] object NamedProviderLoader:
         requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(MistralConfig.DEFAULT_BASE_URL)
           MistralConfig.fromValues(section.model.asString, apiKey, baseUrl)
+      case ProviderKind.VertexAI =>
+        for projectId <- required("endpoint (GCP project ID)", section.endpoint, "llm4s.providers.<name>.endpoint")
+        yield
+          val location           = section.organization.getOrElse(DefaultConfig.DEFAULT_VERTEXAI_LOCATION)
+          val credentialFilePath = section.apiKey.map(_.asKey)
+          VertexAIConfig.fromValues(section.model.asString, projectId, location, credentialFilePath)
