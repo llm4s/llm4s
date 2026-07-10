@@ -4,7 +4,7 @@ import org.llm4s.model.ModelRegistryService
 import org.slf4j.LoggerFactory
 
 /** Resolves context window and output-reserve token counts for a given model using the model registry. */
-class ContextWindowResolver(service: ModelRegistryService):
+class ContextWindowResolver(service: ModelRegistryService) {
   import ContextWindowResolver.logger
 
   /**
@@ -25,14 +25,14 @@ class ContextWindowResolver(service: ModelRegistryService):
     defaultReserve: Int,
     fallbackResolver: String => (Int, Int),
     logPrefix: String = ""
-  ): (Int, Int) =
+  ): (Int, Int) = {
     val registryResult =
       lookupProviders.view
         .flatMap(p => service.lookup(p, modelName).toOption)
         .headOption
         .orElse(service.lookup(modelName).toOption)
 
-    registryResult match
+    registryResult match {
       case Some(metadata) =>
         val contextWindow = metadata.maxInputTokens.getOrElse(defaultContextWindow)
         val reserve       = metadata.maxOutputTokens.getOrElse(defaultReserve)
@@ -43,6 +43,10 @@ class ContextWindowResolver(service: ModelRegistryService):
       case None =>
         logger.debug(s"Model $modelName not found in registry, using fallback values")
         fallbackResolver(modelName)
+    }
+  }
+}
 
-object ContextWindowResolver:
+object ContextWindowResolver {
   private val logger = LoggerFactory.getLogger(classOf[ContextWindowResolver])
+}

@@ -24,7 +24,7 @@ Get LLM4S up and running in minutes.
 Before installing LLM4S, ensure you have:
 
 - **Java Development Kit (JDK) 21**
-- **Scala 3.7.1**
+- **Scala 3.7.1** (recommended) or **Scala 2.13.18**
 - **SBT 1.10.6** or higher
 - An API key from at least one LLM provider (OpenAI, Anthropic, Azure OpenAI, or Ollama)
 
@@ -35,7 +35,7 @@ Before installing LLM4S, ensure you have:
 java -version  # Should show 21
 
 # Check Scala version
-scala -version  # 3.7.1
+scala -version  # 3.7.1 (recommended) or 2.13.18
 
 # Check SBT version
 sbt version  # 1.10.6 or higher
@@ -50,21 +50,33 @@ sbt version  # 1.10.6 or higher
 Add LLM4S to your `build.sbt`:
 
 ```scala
-// Scala 3
+// Scala 3 (recommended)
 libraryDependencies += "org.llm4s" %% "core" % "0.3.2"
 ThisBuild / scalaVersion := "3.7.1"
+
+// Scala 2.13
+// libraryDependencies += "org.llm4s" %% "core" % "0.3.2"
+// ThisBuild / scalaVersion := "2.13.18"
 ```
 
 ### Maven
 
 ```xml
-<!-- For Scala 3 -->
+<!-- For Scala 3 (recommended) -->
 <dependency>
     <groupId>org.llm4s</groupId>
     <artifactId>core_3</artifactId>
     <version>0.3.2</version>
 </dependency>
 
+<!-- For Scala 2.13 -->
+<!--
+<dependency>
+    <groupId>org.llm4s</groupId>
+    <artifactId>core_2.13</artifactId>
+    <version>0.3.2</version>
+</dependency>
+-->
 ```
 
 ### Multi-Module Project

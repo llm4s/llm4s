@@ -20,7 +20,7 @@ private[provider] object ProviderExchangeRecorder {
     requestId: Option[String] = None,
     correlationId: Option[String] = None
   ): Unit =
-    exchangeLogging match
+    exchangeLogging match {
       case ProviderExchangeLogging.Disabled => ()
       case ProviderExchangeLogging.Enabled(sink) =>
         val completedAt = Instant.now()
@@ -38,5 +38,6 @@ private[provider] object ProviderExchangeRecorder {
           responseBody = responseBody,
           errorMessage = result.left.toOption.map(_.message)
         )
-        Try(sink.record(exchange))
+        val _ = Try(sink.record(exchange))
+    }
 }

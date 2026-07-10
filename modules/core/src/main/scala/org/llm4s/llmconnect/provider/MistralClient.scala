@@ -32,7 +32,7 @@ class MistralClient(
   config: MistralConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
-)(using val registryService: ModelRegistryService)
+)(implicit val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
   private val httpClient = HttpClient.newHttpClient()
@@ -256,18 +256,17 @@ class MistralClient(
 object MistralClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: MistralConfig)(using ModelRegistryService): Result[MistralClient] =
+  def apply(config: MistralConfig)(implicit service: ModelRegistryService): Result[MistralClient] = {
     Try(new MistralClient(config)).toResult
+  }
 
-  def apply(config: MistralConfig, metrics: org.llm4s.metrics.MetricsCollector)(using
-    ModelRegistryService
-  ): Result[MistralClient] =
+  def apply(config: MistralConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit implicitService: ModelRegistryService): Result[MistralClient] =
     Try(new MistralClient(config, metrics)).toResult
 
   def apply(
     config: MistralConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService): Result[MistralClient] =
+  )(implicit service: ModelRegistryService): Result[MistralClient] =
     Try(new MistralClient(config, metrics, exchangeLogging)).toResult
 }

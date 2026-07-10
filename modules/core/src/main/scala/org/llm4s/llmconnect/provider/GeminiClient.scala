@@ -10,7 +10,7 @@ import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.GeminiConfig
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.provider.ProviderResultOps.*
+import org.llm4s.llmconnect.provider.ProviderResultOps._
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.{ ModelRegistryService, TransformationResult }
 import org.llm4s.toolapi.ToolFunction
@@ -67,10 +67,10 @@ class GeminiClient(
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
   private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
-)(using val registryService: ModelRegistryService)
+)(implicit val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
-  private val logger = LoggerFactory.getLogger(getClass)
+  val logger = LoggerFactory.getLogger(getClass)
 
   protected def clientDescription: String = s"Gemini client for model ${config.model}"
   protected def providerName: String      = "gemini"
@@ -157,7 +157,7 @@ class GeminiClient(
           val accumulator = StreamingAccumulator.create()
           val messageId   = UUID.randomUUID().toString
           val reader      = new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))
-          val rawStream   = StringBuilder()
+          val rawStream   = new StringBuilder()
 
           Try {
             try {
@@ -188,7 +188,7 @@ class GeminiClient(
               // Close resources INSIDE Try block
             } finally {
               Try(reader.close())
-              Try(response.body.close())
+              val _ = Try(response.body.close())
             }
           }.toEither.left
             .map(_.toLLMError)
@@ -219,7 +219,7 @@ class GeminiClient(
    * map so that subsequent [[ToolMessage]] entries can be keyed by function
    * name rather than ID (Gemini's requirement).
    */
-  private def buildRequestBody(
+  def buildRequestBody(
     conversation: Conversation,
     options: CompletionOptions
   ): ujson.Value = {
@@ -372,7 +372,7 @@ class GeminiClient(
   /**
    * Parse a non-streaming completion response.
    */
-  private def parseCompletionResponse(responseText: String): Result[Completion] =
+  def parseCompletionResponse(responseText: String): Result[Completion] =
     Try {
       val json       = ujson.read(responseText)
       val candidates = json("candidates").arr
@@ -439,7 +439,7 @@ class GeminiClient(
   /**
    * Parse a streaming chunk from Gemini.
    */
-  private def parseStreamChunk(json: ujson.Value, messageId: String): Option[StreamedChunk] =
+  def parseStreamChunk(json: ujson.Value, messageId: String): Option[StreamedChunk] =
     Try {
       val candidates = json("candidates").arr
       if (candidates.nonEmpty) {
@@ -482,20 +482,20 @@ class GeminiClient(
       }
     }.toOption.flatten
 
-  private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] = {
+  def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] = {
     logger.error(s"[Gemini] Error response: $statusCode")
     val details = HttpErrorMapper.extractErrorDetails(body, statusCode, providerName)
-    if statusCode == 400 && isInvalidApiKey(details) then Left(AuthenticationError(providerName, details))
+    if (statusCode == 400 && isInvalidApiKey(details)) Left(AuthenticationError(providerName, details))
     else HttpErrorMapper.mapHttpError(statusCode, body, providerName)
   }
 
-  private def isInvalidApiKey(details: String): Boolean = {
+  def isInvalidApiKey(details: String): Boolean = {
     val normalized = details.toLowerCase
     normalized.contains("api key not valid") ||
     normalized.contains("invalid api key")
   }
 
-  private def recordExchange(
+  def recordExchange(
     startedAt: Instant,
     requestBody: String,
     responseBody: Option[String],
@@ -521,18 +521,17 @@ class GeminiClient(
 object GeminiClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: GeminiConfig)(using ModelRegistryService): Result[GeminiClient] =
+  def apply(config: GeminiConfig)(implicit service: ModelRegistryService): Result[GeminiClient] = {
     Try(new GeminiClient(config)).toResult
+  }
 
-  def apply(config: GeminiConfig, metrics: org.llm4s.metrics.MetricsCollector)(using
-    ModelRegistryService
-  ): Result[GeminiClient] =
+  def apply(config: GeminiConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit implicitService: ModelRegistryService): Result[GeminiClient] =
     Try(new GeminiClient(config, metrics)).toResult
 
   def apply(
     config: GeminiConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService): Result[GeminiClient] =
+  )(implicit service: ModelRegistryService): Result[GeminiClient] =
     Try(new GeminiClient(config, metrics, exchangeLogging)).toResult
 }

@@ -27,8 +27,8 @@ class KeywordIndexBenchmark(
   @Setup(Level.Trial)
   def setup(): Unit = {
     index = indexFactory().fold(raiseSetupError, identity)
-    oneDoc = KeywordDocument("bench-single", "scala jvm programming language benchmark performance")
-    index.indexBatch(BenchmarkFixtures.makeDocuments(1000))
+    oneDoc = new KeywordDocument("bench-single", "scala jvm programming language benchmark performance")
+    val _ = index.indexBatch(BenchmarkFixtures.makeDocuments(1000))
   }
 
   @TearDown(Level.Trial)

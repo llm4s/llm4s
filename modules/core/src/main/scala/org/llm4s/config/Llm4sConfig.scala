@@ -2,10 +2,11 @@
 package org.llm4s.config
 
 import org.llm4s.llmconnect.ProviderExchangeLogging
-import org.llm4s.llmconnect.config.*
+import org.llm4s.llmconnect.config._
 import org.llm4s.metrics.{ MetricsCollector, PrometheusEndpoint }
 import org.llm4s.types.Result
-import org.llm4s.config.ProvidersConfigModel.{ ProviderName, ProvidersConfig }
+import org.llm4s.config.ProvidersConfigModel.ProvidersConfig
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.error.LLMError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
@@ -59,7 +60,7 @@ object Llm4sConfig {
     Right(
       ModelRegistryConfig(
         resourcePath =
-          resourcePath.orElse(if useDefaultResource then Some(ModelRegistryConfig.DefaultResourcePath) else None),
+          resourcePath.orElse(if (useDefaultResource) Some(ModelRegistryConfig.DefaultResourcePath) else None),
         filePath = filePathFromConfig,
         url = urlFromConfig
       )
@@ -79,36 +80,43 @@ object Llm4sConfig {
    * instances, including multiple accounts for the same provider type.
    */
   def provider(name: String): Result[ProviderConfig] =
-    for
+    for {
       service <- modelRegistryService()
-      given ContextWindowResolver = ContextWindowResolver(service)
-      config <- org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name)
-    yield config
+      config <- {
+        implicit val resolver: ContextWindowResolver = new ContextWindowResolver(service)
+        org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name)
+      }
+    } yield config
 
   def providerConfigs(): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
-    for
+    for {
       service <- modelRegistryService()
-      given ContextWindowResolver = ContextWindowResolver(service)
-      result <- org.llm4s.config.NamedProviderLoader.loadProviderConfigs(ConfigSource.default)
-    yield result
+      result <- {
+        implicit val resolver: ContextWindowResolver = new ContextWindowResolver(service)
+        org.llm4s.config.NamedProviderLoader.loadProviderConfigs(ConfigSource.default)
+      }
+    } yield result
 
   def providerConfigs(
     map: Map[ProviderName, ProvidersConfigModel.NamedProviderConfig]
   ): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
-    modelRegistryService() match
+    modelRegistryService() match {
       case Right(service) =>
-        given ContextWindowResolver = ContextWindowResolver(service)
+        implicit val resolver: ContextWindowResolver = new ContextWindowResolver(service)
         org.llm4s.config.NamedProviderLoader.getProviderConfigs(map)
       case Left(err) =>
         val errors = map.map { case (name, _) => name -> (err: LLMError) }
         (errors, Map.empty)
+    }
 
   private[config] def provider(source: ConfigSource, name: String): Result[ProviderConfig] =
-    for
+    for {
       service <- modelRegistryService(source)
-      given ContextWindowResolver = ContextWindowResolver(service)
-      config <- org.llm4s.config.NamedProviderLoader.load(source, name)
-    yield config
+      config <- {
+        implicit val resolver: ContextWindowResolver = new ContextWindowResolver(service)
+        org.llm4s.config.NamedProviderLoader.load(source, name)
+      }
+    } yield config
 
   /**
    * Loads the full validated named-providers configuration from `llm4s.providers`.
@@ -132,20 +140,24 @@ object Llm4sConfig {
    * Loads the configured default named provider as a runtime [[ProviderConfig]].
    */
   def defaultProvider(): Result[ProviderConfig] =
-    for
+    for {
       service <- modelRegistryService()
-      given ContextWindowResolver = ContextWindowResolver(service)
       name   <- defaultProviderName()
-      config <- org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name.asName)
-    yield config
+      config <- {
+        implicit val resolver: ContextWindowResolver = new ContextWindowResolver(service)
+        org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name.asName)
+      }
+    } yield config
 
   private[config] def defaultProvider(source: ConfigSource): Result[ProviderConfig] =
-    for
+    for {
       service <- modelRegistryService(source)
-      given ContextWindowResolver = ContextWindowResolver(service)
       name   <- defaultProviderName(source)
-      config <- org.llm4s.config.NamedProviderLoader.load(source, name.asName)
-    yield config
+      config <- {
+        implicit val resolver: ContextWindowResolver = new ContextWindowResolver(service)
+        org.llm4s.config.NamedProviderLoader.load(source, name.asName)
+      }
+    } yield config
 
   /**
    * Lists models for the configured default named provider.
@@ -160,10 +172,10 @@ object Llm4sConfig {
     source: ConfigSource,
     httpClient: Llm4sHttpClient
   ): Result[List[DiscoveredModel]] =
-    for
+    for {
       defaultName <- defaultProviderName(source)
       models      <- listModels(defaultName.asName, source, httpClient)
-    yield models
+    } yield models
 
   /**
    * Lists models for a named provider configured under `llm4s.providers.<name>`.
@@ -176,7 +188,7 @@ object Llm4sConfig {
     source: ConfigSource,
     httpClient: Llm4sHttpClient
   ): Result[List[DiscoveredModel]] =
-    for
+    for {
       providers <- providers(source)
       namedProvider <- providers.namedProviders
         .get(ProviderName(name))
@@ -189,7 +201,7 @@ object Llm4sConfig {
           )
         )
       models <- lister.listModels(namedProvider, httpClient)
-    yield models
+    } yield models
 
   /**
    * Loads the default LLM provider configuration from a custom PureConfig source.

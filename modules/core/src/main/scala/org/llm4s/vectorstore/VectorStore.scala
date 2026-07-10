@@ -192,7 +192,7 @@ final case class VectorRecord(
   }
 
   override def hashCode(): Int = {
-    val state = Seq(id, java.util.Arrays.hashCode(embedding), content, metadata)
+    val state = Seq[Any](id, java.util.Arrays.hashCode(embedding), content, metadata)
     state.map(_.hashCode()).foldLeft(0)((a, b) => 31 * a + b)
   }
 }

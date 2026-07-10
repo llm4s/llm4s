@@ -93,7 +93,7 @@ object RequestTransformer {
   /**
    * Default implementation using ModelRegistryService for capability lookups.
    */
-  def default(service: ModelRegistryService): RequestTransformer = DefaultRequestTransformer(Map.empty, service)
+  def default(service: ModelRegistryService): RequestTransformer = new DefaultRequestTransformer(Map.empty, service)
 
   /**
    * Create a transformer with custom model overrides.

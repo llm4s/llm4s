@@ -2,10 +2,11 @@ package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes._
+import org.llm4s.config.ProvidersConfigModel._
 
 /** Validates a raw named provider section for a specific provider type. */
-private[llm4s] trait NamedProviderValidator:
+private[llm4s] trait NamedProviderValidator {
   /**
    * Validates the raw provider section and returns a normalised `NamedProviderConfig`.
    *
@@ -17,12 +18,13 @@ private[llm4s] trait NamedProviderValidator:
     providerName: ProviderName,
     section: RawNamedProviderSection
   ): Result[NamedProviderConfig]
+}
 
 /** Per-provider validator implementations for each supported `ProviderKind`. */
-private[llm4s] object NamedProviderValidators:
+private[llm4s] object NamedProviderValidators {
 
   /** Validator for OpenAI provider configurations. */
-  object OpenAI extends NamedProviderValidator:
+  object OpenAI extends NamedProviderValidator {
     def validate(
       providerName: ProviderName,
       section: RawNamedProviderSection
@@ -33,9 +35,10 @@ private[llm4s] object NamedProviderValidators:
         section = section,
         requireApiKey = true,
       )
+  }
 
   /** Validator for OpenRouter provider configurations. */
-  object OpenRouter extends NamedProviderValidator:
+  object OpenRouter extends NamedProviderValidator {
     def validate(
       providerName: ProviderName,
       section: RawNamedProviderSection
@@ -46,9 +49,10 @@ private[llm4s] object NamedProviderValidators:
         section = section,
         requireApiKey = true,
       )
+  }
 
   /** Validator for Requesty provider configurations. */
-  object Requesty extends NamedProviderValidator:
+  object Requesty extends NamedProviderValidator {
     def validate(
       providerName: ProviderName,
       section: RawNamedProviderSection
@@ -59,9 +63,10 @@ private[llm4s] object NamedProviderValidators:
         section = section,
         requireApiKey = true,
       )
+  }
 
   /** Validator for Azure provider configurations. */
-  object Azure extends NamedProviderValidator:
+  object Azure extends NamedProviderValidator {
     def validate(
       providerName: ProviderName,
       section: RawNamedProviderSection
@@ -73,9 +78,10 @@ private[llm4s] object NamedProviderValidators:
         requireApiKey = true,
         requireEndpoint = true,
       )
+  }
 
   /** Validator for Anthropic provider configurations. */
-  object Anthropic extends NamedProviderValidator:
+  object Anthropic extends NamedProviderValidator {
     def validate(
       providerName: ProviderName,
       section: RawNamedProviderSection
@@ -86,9 +92,10 @@ private[llm4s] object NamedProviderValidators:
         section = section,
         requireApiKey = true,
       )
+  }
 
   /** Validator for Ollama provider configurations. */
-  object Ollama extends NamedProviderValidator:
+  object Ollama extends NamedProviderValidator {
     def validate(
       providerName: ProviderName,
       section: RawNamedProviderSection
@@ -99,9 +106,10 @@ private[llm4s] object NamedProviderValidators:
         section = section,
         requireBaseUrl = true,
       )
+  }
 
   /** Validator for Zai provider configurations. */
-  object Zai extends NamedProviderValidator:
+  object Zai extends NamedProviderValidator {
     def validate(
       providerName: ProviderName,
       section: RawNamedProviderSection
@@ -112,9 +120,10 @@ private[llm4s] object NamedProviderValidators:
         section = section,
         requireApiKey = true,
       )
+  }
 
   /** Validator for Gemini provider configurations. */
-  object Gemini extends NamedProviderValidator:
+  object Gemini extends NamedProviderValidator {
     def validate(
       providerName: ProviderName,
       section: RawNamedProviderSection
@@ -125,9 +134,10 @@ private[llm4s] object NamedProviderValidators:
         section = section,
         requireApiKey = true,
       )
+  }
 
   /** Validator for DeepSeek provider configurations. */
-  object DeepSeek extends NamedProviderValidator:
+  object DeepSeek extends NamedProviderValidator {
     def validate(
       providerName: ProviderName,
       section: RawNamedProviderSection
@@ -138,9 +148,10 @@ private[llm4s] object NamedProviderValidators:
         section = section,
         requireApiKey = true,
       )
+  }
 
   /** Validator for Cohere provider configurations. */
-  object Cohere extends NamedProviderValidator:
+  object Cohere extends NamedProviderValidator {
     def validate(
       providerName: ProviderName,
       section: RawNamedProviderSection
@@ -151,9 +162,10 @@ private[llm4s] object NamedProviderValidators:
         section = section,
         requireApiKey = true,
       )
+  }
 
   /** Validator for Mistral provider configurations. */
-  object Mistral extends NamedProviderValidator:
+  object Mistral extends NamedProviderValidator {
     def validate(
       providerName: ProviderName,
       section: RawNamedProviderSection
@@ -164,6 +176,7 @@ private[llm4s] object NamedProviderValidators:
         section = section,
         requireApiKey = true,
       )
+  }
 
   private[config] def validateNamedProviderConfig(
     providerName: ProviderName,
@@ -174,47 +187,53 @@ private[llm4s] object NamedProviderValidators:
     requireEndpoint: Boolean = false
   ): Result[NamedProviderConfig] =
     NamedProviderConfigNormalizer.normalize(providerName, section).flatMap { normalized =>
-      if normalized.provider != providerKind then
+      if (normalized.provider != providerKind) {
         Left(
           ConfigurationError(
             s"Configured provider '${providerName.asName}' resolved to unexpected provider '${normalized.provider.toString}'"
           )
         )
-      else
+      } else {
         val missingFields = Seq.newBuilder[String]
 
         val envPrefix           = providerKind.toString.toUpperCase
         val providerDisplayName = if (providerKind == ProviderKind.Azure) "Azure OpenAI" else providerKind.toString
 
-        if requireApiKey && section.apiKey.map(_.trim).forall(_.isEmpty) then
+        if (requireApiKey && section.apiKey.map(_.trim).forall(_.isEmpty)) {
           // Named providers resolve from HOCON, not an automatic <PROVIDER>_API_KEY binding, so lead with the
           // conf path (the real fix) and show how to bind an env var explicitly via a HOCON substitution.
           missingFields += s"  - apiKey: set it in llm4s.conf under providers.${providerName.asName}.apiKey (optionally from an env var, e.g. apiKey = $${?${envPrefix}_API_KEY})"
+        }
 
-        if requireBaseUrl && section.baseUrl.map(_.trim).forall(_.isEmpty) then
-          val exampleUrl = providerKind match
+        if (requireBaseUrl && section.baseUrl.map(_.trim).forall(_.isEmpty)) {
+          val exampleUrl = providerKind match {
             case ProviderKind.Ollama => "e.g. http://localhost:11434"
             case _                   => "e.g. https://api.example.com/"
+          }
 
           missingFields += s"  - baseUrl: set ${envPrefix}_BASE_URL ($exampleUrl)"
+        }
 
-        if requireEndpoint && section.endpoint.map(_.trim).forall(_.isEmpty) then
+        if (requireEndpoint && section.endpoint.map(_.trim).forall(_.isEmpty)) {
           val exampleMsg = "the model endpoint/deployment name in your Azure OpenAI resource"
           missingFields += s"  - endpoint: $exampleMsg"
+        }
 
         val errors = missingFields.result()
-        if errors.nonEmpty then
+        if (errors.nonEmpty) {
           Left(
             ConfigurationError(
               s"$providerDisplayName provider '${providerName.asName}' is missing required fields:\n" + errors
                 .mkString("\n")
             )
           )
-        else Right(normalized)
+        } else Right(normalized)
+      }
     }
+}
 
 /** Dispatches validation of a raw named provider section to the appropriate provider-specific validator. */
-private[llm4s] object NamedProviderConfigValidator:
+private[llm4s] object NamedProviderConfigValidator {
 
   /**
    * Validates a raw provider section by normalizing it and delegating to the registry-resolved validator.
@@ -232,3 +251,4 @@ private[llm4s] object NamedProviderConfigValidator:
         .forKind(normalized.provider)
         .flatMap(_.validator.validate(providerName, section))
     }
+}

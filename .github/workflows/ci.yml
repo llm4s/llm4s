@@ -95,6 +95,29 @@ jobs:
       - name: Compile
         run: sbt compile
 
+  # Scala 2.13 cross-compilation check
+  scala213-compile:
+    name: Scala 2.13 Compatibility Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Check Scala 2.13 compilation
+        run: sbt ++2.13.18 core/compile
+        # Note: full +test may fail due to 2.13-incompatible test deps
+        # compile check is sufficient to catch source incompatibilities
+
   scaladoc:
     name: ScalaDoc
     needs: quick-checks
@@ -219,7 +242,7 @@ jobs:
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, coverage, config-policy-check, scaladoc]
+    needs: [test, coverage, config-policy-check, scaladoc, scala213-compile]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -241,6 +264,10 @@ jobs:
           fi
           if [[ "${{ needs.scaladoc.result }}" != "success" ]]; then
             echo "ScalaDoc job failed"
+            exit 1
+          fi
+          if [[ "${{ needs.scala213-compile.result }}" != "success" ]]; then
+            echo "Scala 2.13 compilation check failed"
             exit 1
           fi
           echo "All tests passed!"

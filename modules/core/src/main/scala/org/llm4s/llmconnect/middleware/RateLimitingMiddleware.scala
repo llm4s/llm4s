@@ -56,7 +56,7 @@ class RateLimitingMiddleware(
         if (tokensToAdd > 0) {
           // Only update if we can advance the time
           if (lastRefillTimestamp.compareAndSet(last, now)) {
-            tokens.updateAndGet(t => Math.min(capacity, t + tokensToAdd))
+            val _ = tokens.updateAndGet(t => Math.min(capacity, t + tokensToAdd))
           }
         }
       }

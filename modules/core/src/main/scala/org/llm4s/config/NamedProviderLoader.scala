@@ -1,13 +1,14 @@
 package org.llm4s.config
 
 import org.llm4s.error.{ ConfigurationError, LLMError }
-import org.llm4s.llmconnect.config.*
+import org.llm4s.llmconnect.config._
 import org.llm4s.types.Result
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.types.ProviderModelTypes._
+import org.llm4s.config.ProvidersConfigModel._
 import pureconfig.ConfigSource
 
 /** Loads and resolves a named provider's `ProviderConfig` from a `ConfigSource`. */
-private[config] object NamedProviderLoader:
+private[config] object NamedProviderLoader {
 
   /**
    * Loads the `ProviderConfig` for a single named provider from the given config source.
@@ -16,17 +17,18 @@ private[config] object NamedProviderLoader:
    *  @param providerName the name of the provider entry to look up
    *  @return `Right(ProviderConfig)` on success, or `Left` with a `ConfigurationError`
    */
-  def load(source: ConfigSource, providerName: String)(using ContextWindowResolver): Result[ProviderConfig] =
+  def load(source: ConfigSource, providerName: String)(implicit implicitResolver: ContextWindowResolver): Result[ProviderConfig] = {
     val trimmed = providerName.trim
-    if trimmed.isEmpty then Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
+    if (trimmed.isEmpty) Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
     else
-      for
+      for {
         providers <- ProvidersConfigLoader.load(source)
         normalized <- providers.namedProviders
           .get(ProviderName(trimmed))
           .toRight(ConfigurationError(s"Configured provider '$trimmed' was not found"))
         config <- buildConfigFromNamedConfig(trimmed, normalized)
-      yield config
+      } yield config
+  }
 
   /**
    * Loads all named provider configs from the given config source, returning errors and successes separately.
@@ -36,12 +38,12 @@ private[config] object NamedProviderLoader:
    */
   def loadProviderConfigs(
     source: ConfigSource
-  )(using ContextWindowResolver): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
-    for
+  )(implicit implicitResolver: ContextWindowResolver): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
+    for {
       providers <- ProvidersConfigLoader.load(source)
       namedProviders = providers.namedProviders
       r              = getProviderConfigs(namedProviders)
-    yield r
+    } yield r
 
   /**
    * Converts a map of validated named provider configs into separate error and success maps.
@@ -51,24 +53,25 @@ private[config] object NamedProviderLoader:
    */
   def getProviderConfigs(
     namedProviders: Map[ProviderName, NamedProviderConfig]
-  )(using ContextWindowResolver): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
+  )(implicit implicitResolver: ContextWindowResolver): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
     namedProviders.toList.foldLeft((Map.empty[ProviderName, LLMError], Map.empty[ProviderName, ProviderConfig]))(
       (x, y) =>
         buildConfigFromNamedConfig(y._1.asName, y._2).fold(
-          (error: LLMError) =>
+          (error: LLMError) => {
             val kv = (y._1, error)
             (x._1 + kv, x._2)
-          ,
-          (providerConfig: ProviderConfig) =>
+          },
+          (providerConfig: ProviderConfig) => {
             val kv: (ProviderName, ProviderConfig) = (y._1, providerConfig)
             (x._1, x._2 + kv)
+          }
         )
     )
 
   private def buildConfigFromNamedConfig(
     providerName: String,
     section: NamedProviderConfig
-  )(using ContextWindowResolver): Result[ProviderConfig] =
+  )(implicit implicitResolver: ContextWindowResolver): Result[ProviderConfig] = {
     def required(fieldName: String, value: Option[String], envHint: String): Result[String] =
       value.toRight(
         ConfigurationError(s"Configured provider '$providerName' is missing $fieldName ($envHint)")
@@ -77,25 +80,27 @@ private[config] object NamedProviderLoader:
     def requiredApiKey(envHint: String): Result[String] =
       required("api key", section.apiKey.map(_.asKey), envHint)
 
-    section.provider match
+    section.provider match {
       case ProviderKind.OpenAI | ProviderKind.OpenRouter | ProviderKind.Requesty =>
-        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
+        requiredApiKey("llm4s.providers.<name>.apiKey").map { apiKey =>
           val defaultBaseUrl =
-            if section.provider == ProviderKind.OpenRouter then DefaultConfig.DEFAULT_OPENROUTER_BASE_URL
-            else if section.provider == ProviderKind.Requesty then DefaultConfig.DEFAULT_REQUESTY_BASE_URL
+            if (section.provider == ProviderKind.OpenRouter) DefaultConfig.DEFAULT_OPENROUTER_BASE_URL
+            else if (section.provider == ProviderKind.Requesty) DefaultConfig.DEFAULT_REQUESTY_BASE_URL
             else DefaultConfig.DEFAULT_OPENAI_BASE_URL
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(defaultBaseUrl)
           OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl)
+        }
       case ProviderKind.Azure =>
-        for
+        for {
           endpoint <- required("endpoint", section.endpoint, "llm4s.providers.<name>.endpoint")
           apiKey   <- requiredApiKey("llm4s.providers.<name>.apiKey")
           apiVersion = section.apiVersion.getOrElse(DefaultConfig.DEFAULT_AZURE_V2025_01_01_PREVIEW)
-        yield AzureConfig.fromValues(section.model.asString, endpoint, apiKey, apiVersion)
+        } yield AzureConfig.fromValues(section.model.asString, endpoint, apiKey, apiVersion)
       case ProviderKind.Anthropic =>
-        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
+        requiredApiKey("llm4s.providers.<name>.apiKey").map { apiKey =>
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL)
           AnthropicConfig.fromValues(section.model.asString, apiKey, baseUrl)
+        }
       case ProviderKind.Ollama =>
         section.baseUrl
           .map(_.asUrl)
@@ -106,28 +111,38 @@ private[config] object NamedProviderLoader:
           )
           .map(url => OllamaConfig.fromValues(section.model.asString, url))
       case ProviderKind.Zai =>
-        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
+        requiredApiKey("llm4s.providers.<name>.apiKey").map { apiKey =>
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(ZaiConfig.DEFAULT_BASE_URL)
           ZaiConfig.fromValues(section.model.asString, apiKey, baseUrl)
+        }
       case ProviderKind.Gemini =>
-        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
+        requiredApiKey("llm4s.providers.<name>.apiKey").map { apiKey =>
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_GEMINI_BASE_URL)
           GeminiConfig.fromValues(section.model.asString, apiKey, baseUrl)
+        }
       case ProviderKind.DeepSeek =>
-        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
+        requiredApiKey("llm4s.providers.<name>.apiKey").map { apiKey =>
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
           DeepSeekConfig.fromValues(section.model.asString, apiKey, baseUrl)
+        }
       case ProviderKind.Cohere =>
-        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
+        requiredApiKey("llm4s.providers.<name>.apiKey").map { apiKey =>
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(CohereConfig.DEFAULT_BASE_URL)
           CohereConfig.fromValues(section.model.asString, apiKey, baseUrl)
+        }
       case ProviderKind.Mistral =>
-        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
+        requiredApiKey("llm4s.providers.<name>.apiKey").map { apiKey =>
           val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(MistralConfig.DEFAULT_BASE_URL)
           MistralConfig.fromValues(section.model.asString, apiKey, baseUrl)
+        }
       case ProviderKind.VertexAI =>
-        for projectId <- required("endpoint (GCP project ID)", section.endpoint, "llm4s.providers.<name>.endpoint")
-        yield
+        for {
+          projectId <- required("endpoint (GCP project ID)", section.endpoint, "llm4s.providers.<name>.endpoint")
+        } yield {
           val location           = section.organization.getOrElse(DefaultConfig.DEFAULT_VERTEXAI_LOCATION)
           val credentialFilePath = section.apiKey.map(_.asKey)
           VertexAIConfig.fromValues(section.model.asString, projectId, location, credentialFilePath)
+        }
+    }
+  }
+}

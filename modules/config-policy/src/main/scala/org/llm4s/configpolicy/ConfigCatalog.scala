@@ -1,14 +1,12 @@
 package org.llm4s.configpolicy
 
 /** Deployment / policy tier for catalog and governance rules. */
-enum CatalogEnvironment:
-  case Dev, Staging, Prod
-
-/**
- * Scala 3 `enum` syntax is intentional: if this module ever needs Scala 2.13
- * cross-compilation, replace with a sealed trait + case objects.
- */
+sealed trait CatalogEnvironment
 object CatalogEnvironment {
+  case object Dev extends CatalogEnvironment
+  case object Staging extends CatalogEnvironment
+  case object Prod extends CatalogEnvironment
+
   def fromString(value: String): CatalogEnvironment =
     value.toLowerCase match {
       case "dev"     => CatalogEnvironment.Dev

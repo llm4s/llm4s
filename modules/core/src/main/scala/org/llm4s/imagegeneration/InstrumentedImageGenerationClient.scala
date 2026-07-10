@@ -185,6 +185,6 @@ class InstrumentedImageGenerationClient(
       success = result.isRight,
       errorMessage = result.left.toOption.map(_.message)
     )
-    tracing.traceEvent(event)
+    val _ = tracing.traceEvent(event)
   }
 }

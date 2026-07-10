@@ -55,7 +55,8 @@ class InMemoryEmbeddingCache[Embedding](
 
   /** Stores an embedding, potentially triggering LRU eviction. */
   def put(key: String, embedding: Embedding): Unit =
-    store.put(key, CacheEntry(embedding, clock()))
+    { { store.put(key, CacheEntry(embedding, clock())); () }; () }
+    ()
 
   /** Clears all cached entries and resets statistics. */
   override def clear(): Unit = {

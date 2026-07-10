@@ -484,7 +484,7 @@ class Agent(client: LLMClient) {
     if (context.debug) {
       logger.debug("========================================")
       logger.debug("Starting Agent.run")
-      logger.debug("Max steps: {}", maxSteps.getOrElse("unlimited"))
+      logger.debug("Max steps: {}", maxSteps.map(_.toString).getOrElse("unlimited"))
       logger.debug("Trace log: {}", context.traceLogPath.getOrElse("disabled"))
       logger.debug("Initial status: {}", initialState.status)
       logger.debug("========================================")

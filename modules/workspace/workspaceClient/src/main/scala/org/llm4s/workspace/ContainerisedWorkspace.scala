@@ -133,7 +133,7 @@ class ContainerisedWorkspace(
   private def handleResponse(response: WorkspaceAgentResponse): Unit =
     Option(pendingResponses.remove(response.commandId)) match {
       case Some(future) =>
-        future.complete(response)
+        val _ = future.complete(response)
       case None =>
         logger.warn(s"Received response for unknown command ID: ${response.commandId}")
     }
@@ -144,7 +144,7 @@ class ContainerisedWorkspace(
         Try(handler(StreamingOutputMessage(commandId, outputType, content, isComplete))).failed.foreach { ex =>
           logger.error(s"Error in streaming handler for command $commandId: ${ex.getMessage}", ex)
         }
-        if (isComplete) streamingHandlers.remove(commandId)
+        if (isComplete) { val _ = streamingHandlers.remove(commandId) }
       case None =>
         logger.debug(s"No streaming handler registered for command $commandId")
     }
@@ -266,7 +266,7 @@ class ContainerisedWorkspace(
 
     val executor = Executors.newSingleThreadScheduledExecutor()
     heartbeatExecutor.set(executor)
-    executor.scheduleAtFixedRate(
+    val _ = executor.scheduleAtFixedRate(
       () =>
         if (containerRunning.get() && wsConnected.get()) {
           val hb = Try(sendHeartbeat())

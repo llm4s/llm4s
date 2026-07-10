@@ -2,10 +2,11 @@ package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
-import org.llm4s.config.ProvidersConfigModel.*
+import org.llm4s.config.ProvidersConfigModel._
+import org.llm4s.types.ProviderModelTypes._
 
 /** Converts a `RawNamedProviderSection` into a validated `NamedProviderConfig` by resolving string fields. */
-private[config] object NamedProviderConfigNormalizer:
+private[config] object NamedProviderConfigNormalizer {
 
   /**
    * Normalizes a raw provider section into a typed `NamedProviderConfig`.
@@ -17,9 +18,9 @@ private[config] object NamedProviderConfigNormalizer:
   def normalize(
     providerName: ProviderName,
     section: RawNamedProviderSection
-  ): Result[NamedProviderConfig] =
+  ): Result[NamedProviderConfig] = {
     val providerType =
-      section.provider.map(_.trim).filter(_.nonEmpty) match
+      section.provider.map(_.trim).filter(_.nonEmpty) match {
         case None =>
           Left(ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `provider`"))
         case Some(value) =>
@@ -28,6 +29,7 @@ private[config] object NamedProviderConfigNormalizer:
             .toRight(
               ConfigurationError(s"Configured provider '${providerName.asName}' has unknown provider '$value'")
             )
+      }
 
     val modelName =
       section.model
@@ -35,10 +37,10 @@ private[config] object NamedProviderConfigNormalizer:
         .filter(_.nonEmpty)
         .toRight(ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `model`"))
 
-    for
+    for {
       kind  <- providerType
       model <- modelName
-    yield NamedProviderConfig(
+    } yield NamedProviderConfig(
       provider = kind,
       model = ModelName(model),
       baseUrl = section.baseUrl.map(_.trim).filter(_.nonEmpty).map(BaseUrl(_)),
@@ -47,3 +49,5 @@ private[config] object NamedProviderConfigNormalizer:
       endpoint = section.endpoint.map(_.trim).filter(_.nonEmpty),
       apiVersion = section.apiVersion.map(_.trim).filter(_.nonEmpty)
     )
+  }
+}

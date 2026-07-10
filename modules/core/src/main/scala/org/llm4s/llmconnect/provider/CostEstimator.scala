@@ -38,7 +38,7 @@ object CostEstimator {
    * @param usage Token usage statistics from the completion
    * @return Estimated cost in USD, or None if pricing is unavailable
    */
-  def estimate(model: String, usage: TokenUsage)(using service: ModelRegistryService): Option[Double] =
+  def estimate(model: String, usage: TokenUsage)(implicit service: ModelRegistryService): Option[Double] =
     estimateFromMetadata(service.lookup(model).toOption, usage)
 
   /**

@@ -332,7 +332,7 @@ final case class ChunkWithEmbedding(
   }
 
   override def hashCode(): Int = {
-    val state = Seq(content, java.util.Arrays.hashCode(embedding), chunkIndex, metadata)
+    val state = Seq[Any](content, java.util.Arrays.hashCode(embedding), chunkIndex, metadata)
     state.map(_.hashCode()).foldLeft(0)((a, b) => 31 * a + b)
   }
 }

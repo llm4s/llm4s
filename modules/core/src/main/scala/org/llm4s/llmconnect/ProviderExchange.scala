@@ -9,18 +9,21 @@ import java.time.Instant
  * a [[ProviderExchangeSink]] through [[ProviderExchangeLogging.Enabled]] when
  * constructing a client.
  */
-enum ProviderExchangeLogging:
-  case Disabled
-  case Enabled(sink: ProviderExchangeSink)
+sealed trait ProviderExchangeLogging
+object ProviderExchangeLogging {
+  case object Disabled extends ProviderExchangeLogging
+  case class Enabled(sink: ProviderExchangeSink) extends ProviderExchangeLogging
 
-object ProviderExchangeLogging:
   def enabled(sink: ProviderExchangeSink): ProviderExchangeLogging =
     Enabled(sink)
+}
 
-enum ProviderExchangeOutcome:
-  case Success
-  case Error
-  case Cancelled
+sealed trait ProviderExchangeOutcome
+object ProviderExchangeOutcome {
+  case object Success extends ProviderExchangeOutcome
+  case object Error extends ProviderExchangeOutcome
+  case object Cancelled extends ProviderExchangeOutcome
+}
 
 /**
  * Minimal first-pass representation of a captured provider exchange.

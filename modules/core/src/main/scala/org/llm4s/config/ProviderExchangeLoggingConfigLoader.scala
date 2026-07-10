@@ -18,18 +18,18 @@ import java.nio.file.Paths
  *  - `llm4s.exchangeLogging.enabled`: enable or disable exchange capture
  *  - `llm4s.exchangeLogging.dir`: output directory for per-run JSONL files when enabled
  */
-private[config] object ProviderExchangeLoggingConfigLoader:
+private[config] object ProviderExchangeLoggingConfigLoader {
 
   final private case class ExchangeLoggingSection(
     enabled: Option[Boolean],
     dir: Option[String]
   )
 
-  private given exchangeLoggingSectionReader: PureConfigReader[ExchangeLoggingSection] =
+  private implicit val exchangeLoggingSectionReader: PureConfigReader[ExchangeLoggingSection] =
     PureConfigReader.forProduct2("enabled", "dir")(ExchangeLoggingSection.apply)
 
   def load(source: ConfigSource = ConfigSource.default): Result[ProviderExchangeLogging] =
-    source.at("llm4s.exchangeLogging").load[ExchangeLoggingSection] match
+    source.at("llm4s.exchangeLogging").load[ExchangeLoggingSection] match {
       case Right(section) =>
         buildExchangeLogging(section)
       case Left(failures) if failures.toList.exists(_.description.contains("Key not found")) =>
@@ -37,9 +37,10 @@ private[config] object ProviderExchangeLoggingConfigLoader:
       case Left(failures) =>
         val msg = failures.toList.map(_.description).mkString("; ")
         Left(ConfigurationError(s"Failed to load llm4s exchange logging config via PureConfig: $msg"))
+    }
 
   private def buildExchangeLogging(section: ExchangeLoggingSection): Result[ProviderExchangeLogging] =
-    section.enabled match
+    section.enabled match {
       case Some(true) =>
         section.dir
           .map(_.trim)
@@ -50,3 +51,5 @@ private[config] object ProviderExchangeLoggingConfigLoader:
           )
       case _ =>
         Right(ProviderExchangeLogging.Disabled)
+    }
+}

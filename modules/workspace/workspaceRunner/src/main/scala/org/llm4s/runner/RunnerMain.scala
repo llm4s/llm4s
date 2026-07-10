@@ -65,7 +65,7 @@ object RunnerMain extends cask.MainRoutes {
 
   // Initialize workspace interface
   private val workspaceInterface     = new WorkspaceAgentInterfaceImpl(workspacePath, isWindows, sandboxConfig)
-  private val effectiveSandboxConfig = sandboxConfig.getOrElse(WorkspaceSandboxConfig.Permissive)
+  private[runner] val effectiveSandboxConfig = sandboxConfig.getOrElse(WorkspaceSandboxConfig.Permissive)
   private val workspaceRootPath      = Paths.get(workspacePath).toAbsolutePath.normalize()
 
   // Track active connections and their last heartbeat
@@ -77,7 +77,7 @@ object RunnerMain extends cask.MainRoutes {
 
   // Constants
   private val HeartbeatTimeoutMs            = 30000L // 30 seconds timeout
-  private val HeartbeatCheckIntervalSeconds = 10L
+  private[runner] val HeartbeatCheckIntervalSeconds = 10L
   // Max captured output size per stream for final ExecuteCommandResponse payload
   private val MaxOutputSize = 1024L * 1024L // 1MB per stream
 
@@ -127,15 +127,15 @@ object RunnerMain extends cask.MainRoutes {
               }
             }
           }
-          connections.remove(channel)
+          val _ = connections.remove(channel)
 
         case cask.Ws.Error(ex) =>
           logger.error(s"WebSocket error: ${ex.getMessage}", ex)
-          connections.remove(channel)
+          val _ = connections.remove(channel)
       }
     }
 
-  private def handleWebSocketMessage(channel: cask.WsChannelActor, message: String): Unit = {
+  private[runner] def handleWebSocketMessage(channel: cask.WsChannelActor, message: String): Unit = {
     logger.debug(s"Received WebSocket message: $message")
 
     // Update heartbeat timestamp for this connection
@@ -193,8 +193,8 @@ object RunnerMain extends cask.MainRoutes {
         sendError(channel, s"Unexpected message type: ${message.getClass.getSimpleName}", "INVALID_MESSAGE_TYPE")
     }
 
-  private def handleCommand(channel: cask.WsChannelActor, command: WorkspaceAgentCommand): Unit =
-    Future {
+  private def handleCommand(channel: cask.WsChannelActor, command: WorkspaceAgentCommand): Unit = {
+    val _ = Future {
       logger.debug(s"Processing command: ${command.getClass.getSimpleName} with ID: ${command.commandId}")
       command match {
         case cmd: ExecuteCommandCommand =>
@@ -279,6 +279,7 @@ object RunnerMain extends cask.MainRoutes {
           )
       }
     }(ec)
+  }
 
   private def toErrorResponse(commandId: String)(e: Throwable): WorkspaceAgentErrorResponse =
     e match {
@@ -292,7 +293,7 @@ object RunnerMain extends cask.MainRoutes {
         )
     }
 
-  private def sendCommandFailure(
+  private[runner] def sendCommandFailure(
     channel: cask.WsChannelActor,
     commandId: String,
     error: String,
@@ -350,7 +351,7 @@ object RunnerMain extends cask.MainRoutes {
             builder.directory(workDir)
             cmd.environment.foreach { env =>
               val pbEnv = builder.environment()
-              env.foreach { case (k, v) => pbEnv.put(k, v) }
+              env.foreach { case (k, v) => pbEnv.put(k, v) }; val _ = pbEnv
             }
 
             val processEither = Try(builder.start()).toEither
@@ -386,8 +387,8 @@ object RunnerMain extends cask.MainRoutes {
                   accumulator: StringBuilder,
                   truncated: AtomicBoolean,
                   done: Promise[Unit]
-                ): Unit =
-                  Future {
+                ): Unit = {
+                  val _ = Future {
                     val buffer    = new Array[Byte](8192)
                     var bytesRead = 0
                     var captured  = 0L
@@ -406,7 +407,7 @@ object RunnerMain extends cask.MainRoutes {
                           if (toCopy > 0) {
                             val toAppend = if (toCopy == bytesRead) chunk else chunk.substring(0, toCopy)
                             accumulator.append(toAppend)
-                            captured += toCopy
+                            captured += toCopy; val _ = captured
                           }
                           if (toCopy < bytesRead) truncated.set(true)
                         } else truncated.set(true)
@@ -416,9 +417,10 @@ object RunnerMain extends cask.MainRoutes {
                         logger.error(s"Error reading $outputType for command ${cmd.commandId}: ${ex.getMessage}", ex)
                     } finally {
                       sendMessage(channel, StreamingOutputMessage(cmd.commandId, outputType, "", isComplete = true))
-                      done.trySuccess(())
+                      val _ = done.trySuccess(())
                     }
                   }(ec)
+                }
 
                 streamOutput("stdout", process.getInputStream, stdoutAccumulator, stdoutTruncated, stdoutDone)
                 streamOutput("stderr", process.getErrorStream, stderrAccumulator, stderrTruncated, stderrDone)
@@ -462,10 +464,11 @@ object RunnerMain extends cask.MainRoutes {
                         -1
                     } finally {
                       processes.remove(cmd.commandId)
-                      exitDone.trySuccess(())
+                      val _ = exitDone.trySuccess(())
                     }
                   exitCodePromise.trySuccess(exitCode)
                 }(ec)
+    ()
 
                 stdoutDone.future
                   .flatMap(_ => stderrDone.future)(ec)
@@ -507,15 +510,18 @@ object RunnerMain extends cask.MainRoutes {
                         durationMs = System.currentTimeMillis() - startTime
                       )
                   }(ec)
+                  ()
+    ()
               }
             )
           }
         )
       }
     }(ec)
+    ()
   }
 
-  private def resolveWorkingDirectory(workingDirectory: Option[String]): Either[WorkspaceAgentException, java.io.File] =
+  private[runner] def resolveWorkingDirectory(workingDirectory: Option[String]): Either[WorkspaceAgentException, java.io.File] =
     Try {
       workingDirectory match {
         case Some(dir) => workspaceRootPath.resolve(dir).normalize()
@@ -571,8 +577,8 @@ object RunnerMain extends cask.MainRoutes {
   ): Unit =
     sendMessage(channel, ErrorMessage(error, code, commandId))
 
-  private def startHeartbeatMonitor(): Unit =
-    heartbeatExecutor.scheduleAtFixedRate(
+  private def startHeartbeatMonitor(): Unit = {
+    val _ = heartbeatExecutor.scheduleAtFixedRate(
       () => {
         val currentTime = System.currentTimeMillis()
         val iterator    = connections.entrySet().iterator()
@@ -602,7 +608,7 @@ object RunnerMain extends cask.MainRoutes {
                 }
               }
             }
-            connections.remove(channel)
+            val _ = connections.remove(channel)
           }
         }
       },
@@ -610,6 +616,7 @@ object RunnerMain extends cask.MainRoutes {
       HeartbeatCheckIntervalSeconds,
       TimeUnit.SECONDS
     )
+  }
 
   // Initialize the service
   private def initializeService(): Unit = {
@@ -678,6 +685,7 @@ object RunnerMain extends cask.MainRoutes {
     Try {
       executor.shutdown()
       if (!executor.awaitTermination(5, TimeUnit.SECONDS)) executor.shutdownNow()
-    }.recover { case _: InterruptedException => executor.shutdownNow() }
+    }.recover { case _: InterruptedException => { executor.shutdownNow(); () } }
+    ()
   }
 }

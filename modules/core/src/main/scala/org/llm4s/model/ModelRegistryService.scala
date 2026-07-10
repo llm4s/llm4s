@@ -13,7 +13,7 @@ import scala.util.{ Try, Using }
  * Implementations are immutable snapshots of model metadata that can be passed
  * through the application without relying on global process state.
  */
-trait ModelRegistryService:
+trait ModelRegistryService {
   def findByCapability(capability: String): Result[List[ModelMetadata]]
   def listProviders(): Result[List[String]]
   def listByMode(mode: ModelMode): Result[List[ModelMetadata]]
@@ -21,28 +21,32 @@ trait ModelRegistryService:
   def statistics(): Result[Map[String, Any]]
   def lookup(modelId: String): Result[ModelMetadata]
   def lookup(provider: String, modelName: String): Result[ModelMetadata]
+}
 
 final private[model] class DefaultModelRegistryService(
   private val metadata: Map[String, ModelMetadata]
-) extends ModelRegistryService:
+) extends ModelRegistryService {
 
-  override def findByCapability(capability: String): Result[List[ModelMetadata]] =
+  override def findByCapability(capability: String): Result[List[ModelMetadata]] = {
     val models = metadata.values.filter(_.supports(capability)).toList
-    if models.nonEmpty then Right(models)
+    if (models.nonEmpty) Right(models)
     else Left(ValidationError(s"No models found with capability: $capability", "capability"))
+  }
 
   override def listProviders(): Result[List[String]] =
     Right(metadata.values.map(_.provider).toSet.toList.sorted)
 
-  override def listByMode(mode: ModelMode): Result[List[ModelMetadata]] =
+  override def listByMode(mode: ModelMode): Result[List[ModelMetadata]] = {
     val models = metadata.values.filter(_.mode == mode).toList
-    if models.nonEmpty then Right(models)
+    if (models.nonEmpty) Right(models)
     else Left(ValidationError(s"No models found for mode: ${mode.name}", "mode"))
+  }
 
-  override def listByProvider(provider: String): Result[List[ModelMetadata]] =
+  override def listByProvider(provider: String): Result[List[ModelMetadata]] = {
     val models = metadata.values.filter(_.provider.equalsIgnoreCase(provider)).toList
-    if models.nonEmpty then Right(models)
+    if (models.nonEmpty) Right(models)
     else Left(ValidationError(s"No models found for provider: $provider", "provider"))
+  }
 
   override def statistics(): Result[Map[String, Any]] =
     Right(
@@ -70,19 +74,20 @@ final private[model] class DefaultModelRegistryService(
           .find(m => m.provider.equalsIgnoreCase(provider) && m.modelId.equalsIgnoreCase(modelName))
           .toRight(ValidationError(s"Model not found: $provider/$modelName", "modelId"))
       )
+}
 
-object ModelRegistryService:
+object ModelRegistryService {
   private val logger = LoggerFactory.getLogger(getClass)
 
   def default(): Result[ModelRegistryService] =
     fromConfig(ModelRegistryConfig.default)
 
-  def fromConfig(config: ModelRegistryConfig): Result[ModelRegistryService] =
+  def fromConfig(config: ModelRegistryConfig): Result[ModelRegistryService] = {
     val resourcePath = config.resourcePath.map(_.trim).filter(_.nonEmpty)
     val filePath     = config.filePath.map(_.trim).filter(_.nonEmpty)
     val url          = config.url.map(_.trim).filter(_.nonEmpty)
 
-    (resourcePath, filePath, url) match
+    (resourcePath, filePath, url) match {
       case (Some(resourcePath), None, None) =>
         fromResource(resourcePath)
       case (None, Some(filePath), None) =>
@@ -93,20 +98,22 @@ object ModelRegistryService:
         Left(ConfigurationError("ModelRegistryConfig must define one metadata source"))
       case _ =>
         Left(ConfigurationError("ModelRegistryConfig must define exactly one of resourcePath, filePath, or url"))
+    }
+  }
 
   def fromModels(models: Iterable[ModelMetadata]): ModelRegistryService =
-    DefaultModelRegistryService(models.iterator.map(model => model.modelId -> model).toMap)
+    new DefaultModelRegistryService(models.iterator.map(model => model.modelId -> model).toMap)
 
   def fromJsonString(jsonContent: String): Result[ModelRegistryService] =
-    parseMetadataJson(jsonContent).map(metadata => DefaultModelRegistryService(metadata))
+    parseMetadataJson(jsonContent).map(metadata => new DefaultModelRegistryService(metadata))
 
   def fromResource(resourcePath: String): Result[ModelRegistryService] =
     loadResource(resourcePath).flatMap(parseMetadataJson).map { base =>
       val metadata =
-        if resourcePath == ModelRegistryConfig.DefaultResourcePath then
+        if (resourcePath == ModelRegistryConfig.DefaultResourcePath)
           mergeOverrides(base, ModelRegistryConfig.DefaultOverridesResourcePath)
         else base
-      DefaultModelRegistryService(metadata)
+      new DefaultModelRegistryService(metadata)
     }
 
   /**
@@ -119,11 +126,12 @@ object ModelRegistryService:
     base: Map[String, ModelMetadata],
     overridesResourcePath: String
   ): Map[String, ModelMetadata] =
-    loadResource(overridesResourcePath).flatMap(parseMetadataJson) match
+    loadResource(overridesResourcePath).flatMap(parseMetadataJson) match {
       case Right(overrides) => base ++ overrides
       case Left(error) =>
         logger.warn(s"Skipping embedded model metadata overrides: ${error.message}")
         base
+    }
 
   def fromFile(filePath: String): Result[ModelRegistryService] =
     loadFile(filePath).flatMap(fromJsonString)
@@ -131,14 +139,15 @@ object ModelRegistryService:
   def fromUrl(url: String): Result[ModelRegistryService] =
     loadUrl(url).flatMap(fromJsonString)
 
-  private def loadResource(resourcePath: String): Result[String] =
+  private def loadResource(resourcePath: String): Result[String] = {
     val stream = getClass.getResourceAsStream(resourcePath)
-    if stream == null then Left(ConfigurationError(s"Embedded metadata not found: $resourcePath"))
+    if (stream == null) Left(ConfigurationError(s"Embedded metadata not found: $resourcePath"))
     else
       Try {
         Using.resource(Source.fromInputStream(stream))(source => source.mkString)
       }.toEither.left
         .map(e => ConfigurationError(s"Failed to load embedded metadata: ${e.getMessage}"))
+  }
 
   private def loadFile(filePath: String): Result[String] =
     Try {
@@ -158,40 +167,42 @@ object ModelRegistryService:
       val modelEntries = json.view.filterKeys(_ != "sample_spec").toMap
 
       modelEntries.flatMap { case (modelId, data) =>
-        ModelMetadata.fromJson(modelId, data) match
+        ModelMetadata.fromJson(modelId, data) match {
           case Right(modelMetadata) => Some(modelId -> modelMetadata)
           case Left(error) =>
             logger.warn(s"Skipping model $modelId: ${error.message}")
             None
+        }
       }.toMap
     }.toEither.left.map(e => ConfigurationError(s"Failed to parse metadata JSON: ${e.getMessage}"))
+}
 
-private object DefaultModelRegistryService:
+private object DefaultModelRegistryService {
   def findModel(
     metadata: Map[String, ModelMetadata],
     modelId: String
-  ): Result[ModelMetadata] =
+  ): Result[ModelMetadata] = {
     val normalized = modelId.trim
 
-    metadata.get(normalized) match
+    metadata.get(normalized) match {
       case Some(modelMetadata) => Right(modelMetadata)
       case None =>
-        metadata.find(_._1.equalsIgnoreCase(normalized)) match
+        metadata.find(_._1.equalsIgnoreCase(normalized)) match {
           case Some((_, modelMetadata)) => Right(modelMetadata)
           case None =>
             val withoutProvider =
-              if normalized.contains("/") then normalized.split("/", 2).last
+              if (normalized.contains("/")) normalized.split("/", 2).last
               else normalized
 
-            metadata.find(_._1.equalsIgnoreCase(withoutProvider)) match
+            metadata.find(_._1.equalsIgnoreCase(withoutProvider)) match {
               case Some((_, modelMetadata)) => Right(modelMetadata)
               case None =>
                 val fuzzyMatches = metadata.filter { case (id, _) =>
                   id.toLowerCase.contains(normalized.toLowerCase)
                 }
 
-                if fuzzyMatches.size == 1 then Right(fuzzyMatches.head._2)
-                else if fuzzyMatches.size > 1 then
+                if (fuzzyMatches.size == 1) Right(fuzzyMatches.head._2)
+                else if (fuzzyMatches.size > 1)
                   Left(
                     ValidationError(
                       s"Ambiguous model identifier '$normalized'. Matches: ${fuzzyMatches.keys.take(5).mkString(", ")}",
@@ -199,3 +210,8 @@ private object DefaultModelRegistryService:
                     )
                   )
                 else Left(ValidationError(s"Model not found: $normalized", "modelId"))
+            }
+        }
+    }
+  }
+}

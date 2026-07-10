@@ -3,11 +3,11 @@ package org.llm4s.rag.benchmark
 import org.llm4s.chunking.{ ChunkerFactory, DocumentChunk, DocumentChunker }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
-import org.llm4s.llmconnect.model.*
+import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
-import org.llm4s.vectorstore.*
+import org.llm4s.vectorstore._
 
 /**
  * A configurable RAG pipeline for benchmark experiments.
@@ -418,7 +418,7 @@ object RAGPipeline {
   def createEmbeddingClient(
     config: EmbeddingConfig,
     resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig]
-  )(using ModelRegistryService): Result[EmbeddingClient] =
+  )(implicit service: ModelRegistryService): Result[EmbeddingClient] =
     resolveEmbeddingProvider(config.provider).flatMap { baseConfig =>
       val providerConfig = config match {
         case EmbeddingConfig.OpenAI(model, _) =>

@@ -385,7 +385,7 @@ object ToolRegistry {
       // scalafix:off
       try
         if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-          executor.shutdownNow()
+          val _ = executor.shutdownNow()
         }
       catch {
         case _: InterruptedException =>

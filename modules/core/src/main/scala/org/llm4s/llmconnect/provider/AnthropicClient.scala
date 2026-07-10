@@ -13,17 +13,17 @@ import scala.collection.mutable
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
-import org.llm4s.llmconnect.model.*
-import org.llm4s.llmconnect.provider.ProviderResultOps.*
-import org.llm4s.llmconnect.streaming.*
+import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.provider.ProviderResultOps._
+import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
 import org.llm4s.toolapi.{ ObjectSchema, ToolFunction }
 import org.llm4s.types.Result
 import org.llm4s.error.{ AuthenticationError, RateLimitError, ValidationError }
-import org.llm4s.error.ThrowableOps.*
+import org.llm4s.error.ThrowableOps._
 
 import java.time.Instant
-import scala.jdk.CollectionConverters.*
+import scala.jdk.CollectionConverters._
 import scala.util.Try
 
 /**
@@ -75,7 +75,7 @@ class AnthropicClient(
   config: AnthropicConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
-)(using val registryService: ModelRegistryService)
+)(implicit val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
   // Store config for budget calculations
@@ -233,7 +233,7 @@ curl https://api.anthropic.com/v1/messages \
         val accumulator                      = StreamingAccumulator.create()
         var currentMessageId: Option[String] = None
         val blockIndexToToolId               = mutable.Map.empty[Long, String]
-        val rawStream                        = StringBuilder()
+        val rawStream                        = new StringBuilder()
 
         // Process the stream
         val attempt = Try {
@@ -442,7 +442,7 @@ curl https://api.anthropic.com/v1/messages \
 
     // Add a default system message if none was provided
     if (!hasSystemMessage) {
-      paramsBuilder.system("You are Claude, a helpful AI assistant.")
+      val _ = paramsBuilder.system("You are Claude, a helpful AI assistant.")
     }
   }
 
@@ -599,9 +599,11 @@ curl https://api.anthropic.com/v1/messages \
   private def applySamplingParameters(
     builder: MessageCreateParams.Builder,
     options: CompletionOptions
-  ): Unit =
-    if (modelSupportsTemperature)
-      builder.temperature(options.temperature.doubleValue())
+  ): Unit = {
+    if (modelSupportsTemperature) {
+      val _ = builder.temperature(options.temperature.doubleValue())
+    }
+  }
 
   /**
    * Whether `config.model` accepts the (deprecated) `temperature` sampling parameter.
@@ -693,13 +695,13 @@ object AnthropicClient {
   def apply(
     config: AnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-  )(using ModelRegistryService): Result[AnthropicClient] =
+  )(implicit service: ModelRegistryService): Result[AnthropicClient] =
     Try(new AnthropicClient(config, metrics)).toResult
 
   def apply(
     config: AnthropicConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService): Result[AnthropicClient] =
+  )(implicit service: ModelRegistryService): Result[AnthropicClient] =
     Try(new AnthropicClient(config, metrics, exchangeLogging)).toResult
 }

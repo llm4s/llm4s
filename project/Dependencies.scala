@@ -59,7 +59,7 @@ object Deps {
   val upickle                 = "com.lihaoyi"   %% "upickle"   % Versions.upickle
   val logback                 = "ch.qos.logback" % "logback-classic" % Versions.logback
   val log4jToSlf4j            = "org.apache.logging.log4j" % "log4j-to-slf4j" % Versions.log4j
-  val termflow                = "org.llm4s" %% "termflow" % Versions.termflow
+  val termflow                = ("org.llm4s" % "termflow_3" % Versions.termflow).exclude("com.github.pureconfig", "pureconfig-core_3")
   val monocleCore             = "dev.optics" %% "monocle-core"  % Versions.monocle
   val monocleMacro            = "dev.optics" %% "monocle-macro" % Versions.monocle
   val scalatest               = "org.scalatest"    %% "scalatest"          % Versions.scalatest
@@ -107,7 +107,10 @@ object Deps {
 }
 
 object Common {
-  val scala3 = "3.7.1"
+  val scala3   = "3.7.1"
+  val scala213 = "2.13.18"
+
+  val supportedScalaVersions = Seq(scala3, scala213)
 
   private val scala3CompilerOptions = Seq(
     "-explain",
@@ -122,6 +125,21 @@ object Common {
     "-Werror"
   )
 
+  private val scala213CompilerOptions = Seq(
+    "-feature",
+    "-unchecked",
+    "-deprecation",
+    "-Xfatal-warnings",
+    "-Xlint:adapted-args",
+    "-Xlint:inaccessible",
+    "-Xlint:infer-any",
+    "-Xlint:nullary-unit",
+    "-Xlint:unused",
+    "-Ywarn-dead-code",
+    "-Ywarn-value-discard"
+  )
+
   def scalacOptionsForVersion(scalaVersion: String): Seq[String] =
-    scala3CompilerOptions
+    if (scalaVersion.startsWith("2.")) scala213CompilerOptions
+    else scala3CompilerOptions
 }

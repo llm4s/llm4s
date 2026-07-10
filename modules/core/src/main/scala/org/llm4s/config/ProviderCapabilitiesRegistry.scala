@@ -2,10 +2,10 @@ package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
-import org.llm4s.config.ProvidersConfigModel.ProviderKind
+import org.llm4s.types.ProviderModelTypes.ProviderKind
 
 /** Registry mapping each `ProviderKind` to its `ProviderCapabilities` instance. */
-private[llm4s] object ProviderCapabilitiesRegistry:
+private[llm4s] object ProviderCapabilitiesRegistry {
 
   /**
    * Looks up the `ProviderCapabilities` for the given provider kind.
@@ -31,3 +31,4 @@ private[llm4s] object ProviderCapabilitiesRegistry:
     ProviderKind.Cohere     -> ProviderCapabilities.Cohere,
     ProviderKind.Mistral    -> ProviderCapabilities.Mistral,
   )
+}

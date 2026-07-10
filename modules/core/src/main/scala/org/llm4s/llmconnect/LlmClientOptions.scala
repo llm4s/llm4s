@@ -14,5 +14,6 @@ final case class LlmClientOptions(
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
 )
 
-object LlmClientOptions:
+object LlmClientOptions {
   val default: LlmClientOptions = LlmClientOptions()
+}

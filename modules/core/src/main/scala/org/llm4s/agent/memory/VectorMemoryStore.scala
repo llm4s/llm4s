@@ -35,7 +35,7 @@ final class VectorMemoryStore private (
   // Initialize schema on creation
   initializeSchema()
 
-  private def initializeSchema(): Unit =
+  private def initializeSchema(): Unit = {
     Using.resource(connection.createStatement()) { stmt =>
       // Main memories table with embedding blob
       stmt.execute(
@@ -86,6 +86,8 @@ final class VectorMemoryStore private (
         }
       }
     }
+    ()
+  }
 
   override def store(memory: Memory): Result[MemoryStore] = {
     // Generate embedding if not present
@@ -146,6 +148,7 @@ final class VectorMemoryStore private (
       stmt.setString(1, memory.id.value)
       stmt.setString(2, memory.content)
       stmt.executeUpdate()
+      ()
     }
   }
 
@@ -418,6 +421,7 @@ final class VectorMemoryStore private (
         stmt.setString(3, memory.id.value)
         stmt.executeUpdate()
       }
+      ()
     }
 
     def processBatch(): Result[Int] =

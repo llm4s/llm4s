@@ -5,6 +5,7 @@ import Common._
 inThisBuild(
   List(
     scalaVersion       := scala3,
+    crossScalaVersions := Common.supportedScalaVersions,
     organization       := "org.llm4s",
     organizationName   := "llm4s",
     versionScheme      := Some("early-semver"),
@@ -146,6 +147,7 @@ lazy val llm4s = (project in file("."))
 lazy val core = (project in file("modules/core"))
   .settings(
     name := "core",
+    crossScalaVersions := Common.supportedScalaVersions,
     commonSettings,
     Test / fork := true,
     Test / javaOptions ++= Seq(
@@ -265,7 +267,11 @@ lazy val samples = (project in file("modules//samples"))
     commonSettings,
     publish / skip := true,
     coverageEnabled := false,
-    libraryDependencies += Deps.termflow
+    libraryDependencies += Deps.termflow,
+    Compile / sources := {
+      if (scalaVersion.value.startsWith("2.13")) Seq.empty
+      else (Compile / sources).value
+    }
   )
 
 lazy val configPolicy = (project in file("modules/config-policy"))
@@ -292,7 +298,11 @@ lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples
     name := "workspaceSamples",
     commonSettings,
     publish / skip := true,
-    coverageEnabled := false
+    coverageEnabled := false,
+    Compile / sources := {
+      if (scalaVersion.value.startsWith("2.13")) Seq.empty
+      else (Compile / sources).value
+    }
   )
 
 lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))

@@ -317,7 +317,7 @@ final class MemoryManagerConfig(
   }
 
   override def hashCode(): Int = {
-    val state = Seq(
+    val state = Seq[Any](
       autoRecordMessages,
       autoExtractEntities,
       defaultImportance,

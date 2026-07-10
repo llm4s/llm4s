@@ -38,7 +38,7 @@ final class SQLiteVectorStore private (
   // Initialize schema on creation
   initializeSchema()
 
-  private def initializeSchema(): Unit =
+  private def initializeSchema(): Unit = {
     Using.resource(connection.createStatement()) { stmt =>
       // Main vectors table
       stmt.execute(
@@ -80,6 +80,8 @@ final class SQLiteVectorStore private (
         }
       }
     }
+    ()
+  }
 
   override def upsert(record: VectorRecord): Result[Unit] =
     Try {
@@ -460,6 +462,7 @@ final class SQLiteVectorStore private (
     Using.resource(connection.prepareStatement("DELETE FROM vectors_fts WHERE id = ?")) { stmt =>
       stmt.setString(1, id)
       stmt.executeUpdate()
+      ()
     }
 
     // Insert new entry
@@ -467,6 +470,7 @@ final class SQLiteVectorStore private (
       stmt.setString(1, id)
       stmt.setString(2, content)
       stmt.executeUpdate()
+      ()
     }
   }
 

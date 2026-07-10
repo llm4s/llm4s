@@ -7,7 +7,7 @@ import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.VertexAIConfig
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.provider.ProviderResultOps.*
+import org.llm4s.llmconnect.provider.ProviderResultOps._
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.{ ModelRegistryService, TransformationResult }
 import org.llm4s.toolapi.ToolFunction
@@ -53,18 +53,18 @@ class VertexAIClient(
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
   private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
-)(using val registryService: ModelRegistryService)
+)(implicit val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
-  private val logger = LoggerFactory.getLogger(getClass)
+  val logger = LoggerFactory.getLogger(getClass)
 
-  private val authProvider = new VertexAIAuthProvider(config.credentialFilePath, httpClient)
+  val authProvider = new VertexAIAuthProvider(config.credentialFilePath, httpClient)
 
   protected def clientDescription: String = s"Vertex AI client for model ${config.model}"
   protected def providerName: String      = "vertexai"
   protected def modelName: String         = config.model
 
-  private def modelUrl(suffix: String): String = {
+  def modelUrl(suffix: String): String = {
     val base = config.computedBaseUrl
     s"$base/projects/${config.projectId}/locations/${config.location}/publishers/google/models/${config.model}:$suffix"
   }
@@ -148,7 +148,7 @@ class VertexAIClient(
               val accumulator = StreamingAccumulator.create()
               val messageId   = UUID.randomUUID().toString
               val reader      = new BufferedReader(new InputStreamReader(response.body, StandardCharsets.UTF_8))
-              val rawStream   = StringBuilder()
+              val rawStream   = new StringBuilder()
 
               Try {
                 try {
@@ -175,7 +175,7 @@ class VertexAIClient(
                   }
                 } finally {
                   Try(reader.close())
-                  Try(response.body.close())
+                  val _ = Try(response.body.close())
                 }
               }.toEither.left
                 .map(_.toLLMError)
@@ -204,7 +204,7 @@ class VertexAIClient(
   override def getContextWindow(): Int     = config.contextWindow
   override def getReserveCompletion(): Int = config.reserveCompletion
 
-  private def buildRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Value = {
+  def buildRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Value = {
     val contents         = scala.collection.mutable.ArrayBuffer[ujson.Value]()
     var systemInstr      = Option.empty[String]
     val toolCallIdToName = scala.collection.mutable.Map[String, String]()
@@ -293,7 +293,7 @@ class VertexAIClient(
       case _ => ()
     }
 
-  private def parseCompletionResponse(responseText: String): Result[Completion] =
+  def parseCompletionResponse(responseText: String): Result[Completion] =
     Try {
       val json       = ujson.read(responseText)
       val candidates = json("candidates").arr
@@ -345,7 +345,7 @@ class VertexAIClient(
       }
     }.toEither.left.map(e => e.toLLMError).flatten
 
-  private def parseStreamChunk(json: ujson.Value, messageId: String): Option[StreamedChunk] =
+  def parseStreamChunk(json: ujson.Value, messageId: String): Option[StreamedChunk] =
     Try {
       val candidates = json("candidates").arr
       if (candidates.nonEmpty) {
@@ -374,12 +374,12 @@ class VertexAIClient(
       } else None
     }.toOption.flatten
 
-  private def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] = {
+  def handleErrorResponse(statusCode: Int, body: String): Result[Nothing] = {
     logger.error(s"[VertexAI] Error response: $statusCode")
     HttpErrorMapper.mapHttpError(statusCode, body, providerName)
   }
 
-  private def recordExchange(
+  def recordExchange(
     startedAt: Instant,
     requestBody: String,
     responseBody: Option[String],
@@ -405,18 +405,17 @@ class VertexAIClient(
 object VertexAIClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: VertexAIConfig)(using ModelRegistryService): Result[VertexAIClient] =
+  def apply(config: VertexAIConfig)(implicit service: ModelRegistryService): Result[VertexAIClient] = {
     Try(new VertexAIClient(config)).toResult
+  }
 
-  def apply(config: VertexAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(using
-    ModelRegistryService
-  ): Result[VertexAIClient] =
+  def apply(config: VertexAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit implicitService: ModelRegistryService): Result[VertexAIClient] =
     Try(new VertexAIClient(config, metrics)).toResult
 
   def apply(
     config: VertexAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService): Result[VertexAIClient] =
+  )(implicit service: ModelRegistryService): Result[VertexAIClient] =
     Try(new VertexAIClient(config, metrics, exchangeLogging)).toResult
 }

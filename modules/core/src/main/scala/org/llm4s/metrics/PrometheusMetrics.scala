@@ -151,7 +151,7 @@ final class PrometheusMetrics(
     model: String,
     outcome: Outcome,
     duration: FiniteDuration
-  ): Unit =
+  ): Unit = {
     Try {
       val status = outcome match {
         case Outcome.Success          => "success"
@@ -169,6 +169,8 @@ final class PrometheusMetrics(
     }.recover { case e: Exception =>
       logger.warn(s"Failed to record request metrics: ${e.getMessage}")
     }
+    ()
+  }
 
   /**
    * Record token usage.
@@ -182,13 +184,15 @@ final class PrometheusMetrics(
     model: String,
     inputTokens: Long,
     outputTokens: Long
-  ): Unit =
+  ): Unit = {
     Try {
       tokensTotal.labelValues(provider, model, "input").inc(inputTokens.toDouble)
       tokensTotal.labelValues(provider, model, "output").inc(outputTokens.toDouble)
     }.recover { case e: Exception =>
       logger.warn(s"Failed to record token metrics: ${e.getMessage}")
     }
+    ()
+  }
 
   /**
    * Record estimated cost in USD.
@@ -201,12 +205,14 @@ final class PrometheusMetrics(
     provider: String,
     model: String,
     costUsd: Double
-  ): Unit =
+  ): Unit = {
     Try {
       costUsdTotal.labelValues(provider, model).inc(costUsd)
     }.recover { case e: Exception =>
       logger.warn(s"Failed to record cost metrics: ${e.getMessage}")
     }
+    ()
+  }
 
   /**
    * Record an image generation operation.
@@ -225,7 +231,7 @@ final class PrometheusMetrics(
     outcome: Outcome,
     duration: FiniteDuration,
     imageCount: Int
-  ): Unit =
+  ): Unit = {
     Try {
       val status = outcome match {
         case Outcome.Success          => "success"
@@ -249,6 +255,8 @@ final class PrometheusMetrics(
     }.recover { case e: Exception =>
       logger.warn(s"Failed to record image generation metrics: ${e.getMessage}")
     }
+    ()
+  }
 
   /**
    * Record estimated image generation cost in USD.
@@ -262,12 +270,14 @@ final class PrometheusMetrics(
     model: String,
     costUsd: Double,
     imageCount: Int
-  ): Unit =
+  ): Unit = {
     Try {
       imageGenerationCostUsdTotal.labelValues(provider, model).inc(costUsd)
     }.recover { case e: Exception =>
       logger.warn(s"Failed to record image generation cost metrics: ${e.getMessage}")
     }
+    ()
+  }
 }
 
 object PrometheusMetrics {

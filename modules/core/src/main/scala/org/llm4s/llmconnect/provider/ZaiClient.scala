@@ -6,7 +6,7 @@ import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.ZaiConfig
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.provider.ProviderResultOps.*
+import org.llm4s.llmconnect.provider.ProviderResultOps._
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.ToolRegistry
@@ -41,11 +41,11 @@ class ZaiClient(
   config: ZaiConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
-)(using val registryService: ModelRegistryService)
+)(implicit val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
-  private val httpClient = HttpClient.newHttpClient()
-  private val logger     = org.slf4j.LoggerFactory.getLogger(getClass)
+  val httpClient = HttpClient.newHttpClient()
+  val logger     = org.slf4j.LoggerFactory.getLogger(getClass)
 
   protected def clientDescription: String = s"Z.ai client for model ${config.model}"
   protected def providerName: String      = "zai"
@@ -106,7 +106,7 @@ class ZaiClient(
     val requestText = requestBody.render()
 
     val accumulator = StreamingAccumulator.create()
-    val rawStream   = StringBuilder()
+    val rawStream   = new StringBuilder()
 
     val requestResult = Try {
       val request = HttpRequest
@@ -155,7 +155,7 @@ class ZaiClient(
             }
           } finally {
             Try(reader.close())
-            Try(response.body().close())
+            val _ = Try(response.body().close())
           }
         }.toResult
 
@@ -175,7 +175,7 @@ class ZaiClient(
     }
   }
 
-  private def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
+  def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
     val choices = json("choices").arr
     if (choices.nonEmpty) {
       val choice = choices(0)
@@ -296,7 +296,7 @@ class ZaiClient(
     base
   }
 
-  private def parseCompletion(json: ujson.Value): Completion = {
+  def parseCompletion(json: ujson.Value): Completion = {
     val choice  = json("choices")(0)
     val message = choice("message")
 
@@ -349,7 +349,7 @@ class ZaiClient(
     )
   }
 
-  private def parseToolCalls(toolCallsJson: ujson.Value): Seq[ToolCall] =
+  def parseToolCalls(toolCallsJson: ujson.Value): Seq[ToolCall] =
     toolCallsJson.arr.map { call =>
       val function = call("function")
       val argsStr  = function.obj.get("arguments").flatMap(_.strOpt).getOrElse("{}")
@@ -370,7 +370,7 @@ class ZaiClient(
       case _                => ()
     }
 
-  private def recordExchange(
+  def recordExchange(
     startedAt: Instant,
     requestBody: String,
     responseBody: Option[String],
@@ -393,13 +393,13 @@ object ZaiClient {
   def apply(
     config: ZaiConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-  )(using ModelRegistryService): Result[ZaiClient] =
+  )(implicit service: ModelRegistryService): Result[ZaiClient] =
     Try(new ZaiClient(config, metrics)).toResult
 
   def apply(
     config: ZaiConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService): Result[ZaiClient] =
+  )(implicit service: ModelRegistryService): Result[ZaiClient] =
     Try(new ZaiClient(config, metrics, exchangeLogging)).toResult
 }

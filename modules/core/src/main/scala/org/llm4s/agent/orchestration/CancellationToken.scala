@@ -72,7 +72,7 @@ class CancellationToken {
   def cancellationFuture: Future[Nothing] = {
     val promise = Promise[Nothing]()
     onCancel {
-      promise.tryFailure(new CancellationException("Operation cancelled"))
+      val _ = promise.tryFailure(new CancellationException("Operation cancelled"))
     }
     promise.future
   }

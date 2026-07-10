@@ -32,7 +32,7 @@ class CohereClient(
   config: CohereConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
-)(using val registryService: ModelRegistryService)
+)(implicit val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
   private val httpClient = HttpClient.newHttpClient()
@@ -250,18 +250,17 @@ class CohereClient(
 object CohereClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: CohereConfig)(using ModelRegistryService): Result[CohereClient] =
+  def apply(config: CohereConfig)(implicit service: ModelRegistryService): Result[CohereClient] = {
     Try(new CohereClient(config)).toResult
+  }
 
-  def apply(config: CohereConfig, metrics: org.llm4s.metrics.MetricsCollector)(using
-    ModelRegistryService
-  ): Result[CohereClient] =
+  def apply(config: CohereConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit implicitService: ModelRegistryService): Result[CohereClient] =
     Try(new CohereClient(config, metrics)).toResult
 
   def apply(
     config: CohereConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService): Result[CohereClient] =
+  )(implicit service: ModelRegistryService): Result[CohereClient] =
     Try(new CohereClient(config, metrics, exchangeLogging)).toResult
 }

@@ -90,6 +90,7 @@ class CodeWorker(sourceDirectory: String, imageName: String, hostPort: Int, clie
     workspace.stopContainer()
   }
 
-  override def close(): Unit =
-    shutdown()
+  override def close(): Unit = {
+    val _ = shutdown()
+  }
 }

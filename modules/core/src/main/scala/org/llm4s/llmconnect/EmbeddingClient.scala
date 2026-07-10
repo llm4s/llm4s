@@ -20,7 +20,7 @@ class EmbeddingClient(
   provider: EmbeddingProvider,
   tracer: Option[Tracing] = None,
   operation: String = "embedding"
-)(using service: ModelRegistryService) {
+)(implicit service: ModelRegistryService) {
   private val logger = LoggerFactory.getLogger(getClass)
 
   /** Text embeddings via the configured HTTP provider. */
@@ -128,7 +128,7 @@ object EmbeddingClient {
    * Typed factory: build client from resolved provider name and typed provider config.
    * Avoids reading any additional configuration at runtime.
    */
-  def from(provider: String, cfg: EmbeddingProviderConfig)(using ModelRegistryService): Result[EmbeddingClient] = {
+  def from(provider: String, cfg: EmbeddingProviderConfig)(implicit service: ModelRegistryService): Result[EmbeddingClient] = {
     val p = provider.toLowerCase
     p match {
       case "openai" => Right(new EmbeddingClient(OpenAIEmbeddingProvider.fromConfig(cfg)))

@@ -14,7 +14,7 @@ final case class ModelRegistryConfig(
 )
 
 /** Companion object providing defaults for `ModelRegistryConfig`. */
-object ModelRegistryConfig:
+object ModelRegistryConfig {
   /** Classpath resource path to the bundled LiteLLM model metadata JSON file. */
   val DefaultResourcePath = "/modeldata/litellm_model_metadata.json"
 
@@ -33,3 +33,4 @@ object ModelRegistryConfig:
 
   /** A `ModelRegistryConfig` that loads from the bundled classpath resource. */
   val default: ModelRegistryConfig = ModelRegistryConfig()
+}

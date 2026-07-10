@@ -64,11 +64,12 @@ case class OpenAIConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig:
+) extends ProviderConfig {
   override val provider: ProviderKind = ProviderKind.OpenAI
   override def toString: String =
     s"OpenAIConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, organization=$organization, baseUrl=$baseUrl, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+}
 
 object OpenAIConfig {
   private val standardReserve = 4096
@@ -104,7 +105,7 @@ object OpenAIConfig {
     apiKey: String,
     organization: Option[String],
     baseUrl: String
-  )(using resolver: ContextWindowResolver): OpenAIConfig = {
+  )(implicit resolver: ContextWindowResolver): OpenAIConfig = {
     require(apiKey.trim.nonEmpty, "OpenAI apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "OpenAI baseUrl must be non-empty")
     val (cw, rc) = resolver.resolve(
@@ -152,11 +153,12 @@ case class AzureConfig(
   apiVersion: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig:
+) extends ProviderConfig {
   override val provider: ProviderKind = ProviderKind.Azure
   override def toString: String =
     s"AzureConfig(endpoint=$endpoint, apiKey=${Redaction.secret(apiKey)}, model=$model, apiVersion=$apiVersion, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+}
 
 object AzureConfig {
   private val standardReserve = 4096
@@ -188,7 +190,7 @@ object AzureConfig {
     endpoint: String,
     apiKey: String,
     apiVersion: String
-  )(using resolver: ContextWindowResolver): AzureConfig = {
+  )(implicit resolver: ContextWindowResolver): AzureConfig = {
     require(endpoint.trim.nonEmpty, "Azure endpoint must be non-empty")
     require(apiKey.trim.nonEmpty, "Azure apiKey must be non-empty")
     val (cw, rc) = resolver.resolve(
@@ -229,11 +231,12 @@ case class AnthropicConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig:
+) extends ProviderConfig {
   override val provider: ProviderKind = ProviderKind.Anthropic
   override def toString: String =
     s"AnthropicConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
+}
 
 object AnthropicConfig {
   private val standardReserve = 4096
@@ -258,7 +261,7 @@ object AnthropicConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  )(using resolver: ContextWindowResolver): AnthropicConfig = {
+  )(implicit resolver: ContextWindowResolver): AnthropicConfig = {
     require(apiKey.trim.nonEmpty, "Anthropic apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Anthropic baseUrl must be non-empty")
     val (cw, rc) = resolver.resolve(
@@ -295,8 +298,10 @@ case class OllamaConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig:
+) extends ProviderConfig {
   override val provider: ProviderKind = ProviderKind.Ollama
+
+}
 
 object OllamaConfig {
   private val standardReserve = 4096
@@ -320,7 +325,7 @@ object OllamaConfig {
   def fromValues(
     modelName: String,
     baseUrl: String
-  )(using resolver: ContextWindowResolver): OllamaConfig = {
+  )(implicit resolver: ContextWindowResolver): OllamaConfig = {
     require(baseUrl.trim.nonEmpty, "Ollama baseUrl must be non-empty")
     val (cw, rc) = resolver.resolve(
       lookupProviders = Seq("ollama"),
@@ -356,11 +361,12 @@ case class ZaiConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig:
+) extends ProviderConfig {
   override val provider: ProviderKind = ProviderKind.Zai
   override def toString: String =
     s"ZaiConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
+}
 
 object ZaiConfig {
   private val standardReserve = 4096
@@ -388,7 +394,7 @@ object ZaiConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  )(using resolver: ContextWindowResolver): ZaiConfig = {
+  )(implicit resolver: ContextWindowResolver): ZaiConfig = {
     require(apiKey.trim.nonEmpty, "Zai apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Zai baseUrl must be non-empty")
     val (cw, rc) = resolver.resolve(
@@ -426,11 +432,12 @@ case class GeminiConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig:
+) extends ProviderConfig {
   override val provider: ProviderKind = ProviderKind.Gemini
   override def toString: String =
     s"GeminiConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
+}
 
 object GeminiConfig {
   private val standardReserve = 8192
@@ -458,7 +465,7 @@ object GeminiConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  )(using resolver: ContextWindowResolver): GeminiConfig = {
+  )(implicit resolver: ContextWindowResolver): GeminiConfig = {
     require(apiKey.trim.nonEmpty, "Gemini apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Gemini baseUrl must be non-empty")
     val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
@@ -480,7 +487,7 @@ object GeminiConfig {
 
   private def normalizeBaseUrl(baseUrl: String): String = {
     val trimmed = baseUrl.trim.stripSuffix("/")
-    if trimmed.matches(""".*/v\d+(?:alpha|beta)?$""") then trimmed
+    if (trimmed.matches(""".*/v\d+(?:alpha|beta)?$""")) trimmed
     else s"$trimmed$DefaultApiPath"
   }
 }
@@ -504,11 +511,12 @@ case class DeepSeekConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig:
+) extends ProviderConfig {
   override val provider: ProviderKind = ProviderKind.DeepSeek
   override def toString: String =
     s"DeepSeekConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
+}
 
 object DeepSeekConfig {
   private val logger          = LoggerFactory.getLogger(getClass)
@@ -549,7 +557,7 @@ object DeepSeekConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  )(using resolver: ContextWindowResolver): DeepSeekConfig = {
+  )(implicit resolver: ContextWindowResolver): DeepSeekConfig = {
     require(apiKey.trim.nonEmpty, "DeepSeek apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "DeepSeek baseUrl must be non-empty")
     val (cw, rc) = resolver.resolve(
@@ -587,11 +595,12 @@ case class CohereConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig:
+) extends ProviderConfig {
   override val provider: ProviderKind = ProviderKind.Cohere
   override def toString: String =
     s"CohereConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
+}
 
 object CohereConfig {
   private val DefaultContextWindow     = 128000
@@ -615,7 +624,7 @@ object CohereConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  )(using resolver: ContextWindowResolver): CohereConfig = {
+  )(implicit resolver: ContextWindowResolver): CohereConfig = {
     require(apiKey.trim.nonEmpty, "Cohere apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Cohere baseUrl must be non-empty")
     val (cw, rc) = resolver.resolve(
@@ -641,13 +650,14 @@ case class MistralConfig(
   baseUrl: String,
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig:
+) extends ProviderConfig {
   override val provider: ProviderKind = ProviderKind.Mistral
   override def toString: String =
     s"MistralConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
+}
 
-object MistralConfig:
+object MistralConfig {
   val DEFAULT_BASE_URL: String = "https://api.mistral.ai"
 
   private val DefaultContextWindow     = 128000
@@ -660,7 +670,7 @@ object MistralConfig:
     modelName: String,
     apiKey: String,
     baseUrl: String
-  )(using resolver: ContextWindowResolver): MistralConfig =
+  )(implicit resolver: ContextWindowResolver): MistralConfig = {
     require(apiKey.trim.nonEmpty, "Mistral apiKey must be non-empty")
     require(baseUrl.trim.nonEmpty, "Mistral baseUrl must be non-empty")
     val (cw, rc) = resolver.resolve(
@@ -677,6 +687,8 @@ object MistralConfig:
       contextWindow = cw,
       reserveCompletion = rc
     )
+  }
+}
 
 /**
  * Configuration for Google Cloud Vertex AI.
@@ -701,7 +713,7 @@ case class VertexAIConfig(
   credentialFilePath: Option[String],
   contextWindow: Int,
   reserveCompletion: Int
-) extends ProviderConfig:
+) extends ProviderConfig {
   override val provider: ProviderKind = ProviderKind.VertexAI
 
   /** Base URL derived from the location, e.g. `"https://us-central1-aiplatform.googleapis.com/v1"`. */
@@ -712,7 +724,9 @@ case class VertexAIConfig(
       s"credentialFilePath=${credentialFilePath.map(_ => "<redacted>").getOrElse("none")}, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
 
-object VertexAIConfig:
+}
+
+object VertexAIConfig {
   val DEFAULT_LOCATION = "us-central1"
 
   private val DefaultContextWindow     = 1048576
@@ -735,7 +749,7 @@ object VertexAIConfig:
     projectId: String,
     location: String = DEFAULT_LOCATION,
     credentialFilePath: Option[String] = None
-  )(using resolver: ContextWindowResolver): VertexAIConfig =
+  )(implicit resolver: ContextWindowResolver): VertexAIConfig = {
     require(projectId.trim.nonEmpty, "Vertex AI projectId must be non-empty")
     require(location.trim.nonEmpty, "Vertex AI location must be non-empty")
     val (cw, rc) = resolver.resolve(
@@ -753,3 +767,5 @@ object VertexAIConfig:
       contextWindow = cw,
       reserveCompletion = rc
     )
+  }
+}

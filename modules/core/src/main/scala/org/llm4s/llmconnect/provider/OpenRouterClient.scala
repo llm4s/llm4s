@@ -5,20 +5,21 @@ import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.provider.ProviderResultOps.*
-import org.llm4s.llmconnect.serialization.OpenRouterToolCallDeserializer
+import org.llm4s.llmconnect.provider.ProviderResultOps._
+
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
+import org.llm4s.types.{ Result, TryOps }
+import java.io.{ BufferedReader, InputStreamReader }
+import java.nio.charset.StandardCharsets
+import org.llm4s.llmconnect.serialization.OpenRouterToolCallDeserializer
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.ToolRegistry
-import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.error.ThrowableOps._
 
 import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.time.Duration
 import java.time.Instant
-import java.io.{ BufferedReader, InputStreamReader }
-import java.nio.charset.StandardCharsets
 import scala.util.Try
 
 /**
@@ -63,10 +64,10 @@ class OpenRouterClient(
   config: OpenAIConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
-)(using val registryService: ModelRegistryService)
+)(implicit val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
-  private val httpClient = HttpClient.newHttpClient()
+  val httpClient = HttpClient.newHttpClient()
 
   protected def clientDescription: String = s"OpenRouter client for model ${config.model}"
   protected def providerName: String      = "openrouter"
@@ -130,7 +131,7 @@ class OpenRouterClient(
       (
         requestBody.render(),
         StreamingAccumulator.create(),
-        StringBuilder()
+        new StringBuilder()
       )
     }.toEither.left.map(_.toLLMError).flatMap { case (requestText, streamAccumulator, rawStream) =>
       // Send the HTTP request, converting transport exceptions to Left
@@ -190,7 +191,7 @@ class OpenRouterClient(
             }
           } finally {
             Try(reader.close())
-            Try(response.body().close())
+            val _ = Try(response.body().close())
           }
         }.toEither.left.map(_.toLLMError)
       }
@@ -210,7 +211,7 @@ class OpenRouterClient(
     }
   }
 
-  private def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
+  def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] = {
     val choices = json("choices").arr
     if (choices.nonEmpty) {
       val choice = choices(0)
@@ -271,7 +272,7 @@ class OpenRouterClient(
     }
   }
 
-  private def recordExchange(
+  def recordExchange(
     startedAt: Instant,
     requestBody: String,
     responseBody: Option[String],
@@ -352,7 +353,7 @@ class OpenRouterClient(
    * Anthropic models receive a `thinking` object; OpenAI o1/o3/o4 models receive
    * `reasoning_effort`; all others are left unchanged (reasoning silently ignored).
    */
-  private def addReasoningConfig(base: ujson.Obj, options: CompletionOptions): Unit = {
+  def addReasoningConfig(base: ujson.Obj, options: CompletionOptions): Unit = {
     val modelLower = config.model.toLowerCase
 
     // Check if reasoning is requested
@@ -397,7 +398,7 @@ class OpenRouterClient(
     }
   }
 
-  private def parseCompletion(json: ujson.Value): Completion = {
+  def parseCompletion(json: ujson.Value): Completion = {
     val choice  = json("choices")(0)
     val message = choice("message")
 
@@ -481,13 +482,13 @@ object OpenRouterClient {
   def apply(
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop
-  )(using ModelRegistryService): Result[OpenRouterClient] =
+  )(implicit service: ModelRegistryService): Result[OpenRouterClient] =
     Try(new OpenRouterClient(config, metrics)).toResult
 
   def apply(
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService): Result[OpenRouterClient] =
+  )(implicit service: ModelRegistryService): Result[OpenRouterClient] =
     Try(new OpenRouterClient(config, metrics, exchangeLogging)).toResult
 }

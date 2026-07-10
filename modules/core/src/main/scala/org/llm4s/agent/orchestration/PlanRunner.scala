@@ -272,11 +272,11 @@ class PlanRunner(maxConcurrentNodes: Int = 10) {
           Future.firstCompletedOf(
             List(
               agent.execute(input),
-              cancellationToken.cachedCancellationFuture.map(_ =>
+              cancellationToken.cachedCancellationFuture.recover { case _ =>
                 Left(
                   OrchestrationError.PlanExecutionError(s"Node ${node.id} cancelled", planId.value)
                 )
-              )
+              }
             )
           )
         }.fold(

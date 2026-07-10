@@ -158,7 +158,7 @@ class MCPServer(
     server.foreach { s =>
       logger.info("Stopping MCPServer...")
       // Close all open SSE connections gracefully
-      sseConnections.values().forEach(conn => Try(conn.queue.put(None)))
+      sseConnections.values().forEach(conn => { Try(conn.queue.put(None)); () })
       sseConnections.clear()
       s.stop(delay)
       if (executorService != null) {
@@ -288,7 +288,7 @@ class MCPServer(
       val path   = exchange.getRequestURI.getPath
       logger.debug(s"$method $path")
 
-      Try {
+      Try[Unit] {
         (method, path) match {
           case ("GET", p) if p.endsWith("/sse")       => handleSSEGet(exchange)
           case ("POST", p) if p.endsWith("/messages") => handleSSEPost(exchange)
@@ -296,10 +296,12 @@ class MCPServer(
           case ("DELETE", _)                          => handleDELETE(exchange)
           case _                                      => sendErrorResponse(exchange, 405, "Method not allowed")
         }
-      }.recover { case e =>
+      }.recover[Unit] { case e =>
         logger.error(s"Unhandled error in $method $path: ${e.getMessage}", e)
-        Try(sendErrorResponse(exchange, 500, "Internal server error"))
+        val _ = Try(sendErrorResponse(exchange, 500, "Internal server error"))
+        ()
       }
+      ()
     }
 
     private def isAuthorized(exchange: HttpExchange): Boolean =

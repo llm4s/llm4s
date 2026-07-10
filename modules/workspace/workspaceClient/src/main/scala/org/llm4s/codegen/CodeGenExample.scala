@@ -35,8 +35,10 @@ object CodeGenExample {
 
       registryService <- Llm4sConfig.modelRegistryService()
 
-      given org.llm4s.model.ModelRegistryService = registryService
-      client <- LLMConnect.getClient(providerCfg)
+      client <- {
+        implicit val _registryService: org.llm4s.model.ModelRegistryService = registryService
+        LLMConnect.getClient(providerCfg)
+      }
 
       finalState <- Using.resource(
         new CodeWorker(ws.workspaceDir, ws.imageName, ws.hostPort, client)

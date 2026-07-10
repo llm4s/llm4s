@@ -793,6 +793,7 @@ class StdioTransportImpl(
     }.recover { case e =>
       logger.warn(s"StdioTransport($name) failed to parse response: ${e.getMessage}, line: $line")
     }
+    ()
   }
 
   // Fails all pending requests with the given error message

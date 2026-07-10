@@ -52,7 +52,7 @@ class OllamaClient(
   protected val metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
   exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
   private[provider] val httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
-)(using val registryService: ModelRegistryService)
+)(implicit val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
   protected def clientDescription: String = s"Ollama client for model ${config.model}"
@@ -189,7 +189,7 @@ class OllamaClient(
             }
           } finally {
             Try(reader.close())
-            Try(response.body.close())
+            val _ = Try(response.body.close())
           }
         }.toResult
 
@@ -317,6 +317,6 @@ object OllamaClient {
     config: OllamaConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
     exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
-  )(using ModelRegistryService): Result[OllamaClient] =
+  )(implicit service: ModelRegistryService): Result[OllamaClient] =
     Try(new OllamaClient(config, metrics, exchangeLogging)).toResult
 }

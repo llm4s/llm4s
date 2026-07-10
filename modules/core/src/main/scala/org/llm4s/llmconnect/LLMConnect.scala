@@ -32,9 +32,7 @@ import org.llm4s.types.Result
  */
 object LLMConnect {
 
-  private def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
-  ): Result[LLMClient] =
+  private def buildClient(config: ProviderConfig, options: LlmClientOptions)(implicit service: ModelRegistryService): Result[LLMClient] = {
     val metrics         = options.metrics
     val exchangeLogging = options.exchangeLogging
     config match {
@@ -61,11 +59,12 @@ object LLMConnect {
       case cfg: VertexAIConfig =>
         VertexAIClient(cfg, metrics, exchangeLogging)
     }
+  }
 
   def fromConfig(
     config: ProviderConfig,
     options: LlmClientOptions = LlmClientOptions.default
-  )(using ModelRegistryService): Result[LLMClient] =
+  )(implicit service: ModelRegistryService): Result[LLMClient] =
     buildClient(config, options)
 
   // ---- Config-driven construction -----------------------------------------
@@ -87,7 +86,7 @@ object LLMConnect {
   def getClient(
     config: ProviderConfig,
     metrics: MetricsCollector
-  )(using ModelRegistryService): Result[LLMClient] =
+  )(implicit service: ModelRegistryService): Result[LLMClient] =
     fromConfig(config, LlmClientOptions(metrics = metrics))
 
   /**
@@ -99,7 +98,7 @@ object LLMConnect {
   def getClient(
     config: ProviderConfig,
     options: LlmClientOptions
-  )(using ModelRegistryService): Result[LLMClient] =
+  )(implicit service: ModelRegistryService): Result[LLMClient] =
     fromConfig(config, options)
 
   /**
@@ -111,7 +110,7 @@ object LLMConnect {
    *
    * @param config Provider configuration; the concrete subtype determines which client is built.
    */
-  def getClient(config: ProviderConfig)(using ModelRegistryService): Result[LLMClient] =
+  def getClient(config: ProviderConfig)(implicit service: ModelRegistryService): Result[LLMClient] =
     fromConfig(config)
 
   // ---- Provider-explicit construction (validates provider/config pairing) -
@@ -138,7 +137,7 @@ object LLMConnect {
     provider: ProviderKind,
     config: ProviderConfig,
     metrics: MetricsCollector
-  )(using ModelRegistryService): Result[LLMClient] =
+  )(implicit service: ModelRegistryService): Result[LLMClient] =
     getClient(provider, config, LlmClientOptions(metrics = metrics))
 
   /**
@@ -149,14 +148,14 @@ object LLMConnect {
     provider: ProviderKind,
     config: ProviderConfig,
     options: LlmClientOptions
-  )(using ModelRegistryService): Result[LLMClient] =
+  )(implicit service: ModelRegistryService): Result[LLMClient] =
     fromProvider(provider, config, options)
 
   def fromProvider(
     provider: ProviderKind,
     config: ProviderConfig,
     options: LlmClientOptions = LlmClientOptions.default
-  )(using ModelRegistryService): Result[LLMClient] =
+  )(implicit service: ModelRegistryService): Result[LLMClient] = {
     val metrics         = options.metrics
     val exchangeLogging = options.exchangeLogging
     (provider, config) match {
@@ -177,6 +176,7 @@ object LLMConnect {
         val msg     = s"Invalid config type $cfgType for provider $prov"
         Left(ConfigurationError(msg))
     }
+  }
 
   /**
    * Constructs an [[LLMClient]], verifying provider/config consistency,
@@ -191,6 +191,6 @@ object LLMConnect {
   def getClient(
     provider: ProviderKind,
     config: ProviderConfig
-  )(using ModelRegistryService): Result[LLMClient] =
+  )(implicit service: ModelRegistryService): Result[LLMClient] =
     getClient(provider, config, LlmClientOptions.default)
 }

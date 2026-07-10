@@ -32,27 +32,31 @@ final case class JsonHttpResponse(
   headers: Map[String, Seq[String]] = Map.empty
 )
 
-object HttpResponse:
-  extension (response: HttpResponse)
+object HttpResponse {
+  implicit class HttpResponseOps(val response: HttpResponse) extends AnyVal {
     def ensureSuccess(provider: String): Result[HttpResponse] =
-      if response.statusCode >= 200 && response.statusCode < 300 then Right(response)
+      if (response.statusCode >= 200 && response.statusCode < 300) Right(response)
       else Left(ServiceError(response.statusCode, provider, response.body))
 
     def toJson(fieldName: String = "responseBody"): Result[JsonHttpResponse] =
       Try(ujson.read(response.body)).toResult.left
         .map(err => ValidationError(fieldName, s"Failed to parse JSON response: ${err.message}"))
         .map(json => JsonHttpResponse(response.statusCode, json, response.headers))
+  }
 
-  extension [A](result: Result[A])
+  implicit class ResultOps[A](val result: Result[A]) extends AnyVal {
     def mapServiceError(
       provider: String,
       message: String
     ): Result[A] =
-      result.left.map:
+      result.left.map {
         case service: ServiceError =>
           ServiceError(service.httpStatus, provider, s"$message: ${service.message}")
         case other =>
           other
+      }
+  }
+}
 
 /**
  * HTTP response wrapper for binary (non-text) response bodies.

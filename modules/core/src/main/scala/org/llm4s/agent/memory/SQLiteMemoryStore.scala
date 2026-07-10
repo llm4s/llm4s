@@ -298,6 +298,7 @@ final class SQLiteMemoryStore private (
     Using.resource(connection.prepareStatement("DELETE FROM memories_fts WHERE id = ?")) { stmt =>
       stmt.setString(1, memory.id.value)
       stmt.executeUpdate()
+      ()
     }
     // Insert new entry
     Using.resource(
@@ -306,6 +307,7 @@ final class SQLiteMemoryStore private (
       stmt.setString(1, memory.id.value)
       stmt.setString(2, memory.content)
       stmt.executeUpdate()
+      ()
     }
   }
 

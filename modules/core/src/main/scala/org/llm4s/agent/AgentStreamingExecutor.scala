@@ -520,7 +520,7 @@ final private[agent] class AgentStreamingExecutor(
     if (context.debug) {
       logger.debug("Starting runWithStrategy")
       logger.debug("Strategy: {}", strategy)
-      logger.debug("Max steps: {}", maxSteps.getOrElse("unlimited"))
+      logger.debug("Max steps: {}", maxSteps.map(_.toString).getOrElse("unlimited"))
     }
 
     context.traceLogPath.foreach(path => AgentTraceFormatter.writeTraceLog(initialState, path))

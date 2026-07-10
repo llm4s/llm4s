@@ -37,7 +37,7 @@ object Policies {
       executor.shutdown()
       try
         if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-          executor.shutdownNow()
+          val _ = executor.shutdownNow()
         }
       catch {
         case _: InterruptedException =>
@@ -157,9 +157,9 @@ object Policies {
         val timeoutTask = scheduler.schedule(
           new Runnable {
             def run(): Unit =
-              timeoutPromise.trySuccess(
+              { timeoutPromise.trySuccess(
                 Future.successful(Left(OrchestrationError.AgentTimeoutError(agent.name, timeout.toMillis)))
-              )
+              ); () }
           },
           timeout.toMillis,
           TimeUnit.MILLISECONDS

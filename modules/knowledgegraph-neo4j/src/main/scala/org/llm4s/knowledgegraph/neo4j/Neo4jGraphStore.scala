@@ -445,7 +445,7 @@ final class Neo4jGraphStore private (
       case (Right(_), (key, value)) =>
         sanitizePropertyKey(key).map { safeKey =>
           clauses += s"toString(n.`$safeKey`) = $$filterPropValue"
-          params.put("filterPropValue", value)
+          val _ = params.put("filterPropValue", value)
         }
       case (Left(err), _) => Left(err)
     }

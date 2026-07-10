@@ -219,7 +219,7 @@ private[memory] trait BaseMemoryManagerOps extends MemoryManager {
         formatted.append(header)
         currentLength += header.length
 
-        mems.takeWhile { memory =>
+        val _ = mems.takeWhile { memory =>
           val line = s"- ${memory.content}\n"
           if (currentLength + line.length <= maxChars) {
             formatted.append(line)

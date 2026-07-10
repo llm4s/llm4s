@@ -184,10 +184,10 @@ private[config] object EmbeddingsConfigLoader {
     final case class OpenAISection(apiKey: Option[String])
     final case class Root(openai: Option[OpenAISection])
 
-    given PureConfigReader[OpenAISection] =
+    implicit val openAISectionReader: PureConfigReader[OpenAISection] =
       PureConfigReader.forProduct1("apiKey")(OpenAISection.apply)
 
-    given PureConfigReader[Root] =
+    implicit val rootReader: PureConfigReader[Root] =
       PureConfigReader.forProduct1("openai")(Root.apply)
 
     source
