@@ -21,8 +21,8 @@ object NamedProviderModelListingExample:
     val result = for
       providers <- Llm4sConfig.providers()
       namedConfig <- providers.namedProviders
-        .get(org.llm4s.config.ProvidersConfigModel.ProviderName(providerName))
-        .toRight(org.llm4s.error.ConfigurationError(s"Configured provider '$providerName' was not found"))
+        .get(org.llm4s.types.ProviderModelTypes.ProviderName(providerName))
+        .toRight[org.llm4s.error.LLMError](org.llm4s.error.ConfigurationError(s"Configured provider '$providerName' was not found"))
       models <- Llm4sConfig.listModels(providerName)
     yield (namedConfig, models)
 

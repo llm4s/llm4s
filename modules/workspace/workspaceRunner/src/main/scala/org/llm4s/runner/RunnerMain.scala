@@ -468,13 +468,12 @@ object RunnerMain extends cask.MainRoutes {
                     }
                   exitCodePromise.trySuccess(exitCode)
                 }(ec)
-    ()
 
                 stdoutDone.future
                   .flatMap(_ => stderrDone.future)(ec)
                   .flatMap(_ => exitDone.future)(ec)
                   .flatMap(_ => exitCodePromise.future)(ec)
-                  .onComplete {
+                  .onComplete({
                     case Success(rawExitCode) =>
                       val durationMs = System.currentTimeMillis() - startTime
                       val effectiveExitCode =
@@ -509,9 +508,7 @@ object RunnerMain extends cask.MainRoutes {
                         exitCode = 1,
                         durationMs = System.currentTimeMillis() - startTime
                       )
-                  }(ec)
-                  ()
-    ()
+                  })(ec)
               }
             )
           }

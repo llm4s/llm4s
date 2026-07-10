@@ -1,7 +1,7 @@
 package org.llm4s.samples.basic
 
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.config.ProvidersConfigModel.ProviderName
+import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -57,7 +57,7 @@ object ParallelNamedProviderModelListingExample:
         providers <- Llm4sConfig.providers()
         named <- providers.namedProviders
           .get(ProviderName(providerName))
-          .toRight(org.llm4s.error.ConfigurationError(s"Configured provider '$providerName' was not found"))
+          .toRight[org.llm4s.error.LLMError](org.llm4s.error.ConfigurationError(s"Configured provider '$providerName' was not found"))
         models <- Llm4sConfig.listModels(providerName)
       yield (named, models)
 
