@@ -168,6 +168,38 @@ class SimpleValidatorSpec extends AnyFlatSpec with Matchers {
     filter.validate("this is forbiddenword").isLeft shouldBe true
   }
 
+  it should "detect custom bad words in case-sensitive mode" in {
+    val filter = ProfanityFilter.caseSensitive(Set("Forbidden"))
+    filter.validate("this is Forbidden").isLeft shouldBe true
+    filter.validate("this is forbidden") shouldBe Right("this is forbidden")
+  }
+
+  it should "behave like the default filter when given an empty custom set" in {
+    val filter = ProfanityFilter.withCustomWords(Set.empty)
+    filter.validate("badword here").isLeft shouldBe true
+    filter.validate("clean text here") shouldBe Right("clean text here")
+  }
+
+  it should "split on tabs and newlines as well as spaces" in {
+    val filter = new ProfanityFilter()
+    filter.validate("first\tbadword\tsecond").isLeft shouldBe true
+    filter.validate("first\nbadword\nsecond").isLeft shouldBe true
+  }
+
+  it should "detect a bad word after leading whitespace" in {
+    val filter = new ProfanityFilter()
+    // split("\\s+") yields an empty leading token; matching must still work
+    filter.validate("   badword").isLeft shouldBe true
+  }
+
+  it should "NOT detect bad words attached to punctuation (known limitation)" in {
+    val filter = new ProfanityFilter()
+    // Tokens are split on whitespace only, so trailing punctuation makes the
+    // token "badword." which is not an exact match against the word list.
+    filter.validate("that is a badword.") shouldBe Right("that is a badword.")
+    filter.validate("badword, indeed") shouldBe Right("badword, indeed")
+  }
+
   // -- Clean text --
 
   it should "pass through clean text unchanged" in {
