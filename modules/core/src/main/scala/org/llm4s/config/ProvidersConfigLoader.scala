@@ -2,7 +2,6 @@ package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
-import org.llm4s.types.ProviderModelTypes._
 import org.llm4s.config.ProvidersConfigModel._
 import pureconfig.ConfigSource
 
@@ -24,7 +23,7 @@ private[config] object ProvidersConfigLoader {
    *  @param raw the raw providers config to validate
    *  @return `Right(ProvidersConfig)` on success, or `Left` with a `ConfigurationError`
    */
-  def validate(raw: RawProvidersConfig): Result[ProvidersConfig] = {
+  def validate(raw: RawProvidersConfig): Result[ProvidersConfig] =
     for {
       namedProviders <- validateNamedProviders(raw.namedProviders)
       _              <- validateSelectedProvider(raw.selectedProvider, namedProviders)
@@ -32,7 +31,6 @@ private[config] object ProvidersConfigLoader {
       selectedProvider = raw.selectedProvider,
       namedProviders = namedProviders,
     )
-  }
 
   private def validateNamedProviders(
     rawNamedProviders: Map[ProviderName, RawNamedProviderSection]

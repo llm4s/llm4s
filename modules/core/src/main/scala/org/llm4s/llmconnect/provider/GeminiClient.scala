@@ -521,11 +521,12 @@ class GeminiClient(
 object GeminiClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: GeminiConfig)(implicit service: ModelRegistryService): Result[GeminiClient] = {
+  def apply(config: GeminiConfig)(implicit service: ModelRegistryService): Result[GeminiClient] =
     Try(new GeminiClient(config)).toResult
-  }
 
-  def apply(config: GeminiConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit implicitService: ModelRegistryService): Result[GeminiClient] =
+  def apply(config: GeminiConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit
+    implicitService: ModelRegistryService
+  ): Result[GeminiClient] =
     Try(new GeminiClient(config, metrics)).toResult
 
   def apply(

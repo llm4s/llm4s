@@ -118,8 +118,8 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
     val config = result.getOrElse(fail("Expected Right"))
     config.provider shouldBe ProviderKind.OpenAI
-    config.apiKey shouldBe Some("sk-test-key")
-    config.baseUrl shouldBe Some("https://api.openai.com/v1")
+    config.apiKey shouldBe Some(ApiKey("sk-test-key"))
+    config.baseUrl shouldBe Some(BaseUrl("https://api.openai.com/v1"))
   }
 
   it should "trim whitespace and filter empty strings for all optional fields" in {
@@ -141,8 +141,8 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
     val config = result.getOrElse(fail("Expected Right"))
     config.provider shouldBe ProviderKind.OpenAI
-    config.baseUrl shouldBe Some("https://api.example.com")
-    config.apiKey shouldBe Some("sk-test-key")
+    config.baseUrl shouldBe Some(BaseUrl("https://api.example.com"))
+    config.apiKey shouldBe Some(ApiKey("sk-test-key"))
     config.organization shouldBe Some("org-123")
     config.endpoint shouldBe None   // should be filtered out because it's just whitespace
     config.apiVersion shouldBe None // should be filtered out because it's empty
@@ -164,7 +164,7 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
     val config = result.getOrElse(fail("Expected Right"))
     config.provider shouldBe ProviderKind.Azure
-    config.apiKey shouldBe Some("azure-key")
+    config.apiKey shouldBe Some(ApiKey("azure-key"))
     config.endpoint shouldBe Some("my-deployment")
   }
 }

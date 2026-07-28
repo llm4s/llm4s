@@ -57,7 +57,9 @@ object ParallelNamedProviderModelListingExample:
         providers <- Llm4sConfig.providers()
         named <- providers.namedProviders
           .get(ProviderName(providerName))
-          .toRight[org.llm4s.error.LLMError](org.llm4s.error.ConfigurationError(s"Configured provider '$providerName' was not found"))
+          .toRight[org.llm4s.error.LLMError](
+            org.llm4s.error.ConfigurationError(s"Configured provider '$providerName' was not found")
+          )
         models <- Llm4sConfig.listModels(providerName)
       yield (named, models)
 

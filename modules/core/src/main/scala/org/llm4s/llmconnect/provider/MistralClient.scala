@@ -256,11 +256,12 @@ class MistralClient(
 object MistralClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: MistralConfig)(implicit service: ModelRegistryService): Result[MistralClient] = {
+  def apply(config: MistralConfig)(implicit service: ModelRegistryService): Result[MistralClient] =
     Try(new MistralClient(config)).toResult
-  }
 
-  def apply(config: MistralConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit implicitService: ModelRegistryService): Result[MistralClient] =
+  def apply(config: MistralConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit
+    implicitService: ModelRegistryService
+  ): Result[MistralClient] =
     Try(new MistralClient(config, metrics)).toResult
 
   def apply(

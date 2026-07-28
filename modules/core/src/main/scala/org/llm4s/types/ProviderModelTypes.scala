@@ -34,21 +34,21 @@ object ProviderModelTypes {
   sealed trait ProviderKind {
     def name: String = ProviderKind.name(this)
   }
-  
+
   /** Companion object with lookup utilities for `ProviderKind`. */
   object ProviderKind {
-    case object OpenAI extends ProviderKind
+    case object OpenAI     extends ProviderKind
     case object OpenRouter extends ProviderKind
-    case object Requesty extends ProviderKind
-    case object Azure extends ProviderKind
-    case object Anthropic extends ProviderKind
-    case object Ollama extends ProviderKind
-    case object Zai extends ProviderKind
-    case object Gemini extends ProviderKind
-    case object DeepSeek extends ProviderKind
-    case object Cohere extends ProviderKind
-    case object Mistral extends ProviderKind
-    case object VertexAI extends ProviderKind
+    case object Requesty   extends ProviderKind
+    case object Azure      extends ProviderKind
+    case object Anthropic  extends ProviderKind
+    case object Ollama     extends ProviderKind
+    case object Zai        extends ProviderKind
+    case object Gemini     extends ProviderKind
+    case object DeepSeek   extends ProviderKind
+    case object Cohere     extends ProviderKind
+    case object Mistral    extends ProviderKind
+    case object VertexAI   extends ProviderKind
 
     /** All known provider kinds in a fixed sequence. */
     val all: Seq[ProviderKind] = Seq(
@@ -72,7 +72,7 @@ object ProviderModelTypes {
      * @param value The provider name string (e.g. `"openai"`, `"anthropic"`, `"google"`).
      * @return `Some(ProviderKind)` if recognised, `None` otherwise.
      */
-    def fromString(value: String): Option[ProviderKind] = {
+    def fromString(value: String): Option[ProviderKind] =
       value.trim.toLowerCase match {
         case "openai"              => Some(OpenAI)
         case "openrouter"          => Some(OpenRouter)
@@ -89,7 +89,6 @@ object ProviderModelTypes {
         case "vertex" | "vertexai" => Some(VertexAI)
         case _                     => None
       }
-    }
 
     /**
      * Alias for `fromString` — parses a `ProviderKind` from a provider name string.

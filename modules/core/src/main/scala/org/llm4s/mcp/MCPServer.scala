@@ -158,7 +158,9 @@ class MCPServer(
     server.foreach { s =>
       logger.info("Stopping MCPServer...")
       // Close all open SSE connections gracefully
-      sseConnections.values().forEach(conn => { Try(conn.queue.put(None)); () })
+      sseConnections.values().forEach { conn =>
+        Try(conn.queue.put(None)); ()
+      }
       sseConnections.clear()
       s.stop(delay)
       if (executorService != null) {

@@ -1,12 +1,25 @@
 package org.llm4s.config
 
-import org.llm4s.types.ProviderModelTypes._
-
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
 
 /** Shared model types and configuration data structures for the multi-provider configuration system. */
 object ProvidersConfigModel {
+
+  type ProviderKind = org.llm4s.types.ProviderModelTypes.ProviderKind
+  val ProviderKind = org.llm4s.types.ProviderModelTypes.ProviderKind
+
+  type ProviderName = org.llm4s.types.ProviderModelTypes.ProviderName
+  val ProviderName = org.llm4s.types.ProviderModelTypes.ProviderName
+
+  type ModelName = org.llm4s.types.ProviderModelTypes.ModelName
+  val ModelName = org.llm4s.types.ProviderModelTypes.ModelName
+
+  type BaseUrl = org.llm4s.types.ProviderModelTypes.BaseUrl
+  val BaseUrl = org.llm4s.types.ProviderModelTypes.BaseUrl
+
+  type ApiKey = org.llm4s.types.ProviderModelTypes.ApiKey
+  val ApiKey = org.llm4s.types.ProviderModelTypes.ApiKey
 
   /**
    * Raw, unvalidated provider section as read directly from the configuration source.
@@ -66,6 +79,7 @@ object ProvidersConfigModel {
     endpoint: Option[String],
     apiVersion: Option[String]
   ) {
+
     /**
      * Returns this config if its provider matches `expected`, otherwise a `ConfigurationError`.
      *
@@ -86,9 +100,8 @@ object ProvidersConfigModel {
      *
      *  @return `Right(BaseUrl)` when present, or `Left` with an error
      */
-    def requireBaseUrl: Result[BaseUrl] = {
+    def requireBaseUrl: Result[BaseUrl] =
       baseUrl.toRight(ConfigurationError("Configured provider is missing required field `baseUrl`"))
-    }
 
     /**
      * Returns the configured base URL, falling back to `default` when absent.
@@ -96,18 +109,16 @@ object ProvidersConfigModel {
      *  @param default by-name fallback string used to construct a `BaseUrl`
      *  @return the configured or default `BaseUrl`
      */
-    def baseUrlOrDefault(default: => String): BaseUrl = {
+    def baseUrlOrDefault(default: => String): BaseUrl =
       baseUrl.getOrElse(BaseUrl(default))
-    }
 
     /**
      * Returns the configured API key or fails with a `ConfigurationError` if absent.
      *
      *  @return `Right(ApiKey)` when present, or `Left` with an error
      */
-    def requireApiKey: Result[ApiKey] = {
+    def requireApiKey: Result[ApiKey] =
       apiKey.toRight(ConfigurationError("Configured provider is missing required field `apiKey`"))
-    }
   }
 
   /**
@@ -120,6 +131,7 @@ object ProvidersConfigModel {
     selectedProvider: Option[ProviderName],
     namedProviders: Map[ProviderName, NamedProviderConfig]
   ) {
+
     /**
      * Returns the name of the default provider or a `ConfigurationError` if none is selected.
      *

@@ -122,6 +122,8 @@ private object ProviderExchangeJson {
       "outcome"        -> exchange.outcome.toString,
       "request_body"   -> Redaction.redactForLogging(exchange.requestBody),
       "response_body"  -> ujson.Str(exchange.responseBody.map(body => Redaction.redactForLogging(body)).getOrElse("")),
-      "error_message"  -> ujson.Str(exchange.errorMessage.map(message => Redaction.redactForLogging(message)).getOrElse(""))
+      "error_message" -> ujson.Str(
+        exchange.errorMessage.map(message => Redaction.redactForLogging(message)).getOrElse("")
+      )
     )
 }

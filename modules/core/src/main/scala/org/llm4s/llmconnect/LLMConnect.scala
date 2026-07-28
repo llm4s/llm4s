@@ -32,7 +32,9 @@ import org.llm4s.types.Result
  */
 object LLMConnect {
 
-  private def buildClient(config: ProviderConfig, options: LlmClientOptions)(implicit service: ModelRegistryService): Result[LLMClient] = {
+  private def buildClient(config: ProviderConfig, options: LlmClientOptions)(implicit
+    service: ModelRegistryService
+  ): Result[LLMClient] = {
     val metrics         = options.metrics
     val exchangeLogging = options.exchangeLogging
     config match {

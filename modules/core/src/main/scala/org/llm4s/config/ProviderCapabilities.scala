@@ -2,6 +2,7 @@ package org.llm4s.config
 
 /** Describes the validation and model-listing capabilities available for a given provider. */
 private[llm4s] trait ProviderCapabilities {
+
   /** The validator used to check raw provider configuration sections. */
   def validator: NamedProviderValidator
 

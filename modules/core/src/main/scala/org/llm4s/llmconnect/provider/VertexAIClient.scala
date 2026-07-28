@@ -405,11 +405,12 @@ class VertexAIClient(
 object VertexAIClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: VertexAIConfig)(implicit service: ModelRegistryService): Result[VertexAIClient] = {
+  def apply(config: VertexAIConfig)(implicit service: ModelRegistryService): Result[VertexAIClient] =
     Try(new VertexAIClient(config)).toResult
-  }
 
-  def apply(config: VertexAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit implicitService: ModelRegistryService): Result[VertexAIClient] =
+  def apply(config: VertexAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit
+    implicitService: ModelRegistryService
+  ): Result[VertexAIClient] =
     Try(new VertexAIClient(config, metrics)).toResult
 
   def apply(

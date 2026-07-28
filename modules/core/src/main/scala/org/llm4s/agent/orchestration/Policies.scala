@@ -156,10 +156,11 @@ object Policies {
         val timeoutPromise = Promise[AsyncResult[O]]()
         val timeoutTask = scheduler.schedule(
           new Runnable {
-            def run(): Unit =
-              { timeoutPromise.trySuccess(
+            def run(): Unit = {
+              timeoutPromise.trySuccess(
                 Future.successful(Left(OrchestrationError.AgentTimeoutError(agent.name, timeout.toMillis)))
-              ); () }
+              ); ()
+            }
           },
           timeout.toMillis,
           TimeUnit.MILLISECONDS

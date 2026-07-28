@@ -11,7 +11,7 @@ import java.time.Instant
  */
 sealed trait ProviderExchangeLogging
 object ProviderExchangeLogging {
-  case object Disabled extends ProviderExchangeLogging
+  case object Disabled                           extends ProviderExchangeLogging
   case class Enabled(sink: ProviderExchangeSink) extends ProviderExchangeLogging
 
   def enabled(sink: ProviderExchangeSink): ProviderExchangeLogging =
@@ -20,8 +20,8 @@ object ProviderExchangeLogging {
 
 sealed trait ProviderExchangeOutcome
 object ProviderExchangeOutcome {
-  case object Success extends ProviderExchangeOutcome
-  case object Error extends ProviderExchangeOutcome
+  case object Success   extends ProviderExchangeOutcome
+  case object Error     extends ProviderExchangeOutcome
   case object Cancelled extends ProviderExchangeOutcome
 }
 

@@ -599,11 +599,10 @@ curl https://api.anthropic.com/v1/messages \
   private def applySamplingParameters(
     builder: MessageCreateParams.Builder,
     options: CompletionOptions
-  ): Unit = {
+  ): Unit =
     if (modelSupportsTemperature) {
       val _ = builder.temperature(options.temperature.doubleValue())
     }
-  }
 
   /**
    * Whether `config.model` accepts the (deprecated) `temperature` sampling parameter.

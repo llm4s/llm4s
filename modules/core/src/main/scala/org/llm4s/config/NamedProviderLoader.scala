@@ -17,7 +17,9 @@ private[config] object NamedProviderLoader {
    *  @param providerName the name of the provider entry to look up
    *  @return `Right(ProviderConfig)` on success, or `Left` with a `ConfigurationError`
    */
-  def load(source: ConfigSource, providerName: String)(implicit implicitResolver: ContextWindowResolver): Result[ProviderConfig] = {
+  def load(source: ConfigSource, providerName: String)(implicit
+    implicitResolver: ContextWindowResolver
+  ): Result[ProviderConfig] = {
     val trimmed = providerName.trim
     if (trimmed.isEmpty) Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
     else
@@ -38,7 +40,9 @@ private[config] object NamedProviderLoader {
    */
   def loadProviderConfigs(
     source: ConfigSource
-  )(implicit implicitResolver: ContextWindowResolver): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
+  )(implicit
+    implicitResolver: ContextWindowResolver
+  ): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
     for {
       providers <- ProvidersConfigLoader.load(source)
       namedProviders = providers.namedProviders
@@ -53,7 +57,9 @@ private[config] object NamedProviderLoader {
    */
   def getProviderConfigs(
     namedProviders: Map[ProviderName, NamedProviderConfig]
-  )(implicit implicitResolver: ContextWindowResolver): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
+  )(implicit
+    implicitResolver: ContextWindowResolver
+  ): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
     namedProviders.toList.foldLeft((Map.empty[ProviderName, LLMError], Map.empty[ProviderName, ProviderConfig]))(
       (x, y) =>
         buildConfigFromNamedConfig(y._1.asName, y._2).fold(

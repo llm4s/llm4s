@@ -26,6 +26,7 @@ final case class DiscoveredModel(
 
 /** Discovers available models from a provider's live API endpoint. */
 private[llm4s] trait ProviderModelLister {
+
   /**
    * Fetches the list of available models for the given provider configuration.
    *
@@ -100,7 +101,7 @@ private[llm4s] object ProviderModelListers {
       httpClient: Llm4sHttpClient,
       afterId: Option[String] = None,
       acc: List[DiscoveredModel] = Nil
-    ): Result[List[DiscoveredModel]] = {
+    ): Result[List[DiscoveredModel]] =
       for {
         response <- httpClient
           .getResult(
@@ -126,7 +127,6 @@ private[llm4s] object ProviderModelListers {
             }
           } else Right(all)
       } yield models
-  }
 
   }
 
@@ -166,6 +166,7 @@ private[llm4s] object ProviderModelListers {
         }
       } yield models
   }
+
   /** Model lister for the DeepSeek provider using the OpenAI-compatible models endpoint. */
   object DeepSeek extends ProviderModelLister {
     def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
@@ -223,7 +224,7 @@ private[llm4s] object ProviderModelListers {
     defaultBaseUrl: String,
     modelsPath: String = "/models",
     httpClient: Llm4sHttpClient
-  ): Result[List[DiscoveredModel]] = {
+  ): Result[List[DiscoveredModel]] =
     for {
       normalized <- config.requireProvider(expected)
       apiKey     <- normalized.requireApiKey
@@ -236,7 +237,6 @@ private[llm4s] object ProviderModelListers {
       jsonResponse <- okResponse.toJson("responseBody")
       models       <- parseOpenAICompatibleModels(jsonResponse.body, provider)
     } yield models
-  }
 
   def authHeaders(
     config: NamedProviderConfig,
@@ -263,15 +263,14 @@ private[llm4s] object ProviderModelListers {
         .map(err => ValidationError("data", s"Missing or invalid models payload: ${err.message}"))
 
     dataResult.flatMap { data =>
-      data.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)) {
-        case (accResult, modelJson) =>
-          for {
-            acc    <- accResult
-            parsed <- parseOpenAICompatibleModel(modelJson, provider)
-          } yield parsed match {
-            case Some(model) => acc :+ model
-            case None        => acc
-          }
+      data.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)) { case (accResult, modelJson) =>
+        for {
+          acc    <- accResult
+          parsed <- parseOpenAICompatibleModel(modelJson, provider)
+        } yield parsed match {
+          case Some(model) => acc :+ model
+          case None        => acc
+        }
       }
     }
   }
@@ -302,15 +301,14 @@ private[llm4s] object ProviderModelListers {
         .map(err => ValidationError("data", s"Missing or invalid models payload: ${err.message}"))
 
     dataResult.flatMap { data =>
-      data.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)) {
-        case (accResult, modelJson) =>
-          for {
-            acc    <- accResult
-            parsed <- parseAnthropicModel(modelJson)
-          } yield parsed match {
-            case Some(model) => acc :+ model
-            case None        => acc
-          }
+      data.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)) { case (accResult, modelJson) =>
+        for {
+          acc    <- accResult
+          parsed <- parseAnthropicModel(modelJson)
+        } yield parsed match {
+          case Some(model) => acc :+ model
+          case None        => acc
+        }
       }
     }
   }
@@ -321,13 +319,12 @@ private[llm4s] object ProviderModelListers {
     lastId: Option[String]
   )
 
-  def parseAnthropicPage(json: ujson.Value): Result[AnthropicPage] = {
+  def parseAnthropicPage(json: ujson.Value): Result[AnthropicPage] =
     for {
       models  <- parseAnthropicModels(json)
       hasMore <- parseOptionalBoolean(json, "has_more").map(_.getOrElse(false))
       lastId  <- parseOptionalString(json, "last_id")
     } yield AnthropicPage(models, hasMore, lastId)
-  }
 
   def parseAnthropicModel(json: ujson.Value): Result[Option[DiscoveredModel]] = {
     val obj = json.obj
@@ -350,15 +347,14 @@ private[llm4s] object ProviderModelListers {
         .map(err => ValidationError("models", s"Missing or invalid Gemini models payload: ${err.message}"))
 
     modelsResult.flatMap { models =>
-      models.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)) {
-        case (accResult, modelJson) =>
-          for {
-            acc    <- accResult
-            parsed <- parseGeminiModel(modelJson)
-          } yield parsed match {
-            case Some(model) => acc :+ model
-            case None        => acc
-          }
+      models.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)) { case (accResult, modelJson) =>
+        for {
+          acc    <- accResult
+          parsed <- parseGeminiModel(modelJson)
+        } yield parsed match {
+          case Some(model) => acc :+ model
+          case None        => acc
+        }
       }
     }
   }
@@ -368,12 +364,11 @@ private[llm4s] object ProviderModelListers {
     nextPageToken: Option[String]
   )
 
-  def parseGeminiPage(json: ujson.Value): Result[GeminiPage] = {
+  def parseGeminiPage(json: ujson.Value): Result[GeminiPage] =
     for {
       models        <- parseGeminiModels(json)
       nextPageToken <- parseOptionalString(json, "nextPageToken")
     } yield GeminiPage(models, nextPageToken)
-  }
 
   def parseGeminiModel(json: ujson.Value): Result[Option[DiscoveredModel]] = {
     val obj = json.obj
@@ -402,15 +397,14 @@ private[llm4s] object ProviderModelListers {
         .map(err => ValidationError("models", s"Missing or invalid Ollama models payload: ${err.message}"))
 
     modelsResult.flatMap { models =>
-      models.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)) {
-        case (accResult, modelJson) =>
-          for {
-            acc    <- accResult
-            parsed <- parseOllamaModel(modelJson)
-          } yield parsed match {
-            case Some(model) => acc :+ model
-            case None        => acc
-          }
+      models.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)) { case (accResult, modelJson) =>
+        for {
+          acc    <- accResult
+          parsed <- parseOllamaModel(modelJson)
+        } yield parsed match {
+          case Some(model) => acc :+ model
+          case None        => acc
+        }
       }
     }
   }
@@ -446,15 +440,13 @@ private[llm4s] object ProviderModelListers {
     }
   }
 
-  def parseOptionalString(json: ujson.Value, field: String): Result[Option[String]] = {
+  def parseOptionalString(json: ujson.Value, field: String): Result[Option[String]] =
     Right(json.obj.get(field).flatMap(_.strOpt).filter(_.nonEmpty))
-  }
 
-  def parseOptionalBoolean(json: ujson.Value, field: String): Result[Option[Boolean]] = {
+  def parseOptionalBoolean(json: ujson.Value, field: String): Result[Option[Boolean]] =
     json.obj.get(field) match {
       case None                                  => Right(None)
       case Some(value) if value.boolOpt.nonEmpty => Right(value.boolOpt)
       case Some(_)                               => Left(ValidationError(field, s"Invalid boolean value for `$field`"))
     }
-  }
 }

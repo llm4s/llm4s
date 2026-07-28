@@ -142,7 +142,7 @@ object Llm4sConfig {
   def defaultProvider(): Result[ProviderConfig] =
     for {
       service <- modelRegistryService()
-      name   <- defaultProviderName()
+      name    <- defaultProviderName()
       config <- {
         implicit val resolver: ContextWindowResolver = new ContextWindowResolver(service)
         org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name.asName)
@@ -152,7 +152,7 @@ object Llm4sConfig {
   private[config] def defaultProvider(source: ConfigSource): Result[ProviderConfig] =
     for {
       service <- modelRegistryService(source)
-      name   <- defaultProviderName(source)
+      name    <- defaultProviderName(source)
       config <- {
         implicit val resolver: ContextWindowResolver = new ContextWindowResolver(service)
         org.llm4s.config.NamedProviderLoader.load(source, name.asName)

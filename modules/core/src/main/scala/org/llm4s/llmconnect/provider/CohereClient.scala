@@ -250,11 +250,12 @@ class CohereClient(
 object CohereClient {
   import org.llm4s.types.TryOps
 
-  def apply(config: CohereConfig)(implicit service: ModelRegistryService): Result[CohereClient] = {
+  def apply(config: CohereConfig)(implicit service: ModelRegistryService): Result[CohereClient] =
     Try(new CohereClient(config)).toResult
-  }
 
-  def apply(config: CohereConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit implicitService: ModelRegistryService): Result[CohereClient] =
+  def apply(config: CohereConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit
+    implicitService: ModelRegistryService
+  ): Result[CohereClient] =
     Try(new CohereClient(config, metrics)).toResult
 
   def apply(

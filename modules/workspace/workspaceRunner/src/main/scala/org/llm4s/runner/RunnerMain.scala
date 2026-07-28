@@ -64,9 +64,9 @@ object RunnerMain extends cask.MainRoutes {
   }
 
   // Initialize workspace interface
-  private val workspaceInterface     = new WorkspaceAgentInterfaceImpl(workspacePath, isWindows, sandboxConfig)
+  private val workspaceInterface             = new WorkspaceAgentInterfaceImpl(workspacePath, isWindows, sandboxConfig)
   private[runner] val effectiveSandboxConfig = sandboxConfig.getOrElse(WorkspaceSandboxConfig.Permissive)
-  private val workspaceRootPath      = Paths.get(workspacePath).toAbsolutePath.normalize()
+  private val workspaceRootPath              = Paths.get(workspacePath).toAbsolutePath.normalize()
 
   // Track active connections and their last heartbeat
   private val connections = new ConcurrentHashMap[cask.WsChannelActor, AtomicLong]()
@@ -76,7 +76,7 @@ object RunnerMain extends cask.MainRoutes {
   private val heartbeatExecutor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
 
   // Constants
-  private val HeartbeatTimeoutMs            = 30000L // 30 seconds timeout
+  private val HeartbeatTimeoutMs                    = 30000L // 30 seconds timeout
   private[runner] val HeartbeatCheckIntervalSeconds = 10L
   // Max captured output size per stream for final ExecuteCommandResponse payload
   private val MaxOutputSize = 1024L * 1024L // 1MB per stream
@@ -350,7 +350,7 @@ object RunnerMain extends cask.MainRoutes {
 
             builder.directory(workDir)
             cmd.environment.foreach { env =>
-              val pbEnv = builder.environment()
+              val pbEnv                                             = builder.environment()
               env.foreach { case (k, v) => pbEnv.put(k, v) }; val _ = pbEnv
             }
 
@@ -473,7 +473,7 @@ object RunnerMain extends cask.MainRoutes {
                   .flatMap(_ => stderrDone.future)(ec)
                   .flatMap(_ => exitDone.future)(ec)
                   .flatMap(_ => exitCodePromise.future)(ec)
-                  .onComplete({
+                  .onComplete {
                     case Success(rawExitCode) =>
                       val durationMs = System.currentTimeMillis() - startTime
                       val effectiveExitCode =
@@ -508,7 +508,7 @@ object RunnerMain extends cask.MainRoutes {
                         exitCode = 1,
                         durationMs = System.currentTimeMillis() - startTime
                       )
-                  })(ec)
+                  }(ec)
               }
             )
           }
@@ -518,7 +518,9 @@ object RunnerMain extends cask.MainRoutes {
     ()
   }
 
-  private[runner] def resolveWorkingDirectory(workingDirectory: Option[String]): Either[WorkspaceAgentException, java.io.File] =
+  private[runner] def resolveWorkingDirectory(
+    workingDirectory: Option[String]
+  ): Either[WorkspaceAgentException, java.io.File] =
     Try {
       workingDirectory match {
         case Some(dir) => workspaceRootPath.resolve(dir).normalize()
@@ -682,7 +684,7 @@ object RunnerMain extends cask.MainRoutes {
     Try {
       executor.shutdown()
       if (!executor.awaitTermination(5, TimeUnit.SECONDS)) executor.shutdownNow()
-    }.recover { case _: InterruptedException => { executor.shutdownNow(); () } }
+    }.recover { case _: InterruptedException => executor.shutdownNow(); () }
     ()
   }
 }

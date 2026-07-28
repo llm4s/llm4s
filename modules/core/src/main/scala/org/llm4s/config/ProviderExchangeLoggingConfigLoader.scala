@@ -25,7 +25,7 @@ private[config] object ProviderExchangeLoggingConfigLoader {
     dir: Option[String]
   )
 
-  private implicit val exchangeLoggingSectionReader: PureConfigReader[ExchangeLoggingSection] =
+  implicit private val exchangeLoggingSectionReader: PureConfigReader[ExchangeLoggingSection] =
     PureConfigReader.forProduct2("enabled", "dir")(ExchangeLoggingSection.apply)
 
   def load(source: ConfigSource = ConfigSource.default): Result[ProviderExchangeLogging] =

@@ -7,6 +7,7 @@ import org.llm4s.config.ProvidersConfigModel._
 
 /** Validates a raw named provider section for a specific provider type. */
 private[llm4s] trait NamedProviderValidator {
+
   /**
    * Validates the raw provider section and returns a normalised `NamedProviderConfig`.
    *

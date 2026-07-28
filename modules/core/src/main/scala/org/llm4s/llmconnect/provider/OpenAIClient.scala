@@ -70,18 +70,19 @@ class OpenAIClient private[provider] (
    * @param config OpenAI configuration with API key and base URL
    * @param metrics metrics collector (default: noop)
    */
-  def this(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit service: ModelRegistryService) = this(
-    config.model,
-    OpenAIClientTransport.azure(
-      new OpenAIClientBuilder()
-        .credential(new KeyCredential(config.apiKey))
-        .endpoint(config.baseUrl)
-        .buildClient()
-    ),
-    config,
-    metrics,
-    ProviderExchangeLogging.Disabled
-  )
+  def this(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit service: ModelRegistryService) =
+    this(
+      config.model,
+      OpenAIClientTransport.azure(
+        new OpenAIClientBuilder()
+          .credential(new KeyCredential(config.apiKey))
+          .endpoint(config.baseUrl)
+          .buildClient()
+      ),
+      config,
+      metrics,
+      ProviderExchangeLogging.Disabled
+    )
 
   def this(
     config: OpenAIConfig,
@@ -106,19 +107,20 @@ class OpenAIClient private[provider] (
    * @param config Azure configuration with API key, endpoint, and API version
    * @param metrics metrics collector (default: noop)
    */
-  def this(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit service: ModelRegistryService) = this(
-    config.model,
-    OpenAIClientTransport.azure(
-      new OpenAIClientBuilder()
-        .credential(new AzureKeyCredential(config.apiKey))
-        .endpoint(config.endpoint)
-        .serviceVersion(OpenAIServiceVersion.valueOf(config.apiVersion))
-        .buildClient()
-    ),
-    config,
-    metrics,
-    ProviderExchangeLogging.Disabled
-  )
+  def this(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector)(implicit service: ModelRegistryService) =
+    this(
+      config.model,
+      OpenAIClientTransport.azure(
+        new OpenAIClientBuilder()
+          .credential(new AzureKeyCredential(config.apiKey))
+          .endpoint(config.endpoint)
+          .serviceVersion(OpenAIServiceVersion.valueOf(config.apiVersion))
+          .buildClient()
+      ),
+      config,
+      metrics,
+      ProviderExchangeLogging.Disabled
+    )
 
   def this(
     config: AzureConfig,
@@ -699,9 +701,8 @@ object OpenAIClient {
   /**
    * Convenience overload with noop metrics.
    */
-  def apply(config: OpenAIConfig)(implicit service: ModelRegistryService): Result[OpenAIClient] = {
+  def apply(config: OpenAIConfig)(implicit service: ModelRegistryService): Result[OpenAIClient] =
     Try(new OpenAIClient(config, org.llm4s.metrics.MetricsCollector.noop)).toResult
-  }
 
   /**
    * Creates an OpenAI client for Azure OpenAI service.
@@ -726,9 +727,8 @@ object OpenAIClient {
   /**
    * Convenience overload with noop metrics.
    */
-  def apply(config: AzureConfig)(implicit service: ModelRegistryService): Result[OpenAIClient] = {
+  def apply(config: AzureConfig)(implicit service: ModelRegistryService): Result[OpenAIClient] =
     Try(new OpenAIClient(config, org.llm4s.metrics.MetricsCollector.noop)).toResult
-  }
 }
 
 private[provider] object OpenAIClientTransport {

@@ -364,11 +364,11 @@ object DeepSeekClient {
   )(implicit service: ModelRegistryService): Result[DeepSeekClient] =
     Try(new DeepSeekClient(config, metrics, exchangeLogging)).toResult
 
-  def apply(config: DeepSeekConfig, metrics: MetricsCollector)(implicit service: ModelRegistryService): Result[DeepSeekClient] = {
+  def apply(config: DeepSeekConfig, metrics: MetricsCollector)(implicit
+    service: ModelRegistryService
+  ): Result[DeepSeekClient] =
     Try(new DeepSeekClient(config, metrics)).toResult
-  }
 
-  def apply(config: DeepSeekConfig)(implicit service: ModelRegistryService): Result[DeepSeekClient] = {
+  def apply(config: DeepSeekConfig)(implicit service: ModelRegistryService): Result[DeepSeekClient] =
     Try(new DeepSeekClient(config, MetricsCollector.noop)).toResult
-  }
 }
