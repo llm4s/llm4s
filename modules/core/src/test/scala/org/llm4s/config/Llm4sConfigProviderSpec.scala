@@ -1,6 +1,6 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.{ ProviderKind, ProviderName }
+import org.llm4s.types.ProviderModelTypes.{ ProviderKind, ProviderName }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAIConfig }
 import org.scalatest.matchers.should.Matchers

@@ -2,24 +2,10 @@ package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes._
 
 /** Shared model types and configuration data structures for the multi-provider configuration system. */
 object ProvidersConfigModel {
-
-  type ProviderKind = org.llm4s.types.ProviderModelTypes.ProviderKind
-  val ProviderKind = org.llm4s.types.ProviderModelTypes.ProviderKind
-
-  type ProviderName = org.llm4s.types.ProviderModelTypes.ProviderName
-  val ProviderName = org.llm4s.types.ProviderModelTypes.ProviderName
-
-  type ModelName = org.llm4s.types.ProviderModelTypes.ModelName
-  val ModelName = org.llm4s.types.ProviderModelTypes.ModelName
-
-  type BaseUrl = org.llm4s.types.ProviderModelTypes.BaseUrl
-  val BaseUrl = org.llm4s.types.ProviderModelTypes.BaseUrl
-
-  type ApiKey = org.llm4s.types.ProviderModelTypes.ApiKey
-  val ApiKey = org.llm4s.types.ProviderModelTypes.ApiKey
 
   /**
    * Raw, unvalidated provider section as read directly from the configuration source.

@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
+import org.llm4s.types.ProviderModelTypes._
 import org.llm4s.config.ProvidersConfigModel._
 
 /** Converts a `RawNamedProviderSection` into a validated `NamedProviderConfig` by resolving string fields. */
