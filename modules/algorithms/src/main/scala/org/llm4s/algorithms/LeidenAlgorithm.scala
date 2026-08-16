@@ -26,8 +26,10 @@ object LeidenAlgorithm:
   // ---------------------------------------------------------
   def runLeiden(graph: Graph, maxIterations: Int): Map[Int, Int] =
     import scala.util.boundary, boundary.break
-    var currentGraph                           = graph
+    var currentGraph = graph
     var nodeToCommunity: mutable.Map[Int, Int] = mutable.Map.from((0 until graph.numNodes).map(i => i -> i))
+    // Maps original node -> current macro-node ID
+    var originalToMacro: Map[Int, Int] = (0 until graph.numNodes).map(i => i -> i).toMap
 
     boundary:
       for _ <- 0 until maxIterations do
@@ -36,12 +38,18 @@ object LeidenAlgorithm:
         val refinedPartition = refinePartition(currentGraph, nodeToCommunity)
 
         if refinedPartition.values.toSet.size == currentGraph.numNodes then
-          break(nodeToCommunity.toMap)
+          break(originalToMacro.map { case (orig, macroId) => orig -> nodeToCommunity(macroId) })
+
+        val subCommToNewId = refinedPartition.values.toSet.zipWithIndex.toMap
+        // Update original -> macro mapping through this aggregation
+        originalToMacro = originalToMacro.map { case (orig, macroId) =>
+          orig -> subCommToNewId(refinedPartition(macroId))
+        }
 
         currentGraph = aggregateGraph(currentGraph, refinedPartition)
         nodeToCommunity = mutable.Map.from(currentGraph.adjList.keys.map(n => n -> n))
 
-      nodeToCommunity.toMap
+      originalToMacro.map { case (orig, macroId) => orig -> nodeToCommunity(macroId) }
 
   // ---------------------------------------------------------
   // Step 1: Local Move Phase
