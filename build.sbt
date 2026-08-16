@@ -129,6 +129,7 @@ lazy val commonSettings = Seq(
 lazy val llm4s = (project in file("."))
   .aggregate(
     core,
+    algorithms,
     samples,
     workspaceShared,
     workspaceRunner,
@@ -139,6 +140,15 @@ lazy val llm4s = (project in file("."))
   )
   .settings(
     publish / skip := true
+  )
+
+lazy val algorithms = (project in file("modules/algorithms"))
+  .settings(
+    name := "algorithms",
+    commonSettings,
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    )
   )
 
 lazy val core = (project in file("modules/core"))
