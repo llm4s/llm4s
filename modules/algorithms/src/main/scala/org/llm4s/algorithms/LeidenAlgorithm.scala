@@ -26,7 +26,7 @@ object LeidenAlgorithm:
   // ---------------------------------------------------------
   def runLeiden(graph: Graph, maxIterations: Int): Map[Int, Int] =
     import scala.util.boundary, boundary.break
-    var currentGraph = graph
+    var currentGraph                           = graph
     var nodeToCommunity: mutable.Map[Int, Int] = mutable.Map.from((0 until graph.numNodes).map(i => i -> i))
     // Maps original node -> current macro-node ID
     var originalToMacro: Map[Int, Int] = (0 until graph.numNodes).map(i => i -> i).toMap
@@ -46,7 +46,7 @@ object LeidenAlgorithm:
           orig -> subCommToNewId(refinedPartition(macroId))
         }
 
-        currentGraph = aggregateGraph(currentGraph, refinedPartition)
+        currentGraph = aggregateGraph(currentGraph, refinedPartition, subCommToNewId)
         nodeToCommunity = mutable.Map.from(currentGraph.adjList.keys.map(n => n -> n))
 
       originalToMacro.map { case (orig, macroId) => orig -> nodeToCommunity(macroId) }
@@ -55,8 +55,8 @@ object LeidenAlgorithm:
   // Step 1: Local Move Phase
   // ---------------------------------------------------------
   private def localMove(g: Graph, partition: mutable.Map[Int, Int], maxPasses: Int = 10): Unit =
-    val m    = g.totalWeight
-    var pass = 0
+    val m        = g.totalWeight
+    var pass     = 0
     var improved = true
 
     while improved && pass < maxPasses do
@@ -86,13 +86,23 @@ object LeidenAlgorithm:
     partition: mutable.Map[Int, Int],
     m: Double
   ): Double =
-    val k_i  = g.getDegree(node)
-    val k_in = g.adjList(node).collect { case (nb, w) if partition(nb) == targetComm => w }.sum
-    val sum_tot = g.adjList.keys
+    val currentComm = partition(node)
+    val k_i         = g.getDegree(node)
+
+    val k_in_new = g.adjList(node).collect { case (nb, w) if partition(nb) == targetComm => w }.sum
+    val sum_tot_new = g.adjList.keys
       .filter(n => n != node && partition(n) == targetComm)
       .map(g.getDegree)
       .sum
-    (k_in / m) - (k_i * sum_tot) / (2.0 * m * m)
+
+    val k_in_old = g.adjList(node).collect { case (nb, w) if nb != node && partition(nb) == currentComm => w }.sum
+    val sum_tot_old = g.adjList.keys
+      .filter(n => n != node && partition(n) == currentComm)
+      .map(g.getDegree)
+      .sum
+
+    (k_in_new / m - k_i * sum_tot_new / (2.0 * m * m)) -
+      (k_in_old / m - k_i * sum_tot_old / (2.0 * m * m))
 
   // ---------------------------------------------------------
   // Step 2: Refinement Phase (DSU-based connectivity)
@@ -122,13 +132,11 @@ object LeidenAlgorithm:
   // ---------------------------------------------------------
   // Step 3: Aggregation Phase
   // ---------------------------------------------------------
-  private def aggregateGraph(g: Graph, refinedPartition: Map[Int, Int]): Graph =
-    val subCommToNewId = refinedPartition.values.toSet.zipWithIndex.toMap
-    val macroGraph     = Graph(subCommToNewId.size)
-
+  private def aggregateGraph(g: Graph, refinedPartition: Map[Int, Int], subCommToNewId: Map[Int, Int]): Graph =
+    val macroGraph = Graph(subCommToNewId.size)
     for
-      u            <- g.adjList.keys
-      (v, weight)  <- g.adjList(u)
+      u           <- g.adjList.keys
+      (v, weight) <- g.adjList(u)
       if u <= v
     do
       val macroU = subCommToNewId(refinedPartition(u))
@@ -164,6 +172,4 @@ object LeidenAlgorithm:
     val partition = runLeiden(g, 5)
 
     println("\nFinal Community Assignments:")
-    partition.toSeq.sortBy(_._1).foreach { (node, comm) =>
-      println(s"Node $node -> Community $comm")
-    }
+    partition.toSeq.sortBy(_._1).foreach((node, comm) => println(s"Node $node -> Community $comm"))
