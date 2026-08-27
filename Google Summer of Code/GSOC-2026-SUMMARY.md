@@ -365,7 +365,7 @@ Our mentors are experienced developers and researchers passionate about LLMs, Sc
 43. **Ipsit Sahoo**
 
     - LinkedIn: [linkedin.com/in/ipsit-sahoo](https://www.linkedin.com/in/ipsit-sahoo/)
-    - Location: India 🇮🇳
+    - Location: US 🇺🇸
     - Focus: Scala, LLM systems
 44. **Chris W**
 
