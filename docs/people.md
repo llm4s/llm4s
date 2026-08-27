@@ -1,3 +1,11 @@
+---
+layout: default
+title: People
+nav_order: 9
+description: "People who build, maintain, and grow LLM4S."
+permalink: /people/
+---
+
 # LLM4S People
 
 LLM4S is an open-source library for agentic and LLM programming in Scala, This page documents the people
@@ -18,8 +26,8 @@ liaisons with sponsors, and conference programme committees.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/39022252.png" width="48" height="48" style="border-radius:50%"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
-| <img src="docs/people/2352078.jpg" width="48" height="48" style="border-radius:50%"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
+| <img src="https://github.com/kannupriyakalra.png?size=48" width="48" height="48" style="border-radius:50%"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
+| <img src="https://github.com/rorygraves.png?size=48" width="48" height="48" style="border-radius:50%"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
 
 ---
 
@@ -30,8 +38,8 @@ are the decision-makers when no consensus is reached among contributors.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/39022252.png" width="48" height="48" style="border-radius:50%"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
-| <img src="docs/people/2352078.jpg" width="48" height="48" style="border-radius:50%"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
+| <img src="https://github.com/kannupriyakalra.png?size=48" width="48" height="48" style="border-radius:50%"> | **Kannupriya Kalra** | [@kannupriyakalra](https://github.com/kannupriyakalra) | [linkedin.com/in/kannupriyakalra](https://www.linkedin.com/in/kannupriyakalra) |
+| <img src="https://github.com/rorygraves.png?size=48" width="48" height="48" style="border-radius:50%"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) | [linkedin.com/in/roryjgraves](https://www.linkedin.com/in/roryjgraves) |
 
 ---
 
@@ -42,8 +50,8 @@ cross-cutting decisions. Members are recognised for sustained, high-quality cont
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/247329.jpg" width="48" height="48" style="border-radius:50%"> | **Atul S. Khot** | [@atulkhot](https://github.com/atulkhot) | [linkedin.com/in/atul-s-khot-035b4b1](https://www.linkedin.com/in/atul-s-khot-035b4b1) |
-| <img src="docs/people/595111.jpg" width="48" height="48" style="border-radius:50%"> | **Vitthal Mirji** | [@vim89](https://github.com/vim89) | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10) |
+| <img src="https://github.com/atulkhot.png?size=48" width="48" height="48" style="border-radius:50%"> | **Atul S. Khot** | [@atulkhot](https://github.com/atulkhot) | [linkedin.com/in/atul-s-khot-035b4b1](https://www.linkedin.com/in/atul-s-khot-035b4b1) |
+| <img src="https://github.com/vim89.png?size=48" width="48" height="48" style="border-radius:50%"> | **Vitthal Mirji** | [@vim89](https://github.com/vim89) | [linkedin.com/in/vitthal10](https://www.linkedin.com/in/vitthal10) |
 | ![](https://github.com/iyadi.png?size=48) | **Iyad M. Issa** | [@iyadi](https://github.com/iyadi) | [linkedin.com/in/iyadissa](https://www.linkedin.com/in/iyadissa) |
 | ![](https://github.com/gruggiero.png?size=48) | **Giovanni Ruggiero** | [@gruggiero](https://github.com/gruggiero) | [linkedin.com/in/giovanniruggiero](https://www.linkedin.com/in/giovanniruggiero) |
 | ![](https://github.com/dmamonov.png?size=48) | **Dmitry Mamonov** | [@dmamonov](https://github.com/dmamonov) | [linkedin.com/in/dmamonov](https://www.linkedin.com/in/dmamonov) |
@@ -60,9 +68,9 @@ project discussions and direction.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/117119879.jpg" width="48" height="48" style="border-radius:50%"> | **Shubham Vishwakarma** | [@Vi-shub](https://github.com/Vi-shub) | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
-| <img src="docs/people/mai.jpg" width="48" height="48" style="border-radius:50%"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) | [linkedin.com/in/autodidact](https://www.linkedin.com/in/autodidact) |
-| <img src="docs/people/vansh-sharma.webp" width="48" height="48" style="border-radius:50%"> | **Vansh Sharma** | [@vansh7nvc](https://github.com/vansh7nvc) | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
+| <img src="https://github.com/Vi-shub.png?size=48" width="48" height="48" style="border-radius:50%"> | **Shubham Vishwakarma** | [@Vi-shub](https://github.com/Vi-shub) | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
+| <img src="https://github.com/AnshumanAI.png?size=48" width="48" height="48" style="border-radius:50%"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) | [linkedin.com/in/autodidact](https://www.linkedin.com/in/autodidact) |
+| <img src="https://github.com/vansh7nvc.png?size=48" width="48" height="48" style="border-radius:50%"> | **Vansh Sharma** | [@vansh7nvc](https://github.com/vansh7nvc) | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
 
 > **Add yourself:** If you have merged PRs and would like to be listed here,
 > open a PR adding your row.
@@ -76,8 +84,8 @@ To report a security issue privately, see [`SECURITY.md`](https://github.com/llm
 
 | | Name | GitHub |
 |---|---|---|
-| <img src="docs/people/mai.jpg" width="48" height="48" style="border-radius:50%"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) |
-| <img src="docs/people/2352078.jpg" width="48" height="48" style="border-radius:50%"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) |
+| <img src="https://github.com/AnshumanAI.png?size=48" width="48" height="48" style="border-radius:50%"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) |
+| <img src="https://github.com/rorygraves.png?size=48" width="48" height="48" style="border-radius:50%"> | **Rory Graves** | [@rorygraves](https://github.com/rorygraves) |
 
 > Actively seeking additional members — comment on [issue #1117](https://github.com/llm4s/llm4s/issues/1117) if you're interested.
 
@@ -90,9 +98,9 @@ and community outreach.
 
 | | Name | GitHub | LinkedIn |
 |---|---|---|---|
-| <img src="docs/people/vansh-sharma.webp" width="48" height="48" style="border-radius:50%"> | **Vansh Sharma** | [@vansh7nvc](https://github.com/vansh7nvc) | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
-| <img src="docs/people/117119879.jpg" width="48" height="48" style="border-radius:50%"> | **Shubham Vishwakarma** | [@Vi-shub](https://github.com/Vi-shub) | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
-| <img src="docs/people/mai.jpg" width="48" height="48" style="border-radius:50%"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) | [linkedin.com/in/autodidact](https://www.linkedin.com/in/autodidact) |
+| <img src="https://github.com/vansh7nvc.png?size=48" width="48" height="48" style="border-radius:50%"> | **Vansh Sharma** | [@vansh7nvc](https://github.com/vansh7nvc) | [linkedin.com/in/vansh-sharma007392325](https://www.linkedin.com/in/vansh-sharma007392325) |
+| <img src="https://github.com/Vi-shub.png?size=48" width="48" height="48" style="border-radius:50%"> | **Shubham Vishwakarma** | [@Vi-shub](https://github.com/Vi-shub) | [linkedin.com/in/shubham-vish](https://www.linkedin.com/in/shubham-vish) |
+| <img src="https://github.com/AnshumanAI.png?size=48" width="48" height="48" style="border-radius:50%"> | **Anshuman Awasthi** | [@AnshumanAI](https://github.com/AnshumanAI) | [linkedin.com/in/autodidact](https://www.linkedin.com/in/autodidact) |
 
 > **Add yourself:** Open a PR or comment on [issue #1117](https://github.com/llm4s/llm4s/issues/1117).
 
