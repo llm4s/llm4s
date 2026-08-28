@@ -125,3 +125,64 @@ object Common {
   def scalacOptionsForVersion(scalaVersion: String): Seq[String] =
     scala3CompilerOptions
 }
+
+/**
+ * Per-module coverage policy.
+ *
+ * Every project in the build must make an explicit decision: either a statement-coverage
+ * floor (`coverageFloor(n)`) or an explicit opt-out (`coverageDisabled`). There is
+ * deliberately no inherited default - `ThisBuild / coveragePolicy` is `Undeclared`, and
+ * the root `coveragePolicyCheck` task fails the build for any project still sitting on it.
+ * That way a newly carved module cannot silently inherit somebody else's threshold.
+ *
+ * Floors are set from a measured baseline rounded DOWN to the nearest 5, so a module has
+ * headroom for normal churn. Floors ratchet upward over time; they are never lowered.
+ */
+object Coverage {
+  import scoverage.ScoverageKeys
+
+  sealed trait Policy
+  object Policy {
+
+    /** No decision has been made for this project - `coveragePolicyCheck` treats this as an error. */
+    case object Undeclared extends Policy
+
+    /** Statement coverage must stay at or above `pct` percent. */
+    final case class Floor(pct: Int) extends Policy
+
+    /** Coverage is deliberately not measured for this project. */
+    case object Disabled extends Policy
+  }
+
+  val coveragePolicy: SettingKey[Policy] =
+    settingKey[Policy]("Explicit per-module coverage policy (floor or deliberate opt-out)")
+
+  /**
+   * Require at least `pct`% statement coverage for this module, failing the build below it.
+   * A floor of 0 is a legitimate (measured) declaration for a module whose tests live
+   * elsewhere - it keeps coverage measured and reported, and is ratcheted up once the
+   * module grows its own tests.
+   */
+  def coverageFloor(pct: Int): Seq[Def.Setting[_]] = {
+    require(pct >= 0 && pct <= 100, s"coverage floor must be in 0..100, got $pct")
+    Seq(
+      coveragePolicy                         := Policy.Floor(pct),
+      ScoverageKeys.coverageMinimumStmtTotal := pct.toDouble,
+      ScoverageKeys.coverageFailOnMinimum    := true
+    )
+  }
+
+  /** Deliberately exclude this module from coverage measurement. */
+  val coverageDisabled: Seq[Def.Setting[_]] = Seq(
+    coveragePolicy                      := Policy.Disabled,
+    ScoverageKeys.coverageEnabled       := false,
+    ScoverageKeys.coverageFailOnMinimum := false
+  )
+
+  /** Human-readable rendering used by the `coveragePolicyCheck` report. */
+  def describe(policy: Policy): String = policy match {
+    case Policy.Floor(pct) => s"floor ${pct}%"
+    case Policy.Disabled   => "disabled"
+    case Policy.Undeclared => "UNDECLARED"
+  }
+}

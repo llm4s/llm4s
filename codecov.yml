@@ -12,17 +12,63 @@ coverage:
         target: 90%
         threshold: 5%
 
-# Coverage flags for per-module tracking
-# Only track main source code (not tests or resources)
+# Coverage flags: one flag per sbt module, mirroring the per-module coverage floors
+# declared in build.sbt (see `coverageFloor` / `coverageDisabled` there).
+#
+# REQUIRED WHEN CARVING A MODULE OUT OF core:
+#   every carve slice MUST add the new module's flag here in the same commit that adds
+#   the module to build.sbt. Codecov only attributes a file to a flag whose `paths`
+#   contain it - a path covered by no flag is silently untracked rather than failing,
+#   so a missing flag makes carved-out code disappear from per-module reporting instead
+#   of turning red. The build-side equivalent (`sbt coveragePolicyCheck`) fails loudly
+#   when a module declares no coverage floor; this file has no such guard, so it is on
+#   the carve PR to keep the two in step.
+#
+# Only main source code is tracked (not tests or resources).
+# `carryforward: true` keeps the last known coverage for a flag when a CI run does not
+# upload that module (CI currently runs coverage for `core` only).
 flags:
   core:
     paths:
       - modules/core/src/main/scala
     carryforward: true
-  workspace:
+  knowledgegraph-neo4j:
     paths:
-      - modules/workspace/*/src/main/scala
+      - modules/knowledgegraph-neo4j/src/main/scala
     carryforward: true
+  trace-opentelemetry:
+    paths:
+      - modules/trace-opentelemetry/src/main/scala
+    carryforward: true
+  # Modules below declare `coverageDisabled` in build.sbt (unpublished tooling, samples,
+  # or containerised workspace code). Flags are declared anyway so that any coverage that
+  # does get uploaded is attributed to the right module rather than going untracked.
+  config-policy:
+    paths:
+      - modules/config-policy/src/main/scala
+    carryforward: true
+  samples:
+    paths:
+      - modules/samples/src/main/scala
+    carryforward: true
+  workspace-shared:
+    paths:
+      - modules/workspace/workspaceShared/src/main/scala
+    carryforward: true
+  workspace-client:
+    paths:
+      - modules/workspace/workspaceClient/src/main/scala
+    carryforward: true
+  workspace-runner:
+    paths:
+      - modules/workspace/workspaceRunner/src/main/scala
+    carryforward: true
+  workspace-samples:
+    paths:
+      - modules/workspace/workspaceSamples/src/main/scala
+    carryforward: true
+  # modules/it has no src/main today (test-only host for integration suites); it gets a
+  # flag when it is populated with sources. modules/benchmarks is ignored above.
 
 # PR comment configuration
 comment:
