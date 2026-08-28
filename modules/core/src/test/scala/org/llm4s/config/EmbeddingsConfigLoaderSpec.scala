@@ -232,7 +232,7 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
         """
           |llm4s {
           |  embeddings {
-          |    provider = "cohere"
+          |    provider = "unknownlegacy"
           |  }
           |}
           |""".stripMargin
@@ -242,7 +242,7 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       result.isLeft shouldBe true
       val error = result.left.value
       error.message should include("Unknown embedding provider")
-      error.message should include("cohere")
+      error.message should include("unknownlegacy")
     }
 
     "fail with clear error when neither model nor provider is set" in {

@@ -5,6 +5,7 @@ import org.llm4s.agent.guardrails.patterns.PIIPatterns
 import org.llm4s.agent.guardrails.patterns.PIIPatterns.{ PIIMatch, PIIType }
 import org.llm4s.error.ValidationError
 import org.llm4s.types.Result
+import org.slf4j.LoggerFactory
 
 /**
  * Detects Personally Identifiable Information (PII) in text.
@@ -46,6 +47,8 @@ class PIIDetector(
 ) extends InputGuardrail
     with OutputGuardrail {
 
+  private val logger = LoggerFactory.getLogger(getClass)
+
   def validate(value: String): Result[String] = {
     val matches = PIIPatterns.detect(value, piiTypes)
 
@@ -70,8 +73,11 @@ class PIIDetector(
           Right(masked)
 
         case GuardrailAction.Warn =>
-          // Log warning but allow processing
-          // In a real implementation, this would log to the trace system
+          val summary  = summarizeMatches(matches)
+          val piiTypes = matches.map(_.piiType.name).distinct.mkString(", ")
+          logger.warn(
+            s"PII detected and allowed in warn mode: $summary. Found types: [$piiTypes]."
+          )
           Right(value)
       }
     }
@@ -87,7 +93,7 @@ class PIIDetector(
       case _                   => input
     }
 
-  val name: String = "PIIDetector"
+  override val name: String = "PIIDetector"
 
   override val description: Option[String] = Some(
     s"Detects PII in text: ${piiTypes.map(_.name).mkString(", ")}"
