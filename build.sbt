@@ -91,7 +91,7 @@ addCommandAlias(
 )
 addCommandAlias(
   "testSmoke",
-  """;it/testOnly org.llm4s.llmconnect.smoke.*"""
+  """;it/testOnly org.llm4s.llmconnect.smoke.* org.llm4s.speech.*"""
 )
 
 // ---- shared settings ----
