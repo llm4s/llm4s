@@ -3,6 +3,7 @@ package org.llm4s.imageprocessing
 import org.llm4s.imageprocessing.config._
 import org.llm4s.imageprocessing.provider._
 import org.llm4s.imageprocessing.provider.anthropicclient.AnthropicVisionClient
+import org.llm4s.imageprocessing.provider.geminiclient.GeminiVisionClient
 import org.llm4s.error.LLMError
 
 import scala.concurrent.{ Future, ExecutionContext, blocking }
@@ -45,6 +46,21 @@ object ImageProcessing {
   ): ImageProcessingClient = {
     val config = AnthropicVisionConfig(apiKey, model)
     new AnthropicVisionClient(config)
+  }
+
+  /**
+   * Creates a Google Gemini Vision client for image analysis.
+   *
+   * @param apiKey Google API key
+   * @param model  Gemini model to use (default: gemini-1.5-flash)
+   * @return ImageProcessingClient instance
+   */
+  def geminiVisionClient(
+    apiKey: String,
+    model: String = "gemini-1.5-flash"
+  ): ImageProcessingClient = {
+    val config = GeminiVisionConfig(apiKey, model)
+    new GeminiVisionClient(config)
   }
 
   /**
