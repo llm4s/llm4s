@@ -93,6 +93,11 @@ addCommandAlias(
   "testSmoke",
   """;it/testOnly org.llm4s.llmconnect.smoke.*"""
 )
+// testDocker: Tier 2 — integration tests requiring Docker daemon (requires LLM4S_DOCKER_TESTS=true)
+addCommandAlias(
+  "testDocker",
+  """;it/testOnly org.llm4s.workspace.WorkspaceAgentIntegrationSpec org.llm4s.workspace.ContainerisedWorkspaceTest"""
+)
 
 // ---- shared settings ----
 lazy val commonSettings = Seq(
