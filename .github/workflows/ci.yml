@@ -91,7 +91,13 @@ jobs:
 
       - name: Run Scalafix
         run: sbt scalafixAll
-      
+
+      # Fails when any module declares neither a coverage floor nor an explicit opt-out.
+      # Coverage floors are per-module and never inherited, so a new (e.g. carved-out)
+      # module must make the decision visible in build.sbt rather than pick up a default.
+      - name: Check coverage policy is declared for every module
+        run: sbt coveragePolicyCheck
+
       - name: Compile
         run: sbt compile
 
@@ -156,14 +162,22 @@ jobs:
           PGVECTOR_PASSWORD: postgres
           PGVECTOR_TEST_USER: postgres
           PGVECTOR_TEST_PASSWORD: postgres
-        # Run coverage only for core to keep signal focused and CI fast
-        run: sbt coverage core/test coverageAggregate
+        # Run coverage only for core to keep signal focused and CI fast.
+        # `core/coverageReport` is what enforces core's per-module floor (build.sbt:
+        # coverageFloor(70)) - the aggregate report is informational only, since a
+        # build-wide average is not a meaningful gate. Each additional module that
+        # should be gated in CI adds its own `<module>/test <module>/coverageReport`.
+        run: sbt coverage core/test core/coverageReport coverageAggregate
 
+      # Tagged with the `core` flag because this job measures core only. A carve slice that
+      # starts measuring another module adds a separate upload step with that module's flag
+      # (and the matching flag definition in codecov.yml).
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: target/scala-3.7.1/scoverage-report/scoverage.xml,modules/*/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: core
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

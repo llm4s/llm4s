@@ -1,6 +1,7 @@
 import sbt.Keys._
 import scoverage.ScoverageKeys._
 import Common._
+import Coverage.{ coverageDisabled, coverageFloor, coveragePolicy }
 
 inThisBuild(
   List(
@@ -44,8 +45,11 @@ inThisBuild(
           "0.0.0-UNKNOWN"
       }
     },
-    ThisBuild / coverageMinimumStmtTotal := 50,
-    ThisBuild / coverageFailOnMinimum    := true,
+    // Coverage floors are per-module, never inherited: every project must declare either
+    // `coverageFloor(n)` or `coverageDisabled` (see project/Dependencies.scala -> Coverage).
+    // This build-level default is the "no decision made" marker that `coveragePolicyCheck`
+    // fails on, so a newly carved module cannot silently inherit somebody else's threshold.
+    ThisBuild / coveragePolicy           := Coverage.Policy.Undeclared,
     ThisBuild / coverageHighlighting     := true,
     ThisBuild / coverageExcludedPackages := Seq(
       "org\\.llm4s\\.runner\\..*",
@@ -125,6 +129,17 @@ lazy val commonSettings = Seq(
   )
 )
 
+// `coveragePolicy` is read reflectively by `coveragePolicyCheck` (via Project.extract),
+// so sbt's unused-setting lint cannot see the use.
+Global / excludeLintKeys += coveragePolicy
+
+// ---- coverage policy check ----
+// Fails the build when a module has neither a coverage floor nor an explicit opt-out.
+// The absence of a decision must be an error, not a silent default.
+lazy val coveragePolicyCheck = taskKey[Unit](
+  "Fail the build if any module has not explicitly declared a coverage floor or opt-out"
+)
+
 // ---- projects ----
 lazy val llm4s = (project in file("."))
   .aggregate(
@@ -140,13 +155,45 @@ lazy val llm4s = (project in file("."))
     benchmarks
   )
   .settings(
-    publish / skip := true
+    publish / skip := true,
+    // Root is an aggregator with no sources of its own. `coverageAggregate` runs here, and
+    // the per-module floors are enforced by each module's own `coverageReport`, so the
+    // aggregate number is reported but not gated (a build-wide average is exactly the kind
+    // of misleading single threshold this change removes).
+    coverageDisabled,
+    coveragePolicyCheck / aggregate := false,
+    coveragePolicyCheck := {
+      val log       = streams.value.log
+      val extracted = Project.extract(state.value)
+      val rows = extracted.structure.allProjectRefs
+        .map(ref => ref.project -> extracted.getOpt(ref / coveragePolicy).getOrElse(Coverage.Policy.Undeclared))
+        .sortBy(_._1)
+      val width = rows.map(_._1.length).max
+      log.info("Coverage policy per module:")
+      rows.foreach { case (id, policy) =>
+        log.info(s"  ${id.padTo(width, ' ')}  ${Coverage.describe(policy)}")
+      }
+      val undeclared = rows.collect { case (id, Coverage.Policy.Undeclared) => id }
+      if (undeclared.nonEmpty)
+        throw new MessageOnlyException(
+          s"""No coverage policy declared for: ${undeclared.mkString(", ")}
+             |Every module must make an explicit decision in build.sbt - coverage floors are
+             |never inherited. Add ONE of the following to the project's .settings(...):
+             |  coverageFloor(<pct>)  // measured statement coverage rounded DOWN to nearest 5
+             |  coverageDisabled      // with a comment saying why it is not measured
+             |Also add a codecov flag for the module in codecov.yml in the same commit.""".stripMargin
+        )
+    }
   )
 
 lazy val core = (project in file("modules/core"))
   .settings(
     name := "core",
     commonSettings,
+    // Measured 72.42% statement coverage (53,499 statements, 7004 tests) on main @ 5a62e2ac.
+    // Floor is the measured value rounded down to the nearest 5. Ratchet it up as the
+    // module is carved apart; never lower it.
+    coverageFloor(70),
     Test / fork := true,
     Test / javaOptions ++= Seq(
       "-Xmx2g", "-Xms512m",
@@ -209,7 +256,9 @@ lazy val workspaceShared = (project in file("modules/workspace/workspaceShared")
     name := "workspaceShared",
     commonSettings,
     Compile / discoveredMainClasses := Seq.empty,
-    coverageEnabled := false
+    // Not measured: excluded via ThisBuild / coverageExcludedPackages (org.llm4s.workspace.*)
+    // and exercised only by containerised integration tests.
+    coverageDisabled
   )
 
 lazy val workspaceClient = (project in file("modules/workspace/workspaceClient"))
@@ -218,7 +267,9 @@ lazy val workspaceClient = (project in file("modules/workspace/workspaceClient")
     name := "workspaceClient",
     commonSettings,
     Compile / discoveredMainClasses := Seq.empty,
-    coverageEnabled := false,
+    // Not measured: excluded via ThisBuild / coverageExcludedPackages (org.llm4s.workspace.*)
+    // and exercised only by containerised integration tests.
+    coverageDisabled,
     libraryDependencies ++= Seq(
       Deps.azureOpenAI,
       Deps.anthropic,
@@ -254,7 +305,9 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
       Deps.hikariCP
     ),
     publish / skip := true,
-    coverageEnabled := false
+    // Not measured: Docker entry point, excluded via ThisBuild / coverageExcludedPackages
+    // (org.llm4s.runner.*) and exercised only by containerised integration tests.
+    coverageDisabled
   )
   .settings(WorkspaceRunnerDocker.settings)
 
@@ -264,7 +317,9 @@ lazy val samples = (project in file("modules//samples"))
     name := "samples",
     commonSettings,
     publish / skip := true,
-    coverageEnabled := false,
+    // Not measured: unpublished example code, excluded via ThisBuild / coverageExcludedPackages
+    // (org.llm4s.samples.*). Samples are compile-checked, not covered.
+    coverageDisabled,
     libraryDependencies += Deps.termflow
   )
 
@@ -274,7 +329,9 @@ lazy val configPolicy = (project in file("modules/config-policy"))
     name := "llm4s-config-policy",
     commonSettings,
     publish / skip := true,
-    coverageEnabled := false,
+    // Not measured: unpublished CLI tooling, verified end-to-end by the
+    // config-policy-check CI job rather than by unit-test coverage.
+    coverageDisabled,
     // Env-var-based engine CLI (EnvCheckPolicies) calls sys.exit, so its runMain
     // is forked. Keep the forked working directory at the repo root so the
     // catalog engine's relative --config paths (CheckPolicies) still resolve.
@@ -292,7 +349,8 @@ lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples
     name := "workspaceSamples",
     commonSettings,
     publish / skip := true,
-    coverageEnabled := false
+    // Not measured: unpublished example code for the workspace modules.
+    coverageDisabled
   )
 
 lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
@@ -300,6 +358,12 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
   .settings(
     name := "trace-opentelemetry",
     commonSettings,
+    // Measured 0.00% statement coverage (`sbt coverage traceOpentelemetry/test
+    // traceOpentelemetry/coverageReport`): the module has no in-module tests at all, its
+    // only suite is modules/it/.../OpenTelemetryTracingSpec, which needs a live collector.
+    // Floor is the measured value rounded down to the nearest 5, i.e. 0 - measurement stays
+    // ON so the number is visible, and the floor ratchets up as soon as unit tests land here.
+    coverageFloor(0),
     libraryDependencies ++= Seq(
       Deps.opentelemetryApi,
       Deps.opentelemetrySdk,
@@ -317,10 +381,9 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
       Deps.neo4jDriver,
       Deps.scalatest % Test
     ),
-    // Enforce ≥80% statement coverage when running with `sbt coverage test`
-    // for the unit-test suite that ships with this module.
-    coverageMinimumStmtTotal := 80,
-    coverageFailOnMinimum    := true
+    // Enforce >=80% statement coverage when running with `sbt coverage test`
+    // for the unit-test suite that ships with this module. Pre-existing gate, unchanged.
+    coverageFloor(80)
   )
 
 lazy val it = (project in file("modules/it"))
@@ -329,6 +392,11 @@ lazy val it = (project in file("modules/it"))
     name := "it",
     commonSettings,
     publish / skip := true,
+    // Not measured: `modules/it` has no src/main at all - it is a test-only host for
+    // integration/smoke suites that exercise the OTHER modules' code, so its own
+    // statement count is zero and any floor would be meaningless. It gets a real
+    // policy (and a codecov flag) when it is populated with sources in a later slice.
+    coverageDisabled,
     Test / fork := true,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
@@ -342,6 +410,12 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
     name           := "benchmarks",
     commonSettings,
     publish / skip := true,
+    // Measured 100.00% statement/branch coverage (`sbt coverage benchmarks/test
+    // benchmarks/coverageReport`): BenchmarkSmokeTest deliberately instantiates and runs
+    // every JMH benchmark. Floor is the measured value rounded down to the nearest 5, i.e.
+    // 100, which encodes exactly that policy - a new benchmark must be added to the smoke
+    // test. (Codecov ignores modules/benchmarks; this is a build-side gate only.)
+    coverageFloor(100),
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
     )
