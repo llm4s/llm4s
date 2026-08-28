@@ -6,26 +6,57 @@
 - Multi-provider support (OpenAI, Anthropic, Azure, Ollama, Google Gemini)
 - Type-safe design with `Result[A]` error handling
 - Agent framework with tools, guardrails, handoffs, and memory
-- Cross-compilation for Scala 2.13 and 3.x
+- Scala 3 only (3.7.1). Scala 2.13 support is deferred to post-1.0 — see [#1126](https://github.com/llm4s/llm4s/issues/1126)
 
-**Tech Stack:** Scala 2.13/3.x, SBT, ScalaTest, Cats, uPickle, Docker
+**Tech Stack:** Scala 3.7.1, JDK 21, SBT, ScalaTest, Cats, uPickle, Docker
 
 ## Core Principles
 
 1. **Use `Result[A]` instead of exceptions** - `type Result[+A] = Either[LLMError, A]`
 2. **Use `Llm4sConfig` at the app edge** - Never use `sys.env`, `System.getenv`, or `ConfigSource.default` directly in core code
 3. **Use type-safe newtypes** - `ModelName`, `ApiKey`, `ConversationId` etc.
-4. **Cross-version compatibility** - Test with `sbt +test`
+4. **Scala 3 idioms are welcome** - `opaque type`, `using` clauses, `enum` and `extension` are all in use. Do not rewrite them to a Scala 2.13-compatible subset; see [#1127](https://github.com/llm4s/llm4s/issues/1127)
+
+## Active: modularisation programme (#1126)
+
+`modules/core` is being split into per-concern modules ahead of a 1.0 API freeze. **Before moving, renaming, or adding files under `modules/core`, read [#1126](https://github.com/llm4s/llm4s/issues/1126) and the relevant slice issue.**
+
+Slice order — each is an issue with its own scope and gotchas:
+
+| Slice | Issue | Carves |
+|---|---|---|
+| 0 | [#1127](https://github.com/llm4s/llm4s/issues/1127) | build + tracker prerequisites |
+| 1 | [#1128](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` |
+| 2 | [#1129](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory` |
+| 3 | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-image`, `llm4s-speech` |
+| 4 | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
+| 5 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules |
+| 6 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability`, then 0.4.0 + MiMa |
+
+**Invariants for every carve:**
+
+1. **Keep package names.** Move files between sbt modules without renaming `org.llm4s.*`, so each carve stays source-compatible — users add a dependency, not new imports. The one sanctioned exception is `org.llm4s.extract` in slice 1.
+2. **Tests move with their code.** Leaving them behind silently drops coverage in both modules.
+3. **`reference.conf` keys move with their code.** HOCON merges across jars; keys left behind become defaults that apply to nothing.
+4. **Coverage floor and codecov flag land in the same commit as the carve.** A missing flag makes the moved code untracked rather than failing.
+5. **One migration note per slice**, in CHANGELOG and docs.
+6. **Never add a provider by editing shared registration files** once slice 4 lands. Before then, note that `NamedProviderLoader`, `ProviderConfig`, `ProviderModelTypes`, `LLMConnect`, `ProviderCapabilities*` and `NamedProviderValidator` are the most contended files in the repo.
+
+Current per-module coverage floors are recorded in [#1127](https://github.com/llm4s/llm4s/issues/1127); floors ratchet upward and are never lowered.
 
 ## Repository Structure
 
 ```
 llm4s/
 ├── modules/
-│   ├── core/            # Core library (published)
-│   ├── samples/         # Usage examples
-│   ├── workspace/       # Containerized execution
-│   └── crossTest/       # Cross-version tests
+│   ├── core/                  # Core library (published)
+│   ├── samples/               # Usage examples
+│   ├── workspace/             # Containerized execution
+│   ├── config-policy/         # Config policy checks + CLI
+│   ├── knowledgegraph-neo4j/  # Neo4j graph store
+│   ├── trace-opentelemetry/   # OpenTelemetry tracing
+│   ├── benchmarks/            # JMH benchmarks
+│   └── it/                    # Integration tests
 ├── docs/                # Documentation
 ├── project/             # SBT config
 └── build.sbt
@@ -42,8 +73,8 @@ llm4s/
 ## Common Commands
 
 ```bash
-sbt buildAll           # Build all Scala versions
-sbt +test              # Test all versions
+sbt buildAll           # Clean, compile, test
+sbt test               # Run tests
 sbt scalafmtAll        # Format code
 sbt cov                # Run coverage
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
