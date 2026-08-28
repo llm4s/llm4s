@@ -31,6 +31,7 @@ Start here if you want to contribute to the project.
 ## Roadmap & Planning
 
 - **[Project Roadmap](roadmap)** - Development roadmap, production readiness, and future plans (single source of truth)
+- **[1.0 Scope](v1-scope)** - Which packages are Frozen, Beta, or Experimental ahead of the 1.0 modularisation
 - **[Design Documents](https://github.com/llm4s/llm4s/tree/main/docs/design)** - Detailed architecture docs
 
 ## External Resources
