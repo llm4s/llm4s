@@ -51,11 +51,66 @@ jobs:
           SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
           SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
       
-  # Deploy the docs as soon as the Maven artifacts are live. Deliberately depends on
-  # `publish` and not on the container image below: a registry failure must not leave
-  # llm4s.org advertising the previous version when the release itself succeeded.
-  docs:
+  # Publish the GitHub Release. This is what makes a release visible in the repo UI and
+  # what notifies anyone watching "Releases only" -- neither happened automatically
+  # before, so every release relied on someone remembering.
+  #
+  # It runs after `publish` so a Release can only ever exist for a version that actually
+  # reached Maven Central, and *before* `docs`, because the docs deploy reads the
+  # published version from the Releases API.
+  github-release:
     needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A semver pre-release identifier (v1.0.0-RC1) must be marked as such, or it
+          # becomes GitHub's "latest" release -- which the docs deploy reads to decide
+          # which version the install snippets name. An RC must not displace the last
+          # stable version there.
+          PRERELEASE=""
+          case "$GITHUB_REF_NAME" in
+            *-*) PRERELEASE="--prerelease" ;;
+          esac
+
+          # Idempotent, and specifically draft-aware. `gh release view` succeeds for a
+          # DRAFT release, so an existence check alone would skip creation and leave the
+          # draft in place. Drafts are excluded from the `releases/latest` endpoint the
+          # docs deploy reads, so the site would then keep advertising the previous
+          # version while the new artifacts were already on Maven Central. Deleting a tag
+          # that has a Release attached leaves exactly such a draft behind, which is a
+          # documented recovery path in docs/reference/release.md -- so this is reachable,
+          # not hypothetical.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = "true" ]; then
+              echo "Release $GITHUB_REF_NAME exists as a draft; publishing it."
+              gh release edit "$GITHUB_REF_NAME" --draft=false $PRERELEASE
+            else
+              echo "Release $GITHUB_REF_NAME already published; leaving it untouched."
+            fi
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes \
+              $PRERELEASE
+          fi
+
+  # Deploy the docs once the release is published and visible. Deliberately independent
+  # of the container image below: a registry failure must not leave llm4s.org advertising
+  # the previous version when the release itself succeeded.
+  docs:
+    needs: github-release
     permissions:
       contents: read
       pages: write

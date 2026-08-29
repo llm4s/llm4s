@@ -16,22 +16,38 @@ git pull origin main
 git tag v0.3.2
 git push origin v0.3.2
 
-# 3. The GitHub Actions release workflow will automatically:
-#    - Run all CI checks
-#    - Build and sign artifacts
-#    - Publish to Maven Central
-#    - Build and push Docker images
+# 3. The GitHub Actions release workflow does the rest -- see below.
 ```
 
-### 3. Creating GitHub Release (Optional)
+Pushing the tag is the whole procedure. Everything after it is automated, in this order:
 
-After the tag is pushed, you can create a GitHub Release:
+```
+ci → publish → github-release → docs
+             └───────────────→ docker
+```
 
-1. Go to https://github.com/llm4s/llm4s/releases/new
-2. Select the tag you just created (e.g., `v0.3.2`)
-3. Set release title (e.g., "v0.3.2")
-4. Add release notes
-5. Click "Publish release"
+| Job | Does |
+|-----|------|
+| `ci` | Full CI on the tagged commit |
+| `publish` | Signs and publishes artifacts to Maven Central |
+| `github-release` | Creates the GitHub Release for the tag |
+| `docs` | Deploys llm4s.org with the new version in the install snippets |
+| `docker` | Builds and pushes the container image |
+
+### 3. Do NOT create the GitHub Release by hand
+
+The `github-release` job creates it for you, and it runs **after** `publish` succeeds. That
+ordering is the point: a GitHub Release is the signal that a version is available, it is
+what notifies everyone watching "Releases only", and it is what `docs` reads to decide which
+version the install snippets should name.
+
+Creating the Release manually defeats all of that. The job skips creation when a Release
+already exists, so a hand-made one is accepted regardless of whether the publish went on to
+succeed -- leaving a Release, a notification, and a documented coordinate for a version that
+never reached Maven Central.
+
+**Editing the generated notes afterwards is fine and encouraged.** The job only ever creates;
+it never overwrites. Write whatever the release deserves once it exists.
 
 ### 4. Verify Release
 
@@ -49,13 +65,27 @@ After the tag is pushed, you can create a GitHub Release:
 
 ### Re-triggering a failed release
 
-```bash
-# Delete and recreate the tag
-git tag -d v0.3.2
-git push origin :v0.3.2
-git tag v0.3.2
-git push origin v0.3.2
-```
+**Check what actually failed first.** Maven Central is immutable: once `publish` has
+succeeded, those coordinates exist forever and cannot be replaced. Re-running a release whose
+`publish` step already completed will fail on the existing version, and re-tagging will not
+help.
+
+- **Failed before or during `publish`** — nothing was published. Delete and recreate the tag:
+
+  ```bash
+  git tag -d v0.3.2
+  git push origin :v0.3.2
+  git tag v0.3.2
+  git push origin v0.3.2
+  ```
+
+  Note that deleting a tag that already has a GitHub Release attached leaves the Release
+  behind as a draft. Delete it too before retrying, or the recreated tag's `github-release`
+  job will skip creation.
+
+- **Failed after `publish`** (`github-release`, `docs` or `docker`) — the artifacts are live
+  and the release is real. Do **not** re-tag. Re-run the failed job from the Actions UI, or
+  cut the next patch version if the failure needs a code change.
 
 ## Version Numbering
 
