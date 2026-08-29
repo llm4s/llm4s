@@ -105,10 +105,16 @@ class TikaDocumentExtractorSpec extends AnyFunSuite with Matchers {
   }
 
   test("normalizePath should strip only a matching pair of quotes") {
-    TikaDocumentExtractor.normalizePath("\"/tmp/a.txt\"").getPath shouldBe "/tmp/a.txt"
-    TikaDocumentExtractor.normalizePath("'/tmp/a.txt'").getPath shouldBe "/tmp/a.txt"
+    // Compared against the unquoted form rather than a literal: normalizePath resolves to an
+    // absolute path, and what that looks like is platform-specific.
+    val plain = TikaDocumentExtractor.normalizePath("/tmp/a.txt")
+    TikaDocumentExtractor.normalizePath("\"/tmp/a.txt\"") shouldBe plain
+    TikaDocumentExtractor.normalizePath("'/tmp/a.txt'") shouldBe plain
+    TikaDocumentExtractor.normalizePath("  /tmp/a.txt  ") shouldBe plain
+
     // An apostrophe in the filename is part of the name, not a quote to strip.
-    TikaDocumentExtractor.normalizePath("/tmp/rory's.txt").getPath shouldBe "/tmp/rory's.txt"
+    TikaDocumentExtractor.normalizePath("/tmp/rory's.txt").getName shouldBe "rory's.txt"
+    TikaDocumentExtractor.normalizePath("\"/tmp/rory's.txt\"").getName shouldBe "rory's.txt"
   }
 
   // ================================= canExtract =================================
