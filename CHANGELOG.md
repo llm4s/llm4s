@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Non-UUID IDs are now mapped to a UUID derived from the ID, with the record's own ID carried
   in the payload and read back from there; UUID IDs are unchanged. A mocked-HTTP unit test had
   been asserting the broken request shape, which is why nothing caught this.
+- `QdrantVectorStore` reported absence as failure. Qdrant answers 404 both for a point that
+  does not exist and for a collection that does not exist - and the collection is created
+  lazily on first upsert and deleted outright by `clear()` - so `get` returned a `Left`
+  instead of `Right(None)`, and `count`, `list`, `search` and `stats` failed on an empty
+  store rather than reporting it empty. Reads now treat 404 as empty; writes still error.
 - 11 of the 18 integration suites in `modules/it` were executed by nothing - not locally, not
   in CI, not on release - because the tier aliases named two `testOnly` patterns and every
   suite outside them matched nothing. Tier membership is now declared per suite by class

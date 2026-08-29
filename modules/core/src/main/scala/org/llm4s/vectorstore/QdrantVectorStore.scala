@@ -138,8 +138,8 @@ final class QdrantVectorStore private (
 
       filter.foreach(f => body("filter") = filterToQdrant(f))
 
-      httpPost(s"$pointsUrl/search", body).map { response =>
-        val results = response("result").arr
+      httpPostOptional(s"$pointsUrl/search", body).map { responseOpt =>
+        val results = responseOpt.map(_("result").arr).getOrElse(ujson.Arr().arr)
         results.map { point =>
           val id       = recordId(point)
           val score    = point("score").num
@@ -163,10 +163,8 @@ final class QdrantVectorStore private (
 
   override def get(id: String): Result[Option[VectorRecord]] =
     Try {
-      httpGet(s"$pointsUrl/${pointId(id)}?with_payload=true&with_vector=true").map { response =>
-        val result = response("result")
-        if (result.isNull) None
-        else Some(pointToRecord(result))
+      httpGetOptional(s"$pointsUrl/${pointId(id)}?with_payload=true&with_vector=true").map {
+        _.map(_("result")).filterNot(_.isNull).map(pointToRecord)
       }
     }.toEither.left
       .map(e => ProcessingError("qdrant-store", s"Failed to get: ${e.getMessage}"))
@@ -262,7 +260,8 @@ final class QdrantVectorStore private (
       val body = ujson.Obj("exact" -> true)
       filter.foreach(f => body("filter") = filterToQdrant(f))
 
-      httpPost(s"$pointsUrl/count", body).map(response => response("result")("count").num.toLong)
+      httpPostOptional(s"$pointsUrl/count", body)
+        .map(_.map(_("result")("count").num.toLong).getOrElse(0L))
     }.toEither.left
       .map(e => ProcessingError("qdrant-store", s"Failed to count: ${e.getMessage}"))
       .flatMap(identity)
@@ -277,7 +276,8 @@ final class QdrantVectorStore private (
       )
       filter.foreach(f => body("filter") = filterToQdrant(f))
 
-      httpPost(s"$pointsUrl/scroll", body).map(response => response("result")("points").arr.map(pointToRecord).toSeq)
+      httpPostOptional(s"$pointsUrl/scroll", body)
+        .map(_.map(_("result")("points").arr.map(pointToRecord).toSeq).getOrElse(Seq.empty))
     }.toEither.left
       .map(e => ProcessingError("qdrant-store", s"Failed to list: ${e.getMessage}"))
       .flatMap(identity)
@@ -288,22 +288,22 @@ final class QdrantVectorStore private (
 
   override def stats(): Result[VectorStoreStats] =
     Try {
-      httpGet(collectionsUrl).map { response =>
-        val result        = response("result")
-        val totalRecords  = result("points_count").num.toLong
-        val vectorsConfig = result("config")("params")("vectors")
+      httpGetOptional(collectionsUrl).map {
+        // A collection that does not exist yet is an empty store, not a failure.
+        case None => VectorStoreStats(totalRecords = 0L, dimensions = Set.empty, sizeBytes = None)
+        case Some(response) =>
+          val result        = response("result")
+          val vectorsConfig = result("config")("params")("vectors")
 
-        val dimensions = if (vectorsConfig.obj.contains("size")) {
-          Set(vectorsConfig("size").num.toInt)
-        } else {
-          Set.empty[Int]
-        }
+          val dimensions =
+            if (vectorsConfig.obj.contains("size")) Set(vectorsConfig("size").num.toInt)
+            else Set.empty[Int]
 
-        VectorStoreStats(
-          totalRecords = totalRecords,
-          dimensions = dimensions,
-          sizeBytes = None // Qdrant doesn't expose this directly
-        )
+          VectorStoreStats(
+            totalRecords = result("points_count").num.toLong,
+            dimensions = dimensions,
+            sizeBytes = None // Qdrant doesn't expose this directly
+          )
       }
     }.toEither.left
       .map(e => ProcessingError("qdrant-store", s"Failed to get stats: ${e.getMessage}"))
@@ -316,6 +316,37 @@ final class QdrantVectorStore private (
   // ============================================================
   // HTTP Helpers
   // ============================================================
+
+  /**
+   * A read of something that is not there.
+   *
+   * Qdrant answers 404 both for a point that does not exist and for a collection that does
+   * not exist - and the collection legitimately does not exist much of the time here, since
+   * it is created lazily on the first upsert and removed outright by `clear()`. Absence is
+   * not a failure for a read: `get` has an `Option` in its return type precisely to say so,
+   * and an empty store counts 0 rather than erroring. Writes keep the 404 as an error.
+   */
+  private def httpGetOptional(url: String): Result[Option[ujson.Value]] =
+    Try(httpClient.get(url, headers = authHeaders)).toEither.left
+      .map(e => ProcessingError("qdrant-store", s"HTTP GET failed: ${e.getMessage}"))
+      .flatMap {
+        case response if response.statusCode == 404 => Right(None)
+        case response                               => handleResponse(response).map(Some(_))
+      }
+
+  private def httpPostOptional(url: String, body: ujson.Value): Result[Option[ujson.Value]] =
+    Try(
+      httpClient.post(
+        url,
+        headers = authHeaders ++ Map("Content-Type" -> "application/json"),
+        body = ujson.write(body)
+      )
+    ).toEither.left
+      .map(e => ProcessingError("qdrant-store", s"HTTP POST failed: ${e.getMessage}"))
+      .flatMap {
+        case response if response.statusCode == 404 => Right(None)
+        case response                               => handleResponse(response).map(Some(_))
+      }
 
   private def httpGet(url: String): Result[ujson.Value] =
     Try {

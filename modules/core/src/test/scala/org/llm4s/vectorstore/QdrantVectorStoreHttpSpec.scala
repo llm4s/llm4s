@@ -77,7 +77,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     result.toOption.flatten.map(_.id) shouldBe Some("test-1")
   }
 
-  it should "handle 404 Not Found error" in {
+  it should "report a 404 as an absent record, not as an error" in {
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
@@ -85,9 +85,9 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
       .when(testPointUrl, *, *, *)
       .returns(httpResponse(404, "Not found"))
 
-    val result = store.get("test-1")
-    result.isLeft shouldBe true
-    result.left.map(error => error.formatted should include("Not found"))
+    // Qdrant 404s for a point that does not exist, and for a collection not created yet.
+    // `get` returns an Option precisely so that absence has somewhere to go other than Left.
+    store.get("test-1") shouldBe Right(None)
   }
 
   it should "handle 500 Internal Server Error" in {
@@ -209,7 +209,8 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
       .when(s"$pointsUrl/$uuid?with_payload=true&with_vector=true", *, *, *)
       .returns(httpResponse(404, "Not found"))
 
-    store.get(uuid).isLeft shouldBe true
+    // Reaching the stub at all is the assertion: an unmapped URL would not match it.
+    store.get(uuid) shouldBe Right(None)
   }
 
   it should "be read back from the payload rather than from the point ID" in {
