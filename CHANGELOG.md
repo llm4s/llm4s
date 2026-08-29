@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-29
+
 ### Changed
 - **Breaking (coordinates only):** every published artifact was renamed to carry an `llm4s-`
   prefix in consistent kebab-case. No API, package or source changes accompany the rename.

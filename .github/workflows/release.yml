@@ -51,11 +51,44 @@ jobs:
           SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
           SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
       
-  # Deploy the docs as soon as the Maven artifacts are live. Deliberately depends on
-  # `publish` and not on the container image below: a registry failure must not leave
-  # llm4s.org advertising the previous version when the release itself succeeded.
-  docs:
+  # Publish the GitHub Release. This is what makes a release visible in the repo UI and
+  # what notifies anyone watching "Releases only" -- neither happened automatically
+  # before, so every release relied on someone remembering.
+  #
+  # It runs after `publish` so a Release can only ever exist for a version that actually
+  # reached Maven Central, and *before* `docs`, because the docs deploy reads the
+  # published version from the Releases API.
+  github-release:
     needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Idempotent: re-running a release must not fail on an existing Release.
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; leaving it untouched."
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --title "$GITHUB_REF_NAME" \
+              --generate-notes
+          fi
+
+  # Deploy the docs once the release is published and visible. Deliberately independent
+  # of the container image below: a registry failure must not leave llm4s.org advertising
+  # the previous version when the release itself succeeded.
+  docs:
+    needs: github-release
     permissions:
       contents: read
       pages: write

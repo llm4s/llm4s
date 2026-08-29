@@ -66,6 +66,8 @@ jobs:
 
       - name: Extract version from sbt
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # Working version of this commit. On an untagged main, sbt-dynver returns
           # something like 0.4.0+3-abc1234-SNAPSHOT, which is NOT resolvable from
@@ -73,10 +75,16 @@ jobs:
           # install snippet.
           VERSION=$(sbt -no-colors 'print version' | tail -1 | tr -d '\n')
 
-          # Latest published release: the newest v* tag. Install snippets use this.
-          LATEST=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null | sed 's/^v//')
+          # Latest published release, from the GitHub Releases API. Install snippets use
+          # this, and it is deliberately NOT `git describe`: a tag exists from the moment
+          # it is pushed, whereas a Release is created only after `sbt ci-release` has
+          # actually published (see release.yml). `git describe` also answers "newest tag
+          # reachable from this ref", which silently gives the wrong answer when a newer
+          # release is still publishing, or when a release was cut from a branch other
+          # than the one being built.
+          LATEST=$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name 2>/dev/null | sed 's/^v//')
           if [ -z "$LATEST" ]; then
-            echo "::error::No v* release tag found; cannot determine the published version."
+            echo "::error::No published GitHub Release found; cannot determine the published version."
             exit 1
           fi
 
