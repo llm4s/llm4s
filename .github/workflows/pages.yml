@@ -9,19 +9,17 @@ on:
       - 'modules/core/src/**'
       - '.github/workflows/pages.yml'
 
-  # A release redeploys the site so the install snippets pick up the new version.
+  # Releases deploy by calling this workflow from release.yml, gated on the Maven
+  # publish job alone. Two reasons it is a `workflow_call` rather than a trigger here:
   #
-  # This is deliberately gated on the Release workflow *succeeding* rather than on
-  # the tag push. Both workflows trigger on `v*` tags, but the snippet version comes
-  # from `git describe` over tags, so deploying on the tag itself would advertise a
-  # coordinate before `sbt ci-release` had published it -- and permanently, if the
-  # publish failed. Pages also wins that race easily, since Release runs full CI first.
-  #
-  # `git describe` finds the tag from main, so checking out the default branch here
-  # is sufficient; we need the tag to be reachable, not checked out.
-  workflow_run:
-    workflows: ["Release"]
-    types: [completed]
+  #  - Gating on the Release *workflow* would suppress the docs deploy when a step
+  #    after `sbt ci-release` fails (the container image push), even though the
+  #    artifacts are already live on Maven Central.
+  #  - A called workflow inherits the caller's ref, so `git describe` sees exactly
+  #    the tag being released. Deriving it from the default branch instead could
+  #    pick a newer tag that has not published yet, or miss a tag not reachable
+  #    from main.
+  workflow_call:
 
   workflow_dispatch:
 
@@ -38,8 +36,6 @@ concurrency:
 
 jobs:
   build:
-    # Only deploy for a release that actually published.
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
