@@ -266,6 +266,56 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     store.get("test-1").toOption.flatten.map(_.id) shouldBe Some("test-1")
   }
 
+  it should "fall back to the point ID for a point written without one" in {
+    val mockClient = createMockClient()
+    val store      = createStore(mockClient)
+
+    // A point put there by something other than llm4s carries no `llm4s_id`, and Qdrant's
+    // other legal ID form is an integer rather than a string.
+    (mockClient.post _)
+      .when(s"$pointsUrl/search", *, *, *)
+      .returns(
+        httpResponse(
+          200,
+          """{"result": [{ "id": 7, "score": 0.5, "vector": [0.1], "payload": { "content": "foreign" } }]}"""
+        )
+      )
+
+    store.search(Array(0.1f), topK = 1).toOption.flatMap(_.headOption).map(_.record.id) shouldBe Some("7")
+  }
+
+  it should "degrade to the raw JSON for a point ID that is neither string nor integer" in {
+    val mockClient = createMockClient()
+    val store      = createStore(mockClient)
+
+    // Not something Qdrant should ever send. Reading it as text keeps a malformed response
+    // from throwing inside what is otherwise a total read path.
+    (mockClient.post _)
+      .when(s"$pointsUrl/search", *, *, *)
+      .returns(httpResponse(200, """{"result": [{ "id": null, "score": 0.5, "vector": [0.1], "payload": {} }]}"""))
+
+    store.search(Array(0.1f), topK = 1).toOption.flatMap(_.headOption).map(_.record.id) shouldBe Some("null")
+  }
+
+  it should "be sent as derived UUIDs when deleting a batch" in {
+    val mockClient = createMockClient()
+    val store      = createStore(mockClient)
+
+    (mockClient.post _)
+      .when(s"$pointsUrl/delete?wait=true", *, *, *)
+      .returns(httpResponse(200, """{"result": "ok"}"""))
+
+    store.deleteBatch(Seq("test-1", "test-2")) shouldBe Right(())
+
+    (mockClient.post _).verify(
+      where { (url: String, _: Map[String, String], body: String, _: Int) =>
+        url == s"$pointsUrl/delete?wait=true" &&
+        ujson.read(body)("points").arr.map(_.str).toSeq ==
+          Seq(testPointId, QdrantVectorStore.derivedPointId("test-2"))
+      }
+    )
+  }
+
   // ============================================================
   // Reads of a store that does not exist yet
   // ============================================================
@@ -290,6 +340,30 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
 
     store.search(Array(0.1f, 0.2f, 0.3f), topK = 5) shouldBe Right(Seq.empty)
     store.list(limit = 10, offset = 0) shouldBe Right(Seq.empty)
+  }
+
+  it should "report no dimensions for a collection configured with named vectors" in {
+    val mockClient = createMockClient()
+    val store      = createStore(mockClient)
+
+    // Named-vector collections nest each vector's size under its name, so there is no single
+    // dimension to report.
+    val namedVectors = """{
+      "result": {
+        "points_count": 3,
+        "config": { "params": { "vectors": { "title": { "size": 4, "distance": "Cosine" } } } }
+      }
+    }"""
+
+    val freshClient = stub[Llm4sHttpClient]
+    (freshClient.get _).when(collectionsUrl, *, *, *).returns(httpResponse(200, namedVectors))
+    val namedStore = QdrantVectorStore(testConfig, freshClient) match {
+      case Right(s)  => s
+      case Left(err) => fail(s"Failed to create store: ${err.formatted}")
+    }
+
+    namedStore.stats() shouldBe Right(VectorStoreStats(totalRecords = 3L, dimensions = Set.empty, sizeBytes = None))
+    store.stats().isRight shouldBe true
   }
 
   it should "report a zero-record store rather than fail" in {
