@@ -166,6 +166,8 @@ lazy val itTierCheck = taskKey[Unit](
 lazy val llm4s = (project in file("."))
   .aggregate(
     core,
+    rag,
+    knowledgegraph,
     samples,
     configPolicy,
     workspaceShared,
@@ -223,7 +225,9 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
-    // Measured 72.42% statement coverage (53,499 statements, 7004 tests) on main @ 5a62e2ac.
+    // Measured 74.19% statement coverage after slice 1 carved `rag`, `vectorstore`,
+    // `chunking`, `reranker`, `eval` and `knowledgegraph` out (`sbt coverage core/test
+    // core/coverageReport`); it was 72.42% on main @ 5a62e2ac before the carve.
     // Floor is the measured value rounded down to the nearest 5. Ratchet it up as the
     // module is carved apart; never lower it.
     coverageFloor(70),
@@ -267,20 +271,66 @@ lazy val core = (project in file("modules/core"))
       Deps.scalatest % Test,
       Deps.scalamock % Test,
       Deps.ujson,
-      Deps.pdfbox,
       Deps.commonsIO,
-      Deps.tika,
-      Deps.poi,
-      Deps.jsoup,
       Deps.jna,
       Deps.vosk,
       Deps.postgres,
       Deps.config,
       Deps.hikariCP,
-      Deps.awsS3,
-      Deps.awsSts,
       Deps.prometheusCore,
       Deps.prometheusHttp
+    )
+  )
+
+// ---- slice 1 of the modularisation programme (#1128) ----
+// `knowledgegraph` carves first because `rag` depends on it; the reverse edge that used to
+// make them inseparable (knowledgegraph/graphrag -> vectorstore) is gone, because GraphRAG
+// itself now lives in `rag`. Package names are unchanged on both sides: users of 0.4.x add a
+// dependency, they do not rewrite imports.
+
+lazy val knowledgegraph = (project in file("modules/knowledgegraph"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-knowledgegraph",
+    commonSettings,
+    // Measured 89.49% statement coverage (`sbt coverage knowledgegraph/test
+    // knowledgegraph/coverageReport`) on the code as carved out of core.
+    // Floor is the measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(85),
+    Test / fork := true
+  )
+
+lazy val rag = (project in file("modules/rag"))
+  .dependsOn(core % "compile->compile;test->test", knowledgegraph)
+  .settings(
+    name := "llm4s-rag",
+    commonSettings,
+    // Measured 65.62% statement coverage (`sbt coverage rag/test rag/coverageReport`) on the
+    // code as carved out of core. Floor is the measured value rounded down to the nearest 5.
+    // Never lower it. The number is lower than core's because the mocked `vectorstore` and
+    // `rag` suites that came with this code test less of it than their count suggests - see
+    // the three real bugs #1149 found in exactly this code.
+    coverageFloor(65),
+    Test / fork := true,
+    Test / javaOptions ++= Seq(
+      "-Xmx2g", "-Xms512m",
+      "-XX:+UseG1GC",
+      "-XX:+TieredCompilation",
+      "-XX:TieredStopAtLevel=1"
+    ),
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      // The six heavy dependencies this carve takes off `llm4s-core`.
+      Deps.tika,
+      Deps.poi,
+      Deps.pdfbox,
+      Deps.jsoup,
+      Deps.awsS3,
+      Deps.awsSts,
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
     )
   )
 
@@ -345,7 +395,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules//samples"))
-  .dependsOn(core, knowledgegraphNeo4j)
+  .dependsOn(core, rag, knowledgegraph, knowledgegraphNeo4j)
   .settings(
     name := "llm4s-samples",
     commonSettings,
@@ -405,7 +455,7 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
   )
 
 lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
-  .dependsOn(core)
+  .dependsOn(core, knowledgegraph)
   .settings(
     name             := "llm4s-knowledgegraph-neo4j",
     commonSettings,
@@ -420,7 +470,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   )
 
 lazy val it = (project in file("modules/it"))
-  .dependsOn(core, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
+  .dependsOn(core, rag, knowledgegraph, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
   .settings(
     name := "llm4s-it",
     commonSettings,
@@ -457,7 +507,7 @@ lazy val it = (project in file("modules/it"))
   )
 
 lazy val benchmarks = (project in file("modules/benchmarks"))
-  .dependsOn(core)
+  .dependsOn(core, rag)
   .enablePlugins(JmhPlugin)
   .settings(
     name           := "llm4s-benchmarks",

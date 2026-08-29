@@ -11,6 +11,7 @@ import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.model.*
 import org.llm4s.llmconnect.utils.SimilarityUtils
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.rag.embed.{ FileEmbedder, FileEmbeddingConfig, TextChunkingConfig }
 import org.slf4j.LoggerFactory
 
 import java.time.{ ZoneId, ZonedDateTime }
@@ -58,13 +59,19 @@ object EmbeddingExample {
         name = textCfg.modelName,
         dimensions = textCfg.dimensions
       )
-      chunkingCfg = org.llm4s.llmconnect.encoding.UniversalEncoder.TextChunkingConfig(
+      chunkingCfg = TextChunkingConfig(
         enabled = runtime.chunkingEnabled,
         size = runtime.chunkSize,
         overlap = runtime.chunkOverlap
       )
       stubsEnabled = Llm4sConfig.experimentalStubsEnabled
       localModels <- Llm4sConfig.localEmbeddingModels()
+      embedConfig = FileEmbeddingConfig(
+        textModel = textModel,
+        localModels = localModels,
+        chunking = chunkingCfg,
+        experimentalStubs = stubsEnabled
+      )
       _ = {
         val eq          = EmbeddingQuery.loadFromEnv().getOrElse(EmbeddingQuery(None))
         val queryVecOpt = eq.value.flatMap(q => embedQueryOnce(client, q, runtime.provider, emb._2.model, ui))
@@ -77,7 +84,7 @@ object EmbeddingExample {
 
         targets.foreach { p =>
           fileCount += 1
-          client.encodePath(p, textModel, chunkingCfg, stubsEnabled, localModels) match {
+          FileEmbedder.encodeFromPath(p, client, embedConfig) match {
             case Left(err) =>
               val msg = s"${p.getFileName}: ${err.context.get("provider")} -> ${err.message}"
               errors += msg

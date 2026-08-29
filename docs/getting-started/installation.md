@@ -136,6 +136,23 @@ The starter kit includes:
 > Additional modules are published separately. The core library includes most functionality.
 > Check [Maven Central](https://central.sonatype.com/namespace/org.llm4s) for available artifacts.
 
+### For RAG, vector stores, chunking, reranking and document extraction
+
+{: .note }
+> Not yet published. `llm4s-rag` exists in the build as of
+> [#1128](https://github.com/llm4s/llm4s/issues/1128) but ships in the next release;
+> in `0.4.1` and earlier this code is still inside `llm4s-core`.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-rag" % llm4sVersion
+```
+
+Brings `llm4s-knowledgegraph` with it, along with Tika, POI, PDFBox, jsoup and the AWS S3
+client — the document-extraction and loader dependencies that `llm4s-core` no longer carries.
+Package names are unchanged, so existing `org.llm4s.rag.*` imports keep working; see the
+[migration note](../reference/migration.md#slice-1-llm4s-rag-and-llm4s-knowledgegraph).
+
 ### For Workspace (Containerized Execution)
 
 ```scala

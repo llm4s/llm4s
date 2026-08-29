@@ -2,7 +2,6 @@ package org.llm4s.agent.memory
 
 import org.llm4s.types.Result
 import org.llm4s.error.{ LLMError, NotFoundError, OptimisticLockFailure, ProcessingError }
-import org.llm4s.vectorstore.PostgresVectorHelpers
 import com.zaxxer.hikari.{ HikariConfig, HikariDataSource }
 import ujson.{ Obj, Str, read, write }
 

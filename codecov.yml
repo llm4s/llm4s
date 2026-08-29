@@ -32,6 +32,14 @@ flags:
     paths:
       - modules/core/src/main/scala
     carryforward: true
+  rag:
+    paths:
+      - modules/rag/src/main/scala
+    carryforward: true
+  knowledgegraph:
+    paths:
+      - modules/knowledgegraph/src/main/scala
+    carryforward: true
   knowledgegraph-neo4j:
     paths:
       - modules/knowledgegraph-neo4j/src/main/scala

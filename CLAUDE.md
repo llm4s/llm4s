@@ -25,8 +25,8 @@ Slice order — each is an issue with its own scope and gotchas:
 
 | Slice | Issue | Carves |
 |---|---|---|
-| 0 | [#1127](https://github.com/llm4s/llm4s/issues/1127) | build + tracker prerequisites |
-| 1 | [#1128](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` |
+| 0 ✅ | [#1127](https://github.com/llm4s/llm4s/issues/1127) | build + tracker prerequisites |
+| 1 ✅ | [#1128](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` |
 | 2 | [#1129](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory` |
 | 3 | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-image`, `llm4s-speech` |
 | 4 | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
@@ -56,6 +56,8 @@ Current per-module coverage floors are recorded in [#1127](https://github.com/ll
 llm4s/
 ├── modules/
 │   ├── core/                  # Core library (published)
+│   ├── rag/                   # RAG, vector stores, chunking, reranking, extraction (published)
+│   ├── knowledgegraph/        # Knowledge graph model, storage, query (published)
 │   ├── samples/               # Usage examples
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI
@@ -67,6 +69,10 @@ llm4s/
 ├── project/             # SBT config
 └── build.sbt
 ```
+
+Slices 0 and 1 have landed: `modules/rag` and `modules/knowledgegraph` are carved, so
+`modules/core` no longer holds `rag`, `vectorstore`, `chunking`, `reranker`, `eval`,
+`knowledgegraph` or any Tika/POI/PDFBox/jsoup/AWS dependency.
 
 **Key paths in `modules/core/src/main/scala/org/llm4s/`:**
 - `types/` - Result type, newtypes

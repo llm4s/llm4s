@@ -202,15 +202,6 @@ object Llm4sConfig {
     defaultProvider(source)
 
   /**
-   * Loads PostgreSQL vector-search index configuration from the current environment.
-   *
-   * @return the PgConfig, or a [[org.llm4s.error.ConfigurationError]] when
-   *         required variables are missing.
-   */
-  def pgSearchIndex(): Result[org.llm4s.rag.permissions.SearchIndex.PgConfig] =
-    org.llm4s.config.PgSearchIndexConfigLoader.load(ConfigSource.default)
-
-  /**
    * Loads tracing configuration from the current environment.
    *
    * Reads `TRACING_MODE` (`langfuse`, `opentelemetry`, `console`, or `none`)
