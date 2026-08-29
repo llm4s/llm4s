@@ -11,6 +11,9 @@ target/
 .metals
 .vscode
 **/.claude/settings.local.json
+# Agent worktrees are created inside the repo by Claude Code's worktree isolation.
+# They are working copies, never content to commit.
+**/.claude/worktrees/
 .DS_Store
 .log
 .scala-build
