@@ -74,14 +74,36 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Idempotent: re-running a release must not fail on an existing Release.
+          # A semver pre-release identifier (v1.0.0-RC1) must be marked as such, or it
+          # becomes GitHub's "latest" release -- which the docs deploy reads to decide
+          # which version the install snippets name. An RC must not displace the last
+          # stable version there.
+          PRERELEASE=""
+          case "$GITHUB_REF_NAME" in
+            *-*) PRERELEASE="--prerelease" ;;
+          esac
+
+          # Idempotent, and specifically draft-aware. `gh release view` succeeds for a
+          # DRAFT release, so an existence check alone would skip creation and leave the
+          # draft in place. Drafts are excluded from the `releases/latest` endpoint the
+          # docs deploy reads, so the site would then keep advertising the previous
+          # version while the new artifacts were already on Maven Central. Deleting a tag
+          # that has a Release attached leaves exactly such a draft behind, which is a
+          # documented recovery path in docs/reference/release.md -- so this is reachable,
+          # not hypothetical.
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            echo "Release $GITHUB_REF_NAME already exists; leaving it untouched."
+            if [ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" = "true" ]; then
+              echo "Release $GITHUB_REF_NAME exists as a draft; publishing it."
+              gh release edit "$GITHUB_REF_NAME" --draft=false $PRERELEASE
+            else
+              echo "Release $GITHUB_REF_NAME already published; leaving it untouched."
+            fi
           else
             gh release create "$GITHUB_REF_NAME" \
               --verify-tag \
               --title "$GITHUB_REF_NAME" \
-              --generate-notes
+              --generate-notes \
+              $PRERELEASE
           fi
 
   # Deploy the docs once the release is published and visible. Deliberately independent
