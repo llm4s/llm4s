@@ -162,7 +162,14 @@ lazy val llm4s = (project in file("."))
     workspaceSamples,
     traceOpentelemetry,
     knowledgegraphNeo4j,
-    benchmarks
+    benchmarks,
+    // Relocation stubs must be aggregated here: `sbt ci-release` publishes the root
+    // aggregate, so a stub outside it would simply never be published.
+    relocationCore,
+    relocationWorkspaceClient,
+    relocationWorkspaceShared,
+    relocationTraceOpentelemetry,
+    relocationKnowledgegraphNeo4j
   )
   .settings(
     publish / skip := true,
@@ -430,3 +437,32 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
       Deps.scalatest % Test
     )
   )
+
+// ---- relocation stubs for the 0.4.0 artifact rename ----
+// Each project below publishes ONLY a POM at the retired coordinate, carrying a Maven
+// `<relocation>` that points at its replacement. They deliberately carry no sources, no
+// `commonSettings` and no Scala library, so they compile nothing; see project/Relocation.scala
+// for what a relocation POM does and does not achieve.
+//
+// Only coordinates with real published history on Maven Central get a stub - publishing a
+// relocation for something that never existed would be noise. Verified present under
+// https://repo1.maven.org/maven2/org/llm4s/ : core_3, workspaceclient_3, workspaceshared_3,
+// trace-opentelemetry_3, knowledgegraph-neo4j_3 (all through 0.3.4).
+//
+// `workspacerunner`, `samples` and the other unpublished modules have `publish / skip` and
+// no Central history, so they need no stub.
+
+lazy val relocationCore = (project in file("modules/relocations/core"))
+  .settings(Relocation.settings("core", "llm4s-core_3"))
+
+lazy val relocationWorkspaceClient = (project in file("modules/relocations/workspaceclient"))
+  .settings(Relocation.settings("workspaceclient", "llm4s-workspace-client_3"))
+
+lazy val relocationWorkspaceShared = (project in file("modules/relocations/workspaceshared"))
+  .settings(Relocation.settings("workspaceshared", "llm4s-workspace-shared_3"))
+
+lazy val relocationTraceOpentelemetry = (project in file("modules/relocations/trace-opentelemetry"))
+  .settings(Relocation.settings("trace-opentelemetry", "llm4s-observability-otel_3"))
+
+lazy val relocationKnowledgegraphNeo4j = (project in file("modules/relocations/knowledgegraph-neo4j"))
+  .settings(Relocation.settings("knowledgegraph-neo4j", "llm4s-knowledgegraph-neo4j_3"))
