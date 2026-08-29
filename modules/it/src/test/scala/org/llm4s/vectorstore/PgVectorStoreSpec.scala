@@ -4,6 +4,8 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.BeforeAndAfterEach
 import scala.util.Try
+import org.llm4s.it.Tier
+import org.llm4s.it.tags.Docker
 
 /**
  * Tests for PgVectorStore.
@@ -19,6 +21,7 @@ import scala.util.Try
  * To run locally:
  *   sbt "it/testOnly org.llm4s.vectorstore.PgVectorStoreSpec"
  */
+@Docker
 class PgVectorStoreSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach {
 
   // Skip tests if no PostgreSQL available
@@ -49,9 +52,10 @@ class PgVectorStoreSpec extends AnyWordSpec with Matchers with BeforeAndAfterEac
       store.close()
     }
 
-  private def skipIfNoPg(test: => Unit): Unit =
-    if (skipTests) info("Skipping test - PGVECTOR_TEST_URL not set")
-    else test
+  private def skipIfNoPg(test: => Unit): Unit = {
+    Tier.require(!skipTests, "PGVECTOR_TEST_URL not set")
+    test
+  }
 
   "PgVectorStore" should {
 

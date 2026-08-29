@@ -9,8 +9,19 @@ import java.nio.file.Files
 import java.awt.image.BufferedImage
 import java.awt.Color
 import javax.imageio.ImageIO
+import org.llm4s.it.tags.Local
 
+@Local
 class OpenAIVisionClientTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+
+  /**
+   * The client's error paths are what these tests exercise; the real endpoint is not.
+   *
+   * Pointing the client at a closed local port keeps this suite in the `@Local` tier
+   * honestly - `sbt test` neither reaches api.openai.com nor waits on its 30-second connect
+   * timeout - while the calls below still take the failure path they assert on.
+   */
+  private val UnreachableBaseUrl = "http://127.0.0.1:1"
 
   var tempFile: java.nio.file.Path = _
   var config: OpenAIVisionConfig   = _
@@ -19,7 +30,7 @@ class OpenAIVisionClientTest extends AnyFlatSpec with Matchers with BeforeAndAft
     tempFile = Files.createTempFile("test", ".png")
     config = OpenAIVisionConfig(
       apiKey = "test-api-key",
-      baseUrl = "https://api.openai.com/v1",
+      baseUrl = UnreachableBaseUrl,
       model = "gpt-4-vision-preview"
     )
 

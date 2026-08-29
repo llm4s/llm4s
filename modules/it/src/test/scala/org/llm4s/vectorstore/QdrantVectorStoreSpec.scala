@@ -5,6 +5,8 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.util.Try
+import org.llm4s.it.Tier
+import org.llm4s.it.tags.Docker
 
 /**
  * Tests for QdrantVectorStore.
@@ -19,6 +21,7 @@ import scala.util.Try
  * To run locally:
  *   sbt "it/testOnly org.llm4s.vectorstore.QdrantVectorStoreSpec"
  */
+@Docker
 class QdrantVectorStoreSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach {
 
   private val testUrl   = sys.env.get("QDRANT_TEST_URL")
@@ -47,9 +50,10 @@ class QdrantVectorStoreSpec extends AnyWordSpec with Matchers with BeforeAndAfte
       store.close()
     }
 
-  private def skipIfNoQdrant(test: => Unit): Unit =
-    if (skipTests) info("Skipping test - QDRANT_TEST_URL not set")
-    else test
+  private def skipIfNoQdrant(test: => Unit): Unit = {
+    Tier.require(!skipTests, "QDRANT_TEST_URL not set")
+    test
+  }
 
   "QdrantVectorStore" should {
 

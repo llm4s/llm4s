@@ -7,6 +7,8 @@ import org.llm4s.llmconnect.provider.AnthropicClient
 import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.it.Tier
+import org.llm4s.it.tags.Cloud
 
 /**
  * Cloud smoke tests for Anthropic.
@@ -17,10 +19,11 @@ import org.scalatest.matchers.should.Matchers
  *
  * Requires: `ANTHROPIC_API_KEY` environment variable.
  */
+@Cloud
 class AnthropicSmokeSpec extends AnyFlatSpec with Matchers {
 
   private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
-  private given ContextWindowResolver = ContextWindowResolver(mrs)
+  private given ContextWindowResolver     = ContextWindowResolver(mrs)
 
   private val apiKey: Option[String] = Option(System.getenv("ANTHROPIC_API_KEY")).filter(_.nonEmpty)
 
@@ -34,7 +37,7 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers {
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 
   "Anthropic" should "complete a basic request" in {
-    assume(apiKey.isDefined, "ANTHROPIC_API_KEY not set")
+    Tier.require(apiKey.isDefined, "ANTHROPIC_API_KEY not set")
 
     val clientResult = AnthropicClient(config(apiKey.get))
     withClue(s"Client creation failed: ${clientResult.swap.toOption}") {
@@ -51,7 +54,7 @@ class AnthropicSmokeSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "stream a response" in {
-    assume(apiKey.isDefined, "ANTHROPIC_API_KEY not set")
+    Tier.require(apiKey.isDefined, "ANTHROPIC_API_KEY not set")
 
     val client = AnthropicClient(config(apiKey.get)).toOption.get
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]

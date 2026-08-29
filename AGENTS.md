@@ -25,6 +25,7 @@
 - Place tests under `src/test/scala`, mirroring the package of the code under test.
 - Keep version-specific tests inside the owning module only when Scala-version behavior genuinely differs.
 - Typical flow: `sbt test` for quick checks or `sbt buildAll` before PR. Coverage (when needed): `sbt coverage test coverageReport`.
+- Suites needing an external service live in `modules/it` and must declare a tier by class annotation (`@Local`, `@Docker`, `@Workspace`, `@Ollama`, `@Cloud` from `org.llm4s.it.tags`); `sbt it/itTierCheck` fails the build if one does not. Run a tier with `sbt testIntegration` / `testWorkspace` / `testOllama` / `testSmoke`, and gate on `Tier.require` rather than `assume` so `LLM4S_IT_STRICT=true` runs turn a missing service into a failure.
 
 ## Issue Templates
 - We provide structured GitHub templates to streamline contributions and improve issue quality.

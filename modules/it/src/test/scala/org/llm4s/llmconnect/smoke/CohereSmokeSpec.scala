@@ -7,6 +7,8 @@ import org.llm4s.llmconnect.provider.CohereClient
 import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.it.Tier
+import org.llm4s.it.tags.Cloud
 
 /**
  * Cloud smoke tests for Cohere.
@@ -16,17 +18,18 @@ import org.scalatest.matchers.should.Matchers
  * or the `sbt testSmoke` alias.
  *
  * Requires: `COHERE_API_KEY` environment variable.
- * Tag: CloudSmoke
+ * Tier: `@Cloud` - `sbt testSmoke`.
  *
  * Note: The current CohereClient implementation (v2 scope) does not support
  * streaming. The `streamComplete` test verifies that calling it returns a
  * `Left(ConfigurationError)` rather than throwing an exception, in accordance
  * with the project's `Result[A]` error handling contract.
  */
+@Cloud
 class CohereSmokeSpec extends AnyFlatSpec with Matchers {
 
   private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
-  private given ContextWindowResolver = ContextWindowResolver(mrs)
+  private given ContextWindowResolver     = ContextWindowResolver(mrs)
 
   private val apiKey: Option[String] = Option(System.getenv("COHERE_API_KEY")).filter(_.nonEmpty)
 
@@ -40,7 +43,7 @@ class CohereSmokeSpec extends AnyFlatSpec with Matchers {
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 
   "Cohere" should "complete a basic request" in {
-    assume(apiKey.isDefined, "COHERE_API_KEY not set")
+    Tier.require(apiKey.isDefined, "COHERE_API_KEY not set")
 
     val clientResult = CohereClient(config(apiKey.get))
     withClue(s"Client creation failed: ${clientResult.swap.toOption}") {

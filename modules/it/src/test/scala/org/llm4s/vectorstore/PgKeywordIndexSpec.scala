@@ -5,6 +5,8 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.util.Try
+import org.llm4s.it.Tier
+import org.llm4s.it.tags.Docker
 
 /**
  * Tests for PgKeywordIndex.
@@ -22,6 +24,7 @@ import scala.util.Try
  * To run locally:
  *   sbt "it/testOnly org.llm4s.vectorstore.PgKeywordIndexSpec"
  */
+@Docker
 class PgKeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEach {
 
   private val testUrl   = sys.env.get("PGVECTOR_TEST_URL")
@@ -51,9 +54,10 @@ class PgKeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
       index.close()
     }
 
-  private def skipIfNoPg(test: => Unit): Unit =
-    if (skipTests) info("Skipping test - PGVECTOR_TEST_URL not set")
-    else test
+  private def skipIfNoPg(test: => Unit): Unit = {
+    Tier.require(!skipTests, "PGVECTOR_TEST_URL not set")
+    test
+  }
 
   "PgKeywordIndex" should {
 
@@ -100,7 +104,10 @@ class PgKeywordIndexSpec extends AnyWordSpec with Matchers with BeforeAndAfterEa
 
     "search for matching documents" in skipIfNoPg {
       val docs = Seq(
-        KeywordDocument("scala-1", "Scala is a programming language that combines object-oriented and functional programming"),
+        KeywordDocument(
+          "scala-1",
+          "Scala is a programming language that combines object-oriented and functional programming"
+        ),
         KeywordDocument("java-1", "Java is a widely-used programming language designed for portability"),
         KeywordDocument("python-1", "Python is a high-level programming language known for readability"),
         KeywordDocument("scala-2", "Scala programming runs on the JVM and is compatible with Java libraries")

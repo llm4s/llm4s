@@ -4,6 +4,10 @@ import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
 import org.llm4s.http.Llm4sHttpClient
 
+import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import java.util.UUID
 import scala.util.Try
 
 /**
@@ -36,6 +40,41 @@ final class QdrantVectorStore private (
 
   private val collectionsUrl = s"$baseUrl/collections/$collectionName"
   private val pointsUrl      = s"$collectionsUrl/points"
+
+  /**
+   * Qdrant point IDs must be an unsigned integer or a UUID - it rejects anything else with
+   * "not a valid point ID" - while a `VectorRecord` ID is an arbitrary string. A UUID ID is
+   * used as-is, so records already stored under one stay reachable; every other ID is mapped
+   * to a UUID derived from it, stably across processes and stores.
+   *
+   * The two must not meet. Deriving a UUID that a caller could also supply literally would
+   * let two distinct records share one point and silently overwrite each other - and the
+   * derivation is public, so such an ID is constructible rather than merely unlucky. Derived
+   * IDs therefore live in UUID version 8, which RFC 9562 reserves for exactly this kind of
+   * custom value, and an ID that is itself a version 8 UUID is derived from rather than
+   * passed through. The two spaces cannot overlap, and within the derived space a collision
+   * would take a SHA-256 collision.
+   *
+   * The record's own ID is what callers search, get and delete by, so it travels in the
+   * payload under `llm4s_id` and is read back from there rather than from the point ID.
+   */
+  private def pointId(id: String): String =
+    if (QdrantVectorStore.isPassthroughUuid(id)) id else QdrantVectorStore.derivedPointId(id)
+
+  /** The record ID a point carries, falling back to its point ID for foreign-written points. */
+  private def recordId(point: ujson.Value): String =
+    point.obj
+      .get("payload")
+      .flatMap(_.objOpt)
+      .flatMap(_.get(QdrantVectorStore.IdKey))
+      .collect { case ujson.Str(value) => value }
+      .getOrElse(pointIdString(point("id")))
+
+  private def pointIdString(id: ujson.Value): String = id match {
+    case ujson.Str(value) => value
+    case ujson.Num(value) => value.toLong.toString
+    case other            => other.toString
+  }
 
   // Initialize collection if it doesn't exist
   ensureCollection()
@@ -79,7 +118,7 @@ final class QdrantVectorStore private (
         Try {
           val points = ujson.Arr(records.map { record =>
             ujson.Obj(
-              "id"      -> record.id,
+              "id"      -> pointId(record.id),
               "vector"  -> ujson.Arr(record.embedding.toIndexedSeq.map(f => ujson.Num(f.toDouble)): _*),
               "payload" -> recordToPayload(record)
             )
@@ -108,10 +147,10 @@ final class QdrantVectorStore private (
 
       filter.foreach(f => body("filter") = filterToQdrant(f))
 
-      httpPost(s"$pointsUrl/search", body).map { response =>
-        val results = response("result").arr
+      httpPostOptional(s"$pointsUrl/search", body).map { responseOpt =>
+        val results = responseOpt.map(_("result").arr).getOrElse(ujson.Arr().arr)
         results.map { point =>
-          val id       = point("id").str
+          val id       = recordId(point)
           val score    = point("score").num
           val vector   = point("vector").arr.map(_.num.toFloat).toArray
           val payload  = point("payload").obj
@@ -133,10 +172,8 @@ final class QdrantVectorStore private (
 
   override def get(id: String): Result[Option[VectorRecord]] =
     Try {
-      httpGet(s"$pointsUrl/$id?with_payload=true&with_vector=true").map { response =>
-        val result = response("result")
-        if (result.isNull) None
-        else Some(pointToRecord(result))
+      httpGetOptional(s"$pointsUrl/${pointId(id)}?with_payload=true&with_vector=true").map {
+        _.map(_("result")).filterNot(_.isNull).map(pointToRecord)
       }
     }.toEither.left
       .map(e => ProcessingError("qdrant-store", s"Failed to get: ${e.getMessage}"))
@@ -147,7 +184,7 @@ final class QdrantVectorStore private (
     else
       Try {
         val body = ujson.Obj(
-          "ids"          -> ujson.Arr(ids.map(ujson.Str(_)): _*),
+          "ids"          -> ujson.Arr(ids.map(id => ujson.Str(pointId(id))): _*),
           "with_payload" -> true,
           "with_vector"  -> true
         )
@@ -165,7 +202,7 @@ final class QdrantVectorStore private (
     else
       Try {
         val body = ujson.Obj(
-          "points" -> ujson.Arr(ids.map(ujson.Str(_)): _*)
+          "points" -> ujson.Arr(ids.map(id => ujson.Str(pointId(id))): _*)
         )
         httpPost(s"$pointsUrl/delete?wait=true", body).map(_ => ())
       }.toEither.left
@@ -181,7 +218,9 @@ final class QdrantVectorStore private (
       var hasMore                = true
 
       while (hasMore) {
-        val body = ujson.Obj("limit" -> 100, "with_payload" -> false, "with_vector" -> false)
+        // Payloads are needed here even though the vectors are not: the prefix belongs to the
+        // record ID, and the point ID is a UUID derived from it.
+        val body = ujson.Obj("limit" -> 100, "with_payload" -> true, "with_vector" -> false)
         offset.foreach(o => body("offset") = o)
 
         val result = httpPost(s"$pointsUrl/scroll", body)
@@ -191,13 +230,14 @@ final class QdrantVectorStore private (
             if (points.isEmpty) {
               hasMore = false
             } else {
+              // Carry the ID as the JSON value Qdrant gave us: a point written by another
+              // tool may have an integer ID, and re-sending it as a string is not the same ID.
               val matchingIds = points.flatMap { p =>
-                val id = p("id").str
-                if (id.startsWith(prefix)) Some(id) else None
+                if (recordId(p).startsWith(prefix)) Some(p("id")) else None
               }.toSeq
 
               if (matchingIds.nonEmpty) {
-                val deleteBody = ujson.Obj("points" -> ujson.Arr(matchingIds.map(ujson.Str(_)): _*))
+                val deleteBody = ujson.Obj("points" -> ujson.Arr(matchingIds: _*))
                 httpPost(s"$pointsUrl/delete?wait=true", deleteBody)
                 deleted += matchingIds.size
               }
@@ -231,7 +271,8 @@ final class QdrantVectorStore private (
       val body = ujson.Obj("exact" -> true)
       filter.foreach(f => body("filter") = filterToQdrant(f))
 
-      httpPost(s"$pointsUrl/count", body).map(response => response("result")("count").num.toLong)
+      httpPostOptional(s"$pointsUrl/count", body)
+        .map(_.map(_("result")("count").num.toLong).getOrElse(0L))
     }.toEither.left
       .map(e => ProcessingError("qdrant-store", s"Failed to count: ${e.getMessage}"))
       .flatMap(identity)
@@ -246,7 +287,8 @@ final class QdrantVectorStore private (
       )
       filter.foreach(f => body("filter") = filterToQdrant(f))
 
-      httpPost(s"$pointsUrl/scroll", body).map(response => response("result")("points").arr.map(pointToRecord).toSeq)
+      httpPostOptional(s"$pointsUrl/scroll", body)
+        .map(_.map(_("result")("points").arr.map(pointToRecord).toSeq).getOrElse(Seq.empty))
     }.toEither.left
       .map(e => ProcessingError("qdrant-store", s"Failed to list: ${e.getMessage}"))
       .flatMap(identity)
@@ -257,22 +299,22 @@ final class QdrantVectorStore private (
 
   override def stats(): Result[VectorStoreStats] =
     Try {
-      httpGet(collectionsUrl).map { response =>
-        val result        = response("result")
-        val totalRecords  = result("points_count").num.toLong
-        val vectorsConfig = result("config")("params")("vectors")
+      httpGetOptional(collectionsUrl).map {
+        // A collection that does not exist yet is an empty store, not a failure.
+        case None => VectorStoreStats(totalRecords = 0L, dimensions = Set.empty, sizeBytes = None)
+        case Some(response) =>
+          val result        = response("result")
+          val vectorsConfig = result("config")("params")("vectors")
 
-        val dimensions = if (vectorsConfig.obj.contains("size")) {
-          Set(vectorsConfig("size").num.toInt)
-        } else {
-          Set.empty[Int]
-        }
+          val dimensions =
+            if (vectorsConfig.obj.contains("size")) Set(vectorsConfig("size").num.toInt)
+            else Set.empty[Int]
 
-        VectorStoreStats(
-          totalRecords = totalRecords,
-          dimensions = dimensions,
-          sizeBytes = None // Qdrant doesn't expose this directly
-        )
+          VectorStoreStats(
+            totalRecords = result("points_count").num.toLong,
+            dimensions = dimensions,
+            sizeBytes = None // Qdrant doesn't expose this directly
+          )
       }
     }.toEither.left
       .map(e => ProcessingError("qdrant-store", s"Failed to get stats: ${e.getMessage}"))
@@ -285,6 +327,37 @@ final class QdrantVectorStore private (
   // ============================================================
   // HTTP Helpers
   // ============================================================
+
+  /**
+   * A read of something that is not there.
+   *
+   * Qdrant answers 404 both for a point that does not exist and for a collection that does
+   * not exist - and the collection legitimately does not exist much of the time here, since
+   * it is created lazily on the first upsert and removed outright by `clear()`. Absence is
+   * not a failure for a read: `get` has an `Option` in its return type precisely to say so,
+   * and an empty store counts 0 rather than erroring. Writes keep the 404 as an error.
+   */
+  private def httpGetOptional(url: String): Result[Option[ujson.Value]] =
+    Try(httpClient.get(url, headers = authHeaders)).toEither.left
+      .map(e => ProcessingError("qdrant-store", s"HTTP GET failed: ${e.getMessage}"))
+      .flatMap {
+        case response if response.statusCode == 404 => Right(None)
+        case response                               => handleResponse(response).map(Some(_))
+      }
+
+  private def httpPostOptional(url: String, body: ujson.Value): Result[Option[ujson.Value]] =
+    Try(
+      httpClient.post(
+        url,
+        headers = authHeaders ++ Map("Content-Type" -> "application/json"),
+        body = ujson.write(body)
+      )
+    ).toEither.left
+      .map(e => ProcessingError("qdrant-store", s"HTTP POST failed: ${e.getMessage}"))
+      .flatMap {
+        case response if response.statusCode == 404 => Right(None)
+        case response                               => handleResponse(response).map(Some(_))
+      }
 
   private def httpGet(url: String): Result[ujson.Value] =
     Try {
@@ -346,6 +419,7 @@ final class QdrantVectorStore private (
 
   private def recordToPayload(record: VectorRecord): ujson.Obj = {
     val payload = ujson.Obj()
+    payload(QdrantVectorStore.IdKey) = record.id
     record.content.foreach(c => payload("content") = c)
     record.metadata.foreach { case (k, v) =>
       payload(s"meta_$k") = v
@@ -360,7 +434,7 @@ final class QdrantVectorStore private (
       .toMap
 
   private def pointToRecord(point: ujson.Value): VectorRecord = {
-    val id       = point("id").str
+    val id       = recordId(point)
     val vector   = point("vector").arr.map(_.num.toFloat).toArray
     val payload  = point("payload").obj
     val content  = payload.get("content").flatMap(v => if (v.isNull) None else Some(v.str))
@@ -439,6 +513,27 @@ final class QdrantVectorStore private (
 }
 
 object QdrantVectorStore {
+
+  /** Payload key holding the record's own ID; see `pointId` for why it is not the point ID. */
+  private[vectorstore] val IdKey = "llm4s_id"
+
+  private val UuidPattern = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}".r
+
+  /** The UUID version reserved here for derived point IDs (RFC 9562 "custom"). */
+  private val DerivedVersion = 8
+
+  /** True for a record ID usable as a point ID as it stands - any UUID outside the derived space. */
+  private[vectorstore] def isPassthroughUuid(id: String): Boolean =
+    UuidPattern.matches(id) && !Try(UUID.fromString(id).version()).toOption.contains(DerivedVersion)
+
+  /** A version 8 UUID derived from the record ID; see `pointId` for why the version matters. */
+  private[vectorstore] def derivedPointId(id: String): String = {
+    val digest = MessageDigest.getInstance("SHA-256").digest(s"llm4s:$id".getBytes(StandardCharsets.UTF_8))
+    digest(6) = ((digest(6) & 0x0f) | (DerivedVersion << 4)).toByte
+    digest(8) = ((digest(8) & 0x3f) | 0x80).toByte // IETF variant
+    val buffer = ByteBuffer.wrap(digest, 0, 16)
+    new UUID(buffer.getLong, buffer.getLong).toString
+  }
 
   /**
    * Configuration for QdrantVectorStore.

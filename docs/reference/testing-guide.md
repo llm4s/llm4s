@@ -180,6 +180,7 @@ The project provides a handful of sbt commands that contributors use frequently.
 | Run all tests              | `sbt test`                  | Default; runs tests for the current Scala version              |
 | Full CI‑like pipeline      | `sbt buildAll`              | Compiles and tests every aggregated module for the current build |
 | Format code                | `sbt scalafmtAll`           | Apply project‑wide formatting (required before PRs)            |
+| Run an integration tier    | `sbt testIntegration`       | Suites in `modules/it` that need a real service — see section 9 |
 
 ### Using the table
 
@@ -199,7 +200,74 @@ sbt ~test                # continuous feedback as you code
 
 ---
 
-## 9. Tests in CI
+## 9. Integration Test Tiers (`modules/it`)
+
+Suites that need something the machine may not have - a database, a container image, a local
+model server, a paid API key - live in `modules/it`, not in the module they exercise. That
+module is deliberately outside the default `sbt test` dependency-free tier, so each suite has
+to say which tier does run it.
+
+**A suite declares its tier by annotating the class**, with exactly one tag from
+`org.llm4s.it.tags`:
+
+| Tag | Needs | Command | CI |
+|---|---|---|---|
+| `@Local` | nothing external | `sbt test` | every PR |
+| `@Docker` | Postgres/pgvector, Qdrant or Neo4j | `sbt testIntegration` | every PR (service containers) |
+| `@Workspace` | Docker + a built `workspace-runner` image | `sbt testWorkspace` | pushes to `main` |
+| `@Ollama` | a local Ollama with `qwen2.5:0.5b` pulled | `sbt testOllama` | pushes to `main` |
+| `@Cloud` | live provider API keys (real money) | `sbt testSmoke` | manual `workflow_dispatch` |
+
+```scala
+import org.llm4s.it.tags.Docker
+
+@Docker
+class PgVectorStoreSpec extends AnyWordSpec with Matchers {
+```
+
+Tiers are tags rather than name patterns in a `testOnly` argument because a name pattern
+fails silently: a suite matching no pattern is run by nothing and reports nothing. `sbt
+it/itTierCheck` - part of Quick Checks in CI - fails the build when a suite declares no tier
+or more than one.
+
+### Skipping is a local convenience, not a CI outcome
+
+A suite whose dependency is missing cancels its tests, which ScalaTest reports as skipped.
+That is right on a laptop and wrong in the CI job that exists to provide that dependency:
+there, a skip is indistinguishable from a pass.
+
+So each tier's CI job sets `LLM4S_IT_STRICT=true`, and `Tier.require` turns "not available"
+into a failure instead of a cancellation:
+
+```scala
+import org.llm4s.it.Tier
+
+Tier.require(pgUrl.isDefined, "PGVECTOR_TEST_URL not set")
+```
+
+Use `Tier.require` in place of `assume(...)` for anything the tier's job is meant to supply.
+It is also worth running strictly by hand once the services are up locally, to confirm a suite
+really executes:
+
+```bash
+docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg16
+docker run -d -p 6333:6333 qdrant/qdrant
+docker run -d -p 7687:7687 -e NEO4J_AUTH=neo4j/llm4stest neo4j:5
+
+export PGVECTOR_TEST_URL=jdbc:postgresql://localhost:5432/postgres
+export PGVECTOR_USER=postgres PGVECTOR_PASSWORD=postgres
+export PGVECTOR_TEST_USER=postgres PGVECTOR_TEST_PASSWORD=postgres
+export POSTGRES_TEST_ENABLED=true POSTGRES_PASSWORD=postgres
+export QDRANT_TEST_URL=http://localhost:6333
+export NEO4J_URI=bolt://localhost:7687 NEO4J_USER=neo4j NEO4J_PASSWORD=llm4stest
+export LLM4S_IT_STRICT=true
+
+sbt testIntegration
+```
+
+---
+
+## 10. Tests in CI
 
 * All PRs must pass the full test suite
 * Flaky tests will be rejected
@@ -213,7 +281,7 @@ If your test fails in CI but not locally, it is usually a **non-determinism issu
 
 ---
 
-## 10. When to Add or Update Tests
+## 11. When to Add or Update Tests
 
 You should add or update tests when:
 
@@ -229,7 +297,7 @@ You usually do **not** need new tests for:
 
 ---
 
-## 11. Getting Help
+## 12. Getting Help
 
 If you're unsure how to test something:
 

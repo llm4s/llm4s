@@ -4,6 +4,8 @@ import org.llm4s.rag.permissions._
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.it.Tier
+import org.llm4s.it.tags.Docker
 
 /**
  * Integration tests for PgSearchIndex.
@@ -17,13 +19,14 @@ import org.scalatest.matchers.should.Matchers
  *   export PGVECTOR_PASSWORD=postgres
  *   sbt "it/testOnly org.llm4s.rag.permissions.pg.PgSearchIndexSpec"
  */
+@Docker
 class PgSearchIndexSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
   private val pgUrl      = sys.env.get("PGVECTOR_TEST_URL")
   private val pgUser     = sys.env.getOrElse("PGVECTOR_USER", "postgres")
   private val pgPassword = sys.env.getOrElse("PGVECTOR_PASSWORD", "postgres")
 
-  private val testTableName = "test_permission_vectors"
+  private val testTableName                      = "test_permission_vectors"
   private var searchIndex: Option[PgSearchIndex] = None
 
   override def beforeAll(): Unit = {
@@ -48,7 +51,7 @@ class PgSearchIndexSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll
   }
 
   private def requirePg(): Unit =
-    assume(searchIndex.isDefined, "PostgreSQL with pgvector not available")
+    Tier.require(searchIndex.isDefined, "PostgreSQL with pgvector not available")
 
   "PgPrincipalStore" should "create and lookup users" in {
     requirePg()

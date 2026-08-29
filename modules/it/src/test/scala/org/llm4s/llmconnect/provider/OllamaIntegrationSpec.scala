@@ -8,6 +8,8 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.util.Try
+import org.llm4s.it.Tier
+import org.llm4s.it.tags.Ollama
 
 /**
  * Integration tests that verify full round-trip against a running Ollama instance.
@@ -22,6 +24,7 @@ import scala.util.Try
  * Non-determinism strategy: never assert on specific content text. Only assert
  * structural properties: isRight, nonEmpty, > 0, correct types.
  */
+@Ollama
 class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
 
   private given ModelRegistryService = ModelRegistryService.default().toOption.get
@@ -62,7 +65,7 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
   }
 
   "OllamaClient" should "complete a basic request" in {
-    assume(ollamaAvailable, s"Ollama not available with model $testModel")
+    Tier.require(ollamaAvailable, s"Ollama not available with model $testModel")
 
     withClient { client =>
       val result = client.complete(conversation("Say hi in one word"), CompletionOptions())
@@ -74,7 +77,7 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "stream a response with chunks" in {
-    assume(ollamaAvailable, s"Ollama not available with model $testModel")
+    Tier.require(ollamaAvailable, s"Ollama not available with model $testModel")
 
     withClient { client =>
       val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]
@@ -92,7 +95,7 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "handle a multi-turn conversation" in {
-    assume(ollamaAvailable, s"Ollama not available with model $testModel")
+    Tier.require(ollamaAvailable, s"Ollama not available with model $testModel")
 
     withClient { client =>
       val multiTurnConv = Conversation(
@@ -109,7 +112,7 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "report token usage" in {
-    assume(ollamaAvailable, s"Ollama not available with model $testModel")
+    Tier.require(ollamaAvailable, s"Ollama not available with model $testModel")
 
     withClient { client =>
       val result = client.complete(conversation("Say yes"), CompletionOptions())
@@ -123,9 +126,9 @@ class OllamaIntegrationSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return ConfigurationError after close" in {
-    assume(ollamaAvailable, s"Ollama not available with model $testModel")
+    Tier.require(ollamaAvailable, s"Ollama not available with model $testModel")
 
-    val client = new OllamaClient(config)
+    val client      = new OllamaClient(config)
     val beforeClose = client.complete(conversation("hi"), CompletionOptions())
     beforeClose.isRight shouldBe true
 

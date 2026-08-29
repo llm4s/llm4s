@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `Neo4jGraphStore.traverse` never worked against a real Neo4j. The variable-length pattern
+  was built from a non-interpolated string, so `$maxDepth` reached Cypher as a parameter
+  reference, which is illegal in a `MATCH` pattern ("Parameter maps cannot be used in MATCH
+  patterns") and failed every traversal. It is now a breadth-first expansion of one level per
+  query, which also avoids the path enumeration a variable-length pattern implies: `[*0..]`
+  matches every relationship-unique path before `min(length(p))` reduces them to one row per
+  node, which grows exponentially on a cyclic or dense graph - and unbounded is the default
+  depth. Semantics follow `GraphTraversal.bfs`, which backs the in-memory store.
+- `QdrantVectorStore` could not store a record whose ID was not already a UUID. Qdrant accepts
+  only an unsigned integer or a UUID as a point ID and rejected everything else with
+  `"test-1" is not a valid point ID`, so `upsert`, `get`, `delete` and `search` all failed.
+  Non-UUID IDs are now mapped to a UUID derived from the ID, with the record's own ID carried
+  in the payload and read back from there; UUID IDs are unchanged. Derived IDs are version 8
+  UUIDs (RFC 9562's "custom" space) and an ID that is itself a version 8 UUID is derived from
+  rather than passed through, so a caller cannot land two records on one point by supplying
+  the UUID that another ID maps to. A mocked-HTTP unit test had been asserting the broken
+  request shape, which is why nothing caught this.
+- `QdrantVectorStore` reported absence as failure. Qdrant answers 404 both for a point that
+  does not exist and for a collection that does not exist - and the collection is created
+  lazily on first upsert and deleted outright by `clear()` - so `get` returned a `Left`
+  instead of `Right(None)`, and `count`, `list`, `search` and `stats` failed on an empty
+  store rather than reporting it empty. Reads now treat 404 as empty; writes still error.
+- 11 of the 18 integration suites in `modules/it` were executed by nothing - not locally, not
+  in CI, not on release - because the tier aliases named two `testOnly` patterns and every
+  suite outside them matched nothing. Tier membership is now declared per suite by class
+  annotation (`@Local`, `@Docker`, `@Workspace`, `@Ollama`, `@Cloud` in `org.llm4s.it.tags`)
+  and `sbt it/itTierCheck` fails the build when a suite declares none or more than one.
+  ([#1143](https://github.com/llm4s/llm4s/issues/1143))
+- Suites no longer report a pass when their dependency is absent. `Tier.require` cancels
+  locally and, under `LLM4S_IT_STRICT=true` (set by every tier's CI job), fails - so a
+  service that did not start is visible instead of green. This also exposes that
+  `GeminiSmokeSpec` reads `GEMINI_API_KEY` while the cloud job only passed `GOOGLE_API_KEY`;
+  the workflow now passes both, plus `COHERE_API_KEY`.
+- `ContainerisedWorkspaceTest` pinned a `workspace-runner:0.1.0-SNAPSHOT` image tag that the
+  build stopped producing long ago. The tag now comes from the build itself.
+
+### Added
+- `sbt testIntegration` runs the containerised tier (pgvector, Qdrant, Neo4j) and a CI job
+  runs it on **every PR** with those services as service containers - the suites covering
+  pgvector, the Postgres keyword index, Qdrant, permission-aware RAG, Postgres-backed agent
+  memory and Neo4j now have execution signal ahead of the modularisation carve
+  ([#1126](https://github.com/llm4s/llm4s/issues/1126)), which moves most of that code.
+- `sbt testWorkspace` runs the containerised workspace tier, in a CI job on pushes to `main`
+  that first builds the `workspace-runner` image.
+
+### Changed
+- `modules/it` joined the root aggregate, so it is compiled, formatted and linted with every
+  other module; it had been outside it, where its suites could stop compiling unnoticed.
+  Default `sbt test` runs only its `@Local` tier, so the dependency-free tier stays fast.
+
 ## [0.4.0] - 2026-08-29
 
 ### Changed
