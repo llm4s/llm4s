@@ -1,12 +1,28 @@
 name: Deploy Documentation
 
 on:
+  # Docs changes on main deploy directly.
   push:
     branches: [main]
     paths:
       - 'docs/**'
       - 'modules/core/src/**'
       - '.github/workflows/pages.yml'
+
+  # A release redeploys the site so the install snippets pick up the new version.
+  #
+  # This is deliberately gated on the Release workflow *succeeding* rather than on
+  # the tag push. Both workflows trigger on `v*` tags, but the snippet version comes
+  # from `git describe` over tags, so deploying on the tag itself would advertise a
+  # coordinate before `sbt ci-release` had published it -- and permanently, if the
+  # publish failed. Pages also wins that race easily, since Release runs full CI first.
+  #
+  # `git describe` finds the tag from main, so checking out the default branch here
+  # is sufficient; we need the tag to be reachable, not checked out.
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
   workflow_dispatch:
 
 # Sets permissions of the GITHUB_TOKEN
@@ -22,6 +38,8 @@ concurrency:
 
 jobs:
   build:
+    # Only deploy for a release that actually published.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
