@@ -22,7 +22,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
   // "test-1" reaches it as a UUID derived from that string, with the record's own ID carried
   // in the payload. Spelled out as a literal rather than recomputed, so that a change to the
   // derivation - which would orphan every point already written - shows up as a test failure.
-  private val testPointId  = "70a37754-eb5a-3e7d-b8cd-887aaf11cda7"
+  private val testPointId  = "0d75226c-b7a2-849e-8abb-9be195dca8ec"
   private val testPointUrl = s"$pointsUrl/$testPointId?with_payload=true&with_vector=true"
 
   // Helper to create a mock HTTP client
@@ -213,13 +213,46 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     store.get(uuid) shouldBe Right(None)
   }
 
+  it should "keep a caller-supplied UUID clear of the derived ID it looks like" in {
+    val mockClient = createMockClient()
+    val store      = createStore(mockClient)
+
+    // The derivation is public, so a caller can supply the UUID that "test-1" maps to as a
+    // record ID in its own right. The two records must not end up on the same point.
+    val literalUuidRecord = testPointId
+    val itsPoint          = QdrantVectorStore.derivedPointId(literalUuidRecord)
+    itsPoint should not be testPointId
+
+    (mockClient.get _)
+      .when(testPointUrl, *, *, *)
+      .returns(
+        httpResponse(
+          200,
+          s"""{"result": {"id": "$testPointId", "vector": [0.1],
+                                     "payload": {"llm4s_id": "test-1"}}}"""
+        )
+      )
+    (mockClient.get _)
+      .when(s"$pointsUrl/$itsPoint?with_payload=true&with_vector=true", *, *, *)
+      .returns(
+        httpResponse(
+          200,
+          s"""{"result": {"id": "$itsPoint", "vector": [0.2],
+                                     "payload": {"llm4s_id": "$literalUuidRecord"}}}"""
+        )
+      )
+
+    store.get("test-1").toOption.flatten.map(_.id) shouldBe Some("test-1")
+    store.get(literalUuidRecord).toOption.flatten.map(_.id) shouldBe Some(literalUuidRecord)
+  }
+
   it should "be read back from the payload rather than from the point ID" in {
     val mockClient = createMockClient()
     val store      = createStore(mockClient)
 
     val responseJson = """{
       "result": {
-        "id": "70a37754-eb5a-3e7d-b8cd-887aaf11cda7",
+        "id": "0d75226c-b7a2-849e-8abb-9be195dca8ec",
         "vector": [0.1, 0.2, 0.3],
         "payload": {
           "llm4s_id": "test-1",
@@ -281,7 +314,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
       "result": {
         "points": [
           { "id": 7, "payload": { "llm4s_id": "doc-1" } },
-          { "id": "70a37754-eb5a-3e7d-b8cd-887aaf11cda7", "payload": { "llm4s_id": "other-1" } }
+          { "id": "0d75226c-b7a2-849e-8abb-9be195dca8ec", "payload": { "llm4s_id": "other-1" } }
         ]
       }
     }"""

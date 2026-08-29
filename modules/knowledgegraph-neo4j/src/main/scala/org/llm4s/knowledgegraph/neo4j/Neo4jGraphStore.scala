@@ -195,37 +195,57 @@ final class Neo4jGraphStore private (
 
   override def traverse(startId: String, config: TraversalConfig = TraversalConfig()): Result[Seq[Node]] =
     withSession { session =>
-      // Uses one read query to avoid per-node session churn.
-      // Follow-up: if GraphTraversal visibility is widened, shared traversal helpers can be reused across stores.
-      val params = new java.util.HashMap[String, AnyRef]()
-      params.put("startId", startId)
-      params.put("excludedIds", config.visitedNodeIds.toList.asJava)
-
-      // The upper bound of a variable-length pattern is part of the query's shape, not a
-      // value: Cypher rejects `[*0..$maxDepth]` with "Parameter maps cannot be used in MATCH
-      // patterns". It has to be inlined, which is safe because it is an Int - the injection
-      // risk that `$`-parameters guard against does not arise. `TraversalConfig` defaults
-      // maxDepth to Int.MaxValue, meaning "no limit", which Cypher spells as an open bound.
-      val depth =
-        if (config.maxDepth == Int.MaxValue) "*0.."
-        else s"*0..${math.max(0, config.maxDepth)}"
-
-      val pattern = config.direction match {
-        case Direction.Outgoing => s"-[$depth]->"
-        case Direction.Incoming => s"<-[$depth]-"
-        case Direction.Both     => s"-[$depth]-"
+      // Breadth-first, one query per level, rather than one variable-length pattern.
+      //
+      // `MATCH p=(start)-[*0..]-(n)` enumerates every relationship-unique path before
+      // `min(length(p))` collapses them back to one row per node, so on a cyclic or densely
+      // connected graph the work grows exponentially in the number of edges - and
+      // TraversalConfig's default depth is unbounded, which is the worst case rather than a
+      // rare one. Expanding a whole frontier per level visits each node exactly once, at the
+      // cost of one round trip per level.
+      //
+      // Semantics follow GraphTraversal.bfs, which backs the in-memory store: nodes in
+      // `visitedNodeIds` are skipped rather than traversed through, and the start node is
+      // included at depth 0 when it exists.
+      val expand = config.direction match {
+        case Direction.Outgoing => "MATCH (a:LLM4S)-[]->(b:LLM4S)"
+        case Direction.Incoming => "MATCH (a:LLM4S)<-[]-(b:LLM4S)"
+        case Direction.Both     => "MATCH (a:LLM4S)-[]-(b:LLM4S)"
       }
+      val expandCypher =
+        s"$expand WHERE a.llm4s_id IN $$frontier AND NOT b.llm4s_id IN $$seen RETURN DISTINCT b ORDER BY b.llm4s_id ASC"
 
       Right(session.executeRead { tx =>
-        val rs = tx.run(
-          s"MATCH p=(start:LLM4S {llm4s_id: $$startId})$pattern(n:LLM4S) WHERE NOT n.llm4s_id IN $$excludedIds WITH n, min(length(p)) AS depth ORDER BY depth ASC, n.llm4s_id ASC RETURN n",
-          params
-        )
+        val startParams = new java.util.HashMap[String, AnyRef]()
+        startParams.put("startId", startId)
+        val startResult = tx.run("MATCH (n:LLM4S {llm4s_id: $startId}) RETURN n", startParams)
 
-        val buf = scala.collection.mutable.ArrayBuffer.empty[Node]
-        while (rs.hasNext)
-          buf += recordToNode(rs.next().get("n").asNode())
-        buf.toSeq
+        if (!startResult.hasNext || config.visitedNodeIds.contains(startId)) Seq.empty
+        else {
+          val startNode = recordToNode(startResult.next().get("n").asNode())
+
+          def expandLevel(frontier: Seq[String], seen: Set[String]): Seq[Node] = {
+            val params = new java.util.HashMap[String, AnyRef]()
+            params.put("frontier", frontier.asJava)
+            params.put("seen", seen.toList.asJava)
+            val rs  = tx.run(expandCypher, params)
+            val buf = scala.collection.mutable.ArrayBuffer.empty[Node]
+            while (rs.hasNext)
+              buf += recordToNode(rs.next().get("b").asNode())
+            buf.toSeq
+          }
+
+          @scala.annotation.tailrec
+          def loop(frontier: Seq[String], seen: Set[String], depth: Int, acc: Vector[Node]): Vector[Node] =
+            if (frontier.isEmpty || depth >= config.maxDepth) acc
+            else {
+              val next = expandLevel(frontier, seen)
+              if (next.isEmpty) acc
+              else loop(next.map(_.id), seen ++ next.map(_.id), depth + 1, acc ++ next)
+            }
+
+          loop(Seq(startId), config.visitedNodeIds + startId, 0, Vector(startNode))
+        }
       })
     }
 

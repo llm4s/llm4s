@@ -11,14 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Neo4jGraphStore.traverse` never worked against a real Neo4j. The variable-length pattern
   was built from a non-interpolated string, so `$maxDepth` reached Cypher as a parameter
   reference, which is illegal in a `MATCH` pattern ("Parameter maps cannot be used in MATCH
-  patterns") and failed every traversal. The bound is now inlined - it is an `Int`, so there
-  is nothing to inject - and the `Int.MaxValue` default maps to Cypher's open bound.
+  patterns") and failed every traversal. It is now a breadth-first expansion of one level per
+  query, which also avoids the path enumeration a variable-length pattern implies: `[*0..]`
+  matches every relationship-unique path before `min(length(p))` reduces them to one row per
+  node, which grows exponentially on a cyclic or dense graph - and unbounded is the default
+  depth. Semantics follow `GraphTraversal.bfs`, which backs the in-memory store.
 - `QdrantVectorStore` could not store a record whose ID was not already a UUID. Qdrant accepts
   only an unsigned integer or a UUID as a point ID and rejected everything else with
   `"test-1" is not a valid point ID`, so `upsert`, `get`, `delete` and `search` all failed.
   Non-UUID IDs are now mapped to a UUID derived from the ID, with the record's own ID carried
-  in the payload and read back from there; UUID IDs are unchanged. A mocked-HTTP unit test had
-  been asserting the broken request shape, which is why nothing caught this.
+  in the payload and read back from there; UUID IDs are unchanged. Derived IDs are version 8
+  UUIDs (RFC 9562's "custom" space) and an ID that is itself a version 8 UUID is derived from
+  rather than passed through, so a caller cannot land two records on one point by supplying
+  the UUID that another ID maps to. A mocked-HTTP unit test had been asserting the broken
+  request shape, which is why nothing caught this.
 - `QdrantVectorStore` reported absence as failure. Qdrant answers 404 both for a point that
   does not exist and for a collection that does not exist - and the collection is created
   lazily on first upsert and deleted outright by `clear()` - so `get` returned a `Left`

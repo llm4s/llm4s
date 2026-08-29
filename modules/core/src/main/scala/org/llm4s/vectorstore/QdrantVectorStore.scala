@@ -4,7 +4,9 @@ import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
 import org.llm4s.http.Llm4sHttpClient
 
+import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.UUID
 import scala.util.Try
 
@@ -41,16 +43,23 @@ final class QdrantVectorStore private (
 
   /**
    * Qdrant point IDs must be an unsigned integer or a UUID - it rejects anything else with
-   * "not a valid point ID" - while a `VectorRecord` ID is an arbitrary string. IDs that are
-   * already UUIDs are used as-is; every other ID is mapped to a UUID derived from it, so the
-   * mapping is stable across processes and stores.
+   * "not a valid point ID" - while a `VectorRecord` ID is an arbitrary string. A UUID ID is
+   * used as-is, so records already stored under one stay reachable; every other ID is mapped
+   * to a UUID derived from it, stably across processes and stores.
+   *
+   * The two must not meet. Deriving a UUID that a caller could also supply literally would
+   * let two distinct records share one point and silently overwrite each other - and the
+   * derivation is public, so such an ID is constructible rather than merely unlucky. Derived
+   * IDs therefore live in UUID version 8, which RFC 9562 reserves for exactly this kind of
+   * custom value, and an ID that is itself a version 8 UUID is derived from rather than
+   * passed through. The two spaces cannot overlap, and within the derived space a collision
+   * would take a SHA-256 collision.
    *
    * The record's own ID is what callers search, get and delete by, so it travels in the
    * payload under `llm4s_id` and is read back from there rather than from the point ID.
    */
   private def pointId(id: String): String =
-    if (QdrantVectorStore.isUuid(id)) id
-    else UUID.nameUUIDFromBytes(id.getBytes(StandardCharsets.UTF_8)).toString
+    if (QdrantVectorStore.isPassthroughUuid(id)) id else QdrantVectorStore.derivedPointId(id)
 
   /** The record ID a point carries, falling back to its point ID for foreign-written points. */
   private def recordId(point: ujson.Value): String =
@@ -510,7 +519,21 @@ object QdrantVectorStore {
 
   private val UuidPattern = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}".r
 
-  private[vectorstore] def isUuid(id: String): Boolean = UuidPattern.matches(id)
+  /** The UUID version reserved here for derived point IDs (RFC 9562 "custom"). */
+  private val DerivedVersion = 8
+
+  /** True for a record ID usable as a point ID as it stands - any UUID outside the derived space. */
+  private[vectorstore] def isPassthroughUuid(id: String): Boolean =
+    UuidPattern.matches(id) && !Try(UUID.fromString(id).version()).toOption.contains(DerivedVersion)
+
+  /** A version 8 UUID derived from the record ID; see `pointId` for why the version matters. */
+  private[vectorstore] def derivedPointId(id: String): String = {
+    val digest = MessageDigest.getInstance("SHA-256").digest(s"llm4s:$id".getBytes(StandardCharsets.UTF_8))
+    digest(6) = ((digest(6) & 0x0f) | (DerivedVersion << 4)).toByte
+    digest(8) = ((digest(8) & 0x3f) | 0x80).toByte // IETF variant
+    val buffer = ByteBuffer.wrap(digest, 0, 16)
+    new UUID(buffer.getLong, buffer.getLong).toString
+  }
 
   /**
    * Configuration for QdrantVectorStore.
