@@ -12,7 +12,7 @@ permalink: /
 A comprehensive, type-safe framework for building LLM-powered applications in Scala.
 {: .fs-6 .fw-300 }
 
-[![Maven Central](https://img.shields.io/maven-central/v/org.llm4s/core_3.svg?label=Maven%20Central)](https://search.maven.org/search?q=g:org.llm4s%20AND%20a:core_3)
+[![Maven Central](https://img.shields.io/maven-central/v/org.llm4s/llm4s-core_3.svg?label=Maven%20Central)](https://search.maven.org/search?q=g:org.llm4s%20AND%20a:llm4s-core_3)
 [![CI](https://github.com/llm4s/llm4s/actions/workflows/ci.yml/badge.svg)](https://github.com/llm4s/llm4s/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Discord](https://img.shields.io/discord/1234567890?color=7289da&label=Discord&logo=discord&logoColor=white)](https://discord.gg/4uvTPn6qww)
@@ -134,12 +134,12 @@ Containerized workspace for safe tool execution with Docker isolation.
 Add LLM4S to your `build.sbt`:
 
 ```scala
-libraryDependencies += "org.llm4s" %% "core" % "{{ site.data.project.version }}"
+libraryDependencies += "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
 ```
 
 {: .note }
-> **Current Version:** `{{ site.data.project.version }}`
-> Check [Maven Central](https://search.maven.org/search?q=g:org.llm4s%20AND%20a:core_3) for the latest release.
+> **Latest release:** `{{ site.data.project.latest_release }}`
+> Check [Maven Central](https://search.maven.org/search?q=g:org.llm4s%20AND%20a:llm4s-core_3) for the latest release.
 
 ### Configuration
 

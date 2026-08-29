@@ -128,7 +128,7 @@ All SBT modules moved from the repo root into the `modules/` subdirectory:
 | `samples/` | `modules/samples/` |
 | `workspace/` | `modules/workspace/` |
 
-If you reference source paths directly (e.g. in IDE imports or custom scripts) update them accordingly. SBT artifact coordinates (`groupId`, `artifactId`) did **not** change.
+If you reference source paths directly (e.g. in IDE imports or custom scripts) update them accordingly. SBT artifact coordinates (`groupId`, `artifactId`) did **not** change *in 0.1.13*. They did change in 0.4.0 — see [Artifact coordinate rename (v0.4.0)](../reference/migration.md#artifact-coordinate-rename-v040).
 
 ---
 

@@ -120,10 +120,10 @@ OTEL_SERVICE_NAME=my-llm-service
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 ```
 
-This requires the `llm4s-trace-opentelemetry` module:
+This requires the `llm4s-observability-otel` module:
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s-trace-opentelemetry" % llm4sVersion
+libraryDependencies += "org.llm4s" %% "llm4s-observability-otel" % llm4sVersion
 ```
 
 ---

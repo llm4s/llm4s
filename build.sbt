@@ -198,7 +198,7 @@ lazy val llm4s = (project in file("."))
 
 lazy val core = (project in file("modules/core"))
   .settings(
-    name := "core",
+    name := "llm4s-core",
     commonSettings,
     // Measured 72.42% statement coverage (53,499 statements, 7004 tests) on main @ 5a62e2ac.
     // Floor is the measured value rounded down to the nearest 5. Ratchet it up as the
@@ -263,7 +263,7 @@ lazy val core = (project in file("modules/core"))
 
 lazy val workspaceShared = (project in file("modules/workspace/workspaceShared"))
   .settings(
-    name := "workspaceShared",
+    name := "llm4s-workspace-shared",
     commonSettings,
     Compile / discoveredMainClasses := Seq.empty,
     // Not measured: excluded via ThisBuild / coverageExcludedPackages (org.llm4s.workspace.*)
@@ -274,7 +274,7 @@ lazy val workspaceShared = (project in file("modules/workspace/workspaceShared")
 lazy val workspaceClient = (project in file("modules/workspace/workspaceClient"))
   .dependsOn(workspaceShared, core)
   .settings(
-    name := "workspaceClient",
+    name := "llm4s-workspace-client",
     commonSettings,
     Compile / discoveredMainClasses := Seq.empty,
     // Not measured: excluded via ThisBuild / coverageExcludedPackages (org.llm4s.workspace.*)
@@ -305,7 +305,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .dependsOn(workspaceShared)
   .enablePlugins(JavaAppPackaging, DockerPlugin)
   .settings(
-    name := "workspaceRunner",
+    name := "llm4s-workspace-runner",
     commonSettings,
     Compile / mainClass := Some("org.llm4s.runner.RunnerMain"),
     libraryDependencies ++= Seq(
@@ -324,7 +324,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
 lazy val samples = (project in file("modules//samples"))
   .dependsOn(core, knowledgegraphNeo4j)
   .settings(
-    name := "samples",
+    name := "llm4s-samples",
     commonSettings,
     publish / skip := true,
     // Not measured: unpublished example code, excluded via ThisBuild / coverageExcludedPackages
@@ -356,7 +356,7 @@ lazy val configPolicy = (project in file("modules/config-policy"))
 lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))
   .dependsOn(workspaceShared, workspaceRunner, workspaceClient, samples)
   .settings(
-    name := "workspaceSamples",
+    name := "llm4s-workspace-samples",
     commonSettings,
     publish / skip := true,
     // Not measured: unpublished example code for the workspace modules.
@@ -366,7 +366,7 @@ lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples
 lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
   .dependsOn(core)
   .settings(
-    name := "trace-opentelemetry",
+    name := "llm4s-observability-otel",
     commonSettings,
     // Measured 0.00% statement coverage (`sbt coverage traceOpentelemetry/test
     // traceOpentelemetry/coverageReport`): the module has no in-module tests at all, its
@@ -384,7 +384,7 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
 lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   .dependsOn(core)
   .settings(
-    name             := "knowledgegraph-neo4j",
+    name             := "llm4s-knowledgegraph-neo4j",
     commonSettings,
     Test / fork      := true,
     libraryDependencies ++= Seq(
@@ -399,7 +399,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
 lazy val it = (project in file("modules/it"))
   .dependsOn(core, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
   .settings(
-    name := "it",
+    name := "llm4s-it",
     commonSettings,
     publish / skip := true,
     // Not measured: `modules/it` has no src/main at all - it is a test-only host for
@@ -417,7 +417,7 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
   .dependsOn(core)
   .enablePlugins(JmhPlugin)
   .settings(
-    name           := "benchmarks",
+    name           := "llm4s-benchmarks",
     commonSettings,
     publish / skip := true,
     // Measured 100.00% statement/branch coverage (`sbt coverage benchmarks/test
