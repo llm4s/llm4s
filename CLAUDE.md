@@ -119,7 +119,7 @@ EMBEDDING_MODEL=ollama/nomic-embed-text        # or mxbai-embed-large, all-minil
 
 ```scala
 // GOOD - Return Result
-def loadProviderConfig(): Result[ProviderConfig] = Llm4sConfig.provider()
+def loadProviderConfig(): Result[ProviderConfig] = Llm4sConfig.defaultProvider()
 
 // BAD - Don't throw
 def parseConfig(): Config = throw new RuntimeException()
@@ -133,7 +133,9 @@ Try("123".toInt).toResult
 
 ```scala
 // GOOD
-val provider: Result[ProviderConfig] = Llm4sConfig.provider()
+val provider: Result[ProviderConfig] = Llm4sConfig.defaultProvider()
+// or a specific named provider from config:
+val named: Result[ProviderConfig] = Llm4sConfig.provider("openai-main")
 
 // BAD
 val apiKey = sys.env.get("OPENAI_API_KEY")
@@ -158,7 +160,9 @@ val apiKey = sys.env.get("OPENAI_API_KEY")
 
 ```scala
 for {
-  providerConfig <- Llm4sConfig.provider()
+  providerConfig  <- Llm4sConfig.defaultProvider()
+  registryService <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registryService
   client <- LLMConnect.getClient(providerConfig)
   agent = new Agent(client)
   tools = new ToolRegistry(Seq(myTool))
