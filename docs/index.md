@@ -134,11 +134,11 @@ Containerized workspace for safe tool execution with Docker isolation.
 Add LLM4S to your `build.sbt`:
 
 ```scala
-libraryDependencies += "org.llm4s" %% "llm4s-core" % "{{ site.data.project.version }}"
+libraryDependencies += "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
 ```
 
 {: .note }
-> **Current Version:** `{{ site.data.project.version }}`
+> **Latest release:** `{{ site.data.project.latest_release }}`
 > Check [Maven Central](https://search.maven.org/search?q=g:org.llm4s%20AND%20a:llm4s-core_3) for the latest release.
 
 ### Configuration
