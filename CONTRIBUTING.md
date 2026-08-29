@@ -127,6 +127,26 @@ See [AGENTS.md](AGENTS.md#testing-guidelines) for details:
 - Test both happy path and error cases
 - Maintain 80%+ coverage
 
+### Tests that need a real service
+
+Suites needing a database, a container, a local model server or an API key go in
+`modules/it`, and each one must declare which tier runs it by annotating the class with
+exactly one tag from `org.llm4s.it.tags`. `sbt it/itTierCheck` (run in CI) fails the build
+if a suite declares none, so a new suite cannot end up being run by nothing:
+
+| Tag | Needs | Command |
+|---|---|---|
+| `@Local` | nothing external | `sbt test` |
+| `@Docker` | Postgres/pgvector, Qdrant or Neo4j | `sbt testIntegration` |
+| `@Workspace` | Docker + a built `workspace-runner` image | `sbt testWorkspace` |
+| `@Ollama` | a local Ollama server | `sbt testOllama` |
+| `@Cloud` | live provider API keys | `sbt testSmoke` |
+
+Gate on `Tier.require(...)` rather than `assume(...)`: with `LLM4S_IT_STRICT=true`, which
+every tier's CI job sets, an unavailable dependency then fails the build instead of skipping
+quietly. Full details in the
+[Testing Guide](docs/reference/testing-guide.md#9-integration-test-tiers-modulesit).
+
 ## Build Commands
 
 See [AGENTS.md](AGENTS.md#build-test-and-development-commands) for complete list:

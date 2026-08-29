@@ -6,6 +6,8 @@ import org.scalatest.BeforeAndAfterAll
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.it.Tier
+import org.llm4s.it.tags.Docker
 
 /**
  * Integration tests for Neo4jGraphStore.
@@ -23,6 +25,7 @@ import org.scalatest.matchers.should.Matchers
  * Netty 4.1.115.Final's NioIoHandler in a way that does not support
  * LocalServerChannel, causing it to crash on startup regardless of the JVM version.
  */
+@Docker
 class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterAll with BeforeAndAfterEach {
 
   private var store: Neo4jGraphStore = _
@@ -61,7 +64,7 @@ class Neo4jGraphStoreSpec extends AnyFunSuite with Matchers with BeforeAndAfterA
 
   /** Skip the current test if Neo4j is not reachable. */
   private def requireNeo4j(): Unit =
-    assume(neo4jAvailable, "No Neo4j at bolt://localhost:7687 — start one to run this test")
+    Tier.require(neo4jAvailable, s"No Neo4j reachable at $neo4jUri")
 
   // ─── Node CRUD ────────────────────────────────────────────────────────────
 

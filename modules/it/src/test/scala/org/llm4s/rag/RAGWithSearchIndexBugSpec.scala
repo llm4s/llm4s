@@ -5,6 +5,8 @@ import org.llm4s.rag.permissions.pg.PgSearchIndex
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.it.Tier
+import org.llm4s.it.tags.Docker
 
 /**
  * Integration tests for PostgreSQL-backed SearchIndex behavior when used through
@@ -13,6 +15,7 @@ import org.scalatest.matchers.should.Matchers
  * These tests require PostgreSQL with pgvector to fully validate.
  * Set `PGVECTOR_TEST_URL` to enable them.
  */
+@Docker
 class RAGWithSearchIndexBugSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll {
 
   private val pgUrl      = sys.env.get("PGVECTOR_TEST_URL")
@@ -47,7 +50,7 @@ class RAGWithSearchIndexBugSpec extends AnyFlatSpec with Matchers with BeforeAnd
   }
 
   private def requirePg(): Unit =
-    assume(searchIndex.isDefined, "PostgreSQL with pgvector not available")
+    Tier.require(searchIndex.isDefined, "PostgreSQL with pgvector not available")
 
   "RAGConfig.withSearchIndex with PgSearchIndex" should "automatically configure pgVectorConnectionString" in {
     requirePg()

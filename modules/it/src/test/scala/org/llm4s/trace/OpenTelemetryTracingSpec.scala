@@ -6,7 +6,9 @@ import org.llm4s.llmconnect.config.{ OpenTelemetryConfig, TracingSettings }
 import org.llm4s.llmconnect.model.TokenUsage
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.it.tags.Local
 
+@Local
 class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
 
   val tracing = new OpenTelemetryTracing("test-service", "http://localhost:4317", Map.empty)

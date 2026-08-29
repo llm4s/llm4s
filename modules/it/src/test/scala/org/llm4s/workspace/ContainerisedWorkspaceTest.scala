@@ -9,6 +9,8 @@ import java.io.File
 import java.nio.file.Files
 import scala.concurrent.duration._
 import scala.util.Try
+import org.llm4s.it.Tier
+import org.llm4s.it.tags.Workspace
 
 /**
  * Test suite for WebSocket-based ContainerisedWorkspace.
@@ -16,6 +18,7 @@ import scala.util.Try
  * This suite requires Docker plus `LLM4S_DOCKER_TESTS=true` and lives in the
  * dedicated integration-test module so it does not slow down default `sbt test`.
  */
+@Workspace
 class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAndAfterAll {
 
   private val tempDir                           = Files.createTempDirectory("websocket-workspace-test").toString
@@ -25,7 +28,7 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
     super.beforeAll()
 
     if (isDockerAvailable) {
-      workspace = new ContainerisedWorkspace(tempDir, "docker.io/library/workspace-runner:0.1.0-SNAPSHOT", 8080)
+      workspace = new ContainerisedWorkspace(tempDir, ContainerisedWorkspaceTest.image, 8080)
 
       val started = workspace.startContainer()
       if (!started) {
@@ -64,7 +67,7 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
       }.getOrElse(false)
 
   test("WebSocket workspace can handle basic file operations") {
-    assume(isDockerAvailable, "Docker not available - skipping WebSocket tests")
+    Tier.require(isDockerAvailable, "Docker not available or LLM4S_DOCKER_TESTS!=true")
 
     val writeResponse = workspace.writeFile(
       "test.txt",
@@ -83,7 +86,7 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
   }
 
   test("WebSocket workspace can execute commands without blocking heartbeats") {
-    assume(isDockerAvailable, "Docker not available - skipping WebSocket tests")
+    Tier.require(isDockerAvailable, "Docker not available or LLM4S_DOCKER_TESTS!=true")
 
     val startTime = System.currentTimeMillis()
 
@@ -103,7 +106,7 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
   }
 
   test("WebSocket workspace supports concurrent operations") {
-    assume(isDockerAvailable, "Docker not available - skipping WebSocket tests")
+    Tier.require(isDockerAvailable, "Docker not available or LLM4S_DOCKER_TESTS!=true")
 
     import scala.concurrent.ExecutionContext.Implicits.global
     import scala.concurrent.Future
@@ -132,7 +135,7 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
   }
 
   test("WebSocket workspace handles command streaming events") {
-    assume(isDockerAvailable, "Docker not available - skipping WebSocket tests")
+    Tier.require(isDockerAvailable, "Docker not available or LLM4S_DOCKER_TESTS!=true")
 
     val response = workspace.executeCommand(
       "echo 'Step 1'; echo 'Step 2'; echo 'Step 3'",
@@ -147,7 +150,7 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
   }
 
   test("WebSocket workspace handles errors gracefully") {
-    assume(isDockerAvailable, "Docker not available - skipping WebSocket tests")
+    Tier.require(isDockerAvailable, "Docker not available or LLM4S_DOCKER_TESTS!=true")
 
     val response = workspace.executeCommand("exit 1", None, Some(5))
     response.exitCode shouldBe 1
@@ -164,8 +167,18 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
 
 object ContainerisedWorkspaceTest {
 
+  /**
+   * The workspace-runner image to test against.
+   *
+   * The build passes the tag it would publish locally (see `it / Test / envVars` in build.sbt),
+   * so this tracks the project version instead of the hardcoded `0.1.0-SNAPSHOT` that had gone
+   * stale while nothing ran this suite.
+   */
+  def image: String =
+    sys.env.getOrElse("LLM4S_WORKSPACE_IMAGE", "llm4s/workspace-runner:latest")
+
   def createTestWorkspace(workspaceDir: String): ContainerisedWorkspace =
-    new ContainerisedWorkspace(workspaceDir, "docker.io/library/workspace-runner:0.1.0-SNAPSHOT", 8080)
+    new ContainerisedWorkspace(workspaceDir, image, 8080)
 
   def demonstrateThreadingFix(workspaceDir: String): Unit = {
     val workspace = createTestWorkspace(workspaceDir)

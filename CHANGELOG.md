@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- 11 of the 18 integration suites in `modules/it` were executed by nothing - not locally, not
+  in CI, not on release - because the tier aliases named two `testOnly` patterns and every
+  suite outside them matched nothing. Tier membership is now declared per suite by class
+  annotation (`@Local`, `@Docker`, `@Workspace`, `@Ollama`, `@Cloud` in `org.llm4s.it.tags`)
+  and `sbt it/itTierCheck` fails the build when a suite declares none or more than one.
+  ([#1143](https://github.com/llm4s/llm4s/issues/1143))
+- Suites no longer report a pass when their dependency is absent. `Tier.require` cancels
+  locally and, under `LLM4S_IT_STRICT=true` (set by every tier's CI job), fails - so a
+  service that did not start is visible instead of green. This also exposes that
+  `GeminiSmokeSpec` reads `GEMINI_API_KEY` while the cloud job only passed `GOOGLE_API_KEY`;
+  the workflow now passes both, plus `COHERE_API_KEY`.
+- `ContainerisedWorkspaceTest` pinned a `workspace-runner:0.1.0-SNAPSHOT` image tag that the
+  build stopped producing long ago. The tag now comes from the build itself.
+
+### Added
+- `sbt testIntegration` runs the containerised tier (pgvector, Qdrant, Neo4j) and a CI job
+  runs it on **every PR** with those services as service containers - the suites covering
+  pgvector, the Postgres keyword index, Qdrant, permission-aware RAG, Postgres-backed agent
+  memory and Neo4j now have execution signal ahead of the modularisation carve
+  ([#1126](https://github.com/llm4s/llm4s/issues/1126)), which moves most of that code.
+- `sbt testWorkspace` runs the containerised workspace tier, in a CI job on pushes to `main`
+  that first builds the `workspace-runner` image.
+
+### Changed
+- `modules/it` joined the root aggregate, so it is compiled, formatted and linted with every
+  other module; it had been outside it, where its suites could stop compiling unnoticed.
+  Default `sbt test` runs only its `@Local` tier, so the dependency-free tier stays fast.
+
 ## [0.4.0] - 2026-08-29
 
 ### Changed

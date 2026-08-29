@@ -7,6 +7,8 @@ import org.llm4s.llmconnect.provider.OpenRouterClient
 import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.it.Tier
+import org.llm4s.it.tags.Cloud
 
 /**
  * Cloud smoke tests for OpenRouter.
@@ -17,10 +19,11 @@ import org.scalatest.matchers.should.Matchers
  *
  * Requires: `OPENROUTER_API_KEY` environment variable.
  */
+@Cloud
 class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers {
 
   private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
-  private given ContextWindowResolver = ContextWindowResolver(mrs)
+  private given ContextWindowResolver     = ContextWindowResolver(mrs)
 
   private val apiKey: Option[String] = Option(System.getenv("OPENROUTER_API_KEY")).filter(_.nonEmpty)
 
@@ -35,7 +38,7 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers {
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 
   "OpenRouter" should "complete a basic request" in {
-    assume(apiKey.isDefined, "OPENROUTER_API_KEY not set")
+    Tier.require(apiKey.isDefined, "OPENROUTER_API_KEY not set")
 
     val client     = new OpenRouterClient(config(apiKey.get))
     val completion = client.complete(conversation, CompletionOptions())
@@ -47,7 +50,7 @@ class OpenRouterSmokeSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "stream a response" in {
-    assume(apiKey.isDefined, "OPENROUTER_API_KEY not set")
+    Tier.require(apiKey.isDefined, "OPENROUTER_API_KEY not set")
 
     val client = new OpenRouterClient(config(apiKey.get))
     val chunks = scala.collection.mutable.ListBuffer.empty[StreamedChunk]

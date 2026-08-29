@@ -10,7 +10,9 @@ import java.nio.file.Files
 import java.awt.image.BufferedImage
 import java.awt.Color
 import javax.imageio.ImageIO
+import org.llm4s.it.tags.Local
 
+@Local
 class AnthropicVisionClientTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
   var tempFile: java.nio.file.Path  = _

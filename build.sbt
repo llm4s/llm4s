@@ -95,18 +95,23 @@ addCommandAlias(
   "testFast",
   """;set core / Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-l", "org.llm4s.tags.SlowTest"); test"""
 )
-// ---- Three-tier test aliases ----
-// Default `test` runs unit + local HTTP server tests (Tier 1), excluding tagged tests.
-// testOllama: Tier 2 — integration tests against a local Ollama instance (requires `ollama pull qwen2.5:0.5b`)
-// testSmoke:  Tier 3 — cloud smoke tests against real APIs (requires API keys in .env or environment)
-addCommandAlias(
-  "testOllama",
-  """;it/testOnly org.llm4s.llmconnect.provider.OllamaIntegrationSpec"""
-)
-addCommandAlias(
-  "testSmoke",
-  """;it/testOnly org.llm4s.llmconnect.smoke.*"""
-)
+// ---- Tiered test aliases ----
+// Every suite in `modules/it` declares its tier by class annotation (see project/ItTiers.scala);
+// `it/itTierCheck` fails the build if one declares none. Each alias selects a tier by tag, so a
+// new suite lands in a tier that actually runs instead of matching no `testOnly` pattern.
+//
+//   sbt test             Tier 1 - unit tests plus the `@Local` suites in modules/it
+//   sbt testIntegration  Tier 2 - `@Docker`: needs Postgres/pgvector, Qdrant, Neo4j
+//   sbt testWorkspace    Tier 2 - `@Workspace`: needs a built workspace-runner image + Docker
+//   sbt testOllama       Tier 3 - `@Ollama`: needs a local Ollama with `qwen2.5:0.5b` pulled
+//   sbt testSmoke        Tier 4 - `@Cloud`: real provider APIs, real money
+//
+// The aliases *replace* `it / Test / testOptions` because the default value restricts the run
+// to the Local tier; adding a second `-n` would intersect to nothing.
+addCommandAlias("testIntegration", ItTiers.alias(ItTiers.Docker))
+addCommandAlias("testWorkspace", ItTiers.alias(ItTiers.Workspace))
+addCommandAlias("testOllama", ItTiers.alias(ItTiers.Ollama))
+addCommandAlias("testSmoke", ItTiers.alias(ItTiers.Cloud))
 
 // ---- shared settings ----
 lazy val commonSettings = Seq(
@@ -150,6 +155,13 @@ lazy val coveragePolicyCheck = taskKey[Unit](
   "Fail the build if any module has not explicitly declared a coverage floor or opt-out"
 )
 
+// ---- integration tier check ----
+// Same principle one level down: an integration suite that declares no tier is run by no
+// command and no CI job, and says nothing about it. See project/ItTiers.scala.
+lazy val itTierCheck = taskKey[Unit](
+  "Fail the build if any suite in modules/it has not declared exactly one test tier"
+)
+
 // ---- projects ----
 lazy val llm4s = (project in file("."))
   .aggregate(
@@ -163,6 +175,10 @@ lazy val llm4s = (project in file("."))
     traceOpentelemetry,
     knowledgegraphNeo4j,
     benchmarks,
+    // Aggregated so `it` is compiled, formatted and linted with everything else - it was
+    // outside the aggregate entirely, so its suites could stop compiling unnoticed. Only the
+    // `@Local` tier actually runs under `sbt test`; see `it / Test / testOptions` below.
+    it,
     // Relocation stubs must be aggregated here: `sbt ci-release` publishes the root
     // aggregate, so a stub outside it would simply never be published.
     relocationCore,
@@ -415,6 +431,21 @@ lazy val it = (project in file("modules/it"))
     // policy (and a codecov flag) when it is populated with sources in a later slice.
     coverageDisabled,
     Test / fork := true,
+    // The default run - including the aggregated `sbt test` - is the Local tier only.
+    // Everything else needs a database, an image build, a model server or a paid API key.
+    // The tier aliases replace this setting rather than adding to it (see ItTiers.alias).
+    Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-n", ItTiers.Local),
+    // ContainerisedWorkspaceTest runs against whatever `workspaceRunner/Docker/publishLocal`
+    // produced; take the tag from the build so the test and the image cannot drift apart.
+    Test / envVars += "LLM4S_WORKSPACE_IMAGE" -> s"llm4s/workspace-runner:${(workspaceRunner / Docker / version).value}",
+    itTierCheck := ItTiers.check(
+      (Test / definedTests).value.map(_.name),
+      (Test / fullClasspath).value.map(_.data),
+      streams.value.log
+    ),
+    // Any tier run proves its own membership first, so a mistagged suite fails where it is
+    // noticed rather than by quietly running nothing.
+    Test / test := (Test / test).dependsOn(itTierCheck).value,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
     )

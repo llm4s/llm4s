@@ -101,6 +101,11 @@ jobs:
       - name: Compile
         run: sbt compile
 
+      # Fails when an integration suite in modules/it declares no tier, i.e. when no command
+      # and no CI job below would run it. Eleven of eighteen suites were in that state.
+      - name: Check every integration suite declares a test tier
+        run: sbt it/itTierCheck
+
   scaladoc:
     name: ScalaDoc
     needs: quick-checks
@@ -229,11 +234,106 @@ jobs:
             **/target/scala-3.7.1/test-reports/
           retention-days: 5
 
+  # Tier 2: containerised integration tests — pgvector, Qdrant and Neo4j as service
+  # containers. Reproducible and secret-free, so unlike the Ollama and cloud tiers this
+  # runs on every PR. `LLM4S_IT_STRICT=true` makes a suite that cannot reach its service
+  # fail instead of skip: this job promises the services are there, so a skip here would be
+  # the same silent non-execution that #1143 was about.
+  integration-tests:
+    name: Integration Tests
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      qdrant:
+        image: qdrant/qdrant:v1.13.0
+        ports:
+          - 6333:6333
+
+      neo4j:
+        image: neo4j:5
+        env:
+          NEO4J_AUTH: neo4j/llm4stest
+        ports:
+          - 7687:7687
+          - 7474:7474
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      # Postgres is covered by the service health check above. The Qdrant and Neo4j images
+      # ship no shell tooling to health-check with, so poll them from the runner instead —
+      # and fail the job if they never come up, rather than letting the suites skip.
+      - name: Wait for Qdrant and Neo4j
+        run: |
+          wait_for() {
+            for _ in $(seq 1 60); do
+              if curl -sf "$2" > /dev/null; then echo "$1 is ready"; return 0; fi
+              sleep 2
+            done
+            echo "$1 did not become ready within 120s" >&2
+            exit 1
+          }
+          wait_for Qdrant http://localhost:6333/readyz
+          wait_for Neo4j http://localhost:7474
+
+      - name: Run containerised integration tests
+        env:
+          LLM4S_IT_STRICT: "true"
+          PGVECTOR_TEST_URL: jdbc:postgresql://localhost:5432/postgres
+          PGVECTOR_USER: postgres
+          PGVECTOR_PASSWORD: postgres
+          PGVECTOR_TEST_USER: postgres
+          PGVECTOR_TEST_PASSWORD: postgres
+          POSTGRES_TEST_ENABLED: "true"
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: "5432"
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          QDRANT_TEST_URL: http://localhost:6333
+          NEO4J_URI: bolt://localhost:7687
+          NEO4J_USER: neo4j
+          NEO4J_PASSWORD: llm4stest
+        run: sbt testIntegration
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-integration
+          path: |
+            modules/it/target/**/test-reports/
+          retention-days: 5
+
   # All tests must pass
   all-tests-pass:
     name: All Tests Pass
     if: always()
-    needs: [test, coverage, config-policy-check, scaladoc]
+    needs: [test, coverage, config-policy-check, scaladoc, integration-tests]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -257,9 +357,13 @@ jobs:
             echo "ScalaDoc job failed"
             exit 1
           fi
+          if [[ "${{ needs.integration-tests.result }}" != "success" ]]; then
+            echo "Integration tests failed"
+            exit 1
+          fi
           echo "All tests passed!"
 
-  # Tier 2: Ollama integration tests — verifies full round-trip against a real
+  # Tier 3: Ollama integration tests — verifies full round-trip against a real
   # local LLM. Only runs on pushes to main to avoid slowing down PR builds.
   ollama-integration:
     name: Ollama Integration
@@ -299,9 +403,59 @@ jobs:
         run: ollama pull qwen2.5:0.5b
 
       - name: Run Ollama integration tests
+        env:
+          # This job installs Ollama and pulls the model, so "Ollama not available" here is a
+          # failure, not a reason to skip.
+          LLM4S_IT_STRICT: "true"
         run: sbt testOllama
 
-  # Tier 3: Cloud smoke tests — minimal sanity checks against real cloud APIs.
+  # Tier 2: containerised workspace tests. Split from the `integration-tests` job because
+  # this one has to build the workspace-runner image first (apt + sdkman + two Scala
+  # versions), which is far too slow for every PR. The image tag comes from the build
+  # itself — `it / Test / envVars` passes `workspaceRunner / Docker / version` to the suite.
+  workspace-integration:
+    name: Workspace Integration
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The image tag is derived from the version, which sbt-dynver reads from git
+          # describe; a shallow clone with no tags yields a different tag than the test
+          # is told to expect.
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+          cache: 'sbt'
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Build the workspace-runner image
+        run: sbt workspaceRunner/Docker/publishLocal
+
+      - name: Run containerised workspace tests
+        env:
+          LLM4S_IT_STRICT: "true"
+          LLM4S_DOCKER_TESTS: "true"
+        run: sbt testWorkspace
+
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports-workspace
+          path: |
+            modules/it/target/**/test-reports/
+          retention-days: 5
+
+  # Tier 4: Cloud smoke tests — minimal sanity checks against real cloud APIs.
   # Manual trigger only (workflow_dispatch) to avoid unintended API costs.
   cloud-smoke:
     name: Cloud Smoke Tests
@@ -323,9 +477,15 @@ jobs:
 
       - name: Run cloud smoke tests
         env:
+          # `LLM4S_IT_STRICT=true` turns a missing key into a failure. Without it this job
+          # reported success while testing nothing — which is what GeminiSmokeSpec has been
+          # doing all along: it reads GEMINI_API_KEY, and only GOOGLE_API_KEY was passed.
+          LLM4S_IT_STRICT: "true"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.GOOGLE_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
         run: sbt testSmoke

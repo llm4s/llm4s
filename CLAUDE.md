@@ -77,6 +77,11 @@ sbt buildAll           # Clean, compile, test
 sbt test               # Run tests
 sbt scalafmtAll        # Format code
 sbt cov                # Run coverage
+sbt testIntegration    # modules/it @Docker tier (Postgres/pgvector, Qdrant, Neo4j)
+sbt testWorkspace      # modules/it @Workspace tier (needs a built workspace-runner image)
+sbt testOllama         # modules/it @Ollama tier
+sbt testSmoke          # modules/it @Cloud tier (live API keys)
+sbt it/itTierCheck     # every suite in modules/it must declare exactly one tier
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
