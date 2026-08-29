@@ -3,6 +3,16 @@ import scoverage.ScoverageKeys._
 import Common._
 import Coverage.{ coverageDisabled, coverageFloor, coveragePolicy }
 
+// sbt-git arrives transitively via sbt-ci-release, and its buildSettings eagerly evaluate
+// `gitUncommittedChanges` through JGit. JGit cannot read a *linked git worktree* -- there
+// `.git` is a file pointing into the main repo, and JGit raises
+// "NoWorkTreeException: Bare Repository" -- so sbt fails to load in any worktree, which
+// blocks running agents or parallel builds in worktrees. sbt-git labels the underlying key
+// its "Git worktree workaround". Shelling out to the git CLI for read-only ops is correct
+// everywhere and costs nothing here: the build reads no `git.*` settings, and versioning
+// goes through sbt-dynver, which already uses the git CLI.
+useReadableConsoleGit
+
 inThisBuild(
   List(
     scalaVersion       := scala3,
