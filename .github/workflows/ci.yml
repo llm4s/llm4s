@@ -167,22 +167,46 @@ jobs:
           PGVECTOR_PASSWORD: postgres
           PGVECTOR_TEST_USER: postgres
           PGVECTOR_TEST_PASSWORD: postgres
-        # Run coverage only for core to keep signal focused and CI fast.
-        # `core/coverageReport` is what enforces core's per-module floor (build.sbt:
-        # coverageFloor(70)) - the aggregate report is informational only, since a
-        # build-wide average is not a meaningful gate. Each additional module that
-        # should be gated in CI adds its own `<module>/test <module>/coverageReport`.
-        run: sbt coverage core/test core/coverageReport coverageAggregate
+        # `<module>/coverageReport` is what enforces each module's per-module floor
+        # (build.sbt: coverageFloor(n)) - the aggregate report is informational only, since a
+        # build-wide average is not a meaningful gate. Each carve slice adds its new modules
+        # here, so the code it moved keeps a floor instead of dropping out of measurement.
+        run: >-
+          sbt coverage
+          core/test core/coverageReport
+          rag/test rag/coverageReport
+          knowledgegraph/test knowledgegraph/coverageReport
+          coverageAggregate
 
-      # Tagged with the `core` flag because this job measures core only. A carve slice that
-      # starts measuring another module adds a separate upload step with that module's flag
-      # (and the matching flag definition in codecov.yml).
-      - name: Upload coverage to Codecov
+      # One upload per measured module, each carrying that module's flag - Codecov attributes
+      # a file to a flag whose `paths` contain it, so a module uploaded under someone else's
+      # flag is worse than not uploaded. Flags are defined in codecov.yml.
+      - name: Upload core coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: target/scala-3.7.1/scoverage-report/scoverage.xml,modules/*/target/scala-3.7.1/scoverage-report/scoverage.xml
+          files: modules/core/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: core
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload rag coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/rag/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: rag
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload knowledgegraph coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/knowledgegraph/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: knowledgegraph
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

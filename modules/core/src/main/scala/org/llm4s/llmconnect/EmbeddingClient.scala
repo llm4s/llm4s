@@ -1,8 +1,7 @@
 package org.llm4s.llmconnect
 
-import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig, LocalEmbeddingModels }
-import org.llm4s.llmconnect.encoding.UniversalEncoder
-import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse, EmbeddingVector }
+import org.llm4s.llmconnect.config.EmbeddingProviderConfig
+import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.llmconnect.provider.{
   EmbeddingProvider,
   OllamaEmbeddingProvider,
@@ -13,8 +12,6 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.trace.Tracing
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
-
-import java.nio.file.Path
 
 class EmbeddingClient(
   provider: EmbeddingProvider,
@@ -108,18 +105,6 @@ class EmbeddingClient(
   /** Create a new client with a specific operation label for tracing. */
   def withOperation(op: String): EmbeddingClient =
     new EmbeddingClient(provider, tracer, op)
-
-  /** Unified API to encode any supported file into vectors, given text model + chunking. */
-  def encodePath(
-    path: Path,
-    textModel: EmbeddingModelConfig,
-    chunking: UniversalEncoder.TextChunkingConfig,
-    experimentalStubsEnabled: Boolean,
-    localModels: LocalEmbeddingModels,
-    maxMediaFileSize: Long = UniversalEncoder.DEFAULT_MAX_MEDIA_FILE_SIZE
-  ): Result[Seq[EmbeddingVector]] =
-    UniversalEncoder
-      .encodeFromPath(path, this, textModel, chunking, experimentalStubsEnabled, localModels, maxMediaFileSize)
 }
 
 object EmbeddingClient {

@@ -4,7 +4,7 @@ import org.llm4s.rag.{ EmbeddingProvider, RAG }
 
 import org.llm4s.rag.permissions.*
 import org.llm4s.rag.permissions.pg.PgSearchIndex
-import org.llm4s.config.Llm4sConfig
+import org.llm4s.config.{ Llm4sConfig, PgSearchIndexConfigLoader }
 import org.slf4j.LoggerFactory
 
 import scala.util.chaining.*
@@ -138,7 +138,7 @@ object PermissionBasedRAGExample extends App {
   // ========== Part 3: Live Demo with PostgreSQL ==========
   logger.info("--- Part 3: Live Demo with PostgreSQL ---")
 
-  val pgConfigResult = Llm4sConfig.pgSearchIndex()
+  val pgConfigResult = PgSearchIndexConfigLoader.default()
 
   pgConfigResult match {
     case Left(error) =>

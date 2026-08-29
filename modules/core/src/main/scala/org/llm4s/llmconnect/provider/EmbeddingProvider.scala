@@ -10,8 +10,8 @@ import org.llm4s.types.Result
  * Each implementation handles provider-specific API calls and response formats.
  *
  * Text content is the primary input; multimedia content (images, audio) should be
- * processed through the UniversalEncoder façade which handles content extraction
- * before embedding.
+ * processed through the `FileEmbedder` façade in `llm4s-rag`, which handles content
+ * extraction before embedding.
  *
  * == Usage Example ==
  * {{{

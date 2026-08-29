@@ -10,7 +10,7 @@ final case class EmbeddingRequest(
 
 /**
  * Multimedia request (co-located in the same file to avoid new source files).
- * Used by local encoders/facades (e.g., UniversalEncoder). Not sent to HTTP providers.
+ * Used by local encoders/facades (e.g., `FileEmbedder` in `llm4s-rag`). Not sent to HTTP providers.
  */
 final case class MultimediaEmbeddingRequest(
   inputs: Seq[MMInput],

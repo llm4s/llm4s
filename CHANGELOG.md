@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`llm4s-rag` and `llm4s-knowledgegraph` are carved out of `llm4s-core`** - the first of
+  the module splits tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126)
+  ([#1128](https://github.com/llm4s/llm4s/issues/1128)). `rag`, `vectorstore`, `chunking`,
+  `reranker`, `eval` and the consolidated `extract` layer become `llm4s-rag`;
+  `knowledgegraph` becomes `llm4s-knowledgegraph`. Package names are unchanged, so this is a
+  build-file change rather than an import rewrite - see the
+  [migration note](docs/reference/migration.md#slice-1-llm4s-rag-and-llm4s-knowledgegraph).
+
+  `llm4s-core` sheds six of the heaviest dependencies in the build: **Tika, POI, PDFBox,
+  jsoup, AWS S3 and AWS STS**. A build that depends on `llm4s-core` and used any of them
+  transitively now has to declare them.
+
+  `org.llm4s.knowledgegraph.graphrag` keeps its package name but ships in `llm4s-rag`.
+  `GraphRAG` imported `vectorstore` while `rag` imported `graphrag`, which made the two
+  modules inseparable; moving that one file broke the cycle.
+
+### Removed
+- **The two document extractors are now one.** `org.llm4s.rag.extract.DefaultDocumentExtractor`
+  and `org.llm4s.llmconnect.extractors.UniversalExtractor` were independent implementations
+  of the same job - each constructing its own `Tika`, defining its own MIME constants, and
+  carrying its own PDFBox and POI paths. They are replaced by
+  `org.llm4s.extract.TikaDocumentExtractor` (documents) and `org.llm4s.extract.MediaExtractor`
+  (the image/audio/video ADT). `org.llm4s.llmconnect.model.ExtractorError` is gone; failures
+  are `org.llm4s.error.ProcessingError` like the rest of the library.
+
+  This is the one deliberate source break in the modularisation programme: merging two public
+  objects cannot be done compatibly, which is the argument for doing it before 1.0 rather than
+  discovering the duplicate after the compatibility promise is made.
+- `EmbeddingClient.encodePath` moves to `org.llm4s.rag.embed.FileEmbedder.encodeFromPath`, and
+  its six parameters - including an `experimentalStubsEnabled: Boolean`, a deployment decision
+  that was arriving at every call site - become a `FileEmbeddingConfig`. `EmbeddingClient`
+  keeps the pure vector API. Nothing in the library depended on the file-embedding path; its
+  only caller was a sample.
+- `Llm4sConfig.pgSearchIndex()` becomes `PgSearchIndexConfigLoader.default()`. It returned
+  `SearchIndex.PgConfig`, a `llm4s-rag` type that `Llm4sConfig` can no longer name from
+  `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
+
+### Fixed
+- The three same-named spec pairs under `rag/loader` and `rag/loader/internal`
+  (`HtmlContentExtractorSpec`, `GlobPatternMatcherSpec`, `UrlNormalizerSpec`) are merged into
+  one suite each, in the package of the code they test. They were two independent test sets
+  per class, not duplicates - so the merge keeps every case except the three that asserted
+  the same behaviour twice.
+
 ## [0.4.1] - 2026-08-29
 
 ### Fixed

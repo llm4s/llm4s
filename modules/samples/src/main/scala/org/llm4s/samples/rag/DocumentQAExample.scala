@@ -5,7 +5,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ProcessingError
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ModelDimensionRegistry }
-import org.llm4s.llmconnect.extractors.UniversalExtractor
+import org.llm4s.extract.TikaDocumentExtractor
 import org.llm4s.llmconnect.model.{ Conversation, SystemMessage, UserMessage }
 import org.llm4s.llmconnect.utils.ChunkingUtils
 import org.llm4s.model.ModelRegistryService
@@ -184,13 +184,13 @@ object DocumentQAExample extends App {
     val fileName = new File(filePath).getName
     logger.info("  Processing: {}", fileName)
 
-    UniversalExtractor.extract(filePath) match {
+    TikaDocumentExtractor.extractFromPath(filePath) match {
       case Left(e) =>
         logger.warn("    Warning: Failed to extract {}: {}", fileName, e.message)
         Right(0) // Skip failed files, don't fail entire ingestion
 
-      case Right(text) =>
-        val chunks = ChunkingUtils.chunkText(text, config.chunkSize, config.chunkOverlap)
+      case Right(document) =>
+        val chunks = ChunkingUtils.chunkText(document.text, config.chunkSize, config.chunkOverlap)
         logger.info("    Created {} chunks", chunks.size)
 
         val storeResults = chunks.zipWithIndex.foldLeft[Result[MemoryStore]](Right(store)) {

@@ -1,5 +1,125 @@
 # Migration Guide
 
+## Slice 1: `llm4s-rag` and `llm4s-knowledgegraph`
+
+First of the module carves tracked in
+[#1126](https://github.com/llm4s/llm4s/issues/1126); slice 1 is
+[#1128](https://github.com/llm4s/llm4s/issues/1128). It is in the build but not yet in a
+release, so nothing here affects `0.4.1` or earlier.
+
+### What moved
+
+| Packages | New module |
+|---|---|
+| `org.llm4s.rag`, `org.llm4s.vectorstore`, `org.llm4s.chunking`, `org.llm4s.reranker`, `org.llm4s.eval`, `org.llm4s.extract`, `org.llm4s.knowledgegraph.graphrag` | `llm4s-rag` |
+| `org.llm4s.knowledgegraph` (everything except `graphrag`) | `llm4s-knowledgegraph` |
+
+**Package names did not change**, with the one deliberate exception described under [Source
+breaks](#source-breaks) below. Add the dependency; your imports stay as they are.
+
+```scala
+// Before
+libraryDependencies += "org.llm4s" %% "llm4s-core" % version
+
+// After — only if you use RAG, vector stores, chunking, reranking or the knowledge graph
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core" % version,
+  "org.llm4s" %% "llm4s-rag"  % version   // depends on llm4s-knowledgegraph transitively
+)
+```
+
+`llm4s-rag` depends on `llm4s-knowledgegraph`, so depending on the graph alone is only
+worth doing if you want the graph without RAG.
+
+`llm4s-knowledgegraph-neo4j` — a separate, already-published artifact — now depends on
+`llm4s-knowledgegraph` instead of `llm4s-core`, which resolves for you.
+
+### What `llm4s-core` sheds
+
+Six dependencies leave the core classpath: **Tika, POI, PDFBox, jsoup, AWS S3 and AWS STS**.
+If you depend on `llm4s-core` and use any of those directly, declare them yourself rather
+than relying on the transitive edge.
+
+### Source breaks
+
+Three, all of them in this slice on purpose — pre-1.0 is when a duplicate is cheapest to
+remove.
+
+**1. The two document extractors are now one.** `org.llm4s.rag.extract.DocumentExtractor`
+and `org.llm4s.llmconnect.extractors.UniversalExtractor` were independent implementations of
+one job: two Tika instances, two sets of MIME constants, two PDFBox paths, two POI paths.
+They are now `org.llm4s.extract`.
+
+| Before | After |
+|---|---|
+| `org.llm4s.rag.extract.DocumentExtractor` | `org.llm4s.extract.DocumentExtractor` |
+| `org.llm4s.rag.extract.DefaultDocumentExtractor` | `org.llm4s.extract.TikaDocumentExtractor` |
+| `UniversalExtractor.extract(path)` → `Either[ExtractorError, String]` | `TikaDocumentExtractor.extractFromPath(path)` → `Result[ExtractedDocument]` (text in `.text`) |
+| `UniversalExtractor.extractFromBytes(bytes, name, mime)` | `TikaDocumentExtractor.extract(bytes, name, mime)` |
+| `UniversalExtractor.extractFromStream(in, name, mime)` | `TikaDocumentExtractor.extractFromStream(in, name, mime)` (returns `ExtractedDocument`) |
+| `UniversalExtractor.isTextLike(mime)` | `TikaDocumentExtractor.canExtract(mime)` — also true for legacy `.doc` |
+| `UniversalExtractor.detectMimeType(bytes, name)` | unchanged |
+| `UniversalExtractor.extractAny(path)` and its `Extracted` / `TextContent` / `ImageContent` / `AudioContent` / `VideoContent` ADT | `org.llm4s.extract.MediaExtractor` |
+| `org.llm4s.llmconnect.model.ExtractorError` | `org.llm4s.error.ProcessingError` |
+
+The package is `org.llm4s.extract`, not `org.llm4s.rag.extract`: extraction has two real
+consumers — RAG document loading and multimodal embedding — and it quarantines the three
+heaviest dependencies in the build. Naming it outside the `rag` namespace makes any later
+decision to give it its own artifact a build-file change rather than a code change.
+
+**2. `EmbeddingClient.encodePath` is now `FileEmbedder.encodeFromPath`.** `EmbeddingClient`
+keeps the pure vector API; file reading, MIME sniffing and chunking live in
+`org.llm4s.rag.embed`. The six-parameter signature — which included an
+`experimentalStubsEnabled: Boolean`, a deployment decision arriving at a call site — became
+a config object.
+
+```scala
+// Before
+client.encodePath(path, textModel, chunkingCfg, stubsEnabled, localModels)
+
+// After
+import org.llm4s.rag.embed.{ FileEmbedder, FileEmbeddingConfig, TextChunkingConfig }
+
+FileEmbedder.encodeFromPath(
+  path,
+  client,
+  FileEmbeddingConfig(
+    textModel = textModel,
+    localModels = localModels,
+    chunking = TextChunkingConfig(enabled = true, size = 1000, overlap = 100),
+    experimentalStubs = stubsEnabled
+  )
+)
+```
+
+`UniversalEncoder.TextChunkingConfig` is now the top-level `org.llm4s.rag.embed.TextChunkingConfig`.
+
+**3. `Llm4sConfig.pgSearchIndex()` is now `PgSearchIndexConfigLoader.default()`.** It
+returned a `SearchIndex.PgConfig`, which is RAG's type; `Llm4sConfig` stays in `llm4s-core`
+and cannot name it. The loader itself keeps its package (`org.llm4s.config`) and its
+`load(source)` method, and moves to `llm4s-rag`.
+
+```scala
+// Before
+val pg = Llm4sConfig.pgSearchIndex()
+
+// After
+import org.llm4s.config.PgSearchIndexConfigLoader
+val pg = PgSearchIndexConfigLoader.default()
+```
+
+### Configuration keys
+
+`llm4s.rag.permissions.pg.*` and `llm4s.rerank.*` now ship in `llm4s-rag`'s `reference.conf`
+rather than core's. HOCON merges `reference.conf` across jars, so the key paths are
+unchanged and nothing in your `application.conf` needs editing — but a build that reads
+those keys without depending on `llm4s-rag` no longer gets the defaults.
+
+`llm4s.embeddings.*` — including `chunking` and `experimentalStubs` — stays in core, because
+`Llm4sConfig` still reads it there.
+
+---
+
 ## Artifact coordinate rename (v0.4.0)
 
 ### Breaking change
