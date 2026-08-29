@@ -15,6 +15,15 @@ import org.llm4s.it.tags.Local
 @Local
 class AnthropicVisionClientTest extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
+  /**
+   * The client's error paths are what these tests exercise; the real endpoint is not.
+   *
+   * Pointing the client at a closed local port keeps this suite in the `@Local` tier
+   * honestly - `sbt test` neither reaches api.openai.com nor waits on its 30-second connect
+   * timeout - while the calls below still take the failure path they assert on.
+   */
+  private val UnreachableBaseUrl = "http://127.0.0.1:1"
+
   var tempFile: java.nio.file.Path  = _
   var config: AnthropicVisionConfig = _
 
@@ -22,7 +31,7 @@ class AnthropicVisionClientTest extends AnyFlatSpec with Matchers with BeforeAnd
     tempFile = Files.createTempFile("test", ".png")
     config = AnthropicVisionConfig(
       apiKey = "test-api-key",
-      baseUrl = "https://api.anthropic.com",
+      baseUrl = UnreachableBaseUrl,
       model = "claude-3-sonnet-20240229"
     )
 

@@ -26,7 +26,7 @@ object ItTiers {
 
   /** The `sbt` command that runs one tier: select it by tag, replacing the Local-tier default. */
   def alias(tag: String): String =
-    s""";set it / Test / testOptions := Seq(Tests.Argument(TestFrameworks.ScalaTest, "-n", "$tag")); it/test"""
+    s""";set it / Test / test / testOptions := Seq(Tests.Argument(TestFrameworks.ScalaTest, "-n", "$tag")); it/test"""
 
   private def simpleName(tag: String): String = tag.split('.').last
 

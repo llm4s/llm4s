@@ -4,6 +4,8 @@ import org.llm4s.types.Result
 import org.llm4s.error.ProcessingError
 import org.llm4s.http.Llm4sHttpClient
 
+import java.nio.charset.StandardCharsets
+import java.util.UUID
 import scala.util.Try
 
 /**
@@ -36,6 +38,34 @@ final class QdrantVectorStore private (
 
   private val collectionsUrl = s"$baseUrl/collections/$collectionName"
   private val pointsUrl      = s"$collectionsUrl/points"
+
+  /**
+   * Qdrant point IDs must be an unsigned integer or a UUID - it rejects anything else with
+   * "not a valid point ID" - while a `VectorRecord` ID is an arbitrary string. IDs that are
+   * already UUIDs are used as-is; every other ID is mapped to a UUID derived from it, so the
+   * mapping is stable across processes and stores.
+   *
+   * The record's own ID is what callers search, get and delete by, so it travels in the
+   * payload under `llm4s_id` and is read back from there rather than from the point ID.
+   */
+  private def pointId(id: String): String =
+    if (QdrantVectorStore.isUuid(id)) id
+    else UUID.nameUUIDFromBytes(id.getBytes(StandardCharsets.UTF_8)).toString
+
+  /** The record ID a point carries, falling back to its point ID for foreign-written points. */
+  private def recordId(point: ujson.Value): String =
+    point.obj
+      .get("payload")
+      .flatMap(_.objOpt)
+      .flatMap(_.get(QdrantVectorStore.IdKey))
+      .collect { case ujson.Str(value) => value }
+      .getOrElse(pointIdString(point("id")))
+
+  private def pointIdString(id: ujson.Value): String = id match {
+    case ujson.Str(value) => value
+    case ujson.Num(value) => value.toLong.toString
+    case other            => other.toString
+  }
 
   // Initialize collection if it doesn't exist
   ensureCollection()
@@ -79,7 +109,7 @@ final class QdrantVectorStore private (
         Try {
           val points = ujson.Arr(records.map { record =>
             ujson.Obj(
-              "id"      -> record.id,
+              "id"      -> pointId(record.id),
               "vector"  -> ujson.Arr(record.embedding.toIndexedSeq.map(f => ujson.Num(f.toDouble)): _*),
               "payload" -> recordToPayload(record)
             )
@@ -111,7 +141,7 @@ final class QdrantVectorStore private (
       httpPost(s"$pointsUrl/search", body).map { response =>
         val results = response("result").arr
         results.map { point =>
-          val id       = point("id").str
+          val id       = recordId(point)
           val score    = point("score").num
           val vector   = point("vector").arr.map(_.num.toFloat).toArray
           val payload  = point("payload").obj
@@ -133,7 +163,7 @@ final class QdrantVectorStore private (
 
   override def get(id: String): Result[Option[VectorRecord]] =
     Try {
-      httpGet(s"$pointsUrl/$id?with_payload=true&with_vector=true").map { response =>
+      httpGet(s"$pointsUrl/${pointId(id)}?with_payload=true&with_vector=true").map { response =>
         val result = response("result")
         if (result.isNull) None
         else Some(pointToRecord(result))
@@ -147,7 +177,7 @@ final class QdrantVectorStore private (
     else
       Try {
         val body = ujson.Obj(
-          "ids"          -> ujson.Arr(ids.map(ujson.Str(_)): _*),
+          "ids"          -> ujson.Arr(ids.map(id => ujson.Str(pointId(id))): _*),
           "with_payload" -> true,
           "with_vector"  -> true
         )
@@ -165,7 +195,7 @@ final class QdrantVectorStore private (
     else
       Try {
         val body = ujson.Obj(
-          "points" -> ujson.Arr(ids.map(ujson.Str(_)): _*)
+          "points" -> ujson.Arr(ids.map(id => ujson.Str(pointId(id))): _*)
         )
         httpPost(s"$pointsUrl/delete?wait=true", body).map(_ => ())
       }.toEither.left
@@ -181,7 +211,9 @@ final class QdrantVectorStore private (
       var hasMore                = true
 
       while (hasMore) {
-        val body = ujson.Obj("limit" -> 100, "with_payload" -> false, "with_vector" -> false)
+        // Payloads are needed here even though the vectors are not: the prefix belongs to the
+        // record ID, and the point ID is a UUID derived from it.
+        val body = ujson.Obj("limit" -> 100, "with_payload" -> true, "with_vector" -> false)
         offset.foreach(o => body("offset") = o)
 
         val result = httpPost(s"$pointsUrl/scroll", body)
@@ -192,8 +224,7 @@ final class QdrantVectorStore private (
               hasMore = false
             } else {
               val matchingIds = points.flatMap { p =>
-                val id = p("id").str
-                if (id.startsWith(prefix)) Some(id) else None
+                if (recordId(p).startsWith(prefix)) Some(pointIdString(p("id"))) else None
               }.toSeq
 
               if (matchingIds.nonEmpty) {
@@ -346,6 +377,7 @@ final class QdrantVectorStore private (
 
   private def recordToPayload(record: VectorRecord): ujson.Obj = {
     val payload = ujson.Obj()
+    payload(QdrantVectorStore.IdKey) = record.id
     record.content.foreach(c => payload("content") = c)
     record.metadata.foreach { case (k, v) =>
       payload(s"meta_$k") = v
@@ -360,7 +392,7 @@ final class QdrantVectorStore private (
       .toMap
 
   private def pointToRecord(point: ujson.Value): VectorRecord = {
-    val id       = point("id").str
+    val id       = recordId(point)
     val vector   = point("vector").arr.map(_.num.toFloat).toArray
     val payload  = point("payload").obj
     val content  = payload.get("content").flatMap(v => if (v.isNull) None else Some(v.str))
@@ -439,6 +471,13 @@ final class QdrantVectorStore private (
 }
 
 object QdrantVectorStore {
+
+  /** Payload key holding the record's own ID; see `pointId` for why it is not the point ID. */
+  private[vectorstore] val IdKey = "llm4s_id"
+
+  private val UuidPattern = "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}".r
+
+  private[vectorstore] def isUuid(id: String): Boolean = UuidPattern.matches(id)
 
   /**
    * Configuration for QdrantVectorStore.

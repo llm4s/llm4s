@@ -199,13 +199,21 @@ final class Neo4jGraphStore private (
       // Follow-up: if GraphTraversal visibility is widened, shared traversal helpers can be reused across stores.
       val params = new java.util.HashMap[String, AnyRef]()
       params.put("startId", startId)
-      params.put("maxDepth", Integer.valueOf(config.maxDepth))
       params.put("excludedIds", config.visitedNodeIds.toList.asJava)
 
+      // The upper bound of a variable-length pattern is part of the query's shape, not a
+      // value: Cypher rejects `[*0..$maxDepth]` with "Parameter maps cannot be used in MATCH
+      // patterns". It has to be inlined, which is safe because it is an Int - the injection
+      // risk that `$`-parameters guard against does not arise. `TraversalConfig` defaults
+      // maxDepth to Int.MaxValue, meaning "no limit", which Cypher spells as an open bound.
+      val depth =
+        if (config.maxDepth == Int.MaxValue) "*0.."
+        else s"*0..${math.max(0, config.maxDepth)}"
+
       val pattern = config.direction match {
-        case Direction.Outgoing => "-[*0..$maxDepth]->"
-        case Direction.Incoming => "<-[*0..$maxDepth]-"
-        case Direction.Both     => "-[*0..$maxDepth]-"
+        case Direction.Outgoing => s"-[$depth]->"
+        case Direction.Incoming => s"<-[$depth]-"
+        case Direction.Both     => s"-[$depth]-"
       }
 
       Right(session.executeRead { tx =>

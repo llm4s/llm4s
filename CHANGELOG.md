@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- `Neo4jGraphStore.traverse` never worked against a real Neo4j. The variable-length pattern
+  was built from a non-interpolated string, so `$maxDepth` reached Cypher as a parameter
+  reference, which is illegal in a `MATCH` pattern ("Parameter maps cannot be used in MATCH
+  patterns") and failed every traversal. The bound is now inlined - it is an `Int`, so there
+  is nothing to inject - and the `Int.MaxValue` default maps to Cypher's open bound.
+- `QdrantVectorStore` could not store a record whose ID was not already a UUID. Qdrant accepts
+  only an unsigned integer or a UUID as a point ID and rejected everything else with
+  `"test-1" is not a valid point ID`, so `upsert`, `get`, `delete` and `search` all failed.
+  Non-UUID IDs are now mapped to a UUID derived from the ID, with the record's own ID carried
+  in the payload and read back from there; UUID IDs are unchanged. A mocked-HTTP unit test had
+  been asserting the broken request shape, which is why nothing caught this.
 - 11 of the 18 integration suites in `modules/it` were executed by nothing - not locally, not
   in CI, not on release - because the tier aliases named two `testOnly` patterns and every
   suite outside them matched nothing. Tier membership is now declared per suite by class

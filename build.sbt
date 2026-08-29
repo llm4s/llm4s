@@ -434,7 +434,12 @@ lazy val it = (project in file("modules/it"))
     // The default run - including the aggregated `sbt test` - is the Local tier only.
     // Everything else needs a database, an image build, a model server or a paid API key.
     // The tier aliases replace this setting rather than adding to it (see ItTiers.alias).
-    Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-n", ItTiers.Local),
+    //
+    // Scoped to `test` rather than to the whole Test configuration on purpose: `testOnly`
+    // names a suite explicitly, so `it/testOnly org.llm4s.vectorstore.PgVectorStoreSpec`
+    // must run that suite whatever tier it is in. A filter there would answer a request for
+    // one suite by running nothing, which is the failure this whole change is about.
+    Test / test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-n", ItTiers.Local),
     // ContainerisedWorkspaceTest runs against whatever `workspaceRunner/Docker/publishLocal`
     // produced; take the tag from the build so the test and the image cannot drift apart.
     Test / envVars += "LLM4S_WORKSPACE_IMAGE" -> s"llm4s/workspace-runner:${(workspaceRunner / Docker / version).value}",

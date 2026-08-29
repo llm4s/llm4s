@@ -18,6 +18,13 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
   private val collectionsUrl = s"$testUrl/collections/$testCollection"
   private val pointsUrl      = s"$collectionsUrl/points"
 
+  // Qdrant only accepts an unsigned integer or a UUID as a point ID, so a record ID like
+  // "test-1" reaches it as a UUID derived from that string, with the record's own ID carried
+  // in the payload. Spelled out as a literal rather than recomputed, so that a change to the
+  // derivation - which would orphan every point already written - shows up as a test failure.
+  private val testPointId  = "70a37754-eb5a-3e7d-b8cd-887aaf11cda7"
+  private val testPointUrl = s"$pointsUrl/$testPointId?with_payload=true&with_vector=true"
+
   // Helper to create a mock HTTP client
   private def createMockClient(): Llm4sHttpClient = stub[Llm4sHttpClient]
 
@@ -62,7 +69,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     }"""
 
     (mockClient.get _)
-      .when(s"$pointsUrl/test-1?with_payload=true&with_vector=true", *, *, *)
+      .when(testPointUrl, *, *, *)
       .returns(httpResponse(200, responseJson))
 
     val result = store.get("test-1")
@@ -75,7 +82,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val store      = createStore(mockClient)
 
     (mockClient.get _)
-      .when(s"$pointsUrl/test-1?with_payload=true&with_vector=true", *, *, *)
+      .when(testPointUrl, *, *, *)
       .returns(httpResponse(404, "Not found"))
 
     val result = store.get("test-1")
@@ -88,7 +95,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val store      = createStore(mockClient)
 
     (mockClient.get _)
-      .when(s"$pointsUrl/test-1?with_payload=true&with_vector=true", *, *, *)
+      .when(testPointUrl, *, *, *)
       .returns(httpResponse(500, "Internal server error"))
 
     val result = store.get("test-1")
@@ -104,7 +111,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val store      = createStore(mockClient)
 
     (mockClient.get _)
-      .when(s"$pointsUrl/test-1?with_payload=true&with_vector=true", *, *, *)
+      .when(testPointUrl, *, *, *)
       .returns(httpResponse(403, "Forbidden"))
 
     val result = store.get("test-1")
@@ -120,7 +127,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
     val store      = createStore(mockClient)
 
     (mockClient.get _)
-      .when(s"$pointsUrl/test-1?with_payload=true&with_vector=true", *, *, *)
+      .when(testPointUrl, *, *, *)
       .throws(new RuntimeException("Connection timeout"))
 
     val result = store.get("test-1")
@@ -166,6 +173,63 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
         stats.dimensions shouldBe Set(3)
       case Left(err) => fail(s"Expected Right but got Left: ${err.formatted}")
     }
+  }
+
+  // ============================================================
+  // Point ID mapping
+  // ============================================================
+
+  "point IDs" should "be sent to Qdrant as a UUID, with the record ID kept in the payload" in {
+    val mockClient = createMockClient()
+    val store      = createStore(mockClient)
+
+    // The store creates the collection first, since the mocked existence check 404s.
+    (mockClient.put _).when(collectionsUrl, *, *, *).returns(httpResponse(200, """{"result": "ok"}"""))
+    (mockClient.put _).when(s"$pointsUrl?wait=true", *, *, *).returns(httpResponse(200, """{"result": "ok"}"""))
+
+    store.upsert(VectorRecord("test-1", Array(0.1f, 0.2f, 0.3f), Some("Test content"))) shouldBe Right(())
+
+    (mockClient.put _).verify(
+      // Guard on the URL first: the collection-creation PUT above carries no points array.
+      where { (url: String, _: Map[String, String], body: String, _: Int) =>
+        url == s"$pointsUrl?wait=true" && {
+          val point = ujson.read(body)("points").arr.head
+          point("id").str == testPointId && point("payload")("llm4s_id").str == "test-1"
+        }
+      }
+    )
+  }
+
+  it should "pass a record ID that is already a UUID through unchanged" in {
+    val mockClient = createMockClient()
+    val store      = createStore(mockClient)
+    val uuid       = "123e4567-e89b-12d3-a456-426614174000"
+
+    (mockClient.get _)
+      .when(s"$pointsUrl/$uuid?with_payload=true&with_vector=true", *, *, *)
+      .returns(httpResponse(404, "Not found"))
+
+    store.get(uuid).isLeft shouldBe true
+  }
+
+  it should "be read back from the payload rather than from the point ID" in {
+    val mockClient = createMockClient()
+    val store      = createStore(mockClient)
+
+    val responseJson = """{
+      "result": {
+        "id": "70a37754-eb5a-3e7d-b8cd-887aaf11cda7",
+        "vector": [0.1, 0.2, 0.3],
+        "payload": {
+          "llm4s_id": "test-1",
+          "content": "Test content"
+        }
+      }
+    }"""
+
+    (mockClient.get _).when(testPointUrl, *, *, *).returns(httpResponse(200, responseJson))
+
+    store.get("test-1").toOption.flatten.map(_.id) shouldBe Some("test-1")
   }
 
   // ============================================================
@@ -550,7 +614,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
 
     // Test 405 Method Not Allowed
     (mockClient.get _)
-      .when(s"$pointsUrl/test-1?with_payload=true&with_vector=true", *, *, *)
+      .when(testPointUrl, *, *, *)
       .returns(httpResponse(405, "Method Not Allowed"))
 
     val result = store.get("test-1")
@@ -564,7 +628,7 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
 
     // Return invalid JSON
     (mockClient.get _)
-      .when(s"$pointsUrl/test-1?with_payload=true&with_vector=true", *, *, *)
+      .when(testPointUrl, *, *, *)
       .returns(httpResponse(200, "not valid json"))
 
     val result = store.get("test-1")
