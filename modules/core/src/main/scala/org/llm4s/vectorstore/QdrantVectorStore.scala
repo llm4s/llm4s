@@ -221,12 +221,14 @@ final class QdrantVectorStore private (
             if (points.isEmpty) {
               hasMore = false
             } else {
+              // Carry the ID as the JSON value Qdrant gave us: a point written by another
+              // tool may have an integer ID, and re-sending it as a string is not the same ID.
               val matchingIds = points.flatMap { p =>
-                if (recordId(p).startsWith(prefix)) Some(pointIdString(p("id"))) else None
+                if (recordId(p).startsWith(prefix)) Some(p("id")) else None
               }.toSeq
 
               if (matchingIds.nonEmpty) {
-                val deleteBody = ujson.Obj("points" -> ujson.Arr(matchingIds.map(ujson.Str(_)): _*))
+                val deleteBody = ujson.Obj("points" -> ujson.Arr(matchingIds: _*))
                 httpPost(s"$pointsUrl/delete?wait=true", deleteBody)
                 deleted += matchingIds.size
               }

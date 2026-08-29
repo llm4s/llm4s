@@ -234,6 +234,71 @@ class QdrantVectorStoreHttpSpec extends AnyFlatSpec with Matchers with MockFacto
   }
 
   // ============================================================
+  // Reads of a store that does not exist yet
+  // ============================================================
+
+  "a read of a collection that does not exist" should "count zero rather than fail" in {
+    val mockClient = createMockClient()
+    val store      = createStore(mockClient)
+
+    // `clear()` deletes the collection outright and the next upsert recreates it, so an
+    // empty store legitimately 404s.
+    (mockClient.post _).when(s"$pointsUrl/count", *, *, *).returns(httpResponse(404, "Not found"))
+
+    store.count() shouldBe Right(0L)
+  }
+
+  it should "search and list as empty rather than fail" in {
+    val mockClient = createMockClient()
+    val store      = createStore(mockClient)
+
+    (mockClient.post _).when(s"$pointsUrl/search", *, *, *).returns(httpResponse(404, "Not found"))
+    (mockClient.post _).when(s"$pointsUrl/scroll", *, *, *).returns(httpResponse(404, "Not found"))
+
+    store.search(Array(0.1f, 0.2f, 0.3f), topK = 5) shouldBe Right(Seq.empty)
+    store.list(limit = 10, offset = 0) shouldBe Right(Seq.empty)
+  }
+
+  it should "report a zero-record store rather than fail" in {
+    val mockClient = createMockClient()
+    val store      = createStore(mockClient)
+
+    // The store's constructor already stubs this URL as a 404.
+    store.stats() shouldBe Right(VectorStoreStats(totalRecords = 0L, dimensions = Set.empty, sizeBytes = None))
+  }
+
+  // ============================================================
+  // deleteByPrefix
+  // ============================================================
+
+  "deleteByPrefix" should "match on the record ID and delete by the ID Qdrant gave it" in {
+    val mockClient = createMockClient()
+    val store      = createStore(mockClient)
+
+    // No `next_page_offset`, so one page ends the scroll. The integer ID is what a point
+    // written by another tool looks like; the record ID still comes from the payload.
+    val scrollJson = """{
+      "result": {
+        "points": [
+          { "id": 7, "payload": { "llm4s_id": "doc-1" } },
+          { "id": "70a37754-eb5a-3e7d-b8cd-887aaf11cda7", "payload": { "llm4s_id": "other-1" } }
+        ]
+      }
+    }"""
+
+    (mockClient.post _).when(s"$pointsUrl/scroll", *, *, *).returns(httpResponse(200, scrollJson))
+    (mockClient.post _).when(s"$pointsUrl/delete?wait=true", *, *, *).returns(httpResponse(200, """{"result": "ok"}"""))
+
+    store.deleteByPrefix("doc-") shouldBe Right(1L)
+
+    (mockClient.post _).verify(
+      where { (url: String, _: Map[String, String], body: String, _: Int) =>
+        url == s"$pointsUrl/delete?wait=true" && ujson.read(body)("points") == ujson.Arr(ujson.Num(7))
+      }
+    )
+  }
+
+  // ============================================================
   // httpPost tests (via search, count, getBatch methods)
   // ============================================================
 
