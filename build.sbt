@@ -162,7 +162,14 @@ lazy val llm4s = (project in file("."))
     workspaceSamples,
     traceOpentelemetry,
     knowledgegraphNeo4j,
-    benchmarks
+    benchmarks,
+    // Relocation stubs must be aggregated here: `sbt ci-release` publishes the root
+    // aggregate, so a stub outside it would simply never be published.
+    relocationCore,
+    relocationWorkspaceClient,
+    relocationWorkspaceShared,
+    relocationTraceOpentelemetry,
+    relocationKnowledgegraphNeo4j
   )
   .settings(
     publish / skip := true,
@@ -198,7 +205,7 @@ lazy val llm4s = (project in file("."))
 
 lazy val core = (project in file("modules/core"))
   .settings(
-    name := "core",
+    name := "llm4s-core",
     commonSettings,
     // Measured 72.42% statement coverage (53,499 statements, 7004 tests) on main @ 5a62e2ac.
     // Floor is the measured value rounded down to the nearest 5. Ratchet it up as the
@@ -263,7 +270,7 @@ lazy val core = (project in file("modules/core"))
 
 lazy val workspaceShared = (project in file("modules/workspace/workspaceShared"))
   .settings(
-    name := "workspaceShared",
+    name := "llm4s-workspace-shared",
     commonSettings,
     Compile / discoveredMainClasses := Seq.empty,
     // Not measured: excluded via ThisBuild / coverageExcludedPackages (org.llm4s.workspace.*)
@@ -274,7 +281,7 @@ lazy val workspaceShared = (project in file("modules/workspace/workspaceShared")
 lazy val workspaceClient = (project in file("modules/workspace/workspaceClient"))
   .dependsOn(workspaceShared, core)
   .settings(
-    name := "workspaceClient",
+    name := "llm4s-workspace-client",
     commonSettings,
     Compile / discoveredMainClasses := Seq.empty,
     // Not measured: excluded via ThisBuild / coverageExcludedPackages (org.llm4s.workspace.*)
@@ -305,7 +312,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .dependsOn(workspaceShared)
   .enablePlugins(JavaAppPackaging, DockerPlugin)
   .settings(
-    name := "workspaceRunner",
+    name := "llm4s-workspace-runner",
     commonSettings,
     Compile / mainClass := Some("org.llm4s.runner.RunnerMain"),
     libraryDependencies ++= Seq(
@@ -324,7 +331,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
 lazy val samples = (project in file("modules//samples"))
   .dependsOn(core, knowledgegraphNeo4j)
   .settings(
-    name := "samples",
+    name := "llm4s-samples",
     commonSettings,
     publish / skip := true,
     // Not measured: unpublished example code, excluded via ThisBuild / coverageExcludedPackages
@@ -356,7 +363,7 @@ lazy val configPolicy = (project in file("modules/config-policy"))
 lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples"))
   .dependsOn(workspaceShared, workspaceRunner, workspaceClient, samples)
   .settings(
-    name := "workspaceSamples",
+    name := "llm4s-workspace-samples",
     commonSettings,
     publish / skip := true,
     // Not measured: unpublished example code for the workspace modules.
@@ -366,7 +373,7 @@ lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples
 lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
   .dependsOn(core)
   .settings(
-    name := "trace-opentelemetry",
+    name := "llm4s-observability-otel",
     commonSettings,
     // Measured 0.00% statement coverage (`sbt coverage traceOpentelemetry/test
     // traceOpentelemetry/coverageReport`): the module has no in-module tests at all, its
@@ -384,7 +391,7 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
 lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   .dependsOn(core)
   .settings(
-    name             := "knowledgegraph-neo4j",
+    name             := "llm4s-knowledgegraph-neo4j",
     commonSettings,
     Test / fork      := true,
     libraryDependencies ++= Seq(
@@ -399,7 +406,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
 lazy val it = (project in file("modules/it"))
   .dependsOn(core, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
   .settings(
-    name := "it",
+    name := "llm4s-it",
     commonSettings,
     publish / skip := true,
     // Not measured: `modules/it` has no src/main at all - it is a test-only host for
@@ -417,7 +424,7 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
   .dependsOn(core)
   .enablePlugins(JmhPlugin)
   .settings(
-    name           := "benchmarks",
+    name           := "llm4s-benchmarks",
     commonSettings,
     publish / skip := true,
     // Measured 100.00% statement/branch coverage (`sbt coverage benchmarks/test
@@ -430,3 +437,32 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
       Deps.scalatest % Test
     )
   )
+
+// ---- relocation stubs for the 0.4.0 artifact rename ----
+// Each project below publishes ONLY a POM at the retired coordinate, carrying a Maven
+// `<relocation>` that points at its replacement. They deliberately carry no sources, no
+// `commonSettings` and no Scala library, so they compile nothing; see project/Relocation.scala
+// for what a relocation POM does and does not achieve.
+//
+// Only coordinates with real published history on Maven Central get a stub - publishing a
+// relocation for something that never existed would be noise. Verified present under
+// https://repo1.maven.org/maven2/org/llm4s/ : core_3, workspaceclient_3, workspaceshared_3,
+// trace-opentelemetry_3, knowledgegraph-neo4j_3 (all through 0.3.4).
+//
+// `workspacerunner`, `samples` and the other unpublished modules have `publish / skip` and
+// no Central history, so they need no stub.
+
+lazy val relocationCore = (project in file("modules/relocations/core"))
+  .settings(Relocation.settings("core", "llm4s-core_3"))
+
+lazy val relocationWorkspaceClient = (project in file("modules/relocations/workspaceclient"))
+  .settings(Relocation.settings("workspaceclient", "llm4s-workspace-client_3"))
+
+lazy val relocationWorkspaceShared = (project in file("modules/relocations/workspaceshared"))
+  .settings(Relocation.settings("workspaceshared", "llm4s-workspace-shared_3"))
+
+lazy val relocationTraceOpentelemetry = (project in file("modules/relocations/trace-opentelemetry"))
+  .settings(Relocation.settings("trace-opentelemetry", "llm4s-observability-otel_3"))
+
+lazy val relocationKnowledgegraphNeo4j = (project in file("modules/relocations/knowledgegraph-neo4j"))
+  .settings(Relocation.settings("knowledgegraph-neo4j", "llm4s-knowledgegraph-neo4j_3"))

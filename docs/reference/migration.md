@@ -1,5 +1,82 @@
 # Migration Guide
 
+## Artifact coordinate rename (v0.4.0)
+
+### Breaking change
+
+Every **published** artifact under the `org.llm4s` group was renamed to carry an `llm4s-`
+prefix and a consistent kebab-case suffix. This is a **coordinate-only** change: there are
+no API changes, no package moves and no source changes in this release. Update your
+`build.sbt`, recompile, and you are done.
+
+| Old coordinate | New coordinate |
+|---|---|
+| `"org.llm4s" %% "core"` | `"org.llm4s" %% "llm4s-core"` |
+| `"org.llm4s" %% "workspaceShared"` (published as `workspaceshared`) | `"org.llm4s" %% "llm4s-workspace-shared"` |
+| `"org.llm4s" %% "workspaceClient"` (published as `workspaceclient`) | `"org.llm4s" %% "llm4s-workspace-client"` |
+| `"org.llm4s" %% "trace-opentelemetry"` | `"org.llm4s" %% "llm4s-observability-otel"` |
+| `"org.llm4s" %% "knowledgegraph-neo4j"` | `"org.llm4s" %% "llm4s-knowledgegraph-neo4j"` |
+
+Maven users: the `artifactId` gains the same prefix, so `core_3` becomes `llm4s-core_3`
+(and `core_2.13` becomes `llm4s-core_2.13`).
+
+### Why
+
+Two reasons:
+
+1. **Consistency.** `org.llm4s:core` is a poor coordinate to read in somebody else's build
+   file, and the module names were an inconsistent mix of camelCase (silently lowercased by
+   the publish into `workspaceclient`) and kebab-case.
+2. **Escaping a bad publish.** The `core_3` / `core_2.13` artifacts carry an accidental
+   mis-published version `2.1.593` (a typo). Maven Central publishes are immutable, so that
+   version cannot be retracted, and some resolvers sort it as the "latest" release. A fresh
+   artifact name is the only way out; documentation is not.
+
+### Nobody is stranded
+
+Releases up to and including **0.3.4** remain published, unchanged and resolvable under the
+old coordinates. Pinning `"org.llm4s" %% "core" % "0.3.4"` keeps working indefinitely — you
+only need to change coordinates when you move to 0.4.0 or later.
+
+If you are pinning `core` with a floating or range version, pin an explicit `0.3.4` before
+upgrading, so the phantom `2.1.593` is never selected.
+
+### Migration steps
+
+1. Replace the old coordinate with the new one in your `build.sbt` (see the table above).
+2. Set the version to `0.4.0` or later.
+3. Recompile. No imports, types or method signatures changed.
+
+```scala
+// Before
+libraryDependencies += "org.llm4s" %% "core" % "0.3.4"
+
+// After
+libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.4.0"
+```
+
+### Note on `"org.llm4s" %% "llm4s"`
+
+The aggregate `llm4s` artifact (`llm4s_3` / `llm4s_2.13`) is **not** published and has not
+been since 0.2.9 — the root project sets `publish / skip := true`. Any build file or
+documentation that depends on `"org.llm4s" %% "llm4s"` is wrong independently of this
+rename and should be changed to `"org.llm4s" %% "llm4s-core"`.
+
+### Note on `llm4s-observability-otel`
+
+The OpenTelemetry integration is published as `llm4s-observability-otel` rather than
+`llm4s-trace-opentelemetry`. The name anticipates the `llm4s-observability` module that the
+modularisation work will carve out of `trace` + `metrics`, so the integration is named once
+rather than twice.
+
+### Unpublished modules
+
+`samples`, `workspaceRunner`, `workspaceSamples`, `config-policy`, `it` and `benchmarks` set
+`publish / skip := true` and never reached Maven Central. Their `name` values were made
+consistent in the same change, but this has no effect on any downstream build.
+
+---
+
 ## MessageRole Enum Changes (v0.2.0)
 
 ### Breaking Change

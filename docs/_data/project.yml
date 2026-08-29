@@ -2,10 +2,10 @@
 # This file is updated during CI builds or manually for releases
 
 # Current version displayed in documentation
-version: "0.3.2"
+version: "0.4.0"
 
 # Latest stable release (updated by CI on release)
-latest_release: "0.3.2"
+latest_release: "0.4.0"
 
 # Supported versions
 scala_versions:
@@ -54,4 +54,4 @@ providers:
 repo_url: "https://github.com/llm4s/llm4s"
 discord_url: "https://discord.gg/4uvTPn6qww"
 maven_group: "org.llm4s"
-maven_artifact: "core"
+maven_artifact: "llm4s-core"

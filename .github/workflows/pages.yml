@@ -1,12 +1,26 @@
 name: Deploy Documentation
 
 on:
+  # Docs changes on main deploy directly.
   push:
     branches: [main]
     paths:
       - 'docs/**'
       - 'modules/core/src/**'
       - '.github/workflows/pages.yml'
+
+  # Releases deploy by calling this workflow from release.yml, gated on the Maven
+  # publish job alone. Two reasons it is a `workflow_call` rather than a trigger here:
+  #
+  #  - Gating on the Release *workflow* would suppress the docs deploy when a step
+  #    after `sbt ci-release` fails (the container image push), even though the
+  #    artifacts are already live on Maven Central.
+  #  - A called workflow inherits the caller's ref, so `git describe` sees exactly
+  #    the tag being released. Deriving it from the default branch instead could
+  #    pick a newer tag that has not published yet, or miss a tag not reachable
+  #    from main.
+  workflow_call:
+
   workflow_dispatch:
 
 # Sets permissions of the GITHUB_TOKEN
@@ -26,6 +40,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # needed for `git describe` to see release tags
 
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
@@ -51,14 +67,25 @@ jobs:
       - name: Extract version from sbt
         id: version
         run: |
-          # Get version from sbt-dynver
+          # Working version of this commit. On an untagged main, sbt-dynver returns
+          # something like 0.4.0+3-abc1234-SNAPSHOT, which is NOT resolvable from
+          # Maven Central. It is fine to display, but must never appear in an
+          # install snippet.
           VERSION=$(sbt -no-colors 'print version' | tail -1 | tr -d '\n')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Detected version: $VERSION"
 
-          # Update the project data file with actual version
+          # Latest published release: the newest v* tag. Install snippets use this.
+          LATEST=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null | sed 's/^v//')
+          if [ -z "$LATEST" ]; then
+            echo "::error::No v* release tag found; cannot determine the published version."
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "latest_release=$LATEST" >> $GITHUB_OUTPUT
+          echo "Build version: $VERSION / latest release: $LATEST"
+
           sed -i "s/^version:.*/version: \"$VERSION\"/" docs/_data/project.yml
-          sed -i "s/^latest_release:.*/latest_release: \"$VERSION\"/" docs/_data/project.yml
+          sed -i "s/^latest_release:.*/latest_release: \"$LATEST\"/" docs/_data/project.yml
 
           echo "Updated docs/_data/project.yml:"
           cat docs/_data/project.yml

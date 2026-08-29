@@ -25,7 +25,7 @@ A: Check your API key is correct. OpenAI keys start with `sk-`, Anthropic with `
 ## Scala Version Issues
 
 **Q: I get a binary incompatibility error when adding llm4s to my project**
-A: Use the `_3` artifact for Scala 3 projects, `_2.13` for Scala 2.13 projects. SBT usually handles this if you use `%%`, e.g., `"org.llm4s" %% "core" % "0.2.0"`.
+A: Use the `_3` artifact for Scala 3 projects, `_2.13` for Scala 2.13 projects. SBT usually handles this if you use `%%`, e.g., `"org.llm4s" %% "llm4s-core" % "0.4.0"`.
 
 ## Agent & Tool Errors
 
@@ -66,7 +66,7 @@ A: Not all models support image generation or vision. Ensure you are using an im
 ## Vector Store & RAG Issues
 
 **Q: I get "No vector store configured" error**
-A: Ensure you have added the correct vector store dependency (e.g., `"org.llm4s" %% "knowledgegraph-neo4j"`) and defined the configuration in your `application.conf` or environment variables for the specific backend.
+A: Ensure you have added the correct vector store dependency (e.g., `"org.llm4s" %% "llm4s-knowledgegraph-neo4j"`) and defined the configuration in your `application.conf` or environment variables for the specific backend.
 
 **Q: PostgreSQL vector store crashes on initialization**
 A: The Postgres store requires `pgvector`. Install the extension on your DB server and run `CREATE EXTENSION IF NOT EXISTS vector;` before initializing the vector store in LLM4S.

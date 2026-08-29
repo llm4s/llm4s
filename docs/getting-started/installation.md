@@ -45,13 +45,20 @@ sbt version  # 1.10.6 or higher
 
 ## Add LLM4S to Your Project
 
+{: .warning }
+> **Artifact coordinates changed in 0.4.0.** Every published module now carries an
+> `llm4s-` prefix (`core` → `llm4s-core`, `workspaceClient` → `llm4s-workspace-client`,
+> and so on). Releases up to and including `0.3.4` remain available under the old names.
+> See the [migration guide](/reference/migration#artifact-coordinate-rename-v040) for the
+> full old → new table.
+
 ### SBT
 
 Add LLM4S to your `build.sbt`:
 
 ```scala
 // Scala 3
-libraryDependencies += "org.llm4s" %% "core" % "0.3.2"
+libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.4.0"
 ThisBuild / scalaVersion := "3.7.1"
 ```
 
@@ -61,8 +68,8 @@ ThisBuild / scalaVersion := "3.7.1"
 <!-- For Scala 3 -->
 <dependency>
     <groupId>org.llm4s</groupId>
-    <artifactId>core_3</artifactId>
-    <version>0.3.2</version>
+    <artifactId>llm4s-core_3</artifactId>
+    <version>0.4.0</version>
 </dependency>
 
 ```
@@ -77,7 +84,7 @@ lazy val myProject = (project in file("."))
     name := "my-llm-project",
     scalaVersion := "3.7.1",
     libraryDependencies ++= Seq(
-      "org.llm4s" %% "core" % "0.3.2"
+      "org.llm4s" %% "llm4s-core" % "0.4.0"
     )
   )
 ```
@@ -88,7 +95,7 @@ To use the latest development snapshot:
 
 ```scala
 resolvers += Resolver.sonatypeRepo("snapshots")
-libraryDependencies += "org.llm4s" %% "core" % "0.3.2-SNAPSHOT"
+libraryDependencies += "org.llm4s" %% "llm4s-core" % "0.4.0-SNAPSHOT"
 ```
 
 ---
@@ -105,7 +112,7 @@ sbt new llm4s/llm4s.g8
 # name [My LLM Project]: my-awesome-agent
 # organization [com.example]: com.mycompany
 # scala_version [3.7.1]:
-# llm4s_version [0.3.2]:
+# llm4s_version [0.4.0]:
 
 cd my-awesome-agent
 sbt run
@@ -132,7 +139,7 @@ The starter kit includes:
 ### For Workspace (Containerized Execution)
 
 ```scala
-libraryDependencies += "org.llm4s" %% "workspaceClient" % "0.3.2"
+libraryDependencies += "org.llm4s" %% "llm4s-workspace-client" % "0.4.0"
 ```
 
 And install Docker:
