@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-29
+
 ### Fixed
 - `Neo4jGraphStore.traverse` never worked against a real Neo4j. The variable-length pattern
   was built from a non-interpolated string, so `$maxDepth` reached Cypher as a parameter
@@ -45,6 +47,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build stopped producing long ago. The tag now comes from the build itself.
 
 ### Added
+- The old artifact coordinates retired in 0.4.0 now publish a Maven **relocation** stub, so
+  a build that bumps `"org.llm4s" %% "core"` (or `workspaceclient`, `workspaceshared`,
+  `trace-opentelemetry`, `knowledgegraph-neo4j`) to 0.4.1 resolves the renamed artifact
+  instead of failing with an unresolved dependency. The stubs are POM-only and carry no code.
+
+  Two limits worth stating. A build pinned to 0.3.4 sees no signal at all - no Maven mechanism
+  reaches it. And coursier, sbt's resolver, follows a relocation *silently*: the build simply
+  starts working again without printing anything, so update the coordinate by hand rather than
+  waiting to be told. The stubs were written for 0.4.0
+  ([#1146](https://github.com/llm4s/llm4s/pull/1146)) but landed after the tag, so 0.4.0 itself
+  has no redirect ([#1150](https://github.com/llm4s/llm4s/issues/1150)).
 - `sbt testIntegration` runs the containerised tier (pgvector, Qdrant, Neo4j) and a CI job
   runs it on **every PR** with those services as service containers - the suites covering
   pgvector, the Postgres keyword index, Qdrant, permission-aware RAG, Postgres-backed agent
@@ -345,7 +358,8 @@ Initial release. Versions 0.1.0 through 0.1.7 were primarily focused on establis
 
 ---
 
-[Unreleased]: https://github.com/llm4s/llm4s/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/llm4s/llm4s/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/llm4s/llm4s/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/llm4s/llm4s/compare/v0.3.4...v0.4.0
 [0.3.4]: https://github.com/llm4s/llm4s/compare/v0.3.3...v0.3.4
 [0.3.3]: https://github.com/llm4s/llm4s/compare/v0.3.2...v0.3.3
