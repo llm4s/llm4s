@@ -40,7 +40,13 @@ Slice order — each is an issue with its own scope and gotchas:
 3. **`reference.conf` keys move with their code.** HOCON merges across jars; keys left behind become defaults that apply to nothing.
 4. **Coverage floor and codecov flag land in the same commit as the carve.** A missing flag makes the moved code untracked rather than failing.
 5. **One migration note per slice**, in CHANGELOG and docs.
-6. **Never add a provider by editing shared registration files** once slice 4 lands. Before then, note that `NamedProviderLoader`, `ProviderConfig`, `ProviderModelTypes`, `LLMConnect`, `ProviderCapabilities*` and `NamedProviderValidator` are the most contended files in the repo.
+6. **Integration suites move with their code, and keep a tier.** A suite that needs a
+   database, a container, a model server or an API key lives in `modules/it` and declares
+   exactly one tier tag from `org.llm4s.it.tags`; `sbt it/itTierCheck` fails the build
+   otherwise. Carving code out of `core` without carrying its integration suite - or moving
+   the suite and leaving it untagged - removes the only signal the carve has (see
+   [#1143](https://github.com/llm4s/llm4s/issues/1143)).
+7. **Never add a provider by editing shared registration files** once slice 4 lands. Before then, note that `NamedProviderLoader`, `ProviderConfig`, `ProviderModelTypes`, `LLMConnect`, `ProviderCapabilities*` and `NamedProviderValidator` are the most contended files in the repo.
 
 Current per-module coverage floors are recorded in [#1127](https://github.com/llm4s/llm4s/issues/1127); floors ratchet upward and are never lowered.
 

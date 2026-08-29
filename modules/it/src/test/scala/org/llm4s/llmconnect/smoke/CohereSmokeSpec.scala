@@ -18,7 +18,7 @@ import org.llm4s.it.tags.Cloud
  * or the `sbt testSmoke` alias.
  *
  * Requires: `COHERE_API_KEY` environment variable.
- * Tag: CloudSmoke
+ * Tier: `@Cloud` - `sbt testSmoke`.
  *
  * Note: The current CohereClient implementation (v2 scope) does not support
  * streaming. The `streamComplete` test verifies that calling it returns a
