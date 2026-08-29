@@ -2,11 +2,22 @@ name: Deploy Documentation
 
 on:
   push:
+    # Release tags must redeploy the site. The version rendered in the install
+    # snippets is derived from `git describe` over release tags, so without a tag
+    # trigger a release leaves llm4s.org advertising the *previous* version until
+    # something unrelated happens to touch docs/**. That is exactly what happened at
+    # v0.4.0, which also renamed the artifacts, so the site served a coordinate
+    # that 404s on Maven Central.
+    #
+    # The `paths` filter that used to be here has been removed deliberately. Under
+    # `push`, `paths` applies to the whole block, including tags -- and a tag that
+    # points at an already-pushed commit introduces no changed files, so a
+    # path-filtered tag trigger can silently never fire. Deploying on every main
+    # push costs a build we would otherwise skip; a docs site that quietly serves a
+    # stale version costs more.
     branches: [main]
-    paths:
-      - 'docs/**'
-      - 'modules/core/src/**'
-      - '.github/workflows/pages.yml'
+    tags:
+      - 'v[0-9]*'
   workflow_dispatch:
 
 # Sets permissions of the GITHUB_TOKEN
