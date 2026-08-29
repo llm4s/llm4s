@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Breaking (coordinates only):** every published artifact was renamed to carry an `llm4s-`
+  prefix in consistent kebab-case. No API, package or source changes accompany the rename.
+
+  | Old coordinate | New coordinate |
+  |---|---|
+  | `org.llm4s:core` | `org.llm4s:llm4s-core` |
+  | `org.llm4s:workspaceshared` | `org.llm4s:llm4s-workspace-shared` |
+  | `org.llm4s:workspaceclient` | `org.llm4s:llm4s-workspace-client` |
+  | `org.llm4s:trace-opentelemetry` | `org.llm4s:llm4s-observability-otel` |
+  | `org.llm4s:knowledgegraph-neo4j` | `org.llm4s:llm4s-knowledgegraph-neo4j` |
+
+  The rename also escapes the accidental `2.1.593` version mis-published under `core_3` /
+  `core_2.13`, which cannot be retracted from Maven Central and sorts as "latest" in some
+  resolvers. `0.3.4` and earlier remain published under the old coordinates, so no existing
+  build breaks until it upgrades. See
+  [docs/reference/migration.md](docs/reference/migration.md#artifact-coordinate-rename-v040).
+- Unpublished modules (`samples`, `workspaceRunner`, `workspaceSamples`, `it`, `benchmarks`)
+  had their `name` values aligned to the same convention; they set `publish / skip := true`,
+  so this has no downstream effect.
+
+### Docs
+- Updated every published coordinate in the docs, including the Maven Central badge and the
+  Maven `<artifactId>` snippet, to the new names.
+
 ## [0.3.4] - 2026-06-19
 
 ### Changed
