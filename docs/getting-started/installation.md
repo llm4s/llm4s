@@ -192,6 +192,24 @@ third-party dependency of its own. Package names are unchanged, so existing `org
 imports keep working; see the
 [migration note](../reference/migration.md#slice-3-llm4s-mcp).
 
+### For speech (STT / TTS)
+
+{: .note }
+> Not yet published. `llm4s-speech` exists in the build as of
+> [#1130](https://github.com/llm4s/llm4s/issues/1130) but ships in the next release;
+> in `0.4.1` and earlier this code is still inside `llm4s-core`.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-speech" % llm4sVersion
+```
+
+Carries speech-to-text (Vosk for offline recognition, Whisper), text-to-speech (Tacotron 2),
+and the audio IO, conversion and validation helpers. **This is the module that brings Vosk**,
+a 25 MB dependency that used to sit on every `llm4s-core` user's classpath — which is much of
+the point of the split. Package names are unchanged; see the
+[migration note](../reference/migration.md#slice-3-llm4s-speech).
+
 ### For image generation and vision
 
 {: .note }

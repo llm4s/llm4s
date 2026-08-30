@@ -22,6 +22,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`llm4s-speech` is carved out of `llm4s-core`, completing slice 3**
+  ([#1130](https://github.com/llm4s/llm4s/issues/1130)). `org.llm4s.speech` and its
+  subpackages move whole - package names unchanged, no source breaks.
+
+  Core sheds **Vosk (25 MB) and JNA**, the largest dependency the carve programme has moved.
+  Vosk is imported by exactly one file, `speech/stt/VoskSpeechToText.scala`, and until now sat
+  on the classpath of every `llm4s-core` user. `Deps.jna` travels with it but is not a second
+  dependency: Vosk's POM already depends on `jna:5.7.0`, and the explicit declaration exists to
+  win that conflict and pull 5.19.1 instead - dropping it would silently downgrade JNA rather
+  than remove it. `llm4s-workspace-client` declared both and used neither; those declarations
+  are removed too, so Vosk genuinely leaves the build for non-speech users.
+
+  **The "Vosk Repository" resolver is deleted, not moved.** Vosk publishes to Maven Central,
+  which is where every build has actually been resolving it from; the resolver added a
+  third-party host to the lookup path for every artifact in the build - llm4s's own
+  inter-module jars included - and resolved nothing. It was the project's only third-party
+  resolver, so **the build now has none**. See the
+  [migration note](docs/reference/migration.md#slice-3-llm4s-speech).
+
+  With this, `llm4s-core` no longer contains `rag`, `knowledgegraph`, `agent/memory`, `mcp`,
+  `imagegeneration`, `imageprocessing` or `speech`.
 - **`llm4s-image` is carved out of `llm4s-core`** - the third artifact of slice 3
   ([#1130](https://github.com/llm4s/llm4s/issues/1130); `llm4s-speech` follows).
   `org.llm4s.imagegeneration` and `org.llm4s.imageprocessing` move together as two halves of

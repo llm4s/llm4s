@@ -177,6 +177,7 @@ lazy val llm4s = (project in file("."))
     memoryPostgres,
     mcp,
     image,
+    speech,
     samples,
     configPolicy,
     workspaceShared,
@@ -261,11 +262,12 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
-    // Measured 74.89% statement coverage after slice 3 carved `mcp` and `image` out (`sbt
-    // coverage core/test core/coverageReport`); it was 74.05% after `mcp` alone, 73.85% after
-    // slice 2 and 72.42% on main @ 5a62e2ac before any of them. Floor is the measured value
-    // rounded down to the nearest 5. Ratchet it up as the module is carved apart; never lower
-    // it.
+    // Measured 74.33% statement coverage with slice 3 complete (`sbt coverage core/test
+    // core/coverageReport`); it was 74.89% after `image`, 74.05% after `mcp`, 73.85% after
+    // slice 2 and 72.42% on main @ 5a62e2ac before any of them. It dips here rather than
+    // rising because `speech` measured 80.68%, well above core's average - a carve moves the
+    // number in whichever direction the departing code sat. Floor is the measured value
+    // rounded down to the nearest 5; ratchet it up, never down.
     coverageFloor(70),
     Test / fork := true,
     Test / javaOptions ++= Seq(
@@ -298,7 +300,6 @@ lazy val core = (project in file("modules/core"))
     ),
     Compile / mainClass := None,
     Compile / discoveredMainClasses := Seq.empty,
-    resolvers += "Vosk Repository" at "https://alphacephei.com/maven/",
     libraryDependencies ++= Seq(
       Deps.azureOpenAI,
       Deps.anthropic,
@@ -307,8 +308,6 @@ lazy val core = (project in file("modules/core"))
       Deps.scalamock % Test,
       Deps.ujson,
       Deps.commonsIO,
-      Deps.jna,
-      Deps.vosk,
       Deps.config,
       Deps.prometheusCore,
       Deps.prometheusHttp
@@ -459,6 +458,43 @@ lazy val mcp = (project in file("modules/mcp"))
 // (`org.llm4s.async.AsyncErrorHandlingSpec`, which tests image clients exclusively despite its
 // package) came with them rather than being left behind to fail.
 
+// `speech` is the last package out of core, and the only one in slice 3 that takes a
+// third-party dependency with it: Vosk, imported by exactly one file, `stt/VoskSpeechToText`.
+//
+// `Deps.jna` travels with it but is not a second dependency - Vosk's own POM already depends
+// on `net.java.dev.jna:jna:5.7.0`, and this declaration exists to win that version conflict
+// and pull 5.19.1 instead (5.7.0 predates Apple Silicon support). Keep them declared together:
+// dropping the JNA line does not remove JNA, it silently downgrades it.
+//
+// What does NOT travel is the "Vosk Repository" resolver at alphacephei.com, which this
+// removes outright. Vosk 0.3.45 publishes to Maven Central - the local Coursier cache has the
+// jar under repo1.maven.org and not one artifact under alphacephei.com, whose only cache
+// entries are failed `org/llm4s` lookups from sbt querying every resolver for every artifact.
+// It was the build's only third-party resolver and it resolved nothing.
+
+lazy val speech = (project in file("modules/speech"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-speech",
+    commonSettings,
+    // Measured 80.68% statement coverage (`sbt coverage speech/test speech/coverageReport`) on
+    // the code as carved out of core. Floor is the measured value rounded down to the nearest
+    // 5. Never lower it.
+    coverageFloor(80),
+    Test / fork := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      // Declared together on purpose - see the note above: JNA is a version pin, not an
+      // addition, and removing it downgrades rather than removes.
+      Deps.vosk,
+      Deps.jna,
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 lazy val image = (project in file("modules/image"))
   .dependsOn(media, core)
   .settings(
@@ -511,8 +547,6 @@ lazy val workspaceClient = (project in file("modules/workspace/workspaceClient")
       Deps.tika,
       Deps.poi,
       Deps.jsoup,
-      Deps.jna,
-      Deps.vosk,
       Deps.postgres,
       Deps.config,
       Deps.hikariCP
@@ -540,7 +574,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules//samples"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, knowledgegraphNeo4j)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, knowledgegraphNeo4j)
   .settings(
     name := "llm4s-samples",
     commonSettings,
@@ -615,7 +649,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   )
 
 lazy val it = (project in file("modules/it"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
   .settings(
     name := "llm4s-it",
     commonSettings,
@@ -667,7 +701,7 @@ lazy val it = (project in file("modules/it"))
 // A module is listed here if and only if it is published. When a slice adds one, add it in
 // the same commit, or its API silently vanishes from the site.
 lazy val docs = (project in file("modules/docs"))
-  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
+  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
   .settings(
     name           := "llm4s-docs",
     commonSettings,
@@ -683,6 +717,7 @@ lazy val docs = (project in file("modules/docs"))
         (memoryPostgres / Compile / sources).value ++
         (mcp / Compile / sources).value ++
         (image / Compile / sources).value ++
+        (speech / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (traceOpentelemetry / Compile / sources).value ++

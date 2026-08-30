@@ -1,5 +1,71 @@
 # Migration Guide
 
+## Slice 3: `llm4s-speech`
+
+The last artifact of slice 3 ([#1130](https://github.com/llm4s/llm4s/issues/1130)) and the last
+package out of `llm4s-core` in this slice. It is in the build but not yet in a release, so
+nothing here affects `0.4.1` or earlier.
+
+### What moved
+
+| Packages | New module |
+|---|---|
+| `org.llm4s.speech` (and `speech/io`, `processing`, `stt`, `tts`, `util`) | `llm4s-speech` |
+
+**Package names did not change, and there are no source breaks.** 16 main and 21 test files
+moved whole; the only code outside the package that referenced it was a sample.
+
+```scala
+// Before
+libraryDependencies += "org.llm4s" %% "llm4s-core" % version
+
+// After - only if you use speech-to-text or text-to-speech
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"   % version,
+  "org.llm4s" %% "llm4s-speech" % version
+)
+```
+
+### What `llm4s-core` sheds
+
+**Vosk (25 MB) and JNA.** `com.alphacephei:vosk` is imported by exactly one file,
+`speech/stt/VoskSpeechToText.scala`, and until now sat on the classpath of every `llm4s-core`
+user, whether or not they had any use for offline speech recognition. It is the single largest
+dependency the carve programme has moved.
+
+`Deps.jna` moves with it, but it is worth being precise about why, because it is not a second
+dependency: Vosk's own POM already depends on `net.java.dev.jna:jna:5.7.0`. The explicit
+declaration exists to win that version conflict and pull 5.19.1 instead. Dropping it would not
+remove JNA - it would silently downgrade it to a release that predates Apple Silicon support.
+
+`llm4s-workspace-client` also declared both, and used neither; those declarations are removed
+here too, so Vosk genuinely leaves the build for everyone who is not doing speech.
+
+### The Vosk resolver is deleted, not moved
+
+`build.sbt` carried the project's only third-party resolver:
+
+```scala
+resolvers += "Vosk Repository" at "https://alphacephei.com/maven/"
+```
+
+It resolved nothing. Vosk 0.3.45 publishes to Maven Central, which is where every build has
+actually been getting it - the local Coursier cache holds `vosk-0.3.45.jar` under
+`repo1.maven.org` and not a single artifact under `alphacephei.com`. What it *did* do was add a
+third-party host to the lookup path for every artifact in the build, including llm4s's own
+inter-module jars, which produced a steady trickle of failed requests to alphacephei.com on
+every resolve.
+
+So it is removed rather than carried into `llm4s-speech`, and **the build now has no
+third-party resolvers at all**.
+
+### Slice 3 is complete
+
+With this, `llm4s-core` no longer contains `rag`, `knowledgegraph`, `agent/memory`, `mcp`,
+`imagegeneration`, `imageprocessing` or `speech`. What remains is the agent runtime,
+`llmconnect`, `toolapi`, `config`, `trace` and the provider clients, which
+[slices 4 to 6](https://github.com/llm4s/llm4s/issues/1126) address.
+
 ## Slice 3: `llm4s-image`
 
 Part of slice 3 of the module carves tracked in
