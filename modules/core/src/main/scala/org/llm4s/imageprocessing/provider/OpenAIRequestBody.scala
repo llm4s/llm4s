@@ -1,6 +1,6 @@
 package org.llm4s.imageprocessing.provider
 
-import org.llm4s.imageprocessing.MediaType
+import org.llm4s.media.ImageMediaType
 import upickle.default.{ macroRW, ReadWriter => RW, _ }
 
 private[provider] case class OpenAIMessage(
@@ -39,17 +39,8 @@ object OpenAIRequestBody {
     maxTokens: Int,
     prompt: String,
     base64Image: String,
-    mediaType: MediaType
+    mediaType: ImageMediaType
   ): String = {
-    // OpenAI expects the media type in the data URL format
-    val mimeType = mediaType match {
-      case MediaType.Jpeg => "jpeg"
-      case MediaType.Png  => "png"
-      case MediaType.Gif  => "gif"
-      case MediaType.WebP => "webp"
-      case MediaType.Bmp  => "bmp"
-      case MediaType.Tiff => "tiff"
-    }
 
     val textContent = ujson.Obj(
       "type" -> "text",
@@ -59,7 +50,8 @@ object OpenAIRequestBody {
     val imageContent = ujson.Obj(
       "type" -> "image_url",
       "image_url" -> ujson.Obj(
-        "url" -> s"data:image/$mimeType;base64,$base64Image"
+        // OpenAI expects the image inline as a data URL.
+        "url" -> s"data:${mediaType.mimeType};base64,$base64Image"
       )
     )
 

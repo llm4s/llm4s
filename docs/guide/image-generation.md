@@ -126,7 +126,7 @@ The `ImageGenerationOptions` class allows you to fine-tune the generation proces
 | Option | Type | Description |
 |--------|------|-------------|
 | `size` | `ImageSize` | The dimensions of the output image (e.g., `ImageSize.Square512`) |
-| `format` | `ImageFormat` | The image format (`ImageFormat.PNG` or `ImageFormat.JPEG`) |
+| `format` | `ImageMediaType` | The image format, from `org.llm4s.media` (`MediaType.Png` or `MediaType.Jpeg`) |
 | `seed` | `Option[Long]` | A specific seed for reproducible results |
 | `guidanceScale` | `Double` | How strictly the model should follow the prompt |
 | `inferenceSteps` | `Int` | The number of steps in the diffusion process |

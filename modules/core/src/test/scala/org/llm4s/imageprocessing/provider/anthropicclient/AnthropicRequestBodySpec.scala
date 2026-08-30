@@ -1,6 +1,6 @@
 package org.llm4s.imageprocessing.provider.anthropicclient
 
-import org.llm4s.imageprocessing.MediaType
+import org.llm4s.media.MediaType
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default._

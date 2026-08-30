@@ -1,5 +1,102 @@
 # Migration Guide
 
+## Slice 3: `llm4s-media`
+
+A new module rather than a carve, landed as part of slice 3
+([#1130](https://github.com/llm4s/llm4s/issues/1130)) and ahead of `llm4s-image` and
+`llm4s-speech`, so those two carves can be pure file moves. It is in the build but not yet in
+a release, so nothing here affects `0.4.1` or earlier.
+
+### Why
+
+A media type - a MIME string, a canonical file extension, and whether the thing is an image,
+audio, video or text - is the one piece of vocabulary every multimodal subsystem needs to
+name. Because there was nowhere shared to put it, each grew its own. `llm4s-core` shipped
+three overlapping enumerations of the same handful of image formats:
+
+| Type | Cases | Members |
+|---|---|---|
+| `org.llm4s.imagegeneration.ImageFormat` | PNG, JPEG, WEBP | `extension`, `mimeType` |
+| `org.llm4s.imageprocessing.ImageFormat` | PNG, JPEG, WEBP, GIF | `extension`, `mimeType` |
+| `org.llm4s.imageprocessing.MediaType` | Jpeg, Png, Gif, WebP, Bmp, Tiff | `value` |
+
+The first two are structurally identical and differ only in package, so a format produced by
+image generation could not be handed to image processing without a hand-written conversion.
+The third models the same six formats a third way, in the same package as the second. Meanwhile
+`MediaExtractor` in `llm4s-rag` discriminated on raw MIME prefixes (`mimeType.startsWith
+("image/")`), with no type to name the answer at all.
+
+Carving `image` and `speech` out of core without fixing this would have frozen three copies
+into three artifacts, where consolidating them later costs a cross-module source break rather
+than an in-module one.
+
+### What `llm4s-media` is
+
+Vocabulary only - no I/O, no content sniffing, no third-party dependencies at all:
+
+- `org.llm4s.media.MediaType` - `mimeType`, `extension`, `category`, plus `fromExtension`,
+  `fromPath` and `fromMimeType` lookups. Sealed; refines into `ImageMediaType` and
+  `AudioMediaType` so an image API can require an image without re-enumerating the cases.
+- `org.llm4s.media.MediaCategory` - `Image`, `Audio`, `Video`, `Text`, `Application`, with
+  `fromMimeType`.
+
+Deciding what a file actually *is* from its bytes needs Tika and stays in `llm4s-rag`; that
+code produces a MIME string and resolves it here. That separation is what lets every consumer
+depend on `llm4s-media` without inheriting anything.
+
+### Source breaks
+
+**This is a source break, taken deliberately ahead of the 1.0 API freeze.** All three types
+above are replaced by `org.llm4s.media.MediaType`.
+
+| Before | After |
+|---|---|
+| `org.llm4s.imagegeneration.ImageFormat` | `org.llm4s.media.ImageMediaType` |
+| `org.llm4s.imageprocessing.ImageFormat` | `org.llm4s.media.ImageMediaType` |
+| `org.llm4s.imageprocessing.MediaType` | `org.llm4s.media.MediaType` |
+| `ImageFormat.PNG` | `MediaType.Png` |
+| `ImageFormat.JPEG` | `MediaType.Jpeg` |
+| `ImageFormat.WEBP` | `MediaType.WebP` |
+| `ImageFormat.GIF` | `MediaType.Gif` |
+| `MediaType.Jpeg.value` | `MediaType.Jpeg.mimeType` |
+
+```scala
+// Before
+import org.llm4s.imagegeneration.ImageFormat
+val opts = ImageGenerationOptions(format = ImageFormat.PNG)
+
+// After
+import org.llm4s.media.MediaType
+val opts = ImageGenerationOptions(format = MediaType.Png)
+```
+
+Two lookups changed shape as well. `org.llm4s.imageprocessing.MediaType.fromExtension` and
+`.fromPath` were total, silently returning JPEG for anything they did not recognise - so a
+`.txt` file reported as an image and the caller could not tell. The replacements return
+`Option`, and callers that genuinely want the old fallback ask for it:
+
+```scala
+// Before
+val mt = MediaType.fromPath(path)                                   // JPEG if unrecognised
+
+// After
+val mt = MediaType.imageFromPath(path).getOrElse(MediaType.Jpeg)    // fallback is now visible
+```
+
+`AnthropicVisionClient.detectMediaType` keeps the old behaviour and its old signature shape -
+it still answers JPEG for an unrecognised extension, because that is what the Anthropic API
+assumes for an unlabelled image - but now returns an `ImageMediaType`.
+
+### Adding the dependency
+
+Nothing to add today: `llm4s-media` arrives as a transitive dependency of `llm4s-core` (via
+the image packages, which are still in core) and of `llm4s-rag`. Declare it directly only if
+you name `MediaType` or `MediaCategory` in your own signatures.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-media" % version
+```
+
 ## Slice 3: `llm4s-mcp`
 
 Third of the module carves tracked in

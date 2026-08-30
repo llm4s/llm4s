@@ -169,6 +169,7 @@ lazy val itTierCheck = taskKey[Unit](
 // ---- projects ----
 lazy val llm4s = (project in file("."))
   .aggregate(
+    media,
     core,
     rag,
     knowledgegraph,
@@ -228,7 +229,37 @@ lazy val llm4s = (project in file("."))
     }
   )
 
+// ---- shared multimodal vocabulary (#1130) ----
+// A media type - MIME string, canonical extension, category - is the one thing the image,
+// speech and extraction subsystems all had to name, so each grew its own copy: core carried
+// three overlapping image-format enumerations and RAG matched on raw MIME prefixes. They are
+// consolidated here, ahead of `image` and `speech` carving out, so those carves are pure file
+// moves rather than moves plus a vocabulary change.
+//
+// Vocabulary only: no I/O, no content sniffing, no dependencies. Sniffing a file's real type
+// needs Tika and stays in `llm4s-rag`, which resolves the MIME string it gets back through
+// `MediaType.fromMimeType`. That is what keeps this module something every consumer can
+// depend on without inheriting anything.
+
+lazy val media = (project in file("modules/media"))
+  .settings(
+    name := "llm4s-media",
+    commonSettings,
+    // Measured 100.00% statement coverage (`sbt coverage media/test media/coverageReport`).
+    // A dependency-free vocabulary with no I/O has no excuse for less. Never lower it.
+    coverageFloor(100),
+    Test / fork := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.scalatest % Test
+    )
+  )
+
 lazy val core = (project in file("modules/core"))
+  // Temporary: `imagegeneration` and `imageprocessing` are the heaviest users of the media
+  // vocabulary and are still in core. This edge leaves with them in the `llm4s-image` carve.
+  .dependsOn(media)
   .settings(
     name := "llm4s-core",
     commonSettings,
@@ -304,7 +335,9 @@ lazy val knowledgegraph = (project in file("modules/knowledgegraph"))
   )
 
 lazy val rag = (project in file("modules/rag"))
-  .dependsOn(core % "compile->compile;test->test", knowledgegraph)
+  // `media` is declared explicitly, not inherited through core: core's edge to it is
+  // temporary and goes away with the `llm4s-image` carve, but `MediaExtractor`'s does not.
+  .dependsOn(media, core % "compile->compile;test->test", knowledgegraph)
   .settings(
     name := "llm4s-rag",
     commonSettings,
@@ -607,7 +640,7 @@ lazy val it = (project in file("modules/it"))
 // A module is listed here if and only if it is published. When a slice adds one, add it in
 // the same commit, or its API silently vanishes from the site.
 lazy val docs = (project in file("modules/docs"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
+  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
   .settings(
     name           := "llm4s-docs",
     commonSettings,
@@ -615,7 +648,8 @@ lazy val docs = (project in file("modules/docs"))
     // Not measured: no sources of its own - it exists only to host the aggregate `doc` task.
     coverageDisabled,
     Compile / sources := {
-      (core / Compile / sources).value ++
+      (media / Compile / sources).value ++
+        (core / Compile / sources).value ++
         (rag / Compile / sources).value ++
         (knowledgegraph / Compile / sources).value ++
         (memory / Compile / sources).value ++

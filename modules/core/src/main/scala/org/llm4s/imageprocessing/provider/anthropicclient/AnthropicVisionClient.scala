@@ -4,6 +4,7 @@ package org.llm4s.imageprocessing.provider.anthropicclient
 import org.llm4s.imageprocessing._
 import org.llm4s.imageprocessing.config.AnthropicVisionConfig
 import org.llm4s.imageprocessing.provider.LocalImageProcessor
+import org.llm4s.media.{ ImageMediaType, MediaType }
 import org.llm4s.error.LLMError
 import ujson.read
 
@@ -84,7 +85,7 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
    */
   override def convertFormat(
     imagePath: String,
-    targetFormat: ImageFormat
+    targetFormat: ImageMediaType
   ): Either[LLMError, ProcessedImage] =
     // Delegate format conversion to local processor
     localProcessor.convertFormat(imagePath, targetFormat)
@@ -174,16 +175,20 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
   /**
    * Detects the media type of an image file based on its extension.
    *
+   * Anything the extension does not name is sent as JPEG, which is what the API assumes for
+   * an unlabelled image; guessing wrong costs a rejected request, refusing to guess costs the
+   * call entirely.
+   *
    * @param imagePath Path to the image file
-   * @return MediaType representing the image format (JPEG, PNG, GIF, or WEBP)
+   * @return the image media type named by the extension, or JPEG
    */
-  def detectMediaType(imagePath: String): MediaType =
-    MediaType.fromPath(imagePath)
+  def detectMediaType(imagePath: String): ImageMediaType =
+    MediaType.imageFromPath(imagePath).getOrElse(MediaType.Jpeg)
 
   private def callAnthropicVisionAPI(
     base64Image: String,
     prompt: String,
-    mediaType: MediaType
+    mediaType: ImageMediaType
   ): Try[String] =
     try {
       // Use type-safe serialization

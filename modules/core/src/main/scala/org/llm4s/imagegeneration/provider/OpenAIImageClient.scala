@@ -2,6 +2,7 @@ package org.llm4s.imagegeneration.provider
 
 import org.llm4s.http.{ HttpResponse, MultipartPart }
 import org.llm4s.imagegeneration._
+import org.llm4s.media.{ ImageMediaType, MediaType }
 import org.slf4j.LoggerFactory
 import ujson._
 
@@ -103,7 +104,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
               response = response,
               prompt = prompt,
               size = requestedSize,
-              fallbackFormat = ImageFormat.PNG,
+              fallbackFormat = MediaType.Png,
               requestedOutputFormat = None,
               seed = None
             ).flatMap(images =>
@@ -364,7 +365,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     response: HttpResponse,
     prompt: String,
     size: ImageSize,
-    fallbackFormat: ImageFormat,
+    fallbackFormat: ImageMediaType,
     requestedOutputFormat: Option[String],
     seed: Option[Long]
   ): Either[ImageGenerationError, Seq[GeneratedImage]] =
@@ -407,8 +408,8 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
     maybeBase64Data: Option[String],
     maybeUrl: Option[String],
     requestedOutputFormat: Option[String],
-    fallbackFormat: ImageFormat
-  ): ImageFormat = {
+    fallbackFormat: ImageMediaType
+  ): ImageMediaType = {
     val requested = requestedOutputFormat.flatMap(OpenAIImageClient.outputFormatToImageFormat)
     val fromUrl   = maybeUrl.flatMap(OpenAIImageClient.urlToImageFormat)
     val fromPayload =
@@ -425,19 +426,16 @@ object OpenAIImageClient {
   def deprecationWarningMessage(model: String): String =
     s"$model is deprecated and scheduled for removal on $DalleRemovalDate. Migrate to $MigrationTargetModels. See $DeprecationsUrl."
 
-  def outputFormatToImageFormat(outputFormat: String): Option[ImageFormat] =
-    outputFormat.toLowerCase match {
-      case "png"          => Some(ImageFormat.PNG)
-      case "jpeg" | "jpg" => Some(ImageFormat.JPEG)
-      case "webp"         => Some(ImageFormat.WEBP)
-      case _              => None
-    }
+  /**
+   * The image formats the OpenAI images API can return. The vocabulary in `llm4s-media` knows
+   * about more of them than this provider will ever produce, so both lookups below are
+   * filtered through this rather than reporting a format the API cannot have sent.
+   */
+  private val supportedFormats: Set[ImageMediaType] = Set(MediaType.Png, MediaType.Jpeg, MediaType.WebP)
 
-  def urlToImageFormat(url: String): Option[ImageFormat] = {
-    val lower = url.toLowerCase
-    if (lower.endsWith(".png")) Some(ImageFormat.PNG)
-    else if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) Some(ImageFormat.JPEG)
-    else if (lower.endsWith(".webp")) Some(ImageFormat.WEBP)
-    else None
-  }
+  def outputFormatToImageFormat(outputFormat: String): Option[ImageMediaType] =
+    MediaType.imageFromExtension(outputFormat).filter(supportedFormats.contains)
+
+  def urlToImageFormat(url: String): Option[ImageMediaType] =
+    MediaType.imageFromPath(url).filter(supportedFormats.contains)
 }

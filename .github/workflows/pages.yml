@@ -126,7 +126,7 @@ jobs:
           # least one package page. This is the check that would have caught slices 1 and 2
           # dropping out of the published API docs.
           missing=""
-          for pkg in llmconnect toolapi agent rag knowledgegraph vectorstore mcp workspace trace; do
+          for pkg in llmconnect toolapi agent rag knowledgegraph vectorstore mcp media workspace trace; do
             if [ ! -d "$SCALADOC_DIR/org/llm4s/$pkg" ]; then missing="$missing $pkg"; fi
           done
           if [ ! -d "$SCALADOC_DIR/org/llm4s/agent/memory" ]; then missing="$missing agent.memory"; fi

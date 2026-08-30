@@ -2,6 +2,7 @@ package org.llm4s.imageprocessing.provider
 
 import org.llm4s.imageprocessing._
 import org.llm4s.error.LLMError
+import org.llm4s.media.{ ImageMediaType, MediaType }
 
 import java.awt.image.BufferedImage
 import java.awt.{ RenderingHints, Color }
@@ -59,7 +60,7 @@ class LocalImageProcessor extends org.llm4s.imageprocessing.ImageProcessingClien
             case (acc, op) => acc.flatMap(img => applyOperationEither(img, op))
           }
           processedEither.map { processedImage =>
-            val format    = ImageFormat.PNG // Default output format
+            val format    = MediaType.Png // Default output format
             val imageData = convertToByteArray(processedImage, format)
             val metadata = ImageMetadata(
               originalPath = Some(imagePath),
@@ -79,7 +80,7 @@ class LocalImageProcessor extends org.llm4s.imageprocessing.ImageProcessingClien
 
   override def convertFormat(
     imagePath: String,
-    targetFormat: ImageFormat
+    targetFormat: ImageMediaType
   ): Either[LLMError, ProcessedImage] =
     Try(ImageIO.read(new File(imagePath))).toEither.left
       .map(e => LLMError.processingFailed("convert", s"Error reading image: ${e.getMessage}", Some(e)))
@@ -290,13 +291,13 @@ class LocalImageProcessor extends org.llm4s.imageprocessing.ImageProcessingClien
     // Simple normalization - just return the original for now
     image
 
-  private def convertToByteArray(image: BufferedImage, format: ImageFormat): Array[Byte] = {
+  private def convertToByteArray(image: BufferedImage, format: ImageMediaType): Array[Byte] = {
     val baos = new ByteArrayOutputStream()
+    // Every image media type's extension is also its ImageIO format name, except WebP, for
+    // which the JDK ships no writer at all - those are written as PNG, as they were before.
     val formatName = format match {
-      case ImageFormat.PNG  => "png"
-      case ImageFormat.JPEG => "jpg"
-      case ImageFormat.WEBP => "png" // Fallback to PNG for WEBP
-      case ImageFormat.GIF  => "gif"
+      case MediaType.WebP => "png"
+      case other          => other.extension
     }
     ImageIO.write(image, formatName, baos)
     baos.toByteArray

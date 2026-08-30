@@ -4,6 +4,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
 import org.llm4s.imageprocessing._
+import org.llm4s.media.MediaType
 import org.llm4s.imageprocessing.config.OpenAIVisionConfig
 import java.nio.file.Files
 import java.awt.image.BufferedImage
@@ -120,10 +121,10 @@ class OpenAIVisionClientTest extends AnyFlatSpec with Matchers with BeforeAndAft
   it should "delegate format conversion to local processor" in {
     val client = new OpenAIVisionClient(config)
 
-    val result = client.convertFormat(tempFile.toString, ImageFormat.JPEG)
+    val result = client.convertFormat(tempFile.toString, MediaType.Jpeg)
 
     result.isRight shouldBe true
-    result.foreach(processedImage => processedImage.format shouldBe ImageFormat.JPEG)
+    result.foreach(processedImage => processedImage.format shouldBe MediaType.Jpeg)
   }
 
   it should "delegate resizing to local processor" in {

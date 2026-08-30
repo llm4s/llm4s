@@ -192,6 +192,27 @@ third-party dependency of its own. Package names are unchanged, so existing `org
 imports keep working; see the
 [migration note](../reference/migration.md#slice-3-llm4s-mcp).
 
+### For media types (`MediaType`, `MediaCategory`)
+
+{: .note }
+> Not yet published. `llm4s-media` exists in the build as of
+> [#1130](https://github.com/llm4s/llm4s/issues/1130) but ships in the next release.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-media" % llm4sVersion
+```
+
+The shared vocabulary the multimodal modules speak: `MediaType` (MIME string, canonical
+extension, category, and lookups by extension, path or MIME type) and `MediaCategory`. It has
+no dependencies at all and does no I/O — deciding what a file is from its bytes needs Tika and
+lives in `llm4s-rag`.
+
+You will usually get it transitively, from `llm4s-core` or `llm4s-rag`; declare it directly
+only if you name these types in your own signatures. It replaces three overlapping image-format
+types that used to ship in `llm4s-core`, which is a source break — see the
+[migration note](../reference/migration.md#slice-3-llm4s-media).
+
 ### For Workspace (Containerized Execution)
 
 ```scala

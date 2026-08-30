@@ -1,6 +1,7 @@
 package org.llm4s.imagegeneration
 
 import java.time.Instant
+import org.llm4s.media.{ ImageMediaType, MediaType }
 import java.nio.file.Path
 import org.llm4s.imagegeneration.provider.{
   HttpClient,
@@ -76,31 +77,10 @@ object ImageSize {
   final case class Custom(width: Int, height: Int) extends ImageSize
 }
 
-/** Image format enumeration */
-sealed trait ImageFormat {
-  def extension: String
-  def mimeType: String
-}
-
-object ImageFormat {
-  case object PNG extends ImageFormat {
-    val extension = "png"
-    val mimeType  = "image/png"
-  }
-  case object JPEG extends ImageFormat {
-    val extension = "jpg"
-    val mimeType  = "image/jpeg"
-  }
-  case object WEBP extends ImageFormat {
-    val extension = "webp"
-    val mimeType  = "image/webp"
-  }
-}
-
 /** Options for image generation */
 case class ImageGenerationOptions(
   size: ImageSize = ImageSize.Square512,
-  format: ImageFormat = ImageFormat.PNG,
+  format: ImageMediaType = MediaType.Png,
   seed: Option[Long] = None,
   guidanceScale: Double = 7.5,
   inferenceSteps: Int = 20,
@@ -160,7 +140,7 @@ case class GeneratedImage(
   /** Base64 encoded image data */
   data: String,
   /** Image format */
-  format: ImageFormat,
+  format: ImageMediaType,
   /** Image dimensions */
   size: ImageSize,
   /** Generation timestamp */

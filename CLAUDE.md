@@ -28,7 +28,7 @@ Slice order — each is an issue with its own scope and gotchas:
 | 0 ✅ | [#1127](https://github.com/llm4s/llm4s/issues/1127) | build + tracker prerequisites |
 | 1 ✅ | [#1128](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` |
 | 2 ✅ | [#1129](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` |
-| 3 🚧 | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp` ✅, `llm4s-image`, `llm4s-speech` |
+| 3 🚧 | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp` ✅, `llm4s-media` ✅, `llm4s-image`, `llm4s-speech` |
 | 4 | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
 | 5 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules |
 | 6 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability`, then 0.4.0 + MiMa |
@@ -67,6 +67,7 @@ llm4s/
 │   ├── memory/                # Agent memory: managers, in-memory + SQLite stores (published)
 │   ├── memory-postgres/       # Agent memory: Postgres/pgvector store (published)
 │   ├── mcp/                   # Model Context Protocol client, server, transports (published)
+│   ├── media/                 # Shared media vocabulary: MediaType, MediaCategory (published)
 │   ├── samples/               # Usage examples
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI
@@ -91,6 +92,16 @@ module's classpath - declare them per-module if you add database code.
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must
 not depend on each other.
+
+`modules/media` is not a carve - it is a new module, added mid-slice-3 because `image` and
+`speech` could not be split apart cleanly without it. Core had grown three overlapping image
+format enumerations (`imagegeneration.ImageFormat`, `imageprocessing.ImageFormat`,
+`imageprocessing.MediaType`) and RAG matched on raw MIME prefixes; carving first would have
+frozen those copies into separate artifacts. `org.llm4s.media` holds the consolidated
+vocabulary and nothing else - **no I/O, no content sniffing, no third-party dependencies**.
+Keep it that way: the moment it grows a dependency, every consumer inherits it. Tika-based
+sniffing stays in `llm4s-rag` and resolves its result through `MediaType.fromMimeType`.
+Core's dependency on it is temporary and leaves with the `llm4s-image` carve.
 
 **Key paths in `modules/core/src/main/scala/org/llm4s/`:**
 - `types/` - Result type, newtypes

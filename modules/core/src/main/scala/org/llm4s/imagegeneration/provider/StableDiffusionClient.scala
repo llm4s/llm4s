@@ -2,6 +2,7 @@ package org.llm4s.imagegeneration.provider
 
 import org.llm4s.imagegeneration._
 import org.llm4s.http.HttpResponse
+import org.llm4s.media.MediaType
 import org.slf4j.LoggerFactory
 import upickle.default._
 import java.nio.file.Path
@@ -175,7 +176,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
       // Convert ImageEditOptions to ImageGenerationOptions for response parsing
       genOptions = ImageGenerationOptions(
         size = options.size.getOrElse(sourceSize),
-        format = ImageFormat.PNG
+        format = MediaType.Png
       )
       payload = StableDiffusionImg2ImgPayload(
         init_images = Seq(img),

@@ -4,6 +4,7 @@ import org.llm4s.imageprocessing.config._
 import org.llm4s.imageprocessing.provider._
 import org.llm4s.imageprocessing.provider.anthropicclient.AnthropicVisionClient
 import org.llm4s.error.LLMError
+import org.llm4s.media.ImageMediaType
 
 import scala.concurrent.{ Future, ExecutionContext, blocking }
 
@@ -116,7 +117,7 @@ trait ImageProcessingClient {
    */
   def convertFormat(
     imagePath: String,
-    targetFormat: ImageFormat
+    targetFormat: ImageMediaType
   ): Either[LLMError, ProcessedImage]
 
   /**
