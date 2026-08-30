@@ -542,14 +542,11 @@ lazy val workspaceClient = (project in file("modules/workspace/workspaceClient")
       Deps.scalatest % Test,
       Deps.scalamock % Test,
       Deps.ujson,
-      Deps.pdfbox,
-      Deps.commonsIO,
-      Deps.tika,
-      Deps.poi,
-      Deps.jsoup,
-      Deps.postgres,
-      Deps.config,
-      Deps.hikariCP
+      // Kept deliberately: pureconfig (from commonSettings) is a facade over Typesafe Config
+      // and needs it at runtime, but no source file here imports com.typesafe.config, so an
+      // import-based audit reads it as dead. Tika/POI/PDFBox/jsoup/Postgres/HikariCP/commons-io
+      // were removed alongside this line - none of them was on any code path in this module.
+      Deps.config
     )
   )
 
