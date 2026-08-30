@@ -60,6 +60,10 @@ flags:
     paths:
       - modules/image/src/main/scala
     carryforward: true
+  speech:
+    paths:
+      - modules/speech/src/main/scala
+    carryforward: true
   knowledgegraph-neo4j:
     paths:
       - modules/knowledgegraph-neo4j/src/main/scala

@@ -19,7 +19,7 @@ What has actually moved so far, in the build but not yet in a release:
 |---|---|---|
 | [1](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` | in the build, unpublished |
 | [2](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` | in the build, unpublished |
-| [3](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image` (`llm4s-speech` to follow) | in the build, unpublished |
+| [3](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` | in the build, unpublished |
 
 The latest release tag is `v0.4.1`, which is still a single `llm4s-core`. The first release to publish separate module artifacts will be the next one.
 
@@ -70,7 +70,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `agent/memory/PostgresMemoryStore` — **carved** | `llm4s-memory-postgres` | Beta |
 | `mcp` - **carved** | `llm4s-mcp` | Beta |
 | `media` - **new** | `llm4s-media` | Beta |
-| `speech` | `llm4s-speech` | Experimental |
+| `speech` - **carved** | `llm4s-speech` | Experimental |
 | `imagegeneration`, `imageprocessing` - **carved** | `llm4s-image` | Experimental |
 | `knowledgegraph` — **carved** (`knowledgegraph/graphrag` ships in `llm4s-rag`) | `llm4s-knowledgegraph` | Experimental |
 
