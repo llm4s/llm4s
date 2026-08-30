@@ -1,5 +1,64 @@
 # Migration Guide
 
+## Slice 3: `llm4s-image`
+
+Part of slice 3 of the module carves tracked in
+[#1126](https://github.com/llm4s/llm4s/issues/1126); the slice is
+[#1130](https://github.com/llm4s/llm4s/issues/1130). It is in the build but not yet in a
+release, so nothing here affects `0.4.1` or earlier.
+
+### What moved
+
+| Packages | New module |
+|---|---|
+| `org.llm4s.imagegeneration` | `llm4s-image` |
+| `org.llm4s.imageprocessing` | `llm4s-image` |
+
+**Package names did not change, and this carve adds no source breaks of its own.** The image
+API's one source break - image formats becoming `org.llm4s.media.MediaType` - landed earlier,
+in [`llm4s-media`](#slice-3-llm4s-media), precisely so that this step is a pure file move.
+
+The two packages move together because they are two halves of one subsystem: generate an
+image, then analyse or convert it. Both are built on the same media vocabulary, and splitting
+them would leave two artifacts nobody uses apart.
+
+```scala
+// Before
+libraryDependencies += "org.llm4s" %% "llm4s-core" % version
+
+// After - only if you generate images, or analyse them with a vision model
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"  % version,
+  "org.llm4s" %% "llm4s-image" % version
+)
+```
+
+`llm4s-image` brings `llm4s-media` with it, so `MediaType` is on your classpath either way.
+
+### What `llm4s-core` sheds
+
+No third-party dependency: the image clients are built on `Llm4sHttpClient`, `ujson`/`upickle`
+and `javax.imageio` from the JDK, all of which core keeps for other reasons. What core sheds is
+**19 source files and about 3,600 lines** of a subsystem most users never touch, along with its
+edge to `llm4s-media` - that edge existed only because the image packages were still inside
+core, and it leaves with them.
+
+Core's measured statement coverage rises from 74.05% to 74.89% as a result, since the image
+code was below core's average.
+
+### One test moved with the code
+
+`org.llm4s.async.AsyncErrorHandlingSpec` lived in core's test tree under a package name that
+suggests it is about asynchrony in general. Every one of its assertions exercises an image
+client - it checks that `ImageProcessingClient.analyzeImageAsync` and the image generation
+clients' `Future { blocking { ... } }.recover { ... }` pattern surface thrown exceptions as
+`Left` rather than as a failed `Future`. It moves to `llm4s-image` with the code it tests,
+keeping its package name.
+
+Had it been left behind it would simply have stopped compiling - but the more useful point is
+that leaving it would have removed the only coverage of that behaviour from the module that
+owns it.
+
 ## Slice 3: `llm4s-media`
 
 A new module rather than a carve, landed as part of slice 3

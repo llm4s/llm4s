@@ -176,6 +176,7 @@ lazy val llm4s = (project in file("."))
     memory,
     memoryPostgres,
     mcp,
+    image,
     samples,
     configPolicy,
     workspaceShared,
@@ -257,16 +258,14 @@ lazy val media = (project in file("modules/media"))
   )
 
 lazy val core = (project in file("modules/core"))
-  // Temporary: `imagegeneration` and `imageprocessing` are the heaviest users of the media
-  // vocabulary and are still in core. This edge leaves with them in the `llm4s-image` carve.
-  .dependsOn(media)
   .settings(
     name := "llm4s-core",
     commonSettings,
-    // Measured 74.05% statement coverage after slice 3 carved `mcp` out (`sbt coverage
-    // core/test core/coverageReport`); it was 73.85% after slice 2 and 72.42% on main @
-    // 5a62e2ac before any carve. Floor is the measured value rounded down to the nearest 5.
-    // Ratchet it up as the module is carved apart; never lower it.
+    // Measured 74.89% statement coverage after slice 3 carved `mcp` and `image` out (`sbt
+    // coverage core/test core/coverageReport`); it was 74.05% after `mcp` alone, 73.85% after
+    // slice 2 and 72.42% on main @ 5a62e2ac before any of them. Floor is the measured value
+    // rounded down to the nearest 5. Ratchet it up as the module is carved apart; never lower
+    // it.
     coverageFloor(70),
     Test / fork := true,
     Test / javaOptions ++= Seq(
@@ -452,6 +451,34 @@ lazy val mcp = (project in file("modules/mcp"))
     )
   )
 
+// `imagegeneration` and `imageprocessing` move together: they are two halves of one subsystem
+// (generate an image, then analyse or convert it) and both are built on the same media
+// vocabulary. Splitting them would leave two artifacts nobody uses apart.
+//
+// Both packages moved whole - nothing in core referenced them, and the one core test that did
+// (`org.llm4s.async.AsyncErrorHandlingSpec`, which tests image clients exclusively despite its
+// package) came with them rather than being left behind to fail.
+
+lazy val image = (project in file("modules/image"))
+  .dependsOn(media, core)
+  .settings(
+    name := "llm4s-image",
+    commonSettings,
+    // Measured 66.82% statement coverage (`sbt coverage image/test image/coverageReport`) on
+    // the code as carved out of core. Floor is the measured value rounded down to the nearest
+    // 5. Never lower it. The two `@Local` vision suites in `modules/it` are not counted here.
+    coverageFloor(65),
+    Test / fork := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test,
+      Deps.logback   % Test
+    )
+  )
+
 lazy val workspaceShared = (project in file("modules/workspace/workspaceShared"))
   .settings(
     name := "llm4s-workspace-shared",
@@ -513,7 +540,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules//samples"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, knowledgegraphNeo4j)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, knowledgegraphNeo4j)
   .settings(
     name := "llm4s-samples",
     commonSettings,
@@ -588,7 +615,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   )
 
 lazy val it = (project in file("modules/it"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
   .settings(
     name := "llm4s-it",
     commonSettings,
@@ -640,7 +667,7 @@ lazy val it = (project in file("modules/it"))
 // A module is listed here if and only if it is published. When a slice adds one, add it in
 // the same commit, or its API silently vanishes from the site.
 lazy val docs = (project in file("modules/docs"))
-  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
+  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
   .settings(
     name           := "llm4s-docs",
     commonSettings,
@@ -655,6 +682,7 @@ lazy val docs = (project in file("modules/docs"))
         (memory / Compile / sources).value ++
         (memoryPostgres / Compile / sources).value ++
         (mcp / Compile / sources).value ++
+        (image / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (traceOpentelemetry / Compile / sources).value ++

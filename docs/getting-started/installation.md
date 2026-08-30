@@ -192,6 +192,27 @@ third-party dependency of its own. Package names are unchanged, so existing `org
 imports keep working; see the
 [migration note](../reference/migration.md#slice-3-llm4s-mcp).
 
+### For image generation and vision
+
+{: .note }
+> Not yet published. `llm4s-image` exists in the build as of
+> [#1130](https://github.com/llm4s/llm4s/issues/1130) but ships in the next release;
+> in `0.4.1` and earlier this code is still inside `llm4s-core`.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-image" % llm4sVersion
+```
+
+Carries image generation (`org.llm4s.imagegeneration` — Stable Diffusion, Stability AI,
+Hugging Face, OpenAI) and image processing (`org.llm4s.imageprocessing` — the OpenAI and
+Anthropic vision clients plus a local `javax.imageio` processor). It adds no third-party
+dependency of its own, and brings `llm4s-media` with it.
+
+Package names are unchanged, so existing `org.llm4s.imagegeneration.*` and
+`org.llm4s.imageprocessing.*` imports keep working — but note that image *formats* did change,
+in `llm4s-media`. See the [migration note](../reference/migration.md#slice-3-llm4s-image).
+
 ### For media types (`MediaType`, `MediaCategory`)
 
 {: .note }
