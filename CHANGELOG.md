@@ -22,6 +22,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`llm4s-image` is carved out of `llm4s-core`** - the third artifact of slice 3
+  ([#1130](https://github.com/llm4s/llm4s/issues/1130); `llm4s-speech` follows).
+  `org.llm4s.imagegeneration` and `org.llm4s.imageprocessing` move together as two halves of
+  one subsystem. Package names are unchanged and this carve adds no source breaks of its own -
+  the image API's one break landed earlier in `llm4s-media`, so that this step is a pure file
+  move. Core sheds no third-party dependency (the image clients are built on `Llm4sHttpClient`,
+  uPickle and `javax.imageio`), but does shed 19 source files and its edge to `llm4s-media`,
+  which existed only while the image packages were inside it. Core's measured statement
+  coverage rises from 74.05% to 74.89% as a result. See the
+  [migration note](docs/reference/migration.md#slice-3-llm4s-image).
+
+  `org.llm4s.async.AsyncErrorHandlingSpec` moves with the code: despite its package name every
+  assertion in it exercises an image client, so it belongs to the module that owns that
+  behaviour.
 - **Breaking: image formats are now `org.llm4s.media.MediaType`.** A deliberate source break
   ahead of the 1.0 API freeze: `ImageFormat.PNG`/`JPEG`/`WEBP`/`GIF` become
   `MediaType.Png`/`Jpeg`/`WebP`/`Gif`, `MediaType.value` becomes `.mimeType`, and

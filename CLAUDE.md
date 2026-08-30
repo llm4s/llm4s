@@ -28,7 +28,7 @@ Slice order — each is an issue with its own scope and gotchas:
 | 0 ✅ | [#1127](https://github.com/llm4s/llm4s/issues/1127) | build + tracker prerequisites |
 | 1 ✅ | [#1128](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` |
 | 2 ✅ | [#1129](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` |
-| 3 🚧 | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp` ✅, `llm4s-media` ✅, `llm4s-image`, `llm4s-speech` |
+| 3 🚧 | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp` ✅, `llm4s-media` ✅, `llm4s-image` ✅, `llm4s-speech` |
 | 4 | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
 | 5 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules |
 | 6 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability`, then 0.4.0 + MiMa |
@@ -68,6 +68,7 @@ llm4s/
 │   ├── memory-postgres/       # Agent memory: Postgres/pgvector store (published)
 │   ├── mcp/                   # Model Context Protocol client, server, transports (published)
 │   ├── media/                 # Shared media vocabulary: MediaType, MediaCategory (published)
+│   ├── image/                 # Image generation and vision/processing clients (published)
 │   ├── samples/               # Usage examples
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI
@@ -80,12 +81,13 @@ llm4s/
 └── build.sbt
 ```
 
-Slices 0, 1 and 2 have landed and slice 3 is in progress: `modules/rag`,
-`modules/knowledgegraph`, `modules/memory`, `modules/memory-postgres` and `modules/mcp` are
-carved, so `modules/core` no longer holds `rag`, `vectorstore` (bar `PostgresVectorHelpers`,
-see below), `chunking`, `reranker`, `eval`, `knowledgegraph`, `agent/memory` or `mcp`, nor any
-Tika/POI/PDFBox/jsoup/AWS, HikariCP, Postgres, SQLite or Java-WebSocket dependency.
-`image` and `speech` are still in core, pending the rest of slice 3.
+Slices 0, 1 and 2 have landed and slice 3 is nearly done: `modules/rag`,
+`modules/knowledgegraph`, `modules/memory`, `modules/memory-postgres`, `modules/mcp` and
+`modules/image` are carved, so `modules/core` no longer holds `rag`, `vectorstore` (bar
+`PostgresVectorHelpers`, see below), `chunking`, `reranker`, `eval`, `knowledgegraph`,
+`agent/memory`, `mcp`, `imagegeneration` or `imageprocessing`, nor any Tika/POI/PDFBox/jsoup/AWS,
+HikariCP, Postgres, SQLite or Java-WebSocket dependency.
+`speech` is the last package still in core, pending the end of slice 3.
 Those three JDBC dependencies also left `commonSettings`, which used to put them on every
 module's classpath - declare them per-module if you add database code.
 
