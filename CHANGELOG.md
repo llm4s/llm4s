@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **`llm4s-mcp` is carved out of `llm4s-core`** - the first artifact of the third module split
+  tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126)
+  ([#1130](https://github.com/llm4s/llm4s/issues/1130), which also carves `llm4s-image` and
+  `llm4s-speech`; those follow separately). `org.llm4s.mcp` becomes `llm4s-mcp`. Package names
+  are unchanged and there are no source breaks - nothing outside the package referenced it, so
+  it moved whole. See the [migration note](docs/reference/migration.md#slice-3-llm4s-mcp).
+
+  `llm4s-core` sheds **Java-WebSocket**, though not for the reason the slice issue predicted.
+  MCP does not use WebSockets: its transports are stdio, HTTP and SSE. `Deps.websocket` was
+  declared on core and imported by nothing in it - the repo's only WebSocket code is
+  `ContainerisedWorkspace` in `llm4s-workspace-client`, which declares the dependency itself.
+  So this removes an unused declaration rather than moving a dependency, and `llm4s-mcp` adds
+  no third-party dependency of its own.
 - **`llm4s-memory` and `llm4s-memory-postgres` are carved out of `llm4s-core`** - the second
   of the module splits tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126)
   ([#1129](https://github.com/llm4s/llm4s/issues/1129)). `org.llm4s.agent.memory` becomes

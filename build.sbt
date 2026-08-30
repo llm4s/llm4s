@@ -174,6 +174,7 @@ lazy val llm4s = (project in file("."))
     knowledgegraph,
     memory,
     memoryPostgres,
+    mcp,
     samples,
     configPolicy,
     workspaceShared,
@@ -231,10 +232,10 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
-    // Measured 73.85% statement coverage after slice 2 carved `agent/memory` out (`sbt
-    // coverage core/test core/coverageReport`); it was 74.19% after slice 1 and 72.42% on
-    // main @ 5a62e2ac before either. Floor is the measured value rounded down to the nearest
-    // 5. Ratchet it up as the module is carved apart; never lower it.
+    // Measured 74.05% statement coverage after slice 3 carved `mcp` out (`sbt coverage
+    // core/test core/coverageReport`); it was 73.85% after slice 2 and 72.42% on main @
+    // 5a62e2ac before any carve. Floor is the measured value rounded down to the nearest 5.
+    // Ratchet it up as the module is carved apart; never lower it.
     coverageFloor(70),
     Test / fork := true,
     Test / javaOptions ++= Seq(
@@ -272,7 +273,6 @@ lazy val core = (project in file("modules/core"))
       Deps.azureOpenAI,
       Deps.anthropic,
       Deps.jtokkit,
-      Deps.websocket,
       Deps.scalatest % Test,
       Deps.scalamock % Test,
       Deps.ujson,
@@ -396,6 +396,29 @@ lazy val memoryPostgres = (project in file("modules/memory-postgres"))
     )
   )
 
+// ---- slice 3 of the modularisation programme (#1130) ----
+// `mcp`, `image` and `speech` are three self-contained subsystems with no inbound edge from
+// the rest of core and no edge to each other, so they carve independently.
+
+lazy val mcp = (project in file("modules/mcp"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-mcp",
+    commonSettings,
+    // Measured 70.79% statement coverage (`sbt coverage mcp/test mcp/coverageReport`) on the
+    // code as carved out of core. Floor is the measured value rounded down to the nearest 5.
+    // Never lower it.
+    coverageFloor(70),
+    Test / fork := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 lazy val workspaceShared = (project in file("modules/workspace/workspaceShared"))
   .settings(
     name := "llm4s-workspace-shared",
@@ -457,7 +480,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules//samples"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, knowledgegraphNeo4j)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, knowledgegraphNeo4j)
   .settings(
     name := "llm4s-samples",
     commonSettings,
@@ -532,7 +555,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   )
 
 lazy val it = (project in file("modules/it"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
   .settings(
     name := "llm4s-it",
     commonSettings,

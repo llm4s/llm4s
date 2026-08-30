@@ -175,6 +175,23 @@ dependencies `llm4s-core` no longer carries. Package names are unchanged, so exi
 `org.llm4s.agent.memory.*` imports keep working; see the
 [migration note](../reference/migration.md#slice-2-llm4s-memory-and-llm4s-memory-postgres).
 
+### For MCP (Model Context Protocol)
+
+{: .note }
+> Not yet published. `llm4s-mcp` exists in the build as of
+> [#1130](https://github.com/llm4s/llm4s/issues/1130) but ships in the next release;
+> in `0.4.1` and earlier this code is still inside `llm4s-core`.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-mcp" % llm4sVersion
+```
+
+Carries the MCP client, server, transports (stdio, HTTP, SSE) and `MCPToolRegistry`. It adds no
+third-party dependency of its own. Package names are unchanged, so existing `org.llm4s.mcp.*`
+imports keep working; see the
+[migration note](../reference/migration.md#slice-3-llm4s-mcp).
+
 ### For Workspace (Containerized Execution)
 
 ```scala

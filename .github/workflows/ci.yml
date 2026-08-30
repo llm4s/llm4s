@@ -178,6 +178,7 @@ jobs:
           knowledgegraph/test knowledgegraph/coverageReport
           memory/test memory/coverageReport
           memoryPostgres/test memoryPostgres/coverageReport
+          mcp/test mcp/coverageReport
           coverageAggregate
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes
@@ -229,6 +230,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/memory-postgres/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: memory-postgres
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload mcp coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/mcp/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: mcp
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
