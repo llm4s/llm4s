@@ -1,5 +1,6 @@
 package org.llm4s.imagegeneration
 
+import org.llm4s.media.MediaType
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -115,22 +116,11 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     ImageSize.Landscape768x512.description shouldBe "768x512"
   }
 
-  test("ImageFormat provides correct metadata") {
-    ImageFormat.PNG.extension shouldBe "png"
-    ImageFormat.PNG.mimeType shouldBe "image/png"
-
-    ImageFormat.JPEG.extension shouldBe "jpg"
-    ImageFormat.JPEG.mimeType shouldBe "image/jpeg"
-
-    ImageFormat.WEBP.extension shouldBe "webp"
-    ImageFormat.WEBP.mimeType shouldBe "image/webp"
-  }
-
   test("ImageGenerationOptions has sensible defaults") {
     val options = ImageGenerationOptions()
 
     options.size shouldBe ImageSize.Square512
-    options.format shouldBe ImageFormat.PNG
+    options.format shouldBe MediaType.Png
     options.seed shouldBe None
     options.guidanceScale shouldBe 7.5
     options.inferenceSteps shouldBe 20
@@ -157,7 +147,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
 
     val image = GeneratedImage(
       data = base64Data,
-      format = ImageFormat.PNG,
+      format = MediaType.Png,
       size = ImageSize.Square512,
       prompt = "test prompt"
     )
@@ -172,7 +162,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
 
     val image = GeneratedImage(
       data = base64Data,
-      format = ImageFormat.PNG,
+      format = MediaType.Png,
       size = ImageSize.Square512,
       prompt = "test prompt"
     )
@@ -291,7 +281,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     result match {
       case Right(image) =>
         image.prompt shouldBe "A beautiful landscape"
-        image.format shouldBe ImageFormat.PNG
+        image.format shouldBe MediaType.Png
         image.size shouldBe ImageSize.Square512
         image.data should not be empty
 
@@ -303,7 +293,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
   test("Mock client respects custom options") {
     val options = ImageGenerationOptions(
       size = ImageSize.Landscape768x512,
-      format = ImageFormat.JPEG,
+      format = MediaType.Jpeg,
       seed = Some(42),
       guidanceScale = 10.0,
       negativePrompt = Some("blurry")
@@ -315,7 +305,7 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     result match {
       case Right(image) =>
         image.size shouldBe ImageSize.Landscape768x512
-        image.format shouldBe ImageFormat.JPEG
+        image.format shouldBe MediaType.Jpeg
         image.seed shouldBe Some(42)
       case Left(error) =>
         fail(s"Expected successful image generation, but got error: $error")

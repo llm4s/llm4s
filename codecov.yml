@@ -52,6 +52,10 @@ flags:
     paths:
       - modules/mcp/src/main/scala
     carryforward: true
+  media:
+    paths:
+      - modules/media/src/main/scala
+    carryforward: true
   knowledgegraph-neo4j:
     paths:
       - modules/knowledgegraph-neo4j/src/main/scala

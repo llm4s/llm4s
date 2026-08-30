@@ -19,7 +19,7 @@ What has actually moved so far, in the build but not yet in a release:
 |---|---|---|
 | [1](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` | in the build, unpublished |
 | [2](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` | in the build, unpublished |
-| [3](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp` (`llm4s-image`, `llm4s-speech` to follow) | in the build, unpublished |
+| [3](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media` (`llm4s-image`, `llm4s-speech` to follow) | in the build, unpublished |
 
 The latest release tag is `v0.4.1`, which is still a single `llm4s-core`. The first release to publish separate module artifacts will be the next one.
 
@@ -69,6 +69,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `agent/memory` (excluding `PostgresMemoryStore`) — **carved** | `llm4s-memory` | Beta |
 | `agent/memory/PostgresMemoryStore` — **carved** | `llm4s-memory-postgres` | Beta |
 | `mcp` - **carved** | `llm4s-mcp` | Beta |
+| `media` - **new** | `llm4s-media` | Beta |
 | `speech` | `llm4s-speech` | Experimental |
 | `imagegeneration`, `imageprocessing` | `llm4s-image` | Experimental |
 | `knowledgegraph` — **carved** (`knowledgegraph/graphrag` ships in `llm4s-rag`) | `llm4s-knowledgegraph` | Experimental |
@@ -77,6 +78,7 @@ Notes:
 
 - The `llmconnect/provider` directory today also holds shared plumbing (cost estimation, HTTP error mapping, metrics recording, embedding provider trait) alongside the per-provider clients. [Slice 4](https://github.com/llm4s/llm4s/issues/1131) is designing a provider registration SPI to replace the current central-file registration; that design decides where this shared plumbing ends up (most likely `llm4s-core`), so treat its exact home as unsettled until #1131 lands.
 - Rows marked **carved** already live in their target sbt module. Their package names are unchanged, so this is a build-file change for users, not an import rewrite — with one exception, `org.llm4s.extract`, described in the [migration guide](migration#slice-1-llm4s-rag-and-llm4s-knowledgegraph).
+- `org.llm4s.media` is a new package, not a carve. It consolidates the three overlapping image-format enumerations `llm4s-core` had accumulated, so that `llm4s-image` and `llm4s-speech` carve as pure file moves rather than moves plus a vocabulary change. It is the one part of slice 3 with a source break, described in the [migration guide](migration#slice-3-llm4s-media); it is deliberate and taken now rather than after 1.0.
 - `org.llm4s.extract` is a new package name, not a rename of an existing one — see [Slice 1](https://github.com/llm4s/llm4s/issues/1128) for why the two extractors were consolidated rather than just moved.
 - `org.llm4s.knowledgegraph.graphrag` keeps its package name but ships in `llm4s-rag`, not `llm4s-knowledgegraph`. `GraphRAG` and `vectorstore` referenced each other, which made the two modules inseparable; moving the one file that reaches into `vectorstore` broke the cycle. Package names track the API; module boundaries track the dependency graph, and here they disagree.
 - `llm4s-memory` splits in two. `PostgresMemoryStore` was the only file in `agent/memory` that needed a connection pool and a server-side driver, so it ships as `llm4s-memory-postgres`; keeping it with the rest would mean anyone using agent memory at all inherits HikariCP and the Postgres JDBC driver. `llm4s-memory` itself carries only sqlite-jdbc, for the two file-backed stores.

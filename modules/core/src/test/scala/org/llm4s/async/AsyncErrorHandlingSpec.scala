@@ -2,13 +2,8 @@ package org.llm4s.async
 
 import org.llm4s.error.LLMError
 import org.llm4s.imagegeneration._
-import org.llm4s.imageprocessing.{
-  ImageAnalysisResult,
-  ImageProcessingClient,
-  ImageFormat,
-  ImageOperation,
-  ProcessedImage
-}
+import org.llm4s.imageprocessing.{ ImageAnalysisResult, ImageProcessingClient, ImageOperation, ProcessedImage }
+import org.llm4s.media.ImageMediaType
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.concurrent.ScalaFutures
@@ -119,7 +114,7 @@ private class ThrowingImageProcessingClient extends ImageProcessingClient {
 
   override def convertFormat(
     imagePath: String,
-    targetFormat: ImageFormat
+    targetFormat: ImageMediaType
   ): Either[LLMError, ProcessedImage] =
     throw new RuntimeException("boom")
 

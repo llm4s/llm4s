@@ -1,6 +1,6 @@
 package org.llm4s.imageprocessing.provider.anthropicclient
 
-import org.llm4s.imageprocessing.MediaType
+import org.llm4s.media.ImageMediaType
 import upickle.default.{ macroRW, ReadWriter => RW, _ }
 
 private[anthropicclient] case class TextContent(
@@ -67,7 +67,7 @@ object AnthropicRequestBody {
     maxTokens: Int,
     prompt: String,
     base64Image: String,
-    mediaType: MediaType
+    mediaType: ImageMediaType
   ): String = {
     val textContent = ujson.Obj(
       "type" -> "text",
@@ -78,7 +78,7 @@ object AnthropicRequestBody {
       "type" -> "image",
       "source" -> ujson.Obj(
         "type"       -> "base64",
-        "media_type" -> mediaType.value,
+        "media_type" -> mediaType.mimeType,
         "data"       -> base64Image
       )
     )

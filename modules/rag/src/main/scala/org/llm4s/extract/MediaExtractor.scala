@@ -1,6 +1,7 @@
 package org.llm4s.extract
 
 import org.llm4s.error.ProcessingError
+import org.llm4s.media.MediaCategory
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -17,6 +18,10 @@ import scala.util.{ Failure, Success, Try }
  * metadata from anything text-bearing; multimodal embedding wants the decoded media
  * itself. The two share only the initial Tika sniff, and the audio and video cases
  * overlap `llm4s-speech` and `llm4s-image` rather than RAG, so this may not stay here.
+ *
+ * The sniff stays here because it needs Tika; the vocabulary it resolves to
+ * ([[org.llm4s.media.MediaCategory]]) lives in `llm4s-media`, so the modules that would
+ * consume audio and video branches can name the same categories without inheriting Tika.
  */
 object MediaExtractor {
 
@@ -51,12 +56,16 @@ object MediaExtractor {
       val mimeType = TikaDocumentExtractor.detectMimeType(file)
       logger.debug(s"[ExtractAny] Processing: ${file.getPath} (MIME: $mimeType)")
 
-      if (mimeType.startsWith("image/")) extractImage(file)
-      else if (mimeType.startsWith("audio/"))
-        unsupported("audio", file, s"Audio extraction not yet implemented (MIME: $mimeType)")
-      else if (mimeType.startsWith("video/"))
-        unsupported("video", file, s"Video extraction not yet implemented (MIME: $mimeType)")
-      else TikaDocumentExtractor.extractFromPath(inputPath).map(doc => TextContent(doc.text))
+      MediaCategory.fromMimeType(mimeType) match {
+        case Some(MediaCategory.Image) => extractImage(file)
+        case Some(MediaCategory.Audio) =>
+          unsupported("audio", file, s"Audio extraction not yet implemented (MIME: $mimeType)")
+        case Some(MediaCategory.Video) =>
+          unsupported("video", file, s"Video extraction not yet implemented (MIME: $mimeType)")
+        // Text, application and anything Tika reports that we do not categorise all go to the
+        // document extractor, which is the only branch that can make sense of them.
+        case _ => TikaDocumentExtractor.extractFromPath(inputPath).map(doc => TextContent(doc.text))
+      }
     }
   }
 

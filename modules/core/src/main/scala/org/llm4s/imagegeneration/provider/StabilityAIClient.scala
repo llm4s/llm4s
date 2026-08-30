@@ -26,7 +26,7 @@ import scala.concurrent.{ Future, ExecutionContext, blocking }
  *
  * val options = ImageGenerationOptions(
  *   size = ImageSize.Square1024,
- *   format = ImageFormat.PNG
+ *   format = MediaType.Png
  * )
  *
  * client.generateImage("a beautiful landscape", options) match {

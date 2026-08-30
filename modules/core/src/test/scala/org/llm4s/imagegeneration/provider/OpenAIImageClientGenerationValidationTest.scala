@@ -1,7 +1,8 @@
 package org.llm4s.imagegeneration.provider
 
 import org.llm4s.http.{ HttpResponse, MultipartPart }
-import org.llm4s.imagegeneration.{ ImageFormat, ImageGenerationOptions, ImageSize, OpenAIConfig, ValidationError }
+import org.llm4s.imagegeneration.{ ImageGenerationOptions, ImageSize, OpenAIConfig, ValidationError }
+import org.llm4s.media.MediaType
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -143,7 +144,7 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
 
     result match {
       case Right(images) =>
-        images.head.format shouldBe ImageFormat.JPEG
+        images.head.format shouldBe MediaType.Jpeg
         images.head.url shouldBe Some("https://x/y.png")
       case Left(err) => fail(s"expected success, got $err")
     }

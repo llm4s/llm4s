@@ -1,5 +1,6 @@
 package org.llm4s.imageprocessing
 
+import org.llm4s.media.MediaType
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import java.nio.file.{ Files, Paths }
@@ -45,10 +46,10 @@ class ImageModelsTest extends AnyFlatSpec with Matchers {
   "ProcessedImage" should "create with valid data" in {
     val data           = Array[Byte](1, 2, 3, 4)
     val metadata       = ImageMetadata()
-    val processedImage = ProcessedImage(data, ImageFormat.JPEG, 100, 100, metadata)
+    val processedImage = ProcessedImage(data, MediaType.Jpeg, 100, 100, metadata)
 
     processedImage.data shouldBe data
-    processedImage.format shouldBe ImageFormat.JPEG
+    processedImage.format shouldBe MediaType.Jpeg
     processedImage.width shouldBe 100
     processedImage.height shouldBe 100
     processedImage.metadata shouldBe metadata
@@ -60,7 +61,7 @@ class ImageModelsTest extends AnyFlatSpec with Matchers {
     try {
       val data           = Array[Byte](1, 2, 3, 4)
       val metadata       = ImageMetadata()
-      val processedImage = ProcessedImage(data, ImageFormat.JPEG, 100, 100, metadata)
+      val processedImage = ProcessedImage(data, MediaType.Jpeg, 100, 100, metadata)
 
       val result = processedImage.saveToFile(tempFile)
       result shouldBe Right(())
@@ -72,7 +73,7 @@ class ImageModelsTest extends AnyFlatSpec with Matchers {
   it should "fail to save with invalid path" in {
     val data           = Array[Byte](1, 2, 3, 4)
     val metadata       = ImageMetadata()
-    val processedImage = ProcessedImage(data, ImageFormat.JPEG, 100, 100, metadata)
+    val processedImage = ProcessedImage(data, MediaType.Jpeg, 100, 100, metadata)
 
     val result = processedImage.saveToFile(Paths.get("/invalid/path/that/does/not/exist/file.jpg"))
     result.isLeft shouldBe true
@@ -81,7 +82,7 @@ class ImageModelsTest extends AnyFlatSpec with Matchers {
   it should "prevent path traversal attacks" in {
     val data           = Array[Byte](1, 2, 3, 4)
     val metadata       = ImageMetadata()
-    val processedImage = ProcessedImage(data, ImageFormat.JPEG, 100, 100, metadata)
+    val processedImage = ProcessedImage(data, MediaType.Jpeg, 100, 100, metadata)
 
     val maliciousPath = Paths.get("../../../etc/passwd")
     val result        = processedImage.saveToFile(maliciousPath)
@@ -165,13 +166,6 @@ class ImageModelsTest extends AnyFlatSpec with Matchers {
     an[IllegalArgumentException] should be thrownBy {
       embedding1.cosineSimilarity(embedding2)
     }
-  }
-
-  "ImageFormat" should "have correct string representations" in {
-    ImageFormat.JPEG.toString shouldBe "JPEG"
-    ImageFormat.PNG.toString shouldBe "PNG"
-    ImageFormat.GIF.toString shouldBe "GIF"
-    ImageFormat.WEBP.toString shouldBe "WEBP"
   }
 
   "ImageOperation" should "create resize operation" in {

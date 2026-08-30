@@ -4,6 +4,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.BeforeAndAfterEach
 import org.llm4s.imageprocessing._
+import org.llm4s.media.MediaType
 import org.llm4s.imageprocessing.config.AnthropicVisionConfig
 import org.llm4s.imageprocessing.provider.anthropicclient.AnthropicVisionClient
 import java.nio.file.Files
@@ -51,15 +52,15 @@ class AnthropicVisionClientTest extends AnyFlatSpec with Matchers with BeforeAnd
     val client = new AnthropicVisionClient(config)
 
     // Test different file extensions
-    client.detectMediaType("test.jpg").value shouldBe "image/jpeg"
-    client.detectMediaType("test.jpeg").value shouldBe "image/jpeg"
-    client.detectMediaType("test.png").value shouldBe "image/png"
-    client.detectMediaType("test.gif").value shouldBe "image/gif"
-    client.detectMediaType("test.webp").value shouldBe "image/webp"
-    client.detectMediaType("test.bmp").value shouldBe "image/bmp"
-    client.detectMediaType("test.tiff").value shouldBe "image/tiff"
-    client.detectMediaType("test.tif").value shouldBe "image/tiff"
-    client.detectMediaType("test.unknown").value shouldBe "image/jpeg" // Default fallback
+    client.detectMediaType("test.jpg").mimeType shouldBe "image/jpeg"
+    client.detectMediaType("test.jpeg").mimeType shouldBe "image/jpeg"
+    client.detectMediaType("test.png").mimeType shouldBe "image/png"
+    client.detectMediaType("test.gif").mimeType shouldBe "image/gif"
+    client.detectMediaType("test.webp").mimeType shouldBe "image/webp"
+    client.detectMediaType("test.bmp").mimeType shouldBe "image/bmp"
+    client.detectMediaType("test.tiff").mimeType shouldBe "image/tiff"
+    client.detectMediaType("test.tif").mimeType shouldBe "image/tiff"
+    client.detectMediaType("test.unknown").mimeType shouldBe "image/jpeg" // Default fallback
   }
 
   it should "encode image to base64 successfully" in {
@@ -135,10 +136,10 @@ class AnthropicVisionClientTest extends AnyFlatSpec with Matchers with BeforeAnd
   it should "delegate format conversion to local processor" in {
     val client = new AnthropicVisionClient(config)
 
-    val result = client.convertFormat(tempFile.toString, ImageFormat.JPEG)
+    val result = client.convertFormat(tempFile.toString, MediaType.Jpeg)
 
     result.isRight shouldBe true
-    result.foreach(processedImage => processedImage.format shouldBe ImageFormat.JPEG)
+    result.foreach(processedImage => processedImage.format shouldBe MediaType.Jpeg)
   }
 
   it should "delegate resizing to local processor" in {
@@ -189,8 +190,8 @@ class AnthropicVisionClientTest extends AnyFlatSpec with Matchers with BeforeAnd
       ImageIO.write(testImage, "jpg", jpgFile.toFile)
 
       // The media type detection should work correctly
-      client.detectMediaType(pngFile.toString).value shouldBe "image/png"
-      client.detectMediaType(jpgFile.toString).value shouldBe "image/jpeg"
+      client.detectMediaType(pngFile.toString).mimeType shouldBe "image/png"
+      client.detectMediaType(jpgFile.toString).mimeType shouldBe "image/jpeg"
     } finally {
       Files.deleteIfExists(pngFile)
       Files.deleteIfExists(jpgFile)

@@ -4,6 +4,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.concurrent.ScalaFutures
 import org.llm4s.imageprocessing._
+import org.llm4s.media.MediaType
 
 import java.nio.file.{ Files, Paths }
 import java.awt.image.BufferedImage
@@ -82,7 +83,7 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers with ScalaFuture
       result.foreach { processedImage =>
         processedImage.width shouldBe 100
         processedImage.height shouldBe 100
-        processedImage.format shouldBe ImageFormat.PNG
+        processedImage.format shouldBe MediaType.Png
         processedImage.data.length should be > 0
         processedImage.metadata.operations should contain(
           ImageOperation.Resize(100, 100, false)
@@ -147,7 +148,7 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers with ScalaFuture
       result.foreach { processedImage =>
         processedImage.width shouldBe 100
         processedImage.height shouldBe 100
-        processedImage.format shouldBe ImageFormat.PNG
+        processedImage.format shouldBe MediaType.Png
         processedImage.data.length should be > 0
         processedImage.metadata.operations should contain(
           ImageOperation.Blur(5.0)
@@ -207,12 +208,12 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers with ScalaFuture
 
   it should "convert format successfully" in
     withTempImage() { path =>
-      val result = processor.convertFormat(path, ImageFormat.JPEG)
+      val result = processor.convertFormat(path, MediaType.Jpeg)
 
       result.isRight shouldBe true
 
       result.foreach { processedImage =>
-        processedImage.format shouldBe ImageFormat.JPEG
+        processedImage.format shouldBe MediaType.Jpeg
         processedImage.width shouldBe 100
         processedImage.height shouldBe 100
       }
@@ -276,9 +277,9 @@ class LocalImageProcessorTest extends AnyFlatSpec with Matchers with ScalaFuture
 
   it should "handle WEBP format with fallback" in
     withTempImage() { path =>
-      val result = processor.convertFormat(path, ImageFormat.WEBP)
+      val result = processor.convertFormat(path, MediaType.WebP)
 
       result.isRight shouldBe true
-      result.foreach(_.format shouldBe ImageFormat.WEBP)
+      result.foreach(_.format shouldBe MediaType.WebP)
     }
 }

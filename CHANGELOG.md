@@ -7,7 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`llm4s-media`, a shared vocabulary for multimodal code** - landed as part of
+  [#1130](https://github.com/llm4s/llm4s/issues/1130), ahead of `llm4s-image` and
+  `llm4s-speech` so those carves are pure file moves. `org.llm4s.media.MediaType` (MIME string,
+  canonical extension, category, and lookups by extension, path or MIME type, refining into
+  `ImageMediaType` and `AudioMediaType`) and `org.llm4s.media.MediaCategory`. Vocabulary only:
+  no I/O, no content sniffing, no third-party dependencies - Tika-based sniffing stays in
+  `llm4s-rag` and resolves its result through `MediaType.fromMimeType`.
+
+  This replaces three overlapping enumerations of the same handful of image formats that
+  `llm4s-core` had accumulated - `imagegeneration.ImageFormat`, `imageprocessing.ImageFormat`
+  (structurally identical to the first, different package) and `imageprocessing.MediaType` -
+  plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
+
 ### Changed
+- **Breaking: image formats are now `org.llm4s.media.MediaType`.** A deliberate source break
+  ahead of the 1.0 API freeze: `ImageFormat.PNG`/`JPEG`/`WEBP`/`GIF` become
+  `MediaType.Png`/`Jpeg`/`WebP`/`Gif`, `MediaType.value` becomes `.mimeType`, and
+  `MediaType.fromPath`/`fromExtension` return `Option` instead of silently answering JPEG for
+  anything unrecognised. Carving `image` and `speech` out of core first would have frozen the
+  three copies into three artifacts, making this a cross-module break instead of an in-module
+  one. See the [migration note](docs/reference/migration.md#slice-3-llm4s-media).
 - **The published Scaladoc covers every module again, not just `core`.** `pages.yml` built the
   API site from `core/doc` alone, which was correct when core was the whole library. The carve
   slices have since moved public API out of it, so the site had silently lost `llm4s-rag`,

@@ -3,6 +3,7 @@ package org.llm4s.imageprocessing.provider
 
 import org.llm4s.imageprocessing._
 import org.llm4s.imageprocessing.config.OpenAIVisionConfig
+import org.llm4s.media.{ ImageMediaType, MediaType }
 import org.llm4s.error.LLMError
 import ujson.read
 
@@ -52,7 +53,9 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
         "Analyze this image in detail. Describe what you see, identify any objects, text, or people present. " +
           "Provide tags that categorize the image content."
       )
-      mediaType = MediaType.fromPath(imagePath)
+      // An extension that names nothing is sent as JPEG, the API's own assumption for an
+      // unlabelled image; refusing to guess would cost the call entirely.
+      mediaType = MediaType.imageFromPath(imagePath).getOrElse(MediaType.Jpeg)
       visionResponse <- callOpenAIVisionAPI(base64Image, analysisPrompt, mediaType).toEither.left
         .map(e => LLMError.apiCallFailed("OpenAI", s"OpenAI Vision API call failed: ${e.getMessage}"))
     } yield parseVisionResponse(visionResponse, metadata)
@@ -80,7 +83,7 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
    */
   override def convertFormat(
     imagePath: String,
-    targetFormat: ImageFormat
+    targetFormat: ImageMediaType
   ): Either[LLMError, ProcessedImage] =
     // Delegate format conversion to local processor
     localProcessor.convertFormat(imagePath, targetFormat)
@@ -167,7 +170,7 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
       Base64.getEncoder.encodeToString(imageBytes)
     }
 
-  private def callOpenAIVisionAPI(base64Image: String, prompt: String, mediaType: MediaType): Try[String] =
+  private def callOpenAIVisionAPI(base64Image: String, prompt: String, mediaType: ImageMediaType): Try[String] =
     try {
       // Use type-safe serialization
       val requestBody = OpenAIRequestBody.serialize(

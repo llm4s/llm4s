@@ -3,39 +3,10 @@ package org.llm4s.imageprocessing
 import java.nio.file.Path
 import java.time.Instant
 import org.llm4s.error.LLMError
+import org.llm4s.media.ImageMediaType
 import cats.data.Validated
 import cats.syntax.validated._
 import scala.util.Try
-
-/**
- * Represents different image formats supported by the system.
- */
-sealed trait ImageFormat {
-  def extension: String
-  def mimeType: String
-}
-
-object ImageFormat {
-  case object PNG extends ImageFormat {
-    override def extension: String = "png"
-    override def mimeType: String  = "image/png"
-  }
-
-  case object JPEG extends ImageFormat {
-    override def extension: String = "jpg"
-    override def mimeType: String  = "image/jpeg"
-  }
-
-  case object WEBP extends ImageFormat {
-    override def extension: String = "webp"
-    override def mimeType: String  = "image/webp"
-  }
-
-  case object GIF extends ImageFormat {
-    override def extension: String = "gif"
-    override def mimeType: String  = "image/gif"
-  }
-}
 
 /**
  * Represents various image processing operations.
@@ -90,7 +61,7 @@ object ImageOperation {
  */
 case class ProcessedImage(
   data: Array[Byte],
-  format: ImageFormat,
+  format: ImageMediaType,
   width: Int,
   height: Int,
   metadata: ImageMetadata
