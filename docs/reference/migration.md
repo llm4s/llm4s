@@ -1,5 +1,54 @@
 # Migration Guide
 
+## Slice 3: `llm4s-mcp`
+
+Third of the module carves tracked in
+[#1126](https://github.com/llm4s/llm4s/issues/1126); slice 3 is
+[#1130](https://github.com/llm4s/llm4s/issues/1130), which carves three independent
+subsystems - `mcp`, `image` and `speech` - one artifact at a time. This note covers `mcp`;
+the other two follow. It is in the build but not yet in a release, so nothing here affects
+`0.4.1` or earlier.
+
+### What moved
+
+| Packages | New module |
+|---|---|
+| `org.llm4s.mcp` | `llm4s-mcp` |
+
+**Package names did not change, and there are no source breaks.** Nothing outside
+`org.llm4s.mcp` referenced it, so the whole package moved with no facade left behind.
+
+```scala
+// Before
+libraryDependencies += "org.llm4s" %% "llm4s-core" % version
+
+// After - only if you use the Model Context Protocol client, server or tool registry
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core" % version,
+  "org.llm4s" %% "llm4s-mcp"  % version
+)
+```
+
+### What `llm4s-core` sheds
+
+**Java-WebSocket.** Worth being precise about why, because it is not what
+[#1130](https://github.com/llm4s/llm4s/issues/1130) predicted: MCP does not use WebSockets at
+all. Its transports are stdio, HTTP and SSE, built on `Llm4sHttpClient` and
+`com.sun.net.httpserver`. `Deps.websocket` was declared on `llm4s-core` and imported by
+nothing in it - the only WebSocket code in the repo is `ContainerisedWorkspace` in
+`llm4s-workspace-client`, which declares the dependency itself. So core sheds it by dropping a
+declaration that was never used, and the dependency does not follow `mcp` anywhere.
+
+If you depend on `llm4s-core` and were picking up `org.java-websocket` transitively, declare
+it yourself.
+
+### Configuration keys
+
+None. `org.llm4s.mcp` reads no `reference.conf` keys and no `Llm4sConfig` method names a type
+that moved.
+
+---
+
 ## Slice 2: `llm4s-memory` and `llm4s-memory-postgres`
 
 Second of the module carves tracked in

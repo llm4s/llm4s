@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **The published Scaladoc covers every module again, not just `core`.** `pages.yml` built the
+  API site from `core/doc` alone, which was correct when core was the whole library. The carve
+  slices have since moved public API out of it, so the site had silently lost `llm4s-rag`,
+  `llm4s-knowledgegraph`, `llm4s-memory` and `llm4s-memory-postgres` - the pages were never
+  generated, which reads to a user as "this API does not exist" rather than as a failure. A new
+  unpublished `docs` project builds one aggregate Scaladoc across all published modules; the
+  ScalaDoc CI job runs it on every PR, and the deploy now fails if a known package is absent
+  instead of publishing a partial site. (Hand-rolled rather than sbt-unidoc, which still
+  invokes `dotty.tools.dottydoc.Main` and cannot run under Scala 3.7.) The docs-deploy path
+  filter also named only `modules/core/src/**`, so changes to any carved module stopped
+  triggering a deploy; it now covers every module.
+- **`llm4s-mcp` is carved out of `llm4s-core`** - the first artifact of the third module split
+  tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126)
+  ([#1130](https://github.com/llm4s/llm4s/issues/1130), which also carves `llm4s-image` and
+  `llm4s-speech`; those follow separately). `org.llm4s.mcp` becomes `llm4s-mcp`. Package names
+  are unchanged and there are no source breaks - nothing outside the package referenced it, so
+  it moved whole. See the [migration note](docs/reference/migration.md#slice-3-llm4s-mcp).
+
+  `llm4s-core` sheds **Java-WebSocket**, though not for the reason the slice issue predicted.
+  MCP does not use WebSockets: its transports are stdio, HTTP and SSE. `Deps.websocket` was
+  declared on core and imported by nothing in it - the repo's only WebSocket code is
+  `ContainerisedWorkspace` in `llm4s-workspace-client`, which declares the dependency itself.
+  So this removes an unused declaration rather than moving a dependency, and `llm4s-mcp` adds
+  no third-party dependency of its own.
 - **`llm4s-memory` and `llm4s-memory-postgres` are carved out of `llm4s-core`** - the second
   of the module splits tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126)
   ([#1129](https://github.com/llm4s/llm4s/issues/1129)). `org.llm4s.agent.memory` becomes

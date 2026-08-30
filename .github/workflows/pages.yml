@@ -6,7 +6,11 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
-      - 'modules/core/src/**'
+      # Every module's sources, not just core's: the carve slices (#1126) keep moving public
+      # API out of core, and a filter naming only core stops triggering a docs deploy for the
+      # modules that now hold it.
+      - 'modules/*/src/**'
+      - 'modules/workspace/*/src/**'
       - '.github/workflows/pages.yml'
 
   # Releases deploy by calling this workflow from release.yml, gated on the Maven
@@ -100,31 +104,41 @@ jobs:
 
       - name: Generate Scaladoc
         run: |
-          # Generate Scaladoc for both Scala versions
-          sbt "core/doc"
+          set -euo pipefail
 
-          # Find the generated doc directory (use Scala 3 by default)
-          SCALADOC_DIR=$(find modules/core/target -name "api" -type d | grep "scala-3" | head -1)
+          # One Scaladoc run across every published module. This used to be `core/doc`, which
+          # was right when core was the whole library; the carve slices (#1126) have since
+          # moved rag, knowledgegraph, memory, memory-postgres and mcp out of it, and a
+          # core-only build silently dropped their API pages. See the `docs` project in
+          # build.sbt for what it spans and how to keep it current.
+          sbt "docs/doc"
 
-          if [ -z "$SCALADOC_DIR" ]; then
-            # Fall back to Scala 2.13 if Scala 3 not found
-            SCALADOC_DIR=$(find modules/core/target -name "api" -type d | head -1)
+          SCALADOC_DIR=$(find modules/docs/target -name "api" -type d | grep "scala-3" | head -1)
+
+          if [ -z "$SCALADOC_DIR" ] || [ ! -d "$SCALADOC_DIR" ]; then
+            echo "::error::Aggregate Scaladoc not found under modules/docs/target."
+            exit 1
           fi
 
           echo "Scaladoc directory: $SCALADOC_DIR"
 
-          # Create scaladoc directory in docs
-          mkdir -p docs/scaladoc
-
-          # Copy Scaladoc to docs
-          if [ -n "$SCALADOC_DIR" ] && [ -d "$SCALADOC_DIR" ]; then
-            cp -r "$SCALADOC_DIR"/* docs/scaladoc/
-            echo "Scaladoc copied successfully"
-            ls -la docs/scaladoc/
-          else
-            echo "Warning: Scaladoc directory not found"
-            echo "<html><body><h1>Scaladoc</h1><p>API documentation will be available after the next release.</p></body></html>" > docs/scaladoc/index.html
+          # Guard against a silently partial site: every published module must contribute at
+          # least one package page. This is the check that would have caught slices 1 and 2
+          # dropping out of the published API docs.
+          missing=""
+          for pkg in llmconnect toolapi agent rag knowledgegraph vectorstore mcp workspace trace; do
+            if [ ! -d "$SCALADOC_DIR/org/llm4s/$pkg" ]; then missing="$missing $pkg"; fi
+          done
+          if [ ! -d "$SCALADOC_DIR/org/llm4s/agent/memory" ]; then missing="$missing agent.memory"; fi
+          if [ -n "$missing" ]; then
+            echo "::error::Aggregate Scaladoc is missing package(s):$missing"
+            echo "::error::Add the owning module to the \`docs\` project in build.sbt."
+            exit 1
           fi
+
+          mkdir -p docs/scaladoc
+          cp -r "$SCALADOC_DIR"/* docs/scaladoc/
+          echo "Scaladoc copied successfully"
 
       - name: Build Jekyll site
         working-directory: docs

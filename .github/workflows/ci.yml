@@ -125,7 +125,11 @@ jobs:
       - uses: sbt/setup-sbt@v1
 
       - name: Generate ScalaDoc
-        run: sbt doc
+        # `doc` covers each module on its own; `docs/doc` builds the single aggregate API tree
+        # that the docs site publishes (see the `docs` project in build.sbt). Both run here so
+        # a module missing from that project's source list fails a PR rather than quietly
+        # disappearing from the published Scaladoc.
+        run: sbt doc docs/doc
 
   # Code coverage (runs on one configuration to avoid duplication)
   coverage:
@@ -178,6 +182,7 @@ jobs:
           knowledgegraph/test knowledgegraph/coverageReport
           memory/test memory/coverageReport
           memoryPostgres/test memoryPostgres/coverageReport
+          mcp/test mcp/coverageReport
           coverageAggregate
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes
@@ -229,6 +234,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/memory-postgres/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: memory-postgres
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload mcp coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/mcp/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: mcp
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true
