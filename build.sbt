@@ -591,6 +591,45 @@ lazy val it = (project in file("modules/it"))
     )
   )
 
+// ---- unified Scaladoc across the published modules ----
+// The docs site publishes ONE API tree at /scaladoc/org/llm4s/..., and `pages.yml` used to
+// build it from `core/doc` alone. That was right when core was the whole library; each carve
+// slice (#1126) moves public API out of it, so by slice 3 the published Scaladoc had silently
+// lost `rag`, `knowledgegraph`, `memory` and `memory-postgres` - the pages were simply not
+// generated, which reads as "this API does not exist" rather than as a failure.
+//
+// This project owns no sources of its own: it borrows every published module's `Compile /
+// sources` and depends on them for the classpath, so `docs/doc` is one Scaladoc run across
+// the whole public API, with one index and one working search. It is a hand-rolled unidoc
+// because sbt-unidoc 0.5.0 still invokes `dotty.tools.dottydoc.Main`, which does not exist in
+// Scala 3.7 - it fails with ClassNotFoundException before generating anything.
+//
+// A module is listed here if and only if it is published. When a slice adds one, add it in
+// the same commit, or its API silently vanishes from the site.
+lazy val docs = (project in file("modules/docs"))
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
+  .settings(
+    name           := "llm4s-docs",
+    commonSettings,
+    publish / skip := true,
+    // Not measured: no sources of its own - it exists only to host the aggregate `doc` task.
+    coverageDisabled,
+    Compile / sources := {
+      (core / Compile / sources).value ++
+        (rag / Compile / sources).value ++
+        (knowledgegraph / Compile / sources).value ++
+        (memory / Compile / sources).value ++
+        (memoryPostgres / Compile / sources).value ++
+        (mcp / Compile / sources).value ++
+        (workspaceShared / Compile / sources).value ++
+        (workspaceClient / Compile / sources).value ++
+        (traceOpentelemetry / Compile / sources).value ++
+        (knowledgegraphNeo4j / Compile / sources).value
+    },
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty
+  )
+
 lazy val benchmarks = (project in file("modules/benchmarks"))
   .dependsOn(core, rag)
   .enablePlugins(JmhPlugin)

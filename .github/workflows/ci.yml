@@ -125,7 +125,11 @@ jobs:
       - uses: sbt/setup-sbt@v1
 
       - name: Generate ScalaDoc
-        run: sbt doc
+        # `doc` covers each module on its own; `docs/doc` builds the single aggregate API tree
+        # that the docs site publishes (see the `docs` project in build.sbt). Both run here so
+        # a module missing from that project's source list fails a PR rather than quietly
+        # disappearing from the published Scaladoc.
+        run: sbt doc docs/doc
 
   # Code coverage (runs on one configuration to avoid duplication)
   coverage:

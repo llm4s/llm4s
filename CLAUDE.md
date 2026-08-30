@@ -46,7 +46,13 @@ Slice order — each is an issue with its own scope and gotchas:
    otherwise. Carving code out of `core` without carrying its integration suite - or moving
    the suite and leaving it untagged - removes the only signal the carve has (see
    [#1143](https://github.com/llm4s/llm4s/issues/1143)).
-7. **Never add a provider by editing shared registration files** once slice 4 lands. Before then, note that `NamedProviderLoader`, `ProviderConfig`, `ProviderModelTypes`, `LLMConnect`, `ProviderCapabilities*` and `NamedProviderValidator` are the most contended files in the repo.
+7. **Add the new module to the `docs` project in `build.sbt`.** The published Scaladoc is one
+   aggregate API tree built from that project's source list, not from `core` alone. A module
+   missing from it does not fail - its API pages are simply never generated, which reads as
+   "this API does not exist". Slices 1 and 2 both hit this and it went unnoticed until slice 3;
+   `pages.yml` now fails the deploy if a known package is absent, and the ScalaDoc CI job runs
+   `docs/doc` on every PR.
+8. **Never add a provider by editing shared registration files** once slice 4 lands. Before then, note that `NamedProviderLoader`, `ProviderConfig`, `ProviderModelTypes`, `LLMConnect`, `ProviderCapabilities*` and `NamedProviderValidator` are the most contended files in the repo.
 
 Current per-module coverage floors are recorded in [#1127](https://github.com/llm4s/llm4s/issues/1127); floors ratchet upward and are never lowered.
 
