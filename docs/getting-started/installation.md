@@ -153,6 +153,28 @@ client — the document-extraction and loader dependencies that `llm4s-core` no 
 Package names are unchanged, so existing `org.llm4s.rag.*` imports keep working; see the
 [migration note](../reference/migration.md#slice-1-llm4s-rag-and-llm4s-knowledgegraph).
 
+### For agent memory
+
+{: .note }
+> Not yet published. `llm4s-memory` and `llm4s-memory-postgres` exist in the build as of
+> [#1129](https://github.com/llm4s/llm4s/issues/1129) but ship in the next release;
+> in `0.4.1` and earlier this code is still inside `llm4s-core`.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-memory" % llm4sVersion
+
+// only if you store memories in Postgres/pgvector
+libraryDependencies += "org.llm4s" %% "llm4s-memory-postgres" % llm4sVersion
+```
+
+`llm4s-memory` carries `MemoryStore`, the memory managers, and the in-memory and SQLite-backed
+stores; it adds sqlite-jdbc to your classpath and nothing else. `PostgresMemoryStore` lives in
+`llm4s-memory-postgres`, which brings HikariCP and the Postgres JDBC driver — the two
+dependencies `llm4s-core` no longer carries. Package names are unchanged, so existing
+`org.llm4s.agent.memory.*` imports keep working; see the
+[migration note](../reference/migration.md#slice-2-llm4s-memory-and-llm4s-memory-postgres).
+
 ### For Workspace (Containerized Execution)
 
 ```scala

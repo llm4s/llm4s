@@ -11,6 +11,23 @@ parent: Reference
 
 ---
 
+## Dependency
+
+{: .note }
+> Not yet published. `llm4s-memory-postgres` exists in the build as of
+> [#1129](https://github.com/llm4s/llm4s/issues/1129) but ships in the next release;
+> in `0.4.1` and earlier this code is inside `llm4s-core`.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-memory-postgres" % llm4sVersion
+```
+
+`PostgresMemoryStore` ships apart from the rest of `org.llm4s.agent.memory` because it is the
+only store needing HikariCP and a server-side JDBC driver; `llm4s-memory-postgres` brings both,
+and `llm4s-memory` with them. The package name is unchanged.
+
+---
+
 ## Features
 
 - **Durable Persistence**  

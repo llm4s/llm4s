@@ -1,5 +1,74 @@
 # Migration Guide
 
+## Slice 2: `llm4s-memory` and `llm4s-memory-postgres`
+
+Second of the module carves tracked in
+[#1126](https://github.com/llm4s/llm4s/issues/1126); slice 2 is
+[#1129](https://github.com/llm4s/llm4s/issues/1129). It is in the build but not yet in a
+release, so nothing here affects `0.4.1` or earlier.
+
+### What moved
+
+| Packages | New module |
+|---|---|
+| `org.llm4s.agent.memory`, except `PostgresMemoryStore` | `llm4s-memory` |
+| `org.llm4s.agent.memory.PostgresMemoryStore` | `llm4s-memory-postgres` |
+
+**Package names did not change, and there are no source breaks in this slice.** Nothing
+outside `org.llm4s.agent.memory` referenced it, so the whole package moved with no facade left
+behind. Add the dependency; your imports stay as they are.
+
+```scala
+// Before
+libraryDependencies += "org.llm4s" %% "llm4s-core" % version
+
+// After — only if you use agent memory
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"   % version,
+  "org.llm4s" %% "llm4s-memory" % version
+)
+
+// ...and only if you store memories in Postgres/pgvector
+libraryDependencies += "org.llm4s" %% "llm4s-memory-postgres" % version
+```
+
+### Why two artifacts
+
+`PostgresMemoryStore` was the only file in the package that needed a connection pool and a
+server-side driver. Shipping it alongside `InMemoryStore` would mean every user of agent
+memory inherits HikariCP and the Postgres JDBC driver whether or not they ever open a
+connection. `llm4s-memory` carries sqlite-jdbc — for the file-backed `SQLiteMemoryStore` and
+`VectorMemoryStore` — and nothing else; `llm4s-memory-postgres` depends on `llm4s-memory` and
+adds the two heavy dependencies.
+
+### What `llm4s-core` sheds
+
+**HikariCP and the Postgres JDBC driver** leave the core classpath. sqlite-jdbc leaves too:
+all three used to be declared in the build's shared settings, which put them on *every*
+module's classpath, so core could not shed them by itself. They are now declared only by the
+modules that open a connection. If you depend on `llm4s-core` and use any of the three
+directly, declare them yourself rather than relying on the transitive edge.
+
+### `org.llm4s.vectorstore.PostgresVectorHelpers`
+
+Unchanged for callers — same package, same object, same methods — but worth knowing where it
+ships. It is the pgvector text codec (`[0.1,0.2,0.3]` ⇄ `Array[Float]`), it names no JDBC
+type, and it now has consumers in two modules that do not and should not depend on each
+other: `PgVectorStore` in `llm4s-rag` and `PostgresMemoryStore` in `llm4s-memory-postgres`.
+Rather than have either reach for the other, the single copy lives in `llm4s-core`, which both
+already depend on. Slice 1 had briefly moved it into `llm4s-rag` and left a private duplicate
+in core for `PostgresMemoryStore`; that duplicate is now gone.
+
+So `org.llm4s.vectorstore` is split across two jars: this one object in `llm4s-core`, the rest
+in `llm4s-rag`. It resolves the same way on any ordinary classpath.
+
+### Configuration keys
+
+None. `agent/memory` reads no `reference.conf` keys and no `Llm4sConfig` method returns a type
+that moved, so there is nothing to migrate.
+
+---
+
 ## Slice 1: `llm4s-rag` and `llm4s-knowledgegraph`
 
 First of the module carves tracked in

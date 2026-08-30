@@ -8,6 +8,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **`llm4s-memory` and `llm4s-memory-postgres` are carved out of `llm4s-core`** - the second
+  of the module splits tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126)
+  ([#1129](https://github.com/llm4s/llm4s/issues/1129)). `org.llm4s.agent.memory` becomes
+  `llm4s-memory`, except `PostgresMemoryStore`, which becomes `llm4s-memory-postgres`.
+  Package names are unchanged and there are no source breaks in this slice - nothing outside
+  the package referenced it, so it moved whole. See the
+  [migration note](docs/reference/migration.md#slice-2-llm4s-memory-and-llm4s-memory-postgres).
+
+  The store split is the point of the slice: `PostgresMemoryStore` was the one file needing a
+  connection pool and a server-side driver, so shipping it with `InMemoryStore` would mean
+  every user of agent memory inherits HikariCP and a JDBC driver. `llm4s-memory` carries
+  sqlite-jdbc for the two file-backed stores and nothing else.
+
+  `llm4s-core` sheds **HikariCP and the Postgres JDBC driver**, and sqlite-jdbc with them. All
+  three had been declared in the build's shared settings, which put a driver and a pool on
+  every module's classpath including those with no database code at all; they are now declared
+  only by the modules that open a connection. A build that depends on `llm4s-core` and used
+  any of the three transitively now has to declare it.
+
+  `org.llm4s.vectorstore.PostgresVectorHelpers` stays in `llm4s-core` rather than moving to
+  `llm4s-rag` with the rest of its package. It is a pure pgvector text codec naming no JDBC
+  type, and its two consumers - `PgVectorStore` in `llm4s-rag` and `PostgresMemoryStore` in
+  `llm4s-memory-postgres` - are in modules that must not depend on each other. Keeping the one
+  copy in the module both already depend on retires the temporary duplicate slice 1 left
+  behind in `org.llm4s.agent.memory`.
 - **`llm4s-rag` and `llm4s-knowledgegraph` are carved out of `llm4s-core`** - the first of
   the module splits tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126)
   ([#1128](https://github.com/llm4s/llm4s/issues/1128)). `rag`, `vectorstore`, `chunking`,

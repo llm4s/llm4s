@@ -136,13 +136,17 @@ lazy val commonSettings = Seq(
     Deps.scalamock % Test,
     Deps.scalatestplusScalacheck % Test,
     Deps.fansi,
-    Deps.postgres,
-    Deps.sqlite,
     Deps.config,
-    Deps.pureConfig,
-    Deps.hikariCP
+    Deps.pureConfig
   )
 )
+
+// `Deps.postgres`, `Deps.sqlite` and `Deps.hikariCP` used to live in `commonSettings`, which
+// put a JDBC driver and a connection pool on every module's classpath - including modules
+// with no database code at all. Slice 2 (#1129) needs core to shed HikariCP and Postgres, and
+// a shared default is not something core can shed on its own. They are now declared by the
+// projects that actually open a connection: `rag`, `memory`, `memoryPostgres`, and the
+// workspace projects that already declared them explicitly.
 
 // `coveragePolicy` is read reflectively by `coveragePolicyCheck` (via Project.extract),
 // so sbt's unused-setting lint cannot see the use.
@@ -168,6 +172,8 @@ lazy val llm4s = (project in file("."))
     core,
     rag,
     knowledgegraph,
+    memory,
+    memoryPostgres,
     samples,
     configPolicy,
     workspaceShared,
@@ -225,11 +231,10 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
-    // Measured 74.19% statement coverage after slice 1 carved `rag`, `vectorstore`,
-    // `chunking`, `reranker`, `eval` and `knowledgegraph` out (`sbt coverage core/test
-    // core/coverageReport`); it was 72.42% on main @ 5a62e2ac before the carve.
-    // Floor is the measured value rounded down to the nearest 5. Ratchet it up as the
-    // module is carved apart; never lower it.
+    // Measured 73.85% statement coverage after slice 2 carved `agent/memory` out (`sbt
+    // coverage core/test core/coverageReport`); it was 74.19% after slice 1 and 72.42% on
+    // main @ 5a62e2ac before either. Floor is the measured value rounded down to the nearest
+    // 5. Ratchet it up as the module is carved apart; never lower it.
     coverageFloor(70),
     Test / fork := true,
     Test / javaOptions ++= Seq(
@@ -274,9 +279,7 @@ lazy val core = (project in file("modules/core"))
       Deps.commonsIO,
       Deps.jna,
       Deps.vosk,
-      Deps.postgres,
       Deps.config,
-      Deps.hikariCP,
       Deps.prometheusCore,
       Deps.prometheusHttp
     )
@@ -328,6 +331,65 @@ lazy val rag = (project in file("modules/rag"))
       Deps.jsoup,
       Deps.awsS3,
       Deps.awsSts,
+      Deps.ujson,
+      // No longer inherited from `commonSettings` (see the note there). `vectorstore` and
+      // `rag.permissions.pg` open both SQLite and Postgres connections, pooled by Hikari.
+      Deps.postgres,
+      Deps.sqlite,
+      Deps.hikariCP,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
+// ---- slice 2 of the modularisation programme (#1129) ----
+// `agent/memory` leaves core. The stores split across two artifacts because
+// `PostgresMemoryStore` was the package's only heavyweight: keeping it with the rest would
+// mean anyone using agent memory at all inherits HikariCP and a JDBC driver.
+//
+// Nothing outside `org.llm4s.agent.memory` referenced it, so the whole package moves with no
+// facade left behind, and the package name is unchanged: users of 0.4.x add a dependency
+// rather than rewriting imports.
+
+lazy val memory = (project in file("modules/memory"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-memory",
+    commonSettings,
+    // Measured 81.10% statement coverage (`sbt coverage memory/test memory/coverageReport`)
+    // on the code as carved out of core. Floor is the measured value rounded down to the
+    // nearest 5. Never lower it.
+    coverageFloor(80),
+    Test / fork := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      // `SQLiteMemoryStore` and `VectorMemoryStore` are file-backed; no pool, no Postgres.
+      Deps.sqlite,
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
+lazy val memoryPostgres = (project in file("modules/memory-postgres"))
+  .dependsOn(memory)
+  .settings(
+    name := "llm4s-memory-postgres",
+    commonSettings,
+    // Measured 60.33% statement coverage (`sbt coverage memoryPostgres/test
+    // memoryPostgres/coverageReport`) on the code as carved out of core. Floor is the measured
+    // value rounded down to the nearest 5. Never lower it. The in-module suite is mock-backed;
+    // the real signal is `modules/it`'s `PostgresMemoryStoreSpec`, which runs on every PR
+    // against a pgvector service container (#1149) and is not counted here.
+    coverageFloor(60),
+    Test / fork := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      // The two dependencies this split keeps off `llm4s-memory` - and, with it, off core.
+      Deps.postgres,
+      Deps.hikariCP,
       Deps.ujson,
       Deps.scalatest % Test,
       Deps.scalamock % Test
@@ -395,7 +457,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules//samples"))
-  .dependsOn(core, rag, knowledgegraph, knowledgegraphNeo4j)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, knowledgegraphNeo4j)
   .settings(
     name := "llm4s-samples",
     commonSettings,
@@ -470,7 +532,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   )
 
 lazy val it = (project in file("modules/it"))
-  .dependsOn(core, rag, knowledgegraph, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
   .settings(
     name := "llm4s-it",
     commonSettings,
