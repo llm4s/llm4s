@@ -40,6 +40,14 @@ flags:
     paths:
       - modules/knowledgegraph/src/main/scala
     carryforward: true
+  memory:
+    paths:
+      - modules/memory/src/main/scala
+    carryforward: true
+  memory-postgres:
+    paths:
+      - modules/memory-postgres/src/main/scala
+    carryforward: true
   knowledgegraph-neo4j:
     paths:
       - modules/knowledgegraph-neo4j/src/main/scala

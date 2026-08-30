@@ -18,6 +18,7 @@ What has actually moved so far, in the build but not yet in a release:
 | Slice | Modules carved | Status |
 |---|---|---|
 | [1](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` | in the build, unpublished |
+| [2](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` | in the build, unpublished |
 
 The latest release tag is `v0.4.1`, which is still a single `llm4s-core`. The first release to publish separate module artifacts will be the next one.
 
@@ -64,7 +65,8 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `llmconnect/provider` — Cohere, Mistral, and other community clients | community provider modules | Beta |
 | `rag`, `vectorstore`, `chunking`, `reranker`, `eval` — **carved** | `llm4s-rag` | Beta |
 | `extract` (consolidated from `rag/extract` + `llmconnect/extractors`) and `rag/embed` (from `llmconnect/encoding`) — **carved** | `llm4s-rag` | Beta |
-| `agent/memory` | `llm4s-memory` | Beta |
+| `agent/memory` (excluding `PostgresMemoryStore`) — **carved** | `llm4s-memory` | Beta |
+| `agent/memory/PostgresMemoryStore` — **carved** | `llm4s-memory-postgres` | Beta |
 | `mcp` | `llm4s-mcp` | Beta |
 | `speech` | `llm4s-speech` | Experimental |
 | `imagegeneration`, `imageprocessing` | `llm4s-image` | Experimental |
@@ -76,6 +78,8 @@ Notes:
 - Rows marked **carved** already live in their target sbt module. Their package names are unchanged, so this is a build-file change for users, not an import rewrite — with one exception, `org.llm4s.extract`, described in the [migration guide](migration#slice-1-llm4s-rag-and-llm4s-knowledgegraph).
 - `org.llm4s.extract` is a new package name, not a rename of an existing one — see [Slice 1](https://github.com/llm4s/llm4s/issues/1128) for why the two extractors were consolidated rather than just moved.
 - `org.llm4s.knowledgegraph.graphrag` keeps its package name but ships in `llm4s-rag`, not `llm4s-knowledgegraph`. `GraphRAG` and `vectorstore` referenced each other, which made the two modules inseparable; moving the one file that reaches into `vectorstore` broke the cycle. Package names track the API; module boundaries track the dependency graph, and here they disagree.
+- `llm4s-memory` splits in two. `PostgresMemoryStore` was the only file in `agent/memory` that needed a connection pool and a server-side driver, so it ships as `llm4s-memory-postgres`; keeping it with the rest would mean anyone using agent memory at all inherits HikariCP and the Postgres JDBC driver. `llm4s-memory` itself carries only sqlite-jdbc, for the two file-backed stores.
+- `org.llm4s.vectorstore.PostgresVectorHelpers` ships in `llm4s-core`, not in `llm4s-rag` with the rest of `org.llm4s.vectorstore`. It is a pure `Array[Float]` ⇄ pgvector-text codec with no JDBC types in it, and it has consumers in two modules that must not depend on each other (`llm4s-rag` and `llm4s-memory-postgres`); the module they share is core. This is the same package-versus-module disagreement as `graphrag`, in the other direction.
 - Vertex AI's exact home is unsettled — it is bundled with Gemini here because it is Google's hosting path for Gemini models, but it could end up a separate or community module once #1131 lands.
 
 ## What Frozen means
