@@ -1,8 +1,8 @@
 package org.llm4s.config
 
-import org.llm4s.config.ProvidersConfigModel.{ ProviderKind, ProviderName }
+import org.llm4s.config.ProvidersConfigModel.{ ProviderId, ProviderName }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
-import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAIConfig, VertexAIConfig }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import pureconfig.ConfigSource
@@ -36,6 +36,38 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
           fail(s"Expected DeepSeekConfig, got $other")
     }
 
+    // Regression for the #1131 scoping finding: before the capabilities registry gained a
+    // `vertexai` entry, this HOCON failed validation outright, even though NamedProviderLoader
+    // and LLMConnect had supported Vertex AI all along.
+    "load a Vertex AI named provider end to end" in {
+      val hocon =
+        """
+          |llm4s {
+          |  providers {
+          |    vertex-main {
+          |      provider = "vertexai"
+          |      model = "gemini-2.0-flash"
+          |      endpoint = "my-gcp-project"
+          |      organization = "europe-west4"
+          |    }
+          |  }
+          |}
+          |""".stripMargin
+
+      val cfg =
+        Llm4sConfig.provider(ConfigSource.string(hocon), "vertex-main").fold(err => fail(err.toString), identity)
+
+      cfg match
+        case vertex: VertexAIConfig =>
+          vertex.projectId shouldBe "my-gcp-project"
+          vertex.location shouldBe "europe-west4"
+          vertex.model shouldBe "gemini-2.0-flash"
+          vertex.providerId shouldBe ProviderId("vertexai")
+          vertex.endpointUrl shouldBe Some("https://europe-west4-aiplatform.googleapis.com/v1")
+        case other =>
+          fail(s"Expected VertexAIConfig, got $other")
+    }
+
     "fail when a sibling named provider is invalid even if the requested provider is valid" in {
       val hocon =
         """
@@ -58,7 +90,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
 
       result match
         case Left(err) =>
-          err.message should include("Gemini provider 'broken-gemini' is missing required fields")
+          err.message should include("Provider 'broken-gemini' (provider = gemini) is missing required fields")
           err.message should include("- apiKey: set it in llm4s.conf under providers.broken-gemini.apiKey")
         case Right(cfg) =>
           fail(s"Expected invalid sibling named provider to fail whole config, got config: $cfg")
@@ -170,7 +202,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       result match
         case Right(models) =>
           models.map(_.name.asString) shouldBe List("llama3.2:latest")
-          models.map(_.provider) shouldBe List(ProviderKind.Ollama)
+          models.map(_.provider) shouldBe List(ProviderId("ollama"))
           httpClient.lastUrl shouldBe Some("http://localhost:11434/api/tags")
         case Left(err) =>
           fail(s"Expected listed models, got error: ${err.message}")

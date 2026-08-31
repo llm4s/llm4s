@@ -4,7 +4,7 @@ import java.time.Instant
 
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OllamaConfig, OpenAIConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
-import org.llm4s.types.ProviderModelTypes.ProviderKind
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -51,7 +51,7 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers {
       exchangeLogging = ProviderExchangeLogging.enabled(ProviderExchangeSink.noop)
     )
 
-    val res = LLMConnect.getClient(ProviderKind.Ollama, cfg, options)
+    val res = LLMConnect.getClient(ProviderId("ollama"), cfg, options)
 
     res.isRight shouldBe true
   }

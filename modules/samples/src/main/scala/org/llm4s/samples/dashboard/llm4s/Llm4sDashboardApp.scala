@@ -46,7 +46,7 @@ object Llm4sDashboardApp:
           now = Llm4sDashboardRuntime.currentTime(),
           prompt = PromptHistory.initial(InMemoryHistoryStore(maxEntries = 100)),
           status = "Dashboard ready. Type help, provider, pulse, clear, or quit.",
-          providerStatus = s"${providerConfig.provider} / ${providerConfig.model}",
+          providerStatus = s"${providerConfig.providerId.asString} / ${providerConfig.model}",
           events = Vector(
             "boot: llm4s dashboard launched",
             "integration: termflow resolved from published dependency"

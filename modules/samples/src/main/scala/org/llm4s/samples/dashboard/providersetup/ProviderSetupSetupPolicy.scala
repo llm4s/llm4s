@@ -1,7 +1,7 @@
 package org.llm4s.samples.dashboard.providersetup
 
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupModel.*
-import org.llm4s.types.ProviderModelTypes.ProviderKind
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import termflow.tui.PromptHistory
 
 object ProviderSetupSetupPolicy:
@@ -10,7 +10,7 @@ object ProviderSetupSetupPolicy:
     isDefaultProviderTab: Boolean,
     activeTab: SetupTabId,
     activeDocId: SetupTabDocId,
-    selectedProviderKind: Option[ProviderKind],
+    selectedProviderId: Option[ProviderId],
     selectedConfiguredProvider: Option[ConfiguredProvider],
     sessionTarget: SessionOverrideTarget
   )

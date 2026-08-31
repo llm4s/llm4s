@@ -54,88 +54,33 @@ object ProviderModelTypes:
   /** Returns the underlying provider name string. */
   extension (value: ProviderName) def asName: String = value
 
-  /** Enumeration of all supported LLM provider kinds. */
-  enum ProviderKind:
-    case OpenAI
-    case OpenRouter
-    case Requesty
-    case Azure
-    case Anthropic
-    case Ollama
-    case Zai
-    case Gemini
-    case DeepSeek
-    case Cohere
-    case Mistral
-    case VertexAI
-
-  /** Companion object with lookup utilities for `ProviderKind`. */
-  object ProviderKind:
-    /** All known provider kinds in a fixed sequence. */
-    val all: Seq[ProviderKind] = Seq(
-      ProviderKind.OpenAI,
-      ProviderKind.OpenRouter,
-      ProviderKind.Requesty,
-      ProviderKind.Azure,
-      ProviderKind.Anthropic,
-      ProviderKind.Ollama,
-      ProviderKind.Zai,
-      ProviderKind.Gemini,
-      ProviderKind.DeepSeek,
-      ProviderKind.Cohere,
-      ProviderKind.Mistral,
-      ProviderKind.VertexAI
-    )
-
-    /**
-     * Parses a `ProviderKind` from a case-insensitive provider name string.
-     *
-     * @param value The provider name string (e.g. `"openai"`, `"anthropic"`, `"google"`).
-     * @return `Some(ProviderKind)` if recognised, `None` otherwise.
-     */
-    def fromString(value: String): Option[ProviderKind] =
-      value.trim.toLowerCase match
-        case "openai"              => Some(ProviderKind.OpenAI)
-        case "openrouter"          => Some(ProviderKind.OpenRouter)
-        case "requesty"            => Some(ProviderKind.Requesty)
-        case "azure"               => Some(ProviderKind.Azure)
-        case "anthropic"           => Some(ProviderKind.Anthropic)
-        case "ollama"              => Some(ProviderKind.Ollama)
-        case "zai"                 => Some(ProviderKind.Zai)
-        case "gemini"              => Some(ProviderKind.Gemini)
-        case "google"              => Some(ProviderKind.Gemini)
-        case "deepseek"            => Some(ProviderKind.DeepSeek)
-        case "cohere"              => Some(ProviderKind.Cohere)
-        case "mistral"             => Some(ProviderKind.Mistral)
-        case "vertex" | "vertexai" => Some(ProviderKind.VertexAI)
-        case _                     => None
-
-    /**
-     * Alias for `fromString` — parses a `ProviderKind` from a provider name string.
-     *
-     * @param value The provider name string.
-     * @return `Some(ProviderKind)` if recognised, `None` otherwise.
-     */
-    def fromName(value: String): Option[ProviderKind] =
-      fromString(value)
+  /**
+   * The canonical identifier of an LLM provider implementation, e.g. `"openai"`.
+   *
+   * This is an open vocabulary, not an enumeration: any string names a provider,
+   * and whether that provider can actually be resolved is decided at resolution
+   * time, not at parse time. That is what allows a provider to be supplied by a
+   * module `llm4s-core` has never heard of — see
+   * [[https://github.com/llm4s/llm4s/issues/1131 #1131]].
+   *
+   * Values are canonicalised on construction to trimmed lowercase, so
+   * `ProviderId(" OpenAI ")` and `ProviderId("openai")` are equal and share a
+   * single spelling in error messages and config.
+   */
+  opaque type ProviderId = String
 
   /**
-   * Returns the canonical lowercase name string for this `ProviderKind`.
+   * Companion for the [[ProviderId]] opaque type.
    *
-   * @return The provider name string (e.g. `"openai"`, `"anthropic"`).
+   * The `asString` extension lives here rather than alongside the other
+   * `as*` extensions above because every newtype in this object erases to
+   * `String`: a second `asString` at that level would be a double definition
+   * after erasure. Companion-scoped extensions are found through the opaque
+   * type's implicit scope, so `id.asString` resolves without an extra import.
    */
-  extension (kind: ProviderKind)
-    def name: String =
-      kind match
-        case ProviderKind.OpenAI     => "openai"
-        case ProviderKind.OpenRouter => "openrouter"
-        case ProviderKind.Requesty   => "requesty"
-        case ProviderKind.Azure      => "azure"
-        case ProviderKind.Anthropic  => "anthropic"
-        case ProviderKind.Ollama     => "ollama"
-        case ProviderKind.Zai        => "zai"
-        case ProviderKind.Gemini     => "gemini"
-        case ProviderKind.DeepSeek   => "deepseek"
-        case ProviderKind.Cohere     => "cohere"
-        case ProviderKind.Mistral    => "mistral"
-        case ProviderKind.VertexAI   => "vertexai"
+  object ProviderId:
+    /** Canonicalises a raw provider string to a [[ProviderId]] (trimmed, lowercased). */
+    def apply(raw: String): ProviderId = raw.trim.toLowerCase
+
+    /** Returns the canonical provider identifier string, e.g. `"openai"`. */
+    extension (id: ProviderId) def asString: String = id

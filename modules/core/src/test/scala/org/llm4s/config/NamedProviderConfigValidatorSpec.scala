@@ -25,7 +25,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Right(cfg) =>
-          cfg.provider shouldBe ProviderKind.OpenAI
+          cfg.provider shouldBe ProviderId("openai")
           cfg.model.asString shouldBe "gpt-4o-mini"
           cfg.baseUrl.map(_.asUrl) shouldBe Some("https://api.openai.com/v1")
           cfg.apiKey.map(_.asKey) shouldBe Some("sk-test")
@@ -48,7 +48,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Right(cfg) =>
-          cfg.provider shouldBe ProviderKind.OpenRouter
+          cfg.provider shouldBe ProviderId("openrouter")
           cfg.model.asString shouldBe "openai/gpt-4o-mini"
           cfg.apiKey.map(_.asKey) shouldBe Some("or-key")
         case Left(err) =>
@@ -69,7 +69,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Right(cfg) =>
-          cfg.provider shouldBe ProviderKind.Azure
+          cfg.provider shouldBe ProviderId("azure")
           cfg.model.asString shouldBe "gpt-4o"
           cfg.apiKey.map(_.asKey) shouldBe Some("azure-key")
           cfg.endpoint shouldBe Some("https://my-resource.openai.azure.com")
@@ -92,7 +92,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Right(cfg) =>
-          cfg.provider shouldBe ProviderKind.Anthropic
+          cfg.provider shouldBe ProviderId("anthropic")
           cfg.model.asString shouldBe "claude-sonnet-4-20250514"
           cfg.apiKey.map(_.asKey) shouldBe Some("sk-ant-test")
         case Left(err) =>
@@ -113,7 +113,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Right(cfg) =>
-          cfg.provider shouldBe ProviderKind.Ollama
+          cfg.provider shouldBe ProviderId("ollama")
           cfg.model.asString shouldBe "llama3:latest"
           cfg.baseUrl.map(_.asUrl) shouldBe Some("http://localhost:11434")
           cfg.apiKey shouldBe None
@@ -135,7 +135,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Right(cfg) =>
-          cfg.provider shouldBe ProviderKind.Zai
+          cfg.provider shouldBe ProviderId("zai")
           cfg.model.asString shouldBe "GLM-4.7"
           cfg.apiKey.map(_.asKey) shouldBe Some("zai-key")
         case Left(err) =>
@@ -156,7 +156,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Right(cfg) =>
-          cfg.provider shouldBe ProviderKind.Gemini
+          cfg.provider shouldBe ProviderId("gemini")
           cfg.model.asString shouldBe "gemini-2.5-flash"
           cfg.apiKey.map(_.asKey) shouldBe Some("google-key")
         case Left(err) =>
@@ -177,7 +177,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Right(cfg) =>
-          cfg.provider shouldBe ProviderKind.DeepSeek
+          cfg.provider shouldBe ProviderId("deepseek")
           cfg.model.asString shouldBe "deepseek-chat"
           cfg.apiKey.map(_.asKey) shouldBe Some("deepseek-key")
         case Left(err) =>
@@ -198,7 +198,7 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Right(cfg) =>
-          cfg.provider shouldBe ProviderKind.Cohere
+          cfg.provider shouldBe ProviderId("cohere")
           cfg.model.asString shouldBe "command-r-plus"
           cfg.apiKey.map(_.asKey) shouldBe Some("cohere-key")
         case Left(err) =>
@@ -219,11 +219,73 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Right(cfg) =>
-          cfg.provider shouldBe ProviderKind.Mistral
+          cfg.provider shouldBe ProviderId("mistral")
           cfg.model.asString shouldBe "mistral-large-latest"
           cfg.apiKey.map(_.asKey) shouldBe Some("mistral-key")
         case Left(err) =>
           fail(s"Expected Mistral NamedProviderConfig, got error: ${err.message}")
+    }
+
+    // Regression for the gap found while scoping #1131: `vertexai` was a supported provider in
+    // NamedProviderLoader and LLMConnect, but had no capabilities entry and no validator, so
+    // validation rejected it outright and it could never be reached from config at all.
+    "validate and normalize a Vertex AI named provider section" in {
+      validate(
+        "vertex-main",
+        RawNamedProviderSection(
+          provider = Some("vertexai"),
+          model = Some("gemini-2.0-flash"),
+          baseUrl = None,
+          apiKey = Some("/path/to/credentials.json"),
+          organization = Some("europe-west4"),
+          endpoint = Some("my-gcp-project"),
+          apiVersion = None,
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.provider shouldBe ProviderId("vertexai")
+          cfg.model.asString shouldBe "gemini-2.0-flash"
+          cfg.endpoint shouldBe Some("my-gcp-project")
+          cfg.organization shouldBe Some("europe-west4")
+        case Left(err) =>
+          fail(s"Expected Vertex AI NamedProviderConfig, got error: ${err.message}")
+    }
+
+    "accept the 'vertex' alias for Vertex AI" in {
+      validate(
+        "vertex-alias",
+        RawNamedProviderSection(
+          provider = Some("Vertex"),
+          model = Some("gemini-2.0-flash"),
+          baseUrl = None,
+          apiKey = None,
+          organization = None,
+          endpoint = Some("my-gcp-project"),
+          apiVersion = None,
+        )
+      ) match
+        case Right(cfg) => cfg.provider shouldBe ProviderId("vertexai")
+        case Left(err)  => fail(s"Expected the 'vertex' alias to resolve, got error: ${err.message}")
+    }
+
+    "fail clearly when a Vertex AI section omits the GCP project id" in {
+      validate(
+        "vertex-missing",
+        RawNamedProviderSection(
+          provider = Some("vertexai"),
+          model = Some("gemini-2.0-flash"),
+          baseUrl = None,
+          apiKey = None,
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+        )
+      ) match
+        case Left(err) =>
+          err.message should include("Provider 'vertex-missing' (provider = vertexai) is missing required fields")
+          err.message should include("- endpoint: the GCP project ID that owns your Vertex AI resources")
+        case Right(cfg) =>
+          fail(s"Expected a missing-endpoint failure, got config: $cfg")
     }
 
     "fail clearly when provider field is missing" in {
@@ -245,7 +307,10 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           fail(s"Expected provider validation failure, got config: $cfg")
     }
 
-    "fail clearly when provider kind is unknown" in {
+    // Unknown ids are no longer rejected while *parsing* - they parse to a ProviderId and fail at
+    // resolution, which is what lets a provider ship in its own module (#1131). The error must
+    // still name what went wrong and what is available.
+    "fail clearly when the provider id cannot be resolved" in {
       validate(
         "weird",
         RawNamedProviderSection(
@@ -259,9 +324,11 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Left(err) =>
-          err.message should include("unknown provider 'moonbeam'")
+          err.message should include("'moonbeam'")
+          err.message should include("Registered providers:")
+          err.message should include("openai")
         case Right(cfg) =>
-          fail(s"Expected unknown provider validation failure, got config: $cfg")
+          fail(s"Expected unresolvable provider failure, got config: $cfg")
     }
 
     "fail clearly when model field is missing" in {

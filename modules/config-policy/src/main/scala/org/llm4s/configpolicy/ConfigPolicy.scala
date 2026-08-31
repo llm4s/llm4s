@@ -79,40 +79,12 @@ object ConfigPolicyEngine {
         }
     }
 
-  /** `@unchecked`: keep a default branch for future [[ProviderConfig]] subtypes without failing -Werror. */
-  def providerName(config: ProviderConfig): String =
-    (config: @unchecked) match {
-      case _: OpenAIConfig    => "openai"
-      case _: AzureConfig     => "azure"
-      case _: AnthropicConfig => "anthropic"
-      case _: OllamaConfig    => "ollama"
-      case _: ZaiConfig       => "zai"
-      case _: GeminiConfig    => "gemini"
-      case _: DeepSeekConfig  => "deepseek"
-      case _: CohereConfig    => "cohere"
-      case _: MistralConfig   => "mistral"
-      case other =>
-        val simple = other.getClass.getSimpleName.stripSuffix("Config")
-        if (simple.isEmpty) "unknown"
-        else simple.toLowerCase
-    }
+  def providerName(config: ProviderConfig): String = config.providerId.asString
 
   def providerModel(config: ProviderConfig): String =
     s"${providerName(config)}/${config.model}"
 
-  def baseUrlOrEndpoint(config: ProviderConfig): Option[String] =
-    (config: @unchecked) match {
-      case c: OpenAIConfig    => Some(c.baseUrl)
-      case c: AzureConfig     => Some(c.endpoint)
-      case c: AnthropicConfig => Some(c.baseUrl)
-      case c: OllamaConfig    => Some(c.baseUrl)
-      case c: ZaiConfig       => Some(c.baseUrl)
-      case c: GeminiConfig    => Some(c.baseUrl)
-      case c: DeepSeekConfig  => Some(c.baseUrl)
-      case c: CohereConfig    => Some(c.baseUrl)
-      case c: MistralConfig   => Some(c.baseUrl)
-      case _                  => None
-    }
+  def baseUrlOrEndpoint(config: ProviderConfig): Option[String] = config.endpointUrl
 
   def check(config: ProviderConfig, policy: ConfigPolicy, environment: CatalogEnvironment): List[PolicyViolation] = {
     val provider = providerName(config)

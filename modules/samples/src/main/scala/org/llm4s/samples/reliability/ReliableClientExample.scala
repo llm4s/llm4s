@@ -210,10 +210,10 @@ object ReliableClientExample {
       registryService <- Llm4sConfig.modelRegistryService()
       given org.llm4s.model.ModelRegistryService = registryService
       baseClient <- LLMConnect.getClient(providerCfg)
-      _ = logger.info(s"Loaded configured provider: ${providerCfg.provider}")
+      _ = logger.info(s"Loaded configured provider: ${providerCfg.providerId.asString}")
 
       // Wrap with ReliabilityConfig (default: exponential backoff + circuit breaker)
-      reliableClient = new ReliableClient(baseClient, providerCfg.provider.toString, ReliabilityConfig.default)
+      reliableClient = new ReliableClient(baseClient, providerCfg.providerId.asString, ReliabilityConfig.default)
 
       _ = logger.info("Sending request through ReliableClient wrapped real provider...")
       completion <- reliableClient.complete(

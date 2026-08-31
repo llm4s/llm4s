@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupModel.*
-import org.llm4s.types.ProviderModelTypes.ProviderKind
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.ProviderModelTypes.ProviderName
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -31,7 +31,7 @@ class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers:
     val request = ProviderSetupProviderSelection.currentSetupSessionRequest(model).toOption.get
 
     request.isDefaultProviderTab shouldBe false
-    request.selectedProviderKind shouldBe Some(ProviderKind.Ollama)
+    request.selectedProviderId shouldBe Some(ProviderId("ollama"))
     request.selectedConfiguredProvider.map(_.name) shouldBe Some("ollama-qwen")
     request.sessionTarget shouldBe SessionOverrideTarget.NamedProvider(ProviderName("ollama-qwen"))
   }
@@ -45,7 +45,7 @@ class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers:
     val request = ProviderSetupProviderSelection.currentSetupSessionRequest(model).toOption.get
 
     request.isDefaultProviderTab shouldBe true
-    request.selectedProviderKind shouldBe None
+    request.selectedProviderId shouldBe None
     request.selectedConfiguredProvider.map(_.name) shouldBe Some("anthropic-main")
     request.sessionTarget shouldBe SessionOverrideTarget.NamedProvider(ProviderName("anthropic-main"))
   }
@@ -60,7 +60,7 @@ class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers:
 
     request.isDefaultProviderTab shouldBe false
     request.activeDocId shouldBe SetupTabDocIds.Status
-    request.selectedProviderKind shouldBe None
+    request.selectedProviderId shouldBe None
     request.selectedConfiguredProvider shouldBe None
     request.sessionTarget shouldBe SessionOverrideTarget.ProviderKind(SetupTabDocIds.Status)
   }

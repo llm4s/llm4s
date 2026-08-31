@@ -3,7 +3,7 @@ package org.llm4s.samples.dashboard.providersetup
 import org.llm4s.error.ValidationError
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupMessages.*
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupModel.*
-import org.llm4s.types.ProviderModelTypes.{ ProviderKind, ProviderName }
+import org.llm4s.types.ProviderModelTypes.{ ProviderId, ProviderName }
 import org.llm4s.types.Result
 import termflow.tui.Tui
 import termflow.tui.Tui.*
@@ -163,13 +163,13 @@ object ProviderSetupProviderSelection:
         .getOrElse(SessionOverrideTarget.ProviderKind(activeDocId))
     else SessionOverrideTarget.ProviderKind(activeDocId)
 
-  def selectedSetupProviderKind(model: Model): Result[ProviderKind] =
+  def selectedSetupProviderId(model: Model): Result[ProviderId] =
     val activeDocId = ProviderSetupTabs.activeSetupDoc(model).id
     if activeDocId.is(SetupTabDocIds.Providers) then
       selectedConfiguredProvider(model)
-        .map(provider => providerKindFromString(provider.providerId))
-        .getOrElse(providerKindFromString(selectedProviderDoc(model).id.value))
-    else providerKindFromString(activeDocId.value)
+        .map(provider => providerIdFromString(provider.providerId))
+        .getOrElse(providerIdFromString(selectedProviderDoc(model).id.value))
+    else providerIdFromString(activeDocId.value)
 
   def currentSetupSessionRequest(model: Model): Result[ProviderSetupSetupPolicy.SetupSessionRequest] =
     val activeDoc    = ProviderSetupTabs.activeSetupDoc(model)
@@ -180,25 +180,32 @@ object ProviderSetupProviderSelection:
         .orElse(Option.when(isDefaultTab)(defaultConfiguredProvider(model.configStatus)))
         .flatten
     val sessionTarget = selectedSessionOverrideTarget(model)
-    val selectedProviderKindResult =
-      if ProviderSetupSetupPolicy.isProvidersTab(model) then selectedSetupProviderKind(model).map(Some(_))
+    val selectedProviderIdResult =
+      if ProviderSetupSetupPolicy.isProvidersTab(model) then selectedSetupProviderId(model).map(Some(_))
       else Right(None)
 
-    selectedProviderKindResult.map { selectedProviderKind =>
+    selectedProviderIdResult.map { selectedProviderId =>
       ProviderSetupSetupPolicy.SetupSessionRequest(
         isDefaultProviderTab = isDefaultTab,
         activeTab = model.activeTab,
         activeDocId = activeDoc.id,
-        selectedProviderKind = selectedProviderKind,
+        selectedProviderId = selectedProviderId,
         selectedConfiguredProvider = selectedConfigured,
         sessionTarget = sessionTarget
       )
     }
 
-  private def providerKindFromString(value: String): Result[ProviderKind] =
-    ProviderKind
-      .fromString(value)
-      .toRight(ValidationError("providerKind", s"Expected provider kind but got: $value"))
+  /**
+   * Resolves a doc-id or configured-provider id to a `ProviderId`.
+   *
+   * Providers are an open vocabulary now, so this validates against the provider docs this
+   * sample actually ships rather than against a global list of known providers.
+   */
+  private def providerIdFromString(value: String): Result[ProviderId] =
+    ProviderSetupContent.providerDocs
+      .find(_.id.value == value)
+      .map(doc => ProviderId(doc.id.value))
+      .toRight(ValidationError("providerId", s"Expected provider id but got: $value"))
 
   def chooseSelectedProviderIndex(existing: Int, configStatus: ConfigStatus): Int =
     if configStatus.namedProviders.isEmpty then existing

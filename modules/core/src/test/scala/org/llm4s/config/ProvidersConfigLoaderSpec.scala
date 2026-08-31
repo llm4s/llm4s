@@ -40,14 +40,14 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
           cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "gemini-main")
 
           val openai = cfg.namedProviders(ProviderName("openai-main"))
-          openai.provider shouldBe ProviderKind.OpenAI
+          openai.provider shouldBe ProviderId("openai")
           openai.model.asString shouldBe "gpt-4o-mini"
           openai.baseUrl.map(_.asUrl) shouldBe Some("https://api.openai.com/v1")
           openai.apiKey.map(_.asKey) shouldBe Some("sk-openai")
           openai.organization shouldBe Some("org-demo")
 
           val gemini = cfg.namedProviders(ProviderName("gemini-main"))
-          gemini.provider shouldBe ProviderKind.Gemini
+          gemini.provider shouldBe ProviderId("gemini")
           gemini.model.asString shouldBe "gemini-2.5-flash"
           gemini.baseUrl.map(_.asUrl) shouldBe Some("https://generativelanguage.googleapis.com/v1beta")
           gemini.apiKey.map(_.asKey) shouldBe Some("google-key")
@@ -91,7 +91,7 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
               )
 
           selectedProviderName.asName shouldBe "gemini-main"
-          selectedProvider.provider shouldBe ProviderKind.Gemini
+          selectedProvider.provider shouldBe ProviderId("gemini")
           selectedProvider.model.asString shouldBe "gemini-2.5-flash"
           selectedProvider.apiKey.map(_.asKey) shouldBe Some("google-key")
         case Left(err) =>
@@ -174,7 +174,7 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
 
       result match
         case Left(err) =>
-          err.message should include("Gemini provider 'broken-gemini' is missing required fields")
+          err.message should include("Provider 'broken-gemini' (provider = gemini) is missing required fields")
           err.message should include("- apiKey: set it in llm4s.conf under providers.broken-gemini.apiKey")
         case Right(cfg) =>
           fail(s"Expected invalid named provider to fail whole providers config, got config: $cfg")

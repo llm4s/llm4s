@@ -9,13 +9,13 @@ import org.scalatest.matchers.should.Matchers
 class ProviderModelListerSpec extends AnyFunSuite with Matchers:
 
   private def namedConfig(
-    providerKind: ProviderKind,
+    providerId: ProviderId,
     model: String,
     baseUrl: Option[String] = None,
     apiKey: Option[String] = None
   ): NamedProviderConfig =
     NamedProviderConfig(
-      provider = providerKind,
+      provider = providerId,
       model = ModelName(model),
       baseUrl = baseUrl.map(BaseUrl(_)),
       apiKey = apiKey.map(ApiKey(_)),
@@ -25,7 +25,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     )
 
   test("Ollama lister discovers models from /api/tags") {
-    val config = namedConfig(ProviderKind.Ollama, "llama3.1", baseUrl = Some("http://localhost:11434"))
+    val config = namedConfig(ProviderId("ollama"), "llama3.1", baseUrl = Some("http://localhost:11434"))
 
     val responseBody =
       """{
@@ -58,7 +58,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     result match
       case Right(models) =>
         models.map(_.name) shouldBe List(ModelName("llama3.2:latest"), ModelName("mistral:latest"))
-        models.forall(_.provider == ProviderKind.Ollama) shouldBe true
+        models.forall(_.provider == ProviderId("ollama")) shouldBe true
         mockHttp.lastUrl shouldBe Some("http://localhost:11434/api/tags")
 
         val llama = models.head
@@ -75,7 +75,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
 
   test("Ollama lister fails clearly for unsupported providers") {
     val config = namedConfig(
-      ProviderKind.OpenAI,
+      ProviderId("openai"),
       "gpt-4o-mini",
       baseUrl = Some("https://api.openai.com/v1"),
       apiKey = Some("test-key")
@@ -92,7 +92,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
   }
 
   test("provider capabilities expose the Ollama model lister") {
-    val result = ProviderCapabilitiesRegistry.forKind(ProviderKind.Ollama)
+    val result = ProviderCapabilitiesRegistry.forProvider(ProviderId("ollama"))
 
     result match
       case Right(capabilities) =>
@@ -102,7 +102,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
   }
 
   test("OpenAI lister discovers models from /models") {
-    val config = namedConfig(ProviderKind.OpenAI, "gpt-4o-mini", apiKey = Some("sk-test"))
+    val config = namedConfig(ProviderId("openai"), "gpt-4o-mini", apiKey = Some("sk-test"))
     val responseBody =
       """{
         |  "data": [
@@ -120,14 +120,14 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     result match
       case Right(models) =>
         models.map(_.name.asString) shouldBe List("gpt-4o-mini")
-        models.map(_.provider) shouldBe List(ProviderKind.OpenAI)
+        models.map(_.provider) shouldBe List(ProviderId("openai"))
         mockHttp.lastUrl shouldBe Some("https://api.openai.com/v1/models")
       case Left(err) =>
         fail(s"Expected discovered OpenAI models, got error: ${err.message}")
   }
 
   test("Anthropic lister discovers models from /v1/models") {
-    val config = namedConfig(ProviderKind.Anthropic, "claude-sonnet-4-20250514", apiKey = Some("sk-ant-test"))
+    val config = namedConfig(ProviderId("anthropic"), "claude-sonnet-4-20250514", apiKey = Some("sk-ant-test"))
     val firstResponseBody =
       """{
         |  "data": [
@@ -166,7 +166,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     result match
       case Right(models) =>
         models.map(_.name.asString) shouldBe List("claude-sonnet-4-20250514", "claude-haiku-4-5-20251001")
-        models.map(_.provider) shouldBe List(ProviderKind.Anthropic, ProviderKind.Anthropic)
+        models.map(_.provider) shouldBe List(ProviderId("anthropic"), ProviderId("anthropic"))
         mockHttp.lastUrl shouldBe Some("https://api.anthropic.com/v1/models")
         mockHttp.getRequests.map(_._3) shouldBe Seq(
           Map("limit" -> "100"),
@@ -177,7 +177,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
   }
 
   test("Anthropic lister fails when has_more=true but last_id is missing") {
-    val config = namedConfig(ProviderKind.Anthropic, "claude-sonnet-4-20250514", apiKey = Some("sk-ant-test"))
+    val config = namedConfig(ProviderId("anthropic"), "claude-sonnet-4-20250514", apiKey = Some("sk-ant-test"))
     val responseBody =
       """{
         |  "data": [
@@ -202,7 +202,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
   }
 
   test("Gemini lister discovers models from /models") {
-    val config = namedConfig(ProviderKind.Gemini, "gemini-3-flash-preview", apiKey = Some("google-key"))
+    val config = namedConfig(ProviderId("gemini"), "gemini-3-flash-preview", apiKey = Some("google-key"))
     val firstResponseBody =
       """{
         |  "models": [
@@ -240,7 +240,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     result match
       case Right(models) =>
         models.map(_.name.asString) shouldBe List("gemini-2.0-flash", "gemini-2.5-pro")
-        models.map(_.provider) shouldBe List(ProviderKind.Gemini, ProviderKind.Gemini)
+        models.map(_.provider) shouldBe List(ProviderId("gemini"), ProviderId("gemini"))
         mockHttp.lastUrl shouldBe Some("https://generativelanguage.googleapis.com/v1beta/models")
         mockHttp.getRequests.map(_._3) shouldBe Seq(
           Map("pageSize" -> "1000"),
@@ -251,7 +251,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
   }
 
   test("OpenRouter lister includes required OpenRouter headers") {
-    val config = namedConfig(ProviderKind.OpenRouter, "openai/gpt-4o-mini", apiKey = Some("or-key"))
+    val config = namedConfig(ProviderId("openrouter"), "openai/gpt-4o-mini", apiKey = Some("or-key"))
     val responseBody =
       """{
         |  "data": [
@@ -269,7 +269,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     result match
       case Right(models) =>
         models.map(_.name.asString) shouldBe List("openai/gpt-4o-mini")
-        models.map(_.provider) shouldBe List(ProviderKind.OpenRouter)
+        models.map(_.provider) shouldBe List(ProviderId("openrouter"))
         mockHttp.lastUrl shouldBe Some("https://openrouter.ai/api/v1/models")
         mockHttp.lastHeaders shouldBe defined
         mockHttp.lastHeaders.get should contain("HTTP-Referer" -> "https://github.com/llm4s/llm4s")
@@ -279,7 +279,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
   }
 
   test("DeepSeek lister discovers models from /models") {
-    val config = namedConfig(ProviderKind.DeepSeek, "deepseek-chat", apiKey = Some("ds-key"))
+    val config = namedConfig(ProviderId("deepseek"), "deepseek-chat", apiKey = Some("ds-key"))
     val responseBody =
       """{
         |  "data": [
@@ -297,14 +297,14 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     result match
       case Right(models) =>
         models.map(_.name.asString) shouldBe List("deepseek-chat")
-        models.map(_.provider) shouldBe List(ProviderKind.DeepSeek)
+        models.map(_.provider) shouldBe List(ProviderId("deepseek"))
         mockHttp.lastUrl shouldBe Some("https://api.deepseek.com/models")
       case Left(err) =>
         fail(s"Expected discovered DeepSeek models, got error: ${err.message}")
   }
 
   test("Mistral lister discovers models from /v1/models") {
-    val config = namedConfig(ProviderKind.Mistral, "mistral-large-latest", apiKey = Some("mistral-key"))
+    val config = namedConfig(ProviderId("mistral"), "mistral-large-latest", apiKey = Some("mistral-key"))
     val responseBody =
       """{
         |  "data": [
@@ -322,7 +322,7 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
     result match
       case Right(models) =>
         models.map(_.name.asString) shouldBe List("mistral-large-latest")
-        models.map(_.provider) shouldBe List(ProviderKind.Mistral)
+        models.map(_.provider) shouldBe List(ProviderId("mistral"))
         mockHttp.lastUrl shouldBe Some("https://api.mistral.ai/v1/models")
       case Left(err) =>
         fail(s"Expected discovered Mistral models, got error: ${err.message}")

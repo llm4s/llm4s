@@ -4,7 +4,7 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OllamaConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
-import org.llm4s.types.ProviderModelTypes.ProviderKind
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 class OllamaRoutingTest extends AnyFunSuite with Matchers {
   private val registryService        = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
@@ -20,7 +20,7 @@ class OllamaRoutingTest extends AnyFunSuite with Matchers {
       contextWindow = 8192,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderKind.Ollama, cfg)
+    val res = LLMConnect.getClient(ProviderId("ollama"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OllamaClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")

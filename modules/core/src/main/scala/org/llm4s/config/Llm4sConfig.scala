@@ -181,11 +181,11 @@ object Llm4sConfig {
       namedProvider <- providers.namedProviders
         .get(ProviderName(name))
         .toRight(org.llm4s.error.ConfigurationError(s"Configured provider '$name' was not found"))
-      capabilities <- ProviderCapabilitiesRegistry.forKind(namedProvider.provider)
+      capabilities <- ProviderCapabilitiesRegistry.forProvider(namedProvider.provider)
       lister <- capabilities.modelLister
         .toRight(
           org.llm4s.error.ConfigurationError(
-            s"Model discovery is not supported yet for provider '${namedProvider.provider.toString.toLowerCase}'"
+            s"Model discovery is not supported yet for provider '${namedProvider.provider.asString}'"
           )
         )
       models <- lister.listModels(namedProvider, httpClient)

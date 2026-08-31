@@ -2,7 +2,7 @@ package org.llm4s.llmconnect
 
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-import org.llm4s.types.ProviderModelTypes.ProviderKind
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.llmconnect.config._
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 
@@ -18,7 +18,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderKind.OpenAI, cfg)
+    val res = LLMConnect.getClient(ProviderId("openai"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OpenAIClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -34,7 +34,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderKind.OpenRouter, cfg)
+    val res = LLMConnect.getClient(ProviderId("openrouter"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OpenRouterClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -50,7 +50,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderKind.Azure, cfg)
+    val res = LLMConnect.getClient(ProviderId("azure"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OpenAIClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -65,7 +65,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       contextWindow = 200000,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderKind.Anthropic, cfg)
+    val res = LLMConnect.getClient(ProviderId("anthropic"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "AnthropicClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -79,7 +79,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       contextWindow = 8192,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderKind.Ollama, cfg)
+    val res = LLMConnect.getClient(ProviderId("ollama"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OllamaClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -94,7 +94,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderKind.Zai, cfg)
+    val res = LLMConnect.getClient(ProviderId("zai"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "ZaiClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -109,7 +109,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       contextWindow = 1048576,
       reserveCompletion = 8192
     )
-    val res = LLMConnect.getClient(ProviderKind.Gemini, cfg)
+    val res = LLMConnect.getClient(ProviderId("gemini"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "GeminiClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -124,7 +124,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 8192
     )
-    val res = LLMConnect.getClient(ProviderKind.DeepSeek, cfg)
+    val res = LLMConnect.getClient(ProviderId("deepseek"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "DeepSeekClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -139,7 +139,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderKind.Cohere, cfg)
+    val res = LLMConnect.getClient(ProviderId("cohere"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "CohereClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -154,7 +154,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       contextWindow = 128000,
       reserveCompletion = 4096
     )
-    val res = LLMConnect.getClient(ProviderKind.Mistral, cfg)
+    val res = LLMConnect.getClient(ProviderId("mistral"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "MistralClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
@@ -170,7 +170,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       reserveCompletion = 4096
     )
 
-    val res = LLMConnect.getClient(ProviderKind.OpenAI, wrongCfg)
+    val res = LLMConnect.getClient(ProviderId("openai"), wrongCfg)
     res.isLeft shouldBe true
   }
 
@@ -184,7 +184,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       reserveCompletion = 4096
     )
 
-    val res = LLMConnect.getClient(ProviderKind.OpenRouter, wrongCfg)
+    val res = LLMConnect.getClient(ProviderId("openrouter"), wrongCfg)
     res.isLeft shouldBe true
   }
 
@@ -198,7 +198,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       reserveCompletion = 4096
     )
 
-    val res = LLMConnect.getClient(ProviderKind.Azure, wrongCfg)
+    val res = LLMConnect.getClient(ProviderId("azure"), wrongCfg)
     res.isLeft shouldBe true
   }
 
@@ -212,7 +212,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       reserveCompletion = 4096
     )
 
-    val res = LLMConnect.getClient(ProviderKind.Zai, wrongCfg)
+    val res = LLMConnect.getClient(ProviderId("zai"), wrongCfg)
     res.isLeft shouldBe true
   }
 }

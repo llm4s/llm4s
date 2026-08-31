@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.config
 
-import org.llm4s.types.ProviderModelTypes.ProviderKind
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.slf4j.LoggerFactory
 import org.llm4s.util.Redaction
 
@@ -17,9 +17,19 @@ import org.llm4s.util.Redaction
  * Prefer each subtype's `fromValues` factory over its primary constructor:
  * `fromValues` resolves `contextWindow` and `reserveCompletion` automatically
  * from the model name, so you only need to supply credentials and endpoint.
+ *
+ * This trait is deliberately '''not''' `sealed`. In Scala 3 `sealed` confines
+ * subtypes to the same source file, which would keep every provider's config in
+ * this one file forever and make a provider supplied by another module
+ * impossible. Implementations are therefore expected from outside `llm4s-core`,
+ * and consumers must not assume the set of subtypes is closed: describe a config
+ * through [[providerId]], [[endpointUrl]] and [[withModel]] rather than by
+ * pattern-matching on its runtime type.
  */
-sealed trait ProviderConfig {
-  val provider: ProviderKind
+trait ProviderConfig {
+
+  /** Canonical id of the provider this config addresses, e.g. `ProviderId("openai")`. */
+  def providerId: ProviderId
 
   /** Model identifier forwarded verbatim to the provider API (e.g. `"gpt-4o"`, `"claude-sonnet-4-5-latest"`). */
   def model: String
@@ -35,6 +45,18 @@ sealed trait ProviderConfig {
    * least this many tokens available to generate a reply.
    */
   def reserveCompletion: Int
+
+  /**
+   * The endpoint this config will contact, when it is known statically.
+   *
+   * Used by policy checks and diagnostics that need to know where traffic will
+   * go without knowing which provider it belongs to. `None` means the config
+   * carries no single URL — not that it makes no network calls.
+   */
+  def endpointUrl: Option[String]
+
+  /** The same provider and credentials, pointed at a different model. */
+  def withModel(model: String): ProviderConfig
 }
 
 /**
@@ -65,7 +87,9 @@ case class OpenAIConfig(
   contextWindow: Int,
   reserveCompletion: Int
 ) extends ProviderConfig:
-  override val provider: ProviderKind = ProviderKind.OpenAI
+  override val providerId: ProviderId                 = ProviderId("openai")
+  override def endpointUrl: Option[String]            = Some(baseUrl)
+  override def withModel(model: String): OpenAIConfig = copy(model = model)
   override def toString: String =
     s"OpenAIConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, organization=$organization, baseUrl=$baseUrl, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
@@ -153,7 +177,9 @@ case class AzureConfig(
   contextWindow: Int,
   reserveCompletion: Int
 ) extends ProviderConfig:
-  override val provider: ProviderKind = ProviderKind.Azure
+  override val providerId: ProviderId                = ProviderId("azure")
+  override def endpointUrl: Option[String]           = Some(endpoint)
+  override def withModel(model: String): AzureConfig = copy(model = model)
   override def toString: String =
     s"AzureConfig(endpoint=$endpoint, apiKey=${Redaction.secret(apiKey)}, model=$model, apiVersion=$apiVersion, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
@@ -230,7 +256,9 @@ case class AnthropicConfig(
   contextWindow: Int,
   reserveCompletion: Int
 ) extends ProviderConfig:
-  override val provider: ProviderKind = ProviderKind.Anthropic
+  override val providerId: ProviderId                    = ProviderId("anthropic")
+  override def endpointUrl: Option[String]               = Some(baseUrl)
+  override def withModel(model: String): AnthropicConfig = copy(model = model)
   override def toString: String =
     s"AnthropicConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
@@ -296,7 +324,9 @@ case class OllamaConfig(
   contextWindow: Int,
   reserveCompletion: Int
 ) extends ProviderConfig:
-  override val provider: ProviderKind = ProviderKind.Ollama
+  override val providerId: ProviderId                 = ProviderId("ollama")
+  override def endpointUrl: Option[String]            = Some(baseUrl)
+  override def withModel(model: String): OllamaConfig = copy(model = model)
 
 object OllamaConfig {
   private val standardReserve = 4096
@@ -357,7 +387,9 @@ case class ZaiConfig(
   contextWindow: Int,
   reserveCompletion: Int
 ) extends ProviderConfig:
-  override val provider: ProviderKind = ProviderKind.Zai
+  override val providerId: ProviderId              = ProviderId("zai")
+  override def endpointUrl: Option[String]         = Some(baseUrl)
+  override def withModel(model: String): ZaiConfig = copy(model = model)
   override def toString: String =
     s"ZaiConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
@@ -427,7 +459,9 @@ case class GeminiConfig(
   contextWindow: Int,
   reserveCompletion: Int
 ) extends ProviderConfig:
-  override val provider: ProviderKind = ProviderKind.Gemini
+  override val providerId: ProviderId                 = ProviderId("gemini")
+  override def endpointUrl: Option[String]            = Some(baseUrl)
+  override def withModel(model: String): GeminiConfig = copy(model = model)
   override def toString: String =
     s"GeminiConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
@@ -505,7 +539,9 @@ case class DeepSeekConfig(
   contextWindow: Int,
   reserveCompletion: Int
 ) extends ProviderConfig:
-  override val provider: ProviderKind = ProviderKind.DeepSeek
+  override val providerId: ProviderId                   = ProviderId("deepseek")
+  override def endpointUrl: Option[String]              = Some(baseUrl)
+  override def withModel(model: String): DeepSeekConfig = copy(model = model)
   override def toString: String =
     s"DeepSeekConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
@@ -588,7 +624,9 @@ case class CohereConfig(
   contextWindow: Int,
   reserveCompletion: Int
 ) extends ProviderConfig:
-  override val provider: ProviderKind = ProviderKind.Cohere
+  override val providerId: ProviderId                 = ProviderId("cohere")
+  override def endpointUrl: Option[String]            = Some(baseUrl)
+  override def withModel(model: String): CohereConfig = copy(model = model)
   override def toString: String =
     s"CohereConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
@@ -642,7 +680,9 @@ case class MistralConfig(
   contextWindow: Int,
   reserveCompletion: Int
 ) extends ProviderConfig:
-  override val provider: ProviderKind = ProviderKind.Mistral
+  override val providerId: ProviderId                  = ProviderId("mistral")
+  override def endpointUrl: Option[String]             = Some(baseUrl)
+  override def withModel(model: String): MistralConfig = copy(model = model)
   override def toString: String =
     s"MistralConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
       s"reserveCompletion=$reserveCompletion)"
@@ -702,10 +742,13 @@ case class VertexAIConfig(
   contextWindow: Int,
   reserveCompletion: Int
 ) extends ProviderConfig:
-  override val provider: ProviderKind = ProviderKind.VertexAI
+  override val providerId: ProviderId                   = ProviderId("vertexai")
+  override def withModel(model: String): VertexAIConfig = copy(model = model)
 
   /** Base URL derived from the location, e.g. `"https://us-central1-aiplatform.googleapis.com/v1"`. */
   def computedBaseUrl: String = s"https://$location-aiplatform.googleapis.com/v1"
+
+  override def endpointUrl: Option[String] = Some(computedBaseUrl)
 
   override def toString: String =
     s"VertexAIConfig(projectId=$projectId, location=$location, model=$model, " +

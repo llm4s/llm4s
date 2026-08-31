@@ -34,6 +34,12 @@ The 0.x series established the core abstractions and steadily hardened the API s
 
 ## `LLMProvider` replaced by `ProviderKind` (0.3.2)
 
+> **Superseded.** `ProviderKind` has itself been replaced, by the opaque type `ProviderId`, as
+> part of slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)). Coming from 0.2.x or
+> earlier, follow the steps below and then apply
+> [`ProviderKind` becomes `ProviderId`](../reference/migration.md); coming from 0.3.2 or later,
+> go straight there.
+
 The `LLMProvider` sealed trait was removed and replaced with `ProviderKind`. Any exhaustive pattern match on `LLMProvider` fails to compile with a missing-case error.
 
 ### Before (0.x)
