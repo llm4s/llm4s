@@ -22,6 +22,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`llm4s-workspace-client` sheds seven unused dependencies.** Tika, POI, PDFBox, jsoup,
+  Postgres, HikariCP and commons-io were declared on `workspaceClient` but referenced by
+  nothing in it. The module is nine source files that speak WebSocket JSON to a container;
+  across all of them the only third-party imports are `org.java_websocket.*`,
+  `org.slf4j.LoggerFactory`, `pureconfig.*`, `upickle.default._` and scalatest. There is no
+  `Class.forName`, no `ServiceLoader`, no `src/main/resources` and so no
+  `META-INF/services` - nothing that could reach these libraries reflectively - and no
+  document-extraction or JDBC string anywhere in the module or in `workspaceShared`.
+
+  These were the last remnants of the era when `commonSettings` put JDBC drivers on every
+  module's classpath; they were declarations `workspace-client` inherited by copy rather than
+  by need. `llm4s-workspace-client` is published, so this also stops those seven artifacts
+  reaching downstream users through its POM - a Postgres driver and a 5 MB document-parsing
+  stack that arrived with a container-execution client. Anyone who was relying on that
+  transitively should declare what they actually use.
+
+  Each removed dependency appeared exactly once in `workspaceClient/dependencyTree`, at the
+  top level: none of them was a version pin winning a conflict over a transitive of something
+  the module really uses, which is what made the JNA declaration removed above load-bearing
+  until Vosk went with it. commons-io is the one exception worth naming - it stays on the
+  runtime classpath at the same 2.22.0, because `llm4s-core` declares it and uses it in
+  `assistant/SessionManager.scala`; removing the duplicate declaration here changes the POM,
+  not the classpath.
+
+  **`Deps.config` is deliberately kept**, with a comment in `build.sbt` saying why: pureconfig
+  is a facade over Typesafe Config and needs it at runtime, but nothing here imports
+  `com.typesafe.config`, so an import-based audit reads it as dead when it is not.
 - **`llm4s-speech` is carved out of `llm4s-core`, completing slice 3**
   ([#1130](https://github.com/llm4s/llm4s/issues/1130)). `org.llm4s.speech` and its
   subpackages move whole - package names unchanged, no source breaks.
