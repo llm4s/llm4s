@@ -98,6 +98,9 @@ jobs:
       - name: Check coverage policy is declared for every module
         run: sbt coveragePolicyCheck
 
+      - name: Check documented support matrix
+        run: python3 scripts/check-doc-support.py
+
       - name: Compile
         run: sbt compile
 
