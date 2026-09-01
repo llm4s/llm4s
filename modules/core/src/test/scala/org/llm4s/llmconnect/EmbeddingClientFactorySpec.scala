@@ -30,6 +30,16 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
       res.isRight shouldBe true
     }
 
+    "build client for jina without throwing" in {
+      val cfg = EmbeddingProviderConfig(
+        baseUrl = "https://api.jina.ai/v1",
+        model = "jina-embeddings-v3",
+        apiKey = "jina-test"
+      )
+      val res = EmbeddingClient.from("jina", cfg)
+      res.isRight shouldBe true
+    }
+
     "build client for ollama without throwing" in {
       val cfg = EmbeddingProviderConfig(
         baseUrl = "http://localhost:11434",
