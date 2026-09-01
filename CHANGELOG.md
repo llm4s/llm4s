@@ -22,6 +22,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **Breaking: `ProviderKind` is replaced by the opaque type `ProviderId`, and `ProviderConfig` is
+  no longer `sealed`** - the first change of slice 4
+  ([#1131](https://github.com/llm4s/llm4s/issues/1131)). No SPI yet; this only removes the two
+  things that make a provider impossible to supply from outside `llm4s-core`.
+
+  Adding one chat provider today costs ~20 files and ~26 edit sites across four sbt modules,
+  measured from the open provider PRs (#1051 Bedrock touches 13 shared files; #1055, #1057,
+  #1058, #1059 and #1061 each touch 11-13). Two structures account for most of that. `enum
+  ProviderKind` is a closed enumeration, so nothing in another jar can extend it and everything
+  keyed by it inherits that. `sealed trait ProviderConfig` is worse than it looks: in Scala 3
+  `sealed` confines subtypes to the **same source file**, which is why all ten provider configs
+  sit in one 756-line file rather than merely in one jar.
+
+  `ProviderId` is an opaque `String`, canonicalised to trimmed lowercase, and deliberately an
+  **open vocabulary** - any string names a provider, and whether it can be resolved is answered
+  at resolution time by what is on the classpath. Staying `opaque` keeps the no-boxing guarantee
+  from [#1127](https://github.com/llm4s/llm4s/issues/1127). `ProviderConfig` gains `providerId`
+  (replacing `val provider: ProviderKind`), `endpointUrl` and `withModel`, which let a caller
+  describe a config without knowing the set of subtypes - so four exhaustive matches were
+  **deleted rather than moved**: `ConfigPolicyEngine.providerName` and `.baseUrlOrEndpoint`,
+  `PrometheusMetricsExample`, and `ProviderSetupRuntime.overrideModel`.
+
+  **No deprecated `ProviderKind` shim.** A shim would keep a closed list of twelve providers
+  inside the very module whose purpose is to remove it, and it only half-works: `case
+  ProviderKind.OpenAI =>` and `def f(k: ProviderKind)` would compile, while `.values`,
+  `.ordinal`, `.fromOrdinal` and exhaustivity would still fail. A clean compile error is better
+  than a partly-working deprecated type. Source breaks are acceptable pre-1.0, and slice 5 will
+  require a build edit regardless.
+
+  Two behaviour changes worth knowing about. `toString` on a provider was `"OpenAI"` and is now
+  `"openai"`, which shows up in error text (`providerId.asString.toUpperCase` still yields
+  `"OPENAI"`, so env-var prefixes are unaffected). And an unrecognised `provider` string in
+  HOCON is no longer a *parse* error: it produces a `ProviderId` and fails at resolution
+  instead, with an error naming the registered ids. That is precisely what allows a provider to
+  arrive from a module core has never heard of.
+
+  Deferred to PR 2 and called out rather than slipped in: `ProviderConfig.fromValues` still
+  uses `require(...)`, which throws (converting it is a throw-to-`Left` change);
+  `ReliableProviders` still exposes seven per-provider factories; and
+  `ProviderSetupRuntime.applyConfiguredSessionOverride` still matches per provider, because it
+  edits provider-specific fields and wants the dashboard to rebuild from the config section
+  rather than pattern-match a built config.
+
+  See [docs/reference/migration.md](docs/reference/migration.md) for the full before/after.
 - **`llm4s-workspace-client` sheds seven unused dependencies.** Tika, POI, PDFBox, jsoup,
   Postgres, HikariCP and commons-io were declared on `workspaceClient` but referenced by
   nothing in it. The module is nine source files that speak WebSocket JSON to a container;
@@ -178,6 +222,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`provider = "vertexai"` failed config validation outright, making Vertex AI unreachable.**
+  `ProviderKind.VertexAI` existed, `NamedProviderLoader` built a `VertexAIConfig` from it and
+  `LLMConnect` built a `VertexAIClient` from that - but Vertex AI was absent from
+  `ProviderCapabilitiesRegistry` (which listed 11 of 12) and had no `NamedProviderValidators`
+  object. Because `NamedProviderConfigValidator.validate` routes through that registry, every
+  Vertex AI configuration was rejected before any of the supporting code could run, so the
+  provider was supported everywhere except at the one point that decides whether a config loads.
+  Found while scoping [#1131](https://github.com/llm4s/llm4s/issues/1131); both are now present
+  and the config path is covered by tests.
 - The three same-named spec pairs under `rag/loader` and `rag/loader/internal`
   (`HtmlContentExtractorSpec`, `GlobPatternMatcherSpec`, `UrlNormalizerSpec`) are merged into
   one suite each, in the package of the code they test. They were two independent test sets

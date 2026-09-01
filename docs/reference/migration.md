@@ -1,5 +1,144 @@
 # Migration Guide
 
+## Slice 4 (PR 1): `ProviderKind` becomes `ProviderId`, `ProviderConfig` opens up
+
+The first of the slice 4 changes ([#1131](https://github.com/llm4s/llm4s/issues/1131)). No SPI
+yet - this only removes the two things that make a provider impossible to supply from outside
+`llm4s-core`: a closed `enum` and a `sealed` trait. It is in the build but not yet in a release,
+so nothing here affects `0.4.1` or earlier.
+
+**This is a clean break: there is no deprecated `ProviderKind` shim.** A shim would have kept a
+closed list of twelve providers inside the very module whose purpose is to remove it, and it
+would only have half-worked - `case ProviderKind.OpenAI =>` and `def f(k: ProviderKind)` would
+still compile, while `.values`, `.ordinal`, `.fromOrdinal` and exhaustivity would not. A clear
+compile error beats a partly-working deprecated type.
+
+### `ProviderKind` → `ProviderId`
+
+```scala
+// Before
+enum ProviderKind:
+  case OpenAI; case Anthropic; /* ... ten more */
+
+// After
+opaque type ProviderId = String
+object ProviderId:
+  def apply(raw: String): ProviderId = raw.trim.toLowerCase   // canonicalises
+  extension (id: ProviderId) def asString: String = id
+```
+
+`ProviderId` is an **open vocabulary**, not an enumeration. Any string names a provider; whether
+that provider can be resolved is answered at resolution time, by whatever is on the classpath -
+which is the whole point. It stays `opaque` over `String`, so `Option[ProviderId]` and
+`Map[ProviderName, ProviderId]` still do not box.
+
+| Before | After |
+|---|---|
+| `ProviderKind.OpenAI` | `ProviderId("openai")` |
+| `ProviderKind.fromString(s)` / `fromName(s)`, returning `Option` | `ProviderId(s)`, total |
+| `kind.name` | `id.asString` |
+| `kind.toString` → `"OpenAI"` | `id.asString` → `"openai"` |
+| `ProviderKind.all` | no replacement - ask the thing that resolves providers, not the type |
+| `ProviderKind.values` / `.ordinal` / `.fromOrdinal` / `.productPrefix` | no replacement |
+| exhaustive `match` on `ProviderKind` | match on `id.asString`, with a default branch |
+
+`asString` lives in `object ProviderId` rather than beside `ModelName.asString` and friends,
+because every newtype in `ProviderModelTypes` erases to `String` and a second `asString` at that
+level would be a double definition after erasure. Companion-scoped extensions resolve through the
+opaque type's implicit scope, so `id.asString` still needs no extra import.
+
+**`toString` changed value.** `ProviderKind.OpenAI.toString` was `"OpenAI"`; a `ProviderId` is
+its canonical lowercase spelling, so it prints `"openai"`. If you interpolated a provider into
+log or error text, expect the case to change. Uppercase derivations still work:
+`providerId.asString.toUpperCase` is `"OPENAI"`, as `providerKind.toString.toUpperCase` was.
+
+### `ProviderConfig` is no longer `sealed`, and describes itself
+
+In Scala 3 `sealed` restricts extension to the **same file**, so all ten provider configs were
+stuck in one 756-line file - not merely in the same jar. `ProviderConfig` is now a plain `trait`
+with three new members:
+
+```scala
+trait ProviderConfig:
+  def providerId: ProviderId              // replaces `val provider: ProviderKind`
+  def endpointUrl: Option[String]         // the endpoint this config will contact
+  def withModel(model: String): ProviderConfig
+  // model, contextWindow, reserveCompletion unchanged
+```
+
+```scala
+// Before
+config.provider == ProviderKind.OpenAI
+// After
+config.providerId == ProviderId("openai")
+```
+
+The three additions exist so that code describing a config does not have to know the set of
+subtypes. Four exhaustive matches were **deleted rather than moved** by using them:
+`ConfigPolicyEngine.providerName`, `ConfigPolicyEngine.baseUrlOrEndpoint`,
+`PrometheusMetricsExample`'s provider-name match, and `ProviderSetupRuntime.overrideModel`. If
+you have a `match` on `ProviderConfig`, that is the migration: reach for `providerId`,
+`endpointUrl` or `withModel` first, and only keep the match if you genuinely need
+provider-specific fields.
+
+Losing `sealed` also means an exhaustive `match` on `ProviderConfig` now compiles with a
+warning - and **fails for anyone building with `-Werror`**, as this repo does. Add a default
+branch, or annotate the scrutinee `(config: @unchecked)` if you have deliberately accepted the
+risk.
+
+One behaviour change falls out of this: `ConfigPolicyEngine.baseUrlOrEndpoint` used to return
+`None` for `VertexAIConfig`, because the old match had no case for it. It now returns
+`Some(computedBaseUrl)`. A `requiredBaseUrlPattern` policy that silently reported "no
+endpoint/baseUrl found" for Vertex AI will now actually check the URL.
+
+### Unknown provider ids are no longer rejected while parsing
+
+`NamedProviderConfigNormalizer` used to fail on an unrecognised `provider` string with
+`"Configured provider 'x' has unknown provider 'moonbeam'"`. It now produces a `ProviderId`
+unconditionally; only *resolution* fails, with an error naming what is registered:
+
+```
+No provider capabilities registered for provider 'moonbeam'.
+Registered providers: anthropic, azure, cohere, deepseek, gemini, mistral, ollama,
+openai, openrouter, requesty, vertexai, zai
+```
+
+This is what lets a provider live in a module `llm4s-core` has never heard of. The accepted
+aliases are unchanged - `provider = "google"` still resolves to `gemini`, and
+`provider = "vertex"` to `vertexai` - though that table moves into each provider's descriptor
+when the SPI lands.
+
+### Validation error text is now provider-agnostic
+
+```
+// Before
+Azure OpenAI provider 'my-azure' is missing required fields:
+// After
+Provider 'my-azure' (provider = azure) is missing required fields:
+```
+
+The per-field guidance underneath is unchanged, including the `${?AZURE_API_KEY}` substitution
+hint. Only the leading sentence differs, because it used to be generated from a hard-coded
+display name per provider.
+
+### Bug fix: `provider = "vertexai"` now works at all
+
+`ProviderKind.VertexAI` existed, `NamedProviderLoader` built a `VertexAIConfig` from it, and
+`LLMConnect` built a `VertexAIClient` from that - but Vertex AI was missing from
+`ProviderCapabilitiesRegistry` and had no validator object. Since validation routes through that
+registry, **every `provider = "vertexai"` config failed validation outright**, so none of the
+supporting code was reachable from configuration. Both are now present, and the config path is
+covered by tests.
+
+### What did *not* change
+
+`ProviderConfig.fromValues`'s `require(...)` calls still throw rather than returning `Result`;
+converting them is a throw-to-`Left` behaviour change and is deferred to PR 2.
+`ReliableProviders`' seven per-provider factories are also unchanged here - they collapse to a
+single registry-routed `wrap` in PR 2. `NamedProviderLoader`, `NamedProviderValidator`,
+`ProviderCapabilities`, `ProviderCapabilitiesRegistry` and `ProviderModelLister` are all
+`private[llm4s]` or `private[config]`, so their reshaping costs users nothing.
+
 ## Slice 3: `llm4s-speech`
 
 The last artifact of slice 3 ([#1130](https://github.com/llm4s/llm4s/issues/1130)) and the last

@@ -62,3 +62,7 @@ private[llm4s] object ProviderCapabilities:
   object Mistral extends ProviderCapabilities:
     val validator: NamedProviderValidator                 = NamedProviderValidators.Mistral
     override val modelLister: Option[ProviderModelLister] = Some(ProviderModelListers.Mistral)
+
+  /** Capabilities for the Vertex AI provider. */
+  object VertexAI extends ProviderCapabilities:
+    val validator: NamedProviderValidator = NamedProviderValidators.VertexAI

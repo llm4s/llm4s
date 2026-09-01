@@ -46,7 +46,7 @@ object ProvidersConfigModel:
   /**
    * Validated and normalised configuration for a single named provider.
    *
-   *  @param provider     the resolved `ProviderKind`
+   *  @param provider     the resolved `ProviderId`
    *  @param model        the model name to use
    *  @param baseUrl      optional base URL override
    *  @param apiKey       provider-dependent credential: an API key for most providers,
@@ -58,7 +58,7 @@ object ProvidersConfigModel:
    *  @param apiVersion   optional API version string (Azure-specific)
    */
   final case class NamedProviderConfig(
-    provider: ProviderKind,
+    provider: ProviderId,
     model: ModelName,
     baseUrl: Option[BaseUrl],
     apiKey: Option[ApiKey],
@@ -69,15 +69,15 @@ object ProvidersConfigModel:
     /**
      * Returns this config if its provider matches `expected`, otherwise a `ConfigurationError`.
      *
-     *  @param expected the `ProviderKind` that is required
+     *  @param expected the `ProviderId` that is required
      *  @return `Right(this)` when the provider matches, or `Left` with a descriptive error
      */
-    def requireProvider(expected: ProviderKind): Result[NamedProviderConfig] =
+    def requireProvider(expected: ProviderId): Result[NamedProviderConfig] =
       if provider == expected then Right(this)
       else
         Left(
           ConfigurationError(
-            s"Model discovery is not supported yet for provider '${provider.toString.toLowerCase}'"
+            s"Model discovery is not supported yet for provider '${provider.asString}'"
           )
         )
 

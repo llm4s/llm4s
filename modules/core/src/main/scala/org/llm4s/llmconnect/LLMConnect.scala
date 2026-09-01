@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.config._
 import org.llm4s.llmconnect.provider._
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ProviderKind
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
 /**
@@ -60,6 +60,15 @@ object LLMConnect {
         MistralClient(cfg, metrics, exchangeLogging)
       case cfg: VertexAIConfig =>
         VertexAIClient(cfg, metrics, exchangeLogging)
+      case other =>
+        // `ProviderConfig` is open, so this is reachable: it is what a config from a provider
+        // module looks like before the registry exists to build its client (#1131, PR 2).
+        Left(
+          ConfigurationError(
+            s"No client is registered for provider '${other.providerId.asString}' " +
+              s"(config type ${other.getClass.getSimpleName})"
+          )
+        )
     }
 
   def fromConfig(
@@ -74,9 +83,11 @@ object LLMConnect {
    * Constructs an [[LLMClient]], routing to the correct provider based on the
    * runtime type of `config` and recording call statistics to `metrics`.
    *
-   * The dispatch is exhaustive — every [[ProviderConfig]] subtype is handled.
-   * Returns `Left` only if the underlying client constructor fails (for example,
-   * if the HTTP client library throws during initialisation).
+   * Every [[ProviderConfig]] subtype defined in `llm4s-core` is handled. Because
+   * [[ProviderConfig]] is open, a config from elsewhere yields a
+   * [[org.llm4s.error.ConfigurationError]] naming its provider; `Left` is also
+   * returned if the underlying client constructor fails (for example, if the HTTP
+   * client library throws during initialisation).
    *
    * @param config  Provider configuration; the concrete subtype determines which
    *                client is built. For OpenRouter, supply an [[OpenAIConfig]]
@@ -135,7 +146,7 @@ object LLMConnect {
    *         [[org.llm4s.error.UnknownError]] if client initialisation throws.
    */
   def getClient(
-    provider: ProviderKind,
+    provider: ProviderId,
     config: ProviderConfig,
     metrics: MetricsCollector
   )(using ModelRegistryService): Result[LLMClient] =
@@ -146,32 +157,32 @@ object LLMConnect {
    * explicit runtime options.
    */
   def getClient(
-    provider: ProviderKind,
+    provider: ProviderId,
     config: ProviderConfig,
     options: LlmClientOptions
   )(using ModelRegistryService): Result[LLMClient] =
     fromProvider(provider, config, options)
 
   def fromProvider(
-    provider: ProviderKind,
+    provider: ProviderId,
     config: ProviderConfig,
     options: LlmClientOptions = LlmClientOptions.default
   )(using ModelRegistryService): Result[LLMClient] =
     val metrics         = options.metrics
     val exchangeLogging = options.exchangeLogging
-    (provider, config) match {
-      case (ProviderKind.OpenAI, cfg: OpenAIConfig)       => OpenAIClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.OpenRouter, cfg: OpenAIConfig)   => OpenRouterClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Requesty, cfg: OpenAIConfig)     => OpenAIClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Azure, cfg: AzureConfig)         => OpenAIClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Anthropic, cfg: AnthropicConfig) => AnthropicClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Ollama, cfg: OllamaConfig)       => OllamaClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Zai, cfg: ZaiConfig)             => ZaiClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Gemini, cfg: GeminiConfig)       => GeminiClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.DeepSeek, cfg: DeepSeekConfig)   => DeepSeekClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Cohere, cfg: CohereConfig)       => CohereClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.Mistral, cfg: MistralConfig)     => MistralClient(cfg, metrics, exchangeLogging)
-      case (ProviderKind.VertexAI, cfg: VertexAIConfig)   => VertexAIClient(cfg, metrics, exchangeLogging)
+    (provider.asString, config) match {
+      case ("openai", cfg: OpenAIConfig)       => OpenAIClient(cfg, metrics, exchangeLogging)
+      case ("openrouter", cfg: OpenAIConfig)   => OpenRouterClient(cfg, metrics, exchangeLogging)
+      case ("requesty", cfg: OpenAIConfig)     => OpenAIClient(cfg, metrics, exchangeLogging)
+      case ("azure", cfg: AzureConfig)         => OpenAIClient(cfg, metrics, exchangeLogging)
+      case ("anthropic", cfg: AnthropicConfig) => AnthropicClient(cfg, metrics, exchangeLogging)
+      case ("ollama", cfg: OllamaConfig)       => OllamaClient(cfg, metrics, exchangeLogging)
+      case ("zai", cfg: ZaiConfig)             => ZaiClient(cfg, metrics, exchangeLogging)
+      case ("gemini", cfg: GeminiConfig)       => GeminiClient(cfg, metrics, exchangeLogging)
+      case ("deepseek", cfg: DeepSeekConfig)   => DeepSeekClient(cfg, metrics, exchangeLogging)
+      case ("cohere", cfg: CohereConfig)       => CohereClient(cfg, metrics, exchangeLogging)
+      case ("mistral", cfg: MistralConfig)     => MistralClient(cfg, metrics, exchangeLogging)
+      case ("vertexai", cfg: VertexAIConfig)   => VertexAIClient(cfg, metrics, exchangeLogging)
       case (prov, wrongCfg) =>
         val cfgType = wrongCfg.getClass.getSimpleName
         val msg     = s"Invalid config type $cfgType for provider $prov"
@@ -189,7 +200,7 @@ object LLMConnect {
    *         [[org.llm4s.error.UnknownError]] if client initialisation throws.
    */
   def getClient(
-    provider: ProviderKind,
+    provider: ProviderId,
     config: ProviderConfig
   )(using ModelRegistryService): Result[LLMClient] =
     getClient(provider, config, LlmClientOptions.default)

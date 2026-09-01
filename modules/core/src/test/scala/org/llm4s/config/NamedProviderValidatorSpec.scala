@@ -23,7 +23,7 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
     result.isLeft shouldBe true
     val err = result.left.toOption.get.asInstanceOf[ConfigurationError]
 
-    err.message should include("Azure OpenAI provider 'my-azure' is missing required fields")
+    err.message should include("Provider 'my-azure' (provider = azure) is missing required fields")
     err.message should include(
       "- apiKey: set it in llm4s.conf under providers.my-azure.apiKey (optionally from an env var, e.g. apiKey = ${?AZURE_API_KEY})"
     )
@@ -45,7 +45,7 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
     result.isLeft shouldBe true
     val err = result.left.toOption.get.asInstanceOf[ConfigurationError]
 
-    err.message should include("OpenAI provider 'my-openai' is missing required fields")
+    err.message should include("Provider 'my-openai' (provider = openai) is missing required fields")
     err.message should include(
       "- apiKey: set it in llm4s.conf under providers.my-openai.apiKey (optionally from an env var, e.g. apiKey = ${?OPENAI_API_KEY})"
     )
@@ -66,7 +66,7 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
     result.isLeft shouldBe true
     val err = result.left.toOption.get.asInstanceOf[ConfigurationError]
 
-    err.message should include("Ollama provider 'my-ollama' is missing required fields")
+    err.message should include("Provider 'my-ollama' (provider = ollama) is missing required fields")
     err.message should include("- baseUrl: set OLLAMA_BASE_URL (e.g. http://localhost:11434)")
   }
 
@@ -88,7 +88,7 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
       ): org.llm4s.types.Result[NamedProviderConfig] =
         NamedProviderValidators.validateNamedProviderConfig(
           providerName = providerName,
-          providerKind = ProviderKind.OpenAI, // non-Ollama to hit the `case _` branch
+          providerId = ProviderId("openai"), // non-Ollama to hit the `case _` branch
           section = section,
           requireBaseUrl = true
         )
@@ -98,7 +98,7 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
     result.isLeft shouldBe true
     val err = result.left.toOption.get.asInstanceOf[ConfigurationError]
 
-    // "OPENAI_BASE_URL" is generated because we passed ProviderKind.OpenAI
+    // "OPENAI_BASE_URL" is generated because we passed ProviderId("openai")
     err.message should include("- baseUrl: set OPENAI_BASE_URL (e.g. https://api.example.com/)")
   }
 
@@ -117,7 +117,7 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
 
     result.isRight shouldBe true
     val config = result.getOrElse(fail("Expected Right"))
-    config.provider shouldBe ProviderKind.OpenAI
+    config.provider shouldBe ProviderId("openai")
     config.apiKey shouldBe Some("sk-test-key")
     config.baseUrl shouldBe Some("https://api.openai.com/v1")
   }
@@ -140,7 +140,7 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
 
     result.isRight shouldBe true
     val config = result.getOrElse(fail("Expected Right"))
-    config.provider shouldBe ProviderKind.OpenAI
+    config.provider shouldBe ProviderId("openai")
     config.baseUrl shouldBe Some("https://api.example.com")
     config.apiKey shouldBe Some("sk-test-key")
     config.organization shouldBe Some("org-123")
@@ -163,7 +163,7 @@ class NamedProviderValidatorSpec extends AnyFlatSpec with Matchers {
 
     result.isRight shouldBe true
     val config = result.getOrElse(fail("Expected Right"))
-    config.provider shouldBe ProviderKind.Azure
+    config.provider shouldBe ProviderId("azure")
     config.apiKey shouldBe Some("azure-key")
     config.endpoint shouldBe Some("my-deployment")
   }

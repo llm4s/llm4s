@@ -146,7 +146,7 @@ private[providersetup] object SetupModeUpdate:
         isDefaultProviderTab = sessionRequest.isDefaultProviderTab,
         activeTab = sessionRequest.activeTab,
         activeDocId = sessionRequest.activeDocId,
-        selectedProviderKind = sessionRequest.selectedProviderKind,
+        selectedProviderId = sessionRequest.selectedProviderId,
         selectedConfiguredProvider = sessionRequest.selectedConfiguredProvider,
         sessionInput = model.sessionInputs.get(sessionRequest.sessionTarget)
       )

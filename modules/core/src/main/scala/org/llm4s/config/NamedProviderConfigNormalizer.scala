@@ -23,11 +23,10 @@ private[config] object NamedProviderConfigNormalizer:
         case None =>
           Left(ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `provider`"))
         case Some(value) =>
-          ProviderKind
-            .fromString(value)
-            .toRight(
-              ConfigurationError(s"Configured provider '${providerName.asName}' has unknown provider '$value'")
-            )
+          // An unrecognised provider string is deliberately *not* an error here. Providers are
+          // resolved, not enumerated (#1131): whether anything on the classpath handles this id is
+          // decided later, by the capabilities lookup, which can name the ids it does know.
+          Right(canonicalId(value))
 
     val modelName =
       section.model
@@ -36,10 +35,10 @@ private[config] object NamedProviderConfigNormalizer:
         .toRight(ConfigurationError(s"Configured provider '${providerName.asName}' is missing required field `model`"))
 
     for
-      kind  <- providerType
+      id    <- providerType
       model <- modelName
     yield NamedProviderConfig(
-      provider = kind,
+      provider = id,
       model = ModelName(model),
       baseUrl = section.baseUrl.map(_.trim).filter(_.nonEmpty).map(BaseUrl(_)),
       apiKey = section.apiKey.map(_.trim).filter(_.nonEmpty).map(ApiKey(_)),
@@ -47,3 +46,17 @@ private[config] object NamedProviderConfigNormalizer:
       endpoint = section.endpoint.map(_.trim).filter(_.nonEmpty),
       apiVersion = section.apiVersion.map(_.trim).filter(_.nonEmpty)
     )
+
+  /**
+   * Accepted alternative spellings, folded onto the canonical id.
+   *
+   * This is the last place in the codebase that hard-codes provider names for
+   * parsing. It moves to `ProviderDescriptor.aliases` when the SPI lands, so
+   * that a provider's module declares its own spellings; until then, dropping
+   * it would silently break `provider = "google"` and `provider = "vertex"`.
+   */
+  private def canonicalId(raw: String): ProviderId =
+    raw.trim.toLowerCase match
+      case "google" => ProviderId("gemini")
+      case "vertex" => ProviderId("vertexai")
+      case other    => ProviderId(other)

@@ -39,14 +39,14 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
           cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "gemini-main")
 
           val openai = cfg.namedProviders(ProviderName("openai-main"))
-          openai.provider shouldBe ProviderKind.OpenAI
+          openai.provider shouldBe ProviderId("openai")
           openai.model.asString shouldBe "gpt-4o-mini"
           openai.baseUrl.map(_.asUrl) shouldBe Some("https://api.openai.com/v1")
           openai.apiKey.map(_.asKey) shouldBe Some("sk-openai")
           openai.organization shouldBe Some("org-demo")
 
           val gemini = cfg.namedProviders(ProviderName("gemini-main"))
-          gemini.provider shouldBe ProviderKind.Gemini
+          gemini.provider shouldBe ProviderId("gemini")
           gemini.model.asString shouldBe "gemini-2.5-flash"
           gemini.apiKey.map(_.asKey) shouldBe Some("google-key")
         case Left(err) =>
@@ -73,7 +73,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
         case Right(cfg) =>
           cfg.selectedProvider shouldBe None
           cfg.namedProviders.keySet.map(_.asName) shouldBe Set("ollama-local")
-          cfg.namedProviders(ProviderName("ollama-local")).provider shouldBe ProviderKind.Ollama
+          cfg.namedProviders(ProviderName("ollama-local")).provider shouldBe ProviderId("ollama")
         case Left(err) =>
           fail(s"Expected ProvidersConfig without selected provider, got error: ${err.message}")
     }

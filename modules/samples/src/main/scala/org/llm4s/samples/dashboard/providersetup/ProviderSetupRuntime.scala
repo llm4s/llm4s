@@ -9,7 +9,7 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupMessages.*
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupModel.*
 import org.llm4s.samples.dashboard.shared.DashboardSupport
-import org.llm4s.types.ProviderModelTypes.{ ProviderKind, ProviderName }
+import org.llm4s.types.ProviderModelTypes.{ ProviderId, ProviderName }
 import org.llm4s.types.Result
 import termflow.tui.{ Cmd, RuntimeCtx }
 
@@ -40,7 +40,7 @@ private[providersetup] object ProviderSetupRuntime:
 
           ConfiguredProvider(
             name = name.asName,
-            providerId = cfg.provider.toString.toLowerCase,
+            providerId = cfg.provider.asString,
             modelName = cfg.model.asString,
             discoveredModels = models,
             discoveryDetail = detail,
@@ -84,7 +84,7 @@ private[providersetup] object ProviderSetupRuntime:
     isDefaultProviderTab: Boolean,
     activeTab: SetupTabId,
     activeDocId: SetupTabDocId,
-    selectedProviderKind: Option[ProviderKind],
+    selectedProviderId: Option[ProviderId],
     selectedConfiguredProvider: Option[ConfiguredProvider],
     sessionInput: Option[ProviderSessionInput]
   )(using ModelRegistryService): Either[String, ActiveSession] =
@@ -94,23 +94,23 @@ private[providersetup] object ProviderSetupRuntime:
         val configuredProvider = providerConfigs(ProviderName(configured.name))
         resolveConfiguredNamedSession(isDefaultProviderTab, configured, configuredProvider, overrideInput)
       case None =>
-        val providerKindResult =
-          selectedProviderKind.map[Result[ProviderKind]](Right(_)).getOrElse(providerKindFromDocId(activeDocId))
+        val providerIdResult =
+          selectedProviderId.map[Result[ProviderId]](Right(_)).getOrElse(providerIdFromDocId(activeDocId))
 
-        providerKindResult.left.map(_.formatted).flatMap { providerKind =>
-          overrideInput.flatMap(input => buildOverrideSession(providerKind, input).toOption) match
+        providerIdResult.left.map(_.formatted).flatMap { providerId =>
+          overrideInput.flatMap(input => buildOverrideSession(providerId, input).toOption) match
             case Some(session) =>
               Right(session)
             case None =>
               overrideInput match
                 case Some(input) =>
-                  buildOverrideSession(providerKind, input)
+                  buildOverrideSession(providerId, input)
                 case None =>
                   resolveConfiguredSession(
                     providerConfigs,
                     defaultProvider,
                     activeTab,
-                    selectedProviderKind,
+                    selectedProviderId,
                     selectedConfiguredProvider
                   )
         }
@@ -140,7 +140,7 @@ private[providersetup] object ProviderSetupRuntime:
     providerConfigs: Map[ProviderName, ProviderConfig],
     defaultProvider: ProviderConfig,
     activeTab: SetupTabId,
-    selectedProviderKind: Option[ProviderKind],
+    selectedProviderId: Option[ProviderId],
     selectedConfiguredProvider: Option[ConfiguredProvider]
   ): Either[String, ActiveSession] =
     selectedConfiguredProvider match
@@ -155,11 +155,11 @@ private[providersetup] object ProviderSetupRuntime:
         )
 
       case _ =>
-        val configuredProvider = defaultProvider.provider
-        selectedProviderKind match
-          case Some(requested) if activeTab == SetupTabId.Providers && configuredProvider != requested =>
+        val configuredProvider = defaultProvider.providerId.asString
+        selectedProviderId match
+          case Some(requested) if activeTab == SetupTabId.Providers && configuredProvider != requested.asString =>
             Left(
-              s"The selected provider is $requested, but llm4s is currently configured for $configuredProvider. Change your config and run reload first."
+              s"The selected provider is ${requested.asString}, but llm4s is currently configured for $configuredProvider. Change your config and run reload first."
             )
           case _ =>
             Right(
@@ -171,12 +171,12 @@ private[providersetup] object ProviderSetupRuntime:
             )
 
   private def buildOverrideSession(
-    providerKind: ProviderKind,
+    providerId: ProviderId,
     input: ProviderSessionInput
   )(using ModelRegistryService): Either[String, ActiveSession] =
     given ContextWindowResolver = contextWindowResolver
-    providerKind match
-      case ProviderKind.Ollama =>
+    providerId.asString match
+      case "ollama" =>
         for
           model <- requiredModel(
             input,
@@ -192,7 +192,7 @@ private[providersetup] object ProviderSetupRuntime:
           config = OllamaConfig.fromValues(model, baseUrl),
           note = s"Using session override values for the default provider in this app run only. Base URL: $baseUrl"
         )
-      case ProviderKind.OpenAI =>
+      case "openai" =>
         for
           model  <- requiredModel(input, "Session override for OpenAI needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for OpenAI needs `set api-key <key>`.")
@@ -207,7 +207,7 @@ private[providersetup] object ProviderSetupRuntime:
           ),
           note = "Using session override values for OpenAI in this app run only."
         )
-      case ProviderKind.Azure =>
+      case "azure" =>
         for
           model    <- requiredModel(input, "Session override for Azure OpenAI needs `set model <deployment>`.")
           endpoint <- requiredEndpoint(input, "Session override for Azure OpenAI needs `set endpoint <url>`.")
@@ -223,7 +223,7 @@ private[providersetup] object ProviderSetupRuntime:
           ),
           note = "Using session override values for Azure OpenAI in this app run only."
         )
-      case ProviderKind.Anthropic =>
+      case "anthropic" =>
         for
           model  <- requiredModel(input, "Session override for Anthropic needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Anthropic needs `set api-key <key>`.")
@@ -234,7 +234,7 @@ private[providersetup] object ProviderSetupRuntime:
             .fromValues(model, apiKey, input.baseUrl.getOrElse(DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL)),
           note = "Using session override values for Anthropic in this app run only."
         )
-      case ProviderKind.Gemini =>
+      case "gemini" =>
         for
           model  <- requiredModel(input, "Session override for Gemini needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Gemini needs `set api-key <key>`.")
@@ -245,7 +245,7 @@ private[providersetup] object ProviderSetupRuntime:
             GeminiConfig.fromValues(model, apiKey, input.baseUrl.getOrElse(DefaultConfig.DEFAULT_GEMINI_BASE_URL)),
           note = "Using session override values for Gemini in this app run only."
         )
-      case ProviderKind.DeepSeek =>
+      case "deepseek" =>
         for
           model  <- requiredModel(input, "Session override for DeepSeek needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for DeepSeek needs `set api-key <key>`.")
@@ -255,7 +255,7 @@ private[providersetup] object ProviderSetupRuntime:
           config = DeepSeekConfig.fromValues(model, apiKey, input.baseUrl.getOrElse(DeepSeekConfig.DEFAULT_BASE_URL)),
           note = "Using session override values for DeepSeek in this app run only."
         )
-      case ProviderKind.Cohere =>
+      case "cohere" =>
         for
           model  <- requiredModel(input, "Session override for Cohere needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Cohere needs `set api-key <key>`.")
@@ -265,7 +265,7 @@ private[providersetup] object ProviderSetupRuntime:
           config = CohereConfig.fromValues(model, apiKey, input.baseUrl.getOrElse(CohereConfig.DEFAULT_BASE_URL)),
           note = "Using session override values for Cohere in this app run only."
         )
-      case ProviderKind.Mistral =>
+      case "mistral" =>
         for
           model  <- requiredModel(input, "Session override for Mistral needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Mistral needs `set api-key <key>`.")
@@ -275,7 +275,7 @@ private[providersetup] object ProviderSetupRuntime:
           config = MistralConfig.fromValues(model, apiKey, input.baseUrl.getOrElse(MistralConfig.DEFAULT_BASE_URL)),
           note = "Using session override values for Mistral in this app run only."
         )
-      case ProviderKind.Zai =>
+      case "zai" =>
         for
           model  <- requiredModel(input, "Session override for Z.ai needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Z.ai needs `set api-key <key>`.")
@@ -312,11 +312,16 @@ private[providersetup] object ProviderSetupRuntime:
   private def requiredEndpoint(input: ProviderSessionInput, message: String): Either[String, String] =
     input.endpoint.toRight(message)
 
+  // The one remaining per-provider match in this file, and the one that does not collapse:
+  // it edits provider-specific fields (Azure's apiVersion, Vertex's projectId), not just the
+  // model. Left as-is deliberately - the fix is for the dashboard to edit the HOCON config
+  // *section* and rebuild the config through the provider's descriptor, rather than
+  // pattern-matching the already-built config. That needs the SPI, so it lands with #1131 PR 2.
   private def applyConfiguredSessionOverride(
     provider: ProviderConfig,
     input: Option[ProviderSessionInput]
   ): ProviderConfig =
-    provider match
+    (provider: @unchecked) match
       case cfg: OpenAIConfig =>
         cfg.copy(
           model = input.flatMap(_.model).getOrElse(cfg.model),
@@ -563,13 +568,16 @@ private[providersetup] object ProviderSetupRuntime:
     Conversation(systemPrompt +: history)
 
   private def providerName(provider: ProviderConfig): String =
-    provider.getClass.getSimpleName.stripSuffix("Config").toLowerCase
+    provider.providerId.asString
 
-  private def providerKindFromDocId(docId: SetupTabDocId): Result[ProviderKind] =
-    ProviderKind
-      .fromString(docId.value)
+  private def providerIdFromDocId(docId: SetupTabDocId): Result[ProviderId] =
+    ProviderSetupContent.providerDocs
+      .find(_.id.value == docId.value)
+      .map(doc => ProviderId(doc.id.value))
       .toRight(ValidationError("providerDocId", s"Expected provider doc id but got: ${docId.value}"))
 
+  // Hard-coded because there is nothing to ask yet. `ProviderFeatures` on the descriptor is the
+  // replacement (#1131 PR 2), which is also what makes the gap in #925 un-hideable.
   private def providerSupportsStreaming(provider: ProviderConfig): Boolean =
     provider match
       case _: MistralConfig => false
@@ -577,14 +585,4 @@ private[providersetup] object ProviderSetupRuntime:
       case _                => true
 
   private def overrideModel(provider: ProviderConfig, modelName: String): ProviderConfig =
-    provider match
-      case cfg: OpenAIConfig    => cfg.copy(model = modelName)
-      case cfg: AzureConfig     => cfg.copy(model = modelName)
-      case cfg: AnthropicConfig => cfg.copy(model = modelName)
-      case cfg: OllamaConfig    => cfg.copy(model = modelName)
-      case cfg: GeminiConfig    => cfg.copy(model = modelName)
-      case cfg: DeepSeekConfig  => cfg.copy(model = modelName)
-      case cfg: CohereConfig    => cfg.copy(model = modelName)
-      case cfg: MistralConfig   => cfg.copy(model = modelName)
-      case cfg: ZaiConfig       => cfg.copy(model = modelName)
-      case cfg: VertexAIConfig  => cfg.copy(model = modelName)
+    provider.withModel(modelName)

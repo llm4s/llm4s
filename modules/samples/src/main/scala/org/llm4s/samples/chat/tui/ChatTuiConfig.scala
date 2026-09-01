@@ -179,4 +179,4 @@ object ChatTuiConfig:
    * Used in the title bar and `/model` semantics.
    */
   private def canonicalModelName(p: ProviderConfig): String =
-    s"${p.provider.toString.toLowerCase}/${p.model}"
+    s"${p.providerId.asString}/${p.model}"
