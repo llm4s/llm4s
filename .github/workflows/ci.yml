@@ -459,6 +459,11 @@ jobs:
 
   # Tier 3: Ollama integration tests — verifies full round-trip against a real
   # local LLM. Only runs on pushes to main to avoid slowing down PR builds.
+  #
+  # Carries a pgvector service as well as Ollama, because the RAG pipeline suite needs both:
+  # real embeddings are the whole point of it, and pgvector is where the hybrid-search half
+  # stores them. A suite declares exactly one tier, so the tier its scarcer dependency
+  # belongs to has to supply the rest.
   ollama-integration:
     name: Ollama Integration
     needs: quick-checks
@@ -466,6 +471,20 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
 
     steps:
       - uses: actions/checkout@v7
@@ -493,14 +512,22 @@ jobs:
             sleep 1
           done
 
-      - name: Pull test model
-        run: ollama pull qwen2.5:0.5b
+      # Two models: one to answer with, one to embed with. RAGPipelineOllamaIntegrationSpec
+      # is the only suite in the repo that exercises retrieval against a real embedding
+      # model, so leaving nomic-embed-text out would make it fail rather than skip here.
+      - name: Pull test models
+        run: |
+          ollama pull qwen2.5:0.5b
+          ollama pull nomic-embed-text
 
       - name: Run Ollama integration tests
         env:
-          # This job installs Ollama and pulls the model, so "Ollama not available" here is a
-          # failure, not a reason to skip.
+          # This job installs Ollama, pulls the models and runs pgvector, so "not available"
+          # here is a failure, not a reason to skip.
           LLM4S_IT_STRICT: "true"
+          PGVECTOR_TEST_URL: jdbc:postgresql://localhost:5432/postgres
+          PGVECTOR_USER: postgres
+          PGVECTOR_PASSWORD: postgres
         run: sbt testOllama
 
   # Tier 2: containerised workspace tests. Split from the `integration-tests` job because
