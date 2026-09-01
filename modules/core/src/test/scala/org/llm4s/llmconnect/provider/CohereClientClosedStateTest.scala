@@ -42,9 +42,11 @@ class CohereClientClosedStateTest extends AnyFlatSpec with Matchers {
     result.left.toOption.get.message should include("command-r")
   }
 
-  it should "return ConfigurationError when streamComplete() is called (streaming not supported)" in {
+  it should "return ConfigurationError when streamComplete() is called after close()" in {
     val client         = new CohereClient(createTestConfig)
     var chunksReceived = 0
+
+    client.close()
 
     val result = client.streamComplete(
       createTestConversation,
@@ -54,7 +56,7 @@ class CohereClientClosedStateTest extends AnyFlatSpec with Matchers {
 
     result.isLeft shouldBe true
     result.left.toOption.get shouldBe a[ConfigurationError]
-    result.left.toOption.get.message.toLowerCase should include("stream")
+    result.left.toOption.get.message should include("already closed")
     chunksReceived shouldBe 0
   }
 
