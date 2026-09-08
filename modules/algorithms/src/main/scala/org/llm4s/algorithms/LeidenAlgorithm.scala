@@ -168,6 +168,20 @@ object LeidenAlgorithm:
     g.addUndirectedEdge(8, 9, 1.0)
     g.addUndirectedEdge(5, 9, 1.0)
 
+    /*
+      0: (1, 1.0), (2, 1.0)
+      1: (0, 1.0), (2, 1.0)
+      2: (0, 1.0), (1, 1.0), (3, 1.0)
+      3: (2, 1.0), (4, 1.0)
+      4: (3, 1.0), (5, 0.5)
+
+      5: (4, 0.5), (6, 1.0), (9, 1.0)
+      6: (5, 1.0), (7, 1.0)
+      7: (6, 1.0), (8, 1.0)
+      8: (7, 1.0), (9, 1.0)
+      9: (8, 1.0), (5, 1.0)
+     */
+
     println("Running Leiden Algorithm on custom graph...")
     val partition = runLeiden(g, 5)
 
