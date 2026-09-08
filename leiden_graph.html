@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { margin: 0; background: #1a1a2e; display: flex; justify-content: center; align-items: center; height: 100vh; font-family: system-ui, sans-serif; }
+  svg { filter: drop-shadow(0 0 20px rgba(0,0,0,0.3)); }
+  .edge { stroke-linecap: round; }
+  .node-circle { stroke-width: 2; }
+  .node-label { font-size: 14px; font-weight: 600; text-anchor: middle; dominant-baseline: central; fill: #1a1a2e; }
+  .edge-label { font-size: 11px; fill: #8892a0; text-anchor: middle; dominant-baseline: central; }
+  .title { font-size: 20px; fill: #e0e0e0; text-anchor: middle; font-weight: 600; }
+  .subtitle { font-size: 13px; fill: #8892a0; text-anchor: middle; }
+  .legend-text { font-size: 12px; fill: #c0c0c0; }
+  .community-bg { opacity: 0.08; }
+</style>
+</head>
+<body>
+<svg width="800" height="520" viewBox="0 0 800 520">
+  <defs>
+    <radialGradient id="glow1" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#4fc3f7" stop-opacity="0.3"/><stop offset="100%" stop-color="#4fc3f7" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glow2" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#81c784" stop-opacity="0.3"/><stop offset="100%" stop-color="#81c784" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glow3" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="#ffb74d" stop-opacity="0.3"/><stop offset="100%" stop-color="#ffb74d" stop-opacity="0"/></radialGradient>
+  </defs>
+
+  <!-- Title -->
+  <text x="400" y="35" class="title">Leiden Algorithm Example Graph</text>
+  <text x="400" y="55" class="subtitle">10 nodes, 10 edges | 3 communities detected</text>
+
+  <!-- Community background regions -->
+  <ellipse cx="190" cy="240" rx="150" ry="130" fill="url(#glow1)" class="community-bg"/>
+  <ellipse cx="610" cy="260" rx="170" ry="160" fill="url(#glow2)" class="community-bg"/>
+  <ellipse cx="390" cy="300" rx="80" ry="70" fill="url(#glow3)" class="community-bg"/>
+
+  <!-- Cluster 1 edges (weight 1.0) -->
+  <line x1="140" y1="170" x2="240" y2="170" class="edge" stroke="#4fc3f7" stroke-width="2.5" opacity="0.7"/>
+  <line x1="140" y1="170" x2="190" y2="260" class="edge" stroke="#4fc3f7" stroke-width="2.5" opacity="0.7"/>
+  <line x1="240" y1="170" x2="190" y2="260" class="edge" stroke="#4fc3f7" stroke-width="2.5" opacity="0.7"/>
+  <line x1="190" y1="260" x2="330" y2="310" class="edge" stroke="#4fc3f7" stroke-width="2.5" opacity="0.7"/>
+
+  <!-- Edges within {3,4} community -->
+  <line x1="330" y1="310" x2="420" y2="280" class="edge" stroke="#ffb74d" stroke-width="2.5" opacity="0.7"/>
+
+  <!-- Bridge edge (weight 0.5) -->
+  <line x1="420" y1="280" x2="510" y2="230" class="edge" stroke="#ff5252" stroke-width="1.5" stroke-dasharray="6,4" opacity="0.8"/>
+  <text x="465" y="245" class="edge-label" fill="#ff8a80">0.5</text>
+
+  <!-- Cluster 2 edges (weight 1.0) -->
+  <line x1="510" y1="230" x2="610" y2="160" class="edge" stroke="#81c784" stroke-width="2.5" opacity="0.7"/>
+  <line x1="610" y1="160" x2="710" y2="220" class="edge" stroke="#81c784" stroke-width="2.5" opacity="0.7"/>
+  <line x1="710" y1="220" x2="680" y2="340" class="edge" stroke="#81c784" stroke-width="2.5" opacity="0.7"/>
+  <line x1="680" y1="340" x2="560" y2="370" class="edge" stroke="#81c784" stroke-width="2.5" opacity="0.7"/>
+  <line x1="560" y1="370" x2="510" y2="230" class="edge" stroke="#81c784" stroke-width="2.5" opacity="0.7"/>
+
+  <!-- Edge weight labels for w=1.0 edges -->
+  <text x="190" y="160" class="edge-label">1.0</text>
+  <text x="155" y="220" class="edge-label">1.0</text>
+  <text x="225" y="220" class="edge-label">1.0</text>
+  <text x="252" y="292" class="edge-label">1.0</text>
+  <text x="378" y="288" class="edge-label">1.0</text>
+  <text x="553" y="188" class="edge-label">1.0</text>
+  <text x="668" y="183" class="edge-label">1.0</text>
+  <text x="704" y="285" class="edge-label">1.0</text>
+  <text x="628" y="363" class="edge-label">1.0</text>
+  <text x="525" y="308" class="edge-label">1.0</text>
+
+  <!-- Cluster 1 nodes (Community 0: blue) -->
+  <circle cx="140" cy="170" r="22" class="node-circle" fill="#4fc3f7" stroke="#29b6f6"/>
+  <text x="140" y="170" class="node-label">0</text>
+
+  <circle cx="240" cy="170" r="22" class="node-circle" fill="#4fc3f7" stroke="#29b6f6"/>
+  <text x="240" y="170" class="node-label">1</text>
+
+  <circle cx="190" cy="260" r="22" class="node-circle" fill="#4fc3f7" stroke="#29b6f6"/>
+  <text x="190" y="260" class="node-label">2</text>
+
+  <!-- Bridge nodes (Community 2: orange) -->
+  <circle cx="330" cy="310" r="22" class="node-circle" fill="#ffb74d" stroke="#ffa726"/>
+  <text x="330" y="310" class="node-label">3</text>
+
+  <circle cx="420" cy="280" r="22" class="node-circle" fill="#ffb74d" stroke="#ffa726"/>
+  <text x="420" y="280" class="node-label">4</text>
+
+  <!-- Cluster 2 nodes (Community 1: green) -->
+  <circle cx="510" cy="230" r="22" class="node-circle" fill="#81c784" stroke="#66bb6a"/>
+  <text x="510" y="230" class="node-label">5</text>
+
+  <circle cx="610" cy="160" r="22" class="node-circle" fill="#81c784" stroke="#66bb6a"/>
+  <text x="610" y="160" class="node-label">6</text>
+
+  <circle cx="710" cy="220" r="22" class="node-circle" fill="#81c784" stroke="#66bb6a"/>
+  <text x="710" y="220" class="node-label">7</text>
+
+  <circle cx="680" cy="340" r="22" class="node-circle" fill="#81c784" stroke="#66bb6a"/>
+  <text x="680" y="340" class="node-label">8</text>
+
+  <circle cx="560" cy="370" r="22" class="node-circle" fill="#81c784" stroke="#66bb6a"/>
+  <text x="560" y="370" class="node-label">9</text>
+
+  <!-- Legend -->
+  <rect x="30" y="420" width="740" height="75" rx="8" fill="#16213e" stroke="#2a2a4a" stroke-width="1"/>
+  <circle cx="70" cy="445" r="8" fill="#4fc3f7"/>
+  <text x="85" y="445" class="legend-text" dominant-baseline="central">Community 0: {0, 1, 2} - triangle cluster</text>
+
+  <circle cx="70" cy="470" r="8" fill="#ffb74d"/>
+  <text x="85" y="470" class="legend-text" dominant-baseline="central">Community 2: {3, 4} - bridge pair (too costly to leave each other)</text>
+
+  <circle cx="530" cy="445" r="8" fill="#81c784"/>
+  <text x="545" y="445" class="legend-text" dominant-baseline="central">Community 1: {5, 6, 7, 8, 9} - ring cluster</text>
+
+  <line x1="530" y1="470" x2="560" y2="470" stroke="#ff5252" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="575" y="470" class="legend-text" dominant-baseline="central">Bridge edge (weight 0.5)</text>
+</svg>
+</body>
+</html>
