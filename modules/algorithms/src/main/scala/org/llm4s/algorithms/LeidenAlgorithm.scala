@@ -49,7 +49,7 @@ object LeidenAlgorithm:
         currentGraph = aggregateGraph(currentGraph, refinedPartition, subCommToNewId)
         nodeToCommunity = mutable.Map.from(currentGraph.adjList.keys.map(n => n -> n))
 
-      originalToMacro.map { case (orig, macroId) => orig -> nodeToCommunity(macroId) }
+      originalToMacro
 
   // ---------------------------------------------------------
   // Step 1: Local Move Phase
