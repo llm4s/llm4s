@@ -46,6 +46,12 @@ LLM4S is now onboarded and tracked on **Linux Foundation LFX Insights**, providi
 
 This visibility helps contributors, adopters, and organizations evaluate the project's activity and sustainability, strengthening transparency, trust, and readiness for broader community and enterprise adoption.
 
+<p align="center">
+  <a href="https://insights.linuxfoundation.org/project/llm4s">
+    <img src="docs/image_assets/lfx-insights-overview.png" alt="LLM4S project overview on LFX Insights" width="900"/>
+  </a>
+</p>
+
 **[View LLM4S on LFX Insights →](https://insights.linuxfoundation.org/project/llm4s)**
 
 ## Overview
