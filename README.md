@@ -40,6 +40,12 @@
 ![GitHub issues](https://img.shields.io/github/issues/llm4s/llm4s?style=for-the-badge&label=Open%20Issues&color=purple)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/llm4s/llm4s)
 
+### Linux Foundation LFX Insights
+
+LLM4S is now onboarded and tracked on **Linux Foundation LFX Insights**, providing an independent, data-driven view of project health, maintainer activity, development, contributors, and security practices. LFX Insights tracking does not mean that LLM4S is hosted by or part of the Linux Foundation.
+
+**[View LLM4S on LFX Insights →](https://insights.linuxfoundation.org/project/llm4s)**
+
 ## Overview
 
 LLM4S provides a simple, robust, and scalable framework for building LLM applications in Scala. While most LLM work is done in Python, we believe that Scala offers a fundamentally better foundation for building reliable, maintainable AI-powered applications.
@@ -57,10 +63,6 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
 LLM4S is a broad pre-1.0 Scala AI framework. It already includes provider clients, agents, tool calling, RAG/vector stores, memory, guardrails, tracing, metrics, reliability wrappers, workspace isolation, and multimodal APIs.
 
 The current roadmap is focused on production readiness rather than adding isolated features: stable API contracts, provider capability parity, Java/Kotlin/Spring/Gradle interop, security hardening, deterministic CI, runnable docs, and maintained reference applications. See the [roadmap](https://llm4s.org/reference/roadmap) for the June 2026 status.
-
-### LFX Insights
-
-LLM4S has been onboarded to and is now tracked on [Linux Foundation LFX Insights](https://insights.linuxfoundation.org/project/llm4s), providing independent visibility into project activity, contributors, and ecosystem health. This listing does not mean that LLM4S is hosted by or part of the Linux Foundation.
 
 ## Why Scala for LLMs?
 
