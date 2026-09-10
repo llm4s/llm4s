@@ -159,6 +159,17 @@ object ConfigKeys {
   /** Selects the Ollama embedding model when using the legacy provider format. */
   val OLLAMA_EMBEDDING_MODEL = "OLLAMA_EMBEDDING_MODEL"
 
+  // ---- Embeddings: Jina AI ------------------------------------------------
+
+  /** Jina AI API key. Required when using Jina embedding models. */
+  val JINA_API_KEY = "JINA_API_KEY"
+
+  /** Overrides the Jina AI embedding base URL. Defaults to `"https://api.jina.ai"`. */
+  val JINA_EMBEDDING_BASE_URL = "JINA_EMBEDDING_BASE_URL"
+
+  /** Selects the Jina AI embedding model when using the legacy provider format. */
+  val JINA_EMBEDDING_MODEL = "JINA_EMBEDDING_MODEL"
+
   // ---- Embeddings: chunking -----------------------------------------------
 
   /** Token count per chunk when splitting documents for embedding. Default: `1000`. */
