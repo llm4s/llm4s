@@ -137,7 +137,7 @@ object LeidenAlgorithm:
     for
       u           <- g.adjList.keys
       (v, weight) <- g.adjList(u)
-      if u <= v
+      if u <= v // <= not <: self-loops (intra-community weight from prior aggregation) must be preserved
     do
       val macroU = subCommToNewId(refinedPartition(u))
       val macroV = subCommToNewId(refinedPartition(v))
