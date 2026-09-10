@@ -54,7 +54,7 @@ This visibility helps contributors, adopters, and organizations evaluate the pro
 
 **[View LLM4S on LFX Insights →](https://insights.linuxfoundation.org/project/llm4s)**
 
-**LLM4S is in excellent company.** The project appears in the [LLM API Gateways & Local Inference collection](https://insights.linuxfoundation.org/collection/details/llm-api-gateways) alongside widely adopted names such as **Ollama, vLLM, LiteLLM, Vercel AI SDK, and Spring AI**. For developers exploring production-minded LLM infrastructure—especially on the JVM and Scala—this makes LLM4S easier to discover, compare, and explore. Collection inclusion provides category context; it does not imply ranking or endorsement.
+LLM4S appears in the [LLM API Gateways & Local Inference collection](https://insights.linuxfoundation.org/collection/details/llm-api-gateways) alongside widely adopted names such as **Ollama, vLLM, LiteLLM, Vercel AI SDK, and Spring AI**. For developers exploring production-minded LLM infrastructure—especially on the JVM and Scala—this makes LLM4S easier to discover, compare, and explore. Collection inclusion provides category context; it does not imply ranking or endorsement.
 
 <p align="center">
   <a href="https://insights.linuxfoundation.org/collection/details/llm-api-gateways">
