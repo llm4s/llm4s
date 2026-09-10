@@ -76,9 +76,13 @@ LLM4S provides a simple, robust, and scalable framework for building LLM applica
 
 ## Current Status
 
-LLM4S is a broad pre-1.0 Scala AI framework. It already includes provider clients, agents, tool calling, RAG/vector stores, memory, guardrails, tracing, metrics, reliability wrappers, workspace isolation, and multimodal APIs.
+LLM4S is under active pre-1.0 development. The latest published release is [v0.4.1](https://github.com/llm4s/llm4s/releases/tag/v0.4.1), targeting Scala 3.7.1 and JDK 21. Its APIs are usable today but are still being stabilized ahead of the 1.0 compatibility commitment.
 
-The current roadmap is focused on production readiness rather than adding isolated features: stable API contracts, provider capability parity, Java/Kotlin/Spring/Gradle interop, security hardening, deterministic CI, runnable docs, and maintained reference applications. See the [roadmap](https://llm4s.org/reference/roadmap) for the June 2026 status.
+The framework already provides multi-provider clients, agents and tool calling, RAG and vector stores, memory, guardrails, tracing and metrics, reliability wrappers, workspace isolation, MCP support, and image and speech APIs.
+
+On `main`, the first three modularization slices are complete: RAG, knowledge graph, memory, MCP, shared media types, image, and speech have been carved out of `llm4s-core` into focused modules with smaller dependency footprints. These split modules are in the build but have not yet been published as separate artifacts; v0.4.1 still ships this functionality through `llm4s-core`. See the [1.0 scope](https://llm4s.org/reference/v1-scope) and [migration guide](https://github.com/llm4s/llm4s/blob/main/docs/reference/migration.md) for module maturity and upgrade details.
+
+The path to 1.0 is focused on stable API boundaries, provider capability parity and contract tests, Java/Kotlin/Spring/Gradle interoperability, security hardening, deterministic CI, production observability and cost controls, runnable documentation, and maintained reference applications. See the [roadmap](https://llm4s.org/reference/roadmap) for the full stabilization plan.
 
 ## Why Scala for LLMs?
 
