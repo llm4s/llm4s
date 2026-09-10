@@ -44,6 +44,8 @@
 
 LLM4S is now onboarded and tracked on **Linux Foundation LFX Insights**, providing an independent, data-driven view of project health, maintainer activity, development, contributors, and security practices. LFX Insights tracking does not mean that LLM4S is hosted by or part of the Linux Foundation.
 
+This visibility helps contributors, adopters, and organizations evaluate the project's activity and sustainability, strengthening transparency, trust, and readiness for broader community and enterprise adoption.
+
 **[View LLM4S on LFX Insights →](https://insights.linuxfoundation.org/project/llm4s)**
 
 ## Overview
