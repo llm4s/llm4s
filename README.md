@@ -58,6 +58,10 @@ LLM4S is a broad pre-1.0 Scala AI framework. It already includes provider client
 
 The current roadmap is focused on production readiness rather than adding isolated features: stable API contracts, provider capability parity, Java/Kotlin/Spring/Gradle interop, security hardening, deterministic CI, runnable docs, and maintained reference applications. See the [roadmap](https://llm4s.org/reference/roadmap) for the June 2026 status.
 
+### LFX Insights
+
+LLM4S has been onboarded to and is now tracked on [Linux Foundation LFX Insights](https://insights.linuxfoundation.org/project/llm4s), providing independent visibility into project activity, contributors, and ecosystem health. This listing does not mean that LLM4S is hosted by or part of the Linux Foundation.
+
 ## Why Scala for LLMs?
 
 - **Type Safety**: Catch errors at compile time, not in production.
