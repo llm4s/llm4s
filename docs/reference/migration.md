@@ -1,5 +1,139 @@
 # Migration Guide
 
+## Slice 4 (PR 2): the provider registration SPI
+
+The second slice 4 change ([#1131](https://github.com/llm4s/llm4s/issues/1131)). PR 1 removed the
+two structures that made an out-of-module provider impossible - a closed `enum` and a `sealed`
+trait. This one builds the extension point on top: a provider is now a value that describes
+itself, and everything that used to enumerate providers looks them up instead.
+
+Every provider still ships inside `llm4s-core`; what changed is that none of them is *wired in*
+by hand any more. Splitting them into their own artifacts is slice 5
+([#1132](https://github.com/llm4s/llm4s/issues/1132)).
+
+### Adding a provider
+
+Before, adding one chat provider meant editing roughly eight shared files - the closed `enum`,
+the `sealed` config file, two `match` expressions in `LLMConnect`, the loader's dispatch, a
+validator object, a capabilities object and the capabilities registry. That surface is why 13
+open provider PRs all conflict with each other.
+
+Now it is one file:
+
+```scala
+object BedrockProvider extends ProviderDescriptor:
+  val id: ProviderId = ProviderId("bedrock")
+
+  val configSpec: ProviderConfigSpec =
+    ProviderConfigSpec(requiresApiKey = true, requiresEndpoint = true)
+
+  def buildConfig(providerName: String, section: NamedProviderConfig)(using
+    ContextWindowResolver
+  ): Result[ProviderConfig] =
+    for
+      apiKey   <- ProviderDescriptor.requireApiKey(providerName, section)
+      endpoint <- ProviderDescriptor.requireField(
+                    providerName, "endpoint", section.endpoint, "llm4s.providers.<name>.endpoint")
+    yield BedrockConfig.fromValues(section.model.asString, apiKey, endpoint)
+
+  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
+    ModelRegistryService
+  ): Result[LLMClient] =
+    ProviderDescriptor
+      .expectConfig[BedrockConfig](id, config)
+      .flatMap(BedrockClient(_, options.metrics, options.exchangeLogging))
+```
+
+plus a `ProviderConfig` implementation, a client, and one registration:
+
+```scala
+val registry = ProviderRegistry.default.withProvider(BedrockProvider)
+LLMConnect.getClient(config)(using registry)
+```
+
+Classpath discovery - registering by *adding a dependency*, with no code at all - is PR 3.
+`Llm4sProviderModule` is the service type it will discover; it is already here so that a module
+can group its providers today.
+
+### What is new
+
+All in `org.llm4s.llmconnect.spi`:
+
+| Type | Purpose |
+|---|---|
+| `ProviderDescriptor` | one provider: id, aliases, config shape, features, model lister, and the two builders |
+| `ProviderConfigSpec` | which section fields the provider requires, its default base URL, and the text shown when a field is missing |
+| `ProviderFeatures` | what the client actually implements, declared statically (Cohere and Mistral declare `streaming = false` - [#925](https://github.com/llm4s/llm4s/issues/925)) |
+| `ProviderRegistry` | an immutable set of descriptors; `of`, `withProvider`, `withModule`, and lookup that returns `Result` |
+| `Llm4sProviderModule` | the unit of registration - one module, several providers |
+
+`ProviderRegistry` is resolved through a `using` clause with a default given in its companion, so
+existing call sites are unchanged and a caller who wants a different set passes one:
+
+```scala
+LLMConnect.getClient(config)                    // ProviderRegistry.default
+LLMConnect.getClient(config)(using myRegistry)  // only the providers you registered
+```
+
+### What was deleted
+
+All of these were `private[llm4s]`, so this costs users nothing:
+
+| Deleted | Replaced by |
+|---|---|
+| `config.ProviderCapabilities` (trait + 12 objects) | `ProviderDescriptor` |
+| `config.ProviderCapabilitiesRegistry` | `ProviderRegistry` |
+| `config.NamedProviderValidator` (trait) and `NamedProviderValidators` (12 objects) | `ProviderConfigSpec` + one generic `NamedProviderSectionValidator` |
+| the twelve-branch `match` in `NamedProviderLoader` | `descriptor.buildConfig` |
+| the two `match` expressions in `LLMConnect` | `descriptor.buildClient` |
+| the hard-coded `"google"`/`"vertex"` alias fold in `NamedProviderConfigNormalizer` | `ProviderDescriptor.aliases` |
+
+Error messages for missing fields are unchanged; they are now generated from the spec rather than
+written out per provider.
+
+### Source breaks
+
+1. **`ReliableProviders`: seven per-provider factories collapse to `wrap`.**
+
+   ```scala
+   // Before - covered 7 of 12 providers, and no provider from another module
+   ReliableProviders.openai(config, ReliabilityConfig.aggressive)
+   ReliableProviders.anthropic(config)
+
+   // After - covers every registered provider
+   ReliableProviders.wrap(config, ReliabilityConfig.aggressive)
+   ReliableProviders.wrap(config)
+   ```
+
+   The missing five were DeepSeek, Cohere, Mistral, Requesty and Vertex AI. `wrap(client,
+   providerName, ...)`, for a client you already have, is unchanged.
+
+2. **`OpenAIConfig.providerId` is derived from `baseUrl`.** It answers `openrouter` for a URL
+   containing `openrouter.ai` and `openai` otherwise - which is exactly the routing `LLMConnect`
+   already did with a hard-coded check, now stated by the config itself. If you build an
+   `OpenAIConfig` for OpenRouter and inspect `providerId`, the answer changed from `openai` to
+   `openrouter`; client routing is unchanged.
+
+3. **`ProviderModelLister` is now public**, along with `ProviderModelListers` and its new
+   `openAICompatible(provider, defaultBaseUrl, modelsPath)` factory - a provider module needs to
+   supply a model lister, and most providers serve the OpenAI `/models` shape. The five
+   near-identical per-provider lister objects became calls to that factory.
+
+4. **`ProviderResultOps` and `ProviderExchangeRecorder` are now public** (they were
+   `private[provider]`). A provider client outside `llm4s-core` needs both.
+
+### What did *not* change
+
+`Llm4sConfig`'s signatures, `NamedProviderLoader`'s results, `DiscoveredModel`, every
+`ProviderConfig` subtype's fields, and the `llm4s.providers.*` config format. A configuration
+that worked before works now, including `provider = "google"` and `provider = "vertex"`.
+
+`ProviderConfig.fromValues` still uses `require(...)`, which throws rather than returning a
+`Left`. Converting it is a behaviour change (throw → `Left`) that deserves its own note, and
+embeddings (`EmbeddingClient.from`, `EmbeddingsConfigLoader`'s fixed-arity reader,
+`ModelDimensionRegistry`, and the duplicate `org.llm4s.rag.EmbeddingProvider` name ADT) are still
+on the old dispatch. Both are tracked under #1131.
+
 ## Slice 4 (PR 1): `ProviderKind` becomes `ProviderId`, `ProviderConfig` opens up
 
 The first of the slice 4 changes ([#1131](https://github.com/llm4s/llm4s/issues/1131)). No SPI

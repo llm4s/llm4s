@@ -3,6 +3,7 @@ package org.llm4s.config
 
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.*
+import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.metrics.{ MetricsCollector, PrometheusEndpoint }
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.{ ProviderName, ProvidersConfig }
@@ -181,8 +182,11 @@ object Llm4sConfig {
       namedProvider <- providers.namedProviders
         .get(ProviderName(name))
         .toRight(org.llm4s.error.ConfigurationError(s"Configured provider '$name' was not found"))
-      capabilities <- ProviderCapabilitiesRegistry.forProvider(namedProvider.provider)
-      lister <- capabilities.modelLister
+      descriptor <- summon[ProviderRegistry].resolve(
+        namedProvider.provider,
+        Some(s"llm4s.providers.$name.provider")
+      )
+      lister <- descriptor.modelLister
         .toRight(
           org.llm4s.error.ConfigurationError(
             s"Model discovery is not supported yet for provider '${namedProvider.provider.asString}'"

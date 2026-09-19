@@ -1,10 +1,9 @@
 package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
-
-import java.util.Locale
 
 /** Converts a `RawNamedProviderSection` into a validated `NamedProviderConfig` by resolving string fields. */
 private[config] object NamedProviderConfigNormalizer:
@@ -19,7 +18,7 @@ private[config] object NamedProviderConfigNormalizer:
   def normalize(
     providerName: ProviderName,
     section: RawNamedProviderSection
-  ): Result[NamedProviderConfig] =
+  )(using registry: ProviderRegistry): Result[NamedProviderConfig] =
     val providerType =
       section.provider.map(_.trim).filter(_.nonEmpty) match
         case None =>
@@ -27,8 +26,10 @@ private[config] object NamedProviderConfigNormalizer:
         case Some(value) =>
           // An unrecognised provider string is deliberately *not* an error here. Providers are
           // resolved, not enumerated (#1131): whether anything on the classpath handles this id is
-          // decided later, by the capabilities lookup, which can name the ids it does know.
-          Right(canonicalId(value))
+          // decided later, by the registry lookup, which can name the ids it does know. Alternative
+          // spellings ("google" for Gemini, "vertex" for Vertex AI) are declared by the provider
+          // itself as `ProviderDescriptor.aliases`, not hard-coded here.
+          Right(registry.canonicalId(value))
 
     val modelName =
       section.model
@@ -48,17 +49,3 @@ private[config] object NamedProviderConfigNormalizer:
       endpoint = section.endpoint.map(_.trim).filter(_.nonEmpty),
       apiVersion = section.apiVersion.map(_.trim).filter(_.nonEmpty)
     )
-
-  /**
-   * Accepted alternative spellings, folded onto the canonical id.
-   *
-   * This is the last place in the codebase that hard-codes provider names for
-   * parsing. It moves to `ProviderDescriptor.aliases` when the SPI lands, so
-   * that a provider's module declares its own spellings; until then, dropping
-   * it would silently break `provider = "google"` and `provider = "vertex"`.
-   */
-  private def canonicalId(raw: String): ProviderId =
-    raw.trim.toLowerCase(Locale.ROOT) match
-      case "google" => ProviderId("gemini")
-      case "vertex" => ProviderId("vertexai")
-      case other    => ProviderId(other)

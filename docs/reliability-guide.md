@@ -91,15 +91,16 @@ User Code → ReliableClient → Circuit Breaker → Retry Logic → Deadline �
 
 ```scala
 import org.llm4s.reliability.ReliableProviders
-import org.llm4s.llmconnect.config.OpenAIConfig
+import org.llm4s.config.Llm4sConfig
 
-// Create reliable OpenAI client with default settings
-val clientResult = ReliableProviders.openai(
-  OpenAIConfig(
-    apiKey = "sk-...",
-    model = "gpt-4o"
-  )
-)
+// Wrap whichever provider the configuration names, with default settings
+val clientResult =
+  for
+    registry <- Llm4sConfig.modelRegistryService()
+    given org.llm4s.model.ModelRegistryService = registry
+    config <- Llm4sConfig.defaultProvider()
+    client <- ReliableProviders.wrap(config)
+  yield client
 
 clientResult.foreach { client =>
   // Use like any LLMClient
@@ -142,7 +143,7 @@ ReliabilityConfig.default
 ```scala
 import org.llm4s.reliability.ReliableProviders
 
-val client = ReliableProviders.anthropic(
+val client = ReliableProviders.wrap(
   config = anthropicConfig,
   reliabilityConfig = ReliabilityConfig.aggressive
 )
@@ -180,7 +181,7 @@ val customConfig = ReliabilityConfig(
   deadline = Some(2.minutes)
 )
 
-val client = ReliableProviders.openai(
+val client = ReliableProviders.wrap(
   config = openAIConfig,
   reliabilityConfig = customConfig
 )
@@ -188,71 +189,37 @@ val client = ReliableProviders.openai(
 
 ## Provider Examples
 
-```scala
-// OpenAI
-import org.llm4s.reliability.ReliableProviders
-import org.llm4s.llmconnect.config.OpenAIConfig
+`wrap` takes any `ProviderConfig`, so there is one call for every provider -
+including a provider supplied by a module `llm4s-core` has never heard of.
 
-val client = ReliableProviders.openai(
-  OpenAIConfig(
-    apiKey = "sk-...",
-    model = "gpt-4o",
-    baseUrl = Some("https://api.openai.com/v1")
-  )
-)
+```scala
+import org.llm4s.reliability.{ ReliabilityConfig, ReliableProviders }
+import org.llm4s.llmconnect.config._
+
+// OpenAI
+ReliableProviders.wrap(OpenAIConfig.fromValues("gpt-4o", "sk-...", None, "https://api.openai.com/v1"))
 
 // Azure OpenAI
-  AzureConfig(
-    apiKey = "...",
-    endpoint = "https://your-resource.openai.azure.com/",
-    deploymentName = "gpt-4o"
-  )
+ReliableProviders.wrap(
+  AzureConfig.fromValues("my-deployment", "https://your-resource.openai.azure.com/", "...", "V2025_01_01_PREVIEW")
 )
 
 // Anthropic
-  AnthropicConfig(
-    apiKey = "sk-ant-...",
-    model = "claude-3-5-sonnet-20241022"
-  )
-)
+ReliableProviders.wrap(AnthropicConfig.fromValues("claude-sonnet-4-5-latest", "sk-ant-...", "https://api.anthropic.com"))
 
-// Gemini
-  GeminiConfig(
-    apiKey = "...",
-    model = "gemini-2.0-flash-exp"
-  )
-)
+// Ollama - no API key, and the base URL is wherever you run it
+ReliableProviders.wrap(OllamaConfig.fromValues("llama3.1", "http://localhost:11434"))
 
-// Ollama
-  OllamaConfig(
-    baseUrl = "http://localhost:11434",
-    model = "llama3.1"
-  )
-)
-
-// OpenRouter
-  OpenAIConfig(
-    apiKey = "sk-or-...",
-    model = "anthropic/claude-3.5-sonnet",
-    baseUrl = Some("https://openrouter.ai/api/v1")
-  )
-)
-
-// Requesty
-  OpenAIConfig(
-    apiKey = "rqsty-sk-...",
-    model = "openai/gpt-4o-mini",
-    baseUrl = Some("https://router.requesty.ai/v1")
-  )
-)
-
-// Zai
-  ZaiConfig(
-    apiKey = "...",
-    model = "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo"
-  )
+// OpenRouter - an OpenAIConfig pointed at OpenRouter
+ReliableProviders.wrap(
+  OpenAIConfig.fromValues("anthropic/claude-sonnet-4-5", "sk-or-...", None, "https://openrouter.ai/api/v1"),
+  ReliabilityConfig.aggressive
 )
 ```
+
+Each `fromValues` needs a `given ContextWindowResolver` in scope, which
+`Llm4sConfig.modelRegistryService()` supplies; in most applications the config
+comes from `Llm4sConfig.defaultProvider()` instead of being built by hand.
 
 ## Retry Policies
 
@@ -343,8 +310,9 @@ class MyMetricsCollector extends MetricsCollector {
   // ... implement other methods
 }
 
-val client = ReliableProviders.openai(
+val client = ReliableProviders.wrap(
   config = openAIConfig,
+  reliabilityConfig = ReliabilityConfig.default,
   metrics = new MyMetricsCollector
 )
 ```
@@ -370,7 +338,7 @@ Non-retryable errors (fail immediately):
 
 ```scala
 // Start here
-val client = ReliableProviders.openai(config)
+val client = ReliableProviders.wrap(config)
 ```
 
 Only customize if you have specific requirements.
@@ -424,7 +392,7 @@ object ReliabilityProfiles {
 }
 
 val config = ReliabilityProfiles.forEnvironment(sys.env.getOrElse("ENV", "production"))
-val client = ReliableProviders.openai(openAIConfig, config)
+val client = ReliableProviders.wrap(openAIConfig, config)
 ```
 
 ### Pattern 2: Provider-Specific Configurations
@@ -475,8 +443,8 @@ def callWithFallback(
 }
 
 // Usage
-val openAI = ReliableProviders.openai(openAIConfig).toOption.get
-val anthropic = ReliableProviders.anthropic(anthropicConfig).toOption.get
+val openAI = ReliableProviders.wrap(openAIConfig).toOption.get
+val anthropic = ReliableProviders.wrap(anthropicConfig).toOption.get
 
 callWithFallback(openAI, anthropic, conversation)
 ```
@@ -604,7 +572,7 @@ val result = client.complete(conversation)
 
 **After (Option 1 - Direct replacement):**
 ```scala
-val client = ReliableProviders.openai(config).toOption.get
+val client = ReliableProviders.wrap(config).toOption.get
 val result = client.complete(conversation)
 ```
 
@@ -896,14 +864,10 @@ case class CircuitBreakerConfig(
 ### ReliableProviders
 
 Factory methods for all providers:
-- `ReliableProviders.openai(...)`
-- `ReliableProviders.azureOpenAI(...)`
-- `ReliableProviders.anthropic(...)`
-- `ReliableProviders.gemini(...)`
-- `ReliableProviders.ollama(...)`
-- `ReliableProviders.openRouter(...)`
-- `ReliableProviders.zai(...)`
-- `ReliableProviders.wrap(...)` - Wrap any LLMClient
+- `ReliableProviders.wrap(config)` - build the client the config names and wrap it
+- `ReliableProviders.wrap(config, reliabilityConfig)`
+- `ReliableProviders.wrap(config, reliabilityConfig, metrics)`
+- `ReliableProviders.wrap(client, providerName, ...)` - wrap an `LLMClient` you already have
 
 ### ReliabilitySyntax
 
@@ -927,7 +891,7 @@ client.withReliability(providerName, config, metrics) // With custom config and 
 
 ### ✅ Easy Integration
 
-- **One-Line Setup**: `ReliableProviders.openai(config)`
+- **One-Line Setup**: `ReliableProviders.wrap(config)`
 - **Universal Support**: Works with all 7 LLM providers
 - **Drop-In Replacement**: No code changes required
 - **Thread-Safe**: Share clients across threads safely

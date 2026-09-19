@@ -52,7 +52,16 @@ Slice order — each is an issue with its own scope and gotchas:
    "this API does not exist". Slices 1 and 2 both hit this and it went unnoticed until slice 3;
    `pages.yml` now fails the deploy if a known package is absent, and the ScalaDoc CI job runs
    `docs/doc` on every PR.
-8. **Never add a provider by editing shared registration files** once slice 4 lands. Before then, note that `NamedProviderLoader`, `ProviderConfig`, `ProviderModelTypes`, `LLMConnect`, `ProviderCapabilities*` and `NamedProviderValidator` are the most contended files in the repo.
+8. **A provider is a `ProviderDescriptor`, not an edit to shared files** - since slice 4 PR 2
+   ([#1131](https://github.com/llm4s/llm4s/issues/1131)). Implement
+   `org.llm4s.llmconnect.spi.ProviderDescriptor`, and register it by listing it in an
+   `Llm4sProviderModule` or passing it to `ProviderRegistry.of` / `.withProvider`. Nothing in
+   `llm4s-core` needs editing: `ProviderCapabilities`, `ProviderCapabilitiesRegistry` and the
+   twelve `NamedProviderValidators` objects are gone, and the dispatch `match` expressions in
+   `LLMConnect` and `NamedProviderLoader` with them. The one remaining central list is
+   `BuiltinProviders`, which exists only because core still holds every client and leaves with
+   slice 5. A provider added there must also be added to `BuiltinProvidersSpec`, which is what
+   replaced the compiler's exhaustivity check over the old closed `enum`.
 
 Current per-module coverage floors are recorded in [#1127](https://github.com/llm4s/llm4s/issues/1127); floors ratchet upward and are never lowered.
 

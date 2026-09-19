@@ -1,8 +1,7 @@
 package org.llm4s.llmconnect
 
-import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config._
-import org.llm4s.llmconnect.provider._
+import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -11,12 +10,15 @@ import org.llm4s.types.Result
 /**
  * Constructs an [[LLMClient]] from provider configuration.
  *
- * Provider selection is determined entirely by the runtime type of the
- * [[ProviderConfig]] supplied: an [[AnthropicConfig]] produces an Anthropic
- * client, an [[OpenAIConfig]] produces an OpenAI or OpenRouter client (the
- * latter when `baseUrl` contains `"openrouter.ai"`), and so on. Azure uses
- * [[OpenAIClient]] internally — [[AzureConfig]] carries the deployment
- * endpoint and API-version fields that OpenAI does not require.
+ * Which client is built is decided by the [[org.llm4s.llmconnect.spi.ProviderRegistry]]:
+ * the config names a provider through
+ * [[org.llm4s.llmconnect.config.ProviderConfig.providerId]], and that provider's
+ * [[org.llm4s.llmconnect.spi.ProviderDescriptor]] builds its own client. `LLMConnect`
+ * itself knows no provider names, so a provider supplied by another module is reached
+ * the same way a built-in one is.
+ *
+ * Pass a different registry with `using` to resolve against a custom set of providers;
+ * with none in scope, [[org.llm4s.llmconnect.spi.ProviderRegistry.default]] is used.
  *
  * @example
  * {{{
@@ -33,72 +35,38 @@ import org.llm4s.types.Result
 object LLMConnect {
 
   private def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
-    ModelRegistryService
+    ModelRegistryService,
+    ProviderRegistry
   ): Result[LLMClient] =
-    val metrics         = options.metrics
-    val exchangeLogging = options.exchangeLogging
-    config match {
-      case cfg: OpenAIConfig =>
-        if (cfg.baseUrl.contains("openrouter.ai"))
-          OpenRouterClient(cfg, metrics, exchangeLogging)
-        else OpenAIClient(cfg, metrics, exchangeLogging)
-      case cfg: AzureConfig =>
-        OpenAIClient(cfg, metrics, exchangeLogging)
-      case cfg: AnthropicConfig =>
-        AnthropicClient(cfg, metrics, exchangeLogging)
-      case cfg: OllamaConfig =>
-        OllamaClient(cfg, metrics, exchangeLogging)
-      case cfg: ZaiConfig =>
-        ZaiClient(cfg, metrics, exchangeLogging)
-      case cfg: GeminiConfig =>
-        GeminiClient(cfg, metrics, exchangeLogging)
-      case cfg: DeepSeekConfig =>
-        DeepSeekClient(cfg, metrics, exchangeLogging)
-      case cfg: CohereConfig =>
-        CohereClient(cfg, metrics, exchangeLogging)
-      case cfg: MistralConfig =>
-        MistralClient(cfg, metrics, exchangeLogging)
-      case cfg: VertexAIConfig =>
-        VertexAIClient(cfg, metrics, exchangeLogging)
-      case other =>
-        // `ProviderConfig` is open, so this is reachable: it is what a config from a provider
-        // module looks like before the registry exists to build its client (#1131, PR 2).
-        Left(
-          ConfigurationError(
-            s"No client is registered for provider '${other.providerId.asString}' " +
-              s"(config type ${other.getClass.getSimpleName})"
-          )
-        )
-    }
+    summon[ProviderRegistry].get(config.providerId).flatMap(_.buildClient(config, options))
 
   def fromConfig(
     config: ProviderConfig,
     options: LlmClientOptions = LlmClientOptions.default
-  )(using ModelRegistryService): Result[LLMClient] =
+  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
     buildClient(config, options)
 
   // ---- Config-driven construction -----------------------------------------
 
   /**
-   * Constructs an [[LLMClient]], routing to the correct provider based on the
-   * runtime type of `config` and recording call statistics to `metrics`.
+   * Constructs an [[LLMClient]] for the provider `config` names, recording call
+   * statistics to `metrics`.
    *
-   * Every [[ProviderConfig]] subtype defined in `llm4s-core` is handled. Because
-   * [[ProviderConfig]] is open, a config from elsewhere yields a
-   * [[org.llm4s.error.ConfigurationError]] naming its provider; `Left` is also
-   * returned if the underlying client constructor fails (for example, if the HTTP
-   * client library throws during initialisation).
+   * A config whose provider is not registered yields a
+   * [[org.llm4s.error.ConfigurationError]] listing the providers that are; `Left`
+   * is also returned if the underlying client constructor fails (for example, if
+   * the HTTP client library throws during initialisation).
    *
-   * @param config  Provider configuration; the concrete subtype determines which
-   *                client is built. For OpenRouter, supply an [[OpenAIConfig]]
-   *                whose `baseUrl` contains `"openrouter.ai"`.
+   * @param config  Provider configuration; its
+   *                `providerId` selects the client. For OpenRouter, supply an
+   *                `OpenAIConfig` whose `baseUrl` contains `"openrouter.ai"`.
    * @param metrics Receives per-call latency and token-usage events.
    *                Use [[org.llm4s.metrics.MetricsCollector.noop]] when no metrics backend is needed.
    */
   def getClient(
     config: ProviderConfig,
     metrics: MetricsCollector
-  )(using ModelRegistryService): Result[LLMClient] =
+  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
     fromConfig(config, LlmClientOptions(metrics = metrics))
 
   /**
@@ -110,7 +78,7 @@ object LLMConnect {
   def getClient(
     config: ProviderConfig,
     options: LlmClientOptions
-  )(using ModelRegistryService): Result[LLMClient] =
+  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
     fromConfig(config, options)
 
   /**
@@ -120,9 +88,9 @@ object LLMConnect {
    * Switch to the two-argument overload when per-call latency or token-usage
    * data is needed (e.g. for Prometheus or Micrometer).
    *
-   * @param config Provider configuration; the concrete subtype determines which client is built.
+   * @param config Provider configuration; its `providerId` selects the client.
    */
-  def getClient(config: ProviderConfig)(using ModelRegistryService): Result[LLMClient] =
+  def getClient(config: ProviderConfig)(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
     fromConfig(config)
 
   // ---- Provider-explicit construction (validates provider/config pairing) -
@@ -137,7 +105,7 @@ object LLMConnect {
    * is resolved dynamically from user input or external config and you want an
    * explicit error on mismatch rather than silent wrong routing.
    *
-   * @param provider The expected provider; must match the runtime type of `config`.
+   * @param provider The provider to build; `config` must be the config type it expects.
    * @param config   Provider configuration corresponding to `provider`.
    * @param metrics  Receives per-call latency and token-usage events.
    *                 Use [[org.llm4s.metrics.MetricsCollector.noop]] when no metrics backend is needed.
@@ -149,7 +117,7 @@ object LLMConnect {
     provider: ProviderId,
     config: ProviderConfig,
     metrics: MetricsCollector
-  )(using ModelRegistryService): Result[LLMClient] =
+  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
     getClient(provider, config, LlmClientOptions(metrics = metrics))
 
   /**
@@ -160,40 +128,21 @@ object LLMConnect {
     provider: ProviderId,
     config: ProviderConfig,
     options: LlmClientOptions
-  )(using ModelRegistryService): Result[LLMClient] =
+  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
     fromProvider(provider, config, options)
 
   def fromProvider(
     provider: ProviderId,
     config: ProviderConfig,
     options: LlmClientOptions = LlmClientOptions.default
-  )(using ModelRegistryService): Result[LLMClient] =
-    val metrics         = options.metrics
-    val exchangeLogging = options.exchangeLogging
-    (provider.asString, config) match {
-      case ("openai", cfg: OpenAIConfig)       => OpenAIClient(cfg, metrics, exchangeLogging)
-      case ("openrouter", cfg: OpenAIConfig)   => OpenRouterClient(cfg, metrics, exchangeLogging)
-      case ("requesty", cfg: OpenAIConfig)     => OpenAIClient(cfg, metrics, exchangeLogging)
-      case ("azure", cfg: AzureConfig)         => OpenAIClient(cfg, metrics, exchangeLogging)
-      case ("anthropic", cfg: AnthropicConfig) => AnthropicClient(cfg, metrics, exchangeLogging)
-      case ("ollama", cfg: OllamaConfig)       => OllamaClient(cfg, metrics, exchangeLogging)
-      case ("zai", cfg: ZaiConfig)             => ZaiClient(cfg, metrics, exchangeLogging)
-      case ("gemini", cfg: GeminiConfig)       => GeminiClient(cfg, metrics, exchangeLogging)
-      case ("deepseek", cfg: DeepSeekConfig)   => DeepSeekClient(cfg, metrics, exchangeLogging)
-      case ("cohere", cfg: CohereConfig)       => CohereClient(cfg, metrics, exchangeLogging)
-      case ("mistral", cfg: MistralConfig)     => MistralClient(cfg, metrics, exchangeLogging)
-      case ("vertexai", cfg: VertexAIConfig)   => VertexAIClient(cfg, metrics, exchangeLogging)
-      case (prov, wrongCfg) =>
-        val cfgType = wrongCfg.getClass.getSimpleName
-        val msg     = s"Invalid config type $cfgType for provider $prov"
-        Left(ConfigurationError(msg))
-    }
+  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
+    summon[ProviderRegistry].get(provider).flatMap(_.buildClient(config, options))
 
   /**
    * Constructs an [[LLMClient]], verifying provider/config consistency,
    * without recording call statistics.
    *
-   * @param provider The expected provider; must match the runtime type of `config`.
+   * @param provider The provider to build; `config` must be the config type it expects.
    * @param config   Provider configuration corresponding to `provider`.
    * @return the constructed client, or a [[org.llm4s.error.ConfigurationError]] when
    *         `provider` and `config` describe different providers, or an
@@ -202,6 +151,6 @@ object LLMConnect {
   def getClient(
     provider: ProviderId,
     config: ProviderConfig
-  )(using ModelRegistryService): Result[LLMClient] =
+  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
     getClient(provider, config, LlmClientOptions.default)
 }

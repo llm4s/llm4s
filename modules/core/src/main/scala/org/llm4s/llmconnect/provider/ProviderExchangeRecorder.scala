@@ -7,7 +7,7 @@ import java.time.Instant
 import scala.util.Try
 
 /** Records completed provider exchanges to the configured logging sink. */
-private[provider] object ProviderExchangeRecorder {
+object ProviderExchangeRecorder {
 
   def record(
     exchangeLogging: ProviderExchangeLogging,

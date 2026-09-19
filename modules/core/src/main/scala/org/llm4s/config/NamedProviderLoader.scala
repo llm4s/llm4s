@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.error.{ ConfigurationError, LLMError }
 import org.llm4s.llmconnect.config.*
+import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
 import pureconfig.ConfigSource
@@ -16,7 +17,10 @@ private[config] object NamedProviderLoader:
    *  @param providerName the name of the provider entry to look up
    *  @return `Right(ProviderConfig)` on success, or `Left` with a `ConfigurationError`
    */
-  def load(source: ConfigSource, providerName: String)(using ContextWindowResolver): Result[ProviderConfig] =
+  def load(source: ConfigSource, providerName: String)(using
+    ContextWindowResolver,
+    ProviderRegistry
+  ): Result[ProviderConfig] =
     val trimmed = providerName.trim
     if trimmed.isEmpty then Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
     else
@@ -36,7 +40,10 @@ private[config] object NamedProviderLoader:
    */
   def loadProviderConfigs(
     source: ConfigSource
-  )(using ContextWindowResolver): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
+  )(using
+    ContextWindowResolver,
+    ProviderRegistry
+  ): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
     for
       providers <- ProvidersConfigLoader.load(source)
       namedProviders = providers.namedProviders
@@ -51,7 +58,10 @@ private[config] object NamedProviderLoader:
    */
   def getProviderConfigs(
     namedProviders: Map[ProviderName, NamedProviderConfig]
-  )(using ContextWindowResolver): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
+  )(using
+    ContextWindowResolver,
+    ProviderRegistry
+  ): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
     namedProviders.toList.foldLeft((Map.empty[ProviderName, LLMError], Map.empty[ProviderName, ProviderConfig]))(
       (x, y) =>
         buildConfigFromNamedConfig(y._1.asName, y._2).fold(
@@ -68,76 +78,9 @@ private[config] object NamedProviderLoader:
   private def buildConfigFromNamedConfig(
     providerName: String,
     section: NamedProviderConfig
-  )(using ContextWindowResolver): Result[ProviderConfig] =
-    def required(fieldName: String, value: Option[String], envHint: String): Result[String] =
-      value.toRight(
-        ConfigurationError(s"Configured provider '$providerName' is missing $fieldName ($envHint)")
-      )
-
-    def requiredApiKey(envHint: String): Result[String] =
-      required("api key", section.apiKey.map(_.asKey), envHint)
-
-    // Dispatch on the canonical id string: `ProviderId` is an open vocabulary, so there is
-    // nothing to be exhaustive over. Each branch becomes a `ProviderDescriptor.buildConfig`
-    // in its own module once the SPI lands (#1131).
-    section.provider.asString match
-      case id @ ("openai" | "openrouter" | "requesty") =>
-        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val defaultBaseUrl = id match
-            case "openrouter" => DefaultConfig.DEFAULT_OPENROUTER_BASE_URL
-            case "requesty"   => DefaultConfig.DEFAULT_REQUESTY_BASE_URL
-            case _            => DefaultConfig.DEFAULT_OPENAI_BASE_URL
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(defaultBaseUrl)
-          OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl)
-      case "azure" =>
-        for
-          endpoint <- required("endpoint", section.endpoint, "llm4s.providers.<name>.endpoint")
-          apiKey   <- requiredApiKey("llm4s.providers.<name>.apiKey")
-          apiVersion = section.apiVersion.getOrElse(DefaultConfig.DEFAULT_AZURE_V2025_01_01_PREVIEW)
-        yield AzureConfig.fromValues(section.model.asString, endpoint, apiKey, apiVersion)
-      case "anthropic" =>
-        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL)
-          AnthropicConfig.fromValues(section.model.asString, apiKey, baseUrl)
-      case "ollama" =>
-        section.baseUrl
-          .map(_.asUrl)
-          .toRight(
-            ConfigurationError(
-              s"Configured provider '$providerName' is missing base URL (llm4s.providers.<name>.baseUrl)"
-            )
-          )
-          .map(url => OllamaConfig.fromValues(section.model.asString, url))
-      case "zai" =>
-        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(ZaiConfig.DEFAULT_BASE_URL)
-          ZaiConfig.fromValues(section.model.asString, apiKey, baseUrl)
-      case "gemini" =>
-        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_GEMINI_BASE_URL)
-          GeminiConfig.fromValues(section.model.asString, apiKey, baseUrl)
-      case "deepseek" =>
-        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
-          DeepSeekConfig.fromValues(section.model.asString, apiKey, baseUrl)
-      case "cohere" =>
-        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(CohereConfig.DEFAULT_BASE_URL)
-          CohereConfig.fromValues(section.model.asString, apiKey, baseUrl)
-      case "mistral" =>
-        requiredApiKey("llm4s.providers.<name>.apiKey").map: apiKey =>
-          val baseUrl = section.baseUrl.map(_.asUrl).getOrElse(MistralConfig.DEFAULT_BASE_URL)
-          MistralConfig.fromValues(section.model.asString, apiKey, baseUrl)
-      case "vertexai" =>
-        for projectId <- required("endpoint (GCP project ID)", section.endpoint, "llm4s.providers.<name>.endpoint")
-        yield
-          val location           = section.organization.getOrElse(DefaultConfig.DEFAULT_VERTEXAI_LOCATION)
-          val credentialFilePath = section.apiKey.map(_.asKey)
-          VertexAIConfig.fromValues(section.model.asString, projectId, location, credentialFilePath)
-      case unknown =>
-        Left(
-          ConfigurationError(
-            s"Configured provider '$providerName' names provider '$unknown', which this build cannot resolve. " +
-              s"Supported providers: ${ProviderCapabilitiesRegistry.registeredIds.mkString(", ")}"
-          )
-        )
+  )(using ContextWindowResolver, ProviderRegistry): Result[ProviderConfig] =
+    // The whole dispatch: find the provider that claims this id and let it build its own config.
+    // This used to be a twelve-branch `match` over hard-coded provider names (#1131).
+    summon[ProviderRegistry]
+      .resolve(section.provider, Some(s"llm4s.providers.$providerName.provider"))
+      .flatMap(_.buildConfig(providerName, section))

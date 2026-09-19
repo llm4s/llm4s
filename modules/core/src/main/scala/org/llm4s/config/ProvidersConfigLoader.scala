@@ -1,6 +1,7 @@
 package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
 import pureconfig.ConfigSource
@@ -14,7 +15,7 @@ private[config] object ProvidersConfigLoader:
    *  @param source the PureConfig source to read from
    *  @return `Right(ProvidersConfig)` on success, or `Left` with a `ConfigurationError`
    */
-  def load(source: ConfigSource): Result[ProvidersConfig] =
+  def load(source: ConfigSource)(using ProviderRegistry): Result[ProvidersConfig] =
     RawProvidersConfigLoader.load(source).flatMap(validate)
 
   /**
@@ -23,7 +24,7 @@ private[config] object ProvidersConfigLoader:
    *  @param raw the raw providers config to validate
    *  @return `Right(ProvidersConfig)` on success, or `Left` with a `ConfigurationError`
    */
-  def validate(raw: RawProvidersConfig): Result[ProvidersConfig] =
+  def validate(raw: RawProvidersConfig)(using ProviderRegistry): Result[ProvidersConfig] =
     for
       namedProviders <- validateNamedProviders(raw.namedProviders)
       _              <- validateSelectedProvider(raw.selectedProvider, namedProviders)
@@ -34,7 +35,7 @@ private[config] object ProvidersConfigLoader:
 
   private def validateNamedProviders(
     rawNamedProviders: Map[ProviderName, RawNamedProviderSection]
-  ): Result[Map[ProviderName, NamedProviderConfig]] =
+  )(using ProviderRegistry): Result[Map[ProviderName, NamedProviderConfig]] =
     rawNamedProviders.foldLeft[Result[Map[ProviderName, NamedProviderConfig]]](Right(Map.empty)):
       case (accResult, (providerName, rawSection)) =>
         for

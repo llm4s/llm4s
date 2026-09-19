@@ -1,8 +1,13 @@
 package org.llm4s.reliability
 
+import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.LLMClient
+import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.metrics.MetricsCollector
+import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -32,6 +37,11 @@ class ReliableProvidersSpec extends AnyFlatSpec with Matchers {
   }
 
   private val mockClient = new MockLLMClient
+
+  private given ModelRegistryService = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
+
+  private val anthropicConfig =
+    AnthropicConfig("sk-test", "claude-sonnet-4-5-latest", "https://api.anthropic.com", 200000, 4096)
 
   // ==========================================================================
   // ReliableProviders.wrap
@@ -121,6 +131,48 @@ class ReliableProvidersSpec extends AnyFlatSpec with Matchers {
   "ReliableClient.apply(client, config)" should "create with custom config" in {
     val reliable = ReliableClient(mockClient, ReliabilityConfig.aggressive)
     reliable shouldBe a[ReliableClient]
+  }
+
+  // ==========================================================================
+  // ReliableProviders.wrap(config) - the registry-routed replacement for the
+  // seven per-provider factories removed in #1131.
+  // ==========================================================================
+
+  "ReliableProviders.wrap(config)" should "build and wrap the client the config names" in {
+    ReliableProviders.wrap(anthropicConfig) match {
+      case Right(client) => client shouldBe a[ReliableClient]
+      case Left(error)   => fail(s"Expected a reliable Anthropic client, got: ${error.message}")
+    }
+  }
+
+  it should "accept a reliability config and a metrics collector" in {
+    val result = ReliableProviders.wrap(anthropicConfig, ReliabilityConfig.aggressive, MetricsCollector.noop)
+    result.map(_.getClass.getSimpleName) shouldBe Right("ReliableClient")
+  }
+
+  it should "report an unregistered provider rather than building anything" in {
+    // A config from a provider module that is not on this classpath.
+    val unregistered = new ProviderConfig {
+      val providerId: ProviderId                   = ProviderId("moonbeam")
+      val model: String                            = "v1"
+      val contextWindow: Int                       = 4096
+      val reserveCompletion: Int                   = 512
+      def endpointUrl: Option[String]              = None
+      def withModel(model: String): ProviderConfig = this
+    }
+
+    ReliableProviders.wrap(unregistered) match {
+      case Left(error: ConfigurationError) => error.message should include("Provider 'moonbeam' is not registered")
+      case other                           => fail(s"Expected an unregistered-provider error, got: $other")
+    }
+  }
+
+  it should "use a registry passed explicitly" in {
+    // An empty registry resolves nothing, which is how a caller proves the
+    // registry is the only thing deciding what can be built.
+    given ProviderRegistry = ProviderRegistry.of()
+
+    ReliableProviders.wrap(anthropicConfig).isLeft shouldBe true
   }
 
   "ReliableClient.apply(client, config, collector)" should "create with metrics" in {

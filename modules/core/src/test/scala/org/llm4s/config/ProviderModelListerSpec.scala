@@ -5,6 +5,7 @@ import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, MockHttpClient }
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
+import org.llm4s.llmconnect.spi.ProviderRegistry
 
 class ProviderModelListerSpec extends AnyFunSuite with Matchers:
 
@@ -91,14 +92,14 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
         fail(s"Expected unsupported provider error, got models: $models")
   }
 
-  test("provider capabilities expose the Ollama model lister") {
-    val result = ProviderCapabilitiesRegistry.forProvider(ProviderId("ollama"))
+  test("the registered Ollama provider exposes its model lister") {
+    val result = ProviderRegistry.default.get(ProviderId("ollama"))
 
     result match
-      case Right(capabilities) =>
-        capabilities.modelLister shouldBe Some(ProviderModelListers.Ollama)
+      case Right(descriptor) =>
+        descriptor.modelLister shouldBe Some(ProviderModelListers.Ollama)
       case Left(err) =>
-        fail(s"Expected Ollama capabilities, got error: ${err.message}")
+        fail(s"Expected the Ollama provider to be registered, got error: ${err.message}")
   }
 
   test("OpenAI lister discovers models from /models") {

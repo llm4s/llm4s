@@ -22,6 +22,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **The provider registration SPI: adding a provider is one file, not eight** - the second
+  change of slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)). PR 1 removed the closed
+  `enum` and the `sealed` trait; this builds the extension point on top of them.
+
+  New in `org.llm4s.llmconnect.spi`: `ProviderDescriptor` (a provider's id, aliases, config shape,
+  features, model lister and its two builders), `ProviderConfigSpec` (which section fields it
+  requires and its default base URL), `ProviderFeatures` (what its client actually implements),
+  `ProviderRegistry` (an immutable set of descriptors, resolved through a `using` clause with a
+  default given in its companion) and `Llm4sProviderModule` (the unit of registration - one module,
+  several providers). All twelve built-in providers are now descriptors in
+  `org.llm4s.llmconnect.provider`, listed in `BuiltinProviders` and nowhere else.
+
+  What that replaces, all of it `private[llm4s]` and therefore free to delete: `ProviderCapabilities`
+  (a trait plus twelve objects), `ProviderCapabilitiesRegistry`, `NamedProviderValidator` and its
+  twelve `NamedProviderValidators` objects, the twelve-branch `match` in `NamedProviderLoader`, the
+  two `match` expressions in `LLMConnect`, and the hard-coded `"google"`/`"vertex"` alias fold in
+  `NamedProviderConfigNormalizer` - which providers now declare as `ProviderDescriptor.aliases`.
+  Missing-field error messages are unchanged: they are generated from the spec rather than written
+  out twelve times.
+
+  Losing the exhaustive `match` means the compiler no longer checks that a new provider was handled
+  everywhere. `BuiltinProvidersSpec` is the replacement for that guarantee: it round-trips every
+  registered descriptor section -> config -> client, and a new built-in provider that is not listed
+  in it fails the build.
+
+  Four source breaks. `ReliableProviders`' seven per-provider factories (`openai`, `azureOpenAI`,
+  `anthropic`, `gemini`, `ollama`, `openRouter`, `zai`) collapse to `ReliableProviders.wrap(config,
+  reliabilityConfig, metrics)`, which covers all twelve providers instead of seven and works for a
+  provider from another module; `wrap(client, providerName, ...)` is unchanged.
+  `OpenAIConfig.providerId` is now derived from `baseUrl`, answering `openrouter` for an OpenRouter
+  URL - which is the routing `LLMConnect` already performed with a hard-coded check, now stated by
+  the config itself. `ProviderModelLister`/`ProviderModelListers` and
+  `ProviderResultOps`/`ProviderExchangeRecorder` become public, because a provider outside
+  `llm4s-core` needs all four; `ProviderModelListers` also gains an `openAICompatible(...)` factory,
+  which the five near-identical OpenAI-shaped lister objects collapse into.
+
+  Not changed: `Llm4sConfig`'s signatures, `DiscoveredModel`, every `ProviderConfig` subtype, and
+  the `llm4s.providers.*` config format - a configuration that worked before works now, `provider =
+  "google"` and `provider = "vertex"` included. Still deferred: classpath discovery via
+  `META-INF/services` (PR 3), `ProviderConfig.fromValues`' throwing `require(...)`, and embeddings
+  (`EmbeddingClient.from` and the fixed-arity reader behind it).
+
+  See [docs/reference/migration.md](docs/reference/migration.md) for the before/after.
 - **Breaking: `ProviderKind` is replaced by the opaque type `ProviderId`, and `ProviderConfig` is
   no longer `sealed`** - the first change of slice 4
   ([#1131](https://github.com/llm4s/llm4s/issues/1131)). No SPI yet; this only removes the two

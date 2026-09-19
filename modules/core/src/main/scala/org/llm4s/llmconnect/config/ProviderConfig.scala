@@ -87,7 +87,18 @@ case class OpenAIConfig(
   contextWindow: Int,
   reserveCompletion: Int
 ) extends ProviderConfig:
-  override val providerId: ProviderId                 = ProviderId("openai")
+  /**
+   * `openai`, or `openrouter` when `baseUrl` points at OpenRouter.
+   *
+   * OpenRouter reuses this config but has its own client, and the base URL is
+   * the only thing distinguishing the two. Deriving the id here keeps that
+   * knowledge with the config rather than in a special case inside
+   * [[org.llm4s.llmconnect.LLMConnect]], which is how routing worked before the
+   * provider registry (#1131).
+   */
+  override def providerId: ProviderId =
+    if baseUrl.contains("openrouter.ai") then ProviderId("openrouter") else ProviderId("openai")
+
   override def endpointUrl: Option[String]            = Some(baseUrl)
   override def withModel(model: String): OpenAIConfig = copy(model = model)
   override def toString: String =

@@ -25,7 +25,7 @@ final case class DiscoveredModel(
 )
 
 /** Discovers available models from a provider's live API endpoint. */
-private[llm4s] trait ProviderModelLister:
+trait ProviderModelLister:
   /**
    * Fetches the list of available models for the given provider configuration.
    *
@@ -38,41 +38,53 @@ private[llm4s] trait ProviderModelLister:
     httpClient: Llm4sHttpClient
   ): Result[List[DiscoveredModel]]
 
-/** Per-provider `ProviderModelLister` implementations for each supported provider. */
-private[llm4s] object ProviderModelListers:
+/**
+ * Model listers for the providers built into `llm4s-core`, and the factory
+ * behind most of them.
+ *
+ * A provider module outside core supplies its own lister the same way: call
+ * [[openAICompatible]] if the provider serves the OpenAI `/models` shape, or
+ * implement [[ProviderModelLister]] if it does not.
+ */
+object ProviderModelListers:
+
+  /**
+   * A lister for any provider serving the OpenAI-compatible `/models` endpoint.
+   *
+   * This is the shape most providers have, so a provider module supplying its
+   * own descriptor can usually call this rather than implement
+   * [[ProviderModelLister]] from scratch.
+   *
+   *  @param provider       the `ProviderId` that owns the returned models; the config section must name it
+   *  @param defaultBaseUrl base URL used when the section does not override it
+   *  @param modelsPath     path of the listing endpoint, relative to the base URL
+   */
+  def openAICompatible(
+    provider: ProviderId,
+    defaultBaseUrl: String,
+    modelsPath: String = "/models"
+  ): ProviderModelLister =
+    new ProviderModelLister:
+      def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
+        listOpenAICompatibleModels(
+          config = config,
+          provider = provider,
+          defaultBaseUrl = defaultBaseUrl,
+          modelsPath = modelsPath,
+          httpClient = httpClient
+        )
 
   /** Model lister for the OpenAI provider. */
-  object OpenAI extends ProviderModelLister:
-    def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
-      listOpenAICompatibleModels(
-        config = config,
-        expected = ProviderId("openai"),
-        provider = ProviderId("openai"),
-        defaultBaseUrl = DefaultConfig.DEFAULT_OPENAI_BASE_URL,
-        httpClient = httpClient
-      )
+  val OpenAI: ProviderModelLister =
+    openAICompatible(ProviderId("openai"), DefaultConfig.DEFAULT_OPENAI_BASE_URL)
 
   /** Model lister for the OpenRouter provider. */
-  object OpenRouter extends ProviderModelLister:
-    def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
-      listOpenAICompatibleModels(
-        config = config,
-        expected = ProviderId("openrouter"),
-        provider = ProviderId("openrouter"),
-        defaultBaseUrl = DefaultConfig.DEFAULT_OPENROUTER_BASE_URL,
-        httpClient = httpClient
-      )
+  val OpenRouter: ProviderModelLister =
+    openAICompatible(ProviderId("openrouter"), DefaultConfig.DEFAULT_OPENROUTER_BASE_URL)
 
   /** Model lister for the Requesty provider. */
-  object Requesty extends ProviderModelLister:
-    def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
-      listOpenAICompatibleModels(
-        config = config,
-        expected = ProviderId("requesty"),
-        provider = ProviderId("requesty"),
-        defaultBaseUrl = DefaultConfig.DEFAULT_REQUESTY_BASE_URL,
-        httpClient = httpClient
-      )
+  val Requesty: ProviderModelLister =
+    openAICompatible(ProviderId("requesty"), DefaultConfig.DEFAULT_REQUESTY_BASE_URL)
 
   /** Model lister for the Anthropic provider, using paginated API requests. */
   object Anthropic extends ProviderModelLister:
@@ -155,27 +167,12 @@ private[llm4s] object ProviderModelListers:
       yield models
 
   /** Model lister for the DeepSeek provider using the OpenAI-compatible models endpoint. */
-  object DeepSeek extends ProviderModelLister:
-    def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
-      listOpenAICompatibleModels(
-        config = config,
-        expected = ProviderId("deepseek"),
-        provider = ProviderId("deepseek"),
-        defaultBaseUrl = DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL,
-        httpClient = httpClient
-      )
+  val DeepSeek: ProviderModelLister =
+    openAICompatible(ProviderId("deepseek"), DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
 
   /** Model lister for the Mistral provider using the OpenAI-compatible models endpoint. */
-  object Mistral extends ProviderModelLister:
-    def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
-      listOpenAICompatibleModels(
-        config = config,
-        expected = ProviderId("mistral"),
-        provider = ProviderId("mistral"),
-        defaultBaseUrl = MistralConfig.DEFAULT_BASE_URL,
-        modelsPath = "/v1/models",
-        httpClient = httpClient
-      )
+  val Mistral: ProviderModelLister =
+    openAICompatible(ProviderId("mistral"), MistralConfig.DEFAULT_BASE_URL, modelsPath = "/v1/models")
 
   /** Model lister for the Ollama provider using the local `/api/tags` endpoint. */
   object Ollama extends ProviderModelLister:
@@ -201,14 +198,13 @@ private[llm4s] object ProviderModelListers:
 
   private def listOpenAICompatibleModels(
     config: NamedProviderConfig,
-    expected: ProviderId,
     provider: ProviderId,
     defaultBaseUrl: String,
-    modelsPath: String = "/models",
+    modelsPath: String,
     httpClient: Llm4sHttpClient
   ): Result[List[DiscoveredModel]] =
     for
-      normalized <- config.requireProvider(expected)
+      normalized <- config.requireProvider(provider)
       apiKey     <- normalized.requireApiKey
       baseUrl = normalized.baseUrlOrDefault(defaultBaseUrl)
       headers = authHeaders(normalized, apiKey)

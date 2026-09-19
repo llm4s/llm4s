@@ -1,149 +1,69 @@
 package org.llm4s.reliability
 
-import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.provider._
-import org.llm4s.llmconnect.config._
+import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 
 /**
- * Convenience methods for wrapping provider clients with reliability features.
+ * Wraps LLM clients with reliability features (retry, circuit breaking, timeouts).
  *
- * Provides easy-to-use factory methods for creating reliable versions of
- * each LLM provider client (OpenAI, Anthropic, Gemini, Ollama, OpenRouter, Zai).
+ * There is one entry point per input: a [[org.llm4s.llmconnect.config.ProviderConfig]],
+ * which is built into a client and then wrapped, or an
+ * [[org.llm4s.llmconnect.LLMClient]] you already have.
+ *
+ * This replaced seven per-provider factories (`openai`, `anthropic`, ...) which
+ * covered only 7 of the 12 built-in providers and could not cover a provider
+ * supplied by another module at all. Routing through
+ * [[org.llm4s.llmconnect.LLMConnect]] covers every registered provider — see
+ * [[https://github.com/llm4s/llm4s/issues/1131 #1131]].
  *
  * Example usage:
  * {{{
- * // Create a reliable OpenAI client with default settings
- * val client = ReliableProviders.openai(
- *   OpenAIConfig(
- *     apiKey = "sk-...",
- *     model = "gpt-4o"
- *   )
- * )
+ * // A reliable client for whatever provider the config names
+ * val client = ReliableProviders.wrap(config)
  *
  * // Or with custom reliability config
- * val aggressiveClient = ReliableProviders.openai(
- *   OpenAIConfig(apiKey = "sk-...", model = "gpt-4o"),
- *   ReliabilityConfig.aggressive
- * )
+ * val aggressive = ReliableProviders.wrap(config, ReliabilityConfig.aggressive)
  * }}}
  */
 object ReliableProviders {
 
   /**
-   * Create a reliable OpenAI client.
+   * Builds the client `config` names and wraps it with reliability features.
    *
-   * @param config OpenAI configuration
-   * @param reliabilityConfig Reliability configuration (default: ReliabilityConfig.default)
-   * @param metrics Metrics collector (default: noop)
-   * @return Right(ReliableClient) wrapping OpenAIClient, or Left(LLMError) on failure
+   * The provider name used for metrics is the config's own
+   * [[org.llm4s.llmconnect.config.ProviderConfig.providerId]].
+   *
+   * @param config            configuration naming the provider to build
+   * @param reliabilityConfig retry/circuit-breaker settings
+   * @param metrics           collector receiving both client and reliability events
+   * @return Right(ReliableClient), or Left(LLMError) if the provider is not registered
+   *         or its client fails to initialise
    */
-  def openai(
-    config: OpenAIConfig,
-    reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
-    metrics: MetricsCollector = MetricsCollector.noop
-  )(using ModelRegistryService): Result[LLMClient] =
-    OpenAIClient(config, metrics).map(client => new ReliableClient(client, "openai", reliabilityConfig, Some(metrics)))
+  def wrap(
+    config: ProviderConfig,
+    reliabilityConfig: ReliabilityConfig,
+    metrics: MetricsCollector
+  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
+    LLMConnect
+      .getClient(config, metrics)
+      .map(client => new ReliableClient(client, config.providerId.asString, reliabilityConfig, Some(metrics)))
 
-  /**
-   * Create a reliable Azure OpenAI client.
-   *
-   * @param config Azure OpenAI configuration
-   * @param reliabilityConfig Reliability configuration (default: ReliabilityConfig.default)
-   * @param metrics Metrics collector (default: noop)
-   * @return Right(ReliableClient) wrapping OpenAIClient, or Left(LLMError) on failure
-   */
-  def azureOpenAI(
-    config: AzureConfig,
-    reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
-    metrics: MetricsCollector = MetricsCollector.noop
-  )(using ModelRegistryService): Result[LLMClient] =
-    OpenAIClient(config, metrics).map(client =>
-      new ReliableClient(client, "azure-openai", reliabilityConfig, Some(metrics))
-    )
+  /** Builds and wraps the client `config` names, without metrics. */
+  def wrap(
+    config: ProviderConfig,
+    reliabilityConfig: ReliabilityConfig
+  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
+    wrap(config, reliabilityConfig, MetricsCollector.noop)
 
-  /**
-   * Create a reliable Anthropic client.
-   *
-   * @param config Anthropic configuration
-   * @param reliabilityConfig Reliability configuration (default: ReliabilityConfig.default)
-   * @param metrics Metrics collector (default: noop)
-   * @return Right(ReliableClient) wrapping AnthropicClient, or Left(LLMError) on failure
-   */
-  def anthropic(
-    config: AnthropicConfig,
-    reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
-    metrics: MetricsCollector = MetricsCollector.noop
-  )(using ModelRegistryService): Result[LLMClient] =
-    AnthropicClient(config, metrics).map(client =>
-      new ReliableClient(client, "anthropic", reliabilityConfig, Some(metrics))
-    )
-
-  /**
-   * Create a reliable Gemini client.
-   *
-   * @param config Gemini configuration
-   * @param reliabilityConfig Reliability configuration (default: ReliabilityConfig.default)
-   * @param metrics Metrics collector (default: noop)
-   * @return Right(ReliableClient) wrapping GeminiClient, or Left(LLMError) on failure
-   */
-  def gemini(
-    config: GeminiConfig,
-    reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
-    metrics: MetricsCollector = MetricsCollector.noop
-  )(using ModelRegistryService): Result[LLMClient] =
-    GeminiClient(config, metrics).map(client => new ReliableClient(client, "gemini", reliabilityConfig, Some(metrics)))
-
-  /**
-   * Create a reliable Ollama client.
-   *
-   * @param config Ollama configuration
-   * @param reliabilityConfig Reliability configuration (default: ReliabilityConfig.default)
-   * @param metrics Metrics collector (default: noop)
-   * @return Right(ReliableClient) wrapping OllamaClient, or Left(LLMError) on failure
-   */
-  def ollama(
-    config: OllamaConfig,
-    reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
-    metrics: MetricsCollector = MetricsCollector.noop
-  )(using ModelRegistryService): Result[LLMClient] =
-    OllamaClient(config, metrics).map(client => new ReliableClient(client, "ollama", reliabilityConfig, Some(metrics)))
-
-  /**
-   * Create a reliable OpenRouter client.
-   *
-   * OpenRouter uses OpenAI-compatible configuration.
-   *
-   * @param config OpenAI configuration (works with OpenRouter)
-   * @param reliabilityConfig Reliability configuration (default: ReliabilityConfig.default)
-   * @param metrics Metrics collector (default: noop)
-   * @return Right(ReliableClient) wrapping OpenRouterClient, or Left(LLMError) on failure
-   */
-  def openRouter(
-    config: OpenAIConfig,
-    reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
-    metrics: MetricsCollector = MetricsCollector.noop
-  )(using ModelRegistryService): Result[LLMClient] =
-    OpenRouterClient(config, metrics).map(client =>
-      new ReliableClient(client, "openrouter", reliabilityConfig, Some(metrics))
-    )
-
-  /**
-   * Create a reliable Zai client.
-   *
-   * @param config Zai configuration
-   * @param reliabilityConfig Reliability configuration (default: ReliabilityConfig.default)
-   * @param metrics Metrics collector (default: noop)
-   * @return Right(ReliableClient) wrapping ZaiClient, or Left(LLMError) on failure
-   */
-  def zai(
-    config: ZaiConfig,
-    reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
-    metrics: MetricsCollector = MetricsCollector.noop
-  )(using ModelRegistryService): Result[LLMClient] =
-    ZaiClient(config, metrics).map(client => new ReliableClient(client, "zai", reliabilityConfig, Some(metrics)))
+  /** Builds and wraps the client `config` names, with default reliability settings. */
+  def wrap(
+    config: ProviderConfig
+  )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
+    wrap(config, ReliabilityConfig.default, MetricsCollector.noop)
 
   /**
    * Wrap any existing LLMClient with reliability features.
