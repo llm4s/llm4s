@@ -4,6 +4,8 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
 
+import java.util.Locale
+
 /** Converts a `RawNamedProviderSection` into a validated `NamedProviderConfig` by resolving string fields. */
 private[config] object NamedProviderConfigNormalizer:
 
@@ -56,7 +58,7 @@ private[config] object NamedProviderConfigNormalizer:
    * it would silently break `provider = "google"` and `provider = "vertex"`.
    */
   private def canonicalId(raw: String): ProviderId =
-    raw.trim.toLowerCase match
+    raw.trim.toLowerCase(Locale.ROOT) match
       case "google" => ProviderId("gemini")
       case "vertex" => ProviderId("vertexai")
       case other    => ProviderId(other)

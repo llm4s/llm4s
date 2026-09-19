@@ -23,7 +23,7 @@ enum ProviderKind:
 // After
 opaque type ProviderId = String
 object ProviderId:
-  def apply(raw: String): ProviderId = raw.trim.toLowerCase   // canonicalises
+  def apply(raw: String): ProviderId = raw.trim.toLowerCase(Locale.ROOT)  // canonicalises
   extension (id: ProviderId) def asString: String = id
 ```
 

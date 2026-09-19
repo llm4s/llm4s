@@ -4,6 +4,9 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.util.Locale
+import scala.util.Try
+
 class ProviderIdSpec extends AnyFlatSpec with Matchers:
 
   "ProviderId" should "canonicalise to trimmed lowercase" in {
@@ -50,6 +53,22 @@ class ProviderIdSpec extends AnyFlatSpec with Matchers:
   it should "canonicalise the empty and whitespace-only string to the empty id" in {
     ProviderId("").asString shouldBe ""
     ProviderId("   ").asString shouldBe ""
+  }
+
+  it should "canonicalise independently of the default locale" in {
+    // Under a Turkish default locale, "OpenAI".toLowerCase folds the final I to a dotless
+    // 'i', giving "openaı" - canonical equality would then hold everywhere but there.
+    // No finally (scalafix NoKeywordFinally): Try runs the body, then the locale is restored
+    // before .get rethrows.
+    val previous = Locale.getDefault
+    val outcome = Try {
+      Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+      ProviderId("OpenAI").asString shouldBe "openai"
+      ProviderId("VERTEXAI") shouldBe ProviderId("vertexai")
+      ProviderId("Mistral").asString shouldBe "mistral"
+    }
+    Locale.setDefault(previous)
+    outcome.get
   }
 
   it should "be usable as a map key" in {

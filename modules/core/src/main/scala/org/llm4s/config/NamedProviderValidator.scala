@@ -4,6 +4,8 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
 
+import java.util.Locale
+
 /** Validates a raw named provider section for a specific provider type. */
 private[llm4s] trait NamedProviderValidator:
   /**
@@ -199,7 +201,7 @@ private[llm4s] object NamedProviderValidators:
         // `ProviderId` is already the canonical lowercase spelling, so the env-var prefix is a
         // straight upper-casing of it - "openai" -> "OPENAI", as it was under `ProviderKind`.
         val id        = providerId.asString
-        val envPrefix = id.toUpperCase
+        val envPrefix = id.toUpperCase(Locale.ROOT)
 
         if requireApiKey && section.apiKey.map(_.trim).forall(_.isEmpty) then
           // Named providers resolve from HOCON, not an automatic <PROVIDER>_API_KEY binding, so lead with the

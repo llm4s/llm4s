@@ -1,5 +1,7 @@
 package org.llm4s.types
 
+import java.util.Locale
+
 /**
  * Type-safe identifier types for the multi-provider configuration system.
  *
@@ -79,8 +81,15 @@ object ProviderModelTypes:
    * type's implicit scope, so `id.asString` resolves without an extra import.
    */
   object ProviderId:
-    /** Canonicalises a raw provider string to a [[ProviderId]] (trimmed, lowercased). */
-    def apply(raw: String): ProviderId = raw.trim.toLowerCase
+    /**
+     * Canonicalises a raw provider string to a [[ProviderId]] (trimmed, lowercased).
+     *
+     * The fold is `Locale.ROOT`, not the default locale: under a Turkish or
+     * Azerbaijani default, `"OpenAI".toLowerCase` yields `openaı` (dotless i),
+     * which would break canonical equality against the registered `openai` in
+     * exactly those environments and nowhere else.
+     */
+    def apply(raw: String): ProviderId = raw.trim.toLowerCase(Locale.ROOT)
 
     /** Returns the canonical provider identifier string, e.g. `"openai"`. */
     extension (id: ProviderId) def asString: String = id

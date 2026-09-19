@@ -167,9 +167,9 @@ object ProviderSetupProviderSelection:
     val activeDocId = ProviderSetupTabs.activeSetupDoc(model).id
     if activeDocId.is(SetupTabDocIds.Providers) then
       selectedConfiguredProvider(model)
-        .map(provider => providerIdFromString(provider.providerId))
-        .getOrElse(providerIdFromString(selectedProviderDoc(model).id.value))
-    else providerIdFromString(activeDocId.value)
+        .map(provider => configuredProviderId(provider.providerId))
+        .getOrElse(providerIdFromDocId(selectedProviderDoc(model).id.value))
+    else providerIdFromDocId(activeDocId.value)
 
   def currentSetupSessionRequest(model: Model): Result[ProviderSetupSetupPolicy.SetupSessionRequest] =
     val activeDoc    = ProviderSetupTabs.activeSetupDoc(model)
@@ -196,16 +196,28 @@ object ProviderSetupProviderSelection:
     }
 
   /**
-   * Resolves a doc-id or configured-provider id to a `ProviderId`.
+   * Converts a configured provider's id straight to a `ProviderId`.
    *
-   * Providers are an open vocabulary now, so this validates against the provider docs this
-   * sample actually ships rather than against a global list of known providers.
+   * Providers are an open vocabulary, so a configured entry names a provider whether or not
+   * this sample ships a doc page for it - `openrouter`, `requesty` and `vertexai` are all
+   * configurable today and none of them has one. Validating these against `providerDocs`
+   * would refuse to open a session the config supports.
    */
-  private def providerIdFromString(value: String): Result[ProviderId] =
+  private def configuredProviderId(value: String): Result[ProviderId] =
+    if value.trim.isEmpty then Left(ValidationError("providerId", "Configured provider has an empty provider id"))
+    else Right(ProviderId(value))
+
+  /**
+   * Resolves a setup-tab doc id to a `ProviderId`.
+   *
+   * Unlike a configured provider id, a doc id is closed by construction: it must name one of
+   * the provider pages this sample ships, so a miss here is a bug in the tab wiring.
+   */
+  private def providerIdFromDocId(value: String): Result[ProviderId] =
     ProviderSetupContent.providerDocs
       .find(_.id.value == value)
       .map(doc => ProviderId(doc.id.value))
-      .toRight(ValidationError("providerId", s"Expected provider id but got: $value"))
+      .toRight(ValidationError("providerId", s"Expected provider doc id but got: $value"))
 
   def chooseSelectedProviderIndex(existing: Int, configStatus: ConfigStatus): Int =
     if configStatus.namedProviders.isEmpty then existing

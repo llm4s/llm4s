@@ -35,7 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sealed` confines subtypes to the **same source file**, which is why all ten provider configs
   sit in one 756-line file rather than merely in one jar.
 
-  `ProviderId` is an opaque `String`, canonicalised to trimmed lowercase, and deliberately an
+  `ProviderId` is an opaque `String`, canonicalised to trimmed lowercase under `Locale.ROOT`
+  (a default-locale fold would spell `OpenAI` as `openaı` on a Turkish JVM, breaking canonical
+  equality in that environment alone), and deliberately an
   **open vocabulary** - any string names a provider, and whether it can be resolved is answered
   at resolution time by what is on the classpath. Staying `opaque` keeps the no-boxing guarantee
   from [#1127](https://github.com/llm4s/llm4s/issues/1127). `ProviderConfig` gains `providerId`
