@@ -144,6 +144,20 @@ sbt it/itTierCheck     # every suite in modules/it must declare exactly one tier
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
+## Commits
+
+**Every commit needs a `Signed-off-by` trailer** - commit with `git commit -s`. This is the
+[Developer Certificate of Origin](https://developercertificate.org/): the trailer certifies the
+committer has the right to submit the code under the project's MIT licence, so it must name a
+real person and cannot be added on someone else's behalf. `.github/workflows/dco.yml` and the DCO
+app both check it, and both fail the PR over a single commit that lacks it - including a commit
+appended to a branch whose earlier commits have it.
+
+Fixing an unsigned commit rewrites history, so it costs a force-push: `git commit --amend -s`
+for the most recent one, `git rebase --signoff main` for a branch of them, then
+`git push --force-with-lease`. Signing as you go is cheaper than either. See
+[CONTRIBUTING.md](CONTRIBUTING.md#developer-certificate-of-origin-dco).
+
 ## Environment Variables
 
 ```bash
