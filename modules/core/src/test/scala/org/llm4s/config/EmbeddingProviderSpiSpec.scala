@@ -130,6 +130,25 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
     }
   }
 
+  "an unregistered provider" should {
+
+    "be reported against llm4s.embeddings.model when selected that way" in {
+      val error = load("""llm4s { embeddings { model = "nosuch/whatever" } }""").left.value.message
+
+      error should include("(from llm4s.embeddings.model)")
+    }
+
+    "be reported against llm4s.embeddings.provider when selected the legacy way" in {
+      // The two settings are alternatives, so naming the wrong one sends the reader to a key
+      // they never set - and `llm4s.embeddings.model` being absent is exactly why the legacy
+      // path was taken.
+      val error = load("""llm4s { embeddings { provider = "nosuch" } }""").left.value.message
+
+      error should include("(from llm4s.embeddings.provider)")
+      (error should not).include("llm4s.embeddings.model")
+    }
+  }
+
   "the defaults that used to be duplicated" should {
 
     "apply with no section present at all" in {

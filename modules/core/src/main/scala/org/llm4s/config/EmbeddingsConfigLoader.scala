@@ -95,12 +95,12 @@ private[config] object EmbeddingsConfigLoader {
     val emb = root.embeddings.getOrElse(EmbeddingsSection(None, None))
 
     // Unified `EMBEDDING_MODEL=provider/model` first, then the legacy EMBEDDING_PROVIDER.
-    val selection: Result[(String, Option[String])] =
+    val selection: Result[Selection] =
       trimmed(emb.model) match {
         case Some(modelSpec) =>
           modelSpec.split("/", 2) match {
             case Array(provider, model) if provider.nonEmpty && model.nonEmpty =>
-              Right(provider.toLowerCase -> Some(model))
+              Right(Selection(provider.toLowerCase, Some(model), UnifiedModelPath))
             case _ =>
               Left(
                 ConfigurationError(
@@ -111,7 +111,7 @@ private[config] object EmbeddingsConfigLoader {
 
         case None =>
           trimmed(emb.provider)
-            .map(provider => Right(provider.toLowerCase -> Option.empty[String]))
+            .map(provider => Right(Selection(provider.toLowerCase, None, LegacyProviderPath)))
             .getOrElse(
               Left(
                 ConfigurationError(
@@ -121,16 +121,31 @@ private[config] object EmbeddingsConfigLoader {
             )
       }
 
-    // Bound as a pair rather than destructured in the generator: `Either` has no
+    // Bound whole rather than destructured in the generator: `Either` has no
     // `withFilter`, so a pattern-matching generator does not compile.
     for {
       selected   <- selection
-      descriptor <- resolve(selected._1, registry)
+      descriptor <- resolve(selected, registry)
       id = descriptor.id.asString
       section <- readSection(source, id)
-      config  <- descriptor.buildConfig(section, selected._2)(using lookupIn(source))
+      config  <- descriptor.buildConfig(section, selected.modelOverride)(using lookupIn(source))
     } yield id -> config
   }
+
+  private val UnifiedModelPath   = "llm4s.embeddings.model"
+  private val LegacyProviderPath = "llm4s.embeddings.provider"
+
+  /**
+   * Which provider was asked for, and which setting asked for it.
+   *
+   * @param provider      the configured provider name, lowercased; not yet canonical.
+   * @param modelOverride the `<model>` half of a unified `EMBEDDING_MODEL`, when that form was used.
+   * @param origin        the config path the selection came from. Carried rather than assumed
+   *                      because an unregistered provider is reported against it, and pointing
+   *                      a legacy `EMBEDDING_PROVIDER` user at `llm4s.embeddings.model` names a
+   *                      key they never set.
+   */
+  final private case class Selection(provider: String, modelOverride: Option[String], origin: String)
 
   /**
    * The descriptor for a configured provider name, or an error naming what is registered.
@@ -139,8 +154,8 @@ private[config] object EmbeddingsConfigLoader {
    * provider that was never added to the classpath and one whose module failed to load
    * look identical from here otherwise.
    */
-  private def resolve(providerName: String, registry: ProviderRegistry): Result[EmbeddingProviderDescriptor] =
-    registry.resolveEmbedding(registry.canonicalEmbeddingId(providerName), Some("llm4s.embeddings.model"))
+  private def resolve(selection: Selection, registry: ProviderRegistry): Result[EmbeddingProviderDescriptor] =
+    registry.resolveEmbedding(registry.canonicalEmbeddingId(selection.provider), Some(selection.origin))
 
   /**
    * Reads `llm4s.embeddings.<id>`, treating an absent section as an empty one.
