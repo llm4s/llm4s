@@ -28,10 +28,11 @@ exactly as before.
 provider was selected, and hands it to the descriptor:
 
 ```scala
-def buildConfig(section: EmbeddingProviderSection, modelOverride: Option[String])(using
-  EmbeddingConfigLookup
-): Result[EmbeddingProviderConfig]
+def buildConfig(section: EmbeddingProviderSection, modelOverride: Option[String]): Result[EmbeddingProviderConfig]
 ```
+
+Everything it needs arrives in `section`, already typed. A descriptor reads no configuration
+itself: raw config access stays in `org.llm4s.config`, which is the boundary AGENTS.md sets.
 
 Most providers never implement it. Declaring an `EmbeddingConfigSpec` is enough, and the
 default implementation resolves the three fields against it:
@@ -81,8 +82,9 @@ override val configSpec = EmbeddingConfigSpec(
 
 > Missing openai embeddings apiKey (llm4s.openai.apiKey / OPENAI_API_KEY)
 
-`EmbeddingConfigLookup` is the read-only window that makes such a reach possible without
-`llm4s-core` knowing why.
+`apiKeyPath` is a ''declaration'', not a read: `EmbeddingsConfigLoader` resolves it and hands
+the value back in the section before calling `buildConfig`. The provider owns the knowledge of
+*where* its key lives; `org.llm4s.config` keeps sole ownership of *reading* it.
 
 ### `Llm4sConfig.embeddings()` takes the registry
 

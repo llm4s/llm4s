@@ -2,7 +2,12 @@ package org.llm4s.config
 
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.provider.EmbeddingProvider
-import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{
+  EmbeddingConfigSpec,
+  EmbeddingProviderDescriptor,
+  EmbeddingProviderSection,
+  ProviderRegistry
+}
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues
@@ -127,6 +132,61 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
 
       error should include("Embedding provider 'anthropic'")
       error should include("is not registered")
+    }
+  }
+
+  "a descriptor" should {
+    "build its config from a section alone, reading nothing" in {
+      // The configuration boundary: `org.llm4s.config` reads raw config, everything else
+      // consumes typed settings handed to it. `buildConfig` takes no config source and no
+      // lookup, so a descriptor cannot reach for a key even if it wanted to - which is why
+      // `apiKeyPath` is a declaration the loader acts on rather than a read.
+      val config = FixtureEmbeddings
+        .buildConfig(EmbeddingProviderSection(apiKey = Some("fk-direct")), Some("m"))
+        .value
+
+      config shouldBe EmbeddingProviderConfig(
+        baseUrl = "https://fixture.example/v1",
+        model = "m",
+        apiKey = "fk-direct"
+      )
+    }
+  }
+
+  "a credential the provider keeps outside its own section" should {
+
+    "be resolved from the path its descriptor declares" in {
+      // OpenAI's shape: no apiKey under llm4s.embeddings.openai, read from the chat key.
+      val (_, config) = load(
+        """llm4s {
+          |  openai { apiKey = "sk-shared" }
+          |  embeddings { model = "openai/text-embedding-3-small" }
+          |}""".stripMargin
+      ).value
+
+      config.apiKey shouldBe "sk-shared"
+    }
+
+    "lose to an explicit key in the provider's own section" in {
+      val (_, config) = load(
+        """llm4s {
+          |  openai { apiKey = "sk-shared" }
+          |  embeddings {
+          |    model = "openai/text-embedding-3-small"
+          |    openai { apiKey = "sk-embeddings-only" }
+          |  }
+          |}""".stripMargin
+      ).value
+
+      config.apiKey shouldBe "sk-embeddings-only"
+    }
+
+    "be reported against the path it is actually set at" in {
+      val error = load("""llm4s { embeddings { model = "openai/text-embedding-3-small" } }""").left.value.message
+
+      error should include("llm4s.openai.apiKey")
+      // Not the embeddings section, where setting it would do nothing.
+      (error should not).include("llm4s.embeddings.openai.apiKey")
     }
   }
 

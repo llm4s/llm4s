@@ -2,12 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, LocalEmbeddingModels }
-import org.llm4s.llmconnect.spi.{
-  EmbeddingConfigLookup,
-  EmbeddingProviderDescriptor,
-  EmbeddingProviderSection,
-  ProviderRegistry
-}
+import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, EmbeddingProviderSection, ProviderRegistry }
 import org.llm4s.types.Result
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 
@@ -126,9 +121,10 @@ private[config] object EmbeddingsConfigLoader {
     for {
       selected   <- selection
       descriptor <- resolve(selected, registry)
-      id = descriptor.id.asString
-      section <- readSection(source, id)
-      config  <- descriptor.buildConfig(section, selected.modelOverride)(using lookupIn(source))
+      id  = descriptor.id.asString
+      raw = readSection(source, id)
+      section <- raw.map(withSharedApiKey(_, descriptor, source))
+      config  <- descriptor.buildConfig(section, selected.modelOverride)
     } yield id -> config
   }
 
@@ -173,14 +169,30 @@ private[config] object EmbeddingsConfigLoader {
       }
   }
 
-  /** A lookup over `source`, for a descriptor that reads outside its own section. */
-  private def lookupIn(source: ConfigSource): EmbeddingConfigLookup =
-    new EmbeddingConfigLookup {
-      def string(path: String): Option[String] =
-        // A provider asking for an optional fallback must not be able to fail the load,
-        // so anything absent, blank, or not a string is simply `None`.
-        Try(source.at(path).load[String].toOption).toOption.flatten.map(_.trim).filter(_.nonEmpty)
-    }
+  /**
+   * Fills in a credential the provider keeps outside its own section.
+   *
+   * A descriptor declares ''where'' with `EmbeddingConfigSpec.apiKeyPath`; the read itself
+   * happens here, because `org.llm4s.config` is the only package allowed to touch raw
+   * configuration - everywhere else consumes typed settings handed to it. OpenAI is the
+   * case: its embeddings use the chat client's `llm4s.openai.apiKey`.
+   */
+  private def withSharedApiKey(
+    section: EmbeddingProviderSection,
+    descriptor: EmbeddingProviderDescriptor,
+    source: ConfigSource
+  ): EmbeddingProviderSection =
+    if (trimmed(section.apiKey).isDefined) section
+    else section.copy(apiKey = descriptor.configSpec.apiKeyPath.flatMap(readString(source, _)))
+
+  /**
+   * The string at an absolute config path, or `None`.
+   *
+   * A declared fallback that is absent, blank, or not a string must not fail the load -
+   * the descriptor's own "missing key" error is the better report, and it names the path.
+   */
+  private def readString(source: ConfigSource, path: String): Option[String] =
+    Try(source.at(path).load[String].toOption).toOption.flatten.map(_.trim).filter(_.nonEmpty)
 
   private def trimmed(value: Option[String]): Option[String] =
     value.map(_.trim).filter(_.nonEmpty)

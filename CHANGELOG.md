@@ -33,9 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it to `EmbeddingProviderDescriptor.buildConfig`. Most providers never implement that method:
   declaring an `EmbeddingConfigSpec` (required fields, defaults, and the environment variables
   to name in errors) is enough, and the default implementation resolves the section against it.
-  `EmbeddingConfigLookup` lets a descriptor read a credential that lives outside its own
-  section, which is how OpenAI's embeddings reach `llm4s.openai.apiKey` without the loader
-  special-casing OpenAI.
+  A descriptor whose credential lives outside its own section declares where with
+  `apiKeyPath`, and `EmbeddingsConfigLoader` resolves it before calling `buildConfig` - which
+  is how OpenAI's embeddings reach `llm4s.openai.apiKey` without the loader special-casing
+  OpenAI, and without a descriptor reading configuration itself. `buildConfig` takes a parsed
+  section and nothing else, so raw config access stays inside `org.llm4s.config`.
 
   Defaults and environment bindings are no longer duplicated. `reference.conf` used to state
   `baseUrl = "http://localhost:11434"` while the loader stated `DefaultOllamaEmbeddingBaseUrl`,

@@ -46,9 +46,12 @@ final case class EmbeddingProviderSection(
  *                       one - Ollama running locally.
  * @param apiKeyPath     absolute config path this provider's key is read from when its own
  *                       section carries none, e.g. `"llm4s.openai.apiKey"`. OpenAI's embedding
- *                       endpoint takes the same key as its chat client, so users set it once;
- *                       declaring the path here is also what makes the "missing key" error
- *                       name the place they would actually set it.
+ *                       endpoint takes the same key as its chat client, so users set it once.
+ *                       This is a ''declaration'', not a read: `org.llm4s.config` resolves it
+ *                       and hands the result back in the section, because reading configuration
+ *                       outside that package is what the configuration boundary forbids.
+ *                       Declaring it is also what makes the "missing key" error name the place
+ *                       the key would actually be set.
  * @param apiKeyEnv      the environment variable this provider's key conventionally comes
  *                       from, named in the error when it is missing.
  * @param modelEnv       likewise for the model.
@@ -99,8 +102,11 @@ object EmbeddingConfigSpec:
       )
 
   /**
-   * Resolves the API key: the section first, then [[EmbeddingConfigSpec.apiKeyPath]]
-   * if the provider declares one, then the spec's stand-in.
+   * Resolves the API key: the section first, then the spec's stand-in.
+   *
+   * The section's `apiKey` already accounts for [[EmbeddingConfigSpec.apiKeyPath]]:
+   * the loader resolves that path and fills it in before calling the descriptor,
+   * so no configuration is read from here.
    *
    * A provider whose spec neither requires a key nor supplies a default gets
    * the empty string, which is what a local provider that ignores the field
@@ -109,11 +115,9 @@ object EmbeddingConfigSpec:
   def resolveApiKey(
     id: ProviderId,
     section: EmbeddingProviderSection,
-    spec: EmbeddingConfigSpec,
-    lookup: EmbeddingConfigLookup
+    spec: EmbeddingConfigSpec
   ): Result[String] =
     nonEmpty(section.apiKey)
-      .orElse(spec.apiKeyPath.flatMap(lookup.string))
       .orElse(spec.defaultApiKey) match
       case Some(key)                    => Right(key)
       case None if !spec.requiresApiKey => Right("")
@@ -126,24 +130,3 @@ object EmbeddingConfigSpec:
 
   private def nonEmpty(value: Option[String]): Option[String] =
     value.map(_.trim).filter(_.nonEmpty)
-
-/**
- * A read-only window onto the wider `llm4s` config, for an embedding provider
- * whose credentials live outside its own section.
- *
- * OpenAI is the case: its embedding endpoint uses the same key as its chat
- * client, so `llm4s.embeddings.openai` has never carried an `apiKey` and the
- * loader reached across to `llm4s.openai.apiKey`. That reach is provider
- * knowledge, so it belongs in the provider's descriptor - which needs a way to
- * perform it without `llm4s-core` knowing why.
- */
-trait EmbeddingConfigLookup:
-
-  /**
-   * The string at an absolute config path, e.g. `"llm4s.openai.apiKey"`.
-   *
-   * `None` for a path that is absent, or whose value is blank or not a string.
-   * Reading config must not throw here: a provider asking for an optional
-   * fallback should not be able to fail the whole load.
-   */
-  def string(path: String): Option[String]

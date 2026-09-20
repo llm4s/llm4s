@@ -66,18 +66,19 @@ trait EmbeddingProviderDescriptor:
    * which says so with `apiKeyPath` rather than by overriding this. Override it
    * only for a provider whose config genuinely cannot be expressed that way.
    *
-   * @param section       the `llm4s.embeddings.<id>` section, already parsed. Empty rather
-   *                      than absent when the user configured nothing.
+   * @param section       the `llm4s.embeddings.<id>` section, already parsed, with any
+   *                      [[EmbeddingConfigSpec.apiKeyPath]] already resolved into its
+   *                      `apiKey`. Empty rather than absent when the user configured
+   *                      nothing. Everything this method needs arrives typed, in here:
+   *                      a descriptor never reads configuration itself.
    * @param modelOverride the `<model>` half of `EMBEDDING_MODEL=<id>/<model>`, when the
    *                      unified form was used. Takes precedence over the section.
    */
-  def buildConfig(section: EmbeddingProviderSection, modelOverride: Option[String])(using
-    lookup: EmbeddingConfigLookup
-  ): Result[EmbeddingProviderConfig] =
+  def buildConfig(section: EmbeddingProviderSection, modelOverride: Option[String]): Result[EmbeddingProviderConfig] =
     for
       model   <- EmbeddingConfigSpec.resolveModel(id, section, modelOverride, configSpec)
       baseUrl <- EmbeddingConfigSpec.resolveBaseUrl(id, section, configSpec)
-      apiKey  <- EmbeddingConfigSpec.resolveApiKey(id, section, configSpec, lookup)
+      apiKey  <- EmbeddingConfigSpec.resolveApiKey(id, section, configSpec)
     yield EmbeddingProviderConfig(baseUrl = baseUrl, model = model, apiKey = apiKey)
 
   /**
