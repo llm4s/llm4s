@@ -31,6 +31,14 @@ import pureconfig.ConfigSource
  * [[org.llm4s.llmconnect.LLMConnect.getClient]]. Apps that need multiple
  * configured providers can call [[provider(name)*]] directly.
  *
+ * == Which providers can be resolved ==
+ * Every method that reads `llm4s.providers` takes an implicit
+ * [[org.llm4s.llmconnect.spi.ProviderRegistry]], which decides what a
+ * `provider = "..."` entry can resolve to. With none in scope it is
+ * `ProviderRegistry.default`: everything found on the classpath through
+ * `META-INF/services`. Pass one explicitly to restrict or extend that set —
+ * `Llm4sConfig.defaultProvider()(using ProviderRegistry.of(MyProvider))`.
+ *
  * @example
  * {{{
  * for {
@@ -79,14 +87,16 @@ object Llm4sConfig {
    * Useful for applications that need to resolve multiple configured provider
    * instances, including multiple accounts for the same provider type.
    */
-  def provider(name: String): Result[ProviderConfig] =
+  def provider(name: String)(using ProviderRegistry): Result[ProviderConfig] =
     for
       service <- modelRegistryService()
       given ContextWindowResolver = ContextWindowResolver(service)
       config <- org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name)
     yield config
 
-  def providerConfigs(): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
+  def providerConfigs()(using
+    ProviderRegistry
+  ): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
     for
       service <- modelRegistryService()
       given ContextWindowResolver = ContextWindowResolver(service)
@@ -95,7 +105,7 @@ object Llm4sConfig {
 
   def providerConfigs(
     map: Map[ProviderName, ProvidersConfigModel.NamedProviderConfig]
-  ): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
+  )(using ProviderRegistry): (Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig]) =
     modelRegistryService() match
       case Right(service) =>
         given ContextWindowResolver = ContextWindowResolver(service)
@@ -104,7 +114,7 @@ object Llm4sConfig {
         val errors = map.map { case (name, _) => name -> (err: LLMError) }
         (errors, Map.empty)
 
-  private[config] def provider(source: ConfigSource, name: String): Result[ProviderConfig] =
+  private[config] def provider(source: ConfigSource, name: String)(using ProviderRegistry): Result[ProviderConfig] =
     for
       service <- modelRegistryService(source)
       given ContextWindowResolver = ContextWindowResolver(service)
@@ -114,25 +124,25 @@ object Llm4sConfig {
   /**
    * Loads the full validated named-providers configuration from `llm4s.providers`.
    */
-  def providers(): Result[ProvidersConfig] =
+  def providers()(using ProviderRegistry): Result[ProvidersConfig] =
     org.llm4s.config.ProvidersConfigLoader.load(ConfigSource.default)
 
-  private[config] def providers(source: ConfigSource): Result[ProvidersConfig] =
+  private[config] def providers(source: ConfigSource)(using ProviderRegistry): Result[ProvidersConfig] =
     org.llm4s.config.ProvidersConfigLoader.load(source)
 
   /**
    * Loads the configured default provider name from `llm4s.providers.provider`.
    */
-  def defaultProviderName(): Result[ProviderName] =
+  def defaultProviderName()(using ProviderRegistry): Result[ProviderName] =
     providers().flatMap(_.defaultProviderName)
 
-  private[config] def defaultProviderName(source: ConfigSource): Result[ProviderName] =
+  private[config] def defaultProviderName(source: ConfigSource)(using ProviderRegistry): Result[ProviderName] =
     providers(source).flatMap(_.defaultProviderName)
 
   /**
    * Loads the configured default named provider as a runtime [[ProviderConfig]].
    */
-  def defaultProvider(): Result[ProviderConfig] =
+  def defaultProvider()(using ProviderRegistry): Result[ProviderConfig] =
     for
       service <- modelRegistryService()
       given ContextWindowResolver = ContextWindowResolver(service)
@@ -140,7 +150,7 @@ object Llm4sConfig {
       config <- org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name.asName)
     yield config
 
-  private[config] def defaultProvider(source: ConfigSource): Result[ProviderConfig] =
+  private[config] def defaultProvider(source: ConfigSource)(using ProviderRegistry): Result[ProviderConfig] =
     for
       service <- modelRegistryService(source)
       given ContextWindowResolver = ContextWindowResolver(service)
@@ -151,16 +161,16 @@ object Llm4sConfig {
   /**
    * Lists models for the configured default named provider.
    */
-  def listModels(): Result[List[DiscoveredModel]] =
+  def listModels()(using ProviderRegistry): Result[List[DiscoveredModel]] =
     listModels(ConfigSource.default)
 
-  private[config] def listModels(source: ConfigSource): Result[List[DiscoveredModel]] =
+  private[config] def listModels(source: ConfigSource)(using ProviderRegistry): Result[List[DiscoveredModel]] =
     listModels(source, Llm4sHttpClient.create())
 
   private[config] def listModels(
     source: ConfigSource,
     httpClient: Llm4sHttpClient
-  ): Result[List[DiscoveredModel]] =
+  )(using ProviderRegistry): Result[List[DiscoveredModel]] =
     for
       defaultName <- defaultProviderName(source)
       models      <- listModels(defaultName.asName, source, httpClient)
@@ -169,14 +179,14 @@ object Llm4sConfig {
   /**
    * Lists models for a named provider configured under `llm4s.providers.<name>`.
    */
-  def listModels(name: String): Result[List[DiscoveredModel]] =
+  def listModels(name: String)(using ProviderRegistry): Result[List[DiscoveredModel]] =
     listModels(name, ConfigSource.default, Llm4sHttpClient.create())
 
   private[config] def listModels(
     name: String,
     source: ConfigSource,
     httpClient: Llm4sHttpClient
-  ): Result[List[DiscoveredModel]] =
+  )(using ProviderRegistry): Result[List[DiscoveredModel]] =
     for
       providers <- providers(source)
       namedProvider <- providers.namedProviders
@@ -202,7 +212,7 @@ object Llm4sConfig {
    * specific config source (for example, file overlays in CI). The source must
    * define named providers under `llm4s.providers` with a selected default.
    */
-  def providerFrom(source: ConfigSource): Result[ProviderConfig] =
+  def providerFrom(source: ConfigSource)(using ProviderRegistry): Result[ProviderConfig] =
     defaultProvider(source)
 
   /**

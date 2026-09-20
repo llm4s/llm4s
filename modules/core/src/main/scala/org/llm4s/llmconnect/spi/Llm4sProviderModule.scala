@@ -17,10 +17,13 @@ package org.llm4s.llmconnect.spi
  *   def chatProviders: Seq[ProviderDescriptor] = Seq(MyProvider)
  * }}}
  *
- * Classpath discovery via `META-INF/services` arrives with PR 3 of
- * [[https://github.com/llm4s/llm4s/issues/1131 #1131]]; until then a module is
- * registered explicitly through `ProviderRegistry.of` or
- * `ProviderRegistry.withModule`.
+ * Declare the class in
+ * `META-INF/services/org.llm4s.llmconnect.spi.Llm4sProviderModule` and
+ * `ProviderRegistry.discover` finds it - adding the provider is then adding the
+ * dependency, with no registration code at the call site. A module can also be
+ * registered explicitly through `ProviderRegistry.ofModules` or
+ * `ProviderRegistry.withModule`, which is the answer for a shaded fat jar whose
+ * services files did not survive.
  */
 trait Llm4sProviderModule:
 

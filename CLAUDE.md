@@ -52,10 +52,12 @@ Slice order — each is an issue with its own scope and gotchas:
    "this API does not exist". Slices 1 and 2 both hit this and it went unnoticed until slice 3;
    `pages.yml` now fails the deploy if a known package is absent, and the ScalaDoc CI job runs
    `docs/doc` on every PR.
-8. **A provider is a `ProviderDescriptor`, not an edit to shared files** - since slice 4 PR 2
-   ([#1131](https://github.com/llm4s/llm4s/issues/1131)). Implement
-   `org.llm4s.llmconnect.spi.ProviderDescriptor`, and register it by listing it in an
-   `Llm4sProviderModule` or passing it to `ProviderRegistry.of` / `.withProvider`. Nothing in
+8. **A provider is a `ProviderDescriptor`, not an edit to shared files** - since slice 4 PRs 2
+   and 3 ([#1131](https://github.com/llm4s/llm4s/issues/1131)). Implement
+   `org.llm4s.llmconnect.spi.ProviderDescriptor`, list it in an `Llm4sProviderModule`, and
+   declare that module in `META-INF/services/org.llm4s.llmconnect.spi.Llm4sProviderModule` - a
+   `class` with a public no-arg constructor, never an `object`. Adding a provider is then adding
+   a dependency; `ProviderRegistry.of` / `.withProvider` remain for explicit registration. Nothing in
    `llm4s-core` needs editing: `ProviderCapabilities`, `ProviderCapabilitiesRegistry` and the
    twelve `NamedProviderValidators` objects are gone, and the dispatch `match` expressions in
    `LLMConnect` and `NamedProviderLoader` with them. The one remaining central list is

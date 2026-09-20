@@ -1,0 +1,173 @@
+package org.llm4s.llmconnect.spi
+
+import org.llm4s.llmconnect.spi.fixtures.FixtureProvider
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
+
+import java.net.URLClassLoader
+
+/**
+ * Covers `META-INF/services` discovery — the point at which adding a provider
+ * stops being a code change and becomes adding a dependency (#1131, PR 3).
+ *
+ * Each case builds a class loader over one fixture directory under
+ * `src/test/resources/provider-discovery`, each holding a services file. They
+ * live in subdirectories rather than at the resource root deliberately: a
+ * services file at the root would be on every test's classpath and would
+ * change what `ProviderRegistry.default` holds for the whole suite.
+ *
+ * The loaders delegate to the test class loader, so core's own services entry
+ * is visible too. That is the realistic arrangement — a real classpath has the
+ * built-ins and the extra module together — and it is what makes the
+ * "one broken jar must not take out the others" cases meaningful.
+ */
+class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
+
+  /** A loader that sees the fixture services file in `directory`, plus the real classpath. */
+  private def loaderFor(directory: String): ClassLoader =
+    val parent = getClass.getClassLoader
+    val url = Option(parent.getResource(s"provider-discovery/$directory/"))
+      .getOrElse(fail(s"fixture directory 'provider-discovery/$directory/' is missing from test resources"))
+    new URLClassLoader(Array(url), parent)
+
+  private val builtinIds = ProviderRegistry.builtin.ids
+
+  "discovery" should {
+
+    "find the built-in providers through core's own services file" in {
+      val registry = ProviderRegistry.discover(getClass.getClassLoader)
+
+      registry.ids should contain allElementsOf builtinIds
+      registry.report.discovered shouldBe true
+      registry.report.modules.map(_.moduleClass) should contain(
+        "org.llm4s.llmconnect.provider.BuiltinProviderModule"
+      )
+      registry.report.failures shouldBe empty
+    }
+
+    "find a provider module that llm4s-core knows nothing about" in {
+      val registry = ProviderRegistry.discover(loaderFor("good"))
+
+      registry.get(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
+      // The point of the SPI: the new provider arrives without displacing anything.
+      registry.ids should contain allElementsOf builtinIds
+
+      val fixtureModule = registry.report.modules
+        .find(_.moduleClass == "org.llm4s.llmconnect.spi.fixtures.FixtureProviderModule")
+        .getOrElse(fail(s"fixture module was not reported: ${registry.report.describe}"))
+
+      fixtureModule.providerIds shouldBe Seq("fixturecloud")
+      fixtureModule.source should not be empty
+    }
+
+    "record an unloadable service entry instead of throwing" in {
+      // `ServiceLoader`'s own iterator throws ServiceConfigurationError here.
+      val registry = ProviderRegistry.discover(loaderFor("broken"))
+
+      registry.report.hasFailures shouldBe true
+      registry.report.failures.map(_.detail).mkString should include("NoSuchProviderModule")
+      registry.report.failures.flatMap(_.failure).head shouldBe a[Throwable]
+    }
+
+    "keep every working provider when one service entry is broken" in {
+      val registry = ProviderRegistry.discover(loaderFor("mixed"))
+
+      registry.get(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
+      registry.ids should contain allElementsOf builtinIds
+      registry.report.hasFailures shouldBe true
+    }
+
+    "record a module that throws when asked for its providers" in {
+      val registry = ProviderRegistry.discover(loaderFor("throwing"))
+
+      registry.report.failures.map(_.detail).mkString should include("ThrowingProviderModule")
+      registry.report.failures.map(_.detail).mkString should include("this module is broken")
+      // The built-ins, discovered from the parent loader, are unaffected.
+      registry.ids should contain allElementsOf builtinIds
+    }
+  }
+
+  "an explicitly registered provider" should {
+    "override one that was discovered" in {
+      val replacement = new ProviderDescriptor:
+        val id: ProviderId                 = ProviderId("fixturecloud")
+        val configSpec: ProviderConfigSpec = ProviderConfigSpec()
+
+        def buildConfig(providerName: String, section: org.llm4s.config.ProvidersConfigModel.NamedProviderConfig)(using
+          org.llm4s.llmconnect.config.ContextWindowResolver
+        ): org.llm4s.types.Result[org.llm4s.llmconnect.config.ProviderConfig] =
+          Left(org.llm4s.error.ConfigurationError("replacement"))
+
+        def buildClient(
+          config: org.llm4s.llmconnect.config.ProviderConfig,
+          options: org.llm4s.llmconnect.LlmClientOptions
+        )(using org.llm4s.model.ModelRegistryService): org.llm4s.types.Result[org.llm4s.llmconnect.LLMClient] =
+          Left(org.llm4s.error.ConfigurationError("replacement"))
+
+      val registry = ProviderRegistry.discover(loaderFor("good")).withProvider(replacement)
+
+      registry.get(ProviderId("fixturecloud")) shouldBe Right(replacement)
+      registry.ids.count(_ == "fixturecloud") shouldBe 1
+      // Overriding must not discard the diagnostics from the scan.
+      registry.report.discovered shouldBe true
+    }
+  }
+
+  "the discovery report" should {
+
+    "summarise a clean scan for the error message that names it" in {
+      val registry = ProviderRegistry.discover(loaderFor("good"))
+
+      registry.report.summary should include(s"Discovery scanned ${registry.report.modules.size} modules")
+      registry.report.summary should include("0 failed")
+    }
+
+    "name the failures in the summary when there are any" in {
+      val summary = ProviderRegistry.discover(loaderFor("broken")).report.summary
+
+      summary should include("1 failed")
+      summary should include("NoSuchProviderModule")
+    }
+
+    "say nothing about a scan for a registry that was built explicitly" in {
+      ProviderRegistry.of().report.discovered shouldBe false
+      ProviderRegistry.of().report.summary shouldBe ""
+      ProviderRegistry.of().report.describe should include("no classpath discovery ran")
+    }
+  }
+
+  "an unresolvable provider" should {
+    "have the discovery summary in its error, so a mangled fat jar is visible" in {
+      val message = ProviderRegistry
+        .discover(loaderFor("broken"))
+        .resolve(ProviderId("moonbeam"), Some("llm4s.providers.my-moon.provider"))
+        .left
+        .toOption
+        .getOrElse(fail("expected an unresolved-provider error"))
+        .message
+
+      message should include("Provider 'moonbeam' (from llm4s.providers.my-moon.provider) is not registered")
+      message should include("Discovery scanned")
+      message should include("1 failed")
+    }
+
+    "say nothing about discovery when the registry was built explicitly" in {
+      val message = ProviderRegistry
+        .of()
+        .get(ProviderId("moonbeam"))
+        .left
+        .toOption
+        .getOrElse(fail("expected an unresolved-provider error"))
+        .message
+
+      (message should not).include("Discovery scanned")
+    }
+  }
+
+  "the default registry" should {
+    "be the discovered one, and hold every built-in provider" in {
+      ProviderRegistry.default.report.discovered shouldBe true
+      ProviderRegistry.default.ids shouldBe builtinIds
+    }
+  }

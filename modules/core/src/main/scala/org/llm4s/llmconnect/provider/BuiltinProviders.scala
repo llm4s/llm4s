@@ -6,7 +6,9 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  * The providers `llm4s-core` ships.
  *
  * This list is the only place core enumerates providers, and it exists because
- * every client still lives in core. Slice 5 of
+ * every client still lives in core. It reaches the registry the same way a
+ * third-party module does - through `BuiltinProviderModule` and core's own
+ * `META-INF/services` entry - so the built-ins have no privileged path. Slice 5 of
  * [[https://github.com/llm4s/llm4s/issues/1126 #1126]] moves each client into
  * its own module with its own `Llm4sProviderModule`, and this list shrinks
  * to whatever is left.

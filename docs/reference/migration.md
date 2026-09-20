@@ -1,5 +1,110 @@
 # Migration Guide
 
+## Slice 4 (PR 3): providers are discovered on the classpath
+
+The third slice 4 change ([#1131](https://github.com/llm4s/llm4s/issues/1131)). PR 2 made a
+provider a `ProviderDescriptor` that registers itself; this removes the last manual step. A
+provider module on the classpath is now found without any registration code at the call site -
+adding a provider is adding a dependency.
+
+### Declaring a provider module
+
+Ship a `META-INF/services/org.llm4s.llmconnect.spi.Llm4sProviderModule` naming an implementation:
+
+```
+com.example.llm4s.BedrockProviderModule
+```
+
+```scala
+// Must be a `class` with a public no-arg constructor, not an `object`:
+// ServiceLoader instantiates the named class, and a Scala `object` exposes its
+// instance as a MODULE$ field instead. (This is also what GraalVM native-image
+// needs, via its ServiceLoaderFeature.)
+final class BedrockProviderModule extends Llm4sProviderModule:
+  override def chatProviders: Seq[ProviderDescriptor] = Seq(BedrockProvider)
+```
+
+That is the whole registration. `ProviderRegistry.default` - what every `Llm4sConfig` and
+`LLMConnect` call uses when the caller supplies no registry - is now
+`ProviderRegistry.discover()`, computed once on first use.
+
+`llm4s-core` declares itself the same way, through
+`org.llm4s.llmconnect.provider.BuiltinProviderModule`. There is no special case for the
+built-ins: they are discovered exactly as a third-party module is.
+
+### One broken jar cannot take out the others
+
+`java.util.ServiceLoader`'s iterator throws `ServiceConfigurationError` for an entry it cannot
+load, and the `for`-comprehension you would naturally write over it propagates the first such
+error and abandons every remaining provider. `discover` drives the iterator by hand and guards
+each step, so an unusable entry becomes a recorded failure and the scan continues:
+
+```scala
+val registry = ProviderRegistry.discover()
+registry.report.failures.foreach(f => println(f.detail))
+println(registry.report.describe)
+// Discovery scanned 2 modules; 1 failed: loading a provider module failed: ...
+//   - org.llm4s.llmconnect.provider.BuiltinProviderModule [file:/.../llm4s-core.jar]: openai, openrouter, ...
+//   ! loading a provider module failed: ... Provider com.example.Missing not found
+```
+
+Failures are logged at WARN as they happen, and the scan summary is appended to the
+"provider is not registered" error, because the two failure modes that are otherwise invisible
+are a dependency that was never added and a fat jar whose services files were dropped:
+
+> Provider 'bedrock' (from llm4s.providers.my-bedrock.provider) is not registered. Registered
+> providers: anthropic, azure, ... If you expected 'bedrock', add the dependency that supplies
+> it, or register it explicitly with ProviderRegistry.of(...). Discovery scanned 1 module; 0 failed.
+
+### Fat jars
+
+Shading tools default to *overwriting* same-named resources, which silently discards every
+services file but one. Configure them to concatenate:
+
+```scala
+// sbt-assembly
+assembly / assemblyMergeStrategy := {
+  case PathList("META-INF", "services", _*) => MergeStrategy.filterDistinctLines
+  case other                                => (assembly / assemblyMergeStrategy).value(other)
+}
+```
+
+```xml
+<!-- maven-shade -->
+<transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+```
+
+If you cannot, register explicitly - this is what the escape hatch is for:
+
+```scala
+val registry = ProviderRegistry.builtin.withProvider(BedrockProvider)
+LLMConnect.getClient(config)(using registry)
+```
+
+`ProviderRegistry.builtin` is the providers compiled into `llm4s-core`, with no classpath scan
+at all.
+
+### `Llm4sConfig` takes the registry
+
+Every `Llm4sConfig` method that reads `llm4s.providers` now takes an implicit
+`ProviderRegistry`: `provider`, `providerConfigs` (both), `providers`, `defaultProviderName`,
+`defaultProvider`, `listModels` (both), and `providerFrom`. Existing call sites are unchanged -
+the companion supplies `ProviderRegistry.default` - and a caller who wants a different set of
+providers passes one:
+
+```scala
+given ProviderRegistry = ProviderRegistry.default.withProvider(MyProvider)
+val config = Llm4sConfig.provider("my-provider")   // now resolvable
+```
+
+This is a binary-incompatible change to those signatures, and source-compatible.
+
+### What did *not* change
+
+`ProviderDescriptor`, `ProviderConfigSpec`, `ProviderFeatures` and `Llm4sProviderModule` are as
+PR 2 shipped them. `ProviderRegistry.of`, `ofModules`, `withProvider` and `withModule` behave as
+before; registries built that way report `discovered = false` and carry no scan summary.
+
 ## Slice 4 (PR 2): the provider registration SPI
 
 The second slice 4 change ([#1131](https://github.com/llm4s/llm4s/issues/1131)). PR 1 removed the

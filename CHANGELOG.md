@@ -22,6 +22,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **Providers are discovered on the classpath: adding a provider is adding a dependency** - the
+  third change of slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)). PR 2 made a
+  provider a self-describing `ProviderDescriptor`; this removes the last manual step.
+
+  A module ships `META-INF/services/org.llm4s.llmconnect.spi.Llm4sProviderModule` naming a class
+  with a public no-arg constructor (not a Scala `object`, whose instance is a `MODULE$` field that
+  `ServiceLoader` cannot instantiate - the same requirement GraalVM's `ServiceLoaderFeature` has),
+  and `ProviderRegistry.default` finds it. `llm4s-core` declares itself the same way through
+  `BuiltinProviderModule`: there is no special case for the built-ins.
+
+  **One broken jar cannot take out the others.** `ServiceLoader`'s iterator throws
+  `ServiceConfigurationError` for an entry it cannot load, and the `for`-comprehension you would
+  naturally write over it propagates the first such error and abandons every remaining provider.
+  `ProviderRegistry.discover` drives the iterator by hand and guards each step - `hasNext`, `next`
+  and the module's own `chatProviders` - so an unusable entry becomes a recorded failure and the
+  scan continues. Failures are logged at WARN and collected in a new `ProviderRegistryReport`
+  (`ProviderModuleReport`, `ProviderDiscoveryFailure`), which names each module, the jar it came
+  from, and what it contributed.
+
+  That report is what makes a missing provider diagnosable. Its summary is appended to the
+  "provider is not registered" error, because the two most common causes are otherwise invisible:
+  a dependency that was never added, and a fat jar whose services files were overwritten during
+  shading rather than concatenated. For the second case `ProviderRegistry.builtin` (no classpath
+  scan at all) and `ProviderRegistry.of(...)` remain the escape hatch, and the shipped services
+  file carries the `sbt-assembly` and `maven-shade` merge configuration in a comment.
+
+  **Binary-incompatible:** every `Llm4sConfig` method that reads `llm4s.providers` now takes an
+  implicit `ProviderRegistry` - `provider`, `providerConfigs` (both overloads), `providers`,
+  `defaultProviderName`, `defaultProvider`, `listModels` (both) and `providerFrom`. Call sites are
+  source-compatible, since the companion supplies `ProviderRegistry.default`; passing one
+  explicitly is how an application resolves providers its own modules supply, and how tests pin
+  the set.
+
+  See [docs/reference/migration.md](docs/reference/migration.md) for the worked example.
 - **The provider registration SPI: adding a provider is one file, not eight** - the second
   change of slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)). PR 1 removed the closed
   `enum` and the `sealed` trait; this builds the extension point on top of them.

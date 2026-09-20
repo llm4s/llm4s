@@ -3,6 +3,8 @@ package org.llm4s.config
 import org.llm4s.config.ProvidersConfigModel.{ ProviderId, ProviderName }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAIConfig, VertexAIConfig }
+import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.llmconnect.spi.fixtures.FixtureProvider
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import pureconfig.ConfigSource
@@ -34,6 +36,38 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
           deepseek.baseUrl shouldBe DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL
         case other =>
           fail(s"Expected DeepSeekConfig, got $other")
+    }
+
+    // The registry is what decides whether a `provider = "..."` entry can resolve, and it is
+    // injectable so that an application can resolve providers its own modules supply (#1131).
+    val fixtureHocon =
+      """
+        |llm4s {
+        |  providers {
+        |    fixture-main {
+        |      provider = "fixturecloud"
+        |      model = "fixture-1"
+        |      apiKey = "fixture-key"
+        |    }
+        |  }
+        |}
+        |""".stripMargin
+
+    "refuse a provider no registry on this classpath supplies" in {
+      Llm4sConfig.provider(ConfigSource.string(fixtureHocon), "fixture-main") match
+        case Left(error) =>
+          error.message should include("Provider 'fixturecloud'")
+          error.message should include("Registered providers:")
+        case Right(cfg) => fail(s"Expected an unresolved-provider error, got $cfg")
+    }
+
+    "resolve a provider supplied by the caller's registry" in {
+      given ProviderRegistry = ProviderRegistry.default.withProvider(FixtureProvider)
+
+      // Reaching the fixture's own error means validation and loading both routed through it.
+      Llm4sConfig.provider(ConfigSource.string(fixtureHocon), "fixture-main") match
+        case Left(error) => error.message shouldBe "fixture provider builds no config"
+        case Right(cfg)  => fail(s"Expected the fixture provider's own error, got $cfg")
     }
 
     // Regression for the #1131 scoping finding: before the capabilities registry gained a

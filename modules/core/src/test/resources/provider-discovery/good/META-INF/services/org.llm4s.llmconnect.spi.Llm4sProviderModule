@@ -1,0 +1,2 @@
+# A provider module that llm4s-core knows nothing about.
+org.llm4s.llmconnect.spi.fixtures.FixtureProviderModule

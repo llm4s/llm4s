@@ -1,0 +1,3 @@
+# A broken entry ahead of a working one: the working one must still be found.
+org.llm4s.llmconnect.spi.fixtures.NoSuchProviderModule
+org.llm4s.llmconnect.spi.fixtures.FixtureProviderModule

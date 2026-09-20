@@ -1,0 +1,9 @@
+# Providers built into llm4s-core. Discovered by ProviderRegistry.discover (#1131).
+#
+# If you bundle llm4s into a fat jar, this file must be CONCATENATED with the
+# services files of any other provider modules, not overwritten:
+#   sbt-assembly:  assembly / assemblyMergeStrategy := { case PathList("META-INF", "services", _*) => MergeStrategy.filterDistinctLines; ... }
+#   maven-shade:   <transformer implementation="...ServicesResourceTransformer"/>
+# Without that, providers silently disappear; ProviderRegistry.builtin or
+# ProviderRegistry.of(...) is the escape hatch.
+org.llm4s.llmconnect.provider.BuiltinProviderModule
