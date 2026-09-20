@@ -167,7 +167,7 @@ class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
       withProps(props) {
         val result = Llm4sConfig.embeddings()
         result.isLeft shouldBe true
-        result.left.getOrElse(fail()).message should include("Unknown embedding provider")
+        result.left.getOrElse(fail()).message should include("is not registered")
       }
     }
   }

@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.http.{ HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
-import org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor
+import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.llmconnect.model._
@@ -36,6 +36,13 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
   val id: ProviderId = ProviderId("voyage")
 
   override val aliases: Set[String] = Set("voyageai")
+
+  override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
+    requiresApiKey = true,
+    defaultBaseUrl = Some("https://api.voyageai.com/v1"),
+    apiKeyEnv = Some("VOYAGE_API_KEY"),
+    modelEnv = Some("VOYAGE_EMBEDDING_MODEL")
+  )
 
   /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))

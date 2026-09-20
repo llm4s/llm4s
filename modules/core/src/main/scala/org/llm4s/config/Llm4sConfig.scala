@@ -284,11 +284,16 @@ object Llm4sConfig {
    * `"openai/text-embedding-3-small"`, `"voyage/voyage-3"`,
    * `"ollama/nomic-embed-text"`). Returns the provider name and typed config.
    *
+   * The provider is resolved through the given
+   * [[org.llm4s.llmconnect.spi.ProviderRegistry]], so an embedding provider
+   * supplied by a module - or registered explicitly - is configurable here
+   * without `llm4s-core` knowing it exists.
+   *
    * @return a pair of `(providerName, EmbeddingProviderConfig)`, or a
    *         [[org.llm4s.error.ConfigurationError]] when `EMBEDDING_MODEL` is
    *         absent or the provider is unrecognised.
    */
-  def embeddings(): Result[(String, EmbeddingProviderConfig)] =
+  def embeddings()(using ProviderRegistry): Result[(String, EmbeddingProviderConfig)] =
     org.llm4s.config.EmbeddingsConfigLoader.loadProvider(ConfigSource.default)
 
   /**

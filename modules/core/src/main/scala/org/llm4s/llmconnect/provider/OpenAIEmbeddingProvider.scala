@@ -2,7 +2,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
-import org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor
+import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.llmconnect.model._
@@ -43,6 +43,20 @@ import scala.util.control.NonFatal
 object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   val id: ProviderId = ProviderId("openai")
+
+  /**
+   * OpenAI's embedding endpoint takes the same key as its chat client, so
+   * `llm4s.embeddings.openai` carries no `apiKey` and users set `OPENAI_API_KEY`
+   * once. `apiKeyPath` is how the descriptor says that, which also makes the
+   * "missing key" error name the place the key is actually set.
+   */
+  override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
+    requiresApiKey = true,
+    defaultBaseUrl = Some("https://api.openai.com/v1"),
+    apiKeyPath = Some("llm4s.openai.apiKey"),
+    apiKeyEnv = Some("OPENAI_API_KEY"),
+    modelEnv = Some("OPENAI_EMBEDDING_MODEL")
+  )
 
   /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
