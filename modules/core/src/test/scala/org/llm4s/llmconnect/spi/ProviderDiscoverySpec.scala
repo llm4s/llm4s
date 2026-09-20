@@ -257,6 +257,28 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
       (error should not).include("anthropic,")
     }
 
+    "each point at the registration call that accepts their own descriptor type" in {
+      // `of` takes chat descriptors and `ofEmbeddings` embedding ones, so an error naming the
+      // wrong one hands the reader a compile error as their next step.
+      val chat = ProviderRegistry.builtin
+        .resolve(ProviderId("moonbeam"))
+        .left
+        .toOption
+        .getOrElse(fail("expected an unresolved-provider error"))
+        .message
+
+      val embedding = ProviderRegistry.builtin
+        .resolveEmbedding(ProviderId("moonbeam"))
+        .left
+        .toOption
+        .getOrElse(fail("expected an unresolved-provider error"))
+        .message
+
+      chat should include("ProviderRegistry.of(...)")
+      embedding should include("ProviderRegistry.ofEmbeddings(...)")
+      (embedding should not).include("ProviderRegistry.of(...)")
+    }
+
     "fold an embedding alias onto its canonical id" in {
       ProviderRegistry.builtin.canonicalEmbeddingId("voyageai").asString shouldBe "voyage"
       // An id nothing claims is returned canonicalised but unchanged.

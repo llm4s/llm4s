@@ -54,7 +54,10 @@ a chat client and an embedding provider that share nothing but a base URL. `ids`
 
 > Embedding provider 'anthropic' (from llm4s.embeddings.model) is not registered. Registered
 > embedding providers: ollama, openai, voyage. If you expected 'anthropic', add the dependency
-> that supplies it, or register it explicitly with ProviderRegistry.of(...).
+> that supplies it, or register it explicitly with ProviderRegistry.ofEmbeddings(...).
+
+Each half names the registration call that accepts its own descriptor type - `of` for chat,
+`ofEmbeddings` for embeddings - because following the other one is a compile error.
 
 ### `EmbeddingClient.from` takes the registry
 

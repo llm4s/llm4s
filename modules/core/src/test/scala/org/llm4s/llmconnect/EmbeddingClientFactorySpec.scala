@@ -99,6 +99,16 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
       response.metadata.get("baseUrl") shouldBe Some("http://fixture")
     }
 
+    "keep compiling for a caller that passes the model registry explicitly" in {
+      // `from` gained a second contextual parameter, and this is the call shape that would
+      // break if a partial `using` list were not allowed: Scala 3 infers the remainder, and
+      // `ProviderRegistry`'s given lives in its own companion, so it is always in scope.
+      val cfg     = EmbeddingProviderConfig(baseUrl = "http://localhost:11434", model = "m", apiKey = "")
+      val service = summon[ModelRegistryService]
+
+      EmbeddingClient.from("ollama", cfg)(using service).isRight shouldBe true
+    }
+
     "fold an alias onto the provider that declares it" in {
       val cfg = EmbeddingProviderConfig(baseUrl = "https://api.voyage.ai", model = "voyage-3", apiKey = "vk-test")
 

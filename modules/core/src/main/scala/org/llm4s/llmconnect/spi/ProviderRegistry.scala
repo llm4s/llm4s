@@ -71,7 +71,7 @@ final class ProviderRegistry private (
    *                   Included in the error so the user knows which entry to fix.
    */
   def resolve(id: ProviderId, configPath: Option[String] = None): Result[ProviderDescriptor] =
-    find(id).toRight(notRegistered("Provider", id, configPath, ids))
+    find(id).toRight(notRegistered("Provider", id, configPath, ids, "ProviderRegistry.of(...)"))
 
   /** The registered descriptor for `id`, or an error naming what is registered. */
   def get(id: ProviderId): Result[ProviderDescriptor] = resolve(id, None)
@@ -90,7 +90,11 @@ final class ProviderRegistry private (
    * @param configPath where the id came from, e.g. `"llm4s.embeddings.model"`.
    */
   def resolveEmbedding(id: ProviderId, configPath: Option[String] = None): Result[EmbeddingProviderDescriptor] =
-    findEmbedding(id).toRight(notRegistered("Embedding provider", id, configPath, embeddingIds))
+    findEmbedding(id).toRight(
+      // Not `ProviderRegistry.of`, which takes chat descriptors: following that advice for an
+      // embedding provider is a compile error.
+      notRegistered("Embedding provider", id, configPath, embeddingIds, "ProviderRegistry.ofEmbeddings(...)")
+    )
 
   /** Registered chat provider ids in canonical spelling, sorted. */
   def ids: Seq[String] = byId.keys.toSeq.sorted
@@ -105,12 +109,18 @@ final class ProviderRegistry private (
    * The two most common causes of a missing provider are invisible otherwise: a
    * dependency that was never added, and a fat jar whose `META-INF/services`
    * entries were dropped or overwritten during shading.
+   *
+   * @param remedy the registration call to suggest. The two halves have
+   *               different ones, and suggesting the wrong one hands the user a
+   *               compile error: `of` takes chat descriptors, `ofEmbeddings`
+   *               embedding ones.
    */
   private def notRegistered(
     what: String,
     id: ProviderId,
     configPath: Option[String],
-    registered: Seq[String]
+    registered: Seq[String],
+    remedy: String
   ): ConfigurationError =
     val origin    = configPath.fold("")(path => s" (from $path)")
     val discovery = report.summary
@@ -120,7 +130,7 @@ final class ProviderRegistry private (
       s"$what '${id.asString}'$origin is not registered. " +
         s"Registered ${what.toLowerCase}s: $known. " +
         s"If you expected '${id.asString}', add the dependency that supplies it, " +
-        s"or register it explicitly with ProviderRegistry.of(...)." + scan
+        s"or register it explicitly with $remedy." + scan
     )
 
   /**
