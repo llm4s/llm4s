@@ -1,8 +1,11 @@
 package org.llm4s.llmconnect.spi
 
+import com.typesafe.config.ConfigUtil
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
+
+import scala.jdk.CollectionConverters._
 
 /**
  * One embedding provider's `llm4s.embeddings.<id>` section, as read from config.
@@ -69,6 +72,23 @@ final case class EmbeddingConfigSpec(
 object EmbeddingConfigSpec:
 
   /**
+   * The config path of a provider's section, e.g. `llm4s.embeddings.openai`.
+   *
+   * Built by joining literal segments rather than by interpolation, because
+   * `ProviderId` canonicalises but does not restrict: `ProviderId("acme.embeddings")`
+   * is a legal id, and interpolating it would name the nested path
+   * `llm4s.embeddings.acme.embeddings` rather than the key the user quoted.
+   * `ConfigUtil.joinPath` quotes each segment that needs it, so the path this
+   * returns is also the path to write in HOCON.
+   */
+  def sectionPath(id: ProviderId): String =
+    ConfigUtil.joinPath(List("llm4s", "embeddings", id.asString).asJava)
+
+  /** The config path of one field in a provider's section, quoted as [[sectionPath]] is. */
+  def fieldPath(id: ProviderId, field: String): String =
+    ConfigUtil.joinPath(List("llm4s", "embeddings", id.asString, field).asJava)
+
+  /**
    * Resolves the model: the `EMBEDDING_MODEL=<id>/<model>` override first, then
    * the section, then the spec's default.
    *
@@ -87,7 +107,7 @@ object EmbeddingConfigSpec:
         val env = spec.modelEnv.fold("")(name => s" or $name")
         ConfigurationError(
           s"Missing ${id.asString} embeddings model " +
-            s"(set EMBEDDING_MODEL=${id.asString}/<model>, llm4s.embeddings.${id.asString}.model$env)"
+            s"(set EMBEDDING_MODEL=${id.asString}/<model>, ${fieldPath(id, "model")}$env)"
         )
       }
 
@@ -97,7 +117,7 @@ object EmbeddingConfigSpec:
       .orElse(spec.defaultBaseUrl)
       .toRight(
         ConfigurationError(
-          s"Missing ${id.asString} embeddings base URL (llm4s.embeddings.${id.asString}.baseUrl)"
+          s"Missing ${id.asString} embeddings base URL (${fieldPath(id, "baseUrl")})"
         )
       )
 
@@ -124,7 +144,7 @@ object EmbeddingConfigSpec:
       case None                         =>
         // Name the path the key is actually read from, which for a provider with an
         // `apiKeyPath` is not its own section.
-        val path = spec.apiKeyPath.getOrElse(s"llm4s.embeddings.${id.asString}.apiKey")
+        val path = spec.apiKeyPath.getOrElse(fieldPath(id, "apiKey"))
         val env  = spec.apiKeyEnv.fold("")(name => s" / $name")
         Left(ConfigurationError(s"Missing ${id.asString} embeddings apiKey ($path$env)"))
 

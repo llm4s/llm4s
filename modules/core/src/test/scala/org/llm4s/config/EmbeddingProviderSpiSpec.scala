@@ -190,6 +190,55 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
     }
   }
 
+  "a provider whose id contains a dot" should {
+
+    /** `ProviderId` canonicalises but does not restrict, so this is a legal id. */
+    object DottedEmbeddings extends EmbeddingProviderDescriptor {
+      val id: ProviderId = ProviderId("acme.embeddings")
+
+      override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
+        requiresApiKey = true,
+        defaultBaseUrl = Some("https://acme.example/v1")
+      )
+
+      def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+        Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
+    }
+
+    "read the section the user actually wrote" in {
+      // Interpolating the id would look under llm4s.embeddings.acme.embeddings - a nested
+      // path - and silently find nothing, replacing the section with defaults.
+      given ProviderRegistry = ProviderRegistry.default.withEmbeddingProvider(DottedEmbeddings)
+
+      val (provider, config) = EmbeddingsConfigLoader
+        .loadProvider(
+          ConfigSource.string(
+            """llm4s {
+              |  embeddings {
+              |    model = "acme.embeddings/m"
+              |    "acme.embeddings" { apiKey = "ak", baseUrl = "https://tenant.acme.example/v1" }
+              |  }
+              |}""".stripMargin
+          )
+        )
+        .value
+
+      provider shouldBe "acme.embeddings"
+      config.apiKey shouldBe "ak"
+      config.baseUrl shouldBe "https://tenant.acme.example/v1"
+    }
+
+    "name a quoted path in its errors, so the reader can copy it" in {
+      EmbeddingConfigSpec.sectionPath(DottedEmbeddings.id) shouldBe """llm4s.embeddings."acme.embeddings""""
+      EmbeddingConfigSpec.fieldPath(DottedEmbeddings.id, "apiKey") shouldBe
+        """llm4s.embeddings."acme.embeddings".apiKey"""
+    }
+
+    "leave an ordinary id unquoted" in {
+      EmbeddingConfigSpec.sectionPath(ProviderId("openai")) shouldBe "llm4s.embeddings.openai"
+    }
+  }
+
   "an unregistered provider" should {
 
     "be reported against llm4s.embeddings.model when selected that way" in {

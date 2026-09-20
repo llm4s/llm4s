@@ -63,7 +63,14 @@ ollama {
 ```
 
 That block is keyed by **provider id**, so it travels with the provider when the provider moves
-to its own module - HOCON merges these across jars. (Chat config cannot do this: it is keyed by
+to its own module - HOCON merges these across jars. `ProviderId` canonicalises (trim, lowercase)
+but does not restrict, so an id containing a dot is legal and must be quoted as a single HOCON
+key; `EmbeddingConfigSpec.sectionPath` / `fieldPath` build the path that way, and the paths
+named in errors are the paths to write:
+
+```hocon
+llm4s.embeddings."acme.embeddings" { apiKey = ${?ACME_API_KEY} }
+``` (Chat config cannot do this: it is keyed by
 the user's *instance* name, which is why `ProviderConfigSpec.defaultBaseUrl` is code and says so.)
 
 ### A key that lives somewhere else

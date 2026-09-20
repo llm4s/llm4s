@@ -2,7 +2,12 @@ package org.llm4s.config
 
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, LocalEmbeddingModels }
-import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, EmbeddingProviderSection, ProviderRegistry }
+import org.llm4s.llmconnect.spi.{
+  EmbeddingConfigSpec,
+  EmbeddingProviderDescriptor,
+  EmbeddingProviderSection,
+  ProviderRegistry
+}
 import org.llm4s.types.Result
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 
@@ -121,9 +126,8 @@ private[config] object EmbeddingsConfigLoader {
     for {
       selected   <- selection
       descriptor <- resolve(selected, registry)
-      id  = descriptor.id.asString
-      raw = readSection(source, id)
-      section <- raw.map(withSharedApiKey(_, descriptor, source))
+      id = descriptor.id.asString
+      section <- readSection(source, descriptor).map(withSharedApiKey(_, descriptor, source))
       config  <- descriptor.buildConfig(section, selected.modelOverride)
     } yield id -> config
   }
@@ -159,13 +163,19 @@ private[config] object EmbeddingsConfigLoader {
    * A provider whose defaults cover everything needs no section at all, and a
    * missing section must not be reported as a config failure.
    */
-  private def readSection(source: ConfigSource, id: String): Result[EmbeddingProviderSection] = {
-    val at = source.at(s"llm4s.embeddings.$id")
+  private def readSection(
+    source: ConfigSource,
+    descriptor: EmbeddingProviderDescriptor
+  ): Result[EmbeddingProviderSection] = {
+    // Built by `sectionPath`, which quotes a provider id containing a dot rather than
+    // letting it read as a nested path.
+    val path = EmbeddingConfigSpec.sectionPath(descriptor.id)
+    val at   = source.at(path)
     if (!at.value().isRight) Right(EmbeddingProviderSection())
     else
       at.load[EmbeddingProviderSection].left.map { failures =>
         val msg = failures.toList.map(_.description).mkString("; ")
-        ConfigurationError(s"Failed to load llm4s.embeddings.$id via PureConfig: $msg")
+        ConfigurationError(s"Failed to load $path via PureConfig: $msg")
       }
   }
 
