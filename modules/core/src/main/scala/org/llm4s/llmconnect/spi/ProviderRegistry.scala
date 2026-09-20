@@ -7,7 +7,8 @@ import org.slf4j.LoggerFactory
 
 import java.util.ServiceLoader
 import scala.annotation.tailrec
-import scala.util.{ Failure, Success, Try }
+import scala.util.Try
+import scala.util.control.NonFatal
 
 /**
  * The set of providers this build can resolve.
@@ -134,8 +135,9 @@ object ProviderRegistry:
    * `ServiceLoader`'s own iterator throws `ServiceConfigurationError` for a
    * service entry it cannot load, and the `for`-comprehension over it that you
    * would naturally write propagates the first such error and abandons every
-   * remaining provider. The loop below drives the iterator by hand and guards
-   * each step, recording the failure in [[ProviderRegistryReport]] instead.
+   * remaining provider. The loop below drives the iterator by hand and wraps
+   * each step in [[guarded]], recording the failure in
+   * [[ProviderRegistryReport]] instead.
    *
    * @param loader the class loader to scan; defaults to the thread's context
    *               class loader, falling back to this class's own loader when a
@@ -150,31 +152,27 @@ object ProviderRegistry:
       modules: Vector[ProviderModuleReport],
       failures: Vector[ProviderDiscoveryFailure]
     ): (Vector[ProviderDescriptor], Vector[ProviderModuleReport], Vector[ProviderDiscoveryFailure]) =
-      Try(iterator.hasNext) match
-        case Failure(error) =>
+      guarded("reading provider service entries")(iterator.hasNext) match
+        case Left(failure) =>
           // `hasNext` is where the services files are parsed. A malformed one fails here and
           // leaves the iterator with nothing further to offer, so stop rather than spin on it.
-          (descriptors, modules, failures :+ failureOf("reading provider service entries", error))
+          (descriptors, modules, failures :+ failure)
 
-        case Success(false) =>
+        case Right(false) =>
           (descriptors, modules, failures)
 
-        case Success(true) =>
-          Try(iterator.next()) match
-            case Failure(error) =>
+        case Right(true) =>
+          guarded("loading a provider module")(iterator.next()) match
+            case Left(failure) =>
               // A single unusable entry - a class that is absent, abstract, or has no public
               // no-arg constructor. `ServiceLoader` consumes it, so the scan continues.
-              loop(descriptors, modules, failures :+ failureOf("loading a provider module", error))
+              loop(descriptors, modules, failures :+ failure)
 
-            case Success(module) =>
-              Try(module.chatProviders.toVector) match
-                case Failure(error) =>
-                  loop(
-                    descriptors,
-                    modules,
-                    failures :+ failureOf(s"asking ${module.getClass.getName} for its providers", error)
-                  )
-                case Success(provided) =>
+            case Right(module) =>
+              guarded(s"asking ${module.getClass.getName} for its providers")(module.chatProviders.toVector) match
+                case Left(failure) =>
+                  loop(descriptors, modules, failures :+ failure)
+                case Right(provided) =>
                   val entry = ProviderModuleReport(
                     moduleClass = module.getClass.getName,
                     providerIds = provided.map(_.id.asString),
@@ -190,9 +188,37 @@ object ProviderRegistry:
 
     fromDescriptors(descriptors, report)
 
+  /**
+   * Runs one step of the scan, turning anything a provider module throws into a
+   * recorded failure.
+   *
+   * The guard has to be wider than `scala.util.Try`, which catches only
+   * `NonFatal` and so deliberately lets every `LinkageError` through. A
+   * `LinkageError` is precisely what this boundary produces: a module compiled
+   * against a different llm4s throws `AbstractMethodError` when its
+   * `chatProviders` is called, and one whose own dependency is missing throws
+   * `NoClassDefFoundError`. Either escaping would abort the initialisation of
+   * `ProviderRegistry.default` and take every working provider with it - the
+   * one failure mode discovery exists to prevent. `VirtualMachineError` and the
+   * rest of the genuinely fatal set still propagate.
+   *
+   * @param what what was being attempted, used to build the failure's detail.
+   */
+  // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
+  private def guarded[A](what: => String)(body: => A): Either[ProviderDiscoveryFailure, A] =
+    try Right(body)
+    catch
+      case error: LinkageError => Left(failureOf(what, error))
+      case NonFatal(error)     => Left(failureOf(what, error))
+  // scalafix:on DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
+
   private def failureOf(what: String, error: Throwable): ProviderDiscoveryFailure =
-    val message = Option(error.getMessage).getOrElse(error.getClass.getName)
-    ProviderDiscoveryFailure(s"$what failed: $message", Some(error))
+    // The throwable's type is half the diagnosis at this boundary - `AbstractMethodError`
+    // means version skew, `NoClassDefFoundError` a dependency that never arrived - and a
+    // LinkageError's message is only a class name, so name the type either way.
+    val detail =
+      Option(error.getMessage).fold(error.getClass.getName)(message => s"${error.getClass.getName}: $message")
+    ProviderDiscoveryFailure(s"$what failed: $detail", Some(error))
 
   private def sourceOf(module: Llm4sProviderModule): Option[String] =
     Try(Option(module.getClass.getProtectionDomain.getCodeSource).map(_.getLocation.toString)).toOption.flatten

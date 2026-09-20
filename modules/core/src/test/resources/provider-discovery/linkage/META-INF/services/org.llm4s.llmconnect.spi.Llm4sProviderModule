@@ -1,0 +1,4 @@
+# A module that throws a LinkageError - what a jar built against another llm4s does.
+# It sits ahead of a working module: neither it nor the built-ins may be lost.
+org.llm4s.llmconnect.spi.fixtures.LinkageErrorProviderModule
+org.llm4s.llmconnect.spi.fixtures.FixtureProviderModule

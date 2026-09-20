@@ -78,6 +78,21 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
       registry.report.hasFailures shouldBe true
     }
 
+    "record a module that throws a LinkageError, not just an exception" in {
+      // A jar compiled against another llm4s throws `AbstractMethodError` when called, and
+      // `Try` does not catch it: unguarded it escapes `discover` and leaves
+      // `ProviderRegistry.default` uninitialisable, losing every working provider.
+      val registry = ProviderRegistry.discover(loaderFor("linkage"))
+
+      val detail = registry.report.failures.map(_.detail).mkString
+      detail should include("LinkageErrorProviderModule")
+      detail should include("java.lang.AbstractMethodError")
+
+      // The module behind the broken one, and the built-ins, are unaffected.
+      registry.get(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
+      registry.ids should contain allElementsOf builtinIds
+    }
+
     "record a module that throws when asked for its providers" in {
       val registry = ProviderRegistry.discover(loaderFor("throwing"))
 

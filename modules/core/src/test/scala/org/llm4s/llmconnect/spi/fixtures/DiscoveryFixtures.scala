@@ -43,3 +43,16 @@ final class FixtureProviderModule extends Llm4sProviderModule:
 final class ThrowingProviderModule extends Llm4sProviderModule:
   override def chatProviders: Seq[ProviderDescriptor] =
     throw new IllegalStateException("this module is broken")
+
+/**
+ * A module that fails the way a stale jar does.
+ *
+ * `AbstractMethodError` is what a module compiled against an older llm4s throws
+ * when core calls it, and `scala.util.Try` does not catch it — nor any other
+ * `LinkageError`. Without an explicit guard it escapes discovery entirely and
+ * `ProviderRegistry.default` cannot initialise, taking every working provider
+ * with it.
+ */
+final class LinkageErrorProviderModule extends Llm4sProviderModule:
+  override def chatProviders: Seq[ProviderDescriptor] =
+    throw new AbstractMethodError("org.llm4s.llmconnect.spi.Llm4sProviderModule.chatProviders()")
