@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, Llm4sProviderModule, ProviderDescriptor }
 
 /**
  * The `META-INF/services` entry point for the providers `llm4s-core` ships.
@@ -11,7 +11,11 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  * instead. The same shape is what GraalVM's `ServiceLoaderFeature` needs, so a
  * provider module written this way works under native-image too.
  *
- * It delegates to [[BuiltinProviders]], which stays the readable list.
+ * It delegates to [[BuiltinProviders]], which stays the readable list. Both
+ * halves must be forwarded: every `Llm4sProviderModule` member defaults to
+ * `Nil`, so a delegating module that forwards only one silently contributes
+ * nothing from the other.
  */
 final class BuiltinProviderModule extends Llm4sProviderModule:
-  override def chatProviders: Seq[ProviderDescriptor] = BuiltinProviders.chatProviders
+  override def chatProviders: Seq[ProviderDescriptor]               = BuiltinProviders.chatProviders
+  override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = BuiltinProviders.embeddingProviders

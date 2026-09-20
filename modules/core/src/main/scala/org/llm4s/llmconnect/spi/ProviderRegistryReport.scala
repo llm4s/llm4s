@@ -3,17 +3,26 @@ package org.llm4s.llmconnect.spi
 /**
  * One [[Llm4sProviderModule]] that classpath discovery loaded.
  *
- * @param moduleClass fully-qualified name of the module class.
- * @param providerIds the provider ids it contributed, in canonical spelling.
- * @param source      where the class was loaded from (a jar URL or a directory),
- *                    when the JVM can say. `None` for a class with no code source,
- *                    which is normal under some class loaders.
+ * @param moduleClass          fully-qualified name of the module class.
+ * @param providerIds          the chat provider ids it contributed, in canonical spelling.
+ * @param embeddingProviderIds the embedding provider ids it contributed.
+ * @param source               where the class was loaded from (a jar URL or a directory),
+ *                             when the JVM can say. `None` for a class with no code source,
+ *                             which is normal under some class loaders.
  */
 final case class ProviderModuleReport(
   moduleClass: String,
   providerIds: Seq[String],
-  source: Option[String]
-)
+  source: Option[String],
+  embeddingProviderIds: Seq[String] = Nil
+):
+
+  /** How this module's contribution reads in [[ProviderRegistryReport.describe]]. */
+  def contribution: String =
+    val chat = if providerIds.isEmpty then Nil else Seq(providerIds.mkString(", "))
+    val embedding =
+      if embeddingProviderIds.isEmpty then Nil else Seq(s"embeddings: ${embeddingProviderIds.mkString(", ")}")
+    if chat.isEmpty && embedding.isEmpty then "no providers" else (chat ++ embedding).mkString("; ")
 
 /**
  * A service entry that discovery could not use.
@@ -76,10 +85,7 @@ final case class ProviderRegistryReport(
 
     val moduleLines = modules.map { module =>
       val from = module.source.fold("")(source => s" [$source]")
-      s"  - ${module.moduleClass}$from: ${
-          if module.providerIds.isEmpty then "no providers"
-          else module.providerIds.mkString(", ")
-        }"
+      s"  - ${module.moduleClass}$from: ${module.contribution}"
     }
 
     val failureLines = failures.map(failure => s"  ! ${failure.detail}")

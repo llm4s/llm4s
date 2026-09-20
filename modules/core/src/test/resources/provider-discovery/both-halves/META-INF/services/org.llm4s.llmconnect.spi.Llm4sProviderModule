@@ -1,0 +1,2 @@
+# A module supplying a chat client and an embedding provider - llm4s-ollama's shape.
+org.llm4s.llmconnect.spi.fixtures.FixtureBothHalvesModule

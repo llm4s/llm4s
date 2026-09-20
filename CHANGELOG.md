@@ -22,6 +22,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **Embedding providers join the provider SPI** - the fourth change of slice 4
+  ([#1131](https://github.com/llm4s/llm4s/issues/1131)), and the last item on that issue's list.
+  PRs 2 and 3 made a *chat* provider self-describing and discoverable; `EmbeddingClient.from` was
+  still a `match` on a lowercased provider name, so an embedding provider was an edit to
+  `llm4s-core` wherever its code lived.
+
+  A new `org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor` is the embedding counterpart of
+  `ProviderDescriptor`, and `Llm4sProviderModule` gained `embeddingProviders` alongside
+  `chatProviders`. Registration is otherwise identical - same services file, same scan, same
+  escape hatches - so an embedding provider in its own module is reachable with nothing in
+  `llm4s-core` edited. `OpenAIEmbeddingProvider`, `VoyageAIEmbeddingProvider` and
+  `OllamaEmbeddingProvider` now *are* their own descriptors; their `fromConfig` is unchanged.
+
+  It is a separate trait rather than a method on `ProviderDescriptor` because the two provider
+  sets overlap without either containing the other: OpenAI and Ollama supply both halves, Voyage
+  only embeddings, Anthropic only chat. Chat and embedding ids therefore live in **separate
+  namespaces** and the same id may appear in both - `ollama` names a chat client and an embedding
+  provider that share nothing but a base URL. `ProviderRegistry` gained `findEmbedding`,
+  `resolveEmbedding`, `embeddingIds`, `canonicalEmbeddingId`, `withEmbeddingProvider` and
+  `ofEmbeddings`; `ProviderModuleReport` gained `embeddingProviderIds`. A provider that supplies
+  no embeddings now fails as such, naming the embedding providers rather than the chat ones.
+
+  `EmbeddingClient.from` takes an implicit `ProviderRegistry`: binary-incompatible,
+  source-compatible via the companion's given, exactly as the `Llm4sConfig` methods in PR 3.
+
+  Embedding **configuration** is unchanged - `llm4s.embeddings` still has typed `openai` /
+  `voyage` / `ollama` sections - so a third-party embedding provider is resolvable but still needs
+  its config built by the application. Moving that into the descriptor is the follow-up.
+
 - **Providers are discovered on the classpath: adding a provider is adding a dependency** - the
   third change of slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)). PR 2 made a
   provider a self-describing `ProviderDescriptor`; this removes the last manual step.

@@ -18,7 +18,7 @@ import org.llm4s.types.Result
  * val provider: EmbeddingProvider = OpenAIEmbeddingProvider.fromConfig(config)
  * val request = EmbeddingRequest(
  *   input = Seq("Hello world", "How are you?"),
- *   model = EmbeddingModelName("text-embedding-3-small")
+ *   model = EmbeddingModelConfig("text-embedding-3-small", dimensions = 1536)
  * )
  * val result: Result[EmbeddingResponse] = provider.embed(request)
  * }}}

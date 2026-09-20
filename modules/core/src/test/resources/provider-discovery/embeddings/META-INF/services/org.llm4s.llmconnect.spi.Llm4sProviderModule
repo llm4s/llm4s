@@ -1,0 +1,2 @@
+# A module that supplies embeddings and no chat client at all - Voyage's shape.
+org.llm4s.llmconnect.spi.fixtures.FixtureEmbeddingModule

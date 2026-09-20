@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.spi
 
-import org.llm4s.llmconnect.spi.fixtures.FixtureProvider
+import org.llm4s.llmconnect.spi.fixtures.{ FixtureEmbeddings, FixtureProvider }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -91,6 +91,45 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
       // The module behind the broken one, and the built-ins, are unaffected.
       registry.get(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
       registry.ids should contain allElementsOf builtinIds
+    }
+
+    "find an embedding-only provider module" in {
+      // Voyage's shape: embeddings and no chat client. The module never overrides
+      // `chatProviders`, so this is also the test that the default is usable.
+      val registry = ProviderRegistry.discover(loaderFor("embeddings"))
+
+      registry.resolveEmbedding(ProviderId("fixtureembed")) shouldBe Right(FixtureEmbeddings)
+      registry.embeddingIds should contain("fixtureembed")
+      // It contributes nothing to the chat namespace.
+      registry.ids shouldBe builtinIds
+
+      val module = registry.report.modules
+        .find(_.moduleClass == "org.llm4s.llmconnect.spi.fixtures.FixtureEmbeddingModule")
+        .getOrElse(fail(s"embedding module was not reported: ${registry.report.describe}"))
+
+      module.providerIds shouldBe empty
+      module.embeddingProviderIds shouldBe Seq("fixtureembed")
+      module.contribution should include("embeddings: fixtureembed")
+    }
+
+    "find both halves of a module that supplies chat and embeddings" in {
+      // llm4s-ollama's shape, and the reason discovery asks for both lists.
+      val registry = ProviderRegistry.discover(loaderFor("both-halves"))
+
+      registry.get(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
+      registry.resolveEmbedding(ProviderId("fixtureembed")) shouldBe Right(FixtureEmbeddings)
+    }
+
+    "keep the working half of a module whose embedding half throws" in {
+      val registry = ProviderRegistry.discover(loaderFor("half-broken"))
+
+      registry.get(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
+
+      val detail = registry.report.failures.map(_.detail).mkString
+      detail should include("embedding providers")
+      detail should include("the embedding half of this module is broken")
+      // The failure is attributed to the embedding half specifically, not the whole module.
+      (detail should not).include("for its chat providers")
     }
 
     "record a module that throws when asked for its providers" in {
@@ -184,5 +223,51 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
     "be the discovered one, and hold every built-in provider" in {
       ProviderRegistry.default.report.discovered shouldBe true
       ProviderRegistry.default.ids shouldBe builtinIds
+      ProviderRegistry.default.embeddingIds shouldBe ProviderRegistry.builtin.embeddingIds
+    }
+  }
+
+  "the two provider namespaces" should {
+
+    "be independent, so one id can name a chat and an embedding provider" in {
+      val registry = ProviderRegistry.builtin
+
+      // Ollama supplies both; Anthropic only chat; Voyage only embeddings. That overlap
+      // without containment is why the embedding descriptor is a separate trait.
+      registry.ids should contain("ollama")
+      registry.embeddingIds should contain("ollama")
+      registry.ids should contain("anthropic")
+      (registry.embeddingIds should not).contain("anthropic")
+      registry.embeddingIds should contain("voyage")
+      (registry.ids should not).contain("voyage")
+    }
+
+    "not resolve a chat provider as an embedding one" in {
+      val error = ProviderRegistry.builtin
+        .resolveEmbedding(ProviderId("anthropic"), Some("llm4s.embeddings.model"))
+        .left
+        .toOption
+        .getOrElse(fail("expected anthropic to supply no embedding provider"))
+        .message
+
+      error should include("Embedding provider 'anthropic'")
+      error should include("(from llm4s.embeddings.model)")
+      // It lists the embedding providers, not the chat ones - the point of separate namespaces.
+      error should include("voyage")
+      (error should not).include("anthropic,")
+    }
+
+    "fold an embedding alias onto its canonical id" in {
+      ProviderRegistry.builtin.canonicalEmbeddingId("voyageai").asString shouldBe "voyage"
+      // An id nothing claims is returned canonicalised but unchanged.
+      ProviderRegistry.builtin.canonicalEmbeddingId("Moonbeam").asString shouldBe "moonbeam"
+    }
+
+    "let an explicitly registered embedding provider override a discovered one" in {
+      val registry = ProviderRegistry.builtin.withEmbeddingProvider(FixtureEmbeddings)
+
+      registry.resolveEmbedding(ProviderId("fixtureembed")) shouldBe Right(FixtureEmbeddings)
+      // Registering an embedding provider leaves the chat namespace alone.
+      registry.ids shouldBe builtinIds
     }
   }

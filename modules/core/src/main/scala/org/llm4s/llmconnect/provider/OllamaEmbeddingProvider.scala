@@ -2,6 +2,9 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
+import org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.Result
 import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse }
 import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
@@ -24,8 +27,19 @@ import scala.util.control.NonFatal
  *
  * No API key is required when Ollama runs locally, though one can be supplied for
  * remote or authenticated deployments.
+ *
+ * Ollama's entry in the embedding half of the provider SPI.
+ *
+ * It shares the `ollama` id with [[OllamaProvider]]'s chat client - the two
+ * namespaces are separate - so `EMBEDDING_MODEL=ollama/nomic-embed-text` and
+ * `LLM_MODEL=ollama/llama3` name the same provider.
  */
-object OllamaEmbeddingProvider {
+object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
+
+  val id: ProviderId = ProviderId("ollama")
+
+  /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
+  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
 
   /** Creates an [[EmbeddingProvider]] backed by Ollama using the given configuration. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider = new EmbeddingProvider {

@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, Llm4sProviderModule, ProviderDescriptor }
 
 /**
  * The providers `llm4s-core` ships.
@@ -14,7 +14,8 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  * to whatever is left.
  *
  * Nothing else should grow a provider list: a new provider is a new
- * `ProviderDescriptor` plus an entry here, and after slice 5 not even that.
+ * `ProviderDescriptor` (or `EmbeddingProviderDescriptor`) plus an entry here,
+ * and after slice 5 not even that.
  */
 object BuiltinProviders extends Llm4sProviderModule:
 
@@ -31,4 +32,10 @@ object BuiltinProviders extends Llm4sProviderModule:
     CohereProvider,
     MistralProvider,
     VertexAIProvider
+  )
+
+  override val embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(
+    OpenAIEmbeddingProvider,
+    VoyageAIEmbeddingProvider,
+    OllamaEmbeddingProvider
   )

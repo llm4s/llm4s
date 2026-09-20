@@ -3,6 +3,9 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.http.{ HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
+import org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.Result
 import org.llm4s.llmconnect.model._
 import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
@@ -20,9 +23,22 @@ import scala.util.control.NonFatal
  *
  * Requires a valid Voyage AI API key in the provider configuration.
  *
+ * Voyage's entry in the embedding half of the provider SPI.
+ *
+ * Voyage is the case that shapes the SPI: it supplies embeddings and no chat
+ * client at all, which is why [[org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor]]
+ * is a separate trait rather than a method on the chat descriptor.
+ *
  * @see [[EmbeddingProvider]] for the common embedding interface
  */
-object VoyageAIEmbeddingProvider {
+object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
+
+  val id: ProviderId = ProviderId("voyage")
+
+  override val aliases: Set[String] = Set("voyageai")
+
+  /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
+  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
 
   /** Creates an [[EmbeddingProvider]] backed by Voyage AI using the given configuration. */
   def fromConfig(cfg: EmbeddingProviderConfig): EmbeddingProvider =

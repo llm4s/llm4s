@@ -1,0 +1,2 @@
+# A module whose embedding half throws: the chat half must still be registered.
+org.llm4s.llmconnect.spi.fixtures.HalfBrokenProviderModule

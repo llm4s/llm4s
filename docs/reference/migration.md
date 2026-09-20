@@ -1,5 +1,95 @@
 # Migration Guide
 
+## Slice 4 (PR 4): embedding providers join the SPI
+
+The fourth slice 4 change ([#1131](https://github.com/llm4s/llm4s/issues/1131)), and the last
+unchecked item on that issue's list. PRs 2 and 3 made a *chat* provider self-describing and
+discoverable. `EmbeddingClient.from` was still the shape the slice exists to delete:
+
+```scala
+provider.toLowerCase match
+  case "openai" => Right(new EmbeddingClient(OpenAIEmbeddingProvider.fromConfig(cfg)))
+  case "voyage" => ...
+  case "ollama" => ...
+  case other    => Left(EmbeddingError(...))
+```
+
+so an embedding provider was an edit to `llm4s-core` no matter where its code lived. It is now
+resolved through the same `ProviderRegistry`.
+
+### Declaring an embedding provider
+
+`EmbeddingProviderDescriptor` is the embedding counterpart of `ProviderDescriptor`, and
+`Llm4sProviderModule` gained a second list:
+
+```scala
+object JinaEmbeddings extends EmbeddingProviderDescriptor:
+  val id = ProviderId("jina")
+
+  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+    Right(JinaEmbeddingProvider.fromConfig(config))
+
+final class JinaProviderModule extends Llm4sProviderModule:
+  override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(JinaEmbeddings)
+```
+
+Registration is otherwise identical to PR 3 - the same `META-INF/services` file, the same
+`ServiceLoader` scan, the same escape hatches. A module declares whichever halves it has; both
+default to empty.
+
+> **If your module delegates**, forward *both* lists. Every `Llm4sProviderModule` member
+> defaults to `Nil`, so a module that forwards only `chatProviders` contributes no embedding
+> providers and fails silently rather than at compile time.
+
+### Why a separate trait, not a method on `ProviderDescriptor`
+
+The two provider sets overlap without either containing the other: OpenAI and Ollama supply a
+chat client *and* an embedding provider, Voyage supplies only embeddings, Anthropic only chat.
+Folding embeddings into `ProviderDescriptor` would force an embedding-only provider to implement
+`buildConfig` and `buildClient` only to fail them.
+
+The ids therefore live in **two namespaces**, and the same id can appear in both — `ollama` names
+a chat client and an embedding provider that share nothing but a base URL. `ids` and
+`embeddingIds` list them separately, and a provider that supplies no embeddings fails as such:
+
+> Embedding provider 'anthropic' (from llm4s.embeddings.model) is not registered. Registered
+> embedding providers: ollama, openai, voyage. If you expected 'anthropic', add the dependency
+> that supplies it, or register it explicitly with ProviderRegistry.of(...).
+
+### `EmbeddingClient.from` takes the registry
+
+```scala
+def from(provider: String, cfg: EmbeddingProviderConfig)(using
+  ModelRegistryService,
+  ProviderRegistry
+): Result[EmbeddingClient]
+```
+
+Binary-incompatible, source-compatible: existing call sites resolve `ProviderRegistry.default`
+through the companion's given, exactly as the `Llm4sConfig` methods did in PR 3. An application
+that registers its own passes it:
+
+```scala
+given ProviderRegistry = ProviderRegistry.default.withEmbeddingProvider(JinaEmbeddings)
+EmbeddingClient.from("jina", cfg)
+```
+
+`ProviderRegistry` gained `findEmbedding`, `resolveEmbedding`, `embeddingIds`,
+`canonicalEmbeddingId`, `withEmbeddingProvider` and `ofEmbeddings`; `ProviderModuleReport` gained
+`embeddingProviderIds`. The unknown-provider failure is still an `EmbeddingError` with code
+`400`, now carrying the registry's diagnostics as its message.
+
+### What did *not* change
+
+`EmbeddingProvider` itself, `EmbeddingProviderConfig`, and each provider's `fromConfig` are
+untouched - `OpenAIEmbeddingProvider.fromConfig(cfg)` still works and is still the direct route.
+The three built-in objects simply *are* their own descriptors now.
+
+Embedding **configuration** is not part of this change: `llm4s.embeddings` still has typed
+`openai` / `voyage` / `ollama` sections in `EmbeddingsConfigLoader`, so a third-party embedding
+provider is reachable through `EmbeddingClient.from` but still needs its config built by the
+application. Moving config binding into the descriptor, as PR 2 did for chat, is the follow-up.
+
 ## Slice 4 (PR 3): providers are discovered on the classpath
 
 The third slice 4 change ([#1131](https://github.com/llm4s/llm4s/issues/1131)). PR 2 made a

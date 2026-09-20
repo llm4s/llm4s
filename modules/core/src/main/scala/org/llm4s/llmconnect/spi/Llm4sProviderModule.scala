@@ -14,7 +14,8 @@ package org.llm4s.llmconnect.spi
  *
  * {{{
  * class MyProviderModule extends Llm4sProviderModule:
- *   def chatProviders: Seq[ProviderDescriptor] = Seq(MyProvider)
+ *   override def chatProviders: Seq[ProviderDescriptor]                = Seq(MyProvider)
+ *   override def embeddingProviders: Seq[EmbeddingProviderDescriptor]  = Seq(MyEmbeddings)
  * }}}
  *
  * Declare the class in
@@ -29,3 +30,12 @@ trait Llm4sProviderModule:
 
   /** The chat providers this module supplies. */
   def chatProviders: Seq[ProviderDescriptor] = Nil
+
+  /**
+   * The embedding providers this module supplies.
+   *
+   * Both lists default to empty, so a module contributes whichever halves it
+   * has: `llm4s-anthropic` overrides only `chatProviders`, a Voyage or Jina
+   * module only `embeddingProviders`, and `llm4s-ollama` both.
+   */
+  def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Nil

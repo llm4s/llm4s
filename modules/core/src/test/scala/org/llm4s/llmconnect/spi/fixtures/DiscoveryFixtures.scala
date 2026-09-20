@@ -3,7 +3,14 @@ package org.llm4s.llmconnect.spi.fixtures
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderConfigSpec, ProviderDescriptor }
+import org.llm4s.llmconnect.config.EmbeddingProviderConfig
+import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.llmconnect.spi.{
+  EmbeddingProviderDescriptor,
+  Llm4sProviderModule,
+  ProviderConfigSpec,
+  ProviderDescriptor
+}
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -56,3 +63,45 @@ final class ThrowingProviderModule extends Llm4sProviderModule:
 final class LinkageErrorProviderModule extends Llm4sProviderModule:
   override def chatProviders: Seq[ProviderDescriptor] =
     throw new AbstractMethodError("org.llm4s.llmconnect.spi.Llm4sProviderModule.chatProviders()")
+
+/**
+ * An embedding provider that exists only to be discovered.
+ *
+ * Voyage's shape: embeddings and no chat client, which is the case that makes
+ * `EmbeddingProviderDescriptor` a separate trait.
+ */
+object FixtureEmbeddings extends EmbeddingProviderDescriptor:
+  val id: ProviderId                = ProviderId("fixtureembed")
+  override val aliases: Set[String] = Set("fixture-embeddings")
+
+  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+    Right(
+      new EmbeddingProvider:
+        def embed(request: org.llm4s.llmconnect.model.EmbeddingRequest) =
+          Right(
+            org.llm4s.llmconnect.model.EmbeddingResponse(
+              embeddings = Seq(Vector(1.0, 2.0)),
+              metadata = Map("provider" -> "fixtureembed", "baseUrl" -> config.baseUrl)
+            )
+          )
+    )
+
+/** A module supplying only embeddings - it never overrides `chatProviders`. */
+final class FixtureEmbeddingModule extends Llm4sProviderModule:
+  override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(FixtureEmbeddings)
+
+/** A module supplying both halves, as `llm4s-ollama` will. */
+final class FixtureBothHalvesModule extends Llm4sProviderModule:
+  override def chatProviders: Seq[ProviderDescriptor]               = Seq(FixtureProvider)
+  override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(FixtureEmbeddings)
+
+/**
+ * A module whose embedding half throws while its chat half is fine.
+ *
+ * Discovery asks for the two lists separately and guards each, so the working
+ * half must still be registered and the report must say which half failed.
+ */
+final class HalfBrokenProviderModule extends Llm4sProviderModule:
+  override def chatProviders: Seq[ProviderDescriptor] = Seq(FixtureProvider)
+  override def embeddingProviders: Seq[EmbeddingProviderDescriptor] =
+    throw new IllegalStateException("the embedding half of this module is broken")

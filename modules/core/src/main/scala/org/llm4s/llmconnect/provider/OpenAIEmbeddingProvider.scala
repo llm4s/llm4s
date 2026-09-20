@@ -2,6 +2,9 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
+import org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor
+import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.Result
 import org.llm4s.llmconnect.model._
 import org.llm4s.util.Redaction
 import org.slf4j.LoggerFactory
@@ -29,10 +32,20 @@ import scala.util.control.NonFatal
  * == Token Usage ==
  * The response includes token usage information when available from the API.
  *
+ * OpenAI's entry in the embedding half of the provider SPI.
+ *
+ * The object that builds the provider is also its [[org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor]],
+ * so there is one place per provider rather than a descriptor shadowing a factory.
+ *
  * @see [[EmbeddingProvider]] for the provider interface
  * @see [[org.llm4s.llmconnect.config.EmbeddingProviderConfig]] for configuration
  */
-object OpenAIEmbeddingProvider {
+object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
+
+  val id: ProviderId = ProviderId("openai")
+
+  /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
+  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
 
   /**
    * Creates an OpenAI embedding provider from configuration.

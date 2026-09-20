@@ -20,15 +20,23 @@ import scala.util.control.NonFatal
  * `ProviderRegistry.default` — every provider on the classpath — unless the
  * caller supplies another.
  *
+ * Chat and embedding providers are held in separate namespaces, because the
+ * two sets overlap without either containing the other - OpenAI and Ollama
+ * supply both, Voyage only embeddings, Anthropic only chat. The same id may
+ * therefore appear in both, and does: `ollama` names a chat client and an
+ * embedding provider that share nothing but a base URL.
+ *
  * Lookup is by `ProviderId` and never throws: an id nothing handles produces
  * a `Left` naming the ids that are registered, which is the difference between
  * a usable error and "provider openai not registered".
  *
- * @param descriptors the registered providers, in registration order.
- * @param report      how this registry came to hold them; see [[ProviderRegistryReport]].
+ * @param descriptors          the registered chat providers, in registration order.
+ * @param embeddingDescriptors the registered embedding providers, in registration order.
+ * @param report               how this registry came to hold them; see [[ProviderRegistryReport]].
  */
 final class ProviderRegistry private (
   val descriptors: Vector[ProviderDescriptor],
+  val embeddingDescriptors: Vector[EmbeddingProviderDescriptor],
   val report: ProviderRegistryReport
 ):
 
@@ -37,6 +45,14 @@ final class ProviderRegistry private (
 
   private val byAlias: Map[String, ProviderDescriptor] =
     descriptors.flatMap { descriptor =>
+      descriptor.aliases.map(alias => ProviderId(alias).asString -> descriptor)
+    }.toMap
+
+  private val embeddingById: Map[String, EmbeddingProviderDescriptor] =
+    embeddingDescriptors.map(descriptor => descriptor.id.asString -> descriptor).toMap
+
+  private val embeddingByAlias: Map[String, EmbeddingProviderDescriptor] =
+    embeddingDescriptors.flatMap { descriptor =>
       descriptor.aliases.map(alias => ProviderId(alias).asString -> descriptor)
     }.toMap
 
@@ -55,23 +71,57 @@ final class ProviderRegistry private (
    *                   Included in the error so the user knows which entry to fix.
    */
   def resolve(id: ProviderId, configPath: Option[String] = None): Result[ProviderDescriptor] =
-    find(id).toRight {
-      val origin    = configPath.fold("")(path => s" (from $path)")
-      val discovery = report.summary
-      val scan      = if discovery.isEmpty then "" else s" $discovery"
-      ConfigurationError(
-        s"Provider '${id.asString}'$origin is not registered. " +
-          s"Registered providers: ${ids.mkString(", ")}. " +
-          s"If you expected '${id.asString}', add the dependency that supplies it, " +
-          s"or register it explicitly with ProviderRegistry.of(...)." + scan
-      )
-    }
+    find(id).toRight(notRegistered("Provider", id, configPath, ids))
 
   /** The registered descriptor for `id`, or an error naming what is registered. */
   def get(id: ProviderId): Result[ProviderDescriptor] = resolve(id, None)
 
-  /** Registered provider ids in canonical spelling, sorted. */
+  /** The registered embedding descriptor for `id`, if any. Does not consider aliases. */
+  def findEmbedding(id: ProviderId): Option[EmbeddingProviderDescriptor] = embeddingById.get(id.asString)
+
+  /**
+   * The registered embedding descriptor for `id`, or an error naming what is
+   * registered.
+   *
+   * The error names the '''embedding''' providers specifically. A user who set
+   * `EMBEDDING_MODEL=anthropic/...` needs to be told that Anthropic supplies no
+   * embedding provider, not handed the chat list and left to infer it.
+   *
+   * @param configPath where the id came from, e.g. `"llm4s.embeddings.model"`.
+   */
+  def resolveEmbedding(id: ProviderId, configPath: Option[String] = None): Result[EmbeddingProviderDescriptor] =
+    findEmbedding(id).toRight(notRegistered("Embedding provider", id, configPath, embeddingIds))
+
+  /** Registered chat provider ids in canonical spelling, sorted. */
   def ids: Seq[String] = byId.keys.toSeq.sorted
+
+  /** Registered embedding provider ids in canonical spelling, sorted. */
+  def embeddingIds: Seq[String] = embeddingById.keys.toSeq.sorted
+
+  /**
+   * The "not registered" error, carrying the discovery summary as well as the
+   * registered ids.
+   *
+   * The two most common causes of a missing provider are invisible otherwise: a
+   * dependency that was never added, and a fat jar whose `META-INF/services`
+   * entries were dropped or overwritten during shading.
+   */
+  private def notRegistered(
+    what: String,
+    id: ProviderId,
+    configPath: Option[String],
+    registered: Seq[String]
+  ): ConfigurationError =
+    val origin    = configPath.fold("")(path => s" (from $path)")
+    val discovery = report.summary
+    val scan      = if discovery.isEmpty then "" else s" $discovery"
+    val known     = if registered.isEmpty then "none" else registered.mkString(", ")
+    ConfigurationError(
+      s"$what '${id.asString}'$origin is not registered. " +
+        s"Registered ${what.toLowerCase}s: $known. " +
+        s"If you expected '${id.asString}', add the dependency that supplies it, " +
+        s"or register it explicitly with ProviderRegistry.of(...)." + scan
+    )
 
   /**
    * Folds an alias onto the id that owns it, leaving unknown strings alone.
@@ -85,6 +135,11 @@ final class ProviderRegistry private (
     val id = ProviderId(raw)
     byAlias.get(id.asString).fold(id)(_.id)
 
+  /** [[canonicalId]] over the embedding providers, which have their own aliases. */
+  def canonicalEmbeddingId(raw: String): ProviderId =
+    val id = ProviderId(raw)
+    embeddingByAlias.get(id.asString).fold(id)(_.id)
+
   /**
    * This registry plus `descriptor`; a later registration of the same id wins.
    *
@@ -93,13 +148,23 @@ final class ProviderRegistry private (
    * unchanged, so the diagnostics still say what the scan saw.
    */
   def withProvider(descriptor: ProviderDescriptor): ProviderRegistry =
-    ProviderRegistry.fromDescriptors(descriptors :+ descriptor, report)
+    ProviderRegistry.fromDescriptors(descriptors :+ descriptor, embeddingDescriptors, report)
 
-  /** This registry plus every provider `module` supplies. */
+  /** This registry plus `descriptor`; a later registration of the same id wins. */
+  def withEmbeddingProvider(descriptor: EmbeddingProviderDescriptor): ProviderRegistry =
+    ProviderRegistry.fromDescriptors(descriptors, embeddingDescriptors :+ descriptor, report)
+
+  /** This registry plus every provider `module` supplies, of either kind. */
   def withModule(module: Llm4sProviderModule): ProviderRegistry =
-    ProviderRegistry.fromDescriptors(descriptors ++ module.chatProviders, report)
+    ProviderRegistry.fromDescriptors(
+      descriptors ++ module.chatProviders,
+      embeddingDescriptors ++ module.embeddingProviders,
+      report
+    )
 
-  override def toString: String = s"ProviderRegistry(${ids.mkString(", ")})"
+  override def toString: String =
+    val embeddings = if embeddingIds.isEmpty then "" else s"; embeddings: ${embeddingIds.mkString(", ")}"
+    s"ProviderRegistry(${ids.mkString(", ")}$embeddings)"
 
 object ProviderRegistry:
 
@@ -107,22 +172,36 @@ object ProviderRegistry:
 
   /** A registry holding exactly `descriptors`; a later duplicate id wins. */
   def of(descriptors: ProviderDescriptor*): ProviderRegistry =
-    fromDescriptors(descriptors.toVector, ProviderRegistryReport.explicit)
+    fromDescriptors(descriptors.toVector, Vector.empty, ProviderRegistryReport.explicit)
 
-  /** A registry holding everything `modules` supply. */
+  /** A registry holding exactly `descriptors`; a later duplicate id wins. */
+  def ofEmbeddings(descriptors: EmbeddingProviderDescriptor*): ProviderRegistry =
+    fromDescriptors(Vector.empty, descriptors.toVector, ProviderRegistryReport.explicit)
+
+  /** A registry holding everything `modules` supply, of either kind. */
   def ofModules(modules: Llm4sProviderModule*): ProviderRegistry =
-    fromDescriptors(modules.toVector.flatMap(_.chatProviders), ProviderRegistryReport.explicit)
+    fromDescriptors(
+      modules.toVector.flatMap(_.chatProviders),
+      modules.toVector.flatMap(_.embeddingProviders),
+      ProviderRegistryReport.explicit
+    )
 
   private def fromDescriptors(
     descriptors: Vector[ProviderDescriptor],
+    embeddingDescriptors: Vector[EmbeddingProviderDescriptor],
     report: ProviderRegistryReport
   ): ProviderRegistry =
     // Deduplicate by id keeping the *last* registration, so `withProvider` overrides rather
     // than silently losing to what is already there - a user-supplied descriptor must be able
     // to replace a built-in one of the same name.
-    val deduplicated =
-      descriptors.reverse.distinctBy(_.id.asString).reverse
-    new ProviderRegistry(deduplicated, report)
+    new ProviderRegistry(
+      lastWins(descriptors)(_.id.asString),
+      lastWins(embeddingDescriptors)(_.id.asString),
+      report
+    )
+
+  private def lastWins[A](values: Vector[A])(key: A => String): Vector[A] =
+    values.reverse.distinctBy(key).reverse
 
   /**
    * Every provider on `loader`'s classpath, found through `META-INF/services`.
@@ -147,46 +226,63 @@ object ProviderRegistry:
     val iterator = ServiceLoader.load(classOf[Llm4sProviderModule], loader).iterator()
 
     @tailrec
-    def loop(
-      descriptors: Vector[ProviderDescriptor],
-      modules: Vector[ProviderModuleReport],
-      failures: Vector[ProviderDiscoveryFailure]
-    ): (Vector[ProviderDescriptor], Vector[ProviderModuleReport], Vector[ProviderDiscoveryFailure]) =
+    def loop(scan: Scan): Scan =
       guarded("reading provider service entries")(iterator.hasNext) match
         case Left(failure) =>
           // `hasNext` is where the services files are parsed. A malformed one fails here and
           // leaves the iterator with nothing further to offer, so stop rather than spin on it.
-          (descriptors, modules, failures :+ failure)
+          scan.failed(failure)
 
         case Right(false) =>
-          (descriptors, modules, failures)
+          scan
 
         case Right(true) =>
           guarded("loading a provider module")(iterator.next()) match
             case Left(failure) =>
               // A single unusable entry - a class that is absent, abstract, or has no public
               // no-arg constructor. `ServiceLoader` consumes it, so the scan continues.
-              loop(descriptors, modules, failures :+ failure)
+              loop(scan.failed(failure))
 
             case Right(module) =>
-              guarded(s"asking ${module.getClass.getName} for its providers")(module.chatProviders.toVector) match
-                case Left(failure) =>
-                  loop(descriptors, modules, failures :+ failure)
-                case Right(provided) =>
-                  val entry = ProviderModuleReport(
-                    moduleClass = module.getClass.getName,
-                    providerIds = provided.map(_.id.asString),
-                    source = sourceOf(module)
-                  )
-                  loop(descriptors ++ provided, modules :+ entry, failures)
+              // Both lists are the module's own code, so both are guarded. Asking for them
+              // separately means a module whose embedding half throws still contributes its
+              // chat half, and the report says which half failed.
+              val name = module.getClass.getName
+              val chat = guarded(s"asking $name for its chat providers")(module.chatProviders.toVector)
+              val embeddings =
+                guarded(s"asking $name for its embedding providers")(module.embeddingProviders.toVector)
 
-    val (descriptors, modules, failures) = loop(Vector.empty, Vector.empty, Vector.empty)
-    val report                           = ProviderRegistryReport(discovered = true, modules, failures)
+              val entry = ProviderModuleReport(
+                moduleClass = name,
+                providerIds = chat.toOption.getOrElse(Vector.empty).map(_.id.asString),
+                embeddingProviderIds = embeddings.toOption.getOrElse(Vector.empty).map(_.id.asString),
+                source = sourceOf(module)
+              )
+              loop(
+                scan.copy(
+                  descriptors = scan.descriptors ++ chat.getOrElse(Vector.empty),
+                  embeddingDescriptors = scan.embeddingDescriptors ++ embeddings.getOrElse(Vector.empty),
+                  modules = scan.modules :+ entry,
+                  failures = scan.failures ++ chat.left.toSeq ++ embeddings.left.toSeq
+                )
+              )
 
-    failures.foreach(failure => logger.warn(s"Provider discovery: ${failure.detail}"))
+    val scan   = loop(Scan())
+    val report = ProviderRegistryReport(discovered = true, scan.modules, scan.failures)
+
+    scan.failures.foreach(failure => logger.warn(s"Provider discovery: ${failure.detail}"))
     logger.debug(s"Provider discovery complete.\n${report.describe}")
 
-    fromDescriptors(descriptors, report)
+    fromDescriptors(scan.descriptors, scan.embeddingDescriptors, report)
+
+  /** What one pass of [[discover]] has accumulated so far. */
+  final private case class Scan(
+    descriptors: Vector[ProviderDescriptor] = Vector.empty,
+    embeddingDescriptors: Vector[EmbeddingProviderDescriptor] = Vector.empty,
+    modules: Vector[ProviderModuleReport] = Vector.empty,
+    failures: Vector[ProviderDiscoveryFailure] = Vector.empty
+  ):
+    def failed(failure: ProviderDiscoveryFailure): Scan = copy(failures = failures :+ failure)
 
   /**
    * Runs one step of the scan, turning anything a provider module throws into a
