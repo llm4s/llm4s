@@ -5,6 +5,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default._
 
+import java.util.concurrent.{ CountDownLatch, Executors, TimeUnit }
 import scala.concurrent.{ Await, ExecutionContext }
 import scala.concurrent.duration._
 
@@ -712,6 +713,89 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
         result.left.toOption.get shouldBe a[ToolCallError.HandlerError]
         // HandlerError is non-retryable — must exit fast, no 5s delay applied
         elapsed should be < 1000L
+      }
+    )
+  }
+
+  it should "preserve synchronous retries on a single-thread execution context" in {
+    createFlakyTool(1).fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val executor = ExecutionContext.fromExecutorService(Executors.newSingleThreadExecutor())
+        try {
+          val registry = new ToolRegistry(Seq(tool))
+          val config = ToolExecutionConfig(
+            retryPolicy = Some(ToolRetryPolicy(maxAttempts = 2, baseDelay = 50.millis))
+          )
+          val request = ToolCallRequest("flaky", ujson.Obj("x" -> 13.0))
+
+          val result = scala.concurrent.Future(registry.execute(request, config)(executor))(executor)
+          Await.result(result, 2.seconds).map(_("result").num) shouldBe Right(13.0)
+        } finally executor.shutdownNow()
+      }
+    )
+  }
+
+  it should "preserve synchronous timeout retries on a single-thread execution context" in {
+    createSleepTool().fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val executor = ExecutionContext.fromExecutorService(Executors.newSingleThreadExecutor())
+        try {
+          val registry = new ToolRegistry(Seq(tool))
+          val config = ToolExecutionConfig(
+            timeout = Some(50.millis),
+            retryPolicy = Some(ToolRetryPolicy(maxAttempts = 2, baseDelay = 10.millis))
+          )
+          val request = ToolCallRequest("sleep", ujson.Obj("ms" -> 500))
+
+          val result = scala.concurrent.Future(registry.execute(request, config)(executor))(executor)
+          Await.result(result, 2.seconds).left.toOption.get shouldBe a[ToolCallError.Timeout]
+        } finally executor.shutdownNow()
+      }
+    )
+  }
+
+  it should "release the execution context thread during asynchronous retry backoff" in {
+    val firstAttempt = new CountDownLatch(1)
+    val callCount    = new java.util.concurrent.atomic.AtomicInteger(0)
+    val schema = Schema
+      .`object`[Map[String, Any]]("Async retry parameters")
+      .withProperty(Schema.property("x", Schema.number("Value")))
+    val retryingTool = ToolBuilder[Map[String, Any], MathResult](
+      "async-retry",
+      "Fails once then succeeds",
+      schema
+    ).withHandler { extractor =>
+      for { x <- extractor.getDouble("x") } yield {
+        if (callCount.getAndIncrement() == 0) {
+          firstAttempt.countDown()
+          throw new java.io.IOException("transient")
+        }
+        MathResult(x)
+      }
+    }.buildSafe()
+
+    retryingTool.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      tool => {
+        val executor = ExecutionContext.fromExecutorService(Executors.newSingleThreadExecutor())
+        try {
+          val registry = new ToolRegistry(Seq(tool))
+          val config = ToolExecutionConfig(
+            retryPolicy = Some(ToolRetryPolicy(maxAttempts = 2, baseDelay = 500.millis))
+          )
+          val request = ToolCallRequest("async-retry", ujson.Obj("x" -> 11.0))
+
+          val result = registry.executeAsync(request, config)(executor)
+          firstAttempt.await(1, TimeUnit.SECONDS) shouldBe true
+
+          val probe = scala.concurrent.Future("execution-context-available")(executor)
+          Await.result(probe, 200.millis) shouldBe "execution-context-available"
+
+          Await.result(result, 2.seconds).map(_("result").num) shouldBe Right(11.0)
+          callCount.get() shouldBe 2
+        } finally executor.shutdownNow()
       }
     )
   }

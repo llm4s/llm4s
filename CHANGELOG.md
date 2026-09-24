@@ -330,6 +330,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- `ToolRegistry.executeAsync` now schedules retry backoff without parking an execution-context
+  thread. Synchronous execution retains blocking semantics and uses dedicated timeout workers,
+  avoiding deadlocks when called from a single-thread execution context.
 - **`provider = "vertexai"` failed config validation outright, making Vertex AI unreachable.**
   `ProviderKind.VertexAI` existed, `NamedProviderLoader` built a `VertexAIConfig` from it and
   `LLMConnect` built a `VertexAIClient` from that - but Vertex AI was absent from
