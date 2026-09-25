@@ -1,7 +1,11 @@
 package org.llm4s.llmconnect
 
+import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.model._
-import org.llm4s.types.{ Result, TokenBudget, HeadroomPercent }
+import org.llm4s.toolapi.ObjectSchema
+import org.llm4s.types.{ HeadroomPercent, Result, TokenBudget }
+
+import scala.util.Try
 
 /**
  * Core interface for interacting with Large Language Model providers.
@@ -43,6 +47,39 @@ trait LLMClient extends AutoCloseable {
     options: CompletionOptions = CompletionOptions(),
     onChunk: StreamedChunk => Unit
   ): Result[Completion]
+
+  /**
+   * Sends the conversation and parses the response into a typed value using the provided schema.
+   *
+   * Sets `ResponseFormat.JsonSchema` on the options so providers that support native structured
+   * output (OpenAI, Gemini) enforce the schema at generation time. Anthropic falls back to
+   * system-prompt injection. The raw JSON string returned by the model is then deserialised with
+   * uPickle into the expected type `A`.
+   *
+   * @param conversation conversation history
+   * @param schema       JSON-Schema description of the expected response object
+   * @param options      additional completion options (default: CompletionOptions())
+   * @param reader       implicit uPickle reader for deserialising the JSON into `A`
+   * @tparam A target type; must have a corresponding `upickle.default.Reader[A]`
+   * @return Right(A) on success, or Left(LLMError) when the provider call fails or the JSON cannot be parsed
+   */
+  def completeStructured[A](
+    conversation: Conversation,
+    schema: ObjectSchema[A],
+    options: CompletionOptions = CompletionOptions()
+  )(implicit reader: upickle.default.Reader[A]): Result[A] = {
+    val jsonSchema = ResponseFormat.JsonSchema(schema.toJsonSchema(strict = true))
+    val opts       = options.withResponseFormat(jsonSchema)
+    for {
+      completion <- complete(conversation, opts)
+      parsed <- Try(ujson.read(completion.content)).toEither.left.map(e =>
+        ValidationError("structured_output", s"Response is not valid JSON: ${e.getMessage}")
+      )
+      result <- Try(upickle.default.read[A](parsed)).toEither.left.map(e =>
+        ValidationError("structured_output", s"Response does not match expected schema: ${e.getMessage}")
+      )
+    } yield result
+  }
 
   /**
    * Returns the maximum context window size supported by this model in tokens.
