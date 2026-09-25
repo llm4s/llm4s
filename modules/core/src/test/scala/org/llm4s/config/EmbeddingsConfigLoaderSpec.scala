@@ -144,7 +144,10 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
       result.isLeft shouldBe true
       val error = result.left.value
-      error.message should include("Unknown embedding provider")
+      // The registry's own message: it names the registered providers and the scan that
+      // found them, so "never added the dependency" is distinguishable from "module failed".
+      error.message should include("is not registered")
+      error.message should include("Registered embedding providers")
       error.message should include("unknownprovider")
     }
   }
@@ -241,7 +244,10 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
       result.isLeft shouldBe true
       val error = result.left.value
-      error.message should include("Unknown embedding provider")
+      // The registry's own message: it names the registered providers and the scan that
+      // found them, so "never added the dependency" is distinguishable from "module failed".
+      error.message should include("is not registered")
+      error.message should include("Registered embedding providers")
       error.message should include("cohere")
     }
 
@@ -288,7 +294,11 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
       result.isLeft shouldBe true
       val error = result.left.value
-      error.message should include("Missing OpenAI API key")
+      error.message should include("apiKey")
+      // OpenAI embeddings reuse the chat key, so the error must point there and not at
+      // llm4s.embeddings.openai.apiKey, where the user would set it in vain.
+      error.message should include("llm4s.openai.apiKey")
+      error.message should include("OPENAI_API_KEY")
       error.message should include("OPENAI_API_KEY")
     }
 
@@ -312,7 +322,8 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
       result.isLeft shouldBe true
       val error = result.left.value
-      error.message should include("Missing OpenAI embeddings model")
+      error.message should include("Missing openai embeddings model")
+      error.message should include("OPENAI_EMBEDDING_MODEL")
     }
 
     "fail with clear error when Voyage API key is missing" in {
@@ -332,7 +343,9 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
       result.isLeft shouldBe true
       val error = result.left.value
-      error.message should include("Missing Voyage embeddings apiKey")
+      error.message should include("Missing voyage embeddings apiKey")
+      error.message should include("llm4s.embeddings.voyage.apiKey")
+      error.message should include("VOYAGE_API_KEY")
       error.message should include("VOYAGE_API_KEY")
     }
 
@@ -353,7 +366,8 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
       result.isLeft shouldBe true
       val error = result.left.value
-      error.message should include("Missing Voyage embeddings model")
+      error.message should include("Missing voyage embeddings model")
+      error.message should include("VOYAGE_EMBEDDING_MODEL")
     }
   }
 

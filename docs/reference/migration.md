@@ -1,5 +1,123 @@
 # Migration Guide
 
+## Slice 4 (PR 5): embedding config moves into the provider
+
+The fifth slice 4 change ([#1131](https://github.com/llm4s/llm4s/issues/1131)), and the
+follow-up PR 4 named. PR 4 made an embedding provider *resolvable* from its own module;
+its configuration was still core's business:
+
+```scala
+final private case class EmbeddingsOllamaSection(apiKey: …, baseUrl: …, model: …)
+implicit private val embeddingsOllamaSectionReader = …
+private val DefaultOllamaEmbeddingBaseUrl = "http://localhost:11434"
+private def buildOllamaEmbeddings(…) = …
+// plus two `match` arms
+```
+
+— a typed case class, a PureConfig reader, a default, a builder and two dispatch arms per
+provider. A third-party embedding provider could be registered and then had nothing to be
+configured *with*.
+
+**Nothing changes for users.** `EMBEDDING_MODEL`, `EMBEDDING_PROVIDER`, `OPENAI_API_KEY`,
+`VOYAGE_API_KEY`, `OLLAMA_EMBEDDING_BASE_URL` and every `llm4s.embeddings.<id>` key behave
+exactly as before.
+
+### The section shape is core's; what it means is the provider's
+
+`llm4s-core` now parses one uniform shape - `apiKey`, `baseUrl`, `model` - for whichever
+provider was selected, and hands it to the descriptor:
+
+```scala
+def buildConfig(section: EmbeddingProviderSection, modelOverride: Option[String]): Result[EmbeddingProviderConfig]
+```
+
+Everything it needs arrives in `section`, already typed. A descriptor reads no configuration
+itself: raw config access stays in `org.llm4s.config`, which is the boundary AGENTS.md sets.
+
+Most providers never implement it. Declaring an `EmbeddingConfigSpec` is enough, and the
+default implementation resolves the three fields against it:
+
+```scala
+object JinaEmbeddings extends EmbeddingProviderDescriptor:
+  val id = ProviderId("jina")
+
+  override val configSpec = EmbeddingConfigSpec(
+    requiresApiKey = true,
+    defaultBaseUrl = Some("https://api.jina.ai/v1"),
+    apiKeyEnv      = Some("JINA_API_KEY")   // named in the error when it is missing
+  )
+```
+
+### Defaults are code, environment bindings are HOCON
+
+They used to be both. `reference.conf` said `baseUrl = "http://localhost:11434"` and
+`EmbeddingsConfigLoader` said `DefaultOllamaEmbeddingBaseUrl`, with nothing keeping them in
+step. The default now lives only in the descriptor's `EmbeddingConfigSpec`, and each
+provider's `reference.conf` block is reduced to the environment variables it binds:
+
+```hocon
+ollama {
+  baseUrl = ${?OLLAMA_EMBEDDING_BASE_URL}
+  model   = ${?OLLAMA_EMBEDDING_MODEL}
+}
+```
+
+That block is keyed by **provider id**, so it travels with the provider when the provider moves
+to its own module - HOCON merges these across jars. `ProviderId` canonicalises (trim, lowercase)
+but does not restrict, so an id containing a dot is legal and must be quoted as a single HOCON
+key; `EmbeddingConfigSpec.sectionPath` / `fieldPath` build the path that way, and the paths
+named in errors are the paths to write:
+
+```hocon
+llm4s.embeddings."acme.embeddings" { apiKey = ${?ACME_API_KEY} }
+```
+
+(Chat config cannot do this: it is keyed by the user's *instance* name, which is why
+`ProviderConfigSpec.defaultBaseUrl` is code and says so.)
+
+### A key that lives somewhere else
+
+OpenAI's embedding endpoint takes the same key as its chat client, so `llm4s.embeddings.openai`
+has never carried one. The descriptor declares where to look instead of the loader special-casing
+it, and that declaration is also what makes the error name the place the key is really set:
+
+```scala
+override val configSpec = EmbeddingConfigSpec(
+  requiresApiKey = true,
+  apiKeyPath     = Some("llm4s.openai.apiKey"),
+  …
+)
+```
+
+> Missing openai embeddings apiKey (llm4s.openai.apiKey / OPENAI_API_KEY)
+
+`apiKeyPath` is a *declaration*, not a read: `EmbeddingsConfigLoader` resolves it and hands
+the value back in the section before calling `buildConfig`. The provider owns the knowledge of
+*where* its key lives; `org.llm4s.config` keeps sole ownership of *reading* it.
+
+### The embedding config entry points take the registry
+
+```scala
+def embeddings()(using ProviderRegistry): Result[(String, EmbeddingProviderConfig)]
+def loadTextEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings]
+def textEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings]
+```
+
+Binary-incompatible, source-compatible, as in PRs 3 and 4. Without it an application's own
+registry could not reach the loader, and a provider it registered explicitly would resolve for
+`EmbeddingClient.from` but not for its configuration.
+
+All three resolve through the same registry, so a provider configurable by one is configurable
+by all of them: `textEmbeddingModel` now goes through `embeddings` rather than calling the
+loader a second time.
+
+### Error messages
+
+Unknown providers now produce the registry's message, which names what *is* registered and the
+scan that found it. Missing-field errors name the config path and the environment variable the
+descriptor declared. The provider is named by its canonical id (`openai`, not `OpenAI`) - the
+spelling that appears in config.
+
 ## Slice 4 (PR 4): embedding providers join the SPI
 
 The fourth slice 4 change ([#1131](https://github.com/llm4s/llm4s/issues/1131)), and the last

@@ -1201,7 +1201,7 @@ class HandoffE2ESpec extends AnyFlatSpec with Matchers {
 
 ### User Guide: Handoff Mechanism
 
-```markdown
+````markdown
 # Handoff Mechanism
 
 ## Overview
@@ -1359,6 +1359,7 @@ for {
   )
 } yield state2
 ```
+````
 
 ---
 

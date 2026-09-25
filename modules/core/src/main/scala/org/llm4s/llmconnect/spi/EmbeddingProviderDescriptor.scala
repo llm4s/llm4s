@@ -27,6 +27,12 @@ import org.llm4s.types.Result
  * object JinaEmbeddings extends EmbeddingProviderDescriptor:
  *   val id = ProviderId("jina")
  *
+ *   override val configSpec = EmbeddingConfigSpec(
+ *     requiresApiKey = true,
+ *     defaultBaseUrl = Some("https://api.jina.ai/v1"),
+ *     apiKeyEnv      = Some("JINA_API_KEY")
+ *   )
+ *
  *   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
  *     Right(JinaEmbeddingProvider.fromConfig(config))
  * }}}
@@ -46,6 +52,34 @@ trait EmbeddingProviderDescriptor:
 
   /** Alternative spellings accepted in `EMBEDDING_MODEL=<name>/<model>`, folded onto [[id]]. */
   def aliases: Set[String] = Set.empty
+
+  /** What this provider needs from `llm4s.embeddings.<id>`, and its defaults. */
+  def configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec()
+
+  /**
+   * Turns this provider's config section into the `EmbeddingProviderConfig` its
+   * client needs.
+   *
+   * The default implementation resolves model, base URL and API key against
+   * [[configSpec]], which is all any built-in provider needs - including
+   * OpenAI, whose key comes from the chat client's `llm4s.openai.apiKey` and
+   * which says so with `apiKeyPath` rather than by overriding this. Override it
+   * only for a provider whose config genuinely cannot be expressed that way.
+   *
+   * @param section       the `llm4s.embeddings.<id>` section, already parsed, with any
+   *                      [[EmbeddingConfigSpec.apiKeyPath]] already resolved into its
+   *                      `apiKey`. Empty rather than absent when the user configured
+   *                      nothing. Everything this method needs arrives typed, in here:
+   *                      a descriptor never reads configuration itself.
+   * @param modelOverride the `<model>` half of `EMBEDDING_MODEL=<id>/<model>`, when the
+   *                      unified form was used. Takes precedence over the section.
+   */
+  def buildConfig(section: EmbeddingProviderSection, modelOverride: Option[String]): Result[EmbeddingProviderConfig] =
+    for
+      model   <- EmbeddingConfigSpec.resolveModel(id, section, modelOverride, configSpec)
+      baseUrl <- EmbeddingConfigSpec.resolveBaseUrl(id, section, configSpec)
+      apiKey  <- EmbeddingConfigSpec.resolveApiKey(id, section, configSpec)
+    yield EmbeddingProviderConfig(baseUrl = baseUrl, model = model, apiKey = apiKey)
 
   /**
    * Constructs the embedding provider for an already-resolved config.

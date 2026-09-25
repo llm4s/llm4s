@@ -284,11 +284,16 @@ object Llm4sConfig {
    * `"openai/text-embedding-3-small"`, `"voyage/voyage-3"`,
    * `"ollama/nomic-embed-text"`). Returns the provider name and typed config.
    *
+   * The provider is resolved through the given
+   * [[org.llm4s.llmconnect.spi.ProviderRegistry]], so an embedding provider
+   * supplied by a module - or registered explicitly - is configurable here
+   * without `llm4s-core` knowing it exists.
+   *
    * @return a pair of `(providerName, EmbeddingProviderConfig)`, or a
    *         [[org.llm4s.error.ConfigurationError]] when `EMBEDDING_MODEL` is
    *         absent or the provider is unrecognised.
    */
-  def embeddings(): Result[(String, EmbeddingProviderConfig)] =
+  def embeddings()(using ProviderRegistry): Result[(String, EmbeddingProviderConfig)] =
     org.llm4s.config.EmbeddingsConfigLoader.loadProvider(ConfigSource.default)
 
   /**
@@ -400,11 +405,15 @@ object Llm4sConfig {
    * Reads `EMBEDDING_MODEL` and looks up the known dimension count for the
    * provider/model combination from the bundled dimension registry.
    *
+   * Resolves the provider through [[embeddings]], and so through the given
+   * [[org.llm4s.llmconnect.spi.ProviderRegistry]]: a provider that is
+   * configurable there is configurable here, by the same registry.
+   *
    * @return the resolved settings, or a [[org.llm4s.error.ConfigurationError]]
    *         when `EMBEDDING_MODEL` is absent or unrecognised.
    */
-  def loadTextEmbeddingModel(): Result[TextEmbeddingModelSettings] =
-    org.llm4s.config.EmbeddingsConfigLoader.loadProvider(ConfigSource.default).flatMap { case (provider, cfg) =>
+  def loadTextEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings] =
+    embeddings().flatMap { case (provider, cfg) =>
       val p = provider.toLowerCase
       ModelDimensionRegistry.getDimension(p, cfg.model).map { dims =>
         TextEmbeddingModelSettings(provider = p, modelName = cfg.model, dimensions = dims)
@@ -412,7 +421,7 @@ object Llm4sConfig {
     }
 
   /** Alias for [[loadTextEmbeddingModel]]. */
-  def textEmbeddingModel(): Result[TextEmbeddingModelSettings] =
+  def textEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings] =
     loadTextEmbeddingModel()
 
   /**

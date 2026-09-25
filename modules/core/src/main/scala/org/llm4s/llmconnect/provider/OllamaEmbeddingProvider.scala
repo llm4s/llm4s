@@ -2,7 +2,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
-import org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor
+import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.llmconnect.model.{ EmbeddingError, EmbeddingRequest, EmbeddingResponse }
@@ -37,6 +37,14 @@ import scala.util.control.NonFatal
 object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
 
   val id: ProviderId = ProviderId("ollama")
+
+  override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
+    defaultBaseUrl = Some("http://localhost:11434"),
+    defaultModel = Some("nomic-embed-text"),
+    // Ollama ignores the field when run locally, but the client still wants a string.
+    defaultApiKey = Some("not-required"),
+    modelEnv = Some("OLLAMA_EMBEDDING_MODEL")
+  )
 
   /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))

@@ -1308,7 +1308,7 @@ class GuardrailPerformanceSpec extends AnyFlatSpec with Matchers {
 
 ### User Guide: Guardrails Framework
 
-```markdown
+````markdown
 # Guardrails Framework
 
 ## Overview
@@ -1451,7 +1451,7 @@ for {
 4. **Test custom guardrails** thoroughly
 5. **Document validation logic** clearly
 6. **Consider performance** for expensive validations
-```
+````
 
 ---
 

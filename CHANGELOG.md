@@ -22,6 +22,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **Embedding configuration moves into the provider** - the fifth change of slice 4
+  ([#1131](https://github.com/llm4s/llm4s/issues/1131)), completing what the fourth began. PR 4
+  made an embedding provider resolvable from its own module; its *configuration* was still a
+  typed case class, a PureConfig reader, a hard-coded default, a builder and two `match` arms
+  per provider inside `EmbeddingsConfigLoader`, so a third-party provider could be registered
+  and then had nothing to be configured with.
+
+  `llm4s-core` now parses one uniform section shape - `apiKey`, `baseUrl`, `model` - and hands
+  it to `EmbeddingProviderDescriptor.buildConfig`. Most providers never implement that method:
+  declaring an `EmbeddingConfigSpec` (required fields, defaults, and the environment variables
+  to name in errors) is enough, and the default implementation resolves the section against it.
+  A descriptor whose credential lives outside its own section declares where with
+  `apiKeyPath`, and `EmbeddingsConfigLoader` resolves it before calling `buildConfig` - which
+  is how OpenAI's embeddings reach `llm4s.openai.apiKey` without the loader special-casing
+  OpenAI, and without a descriptor reading configuration itself. `buildConfig` takes a parsed
+  section and nothing else, so raw config access stays inside `org.llm4s.config`.
+
+  Defaults and environment bindings are no longer duplicated. `reference.conf` used to state
+  `baseUrl = "http://localhost:11434"` while the loader stated `DefaultOllamaEmbeddingBaseUrl`,
+  with nothing keeping them in step; the default now lives only in the descriptor, and each
+  provider's `reference.conf` block is reduced to the environment variables it binds. Because
+  that block is keyed by provider id, it can travel with the provider when the provider moves
+  to its own module - which chat config, keyed by the user's instance name, cannot do.
+
+  `Llm4sConfig.embeddings()`, `loadTextEmbeddingModel()` and `textEmbeddingModel()` take an
+  implicit `ProviderRegistry`: binary-incompatible, source-compatible. Without it an
+  application's own registry could not reach the loader. All three resolve through the same
+  registry, so a provider configurable by one is configurable by all of them.
+
+  **No user-facing configuration changed.** `EMBEDDING_MODEL`, `EMBEDDING_PROVIDER`, every
+  `llm4s.embeddings.<id>` key and every provider environment variable behave exactly as before.
+  Error messages are more specific: unknown providers get the registry's message naming what is
+  registered, and missing fields name both the config path and the environment variable.
+
 - **Embedding providers join the provider SPI** - the fourth change of slice 4
   ([#1131](https://github.com/llm4s/llm4s/issues/1131)), and the last item on that issue's list.
   PRs 2 and 3 made a *chat* provider self-describing and discoverable; `EmbeddingClient.from` was
