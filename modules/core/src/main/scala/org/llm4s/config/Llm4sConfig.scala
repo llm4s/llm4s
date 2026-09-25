@@ -405,11 +405,15 @@ object Llm4sConfig {
    * Reads `EMBEDDING_MODEL` and looks up the known dimension count for the
    * provider/model combination from the bundled dimension registry.
    *
+   * Resolves the provider through [[embeddings]], and so through the given
+   * [[org.llm4s.llmconnect.spi.ProviderRegistry]]: a provider that is
+   * configurable there is configurable here, by the same registry.
+   *
    * @return the resolved settings, or a [[org.llm4s.error.ConfigurationError]]
    *         when `EMBEDDING_MODEL` is absent or unrecognised.
    */
-  def loadTextEmbeddingModel(): Result[TextEmbeddingModelSettings] =
-    org.llm4s.config.EmbeddingsConfigLoader.loadProvider(ConfigSource.default).flatMap { case (provider, cfg) =>
+  def loadTextEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings] =
+    embeddings().flatMap { case (provider, cfg) =>
       val p = provider.toLowerCase
       ModelDimensionRegistry.getDimension(p, cfg.model).map { dims =>
         TextEmbeddingModelSettings(provider = p, modelName = cfg.model, dimensions = dims)
@@ -417,7 +421,7 @@ object Llm4sConfig {
     }
 
   /** Alias for [[loadTextEmbeddingModel]]. */
-  def textEmbeddingModel(): Result[TextEmbeddingModelSettings] =
+  def textEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings] =
     loadTextEmbeddingModel()
 
   /**

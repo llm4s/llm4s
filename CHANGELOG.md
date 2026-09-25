@@ -46,8 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that block is keyed by provider id, it can travel with the provider when the provider moves
   to its own module - which chat config, keyed by the user's instance name, cannot do.
 
-  `Llm4sConfig.embeddings()` takes an implicit `ProviderRegistry`: binary-incompatible,
-  source-compatible. Without it an application's own registry could not reach the loader.
+  `Llm4sConfig.embeddings()`, `loadTextEmbeddingModel()` and `textEmbeddingModel()` take an
+  implicit `ProviderRegistry`: binary-incompatible, source-compatible. Without it an
+  application's own registry could not reach the loader. All three resolve through the same
+  registry, so a provider configurable by one is configurable by all of them.
 
   **No user-facing configuration changed.** `EMBEDDING_MODEL`, `EMBEDDING_PROVIDER`, every
   `llm4s.embeddings.<id>` key and every provider environment variable behave exactly as before.

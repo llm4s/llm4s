@@ -95,15 +95,21 @@ override val configSpec = EmbeddingConfigSpec(
 the value back in the section before calling `buildConfig`. The provider owns the knowledge of
 *where* its key lives; `org.llm4s.config` keeps sole ownership of *reading* it.
 
-### `Llm4sConfig.embeddings()` takes the registry
+### The embedding config entry points take the registry
 
 ```scala
 def embeddings()(using ProviderRegistry): Result[(String, EmbeddingProviderConfig)]
+def loadTextEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings]
+def textEmbeddingModel()(using ProviderRegistry): Result[TextEmbeddingModelSettings]
 ```
 
 Binary-incompatible, source-compatible, as in PRs 3 and 4. Without it an application's own
 registry could not reach the loader, and a provider it registered explicitly would resolve for
 `EmbeddingClient.from` but not for its configuration.
+
+All three resolve through the same registry, so a provider configurable by one is configurable
+by all of them: `textEmbeddingModel` now goes through `embeddings` rather than calling the
+loader a second time.
 
 ### Error messages
 
