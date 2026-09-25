@@ -96,25 +96,8 @@ class RAGASEvaluator(
       return Left(EvaluationError("No applicable metrics for this sample"))
     }
 
-    val results = applicableMetrics.map(_.evaluate(sample))
-
-    // Collect successes and failures
-    val successes = results.collect { case Right(r) => r }
-    val failures  = results.collect { case Left(e) => e }
-
-    val evalResult = if (successes.isEmpty && failures.nonEmpty) {
-      Left(failures.head)
-    } else {
-      val ragasScore = if (successes.isEmpty) 0.0 else successes.map(_.score).sum / successes.size
-
-      Right(
-        EvalResult(
-          sample = sample,
-          metrics = successes,
-          ragasScore = ragasScore
-        )
-      )
-    }
+    val results    = applicableMetrics.map(_.evaluate(sample))
+    val evalResult = RAGASEvaluator.summarizeResults(sample, results)
 
     // Emit trace event for evaluation completion
     evalResult.foreach { _ =>
@@ -240,6 +223,25 @@ class RAGASEvaluator(
 }
 
 object RAGASEvaluator {
+
+  /**
+   * Combine per-metric results into a single evaluation outcome: fail if every
+   * metric failed, otherwise average the successful scores into the RAGAS score.
+   */
+  private[evaluation] def summarizeResults(
+    sample: EvalSample,
+    results: Seq[Result[MetricResult]]
+  ): Result[EvalResult] = {
+    val successes = results.collect { case Right(r) => r }
+    val failures  = results.collect { case Left(e) => e }
+
+    if (successes.isEmpty && failures.nonEmpty) {
+      Left(failures.head)
+    } else {
+      val ragasScore = if (successes.isEmpty) 0.0 else successes.map(_.score).sum / successes.size
+      Right(EvalResult(sample = sample, metrics = successes, ragasScore = ragasScore))
+    }
+  }
 
   /**
    * Create a new RAGAS evaluator with default metrics.

@@ -272,4 +272,38 @@ class RAGASEvaluatorSpec extends AnyFlatSpec with Matchers {
     result.isRight shouldBe true
     result.toOption.get.sampleCount shouldBe 2
   }
+
+  // ==========================================================================
+  // summarizeResults
+  // ==========================================================================
+
+  "summarizeResults" should "average the scores of successful metrics" in {
+    val sample  = EvalSample("Q?", "A.", Seq("ctx"))
+    val results = Seq(Right(MetricResult("faithfulness", 0.8)), Right(MetricResult("answer_relevancy", 0.4)))
+
+    val result = RAGASEvaluator.summarizeResults(sample, results)
+
+    result.map(_.ragasScore).toOption.get shouldBe 0.6 +- 0.0001
+    result.map(_.metrics.size) shouldBe Right(2)
+  }
+
+  it should "fail with the first error when every metric fails" in {
+    val sample      = EvalSample("Q?", "A.", Seq("ctx"))
+    val firstError  = EvaluationError("first failure")
+    val secondError = EvaluationError("second failure")
+
+    val result = RAGASEvaluator.summarizeResults(sample, Seq(Left(firstError), Left(secondError)))
+
+    result shouldBe Left(firstError)
+  }
+
+  it should "ignore failures and score only the successes when both are present" in {
+    val sample  = EvalSample("Q?", "A.", Seq("ctx"))
+    val results = Seq(Right(MetricResult("faithfulness", 1.0)), Left(EvaluationError("skipped")))
+
+    val result = RAGASEvaluator.summarizeResults(sample, results)
+
+    result.map(_.ragasScore) shouldBe Right(1.0)
+    result.map(_.metrics.size) shouldBe Right(1)
+  }
 }
