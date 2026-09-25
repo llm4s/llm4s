@@ -22,6 +22,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`llm4s-ollama`: Ollama leaves `llm4s-core`** - the first provider module of slice 5
+  ([#1132](https://github.com/llm4s/llm4s/issues/1132)). `OllamaClient`, `OllamaProvider`,
+  `OllamaEmbeddingProvider`, `OllamaConfig` and the Ollama model lister move to the new
+  `llm4s-ollama` artifact, with their tests, the `llm4s.embeddings.ollama` `reference.conf`
+  block, and an `Llm4sOllamaModule` declared in `META-INF/services` - so adding the dependency
+  is the whole of registration. Package names are unchanged.
+
+  Two names move because the objects they were members of stay in core:
+  `ProviderModelListers.Ollama` is now `OllamaModelLister`, and `ConfigKeys.OLLAMA_*` are now
+  on `OllamaConfigKeys`, both still in `org.llm4s.config`. `ProviderRegistry.builtin` no longer
+  includes Ollama; `ProviderRegistry.builtin.withModule(new Llm4sOllamaModule)` restores it
+  where classpath discovery is unavailable. No configuration key or environment variable
+  changed. See the [migration guide](docs/reference/migration.md#slice-5-llm4s-ollama).
+
 - **Embedding model dimensions move into the provider** - the last central provider list on
   the embedding side, and one of the two items deferred from slice 4
   ([#1131](https://github.com/llm4s/llm4s/issues/1131)). `EmbeddingProviderDescriptor` gains

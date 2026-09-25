@@ -54,18 +54,6 @@ class Llm4sConfigTextModelSpec extends AnyWordSpec with Matchers with EitherValu
       }
     }
 
-    "resolve EMBEDDING_MODEL=ollama/nomic-embed-text, as the README documents" in {
-      // Regression: the central dimension table had no ollama entry, so the documented
-      // configuration failed here with "Unknown model 'nomic-embed-text'".
-      withProps(Map("llm4s.embeddings.model" -> "ollama/nomic-embed-text")) {
-        val settings = Llm4sConfig.textEmbeddingModel().value
-
-        settings.provider shouldBe "ollama"
-        settings.modelName shouldBe "nomic-embed-text"
-        settings.dimensions shouldBe 768
-      }
-    }
-
     "resolve the provider and its dimensions through the caller's registry" in {
       val props = Map("llm4s.embeddings.model" -> "fixturelocal/fixture-encoder")
 

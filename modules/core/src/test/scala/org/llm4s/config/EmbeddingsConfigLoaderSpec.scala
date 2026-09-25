@@ -66,28 +66,6 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       cfg.baseUrl shouldBe "https://api.voyageai.com/v1"
     }
 
-    "successfully load Ollama embeddings via provider/model format" in {
-      val hocon =
-        """
-          |llm4s {
-          |  embeddings {
-          |    model = "ollama/nomic-embed-text"
-          |    ollama {
-          |      baseUrl = "http://localhost:11434"
-          |    }
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      val (provider, cfg) = result.value
-      provider shouldBe "ollama"
-      cfg.model shouldBe "nomic-embed-text"
-      cfg.baseUrl shouldBe "http://localhost:11434"
-    }
-
     "use custom baseUrl when provided for OpenAI embeddings" in {
       val hocon =
         """
@@ -205,29 +183,6 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       provider shouldBe "voyage"
       cfg.model shouldBe "voyage-2"
       cfg.apiKey shouldBe "vk-legacy"
-    }
-
-    "successfully load Ollama embeddings via legacy provider setting" in {
-      val hocon =
-        """
-          |llm4s {
-          |  embeddings {
-          |    provider = "ollama"
-          |    ollama {
-          |      baseUrl = "http://ollama-server:11434"
-          |    }
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      val (provider, cfg) = result.value
-      provider shouldBe "ollama"
-      // Ollama has a default model
-      cfg.model shouldBe "nomic-embed-text"
-      cfg.baseUrl shouldBe "http://ollama-server:11434"
     }
 
     "fail with clear error for unknown legacy provider" in {
@@ -414,38 +369,6 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
       result.isRight shouldBe true
       result.value._2.baseUrl shouldBe "https://api.voyageai.com/v1"
-    }
-
-    "use default baseUrl for Ollama when not specified" in {
-      val hocon =
-        """
-          |llm4s {
-          |  embeddings {
-          |    model = "ollama/mxbai-embed-large"
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      result.value._2.baseUrl shouldBe "http://localhost:11434"
-    }
-
-    "use default model for Ollama when not specified" in {
-      val hocon =
-        """
-          |llm4s {
-          |  embeddings {
-          |    provider = "ollama"
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      result.value._2.model shouldBe "nomic-embed-text"
     }
   }
 

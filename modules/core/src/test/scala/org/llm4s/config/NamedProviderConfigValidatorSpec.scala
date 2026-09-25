@@ -99,28 +99,6 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           fail(s"Expected Anthropic NamedProviderConfig, got error: ${err.message}")
     }
 
-    "validate and normalize an Ollama named provider section" in {
-      validate(
-        "ollama-local",
-        RawNamedProviderSection(
-          provider = Some("ollama"),
-          model = Some("llama3:latest"),
-          baseUrl = Some("http://localhost:11434"),
-          apiKey = None,
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
-        )
-      ) match
-        case Right(cfg) =>
-          cfg.provider shouldBe ProviderId("ollama")
-          cfg.model.asString shouldBe "llama3:latest"
-          cfg.baseUrl.map(_.asUrl) shouldBe Some("http://localhost:11434")
-          cfg.apiKey shouldBe None
-        case Left(err) =>
-          fail(s"Expected Ollama NamedProviderConfig, got error: ${err.message}")
-    }
-
     "validate and normalize a Z.ai named provider section" in {
       validate(
         "zai-main",
@@ -386,24 +364,5 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           err.message should include("- endpoint: the model endpoint/deployment name in your Azure OpenAI resource")
         case Right(cfg) =>
           fail(s"Expected missing Azure endpoint failure, got config: $cfg")
-    }
-
-    "fail clearly when Ollama baseUrl is missing" in {
-      validate(
-        "ollama-local",
-        RawNamedProviderSection(
-          provider = Some("ollama"),
-          model = Some("llama3:latest"),
-          baseUrl = Some("   "),
-          apiKey = None,
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
-        )
-      ) match
-        case Left(err) =>
-          err.message should include("- baseUrl: set OLLAMA_BASE_URL")
-        case Right(cfg) =>
-          fail(s"Expected missing Ollama baseUrl failure, got config: $cfg")
     }
   }

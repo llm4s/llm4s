@@ -90,7 +90,7 @@ object FixtureEmbeddings extends EmbeddingProviderDescriptor:
 final class FixtureEmbeddingModule extends Llm4sProviderModule:
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(FixtureEmbeddings)
 
-/** A module supplying both halves, as `llm4s-ollama` will. */
+/** A module supplying both halves, as `llm4s-ollama` does. */
 final class FixtureBothHalvesModule extends Llm4sProviderModule:
   override def chatProviders: Seq[ProviderDescriptor]               = Seq(FixtureProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(FixtureEmbeddings)

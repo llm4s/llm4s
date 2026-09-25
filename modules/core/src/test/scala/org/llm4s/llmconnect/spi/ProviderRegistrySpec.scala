@@ -129,7 +129,6 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
         "deepseek",
         "gemini",
         "mistral",
-        "ollama",
         "openai",
         "openrouter",
         "requesty",

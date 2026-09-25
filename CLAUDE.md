@@ -30,7 +30,7 @@ Slice order — each is an issue with its own scope and gotchas:
 | 2 ✅ | [#1129](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` |
 | 3 ✅ | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` |
 | 4 🚧 | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
-| 5 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules |
+| 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama` first |
 | 6 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability`, then 0.4.0 + MiMa |
 
 **Invariants for every carve:**
@@ -61,9 +61,11 @@ Slice order — each is an issue with its own scope and gotchas:
    `llm4s-core` needs editing: `ProviderCapabilities`, `ProviderCapabilitiesRegistry` and the
    twelve `NamedProviderValidators` objects are gone, and the dispatch `match` expressions in
    `LLMConnect` and `NamedProviderLoader` with them. The one remaining central list is
-   `BuiltinProviders`, which exists only because core still holds every client and leaves with
+   `BuiltinProviders`, which exists only because core still holds most clients and leaves with
    slice 5. A provider added there must also be added to `BuiltinProvidersSpec`, which is what
-   replaced the compiler's exhaustivity check over the old closed `enum`.
+   replaced the compiler's exhaustivity check over the old closed `enum`. `modules/ollama` is the
+   worked example of a provider that has left: its own `Llm4sOllamaModule`, services entry,
+   `reference.conf` block and round-trip spec, and nothing of it in core.
 
 Current per-module coverage floors are recorded in [#1127](https://github.com/llm4s/llm4s/issues/1127); floors ratchet upward and are never lowered.
 
@@ -81,6 +83,7 @@ llm4s/
 │   ├── media/                 # Shared media vocabulary: MediaType, MediaCategory (published)
 │   ├── image/                 # Image generation and vision/processing clients (published)
 │   ├── speech/                # Speech-to-text and text-to-speech (published)
+│   ├── ollama/                # Ollama chat + embedding provider (published)
 │   ├── samples/               # Usage examples
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI
@@ -106,6 +109,11 @@ module's classpath - declare them per-module if you add database code. The build
 third-party resolvers at all**: the "Vosk Repository" at alphacephei.com was the last one, and
 it went with the speech carve because Vosk publishes to Maven Central and it had never resolved
 anything. Think hard before adding one back.
+
+Slice 5 has begun: `modules/ollama` carries the Ollama chat client, embedding provider,
+`OllamaConfig`, model lister and its `llm4s.embeddings.ollama` block, so core's tests cannot
+use Ollama as a convenient no-key provider any more - use a fixture descriptor, as
+`EmbeddingProviderSpiSpec` and `ModelDimensionRegistrySpec` do.
 
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must
@@ -364,10 +372,8 @@ class MySpec extends AnyFlatSpec with Matchers {
 3. Run with `sbt "samples/runMain org.llm4s.samples.<category>.YourExample"`
 
 ### New Provider
-1. Create config in `llmconnect/config/`
-2. Implement client in `llmconnect/provider/`
-3. Update `ProviderSelector`
-4. Add tests
+Follow invariant 8 above: a `ProviderDescriptor` in its own module, listed in an
+`Llm4sProviderModule` declared in `META-INF/services`. `modules/ollama` is the template.
 
 ### New Tool
 1. Define function returning `Result[T]`

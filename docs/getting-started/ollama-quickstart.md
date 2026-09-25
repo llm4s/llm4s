@@ -42,6 +42,17 @@ Perfect for **development**, **testing**, and **production** workloads where pri
 
 No API keys needed! 🎉
 
+From the release after `0.4.1`, Ollama support ships in its own artifact, alongside
+`llm4s-core`:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-ollama" % llm4sVersion
+```
+
+Adding it registers the provider; there is nothing else to wire up. In `0.4.1` and earlier,
+Ollama is part of `llm4s-core`. See the
+[installation guide](installation.md#for-ollama-local-models).
+
 ---
 
 ## Step 1: Install Ollama

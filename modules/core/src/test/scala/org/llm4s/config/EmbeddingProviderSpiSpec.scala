@@ -45,7 +45,22 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
   }
 
-  private given ProviderRegistry = ProviderRegistry.default.withEmbeddingProvider(FixtureEmbeddings)
+  /** A provider needing no key and no section, as a local server does - Ollama's shape. */
+  private object KeylessFixtureEmbeddings extends EmbeddingProviderDescriptor {
+    val id: ProviderId = ProviderId("keylessfixture")
+
+    override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
+      defaultBaseUrl = Some("http://localhost:9999"),
+      defaultModel = Some("fixture-default"),
+      defaultApiKey = Some("fixture-not-required")
+    )
+
+    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+      Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
+  }
+
+  private given ProviderRegistry =
+    ProviderRegistry.default.withEmbeddingProvider(FixtureEmbeddings).withEmbeddingProvider(KeylessFixtureEmbeddings)
 
   private def load(hocon: String): Result[(String, EmbeddingProviderConfig)] =
     EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
@@ -263,34 +278,36 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
     "apply with no section present at all" in {
       // An absent `llm4s.embeddings.<id>` must read as an empty section, not as a
       // config failure - a provider whose defaults cover everything needs no section.
-      val (provider, config) = load("""llm4s { embeddings { model = "ollama/nomic-embed-text" } }""").value
+      val (provider, config) = load("""llm4s { embeddings { model = "keylessfixture/fixture-small" } }""").value
 
-      provider shouldBe "ollama"
-      config.model shouldBe "nomic-embed-text"
+      provider shouldBe "keylessfixture"
+      config.model shouldBe "fixture-small"
     }
 
     "come from the descriptor rather than reference.conf" in {
       // Ollama's base URL and model were stated twice - in reference.conf and as
       // `DefaultOllamaEmbeddingBaseUrl` in the loader - with nothing keeping them in step.
-      // Neither the section nor reference.conf is consulted here.
-      val (_, config) = load("""llm4s { embeddings { model = "ollama/nomic-embed-text" } }""").value
+      // Ollama now lives in llm4s-ollama, which checks its own; this is the same property
+      // for a provider with no reference.conf block at all.
+      val (_, config) = load("""llm4s { embeddings { provider = "keylessfixture" } }""").value
 
-      config.baseUrl shouldBe "http://localhost:11434"
-      config.apiKey shouldBe "not-required"
+      config.baseUrl shouldBe "http://localhost:9999"
+      config.model shouldBe "fixture-default"
+      config.apiKey shouldBe "fixture-not-required"
     }
 
     "still let a section override them" in {
       val (_, config) = load(
         """llm4s {
           |  embeddings {
-          |    model = "ollama/mxbai-embed-large"
-          |    ollama { baseUrl = "http://gpu-box:11434" }
+          |    model = "keylessfixture/fixture-large"
+          |    keylessfixture { baseUrl = "http://gpu-box:9999" }
           |  }
           |}""".stripMargin
       ).value
 
-      config.baseUrl shouldBe "http://gpu-box:11434"
-      config.model shouldBe "mxbai-embed-large"
+      config.baseUrl shouldBe "http://gpu-box:9999"
+      config.model shouldBe "fixture-large"
     }
   }
 }

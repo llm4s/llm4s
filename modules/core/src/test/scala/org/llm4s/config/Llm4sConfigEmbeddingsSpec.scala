@@ -101,23 +101,6 @@ class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
       }
     }
 
-    "load Ollama embeddings via unified EMBEDDING_MODEL format" in {
-      val props = Map(
-        "llm4s.embeddings.model" -> "ollama/mxbai-embed-large"
-        // No explicit baseUrl - should use default
-        // No API key needed for Ollama
-      )
-      withProps(props) {
-        val (provider, cfg): (String, EmbeddingProviderConfig) =
-          Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
-
-        provider shouldBe "ollama"
-        cfg.model shouldBe "mxbai-embed-large"
-        cfg.baseUrl shouldBe "http://localhost:11434" // Default base URL
-        cfg.apiKey shouldBe "not-required"
-      }
-    }
-
     "prefer unified model format over legacy provider" in {
       val props = Map(
         "llm4s.embeddings.model"    -> "openai/text-embedding-3-large", // Takes precedence

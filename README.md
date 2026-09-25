@@ -80,7 +80,7 @@ LLM4S is under active pre-1.0 development. The latest published release is [v0.4
 
 The framework already provides multi-provider clients, agents and tool calling, RAG and vector stores, memory, guardrails, tracing and metrics, reliability wrappers, workspace isolation, MCP support, and image and speech APIs.
 
-On `main`, the first three modularization slices are complete: RAG, knowledge graph, memory, MCP, shared media types, image, and speech have been carved out of `llm4s-core` into focused modules with smaller dependency footprints. These split modules are in the build but have not yet been published as separate artifacts; v0.4.1 still ships this functionality through `llm4s-core`. See the [1.0 scope](https://llm4s.org/reference/v1-scope) and [migration guide](https://github.com/llm4s/llm4s/blob/main/docs/reference/migration.md) for module maturity and upgrade details.
+On `main`, the first four modularization slices are complete: RAG, knowledge graph, memory, MCP, shared media types, image, and speech have been carved out of `llm4s-core` into focused modules with smaller dependency footprints, and providers now register through an SPI. Provider clients are moving into modules of their own, starting with `llm4s-ollama`. These split modules are in the build but have not yet been published as separate artifacts; v0.4.1 still ships this functionality through `llm4s-core`. See the [1.0 scope](https://llm4s.org/reference/v1-scope) and [migration guide](https://github.com/llm4s/llm4s/blob/main/docs/reference/migration.md) for module maturity and upgrade details.
 
 The path to 1.0 is focused on stable API boundaries, provider capability parity and contract tests, Java/Kotlin/Spring/Gradle interoperability, security hardening, deterministic CI, production observability and cost controls, runnable documentation, and maintained reference applications. See the [roadmap](https://llm4s.org/reference/roadmap) for the full stabilization plan.
 
@@ -496,7 +496,7 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
 
 - Embeddings: provider configuration
   - Key: `EMBEDDING_PROVIDER` or `llm4s.embeddings.provider` (required)
-  - Supported providers: `openai`, `voyage`, `ollama`
+  - Supported providers: `openai`, `voyage`, `ollama` (the last from `llm4s-ollama` once it is published)
   - Type: `(String, EmbeddingProviderConfig)`
   - Loader: `Llm4sConfig.embeddings()`
   - Provider-specific keys:

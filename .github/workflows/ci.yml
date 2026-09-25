@@ -186,6 +186,7 @@ jobs:
           media/test media/coverageReport
           image/test image/coverageReport
           speech/test speech/coverageReport
+          ollama/test ollama/coverageReport
           coverageAggregate
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes
@@ -277,6 +278,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/speech/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: speech
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload ollama coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/ollama/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: ollama
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

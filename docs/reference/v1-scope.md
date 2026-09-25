@@ -20,6 +20,7 @@ What has actually moved so far, in the build but not yet in a release:
 | [1](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` | in the build, unpublished |
 | [2](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` | in the build, unpublished |
 | [3](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` | in the build, unpublished |
+| [5](https://github.com/llm4s/llm4s/issues/1132) | `llm4s-ollama` (first of the provider modules) | in the build, unpublished |
 
 The latest release tag is `v0.4.1`, which is still a single `llm4s-core`. The first release to publish separate module artifacts will be the next one.
 
@@ -62,7 +63,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `llmconnect/provider` — OpenAI, and the OpenAI-compatible clients (Azure, OpenRouter, Requesty, DeepSeek, Z.ai) | `llm4s-openai` | Frozen at 1.0 |
 | `llmconnect/provider` — Anthropic | `llm4s-anthropic` | Frozen at 1.0 |
 | `llmconnect/provider` — Gemini (and Vertex AI) | `llm4s-gemini` | Frozen at 1.0 |
-| `llmconnect/provider` — Ollama | `llm4s-ollama` | Frozen at 1.0 |
+| `llmconnect/provider` — Ollama — **carved** | `llm4s-ollama` | Frozen at 1.0 |
 | `llmconnect/provider` — Cohere, Mistral, and other community clients | community provider modules | Beta |
 | `rag`, `vectorstore`, `chunking`, `reranker`, `eval` — **carved** | `llm4s-rag` | Beta |
 | `extract` (consolidated from `rag/extract` + `llmconnect/extractors`) and `rag/embed` (from `llmconnect/encoding`) — **carved** | `llm4s-rag` | Beta |

@@ -1,5 +1,67 @@
 # Migration Guide
 
+## Slice 5: `llm4s-ollama`
+
+The first provider module of slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
+Ollama goes first because it has the smallest client, no vendor SDK, and a live `@Ollama`
+integration tier - so the carve is checked against a real server rather than mocks. It is in
+the build but not yet in a release; `0.4.1` and earlier still ship Ollama inside `llm4s-core`.
+
+### What moved
+
+| Code | Now in |
+|---|---|
+| `OllamaClient`, `OllamaProvider`, `OllamaEmbeddingProvider` (`org.llm4s.llmconnect.provider`) | `llm4s-ollama` |
+| `OllamaConfig` (`org.llm4s.llmconnect.config`) | `llm4s-ollama` |
+| `ProviderModelListers.Ollama` → `OllamaModelLister` (`org.llm4s.config`) | `llm4s-ollama` |
+| `ConfigKeys.OLLAMA_*` → `OllamaConfigKeys.OLLAMA_*` (`org.llm4s.config`) | `llm4s-ollama` |
+| the `llm4s.embeddings.ollama` `reference.conf` block | `llm4s-ollama`'s `reference.conf` |
+
+Package names are unchanged, so `import org.llm4s.llmconnect.config.OllamaConfig` keeps
+working once the dependency is added:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-ollama" % version
+```
+
+### Registration is the dependency
+
+`llm4s-ollama` declares `Llm4sOllamaModule` in its `META-INF/services`, so
+`ProviderRegistry.default` finds it and `provider = "ollama"` and
+`EMBEDDING_MODEL=ollama/<model>` resolve as before. Without the dependency both fail with the
+registry's error, which says `ollama` is not registered and names the providers that are.
+
+`ProviderRegistry.builtin` no longer includes Ollama, because core no longer ships it. If you
+used `builtin` to avoid classpath discovery (a shaded fat jar, typically), add the module
+explicitly:
+
+```scala
+given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sOllamaModule)
+```
+
+### Source breaks
+
+Two names could not keep their fully-qualified path, because they were members of objects that
+stay in core:
+
+1. **`ProviderModelListers.Ollama` is now `OllamaModelLister`**, in the same package
+   (`org.llm4s.config`). `OllamaProvider.modelLister` returns it, so code that reached the
+   lister through the descriptor is unaffected.
+2. **`ConfigKeys.OLLAMA_BASE_URL`, `OLLAMA_EMBEDDING_BASE_URL` and `OLLAMA_EMBEDDING_MODEL`
+   are now on `OllamaConfigKeys`**, also in `org.llm4s.config`. The variable names themselves
+   are unchanged.
+
+### What did *not* change
+
+Every configuration key and environment variable: `llm4s.providers.<name>` with
+`provider = "ollama"`, `llm4s.embeddings.ollama.*`, `OLLAMA_EMBEDDING_BASE_URL` and
+`OLLAMA_EMBEDDING_MODEL`. The `reference.conf` block moved rather than changed; HOCON merges
+reference files across jars, so the keys exist exactly when the provider does.
+
+`TokenizerMapping` still recognises the `ollama/` model-name prefix. It is a naming
+convention on model strings rather than a reference to the provider, and it gives the same
+answer whether or not `llm4s-ollama` is on the classpath.
+
 ## Slice 4 follow-up: embedding dimensions move into the provider
 
 One of the two items deferred from slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)),
