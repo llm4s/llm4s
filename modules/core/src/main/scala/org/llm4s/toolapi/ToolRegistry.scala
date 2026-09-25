@@ -131,13 +131,10 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
             case Right(_) => return lastResult
             case Left(err) if ToolCallError.isRetryable(err) && attempt + 1 < policy.maxAttempts =>
               attempt += 1
-              // Exponential backoff: delay = baseDelay * backoffFactor^(attempt-1)
-              // attempt 1 -> baseDelay, attempt 2 -> baseDelay * factor, attempt 3 -> baseDelay * factor^2, ...
-              val delayMs =
-                (policy.baseDelay.toMillis * math.pow(policy.backoffFactor, (attempt - 1).toDouble)).toLong
-              if (delayMs > 0) {
+              val delay = policy.delayBeforeAttempt(attempt)
+              if (delay.toMillis > 0) {
                 blocking {
-                  Thread.sleep(delayMs)
+                  Thread.sleep(delay.toMillis)
                 }
               }
             case _ => return lastResult

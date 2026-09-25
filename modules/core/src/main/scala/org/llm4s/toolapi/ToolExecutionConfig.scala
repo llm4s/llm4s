@@ -1,6 +1,7 @@
 package org.llm4s.toolapi
 
 import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.DurationLong
 
 /**
  * Controls timeout and retry behaviour for tool calls executed through a
@@ -52,4 +53,11 @@ case class ToolRetryPolicy(
 ) {
   require(maxAttempts >= 1, "maxAttempts must be >= 1")
   require(backoffFactor >= 1.0, "backoffFactor must be >= 1.0")
+
+  /**
+   * Delay before the given retry attempt (1-based: 1 is the first retry, after the
+   * initial try). attempt 1 -> baseDelay, attempt 2 -> baseDelay * backoffFactor, etc.
+   */
+  def delayBeforeAttempt(attempt: Int): FiniteDuration =
+    (baseDelay.toMillis * math.pow(backoffFactor, (attempt - 1).toDouble)).toLong.millis
 }
