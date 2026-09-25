@@ -8,6 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **MiMa binary-compatibility checks, wired into CI** - closes
+  [#924](https://github.com/llm4s/llm4s/issues/924). `mimaPreviousArtifacts` is set against
+  `0.4.1` for the four already-published modules with a clean baseline -
+  `llm4s-workspace-client`, `llm4s-workspace-shared`, `llm4s-observability-otel`,
+  `llm4s-knowledgegraph-neo4j` - and `sbt <module>/mimaReportBinaryIssues` for all four now runs
+  as a `quick-checks` step in CI, failing the PR on an unexcluded binary break.
+
+  `llm4s-core` is deliberately not enabled yet: modularisation slices 1-4 already carved
+  `rag`/`knowledgegraph`/`agent.memory`/`mcp`/`vectorstore`/`chunking`/`reranker`/`eval`/
+  `imagegeneration`/`imageprocessing`/`speech` and the provider-capability classes out of its
+  source without an intervening release, so diffing current `core` against `0.4.1` reports
+  over a thousand problems that are all already-shipped, not-yet-released removals rather than
+  a live risk. It rejoins the checked set, pinned to the next published version, in the same PR
+  that publishes it - see `docs/reference/api-stability.md`.
+
+  New doc `docs/reference/api-stability.md` documents which modules MiMa covers, the
+  early-semver compatibility contract (`versionScheme` in `build.sbt`), how to add a
+  `mimaBinaryIssueFilters` entry for an intentional break, and points to
+  `docs/reference/v1-scope.md` for the public (Frozen) vs internal (Beta/Experimental) package
+  classification the issue asked for.
+
 - **`llm4s-media`, a shared vocabulary for multimodal code** - landed as part of
   [#1130](https://github.com/llm4s/llm4s/issues/1130), ahead of `llm4s-image` and
   `llm4s-speech` so those carves are pure file moves. `org.llm4s.media.MediaType` (MIME string,

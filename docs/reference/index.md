@@ -24,6 +24,7 @@ Start here if you want to contribute to the project.
 - **[Scalafix Rules](scalafix)** - Linting rules and code quality
 - **[Migration Guide](migration)** - Upgrade between versions
 - **[Test Coverage](test-coverage)** - Coverage tooling and thresholds
+- **[API Stability (MiMa)](api-stability)** - Binary-compatibility checking and the early-semver contract
 - **[Release Process](release)** - How releases are created
 - **[Postgres Memory Store](postgres-memory-store)** - PostgreSQL-backed agent memory persistence
 - **[Troubleshooting / FAQ](troubleshooting)** - Common errors and solutions

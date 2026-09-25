@@ -19,6 +19,14 @@ inThisBuild(
     organization       := "org.llm4s",
     organizationName   := "llm4s",
     versionScheme      := Some("early-semver"),
+    // sbt-mima-plugin auto-enables on every project (trigger = allRequirements), so without
+    // this, any module with no mimaPreviousArtifacts set fails the build with "no previous
+    // artifact". Most modules here are either never published (publish / skip := true) or
+    // carved out but not yet released (see modules/rag, /knowledgegraph, /memory, etc. below) -
+    // neither has a prior artifact to diff against. Only the modules that set
+    // mimaPreviousArtifacts explicitly (see docs/reference/api-stability.md) are actually
+    // checked; this default just stops the rest from failing for the wrong reason.
+    ThisBuild / mimaFailOnNoPrevious := false,
     homepage := Some(url("https://github.com/llm4s/")),
     licenses := List("MIT" -> url("https://mit-license.org/")),
     developers := List(
@@ -201,6 +209,10 @@ lazy val llm4s = (project in file("."))
   )
   .settings(
     publish / skip := true,
+    // Explicit, not just implied by publish/skip - same reason sbt/sbt and
+    // sbt/librarymanagement zero this out on their own root aggregates: makes "not applicable"
+    // unambiguous from "forgotten", rather than relying on ThisBuild / mimaFailOnNoPrevious.
+    mimaPreviousArtifacts := Set.empty,
     // Root is an aggregator with no sources of its own. `coverageAggregate` runs here, and
     // the per-module floors are enforced by each module's own `coverageReport`, so the
     // aggregate number is reported but not gated (a build-wide average is exactly the kind
@@ -269,6 +281,16 @@ lazy val core = (project in file("modules/core"))
     // number in whichever direction the departing code sat. Floor is the measured value
     // rounded down to the nearest 5; ratchet it up, never down.
     coverageFloor(70),
+    // MiMa deliberately NOT enabled here yet, unlike the other 4 published modules - see
+    // docs/reference/api-stability.md. 0.4.1 is stale as a baseline: slices 1-4 (#1126) already
+    // carved rag/knowledgegraph/agent.memory/mcp/vectorstore/chunking/reranker/eval/image*/speech
+    // and provider-capability classes out of core without a release in between, so diffing
+    // against 0.4.1 today reports ~1200 problems that are all already-shipped-in-source,
+    // not-yet-released intentional removals. Checking against a baseline that predates them
+    // would fail every PR for a change nobody is making anymore. Once core is next published
+    // (its version will carry the early-semver minor bump that removal deserves), flip this back
+    // on pinned to that new version - same one line as the other 4 modules:
+    // mimaPreviousArtifacts := Set(organization.value %% moduleName.value % "<next-release>"),
     Test / fork := true,
     Test / javaOptions ++= Seq(
       "-Xmx2g", "-Xms512m",
@@ -522,7 +544,9 @@ lazy val workspaceShared = (project in file("modules/workspace/workspaceShared")
     Compile / discoveredMainClasses := Seq.empty,
     // Not measured: excluded via ThisBuild / coverageExcludedPackages (org.llm4s.workspace.*)
     // and exercised only by containerised integration tests.
-    coverageDisabled
+    coverageDisabled,
+    // Published on Maven Central through 0.4.1 - see docs/reference/api-stability.md.
+    mimaPreviousArtifacts := Set(organization.value %% moduleName.value % "0.4.1")
   )
 
 lazy val workspaceClient = (project in file("modules/workspace/workspaceClient"))
@@ -534,6 +558,8 @@ lazy val workspaceClient = (project in file("modules/workspace/workspaceClient")
     // Not measured: excluded via ThisBuild / coverageExcludedPackages (org.llm4s.workspace.*)
     // and exercised only by containerised integration tests.
     coverageDisabled,
+    // Published on Maven Central through 0.4.1 - see docs/reference/api-stability.md.
+    mimaPreviousArtifacts := Set(organization.value %% moduleName.value % "0.4.1"),
     libraryDependencies ++= Seq(
       Deps.azureOpenAI,
       Deps.anthropic,
@@ -623,6 +649,8 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
     // Floor is the measured value rounded down to the nearest 5, i.e. 0 - measurement stays
     // ON so the number is visible, and the floor ratchets up as soon as unit tests land here.
     coverageFloor(0),
+    // Published on Maven Central through 0.4.1 - see docs/reference/api-stability.md.
+    mimaPreviousArtifacts := Set(organization.value %% moduleName.value % "0.4.1"),
     libraryDependencies ++= Seq(
       Deps.opentelemetryApi,
       Deps.opentelemetrySdk,
@@ -635,6 +663,8 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   .settings(
     name             := "llm4s-knowledgegraph-neo4j",
     commonSettings,
+    // Published on Maven Central through 0.4.1 - see docs/reference/api-stability.md.
+    mimaPreviousArtifacts := Set(organization.value %% moduleName.value % "0.4.1"),
     Test / fork      := true,
     libraryDependencies ++= Seq(
       Deps.neo4jDriver,

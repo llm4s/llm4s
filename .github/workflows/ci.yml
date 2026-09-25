@@ -106,6 +106,17 @@ jobs:
       - name: Check every integration suite declares a test tier
         run: sbt it/itTierCheck
 
+      # Binary-compatibility check against the last Maven Central release (see
+      # docs/reference/api-stability.md). core is deliberately excluded for now - see the
+      # comment at its mimaPreviousArtifacts line in build.sbt - and rejoins this list once it
+      # is next published.
+      - name: Check binary compatibility (MiMa)
+        run: >-
+          sbt workspaceClient/mimaReportBinaryIssues
+          workspaceShared/mimaReportBinaryIssues
+          traceOpentelemetry/mimaReportBinaryIssues
+          knowledgegraphNeo4j/mimaReportBinaryIssues
+
   scaladoc:
     name: ScalaDoc
     needs: quick-checks
