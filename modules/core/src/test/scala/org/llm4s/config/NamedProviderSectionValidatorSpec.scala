@@ -2,7 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.provider.{ AzureProvider, OllamaProvider, OpenAIProvider }
+import org.llm4s.llmconnect.provider.{ AzureProvider, OpenAIProvider }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.flatspec.AnyFlatSpec
@@ -68,13 +68,6 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
 
     result.map(_.baseUrl) shouldBe Right(None)
     OpenAIProvider.configSpec.defaultBaseUrl shouldBe Some(DefaultConfig.DEFAULT_OPENAI_BASE_URL)
-  }
-
-  "Ollama validation" should "mention missing Ollama fields by name" in {
-    val message = errorFrom(validate("my-ollama", OllamaProvider, section("ollama", "llama3")))
-
-    message should include("Provider 'my-ollama' (provider = ollama) is missing required fields")
-    message should include("- baseUrl: set OLLAMA_BASE_URL (e.g. http://localhost:11434)")
   }
 
   "a provider from outside core" should "get its requirements honoured with default example text" in {

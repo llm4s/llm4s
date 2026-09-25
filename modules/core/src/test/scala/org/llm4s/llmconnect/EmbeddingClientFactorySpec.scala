@@ -34,26 +34,6 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
       res.isRight shouldBe true
     }
 
-    "build client for ollama without throwing" in {
-      val cfg = EmbeddingProviderConfig(
-        baseUrl = "http://localhost:11434",
-        model = "nomic-embed-text",
-        apiKey = "not-required"
-      )
-      val res = EmbeddingClient.from("ollama", cfg)
-      res.isRight shouldBe true
-    }
-
-    "build client for ollama with empty apiKey" in {
-      val cfg = EmbeddingProviderConfig(
-        baseUrl = "http://localhost:11434",
-        model = "mxbai-embed-large",
-        apiKey = ""
-      )
-      val res = EmbeddingClient.from("ollama", cfg)
-      res.isRight shouldBe true
-    }
-
     "reject unknown provider" in {
       val cfg = EmbeddingProviderConfig(
         baseUrl = "http://localhost",
@@ -103,10 +83,10 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
       // `from` gained a second contextual parameter, and this is the call shape that would
       // break if a partial `using` list were not allowed: Scala 3 infers the remainder, and
       // `ProviderRegistry`'s given lives in its own companion, so it is always in scope.
-      val cfg     = EmbeddingProviderConfig(baseUrl = "http://localhost:11434", model = "m", apiKey = "")
+      val cfg     = EmbeddingProviderConfig(baseUrl = "https://api.voyage.ai", model = "voyage-3", apiKey = "vk-test")
       val service = summon[ModelRegistryService]
 
-      EmbeddingClient.from("ollama", cfg)(using service).isRight shouldBe true
+      EmbeddingClient.from("voyage", cfg)(using service).isRight shouldBe true
     }
 
     "fold an alias onto the provider that declares it" in {

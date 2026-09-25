@@ -74,11 +74,6 @@ object ConfigKeys {
   /** Overrides the Anthropic API base URL. Defaults to `"https://api.anthropic.com"`. */
   val ANTHROPIC_BASE_URL = "ANTHROPIC_BASE_URL"
 
-  // ---- Ollama (local) -----------------------------------------------------
-
-  /** Ollama server URL. Defaults to `"http://localhost:11434"` when not set. */
-  val OLLAMA_BASE_URL = "OLLAMA_BASE_URL"
-
   // ---- DeepSeek -----------------------------------------------------------
 
   /** DeepSeek API key. */
@@ -150,14 +145,6 @@ object ConfigKeys {
 
   /** Selects the Voyage AI embedding model when using the legacy provider format. */
   val VOYAGE_EMBEDDING_MODEL = "VOYAGE_EMBEDDING_MODEL"
-
-  // ---- Embeddings: Ollama (local) -----------------------------------------
-
-  /** Overrides the Ollama embedding base URL independently of [[OLLAMA_BASE_URL]]. */
-  val OLLAMA_EMBEDDING_BASE_URL = "OLLAMA_EMBEDDING_BASE_URL"
-
-  /** Selects the Ollama embedding model when using the legacy provider format. */
-  val OLLAMA_EMBEDDING_MODEL = "OLLAMA_EMBEDDING_MODEL"
 
   // ---- Embeddings: chunking -----------------------------------------------
 

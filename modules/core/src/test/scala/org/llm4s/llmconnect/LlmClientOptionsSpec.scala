@@ -2,7 +2,7 @@ package org.llm4s.llmconnect
 
 import java.time.Instant
 
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, OllamaConfig, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.funsuite.AnyFunSuite
@@ -43,15 +43,17 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers {
   }
 
   test("LLMConnect.getClient accepts explicit options for provider-checked construction") {
-    val cfg = OllamaConfig.fromValues(
-      modelName = "llama3.1",
-      baseUrl = "http://localhost:11434"
+    val cfg = OpenAIConfig.fromValues(
+      modelName = "gpt-4o",
+      apiKey = "sk-test",
+      organization = None,
+      baseUrl = "https://api.openai.com/v1"
     )
     val options = LlmClientOptions(
       exchangeLogging = ProviderExchangeLogging.enabled(ProviderExchangeSink.noop)
     )
 
-    val res = LLMConnect.getClient(ProviderId("ollama"), cfg, options)
+    val res = LLMConnect.getClient(ProviderId("openai"), cfg, options)
 
     res.isRight shouldBe true
   }

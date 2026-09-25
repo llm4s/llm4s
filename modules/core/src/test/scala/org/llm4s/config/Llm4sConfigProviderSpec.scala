@@ -207,11 +207,11 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "ollama-main"
-          |    ollama-main {
-          |      provider = "ollama"
-          |      model = "llama3.1"
-          |      baseUrl = "http://localhost:11434"
+          |    provider = "openai-main"
+          |    openai-main {
+          |      provider = "openai"
+          |      model = "gpt-4o-mini"
+          |      apiKey = "sk-test"
           |    }
           |  }
           |}
@@ -219,25 +219,20 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
 
       val responseBody =
         """{
-          |  "models": [
-          |    {
-          |      "name": "llama3.2:latest",
-          |      "modified_at": "2026-03-27T08:00:00Z",
-          |      "size": 2019393189,
-          |      "digest": "sha256:abc123"
-          |    }
+          |  "data": [
+          |    { "id": "gpt-4o-mini", "created": 1710000000, "owned_by": "openai" }
           |  ]
           |}""".stripMargin
 
       val httpClient = new MockHttpClient(HttpResponse(200, responseBody, Map.empty))
 
-      val result = Llm4sConfig.listModels("ollama-main", ConfigSource.string(hocon), httpClient)
+      val result = Llm4sConfig.listModels("openai-main", ConfigSource.string(hocon), httpClient)
 
       result match
         case Right(models) =>
-          models.map(_.name.asString) shouldBe List("llama3.2:latest")
-          models.map(_.provider) shouldBe List(ProviderId("ollama"))
-          httpClient.lastUrl shouldBe Some("http://localhost:11434/api/tags")
+          models.map(_.name.asString) shouldBe List("gpt-4o-mini")
+          models.map(_.provider) shouldBe List(ProviderId("openai"))
+          httpClient.lastUrl shouldBe Some(s"${DefaultConfig.DEFAULT_OPENAI_BASE_URL}/models")
         case Left(err) =>
           fail(s"Expected listed models, got error: ${err.message}")
     }
@@ -247,11 +242,11 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "ollama-main"
-          |    ollama-main {
-          |      provider = "ollama"
-          |      model = "llama3.1"
-          |      baseUrl = "http://localhost:11434"
+          |    provider = "openai-main"
+          |    openai-main {
+          |      provider = "openai"
+          |      model = "gpt-4o-mini"
+          |      apiKey = "sk-test"
           |    }
           |  }
           |}
@@ -259,14 +254,14 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
 
       val result =
         Llm4sConfig.listModels(
-          "ollmaa-main",
+          "opneai-main",
           ConfigSource.string(hocon),
           new MockHttpClient(HttpResponse(200, "{}", Map.empty))
         )
 
       result match
         case Left(err) =>
-          err.message should include("Configured provider 'ollmaa-main' was not found")
+          err.message should include("Configured provider 'opneai-main' was not found")
         case Right(models) =>
           fail(s"Expected missing named provider failure, got models: $models")
     }

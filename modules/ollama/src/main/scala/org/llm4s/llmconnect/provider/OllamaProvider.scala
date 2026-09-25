@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.config.{ ProviderModelLister, ProviderModelListers }
+import org.llm4s.config.{ OllamaModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OllamaConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -24,7 +24,7 @@ object OllamaProvider extends ProviderDescriptor:
     baseUrlExample = "e.g. http://localhost:11434"
   )
 
-  override val modelLister: Option[ProviderModelLister] = Some(ProviderModelListers.Ollama)
+  override val modelLister: Option[ProviderModelLister] = Some(OllamaModelLister)
 
   def buildConfig(providerName: String, section: NamedProviderConfig)(using
     ContextWindowResolver

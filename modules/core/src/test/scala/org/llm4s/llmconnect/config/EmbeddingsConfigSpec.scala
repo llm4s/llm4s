@@ -57,36 +57,5 @@ class EmbeddingsConfigSpec extends AnyWordSpec with Matchers {
         cfg.apiKey shouldBe "vk-test"
       }
     }
-
-    "load Ollama embeddings config via llm4s.*" in {
-      val props = Map(
-        "llm4s.embeddings.provider"       -> "ollama",
-        "llm4s.embeddings.ollama.baseUrl" -> "http://localhost:11434",
-        "llm4s.embeddings.ollama.model"   -> "nomic-embed-text"
-      )
-      withProps(props) {
-        val (provider, cfg) = Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
-        provider shouldBe "ollama"
-        cfg.baseUrl shouldBe "http://localhost:11434"
-        cfg.model shouldBe "nomic-embed-text"
-        // Ollama doesn't require API key, defaults to "not-required"
-        cfg.apiKey shouldBe "not-required"
-      }
-    }
-
-    "load Ollama embeddings config with defaults" in {
-      val props = Map(
-        "llm4s.embeddings.provider"     -> "ollama",
-        "llm4s.embeddings.ollama.model" -> "mxbai-embed-large"
-      )
-      withProps(props) {
-        val (provider, cfg) = Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
-        provider shouldBe "ollama"
-        // Default baseUrl when not specified
-        cfg.baseUrl shouldBe "http://localhost:11434"
-        cfg.model shouldBe "mxbai-embed-large"
-        cfg.apiKey shouldBe "not-required"
-      }
-    }
   }
 }
