@@ -46,6 +46,22 @@ object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
     modelEnv = Some("OLLAMA_EMBEDDING_MODEL")
   )
 
+  /**
+   * The embedding models in Ollama's library that are commonly pulled, under
+   * their untagged names. Ollama model names carry an optional `:tag`, and
+   * different tags of one model can differ in size - `snowflake-arctic-embed:22m`
+   * is 384-dimensional, `:335m` is 1024 - so only `:latest`, which is what the
+   * untagged name means, is folded onto these.
+   */
+  override val modelDimensions: Map[String, Int] = Map(
+    "nomic-embed-text"  -> 768,
+    "mxbai-embed-large" -> 1024,
+    "all-minilm"        -> 384
+  )
+
+  override def dimensionsOf(model: String): Option[Int] =
+    modelDimensions.get(model.stripSuffix(":latest"))
+
   /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
 

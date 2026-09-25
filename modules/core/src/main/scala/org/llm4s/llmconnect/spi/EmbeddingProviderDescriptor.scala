@@ -57,6 +57,24 @@ trait EmbeddingProviderDescriptor:
   def configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec()
 
   /**
+   * Vector dimensions of the models this provider knows, keyed by model name as
+   * it appears in `EMBEDDING_MODEL=<id>/<model>`.
+   *
+   * This is what `ModelDimensionRegistry` answers from, so a provider's
+   * dimensions travel with the provider rather than living in a central table in
+   * `llm4s-core` - which is how `ollama` came to have no entries at all while its
+   * documented configuration depended on them.
+   *
+   * A model missing here still embeds; only a caller that needs its
+   * dimensionality up front is told it is unknown. Override [[dimensionsOf]]
+   * instead when model names have variants that share a size.
+   */
+  def modelDimensions: Map[String, Int] = Map.empty
+
+  /** The vector dimensions of `model`, when this provider knows them. */
+  def dimensionsOf(model: String): Option[Int] = modelDimensions.get(model)
+
+  /**
    * Turns this provider's config section into the `EmbeddingProviderConfig` its
    * client needs.
    *

@@ -58,6 +58,12 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     modelEnv = Some("OPENAI_EMBEDDING_MODEL")
   )
 
+  override val modelDimensions: Map[String, Int] = Map(
+    "text-embedding-3-small" -> 1536,
+    "text-embedding-3-large" -> 3072,
+    "text-embedding-ada-002" -> 1536
+  )
+
   /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
 
