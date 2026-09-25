@@ -70,8 +70,10 @@ named in errors are the paths to write:
 
 ```hocon
 llm4s.embeddings."acme.embeddings" { apiKey = ${?ACME_API_KEY} }
-``` (Chat config cannot do this: it is keyed by
-the user's *instance* name, which is why `ProviderConfigSpec.defaultBaseUrl` is code and says so.)
+```
+
+(Chat config cannot do this: it is keyed by the user's *instance* name, which is why
+`ProviderConfigSpec.defaultBaseUrl` is code and says so.)
 
 ### A key that lives somewhere else
 
@@ -89,7 +91,7 @@ override val configSpec = EmbeddingConfigSpec(
 
 > Missing openai embeddings apiKey (llm4s.openai.apiKey / OPENAI_API_KEY)
 
-`apiKeyPath` is a ''declaration'', not a read: `EmbeddingsConfigLoader` resolves it and hands
+`apiKeyPath` is a *declaration*, not a read: `EmbeddingsConfigLoader` resolves it and hands
 the value back in the section before calling `buildConfig`. The provider owns the knowledge of
 *where* its key lives; `org.llm4s.config` keeps sole ownership of *reading* it.
 
