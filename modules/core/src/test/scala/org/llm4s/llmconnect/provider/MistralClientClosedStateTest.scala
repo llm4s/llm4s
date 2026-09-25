@@ -46,9 +46,11 @@ class MistralClientClosedStateTest extends AnyFlatSpec with Matchers {
     )
   }
 
-  it should "return ConfigurationError when streamComplete() is called (streaming not supported)" in {
+  it should "return ConfigurationError when streamComplete() is called after close()" in {
     val client         = new MistralClient(createTestConfig)
     var chunksReceived = 0
+
+    client.close()
 
     val result = client.streamComplete(
       createTestConversation,
@@ -59,7 +61,7 @@ class MistralClientClosedStateTest extends AnyFlatSpec with Matchers {
     result.fold(
       err => {
         err shouldBe a[ConfigurationError]
-        err.message.toLowerCase should include("stream")
+        err.message should include("already closed")
       },
       _ => fail("Expected Left(ConfigurationError)")
     )
