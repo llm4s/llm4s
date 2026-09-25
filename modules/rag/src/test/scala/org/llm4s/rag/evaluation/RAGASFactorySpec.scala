@@ -1,10 +1,12 @@
 package org.llm4s.rag.evaluation
 
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
-import org.llm4s.llmconnect.config.EmbeddingModelConfig
+import org.llm4s.llmconnect.config.{ AnthropicConfig, EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -140,5 +142,40 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
 
   it should "together with metricsRequiringGroundTruth cover all available metrics" in {
     (RAGASFactory.metricsWithoutGroundTruth ++ RAGASFactory.metricsRequiringGroundTruth) shouldBe RAGASFactory.availableMetrics
+  }
+
+  // fromConfigs used to fall back to 1536 dimensions for any model the central table lacked,
+  // which included every Ollama model - nomic-embed-text is 768. Dimensions now come from the
+  // embedding provider's descriptor, so a fixture provider stands in for any of them.
+  private object FixtureEmbeddings extends EmbeddingProviderDescriptor {
+    val id: ProviderId = ProviderId("fixture")
+
+    override val modelDimensions: Map[String, Int] = Map("fixture-768" -> 768)
+
+    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+      Right(new MockEmbeddingProvider)
+  }
+
+  private def withFixture = ProviderRegistry.builtin.withEmbeddingProvider(FixtureEmbeddings)
+
+  private def chat =
+    AnthropicConfig("k", "claude-sonnet-4-5", "https://api.anthropic.com", 200000, 4096)
+
+  private def embeddings(model: String) =
+    "fixture" -> EmbeddingProviderConfig("http://localhost:9999", model, "key")
+
+  "RAGASFactory.fromConfigs" should "resolve the embedding model's dimensions through its provider" in {
+    given ProviderRegistry = withFixture
+
+    RAGASFactory.fromConfigs(chat, embeddings("fixture-768")) shouldBe a[Right[?, ?]]
+    RAGASFactory.basicFromConfigs(chat, embeddings("fixture-768")) shouldBe a[Right[?, ?]]
+  }
+
+  it should "fail for a model its provider does not declare, rather than guess 1536" in {
+    given ProviderRegistry = withFixture
+
+    val error = RAGASFactory.fromConfigs(chat, embeddings("my-custom-embedder")).left.map(_.formatted)
+
+    error.left.getOrElse("") should include("Unknown model 'my-custom-embedder' for provider 'fixture'")
   }
 }

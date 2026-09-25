@@ -1,55 +1,56 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.error.ConfigurationError
+import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.Result
 
 /**
  * Lookup service for embedding model vector dimensions.
  *
- * Provides a single, authoritative mapping from (provider, model) pairs to
- * the dimensionality of the vectors they produce. All configuration and
- * encoding code should resolve dimensions through this registry to avoid
- * duplicated or inconsistent dimension constants.
+ * Answers from the embedding providers in the caller's [[org.llm4s.llmconnect.spi.ProviderRegistry]]:
+ * each [[org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor]] declares the
+ * dimensions of the models it knows, so a provider module brings its own and
+ * nothing here needs editing when one is added.
+ *
+ * The one provider answered locally is `local`, the non-text encoders used by
+ * `ModelSelector`. It is not an embedding provider - nothing can be configured
+ * with it - so it has no descriptor to declare them.
  */
 object ModelDimensionRegistry {
 
-  /**
-   * Central registry for known embedding model dimensions.
-   *
-   * Prefer this registry over ad-hoc per-callsite maps so that configuration
-   * code and encoding logic can look up dimensionality consistently.
-   */
-  private val dimensions: Map[String, Map[String, Int]] = Map(
-    "openai" -> Map(
-      "text-embedding-3-small" -> 1536,
-      "text-embedding-3-large" -> 3072
-    ),
-    "voyage" -> Map(
-      "voyage-2"         -> 1024,
-      "voyage-3-large"   -> 1536,
-      "voyage-3.5"       -> 1024,
-      "voyage-3.5-lite"  -> 1024,
-      "voyage-code-3"    -> 1024,
-      "voyage-finance-2" -> 1024,
-      "voyage-law-2"     -> 1024,
-      "voyage-code-2"    -> 1536,
-      "voyage-context-3" -> 1024
-    ),
-    // NEW: local (non-text) "model" dims used by our stubs or future local encoders
-    "local" -> Map(
-      "openclip-vit-b32" -> 512,
-      "wav2vec2-base"    -> 768,
-      "timesformer-base" -> 768
-    )
+  /** The provider name under which the local non-text encoders are looked up. */
+  val LocalProvider: String = "local"
+
+  private val localDimensions: Map[String, Int] = Map(
+    "openclip-vit-b32" -> 512,
+    "wav2vec2-base"    -> 768,
+    "timesformer-base" -> 768
   )
 
-  def getDimension(provider: String, model: String): Result[Int] =
-    dimensions
-      .getOrElse(provider.toLowerCase, Map.empty)
-      .get(model)
-      .toRight(
-        ConfigurationError(
-          s"[ModelDimensionRegistry] Unknown model '$model' for provider '$provider'"
-        )
-      )
+  /**
+   * The vector dimensions `model` produces under `provider`.
+   *
+   * @param provider an embedding provider id or alias, as in `EMBEDDING_MODEL=<provider>/<model>`.
+   * @return `Left` with a [[org.llm4s.error.ConfigurationError]] when the provider is not
+   *         registered - the registry's error, naming what is - or is registered but does
+   *         not declare `model`.
+   */
+  def getDimension(provider: String, model: String)(using registry: ProviderRegistry): Result[Int] =
+    if (provider.trim.equalsIgnoreCase(LocalProvider)) localDimension(model)
+    else
+      registry
+        .resolveEmbedding(registry.canonicalEmbeddingId(provider))
+        .flatMap(_.dimensionsOf(model).toRight(unknownModel(provider, model)))
+
+  /**
+   * The vector dimensions of one of the local non-text encoders.
+   *
+   * Separate from [[getDimension]] so that selecting a local model never triggers
+   * provider discovery, which it has no use for.
+   */
+  def localDimension(model: String): Result[Int] =
+    localDimensions.get(model).toRight(unknownModel(LocalProvider, model))
+
+  private def unknownModel(provider: String, model: String): ConfigurationError =
+    ConfigurationError(s"[ModelDimensionRegistry] Unknown model '$model' for provider '$provider'")
 }

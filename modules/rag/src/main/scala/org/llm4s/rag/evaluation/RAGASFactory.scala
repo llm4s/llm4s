@@ -2,6 +2,7 @@ package org.llm4s.rag.evaluation
 
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ModelDimensionRegistry, ProviderConfig }
+import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag.evaluation.metrics.*
 import org.llm4s.types.Result
@@ -31,16 +32,21 @@ object RAGASFactory {
 
   /**
    * Create evaluator with all default metrics from explicit configurations.
+   *
+   * The embedding model's dimensions come from its provider's descriptor, through
+   * the given [[org.llm4s.llmconnect.spi.ProviderRegistry]]. A model the provider does
+   * not declare is an error rather than a guess; build the [[EmbeddingModelConfig]]
+   * yourself and use [[create]] for one.
    */
   def fromConfigs(
     providerCfg: ProviderConfig,
     embedding: (String, org.llm4s.llmconnect.config.EmbeddingProviderConfig)
-  )(using ModelRegistryService): Result[RAGASEvaluator] =
+  )(using ModelRegistryService, ProviderRegistry): Result[RAGASEvaluator] =
     for {
       llmClient <- LLMConnect.fromConfig(providerCfg)
       (providerName, embeddingConfig) = embedding
       embeddingClient <- EmbeddingClient.from(providerName, embeddingConfig)
-      dims              = ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model).getOrElse(1536)
+      dims            <- ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model)
       embeddingModelCfg = EmbeddingModelConfig(embeddingConfig.model, dims)
     } yield RAGASEvaluator(llmClient, embeddingClient, embeddingModelCfg)
 
@@ -101,16 +107,19 @@ object RAGASFactory {
 
   /**
    * Create a basic evaluator from explicit configurations.
+   *
+   * Dimensions are resolved as in [[fromConfigs]]; use [[basic]] for a model its
+   * provider does not declare.
    */
   def basicFromConfigs(
     providerCfg: ProviderConfig,
     embedding: (String, org.llm4s.llmconnect.config.EmbeddingProviderConfig)
-  )(using ModelRegistryService): Result[RAGASEvaluator] =
+  )(using ModelRegistryService, ProviderRegistry): Result[RAGASEvaluator] =
     for {
       llmClient <- LLMConnect.fromConfig(providerCfg)
       (providerName, embeddingConfig) = embedding
       embeddingClient <- EmbeddingClient.from(providerName, embeddingConfig)
-      dims              = ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model).getOrElse(1536)
+      dims            <- ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model)
       embeddingModelCfg = EmbeddingModelConfig(embeddingConfig.model, dims)
     } yield RAGASEvaluator.basic(llmClient, embeddingClient, embeddingModelCfg)
 

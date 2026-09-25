@@ -1,5 +1,59 @@
 # Migration Guide
 
+## Slice 4 follow-up: embedding dimensions move into the provider
+
+One of the two items deferred from slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)),
+and the precursor to carving `llm4s-ollama` ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
+`ModelDimensionRegistry` was the last central provider list on the embedding side: a map in
+`llm4s-core` covering `openai`, `voyage` and `local`. It had no `ollama` entry, so the documented
+
+```bash
+EMBEDDING_MODEL=ollama/nomic-embed-text
+```
+
+failed at `Llm4sConfig.textEmbeddingModel()` with `Unknown model 'nomic-embed-text' for
+provider 'ollama'`, and `RAGASFactory.fromConfigs` papered over the same gap with
+`.getOrElse(1536)` for a model that is 768-dimensional.
+
+### Declaring dimensions
+
+An embedding provider now declares the dimensions of the models it knows, alongside its
+`configSpec`:
+
+```scala
+object JinaEmbeddings extends EmbeddingProviderDescriptor:
+  val id = ProviderId("jina")
+
+  override val modelDimensions = Map(
+    "jina-embeddings-v3" -> 1024
+  )
+```
+
+A provider whose model names have variants overrides `dimensionsOf(model)` instead - Ollama
+folds a `:latest` tag onto the untagged name, and no other tag, because other tags of one model
+can differ in size. A model a provider does not declare still embeds; only a caller that needs
+its dimensionality up front is told it is unknown.
+
+### Source-compatible signature changes
+
+`ModelDimensionRegistry.getDimension`, `RAGASFactory.fromConfigs` and
+`RAGASFactory.basicFromConfigs` take an implicit `ProviderRegistry`, resolved to
+`ProviderRegistry.default` when none is in scope. Existing call sites compile unchanged; a
+caller with its own registry now reaches the providers in it.
+
+`ModelDimensionRegistry.localDimension(model)` answers the local non-text encoders
+(`openclip-vit-b32`, `wav2vec2-base`, `timesformer-base`), which have no descriptor because
+nothing can be configured with them. `getDimension("local", ...)` still works.
+
+### Behaviour changes
+
+- `RAGASFactory.fromConfigs` and `basicFromConfigs` return the lookup's `Left` for an embedding
+  model its provider does not declare, instead of assuming 1536 dimensions. Build the
+  `EmbeddingModelConfig` yourself and call `RAGASFactory.create` or `basic` for such a model.
+- `getDimension` for an unregistered provider returns the registry's "not registered" error,
+  naming the embedding providers that are, rather than "Unknown model".
+- `voyage-3-large` resolves to 1024, its default output size, not 1536.
+
 ## Slice 4 (PR 5): embedding config moves into the provider
 
 The fifth slice 4 change ([#1131](https://github.com/llm4s/llm4s/issues/1131)), and the
