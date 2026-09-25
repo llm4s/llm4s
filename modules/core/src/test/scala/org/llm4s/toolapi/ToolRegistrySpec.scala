@@ -5,6 +5,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default._
 
+import java.lang.management.ManagementFactory
 import scala.concurrent.{ Await, ExecutionContext }
 import scala.concurrent.duration._
 
@@ -510,6 +511,48 @@ class ToolRegistrySpec extends AnyFlatSpec with Matchers {
           attempts += 1
         }
         interruptReceived.get() shouldBe true
+      }
+    )
+  }
+
+  it should "not leak OS threads across repeated timeout cycles" in {
+    val schema = Schema
+      .`object`[Map[String, Any]]("Blocking tool")
+      .withProperty(Schema.property("ms", Schema.integer("Sleep ms")))
+    val interruptSafeSleepTool = ToolBuilder[Map[String, Any], MathResult](
+      "sleep-interruptible",
+      "Sleeps for given ms, swallowing interruption like a well-behaved worker",
+      schema
+    ).withHandler { _ =>
+      try Thread.sleep(500)
+      catch { case _: InterruptedException => () }
+      Right(MathResult(0.0))
+    }.buildSafe()
+
+    interruptSafeSleepTool.fold(
+      e => fail(s"Tool creation failed: ${e.formatted}"),
+      sleepTool => {
+        val registry   = new ToolRegistry(Seq(sleepTool))
+        val config     = ToolExecutionConfig(timeout = Some(50.millis))
+        val threadBean = ManagementFactory.getThreadMXBean
+        val request    = ToolCallRequest("sleep-interruptible", ujson.Obj("ms" -> 500))
+
+        // Warm up the JIT/thread pools once before taking the baseline.
+        (1 to 5).foreach(_ => registry.execute(request, config))
+        Thread.sleep(200)
+
+        val baseline = threadBean.getThreadCount
+
+        (1 to 50).foreach { _ =>
+          val result = registry.execute(request, config)
+          result.isLeft shouldBe true
+        }
+
+        // Let interrupted worker threads finish unwinding after the timeout fires.
+        Thread.sleep(1000)
+
+        val afterCount = threadBean.getThreadCount
+        (afterCount - baseline) should be <= 10
       }
     )
   }

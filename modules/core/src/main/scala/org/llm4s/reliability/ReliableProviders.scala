@@ -1,6 +1,7 @@
 package org.llm4s.reliability
 
 import org.llm4s.llmconnect.config.ProviderConfig
+import org.llm4s.llmconnect.middleware.RateLimitingMiddleware
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect }
 import org.llm4s.metrics.MetricsCollector
@@ -50,7 +51,31 @@ object ReliableProviders {
   )(using ModelRegistryService, ProviderRegistry): Result[LLMClient] =
     LLMConnect
       .getClient(config, metrics)
-      .map(client => new ReliableClient(client, config.providerId.asString, reliabilityConfig, Some(metrics)))
+      .map { client =>
+        val providerName = config.providerId.asString
+        val rateLimited  = withRateLimiting(client, providerName, reliabilityConfig.rateLimit, Some(metrics))
+        new ReliableClient(rateLimited, providerName, reliabilityConfig, Some(metrics))
+      }
+
+  /**
+   * Wraps `client` with local rate limiting when `rateLimitConfig.enabled`, otherwise
+   * returns it unchanged. Applied *before* [[ReliableClient]] so retries consult the
+   * token bucket on every attempt, not just the outermost call.
+   */
+  private[reliability] def withRateLimiting(
+    client: LLMClient,
+    providerName: String,
+    rateLimitConfig: RateLimitConfig,
+    metrics: Option[MetricsCollector]
+  ): LLMClient =
+    if (rateLimitConfig.enabled)
+      new RateLimitingMiddleware(
+        rateLimitConfig.requestsPerMinute,
+        rateLimitConfig.burstCapacity,
+        metrics = metrics,
+        providerName = providerName
+      ).wrap(client)
+    else client
 
   /** Builds and wraps the client `config` names, without metrics. */
   def wrap(
@@ -81,8 +106,10 @@ object ReliableProviders {
     providerName: String,
     reliabilityConfig: ReliabilityConfig = ReliabilityConfig.default,
     metrics: Option[MetricsCollector] = None
-  ): LLMClient =
-    new ReliableClient(client, providerName, reliabilityConfig, metrics)
+  ): LLMClient = {
+    val rateLimited = withRateLimiting(client, providerName, reliabilityConfig.rateLimit, metrics)
+    new ReliableClient(rateLimited, providerName, reliabilityConfig, metrics)
+  }
 }
 
 /**
@@ -119,13 +146,17 @@ object ReliabilitySyntax {
     /**
      * Wrap this client with custom reliability configuration.
      */
-    def withReliability(providerName: String, config: ReliabilityConfig): LLMClient =
-      new ReliableClient(client, providerName, config, None)
+    def withReliability(providerName: String, config: ReliabilityConfig): LLMClient = {
+      val rateLimited = ReliableProviders.withRateLimiting(client, providerName, config.rateLimit, None)
+      new ReliableClient(rateLimited, providerName, config, None)
+    }
 
     /**
      * Wrap this client with custom reliability configuration and metrics.
      */
-    def withReliability(providerName: String, config: ReliabilityConfig, metrics: MetricsCollector): LLMClient =
-      new ReliableClient(client, providerName, config, Some(metrics))
+    def withReliability(providerName: String, config: ReliabilityConfig, metrics: MetricsCollector): LLMClient = {
+      val rateLimited = ReliableProviders.withRateLimiting(client, providerName, config.rateLimit, Some(metrics))
+      new ReliableClient(rateLimited, providerName, config, Some(metrics))
+    }
   }
 }

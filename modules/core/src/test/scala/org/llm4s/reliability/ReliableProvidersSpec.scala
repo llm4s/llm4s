@@ -1,6 +1,6 @@
 package org.llm4s.reliability
 
-import org.llm4s.error.ConfigurationError
+import org.llm4s.error.{ ConfigurationError, TimeoutError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
@@ -11,6 +11,9 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
+import java.util.concurrent.atomic.AtomicInteger
+import scala.concurrent.duration._
 
 class ReliableProvidersSpec extends AnyFlatSpec with Matchers {
 
@@ -80,6 +83,56 @@ class ReliableProvidersSpec extends AnyFlatSpec with Matchers {
   it should "delegate getReserveCompletion to underlying" in {
     val wrapped = ReliableProviders.wrap(mockClient, "test-provider")
     wrapped.getReserveCompletion() shouldBe 512
+  }
+
+  // ==========================================================================
+  // ReliableProviders.wrap - rate limiting composes with retry
+  // ==========================================================================
+
+  class AlwaysTimingOutClient extends LLMClient {
+    val callCount = new AtomicInteger(0)
+
+    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
+      callCount.incrementAndGet()
+      Left(TimeoutError("slow", 1.second, "complete"))
+    }
+
+    override def streamComplete(
+      conversation: Conversation,
+      options: CompletionOptions,
+      onChunk: StreamedChunk => Unit
+    ): Result[Completion] = complete(conversation, options)
+
+    override def getContextWindow(): Int     = 4096
+    override def getReserveCompletion(): Int = 512
+  }
+
+  "ReliableProviders.wrap" should "consult the rate limiter on every retry, not just the first attempt" in {
+    // Burst of 1 with no refill: the first attempt drains the bucket, so every
+    // retry after it must be rejected by the rate limiter before it ever reaches
+    // the underlying client - proving the limiter sits inside the retry loop.
+    val failingClient = new AlwaysTimingOutClient
+    val config = ReliabilityConfig.default
+      .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
+      .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
+
+    val wrapped = ReliableProviders.wrap(failingClient, "test-provider", config)
+    val result  = wrapped.complete(Conversation(List(UserMessage("hello"))))
+
+    result.isLeft shouldBe true
+    failingClient.callCount.get() shouldBe 1
+  }
+
+  it should "reach the underlying client on every attempt when rate limiting is disabled" in {
+    val failingClient = new AlwaysTimingOutClient
+    val config = ReliabilityConfig.default
+      .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
+
+    val wrapped = ReliableProviders.wrap(failingClient, "test-provider", config)
+    val result  = wrapped.complete(Conversation(List(UserMessage("hello"))))
+
+    result.isLeft shouldBe true
+    failingClient.callCount.get() shouldBe 3
   }
 
   // ==========================================================================

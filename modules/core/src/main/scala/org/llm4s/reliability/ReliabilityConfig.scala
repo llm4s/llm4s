@@ -10,12 +10,14 @@ import scala.concurrent.duration.{ Duration, DurationInt }
  *
  * @param retryPolicy Retry policy for transient failures
  * @param circuitBreaker Circuit breaker configuration
+ * @param rateLimit Local rate limiting configuration
  * @param deadline Maximum time to wait for operation completion
  * @param enabled Whether reliability features are enabled (for opt-out)
  */
 final case class ReliabilityConfig(
   retryPolicy: RetryPolicy = RetryPolicy.exponentialBackoff(),
   circuitBreaker: CircuitBreakerConfig = CircuitBreakerConfig.default,
+  rateLimit: RateLimitConfig = RateLimitConfig.disabled,
   deadline: Option[Duration] = Some(5.minutes),
   enabled: Boolean = true
 ) {
@@ -31,6 +33,10 @@ final case class ReliabilityConfig(
   /** Set circuit breaker configuration */
   def withCircuitBreaker(config: CircuitBreakerConfig): ReliabilityConfig =
     copy(circuitBreaker = config)
+
+  /** Set rate limit configuration */
+  def withRateLimit(config: RateLimitConfig): ReliabilityConfig =
+    copy(rateLimit = config)
 
   /** Set operation deadline */
   def withDeadline(duration: Duration): ReliabilityConfig =
@@ -122,4 +128,39 @@ object CircuitBreakerConfig {
   val disabled: CircuitBreakerConfig = CircuitBreakerConfig(
     failureThreshold = Int.MaxValue
   )
+}
+
+/**
+ * Local token-bucket rate limiting configuration.
+ *
+ * @param enabled Whether local rate limiting is applied
+ * @param requestsPerMinute Sustained request rate once the bucket is empty
+ * @param burstCapacity Maximum tokens the bucket can hold, i.e. the largest burst allowed
+ */
+final case class RateLimitConfig(
+  enabled: Boolean = false,
+  requestsPerMinute: Int = 60,
+  burstCapacity: Int = 60
+) {
+
+  /** Set requests per minute */
+  def withRequestsPerMinute(rpm: Int): RateLimitConfig =
+    copy(requestsPerMinute = rpm)
+
+  /** Set burst capacity */
+  def withBurstCapacity(burst: Int): RateLimitConfig =
+    copy(burstCapacity = burst)
+
+  /** Set enabled flag */
+  def withEnabled(isEnabled: Boolean): RateLimitConfig =
+    copy(enabled = isEnabled)
+}
+
+object RateLimitConfig {
+
+  /** Default: enabled, 60 requests/minute, burst of 60 */
+  val default: RateLimitConfig = RateLimitConfig(enabled = true)
+
+  /** Disabled: no local rate limiting (the field default in ReliabilityConfig) */
+  val disabled: RateLimitConfig = RateLimitConfig(enabled = false)
 }

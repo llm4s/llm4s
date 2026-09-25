@@ -1,6 +1,16 @@
 package org.llm4s.error
 
 /**
+ * Where a [[RateLimitError]] originated. Distinguishes a request that never left the
+ * process (rejected by a local token bucket) from one the provider itself rejected with
+ * an HTTP 429 - the two need different treatment when a caller has already recorded a
+ * metrics event for the local case, e.g. `org.llm4s.llmconnect.middleware.RateLimitingMiddleware`.
+ */
+enum RateLimitOrigin {
+  case LocalThrottle, UpstreamProvider
+}
+
+/**
  * Raised when the LLM provider rejects the request due to rate limiting.
  *
  * This is a [[RecoverableError]]: it is safe to retry after waiting.
@@ -12,13 +22,17 @@ package org.llm4s.error
  * @param provider the name of the LLM provider (e.g., "openai", "anthropic")
  * @param requestsRemaining optional number of requests remaining in the current window
  * @param resetTime optional timestamp (in milliseconds) when the rate limit will reset
+ * @param origin whether this was rejected locally (never reached the provider) or by the
+ *               provider itself; defaults to [[RateLimitOrigin.UpstreamProvider]] since every
+ *               existing constructor call maps a provider-side rejection
  */
 final case class RateLimitError private (
   override val message: String,
   retryAfter: Option[Long],
   provider: String,
   requestsRemaining: Option[Int] = None,
-  resetTime: Option[Long] = None
+  resetTime: Option[Long] = None,
+  origin: RateLimitOrigin = RateLimitOrigin.UpstreamProvider
 ) extends LLMError
     with RecoverableError {
 
@@ -45,6 +59,21 @@ object RateLimitError {
   /** Create rate limit error with retry delay */
   def apply(provider: String, retryAfter: Long): RateLimitError =
     RateLimitError(s"Rate limited by $provider. Retry after $retryAfter seconds", Some(retryAfter), provider)
+
+  /**
+   * Create a rate limit error for a request rejected locally (e.g. by a token-bucket
+   * middleware) before it ever reached `provider`. Tagged with [[RateLimitOrigin.LocalThrottle]]
+   * so a wrapping component that already recorded a metrics event for the rejection -
+   * such as `ReliableClient` composed around a rate-limiting middleware - can recognize
+   * that and avoid recording it again.
+   */
+  def local(provider: String): RateLimitError =
+    RateLimitError(
+      message = "Local rate limit exceeded.",
+      retryAfter = None,
+      provider = provider,
+      origin = RateLimitOrigin.LocalThrottle
+    )
 
   /** Unapply extractor for pattern matching */
   def unapply(error: RateLimitError): Option[(String, Option[Long], String)] =

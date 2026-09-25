@@ -25,7 +25,7 @@ trait ManagedResource[R] {
    */
   def use[A](f: R => Result[A]): Result[A] =
     acquire().flatMap { resource =>
-      val result = f(resource)
+      val result: Result[A] = Try(f(resource)).toResult.flatMap(identity)
       release(resource).flatMap(_ => result)
     }
 }

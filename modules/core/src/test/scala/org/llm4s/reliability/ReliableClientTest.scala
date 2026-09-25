@@ -591,6 +591,52 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
     mockClient.callCount.get() shouldBe 2
   }
 
+  test("ReliableClient does not double-count a locally-throttled error already recorded by the caller") {
+    // Simulates a rate-limiting middleware composed inside the retry loop: every
+    // rejection it produces is already recorded (RateLimitOrigin.LocalThrottle), so
+    // ReliableClient's terminal-failure handler must not record it a second time.
+    val localRejection = RateLimitError.local("test-provider")
+    val mockClient     = new MockClient(() => Left(localRejection))
+
+    val config = ReliabilityConfig(
+      retryPolicy = RetryPolicy.fixedDelay(maxAttempts = 3, delay = 1.millis),
+      circuitBreaker = CircuitBreakerConfig(failureThreshold = 10, recoveryTimeout = 1.minute, successThreshold = 2),
+      deadline = None
+    )
+
+    val metrics        = new TestMetricsCollector()
+    val reliableClient = new ReliableClient(mockClient, "test-provider", config, Some(metrics))
+
+    val result = reliableClient.complete(testConversation)
+
+    result shouldBe Left(localRejection)
+    mockClient.callCount.get() shouldBe 3
+    metrics.recordedErrors shouldBe empty
+  }
+
+  test("ReliableClient still records a genuine upstream RateLimitError once, on the terminal attempt") {
+    // The default origin (UpstreamProvider) is never recorded by anyone else, so
+    // ReliableClient must remain the sole recorder for it - the fix above must not
+    // silently drop metrics for real provider-side 429s.
+    val upstreamRejection = RateLimitError("anthropic")
+    val mockClient        = new MockClient(() => Left(upstreamRejection))
+
+    val config = ReliabilityConfig(
+      retryPolicy = RetryPolicy.fixedDelay(maxAttempts = 2, delay = 1.millis),
+      circuitBreaker = CircuitBreakerConfig(failureThreshold = 10, recoveryTimeout = 1.minute, successThreshold = 2),
+      deadline = None
+    )
+
+    val metrics        = new TestMetricsCollector()
+    val reliableClient = new ReliableClient(mockClient, "anthropic", config, Some(metrics))
+
+    val result = reliableClient.complete(testConversation)
+
+    result shouldBe Left(upstreamRejection)
+    mockClient.callCount.get() shouldBe 2
+    metrics.recordedErrors.toList shouldBe List(ErrorKind.RateLimit)
+  }
+
   test("ReliableClient.resetCircuitBreaker resets state correctly") {
     val mockClient = new MockClient(() => Left(TimeoutError("timeout", 1.second, "test")))
 

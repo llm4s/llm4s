@@ -198,7 +198,7 @@ final class ReliableClient(
               // Max attempts reached or non-retryable error
               if (attemptNumber > 1) {
                 // Preserve original error type, add context via collector
-                collector.foreach(_.recordError(ErrorKind.fromLLMError(error), providerName))
+                recordTerminalError(error)
               }
               Left(error)
           }
@@ -257,7 +257,7 @@ final class ReliableClient(
           case RetryDecision.DoNotRetry =>
             // Max attempts reached or non-retryable error - preserve original error
             if (attemptNumber > 1) {
-              collector.foreach(_.recordError(ErrorKind.fromLLMError(error), providerName))
+              recordTerminalError(error)
             }
             Left(error)
         }
@@ -275,6 +275,22 @@ final class ReliableClient(
       RetryDecision.Retry(config.retryPolicy.delayFor(attemptNumber, error))
     else
       RetryDecision.DoNotRetry
+
+  /**
+   * Record the outcome metric for an attempt that exhausted retries.
+   *
+   * Skips [[RateLimitError]]s of [[RateLimitOrigin.LocalThrottle]] origin: those were
+   * rejected by a rate-limiting middleware composed inside this retry loop (see
+   * `ReliableProviders.withRateLimiting`), which already recorded its own
+   * [[ErrorKind.RateLimit]] event at the point of rejection. Recording it again here
+   * would double-count the same event. Upstream-provider rate limits (the default
+   * origin) are never recorded anywhere else, so they still go through.
+   */
+  private def recordTerminalError(error: LLMError): Unit =
+    error match {
+      case rle: RateLimitError if rle.origin == RateLimitOrigin.LocalThrottle => ()
+      case _ => collector.foreach(_.recordError(ErrorKind.fromLLMError(error), providerName))
+    }
 
   /**
    * Check circuit breaker state and transition if needed.

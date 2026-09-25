@@ -3,6 +3,7 @@ package org.llm4s.llmconnect.middleware
 import org.llm4s.error.{ RateLimitError, LLMError }
 import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model.{ Completion, CompletionOptions, Conversation }
+import org.llm4s.metrics.{ ErrorKind, MetricsCollector }
 import org.llm4s.types.Result
 import java.util.concurrent.atomic.AtomicLong
 
@@ -13,11 +14,15 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * @param requestsPerMinute Maximum allowable requests per minute
  * @param burstCapacity Maximum burst size (default: same as RPM)
+ * @param metrics Optional collector receiving an [[ErrorKind.RateLimit]] event on local rejection
+ * @param providerName Provider name attached to metrics events
  */
 class RateLimitingMiddleware(
   requestsPerMinute: Int,
   burstCapacity: Int,
-  timeSource: () => Long = () => System.nanoTime()
+  timeSource: () => Long = () => System.nanoTime(),
+  metrics: Option[MetricsCollector] = None,
+  providerName: String = "unknown"
 ) extends LLMMiddleware {
 
   def this(requestsPerMinute: Int) = this(requestsPerMinute, requestsPerMinute)
@@ -69,7 +74,8 @@ class RateLimitingMiddleware(
       if (tryAcquire()) {
         next.complete(conversation, options)
       } else {
-        convertError(RateLimitError("Local rate limit exceeded."))
+        metrics.foreach(_.recordError(ErrorKind.RateLimit, providerName))
+        convertError(RateLimitError.local(providerName))
       }
 
     override def streamComplete(
@@ -80,7 +86,8 @@ class RateLimitingMiddleware(
       if (tryAcquire()) {
         next.streamComplete(conversation, options, onChunk)
       } else {
-        convertError(RateLimitError("Local rate limit exceeded."))
+        metrics.foreach(_.recordError(ErrorKind.RateLimit, providerName))
+        convertError(RateLimitError.local(providerName))
       }
   }
 }
