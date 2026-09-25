@@ -14,7 +14,7 @@ import org.llm4s.types.Result
  * @example
  * {{{
  * val rag = RAG.builder()
- *   .withEmbeddings(EmbeddingProvider.OpenAI)
+ *   .withEmbeddings("openai")
  *   .withQueryTransformer(LLMQueryRewriter(llmClient))
  *   .build()
  *

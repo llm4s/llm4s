@@ -10,37 +10,6 @@ import org.llm4s.llmconnect.model.TokenUsage
 class RAGTypesSpec extends AnyFlatSpec with Matchers {
 
   // ==========================================================================
-  // EmbeddingProvider Tests
-  // ==========================================================================
-
-  "EmbeddingProvider" should "have correct names" in {
-    EmbeddingProvider.OpenAI.name shouldBe "openai"
-    EmbeddingProvider.Voyage.name shouldBe "voyage"
-    EmbeddingProvider.Ollama.name shouldBe "ollama"
-  }
-
-  it should "parse from string correctly" in {
-    EmbeddingProvider.fromString("openai") shouldBe Some(EmbeddingProvider.OpenAI)
-    EmbeddingProvider.fromString("voyage") shouldBe Some(EmbeddingProvider.Voyage)
-    EmbeddingProvider.fromString("ollama") shouldBe Some(EmbeddingProvider.Ollama)
-    EmbeddingProvider.fromString("OPENAI") shouldBe Some(EmbeddingProvider.OpenAI)
-  }
-
-  it should "return None for unknown provider" in {
-    EmbeddingProvider.fromString("unknown") shouldBe None
-    EmbeddingProvider.fromString("") shouldBe None
-  }
-
-  it should "have all values in values sequence" in {
-    (EmbeddingProvider.values should contain).allOf(
-      EmbeddingProvider.OpenAI,
-      EmbeddingProvider.Voyage,
-      EmbeddingProvider.Ollama
-    )
-    EmbeddingProvider.values should have size 3
-  }
-
-  // ==========================================================================
   // RerankingStrategy Tests
   // ==========================================================================
 

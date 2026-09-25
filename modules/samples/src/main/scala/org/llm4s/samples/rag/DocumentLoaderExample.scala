@@ -64,7 +64,7 @@ object DocumentLoaderExample extends App {
 
   // Example of build-time loading:
   // val rag = RAG.builder()
-  //   .withEmbeddings(EmbeddingProvider.OpenAI)
+  //   .withEmbeddings("openai")
   //   .withDocuments(textLoader)
   //   .withDocuments("./docs")  // Can also use path strings
   //   .build()

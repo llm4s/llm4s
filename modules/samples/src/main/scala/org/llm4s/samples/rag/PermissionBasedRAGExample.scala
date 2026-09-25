@@ -1,6 +1,6 @@
 package org.llm4s.samples.rag
 
-import org.llm4s.rag.{ EmbeddingProvider, RAG }
+import org.llm4s.rag.RAG
 
 import org.llm4s.rag.permissions.*
 import org.llm4s.rag.permissions.pg.PgSearchIndex
@@ -108,7 +108,7 @@ object PermissionBasedRAGExample extends App {
   logger.info("""
     |// Configure RAG with a SearchIndex for permissions
     |val config = RAG.builder()
-    |  .withEmbeddings(EmbeddingProvider.OpenAI)
+    |  .withEmbeddings("openai")
     |  .withSearchIndex(searchIndex)
     |  .build()
     |
@@ -259,7 +259,7 @@ object PermissionBasedRAGExample extends App {
                 RAG.build(
                   RAG
                     .builder()
-                    .withEmbeddings(EmbeddingProvider.OpenAI)
+                    .withEmbeddings("openai")
                     .withSearchIndex(searchIndex)
                     .withTopK(5)
                 )(using service)

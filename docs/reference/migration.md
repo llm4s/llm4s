@@ -1,5 +1,65 @@
 # Migration Guide
 
+## Slice 4 (close-out): the last closed provider list
+
+The last items deferred from slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)).
+Both are source breaks, taken now because the API is not yet frozen; neither has a
+deprecated shim, following the precedent of `ProviderKind` in PR 1. It is in the build but not
+yet in a release, so nothing here affects `0.4.1` or earlier.
+
+### `org.llm4s.rag.EmbeddingProvider` is gone
+
+`llm4s-rag` kept its own closed list of embedding providers - `EmbeddingProvider.OpenAI`,
+`Voyage` and `Ollama` - duplicating what the `ProviderRegistry` has known since PR 4. It was
+wrong in both directions: an embedding provider from its own module could not be named through
+it, and it named `ollama` whether or not `llm4s-ollama` was on the classpath. It also shared its
+simple name with `org.llm4s.llmconnect.provider.EmbeddingProvider`, the embedding client trait.
+
+`RAGConfig` now names the provider by id, the same id as in `EMBEDDING_MODEL=<id>/<model>`, and
+`RAG.build` resolves it through the registry:
+
+```scala
+// Before
+import org.llm4s.rag.{ EmbeddingProvider, RAG }
+
+RAG.builder()
+  .withEmbeddings(EmbeddingProvider.OpenAI, "text-embedding-3-large")
+
+EmbeddingProvider.fromString(name).toRight(...)   // to turn a configured name into one
+
+// After
+import org.llm4s.rag.RAG
+
+RAG.builder()
+  .withEmbeddings("openai", "text-embedding-3-large")
+
+RAG.builder().withEmbeddings(name)                 // any registered id or alias; no conversion
+```
+
+`RAGConfig.embeddingProvider` is a `ProviderId`, so `config.embeddingProvider.name` becomes
+`config.embeddingProvider.asString`. `RAG.build` and `RAGConfig#build` take an implicit
+`ProviderRegistry`, resolved to `ProviderRegistry.default` when none is in scope, so existing
+call sites compile unchanged and an application with its own registry reaches the providers in
+it. `EmbeddingProvider.values` has no replacement in `llm4s-rag`: the providers are
+`summon[ProviderRegistry].embeddingIds`.
+
+### Behaviour changes
+
+- An id that is not registered fails `RAG.build` with the registry's own "Embedding provider
+  '...' is not registered" error, naming the ids that are - where `fromString` returned `None`
+  and every caller wrote its own message. The resolver is asked for the provider's canonical id,
+  so an alias such as `voyageai` arrives as `voyage`.
+- **The model default moved from `llm4s-rag` into the provider.** `RAG` used to pick a model
+  per provider from its own table, and ignore the model in the `EmbeddingProviderConfig` the
+  resolver returned. `RAGConfig()` still defaults to `openai` / `text-embedding-3-small`, but
+  `withEmbeddings(provider)` without a model now clears any model set earlier and uses, in
+  order: the resolved config's model, then the provider's `configSpec.defaultModel`. With
+  `Llm4sConfig.embeddings()` as the resolver, that is the model you configured. A provider with
+  neither fails the build naming the provider, rather than guessing.
+- Dimensions come from the provider's `dimensionsOf(model)` when not set explicitly, rather than
+  from a second table in `llm4s-rag`. A model its provider does not declare keeps the old
+  fallback of 1536.
+
 ## Slice 5: `llm4s-ollama`
 
 The first provider module of slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
@@ -565,6 +625,10 @@ that worked before works now, including `provider = "google"` and `provider = "v
 embeddings (`EmbeddingClient.from`, `EmbeddingsConfigLoader`'s fixed-arity reader,
 `ModelDimensionRegistry`, and the duplicate `org.llm4s.rag.EmbeddingProvider` name ADT) are still
 on the old dispatch. Both are tracked under #1131.
+
+> **Since resolved.** The embedding entry points moved onto the registry in PR 4, PR 5 and the
+> dimensions follow-up above; the `org.llm4s.rag.EmbeddingProvider` ADT was removed in the
+> [slice 4 close-out](#slice-4-close-out-the-last-closed-provider-list).
 
 ## Slice 4 (PR 1): `ProviderKind` becomes `ProviderId`, `ProviderConfig` opens up
 

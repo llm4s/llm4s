@@ -375,6 +375,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules inseparable; moving that one file broke the cycle.
 
 ### Removed
+- **`org.llm4s.rag.EmbeddingProvider` is gone; RAG names embedding providers by id** - the last
+  closed provider list, deferred from slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)).
+  `llm4s-rag` kept its own `OpenAI` / `Voyage` / `Ollama` ADT alongside the `ProviderRegistry`,
+  so an embedding provider from its own module could not be named through it, and it named
+  `ollama` whether or not `llm4s-ollama` was present. `RAGConfig.embeddingProvider` is now a
+  `ProviderId`, `withEmbeddings` takes the id as a string (`.withEmbeddings("openai")`), and
+  `RAG.build` resolves it through an implicit `ProviderRegistry` - an id nothing registers fails
+  with the registry's "not registered" error. The per-provider model and dimension tables in
+  `RAG` go with it: without an explicit model, RAG uses the resolved config's model, then the
+  provider's own default. Source break, no shim; see the
+  [migration guide](docs/reference/migration.md#slice-4-close-out-the-last-closed-provider-list).
 - **The two document extractors are now one.** `org.llm4s.rag.extract.DefaultDocumentExtractor`
   and `org.llm4s.llmconnect.extractors.UniversalExtractor` were independent implementations
   of the same job - each constructing its own `Tika`, defining its own MIME constants, and

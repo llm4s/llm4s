@@ -1,19 +1,8 @@
 package org.llm4s.samples.rag.modular
 
-import org.llm4s.error.ConfigurationError
-import org.llm4s.rag.EmbeddingProvider
 import org.llm4s.types.Result
 
 object ModularRAGSupport {
-
-  def toEmbeddingProvider(providerName: String): Result[EmbeddingProvider] =
-    EmbeddingProvider
-      .fromString(providerName)
-      .toRight(
-        ConfigurationError(
-          s"Unsupported embedding provider '$providerName'. Supported: ${EmbeddingProvider.values.map(_.name).mkString(", ")}"
-        )
-      )
 
   def seedCorpus(ingestion: IngestionModule): Result[Int] = {
     val docs = Seq(

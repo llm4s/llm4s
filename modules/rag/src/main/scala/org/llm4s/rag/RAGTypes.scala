@@ -3,28 +3,6 @@ package org.llm4s.rag
 import org.llm4s.llmconnect.model.TokenUsage
 
 /**
- * Embedding provider selection for RAG pipeline.
- */
-sealed trait EmbeddingProvider {
-  def name: String
-}
-
-object EmbeddingProvider {
-  case object OpenAI extends EmbeddingProvider { val name = "openai" }
-  case object Voyage extends EmbeddingProvider { val name = "voyage" }
-  case object Ollama extends EmbeddingProvider { val name = "ollama" }
-
-  def fromString(s: String): Option[EmbeddingProvider] = s.toLowerCase match {
-    case "openai" => Some(OpenAI)
-    case "voyage" => Some(Voyage)
-    case "ollama" => Some(Ollama)
-    case _        => None
-  }
-
-  val values: Seq[EmbeddingProvider] = Seq(OpenAI, Voyage, Ollama)
-}
-
-/**
  * Reranking strategy for RAG pipeline.
  */
 sealed trait RerankingStrategy
