@@ -4,6 +4,7 @@ import org.llm4s.error.{ ConfigurationError, ValidationError }
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
+import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.config.CohereConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.model.ModelRegistryService
@@ -61,16 +62,11 @@ class CohereClient(
         httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8))
       }.toEither.left.map(_.toLLMError)
 
-      attempt.flatMap { response =>
-        val status = response.statusCode()
-        if (status >= 200 && status < 300) {
-          val completionResult = parseChatResponse(response.body())
-          recordExchange(startedAt, requestText, Some(response.body()), completionResult)
-          completionResult
-        } else {
-          val errorResult = handleErrorResponse(status, response.body())
-          recordExchange(startedAt, requestText, Some(response.body()), errorResult)
-          errorResult
+      recordingExchange(startedAt, requestText, attempt.toOption.map(_.body())) {
+        attempt.flatMap { response =>
+          val status = response.statusCode()
+          if (status >= 200 && status < 300) parseChatResponse(response.body())
+          else handleErrorResponse(status, response.body())
         }
       }
     }
@@ -245,6 +241,21 @@ class CohereClient(
       responseBody = responseBody,
       result = result
     )
+
+  /**
+   * Runs a completion-producing operation and records the provider exchange exactly
+   * once, regardless of whether it succeeds or fails. `responseBody` is the same in
+   * both cases here: Cohere's HTTP response body is captured before the status check,
+   * so success and error outcomes share it.
+   */
+  private def recordingExchange(
+    startedAt: Instant,
+    requestBody: String,
+    responseBody: => Option[String]
+  )(operation: => Result[Completion]): Result[Completion] =
+    operation
+      .tapRight(completion => recordExchange(startedAt, requestBody, responseBody, Right(completion)))
+      .tapLeft(error => recordExchange(startedAt, requestBody, responseBody, Left(error)))
 }
 
 object CohereClient {
