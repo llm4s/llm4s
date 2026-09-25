@@ -17,6 +17,13 @@ import ch.qos.logback.core.read.ListAppender
 
 class VisionClientsSpec extends AnyFunSuite with Matchers {
 
+  // The stub server below responds immediately, so these bound nothing the test is
+  // waiting for - they only have to outlast the first HTTP call in a cold JVM. At one
+  // second they did not on Windows CI: the call timed out before the stubbed 500
+  // arrived, which is still a `Left` but logs nothing to assert on.
+  private val RequestTimeoutSeconds = 30
+  private val ConnectTimeoutSeconds = 10
+
   private def createTestImage(width: Int = 10, height: Int = 10): BufferedImage = {
     val image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
     val g2d   = image.createGraphics()
@@ -72,8 +79,8 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
         val cfg = org.llm4s.imageprocessing.config.OpenAIVisionConfig(
           apiKey = "x",
           baseUrl = s"http://localhost:$port",
-          requestTimeoutSeconds = 1,
-          connectTimeoutSeconds = 1
+          requestTimeoutSeconds = RequestTimeoutSeconds,
+          connectTimeoutSeconds = ConnectTimeoutSeconds
         )
         val client = new org.llm4s.imageprocessing.provider.OpenAIVisionClient(cfg)
 
@@ -85,8 +92,11 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
         // Use the public API instead of reflection
         val result = client.analyzeImage(imagePath, Some("test prompt"))
 
-        // The API should fail with an error
-        result.isLeft shouldBe true
+        // The failure must be the stubbed 500 itself. `isLeft` alone also holds for a
+        // timeout or a refused connection, which log nothing and would leave the
+        // truncation assertion below failing as a bare `false was not equal to true`.
+        val error = result.left.getOrElse(fail(s"expected a failure, got $result")).formatted
+        error should include("Status 500")
 
         // The error body must not be logged in full — the log should contain a truncated marker
         val logged =
@@ -106,8 +116,8 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
         val cfg = org.llm4s.imageprocessing.config.AnthropicVisionConfig(
           apiKey = "x",
           baseUrl = s"http://localhost:$port",
-          requestTimeoutSeconds = 1,
-          connectTimeoutSeconds = 1
+          requestTimeoutSeconds = RequestTimeoutSeconds,
+          connectTimeoutSeconds = ConnectTimeoutSeconds
         )
         val client = new org.llm4s.imageprocessing.provider.anthropicclient.AnthropicVisionClient(cfg)
 
@@ -119,8 +129,11 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
         // Use the public API instead of reflection
         val result = client.analyzeImage(imagePath, Some("test prompt"))
 
-        // The API should fail with an error
-        result.isLeft shouldBe true
+        // The failure must be the stubbed 500 itself. `isLeft` alone also holds for a
+        // timeout or a refused connection, which log nothing and would leave the
+        // truncation assertion below failing as a bare `false was not equal to true`.
+        val error = result.left.getOrElse(fail(s"expected a failure, got $result")).formatted
+        error should include("Status 500")
 
         // The error body must not be logged in full — the log should contain a truncated marker
         val logged =
