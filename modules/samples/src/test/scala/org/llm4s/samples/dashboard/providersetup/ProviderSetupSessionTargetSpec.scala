@@ -1,5 +1,6 @@
 package org.llm4s.samples.dashboard.providersetup
 
+import org.scalatest.EitherValues
 import org.llm4s.config.ProvidersConfigModel
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
@@ -14,7 +15,7 @@ import termflow.tui.PromptHistory
 
 import java.nio.file.Path
 
-class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers:
+class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers with EitherValues:
 
   private given ContextWindowResolver =
     ContextWindowResolver(ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get)
@@ -185,7 +186,7 @@ class ProviderSetupSessionTargetSpec extends AnyFlatSpec with Matchers:
           namedProviders = Map.empty
         ),
         providerConfigs = Map.empty,
-        defaultProvider = OpenAIConfig.fromValues("gpt-4o-mini", "test-key", None, "https://api.openai.com/v1"),
+        defaultProvider = OpenAIConfig.fromValues("gpt-4o-mini", "test-key", None, "https://api.openai.com/v1").value,
         discoveredModels = Map.empty,
         exchangeLogging = ProviderExchangeLogging.Disabled
       ),

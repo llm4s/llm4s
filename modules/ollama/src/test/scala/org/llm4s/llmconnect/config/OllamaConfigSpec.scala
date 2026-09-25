@@ -1,10 +1,10 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.error.ConfigurationError
+import org.scalatest.EitherValues
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
-
-import scala.util.Try
 
 /**
  * `OllamaConfig`'s construction, fallbacks and self-description.
@@ -13,7 +13,7 @@ import scala.util.Try
  * `ProviderConfigLoaderTest` and `ProviderConfigDescriptionSpec` - when the config moved
  * to `llm4s-ollama` (#1132).
  */
-class OllamaConfigSpec extends AnyFunSuite with Matchers {
+class OllamaConfigSpec extends AnyFunSuite with Matchers with EitherValues {
 
   private given ContextWindowResolver =
     ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
@@ -21,81 +21,88 @@ class OllamaConfigSpec extends AnyFunSuite with Matchers {
   private val baseUrl = "https://api.example.com"
 
   test("OllamaConfig.fromValues creates config with correct model") {
-    val config = OllamaConfig.fromValues(
-      modelName = "llama3",
-      baseUrl = "http://localhost:11434"
-    )
+    val config = OllamaConfig
+      .fromValues(
+        modelName = "llama3",
+        baseUrl = "http://localhost:11434"
+      )
+      .value
 
     config.model shouldBe "llama3"
     config.baseUrl shouldBe "http://localhost:11434"
   }
 
   test("OllamaConfig.fromValues sets correct context window for llama2") {
-    val config = OllamaConfig.fromValues(
-      modelName = "llama2",
-      baseUrl = "http://localhost:11434"
-    )
+    val config = OllamaConfig
+      .fromValues(
+        modelName = "llama2",
+        baseUrl = "http://localhost:11434"
+      )
+      .value
 
     config.contextWindow shouldBe 4096
   }
 
   test("OllamaConfig.fromValues sets context window for mistral") {
-    val config = OllamaConfig.fromValues(
-      modelName = "mistral",
-      baseUrl = "http://localhost:11434"
-    )
+    val config = OllamaConfig
+      .fromValues(
+        modelName = "mistral",
+        baseUrl = "http://localhost:11434"
+      )
+      .value
 
     // Context window may come from registry metadata or fallback logic
     config.contextWindow should be > 0
   }
 
-  test("OllamaConfig.fromValues throws for empty baseUrl") {
-    an[IllegalArgumentException] should be thrownBy {
-      OllamaConfig.fromValues(
+  test("OllamaConfig.fromValues fails for empty baseUrl") {
+    OllamaConfig
+      .fromValues(
         modelName = "llama3",
         baseUrl = ""
       )
-    }
+      .left
+      .value shouldBe a[ConfigurationError]
   }
 
   test("OllamaConfig.fromValues sets reserveCompletion for all models") {
-    val config = OllamaConfig.fromValues("llama3", "http://localhost:11434")
+    val config = OllamaConfig.fromValues("llama3", "http://localhost:11434").value
     // reserveCompletion may come from registry metadata or fallback logic
     config.reserveCompletion should be > 0
   }
 
   test("OllamaConfig.load returns Left when base url missing") {
-    val res = Try(OllamaConfig.fromValues("llama3", "")).toEither
+    val res = OllamaConfig.fromValues("llama3", "")
     res.isLeft shouldBe true
   }
 
   // Model names use a "patch-cov-" prefix so the registry misses and the fallback resolver runs.
   test("OllamaConfig fallback: return 4096 for llama2-like model") {
-    val cfg = OllamaConfig.fromValues("patch-cov-llama2", baseUrl)
+    val cfg = OllamaConfig.fromValues("patch-cov-llama2", baseUrl).value
     cfg.contextWindow shouldBe 4096
     cfg.reserveCompletion shouldBe 4096
   }
 
   test("OllamaConfig fallback: return 8192 for llama3-like model") {
-    val cfg = OllamaConfig.fromValues("patch-cov-llama3", baseUrl)
+    val cfg = OllamaConfig.fromValues("patch-cov-llama3", baseUrl).value
     cfg.contextWindow shouldBe 8192
     cfg.reserveCompletion shouldBe 4096
   }
 
   test("OllamaConfig fallback: return 16384 for codellama-like model") {
-    val cfg = OllamaConfig.fromValues("patch-cov-codellama", baseUrl)
+    val cfg = OllamaConfig.fromValues("patch-cov-codellama", baseUrl).value
     cfg.contextWindow shouldBe 16384
     cfg.reserveCompletion shouldBe 4096
   }
 
   test("OllamaConfig fallback: return 32768 for mistral-like model") {
-    val cfg = OllamaConfig.fromValues("patch-cov-mistral", baseUrl)
+    val cfg = OllamaConfig.fromValues("patch-cov-mistral", baseUrl).value
     cfg.contextWindow shouldBe 32768
     cfg.reserveCompletion shouldBe 4096
   }
 
   test("OllamaConfig fallback: return 8192 for unknown model") {
-    val cfg = OllamaConfig.fromValues("patch-cov-unknown", baseUrl)
+    val cfg = OllamaConfig.fromValues("patch-cov-unknown", baseUrl).value
     cfg.contextWindow shouldBe 8192
     cfg.reserveCompletion shouldBe 4096
   }

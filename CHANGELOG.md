@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`ProviderConfig` factories return `Result` instead of throwing** - the other item deferred
+  from slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)). Every `fromValues` on a
+  `ProviderConfig` subtype (`OpenAIConfig`, `AzureConfig`, `AnthropicConfig`, `ZaiConfig`,
+  `GeminiConfig`, `DeepSeekConfig`, `CohereConfig`, `MistralConfig`, `VertexAIConfig`,
+  `OllamaConfig`) validated with `require(...)`, throwing `IllegalArgumentException` for a blank
+  key or endpoint - the one place a library built on `Result` still reported a configuration
+  mistake by exception. They now return `Result[XConfig]`, with a `ConfigurationError` naming
+  the provider and field (same message text, field in `missingKeys`). Source break: callers
+  `flatMap` where they used the value directly, and a descriptor's `buildConfig` binds the
+  result rather than yielding it. See the
+  [migration guide](docs/reference/migration.md#slice-4-close-out-the-last-closed-provider-list-and-fromvalues-stops-throwing).
+
 - **`llm4s-ollama`: Ollama leaves `llm4s-core`** - the first provider module of slice 5
   ([#1132](https://github.com/llm4s/llm4s/issues/1132)). `OllamaClient`, `OllamaProvider`,
   `OllamaEmbeddingProvider`, `OllamaConfig` and the Ollama model lister move to the new
@@ -385,7 +397,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the registry's "not registered" error. The per-provider model and dimension tables in
   `RAG` go with it: without an explicit model, RAG uses the resolved config's model, then the
   provider's own default. Source break, no shim; see the
-  [migration guide](docs/reference/migration.md#slice-4-close-out-the-last-closed-provider-list).
+  [migration guide](docs/reference/migration.md#slice-4-close-out-the-last-closed-provider-list-and-fromvalues-stops-throwing).
 - **The two document extractors are now one.** `org.llm4s.rag.extract.DefaultDocumentExtractor`
   and `org.llm4s.llmconnect.extractors.UniversalExtractor` were independent implementations
   of the same job - each constructing its own `Tika`, defining its own MIME constants, and

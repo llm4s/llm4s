@@ -1,6 +1,6 @@
 # Migration Guide
 
-## Slice 4 (close-out): the last closed provider list
+## Slice 4 (close-out): the last closed provider list, and `fromValues` stops throwing
 
 The last items deferred from slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)).
 Both are source breaks, taken now because the API is not yet frozen; neither has a
@@ -59,6 +59,50 @@ it. `EmbeddingProvider.values` has no replacement in `llm4s-rag`: the providers 
 - Dimensions come from the provider's `dimensionsOf(model)` when not set explicitly, rather than
   from a second table in `llm4s-rag`. A model its provider does not declare keeps the old
   fallback of 1536.
+
+### `fromValues` returns `Result`
+
+Every `ProviderConfig` subtype's `fromValues` factory - `OpenAIConfig`, `AzureConfig`,
+`AnthropicConfig`, `ZaiConfig`, `GeminiConfig`, `DeepSeekConfig`, `CohereConfig`,
+`MistralConfig`, `VertexAIConfig` and `OllamaConfig` - validated its arguments with
+`require(...)`, so a blank API key threw `IllegalArgumentException` out of a library whose rule
+is that errors are values. They now return `Result[XConfig]`, and a blank credential or endpoint
+is a `ConfigurationError` carrying the same message as before (`"OpenAI apiKey must be
+non-empty"`) with the field in `missingKeys`.
+
+```scala
+// Before
+val config: OpenAIConfig = OpenAIConfig.fromValues("gpt-4o", apiKey, None, baseUrl)
+val client = LLMConnect.getClient(config)
+
+// After
+val client: Result[LLMClient] =
+  OpenAIConfig.fromValues("gpt-4o", apiKey, None, baseUrl).flatMap(LLMConnect.getClient(_))
+```
+
+A `ProviderDescriptor.buildConfig` that returned `fromValues` from a `for`'s `yield`, or
+through `.map`, binds it as a generator or uses `.flatMap` instead:
+
+```scala
+// Before
+for
+  apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
+  baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
+yield AcmeConfig.fromValues(section.model.asString, apiKey, baseUrl)
+
+// After
+for
+  apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
+  baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
+  config  <- AcmeConfig.fromValues(section.model.asString, apiKey, baseUrl)
+yield config
+```
+
+Code that caught the exception - `Try(OpenAIConfig.fromValues(...)).toEither`, or a test's
+`an[IllegalArgumentException] should be thrownBy` - matches on the `Left` instead. Nothing
+reachable from configuration changes: `Llm4sConfig` and the provider descriptors already
+rejected a missing key before calling `fromValues`, and now propagate its `Left` rather than
+letting a blank one throw.
 
 ## Slice 5: `llm4s-ollama`
 
@@ -627,8 +671,9 @@ embeddings (`EmbeddingClient.from`, `EmbeddingsConfigLoader`'s fixed-arity reade
 on the old dispatch. Both are tracked under #1131.
 
 > **Since resolved.** The embedding entry points moved onto the registry in PR 4, PR 5 and the
-> dimensions follow-up above; the `org.llm4s.rag.EmbeddingProvider` ADT was removed in the
-> [slice 4 close-out](#slice-4-close-out-the-last-closed-provider-list).
+> dimensions follow-up above; the `org.llm4s.rag.EmbeddingProvider` ADT was removed, and
+> `fromValues` converted to `Result`, in the
+> [slice 4 close-out](#slice-4-close-out-the-last-closed-provider-list-and-fromvalues-stops-throwing).
 
 ## Slice 4 (PR 1): `ProviderKind` becomes `ProviderId`, `ProviderConfig` opens up
 

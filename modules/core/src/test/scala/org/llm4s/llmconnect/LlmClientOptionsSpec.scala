@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect
 
+import org.scalatest.EitherValues
 import java.time.Instant
 
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
@@ -8,7 +9,7 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-class LlmClientOptionsSpec extends AnyFunSuite with Matchers {
+class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
   private val registryService        = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
   private given ModelRegistryService = registryService
 
@@ -27,12 +28,14 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers {
   }
 
   test("LLMConnect.getClient accepts explicit options for config-driven construction") {
-    val cfg = OpenAIConfig.fromValues(
-      modelName = "gpt-4o",
-      apiKey = "sk-test",
-      organization = None,
-      baseUrl = "https://openrouter.ai/api/v1"
-    )
+    val cfg = OpenAIConfig
+      .fromValues(
+        modelName = "gpt-4o",
+        apiKey = "sk-test",
+        organization = None,
+        baseUrl = "https://openrouter.ai/api/v1"
+      )
+      .value
     val options = LlmClientOptions(
       exchangeLogging = ProviderExchangeLogging.enabled(ProviderExchangeSink.noop)
     )
@@ -43,12 +46,14 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers {
   }
 
   test("LLMConnect.getClient accepts explicit options for provider-checked construction") {
-    val cfg = OpenAIConfig.fromValues(
-      modelName = "gpt-4o",
-      apiKey = "sk-test",
-      organization = None,
-      baseUrl = "https://api.openai.com/v1"
-    )
+    val cfg = OpenAIConfig
+      .fromValues(
+        modelName = "gpt-4o",
+        apiKey = "sk-test",
+        organization = None,
+        baseUrl = "https://api.openai.com/v1"
+      )
+      .value
     val options = LlmClientOptions(
       exchangeLogging = ProviderExchangeLogging.enabled(ProviderExchangeSink.noop)
     )

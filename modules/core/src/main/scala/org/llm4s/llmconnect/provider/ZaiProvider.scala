@@ -21,7 +21,8 @@ object ZaiProvider extends ProviderDescriptor:
     for
       apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-    yield ZaiConfig.fromValues(section.model.asString, apiKey, baseUrl)
+      config  <- ZaiConfig.fromValues(section.model.asString, apiKey, baseUrl)
+    yield config
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

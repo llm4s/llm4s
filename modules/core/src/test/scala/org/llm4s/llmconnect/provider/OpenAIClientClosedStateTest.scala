@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.scalatest.EitherValues
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
 import com.azure.ai.openai.models.{ ChatCompletions, ChatCompletionsOptions }
 import com.azure.core.util.IterableStream
@@ -18,18 +19,20 @@ import org.slf4j.LoggerFactory
  * - Operations fail with ConfigurationError after close() is called
  * - close() is idempotent (can be called multiple times safely)
  */
-class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers {
+class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers with EitherValues {
 
   private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
 
-  private def createTestConfig: OpenAIConfig = OpenAIConfig.fromValues(
-    modelName = "gpt-4",
-    apiKey = "test-api-key-for-closed-state-testing",
-    organization = None,
-    // Must never be used by unit tests (no network). We keep a clearly fake endpoint.
-    baseUrl = "https://example.invalid/v1"
-  )
+  private def createTestConfig: OpenAIConfig = OpenAIConfig
+    .fromValues(
+      modelName = "gpt-4",
+      apiKey = "test-api-key-for-closed-state-testing",
+      organization = None,
+      // Must never be used by unit tests (no network). We keep a clearly fake endpoint.
+      baseUrl = "https://example.invalid/v1"
+    )
+    .value
 
   private def createTestConversation: Conversation =
     Conversation(Seq(UserMessage("Hello")))
@@ -140,13 +143,15 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers {
 
   it should "include model name in the closed error message" in {
     val modelName = "gpt-4-turbo-preview"
-    val config = OpenAIConfig.fromValues(
-      modelName = modelName,
-      apiKey = "test-api-key",
-      organization = None,
-      // Must never be used by unit tests (no network). We keep a clearly fake endpoint.
-      baseUrl = "https://example.invalid/v1"
-    )
+    val config = OpenAIConfig
+      .fromValues(
+        modelName = modelName,
+        apiKey = "test-api-key",
+        organization = None,
+        // Must never be used by unit tests (no network). We keep a clearly fake endpoint.
+        baseUrl = "https://example.invalid/v1"
+      )
+      .value
     val client = new OpenAIClient(config, org.llm4s.metrics.MetricsCollector.noop)
 
     client.close()

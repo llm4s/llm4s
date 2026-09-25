@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.scalatest.EitherValues
 import org.llm4s.error.{ AuthenticationError, ConfigurationError }
 import org.llm4s.llmconnect.config.{ CohereConfig, ContextWindowResolver }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
@@ -26,7 +27,7 @@ import org.llm4s.it.tags.Cloud
  * with the project's `Result[A]` error handling contract.
  */
 @Cloud
-class CohereSmokeSpec extends AnyFlatSpec with Matchers {
+class CohereSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
@@ -34,11 +35,13 @@ class CohereSmokeSpec extends AnyFlatSpec with Matchers {
   private val apiKey: Option[String] = Option(System.getenv("COHERE_API_KEY")).filter(_.nonEmpty)
 
   private def config(key: String): CohereConfig =
-    CohereConfig.fromValues(
-      modelName = "command-r",
-      apiKey = key,
-      baseUrl = CohereConfig.DEFAULT_BASE_URL
-    )
+    CohereConfig
+      .fromValues(
+        modelName = "command-r",
+        apiKey = key,
+        baseUrl = CohereConfig.DEFAULT_BASE_URL
+      )
+      .value
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 

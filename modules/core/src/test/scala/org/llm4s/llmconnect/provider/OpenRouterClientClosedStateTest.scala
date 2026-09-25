@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.error.ConfigurationError
@@ -14,18 +15,20 @@ import org.llm4s.model.ModelRegistryService
  * - Operations fail with ConfigurationError after close() is called
  * - close() is idempotent (can be called multiple times safely)
  */
-class OpenRouterClientClosedStateTest extends AnyFlatSpec with Matchers {
+class OpenRouterClientClosedStateTest extends AnyFlatSpec with Matchers with EitherValues {
 
   private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
 
-  private def createTestConfig: OpenAIConfig = OpenAIConfig.fromValues(
-    modelName = "openai/gpt-4",
-    apiKey = "test-api-key-for-closed-state-testing",
-    organization = None,
-    // Must never be used by unit tests (no network). We keep a clearly fake endpoint.
-    baseUrl = "https://example.invalid/api/v1"
-  )
+  private def createTestConfig: OpenAIConfig = OpenAIConfig
+    .fromValues(
+      modelName = "openai/gpt-4",
+      apiKey = "test-api-key-for-closed-state-testing",
+      organization = None,
+      // Must never be used by unit tests (no network). We keep a clearly fake endpoint.
+      baseUrl = "https://example.invalid/api/v1"
+    )
+    .value
 
   private def createTestConversation: Conversation =
     Conversation(Seq(UserMessage("Hello")))
@@ -82,12 +85,14 @@ class OpenRouterClientClosedStateTest extends AnyFlatSpec with Matchers {
   }
 
   it should "include model name in the closed error message" in {
-    val config = OpenAIConfig.fromValues(
-      modelName = "anthropic/claude-3-opus",
-      apiKey = "test-api-key",
-      organization = None,
-      baseUrl = "https://example.invalid/api/v1"
-    )
+    val config = OpenAIConfig
+      .fromValues(
+        modelName = "anthropic/claude-3-opus",
+        apiKey = "test-api-key",
+        organization = None,
+        baseUrl = "https://example.invalid/api/v1"
+      )
+      .value
     val client = new OpenRouterClient(config)
 
     client.close()

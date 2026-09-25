@@ -1,9 +1,10 @@
 package org.llm4s.llmconnect.config
 
+import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-class ConfigRedactionSpec extends AnyFlatSpec with Matchers {
+class ConfigRedactionSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private given ContextWindowResolver =
     ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
@@ -11,45 +12,55 @@ class ConfigRedactionSpec extends AnyFlatSpec with Matchers {
   private val secret = "SECRET_TEST_VALUE_12345"
 
   "Provider config toString" should "not leak apiKey values" in {
-    val openai = OpenAIConfig.fromValues(
-      modelName = "gpt-4",
-      apiKey = secret,
-      organization = Some("org"),
-      baseUrl = "https://example.invalid/v1"
-    )
+    val openai = OpenAIConfig
+      .fromValues(
+        modelName = "gpt-4",
+        apiKey = secret,
+        organization = Some("org"),
+        baseUrl = "https://example.invalid/v1"
+      )
+      .value
     (openai.toString should not).include(secret)
     openai.toString should include("***")
 
-    val azure = AzureConfig.fromValues(
-      modelName = "gpt-4",
-      endpoint = "https://example.invalid",
-      apiKey = secret,
-      apiVersion = "2024-02-01"
-    )
+    val azure = AzureConfig
+      .fromValues(
+        modelName = "gpt-4",
+        endpoint = "https://example.invalid",
+        apiKey = secret,
+        apiVersion = "2024-02-01"
+      )
+      .value
     (azure.toString should not).include(secret)
     azure.toString should include("***")
 
-    val anthropic = AnthropicConfig.fromValues(
-      modelName = "claude-3-5-sonnet-20241022",
-      apiKey = secret,
-      baseUrl = "https://example.invalid"
-    )
+    val anthropic = AnthropicConfig
+      .fromValues(
+        modelName = "claude-3-5-sonnet-20241022",
+        apiKey = secret,
+        baseUrl = "https://example.invalid"
+      )
+      .value
     (anthropic.toString should not).include(secret)
     anthropic.toString should include("***")
 
-    val gemini = GeminiConfig.fromValues(
-      modelName = "gemini-1.5-pro",
-      apiKey = secret,
-      baseUrl = "https://example.invalid"
-    )
+    val gemini = GeminiConfig
+      .fromValues(
+        modelName = "gemini-1.5-pro",
+        apiKey = secret,
+        baseUrl = "https://example.invalid"
+      )
+      .value
     (gemini.toString should not).include(secret)
     gemini.toString should include("***")
 
-    val zai = ZaiConfig.fromValues(
-      modelName = "glm-4.5",
-      apiKey = secret,
-      baseUrl = "https://example.invalid"
-    )
+    val zai = ZaiConfig
+      .fromValues(
+        modelName = "glm-4.5",
+        apiKey = secret,
+        baseUrl = "https://example.invalid"
+      )
+      .value
     (zai.toString should not).include(secret)
     zai.toString should include("***")
   }

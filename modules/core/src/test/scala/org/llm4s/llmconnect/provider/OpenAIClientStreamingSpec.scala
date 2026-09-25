@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.scalatest.EitherValues
 import com.azure.ai.openai.models.{ ChatCompletions, ChatCompletionsOptions }
 import com.azure.core.util.IterableStream
 import com.azure.json.JsonProviders
@@ -15,7 +16,7 @@ import scala.collection.mutable.ListBuffer
 import scala.jdk.CollectionConverters._
 import scala.util.Using
 
-final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers {
+final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
@@ -26,12 +27,14 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers {
   "OpenAIClient.streamComplete" should "safely handle null/empty choices and update tokens only when finished" in {
     val model = "gpt-4"
 
-    val config = OpenAIConfig.fromValues(
-      modelName = model,
-      apiKey = "test-api-key",
-      organization = None,
-      baseUrl = "https://example.invalid/v1"
-    )
+    val config = OpenAIConfig
+      .fromValues(
+        modelName = model,
+        apiKey = "test-api-key",
+        organization = None,
+        baseUrl = "https://example.invalid/v1"
+      )
+      .value
 
     val noChoices    = completionsFromJson("""{"id":"chatcmpl-1","created":0,"choices":null}""")
     val emptyChoices = completionsFromJson("""{"id":"chatcmpl-1","created":0,"choices":[]}""")
@@ -87,12 +90,14 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers {
 
   it should "record provider exchanges for native streaming when logging is enabled" in {
     val model = "gpt-4"
-    val config = OpenAIConfig.fromValues(
-      modelName = model,
-      apiKey = "test-api-key",
-      organization = None,
-      baseUrl = "https://example.invalid/v1"
-    )
+    val config = OpenAIConfig
+      .fromValues(
+        modelName = model,
+        apiKey = "test-api-key",
+        organization = None,
+        baseUrl = "https://example.invalid/v1"
+      )
+      .value
     val contentChunk = completionsFromJson(
       """{
         |"id":"chatcmpl-stream-1",
@@ -146,12 +151,14 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers {
 
   it should "record a failed provider exchange when native streaming throws" in {
     val model = "gpt-4"
-    val config = OpenAIConfig.fromValues(
-      modelName = model,
-      apiKey = "test-api-key",
-      organization = None,
-      baseUrl = "https://example.invalid/v1"
-    )
+    val config = OpenAIConfig
+      .fromValues(
+        modelName = model,
+        apiKey = "test-api-key",
+        organization = None,
+        baseUrl = "https://example.invalid/v1"
+      )
+      .value
     val recorded = ListBuffer.empty[ProviderExchange]
     val sink = new ProviderExchangeSink:
       override def record(exchange: ProviderExchange): Unit =
