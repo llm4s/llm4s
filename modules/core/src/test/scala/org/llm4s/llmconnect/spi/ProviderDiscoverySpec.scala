@@ -232,10 +232,10 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
     "be independent, so one id can name a chat and an embedding provider" in {
       val registry = ProviderRegistry.builtin
 
-      // Ollama supplies both; Anthropic only chat; Voyage only embeddings. That overlap
+      // OpenAI supplies both; Anthropic only chat; Voyage only embeddings. That overlap
       // without containment is why the embedding descriptor is a separate trait.
-      registry.ids should contain("ollama")
-      registry.embeddingIds should contain("ollama")
+      registry.ids should contain("openai")
+      registry.embeddingIds should contain("openai")
       registry.ids should contain("anthropic")
       (registry.embeddingIds should not).contain("anthropic")
       registry.embeddingIds should contain("voyage")

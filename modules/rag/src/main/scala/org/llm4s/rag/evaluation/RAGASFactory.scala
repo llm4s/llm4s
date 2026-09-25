@@ -2,6 +2,7 @@ package org.llm4s.rag.evaluation
 
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient, LLMConnect }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, ModelDimensionRegistry, ProviderConfig }
+import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag.evaluation.metrics.*
 import org.llm4s.types.Result
@@ -31,18 +32,40 @@ object RAGASFactory {
 
   /**
    * Create evaluator with all default metrics from explicit configurations.
+   *
+   * The embedding model's dimensions come from its provider's descriptor, through
+   * the given [[org.llm4s.llmconnect.spi.ProviderRegistry]]. A model the provider does
+   * not declare is an error rather than a guess; build the [[EmbeddingModelConfig]]
+   * yourself and use [[create]] for one.
    */
   def fromConfigs(
     providerCfg: ProviderConfig,
     embedding: (String, org.llm4s.llmconnect.config.EmbeddingProviderConfig)
-  )(using ModelRegistryService): Result[RAGASEvaluator] =
+  )(using ModelRegistryService, ProviderRegistry): Result[RAGASEvaluator] = {
+    val (providerName, embeddingConfig) = embedding
     for {
+      embeddingModelCfg <- embeddingModelConfig(providerName, embeddingConfig)
+      embeddingClient   <- EmbeddingClient.from(providerName, embeddingConfig)
+      // Last, because it is the one that holds resources: nothing after it can fail and
+      // leave it unclosed.
       llmClient <- LLMConnect.fromConfig(providerCfg)
-      (providerName, embeddingConfig) = embedding
-      embeddingClient <- EmbeddingClient.from(providerName, embeddingConfig)
-      dims              = ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model).getOrElse(1536)
-      embeddingModelCfg = EmbeddingModelConfig(embeddingConfig.model, dims)
     } yield RAGASEvaluator(llmClient, embeddingClient, embeddingModelCfg)
+  }
+
+  /**
+   * The embedding model config for `embeddingConfig`, its dimensions resolved through the
+   * provider's descriptor.
+   *
+   * Resolved before any client is built: it is pure, and failing after an
+   * [[org.llm4s.llmconnect.LLMClient]] exists would discard that client unclosed.
+   */
+  private def embeddingModelConfig(
+    providerName: String,
+    embeddingConfig: org.llm4s.llmconnect.config.EmbeddingProviderConfig
+  )(using ProviderRegistry): Result[EmbeddingModelConfig] =
+    ModelDimensionRegistry
+      .getDimension(providerName, embeddingConfig.model)
+      .map(dims => EmbeddingModelConfig(embeddingConfig.model, dims))
 
   /**
    * Create evaluator with all default metrics.
@@ -101,18 +124,23 @@ object RAGASFactory {
 
   /**
    * Create a basic evaluator from explicit configurations.
+   *
+   * Dimensions are resolved as in [[fromConfigs]]; use [[basic]] for a model its
+   * provider does not declare.
    */
   def basicFromConfigs(
     providerCfg: ProviderConfig,
     embedding: (String, org.llm4s.llmconnect.config.EmbeddingProviderConfig)
-  )(using ModelRegistryService): Result[RAGASEvaluator] =
+  )(using ModelRegistryService, ProviderRegistry): Result[RAGASEvaluator] = {
+    val (providerName, embeddingConfig) = embedding
     for {
+      embeddingModelCfg <- embeddingModelConfig(providerName, embeddingConfig)
+      embeddingClient   <- EmbeddingClient.from(providerName, embeddingConfig)
+      // Last, because it is the one that holds resources: nothing after it can fail and
+      // leave it unclosed.
       llmClient <- LLMConnect.fromConfig(providerCfg)
-      (providerName, embeddingConfig) = embedding
-      embeddingClient <- EmbeddingClient.from(providerName, embeddingConfig)
-      dims              = ModelDimensionRegistry.getDimension(providerName, embeddingConfig.model).getOrElse(1536)
-      embeddingModelCfg = EmbeddingModelConfig(embeddingConfig.model, dims)
     } yield RAGASEvaluator.basic(llmClient, embeddingClient, embeddingModelCfg)
+  }
 
   // Individual metric factories
 

@@ -38,19 +38,19 @@ object ModelSelector {
         )
       case Image =>
         val name = localModels.imageModel
-        ModelDimensionRegistry.getDimension("local", name).map { dim =>
+        ModelDimensionRegistry.localDimension(name).map { dim =>
           logger.info(s"[ModelSelector] Image model: $name ($dim dims)")
           EmbeddingModelConfig(name, dim)
         }
       case Audio =>
         val name = localModels.audioModel
-        ModelDimensionRegistry.getDimension("local", name).map { dim =>
+        ModelDimensionRegistry.localDimension(name).map { dim =>
           logger.info(s"[ModelSelector] Audio model: $name ($dim dims)")
           EmbeddingModelConfig(name, dim)
         }
       case Video =>
         val name = localModels.videoModel
-        ModelDimensionRegistry.getDimension("local", name).map { dim =>
+        ModelDimensionRegistry.localDimension(name).map { dim =>
           logger.info(s"[ModelSelector] Video model: $name ($dim dims)")
           EmbeddingModelConfig(name, dim)
         }

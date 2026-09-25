@@ -60,11 +60,6 @@ class ProviderConfigConstructionTest extends AnyFunSuite with Matchers {
     res.isLeft shouldBe true
   }
 
-  test("OllamaConfig.load returns Left when base url missing") {
-    val res = Try(OllamaConfig.fromValues("llama3", "")).toEither
-    res.isLeft shouldBe true
-  }
-
   test("OpenAIConfig.fromValues constructs an OpenAI config") {
     val openAi = OpenAIConfig.fromValues("gpt-4o", "sk", None, DEFAULT_OPENAI_BASE_URL)
     openAi shouldBe a[OpenAIConfig]

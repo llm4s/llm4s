@@ -54,19 +54,16 @@ class Llm4sConfigTextModelSpec extends AnyWordSpec with Matchers with EitherValu
       }
     }
 
-    "resolve the provider through the caller's registry" in {
-      // `local` is the one provider ModelDimensionRegistry knows and BuiltinProviders
-      // does not, so the dimension lookup succeeds and the registry is the only thing
-      // under test.
-      val props = Map("llm4s.embeddings.model" -> "local/openclip-vit-b32")
+    "resolve the provider and its dimensions through the caller's registry" in {
+      val props = Map("llm4s.embeddings.model" -> "fixturelocal/fixture-encoder")
 
       withProps(props) {
         val settings = Llm4sConfig
-          .textEmbeddingModel()(using ProviderRegistry.default.withEmbeddingProvider(LocalFixtureEmbeddings))
+          .textEmbeddingModel()(using ProviderRegistry.default.withEmbeddingProvider(FixtureEmbeddings))
           .value
 
-        settings.provider shouldBe "local"
-        settings.modelName shouldBe "openclip-vit-b32"
+        settings.provider shouldBe "fixturelocal"
+        settings.modelName shouldBe "fixture-encoder"
         settings.dimensions shouldBe 512
       }
     }
@@ -74,20 +71,22 @@ class Llm4sConfigTextModelSpec extends AnyWordSpec with Matchers with EitherValu
     "report the provider as unregistered under a registry that lacks it" in {
       // The negative half of the pair above: the same configuration, resolved by a
       // registry the fixture was never added to.
-      val props = Map("llm4s.embeddings.model" -> "local/openclip-vit-b32")
+      val props = Map("llm4s.embeddings.model" -> "fixturelocal/fixture-encoder")
 
       withProps(props) {
         val error = Llm4sConfig.textEmbeddingModel()(using ProviderRegistry.default).left.value.formatted
 
-        error should include("local")
+        error should include("fixturelocal")
         error should include("llm4s.embeddings.model")
       }
     }
   }
 
   /** An embedding provider registered only by the caller, as an application's would be. */
-  private object LocalFixtureEmbeddings extends EmbeddingProviderDescriptor {
-    val id: ProviderId = ProviderId("local")
+  private object FixtureEmbeddings extends EmbeddingProviderDescriptor {
+    val id: ProviderId = ProviderId("fixturelocal")
+
+    override val modelDimensions: Map[String, Int] = Map("fixture-encoder" -> 512)
 
     override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
       requiresApiKey = false,

@@ -32,4 +32,17 @@ class OllamaRoutingTest extends AnyFunSuite with Matchers {
     cfg.baseUrl shouldBe "http://lan-host:11434"
     cfg.model shouldBe "mistral:latest"
   }
+
+  test("LLMConnect.getClient returns OllamaClient for Ollama provider") {
+    val cfg = OllamaConfig.fromValues(
+      modelName = "llama3.1",
+      baseUrl = "http://localhost:11434"
+    )
+
+    val res = LLMConnect.getClient(ProviderId("ollama"), cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "OllamaClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
 }

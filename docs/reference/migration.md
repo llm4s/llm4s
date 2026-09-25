@@ -1,5 +1,121 @@
 # Migration Guide
 
+## Slice 5: `llm4s-ollama`
+
+The first provider module of slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
+Ollama goes first because it has the smallest client, no vendor SDK, and a live `@Ollama`
+integration tier - so the carve is checked against a real server rather than mocks. It is in
+the build but not yet in a release; `0.4.1` and earlier still ship Ollama inside `llm4s-core`.
+
+### What moved
+
+| Code | Now in |
+|---|---|
+| `OllamaClient`, `OllamaProvider`, `OllamaEmbeddingProvider` (`org.llm4s.llmconnect.provider`) | `llm4s-ollama` |
+| `OllamaConfig` (`org.llm4s.llmconnect.config`) | `llm4s-ollama` |
+| `ProviderModelListers.Ollama` → `OllamaModelLister` (`org.llm4s.config`) | `llm4s-ollama` |
+| `ConfigKeys.OLLAMA_*` → `OllamaConfigKeys.OLLAMA_*` (`org.llm4s.config`) | `llm4s-ollama` |
+| the `llm4s.embeddings.ollama` `reference.conf` block | `llm4s-ollama`'s `reference.conf` |
+
+Package names are unchanged, so `import org.llm4s.llmconnect.config.OllamaConfig` keeps
+working once the dependency is added:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-ollama" % version
+```
+
+### Registration is the dependency
+
+`llm4s-ollama` declares `Llm4sOllamaModule` in its `META-INF/services`, so
+`ProviderRegistry.default` finds it and `provider = "ollama"` and
+`EMBEDDING_MODEL=ollama/<model>` resolve as before. Without the dependency both fail with the
+registry's error, which says `ollama` is not registered and names the providers that are.
+
+`ProviderRegistry.builtin` no longer includes Ollama, because core no longer ships it. If you
+used `builtin` to avoid classpath discovery (a shaded fat jar, typically), add the module
+explicitly:
+
+```scala
+given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sOllamaModule)
+```
+
+### Source breaks
+
+Two names could not keep their fully-qualified path, because they were members of objects that
+stay in core:
+
+1. **`ProviderModelListers.Ollama` is now `OllamaModelLister`**, in the same package
+   (`org.llm4s.config`). `OllamaProvider.modelLister` returns it, so code that reached the
+   lister through the descriptor is unaffected.
+2. **`ConfigKeys.OLLAMA_BASE_URL`, `OLLAMA_EMBEDDING_BASE_URL` and `OLLAMA_EMBEDDING_MODEL`
+   are now on `OllamaConfigKeys`**, also in `org.llm4s.config`. The variable names themselves
+   are unchanged.
+
+### What did *not* change
+
+Every configuration key and environment variable: `llm4s.providers.<name>` with
+`provider = "ollama"`, `llm4s.embeddings.ollama.*`, `OLLAMA_EMBEDDING_BASE_URL` and
+`OLLAMA_EMBEDDING_MODEL`. The `reference.conf` block moved rather than changed; HOCON merges
+reference files across jars, so the keys exist exactly when the provider does.
+
+`TokenizerMapping` still recognises the `ollama/` model-name prefix. It is a naming
+convention on model strings rather than a reference to the provider, and it gives the same
+answer whether or not `llm4s-ollama` is on the classpath.
+
+## Slice 4 follow-up: embedding dimensions move into the provider
+
+One of the two items deferred from slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)),
+and the precursor to carving `llm4s-ollama` ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
+`ModelDimensionRegistry` was the last central provider list on the embedding side: a map in
+`llm4s-core` covering `openai`, `voyage` and `local`. It had no `ollama` entry, so the documented
+
+```bash
+EMBEDDING_MODEL=ollama/nomic-embed-text
+```
+
+failed at `Llm4sConfig.textEmbeddingModel()` with `Unknown model 'nomic-embed-text' for
+provider 'ollama'`, and `RAGASFactory.fromConfigs` papered over the same gap with
+`.getOrElse(1536)` for a model that is 768-dimensional.
+
+### Declaring dimensions
+
+An embedding provider now declares the dimensions of the models it knows, alongside its
+`configSpec`:
+
+```scala
+object JinaEmbeddings extends EmbeddingProviderDescriptor:
+  val id = ProviderId("jina")
+
+  override val modelDimensions = Map(
+    "jina-embeddings-v3" -> 1024
+  )
+```
+
+A provider whose model names have variants overrides `dimensionsOf(model)` instead - Ollama
+folds a `:latest` tag onto the untagged name, and no other tag, because other tags of one model
+can differ in size. A model a provider does not declare still embeds; only a caller that needs
+its dimensionality up front is told it is unknown.
+
+### Source-compatible signature changes
+
+`ModelDimensionRegistry.getDimension`, `RAGASFactory.fromConfigs` and
+`RAGASFactory.basicFromConfigs` take an implicit `ProviderRegistry`, resolved to
+`ProviderRegistry.default` when none is in scope. Existing call sites compile unchanged; a
+caller with its own registry now reaches the providers in it.
+
+`ModelDimensionRegistry.localDimension(model)` answers the local non-text encoders
+(`openclip-vit-b32`, `wav2vec2-base`, `timesformer-base`), which have no descriptor because
+nothing can be configured with them. `getDimension("local", ...)` still works.
+
+### Behaviour changes
+
+- `RAGASFactory.fromConfigs` and `basicFromConfigs` return the lookup's `Left` for an embedding
+  model its provider does not declare, instead of assuming 1536 dimensions. Build the
+  `EmbeddingModelConfig` yourself and call `RAGASFactory.create` or `basic` for such a model.
+- `getDimension` for an unregistered provider returns the registry's "not registered" error,
+  naming the embedding providers that are, rather than "Unknown model".
+- `voyage-3-large` resolves to 1024, its default output size, not 1536.
+
 ## Slice 4 (PR 5): embedding config moves into the provider
 
 The fifth slice 4 change ([#1131](https://github.com/llm4s/llm4s/issues/1131)), and the

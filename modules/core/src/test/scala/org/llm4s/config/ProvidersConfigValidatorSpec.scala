@@ -57,11 +57,11 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
       val raw = RawProvidersConfig(
         selectedProvider = None,
         namedProviders = Map(
-          ProviderName("ollama-local") -> RawNamedProviderSection(
-            provider = Some("ollama"),
-            model = Some("llama3:latest"),
-            baseUrl = Some("http://localhost:11434"),
-            apiKey = None,
+          ProviderName("anthropic-main") -> RawNamedProviderSection(
+            provider = Some("anthropic"),
+            model = Some("claude-sonnet-4-5"),
+            baseUrl = None,
+            apiKey = Some("sk-ant-test"),
             organization = None,
             endpoint = None,
             apiVersion = None,
@@ -72,8 +72,8 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
       ProvidersConfigLoader.validate(raw) match
         case Right(cfg) =>
           cfg.selectedProvider shouldBe None
-          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("ollama-local")
-          cfg.namedProviders(ProviderName("ollama-local")).provider shouldBe ProviderId("ollama")
+          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("anthropic-main")
+          cfg.namedProviders(ProviderName("anthropic-main")).provider shouldBe ProviderId("anthropic")
         case Left(err) =>
           fail(s"Expected ProvidersConfig without selected provider, got error: ${err.message}")
     }

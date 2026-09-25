@@ -11,7 +11,8 @@ import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, Llm4sProviderModu
  * `META-INF/services` entry - so the built-ins have no privileged path. Slice 5 of
  * [[https://github.com/llm4s/llm4s/issues/1126 #1126]] moves each client into
  * its own module with its own `Llm4sProviderModule`, and this list shrinks
- * to whatever is left.
+ * to whatever is left. Ollama has gone: it is `llm4s-ollama`'s
+ * `Llm4sOllamaModule` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  *
  * Nothing else should grow a provider list: a new provider is a new
  * `ProviderDescriptor` (or `EmbeddingProviderDescriptor`) plus an entry here,
@@ -25,7 +26,6 @@ object BuiltinProviders extends Llm4sProviderModule:
     RequestyProvider,
     AzureProvider,
     AnthropicProvider,
-    OllamaProvider,
     ZaiProvider,
     GeminiProvider,
     DeepSeekProvider,
@@ -36,6 +36,5 @@ object BuiltinProviders extends Llm4sProviderModule:
 
   override val embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(
     OpenAIEmbeddingProvider,
-    VoyageAIEmbeddingProvider,
-    OllamaEmbeddingProvider
+    VoyageAIEmbeddingProvider
   )

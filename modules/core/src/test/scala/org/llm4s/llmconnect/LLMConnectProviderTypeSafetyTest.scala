@@ -72,20 +72,6 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     }
   }
 
-  test("Ollama provider with OllamaConfig returns OllamaClient") {
-    val cfg: ProviderConfig = OllamaConfig(
-      model = "llama3.1",
-      baseUrl = "http://localhost:11434",
-      contextWindow = 8192,
-      reserveCompletion = 4096
-    )
-    val res = LLMConnect.getClient(ProviderId("ollama"), cfg)
-    res match {
-      case Right(client) => client.getClass.getSimpleName shouldBe "OllamaClient"
-      case Left(err)     => fail(s"Expected Right, got Left($err)")
-    }
-  }
-
   test("Zai provider with ZaiConfig returns ZaiClient") {
     val cfg: ProviderConfig = ZaiConfig(
       apiKey = "key",

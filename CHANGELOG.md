@@ -22,6 +22,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`llm4s-ollama`: Ollama leaves `llm4s-core`** - the first provider module of slice 5
+  ([#1132](https://github.com/llm4s/llm4s/issues/1132)). `OllamaClient`, `OllamaProvider`,
+  `OllamaEmbeddingProvider`, `OllamaConfig` and the Ollama model lister move to the new
+  `llm4s-ollama` artifact, with their tests, the `llm4s.embeddings.ollama` `reference.conf`
+  block, and an `Llm4sOllamaModule` declared in `META-INF/services` - so adding the dependency
+  is the whole of registration. Package names are unchanged.
+
+  Two names move because the objects they were members of stay in core:
+  `ProviderModelListers.Ollama` is now `OllamaModelLister`, and `ConfigKeys.OLLAMA_*` are now
+  on `OllamaConfigKeys`, both still in `org.llm4s.config`. `ProviderRegistry.builtin` no longer
+  includes Ollama; `ProviderRegistry.builtin.withModule(new Llm4sOllamaModule)` restores it
+  where classpath discovery is unavailable. No configuration key or environment variable
+  changed. See the [migration guide](docs/reference/migration.md#slice-5-llm4s-ollama).
+
+- **Embedding model dimensions move into the provider** - the last central provider list on
+  the embedding side, and one of the two items deferred from slice 4
+  ([#1131](https://github.com/llm4s/llm4s/issues/1131)). `EmbeddingProviderDescriptor` gains
+  `modelDimensions` (and `dimensionsOf`, for a provider whose model names have variants), and
+  `ModelDimensionRegistry.getDimension` answers from the descriptors in the caller's
+  `ProviderRegistry` instead of a table in `llm4s-core`. A provider module now brings its
+  dimensions with it, which is what lets them leave core with the provider in slice 5.
+
+  `getDimension` takes an implicit `ProviderRegistry`, and so do `RAGASFactory.fromConfigs`
+  and `basicFromConfigs`: binary-incompatible, source-compatible. `ModelDimensionRegistry.
+  localDimension` answers the local non-text encoders without triggering provider discovery;
+  `ModelSelector` uses it.
+
+  **`RAGASFactory.fromConfigs` and `basicFromConfigs` no longer guess.** Both used to fall back
+  to 1536 dimensions for any model the table lacked - including every Ollama model. They now
+  return the lookup's `Left`; for a model its provider does not declare, build the
+  `EmbeddingModelConfig` yourself and use `create` or `basic`.
+
 - **Embedding configuration moves into the provider** - the fifth change of slice 4
   ([#1131](https://github.com/llm4s/llm4s/issues/1131)), completing what the fourth began. PR 4
   made an embedding provider resolvable from its own module; its *configuration* was still a
@@ -364,6 +396,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`EMBEDDING_MODEL=ollama/nomic-embed-text` failed `Llm4sConfig.textEmbeddingModel()`** with
+  `Unknown model 'nomic-embed-text' for provider 'ollama'`. The configuration is documented in
+  the README and `CLAUDE.md`, but the central dimension table covered only `openai`, `voyage`
+  and `local`. Ollama now declares `nomic-embed-text` (768), `mxbai-embed-large` (1024) and
+  `all-minilm` (384), with a `:latest` tag folded onto the untagged name.
+- **`voyage-3-large` was recorded as 1536-dimensional**; its default output is 1024. `voyage-3`
+  (1024), the model `CLAUDE.md` documents, and `voyage-3-lite` (512) were missing and are now
+  declared, as is OpenAI's `text-embedding-ada-002` (1536).
 - **`provider = "vertexai"` failed config validation outright, making Vertex AI unreachable.**
   `ProviderKind.VertexAI` existed, `NamedProviderLoader` built a `VertexAIConfig` from it and
   `LLMConnect` built a `VertexAIClient` from that - but Vertex AI was absent from

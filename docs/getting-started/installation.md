@@ -210,6 +210,26 @@ a 25 MB dependency that used to sit on every `llm4s-core` user's classpath — w
 the point of the split. Package names are unchanged; see the
 [migration note](../reference/migration.md#slice-3-llm4s-speech).
 
+### For Ollama (local models)
+
+{: .note }
+> Not yet published. `llm4s-ollama` exists in the build as of
+> [#1132](https://github.com/llm4s/llm4s/issues/1132) but ships in the next release;
+> in `0.4.1` and earlier Ollama is still inside `llm4s-core`.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-ollama" % llm4sVersion
+```
+
+Carries the Ollama chat client, the Ollama embedding provider and Ollama model listing. It adds
+no third-party dependency of its own. Adding it is all the registration there is: the module
+declares itself to the provider registry, so `provider = "ollama"` and
+`EMBEDDING_MODEL=ollama/<model>` resolve with no code change. Without it, both fail with an error
+saying `ollama` is not registered and naming the providers that are. Package names are
+unchanged; see the
+[migration note](../reference/migration.md#slice-5-llm4s-ollama).
+
 ### For image generation and vision
 
 {: .note }

@@ -18,7 +18,8 @@ import org.scalatest.wordspec.AnyWordSpec
  * checked that a new provider had been handled everywhere. The registry is a
  * runtime lookup and the compiler cannot; this spec is the replacement for that
  * guarantee, and a new built-in provider must appear in [[expectations]] or
- * fail here.
+ * fail here. A provider that moves to its own module takes its round trip with it
+ * (`Llm4sOllamaModuleSpec` in `llm4s-ollama`).
  */
 class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
 
@@ -33,7 +34,6 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
     (RequestyProvider, "OpenAIConfig", "OpenAIClient"),
     (AzureProvider, "AzureConfig", "OpenAIClient"),
     (AnthropicProvider, "AnthropicConfig", "AnthropicClient"),
-    (OllamaProvider, "OllamaConfig", "OllamaClient"),
     (ZaiProvider, "ZaiConfig", "ZaiClient"),
     (GeminiProvider, "GeminiConfig", "GeminiClient"),
     (DeepSeekProvider, "DeepSeekConfig", "DeepSeekClient"),

@@ -44,6 +44,25 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
     modelEnv = Some("VOYAGE_EMBEDDING_MODEL")
   )
 
+  /**
+   * Default output dimensions. Several of these models accept an
+   * `output_dimension` request parameter; the client does not send one, so the
+   * default is what it gets.
+   */
+  override val modelDimensions: Map[String, Int] = Map(
+    "voyage-2"         -> 1024,
+    "voyage-3"         -> 1024,
+    "voyage-3-lite"    -> 512,
+    "voyage-3-large"   -> 1024,
+    "voyage-3.5"       -> 1024,
+    "voyage-3.5-lite"  -> 1024,
+    "voyage-code-2"    -> 1536,
+    "voyage-code-3"    -> 1024,
+    "voyage-finance-2" -> 1024,
+    "voyage-law-2"     -> 1024,
+    "voyage-context-3" -> 1024
+  )
+
   /** Builds the provider for the SPI; see [[fromConfig]] for the direct route. */
   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] = Right(fromConfig(config))
 

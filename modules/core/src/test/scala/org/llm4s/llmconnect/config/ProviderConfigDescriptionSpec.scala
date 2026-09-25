@@ -12,14 +12,14 @@ import org.scalatest.wordspec.AnyWordSpec
  * `PrometheusMetricsExample` and `ProviderSetupRuntime`. Losing `sealed` means
  * the compiler no longer checks that a new subtype has been considered
  * everywhere, so this spec is what keeps that guarantee: every config built into
- * core is checked here, and a new one must be added.
+ * core is checked here, and a new one must be added. A config that leaves core
+ * takes its checks with it - `OllamaConfigSpec` in `llm4s-ollama`.
  */
 class ProviderConfigDescriptionSpec extends AnyWordSpec with Matchers:
 
   private val openai    = OpenAIConfig("k", "gpt-4o", None, "https://api.openai.com/v1", 128000, 4096)
   private val azure     = AzureConfig("https://x.openai.azure.com", "k", "gpt-4o", "2025-01-01-preview", 128000, 4096)
   private val anthropic = AnthropicConfig("k", "claude-sonnet-4-5", "https://api.anthropic.com", 200000, 4096)
-  private val ollama    = OllamaConfig("llama3", "http://localhost:11434", 8192, 4096)
   private val zai       = ZaiConfig("k", "GLM-4.7", ZaiConfig.DEFAULT_BASE_URL, 200000, 4096)
   private val gemini    = GeminiConfig("k", "gemini-2.0-flash", "https://x.invalid/v1beta", 1048576, 8192)
   private val deepseek  = DeepSeekConfig("k", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
@@ -28,14 +28,13 @@ class ProviderConfigDescriptionSpec extends AnyWordSpec with Matchers:
   private val vertexai  = VertexAIConfig("proj", "us-central1", "gemini-2.0-flash", None, 1048576, 8192)
 
   private val all: Seq[ProviderConfig] =
-    Seq(openai, azure, anthropic, ollama, zai, gemini, deepseek, cohere, mistral, vertexai)
+    Seq(openai, azure, anthropic, zai, gemini, deepseek, cohere, mistral, vertexai)
 
   "ProviderConfig.providerId" should {
     "name each provider in its canonical spelling" in {
       openai.providerId shouldBe ProviderId("openai")
       azure.providerId shouldBe ProviderId("azure")
       anthropic.providerId shouldBe ProviderId("anthropic")
-      ollama.providerId shouldBe ProviderId("ollama")
       zai.providerId shouldBe ProviderId("zai")
       gemini.providerId shouldBe ProviderId("gemini")
       deepseek.providerId shouldBe ProviderId("deepseek")
@@ -55,7 +54,6 @@ class ProviderConfigDescriptionSpec extends AnyWordSpec with Matchers:
       // Azure's endpoint field, not a baseUrl - the distinction the old match existed to make.
       azure.endpointUrl shouldBe Some("https://x.openai.azure.com")
       anthropic.endpointUrl shouldBe Some("https://api.anthropic.com")
-      ollama.endpointUrl shouldBe Some("http://localhost:11434")
       zai.endpointUrl shouldBe Some(ZaiConfig.DEFAULT_BASE_URL)
       gemini.endpointUrl shouldBe Some("https://x.invalid/v1beta")
       deepseek.endpointUrl shouldBe Some(DeepSeekConfig.DEFAULT_BASE_URL)
