@@ -136,7 +136,7 @@ final class ProviderRegistry private (
   /**
    * Folds an alias onto the id that owns it, leaving unknown strings alone.
    *
-   * `"google"` becomes `"gemini"` because the Gemini descriptor declares that
+   * `"google"` becomes `"gemini"` because the Gemini descriptor (`llm4s-gemini`) declares that
    * alias. An id no provider claims is returned canonicalised but unchanged —
    * parsing config must not depend on what happens to be on the classpath; only
    * resolution does.

@@ -20,7 +20,7 @@ What has actually moved so far, in the build but not yet in a release:
 | [1](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` | in the build, unpublished |
 | [2](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` | in the build, unpublished |
 | [3](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` | in the build, unpublished |
-| [5](https://github.com/llm4s/llm4s/issues/1132) | `llm4s-ollama` (first of the provider modules) | in the build, unpublished |
+| [5](https://github.com/llm4s/llm4s/issues/1132) | `llm4s-ollama`, `llm4s-gemini` (the first provider modules) | in the build, unpublished |
 
 The latest release tag is `v0.4.1`, which is still a single `llm4s-core`. The first release to publish separate module artifacts will be the next one.
 
@@ -62,7 +62,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `metrics` | `llm4s-observability` | Frozen at 1.0 |
 | `llmconnect/provider` — OpenAI, and the OpenAI-compatible clients (Azure, OpenRouter, Requesty, DeepSeek, Z.ai) | `llm4s-openai` | Frozen at 1.0 |
 | `llmconnect/provider` — Anthropic | `llm4s-anthropic` | Frozen at 1.0 |
-| `llmconnect/provider` — Gemini (and Vertex AI) | `llm4s-gemini` | Frozen at 1.0 |
+| `llmconnect/provider` — Gemini (and Vertex AI) — **carved** | `llm4s-gemini` | Frozen at 1.0 |
 | `llmconnect/provider` — Ollama — **carved** | `llm4s-ollama` | Frozen at 1.0 |
 | `llmconnect/provider` — Cohere, Mistral, and other community clients | community provider modules | Beta |
 | `rag`, `vectorstore`, `chunking`, `reranker`, `eval` — **carved** | `llm4s-rag` | Beta |
@@ -84,7 +84,7 @@ Notes:
 - `org.llm4s.knowledgegraph.graphrag` keeps its package name but ships in `llm4s-rag`, not `llm4s-knowledgegraph`. `GraphRAG` and `vectorstore` referenced each other, which made the two modules inseparable; moving the one file that reaches into `vectorstore` broke the cycle. Package names track the API; module boundaries track the dependency graph, and here they disagree.
 - `llm4s-memory` splits in two. `PostgresMemoryStore` was the only file in `agent/memory` that needed a connection pool and a server-side driver, so it ships as `llm4s-memory-postgres`; keeping it with the rest would mean anyone using agent memory at all inherits HikariCP and the Postgres JDBC driver. `llm4s-memory` itself carries only sqlite-jdbc, for the two file-backed stores.
 - `org.llm4s.vectorstore.PostgresVectorHelpers` ships in `llm4s-core`, not in `llm4s-rag` with the rest of `org.llm4s.vectorstore`. It is a pure `Array[Float]` ⇄ pgvector-text codec with no JDBC types in it, and it has consumers in two modules that must not depend on each other (`llm4s-rag` and `llm4s-memory-postgres`); the module they share is core. This is the same package-versus-module disagreement as `graphrag`, in the other direction.
-- Vertex AI's exact home is unsettled — it is bundled with Gemini here because it is Google's hosting path for Gemini models, but it could end up a separate or community module once #1131 lands.
+- Vertex AI ships in `llm4s-gemini`. It only calls Google's Gemini models, in the same JSON format as the Gemini API, and differs in endpoint and OAuth authentication rather than in dependencies - so bundling costs Gemini-API users nothing, whereas splitting it out after release would be a breaking move. See the [migration guide](migration#slice-5-llm4s-gemini).
 
 ## What Frozen means
 

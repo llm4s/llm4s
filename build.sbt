@@ -179,6 +179,7 @@ lazy val llm4s = (project in file("."))
     image,
     speech,
     ollama,
+    gemini,
     samples,
     configPolicy,
     workspaceShared,
@@ -263,12 +264,13 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
-    // Measured 75.86% statement coverage after the `ollama` carve (`sbt coverage core/test
-    // core/coverageReport`); it was 74.33% with slice 3 complete, 74.89% after `image`, 74.05%
-    // after `mcp`, 73.85% after slice 2 and 72.42% on main @ 5a62e2ac before any of them. A
-    // carve moves the number in whichever direction the departing code sat - `speech` (80.68%)
-    // pulled it down, and the slice-4 SPI work plus this carve pushed it up. Floor is the
-    // measured value rounded down to the nearest 5; ratchet it up, never down.
+    // Measured 75.27% statement coverage after the `gemini` carve (`sbt coverage core/test
+    // core/coverageReport`); it was 75.86% after `ollama`, 74.33% with slice 3 complete, 74.89%
+    // after `image`, 74.05% after `mcp`, 73.85% after slice 2 and 72.42% on main @ 5a62e2ac
+    // before any of them. A carve moves the number in whichever direction the departing code
+    // sat - `speech` (80.68%) and `gemini` (87.53%) pulled it down, the slice-4 SPI work and
+    // the `ollama` carve pushed it up. Floor is the measured value rounded down to the nearest
+    // 5; ratchet it up, never down.
     //
     // Held at 70 rather than ratcheted to 75 while slice 5 is in flight: each provider carve
     // moves this number in whichever direction the departing client sat, and a floor with
@@ -553,6 +555,33 @@ lazy val ollama = (project in file("modules/ollama"))
     )
   )
 
+// Gemini carves second, and takes Vertex AI with it. `VertexAIClient` only calls Google's
+// `publishers/google` (Gemini) models, in the same JSON format as `GeminiClient`; the two
+// differ in endpoint (region/project-scoped aiplatform.googleapis.com) and auth (OAuth in
+// `VertexAIAuthProvider`, hand-rolled, no Google SDK), not in dependencies. So bundling
+// costs a Gemini-API user nothing, whereas splitting Vertex out later would be a breaking
+// move for its users - bundling now is the safe direction. Deduplicating the two clients'
+// shared JSON handling is a separate follow-up, not part of the carve.
+
+lazy val gemini = (project in file("modules/gemini"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    name := "llm4s-gemini",
+    commonSettings,
+    // Measured 87.53% statement coverage (`sbt coverage gemini/test gemini/coverageReport`) on
+    // the code as carved out of core. Floor is the measured value rounded down to the nearest
+    // 5. Never lower it. The `@Cloud` Gemini smoke suite in `modules/it` is not counted here.
+    coverageFloor(85),
+    Test / fork := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 lazy val workspaceShared = (project in file("modules/workspace/workspaceShared"))
   .settings(
     name := "llm4s-workspace-shared",
@@ -609,7 +638,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules//samples"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, knowledgegraphNeo4j)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, knowledgegraphNeo4j)
   .settings(
     name := "llm4s-samples",
     commonSettings,
@@ -621,10 +650,12 @@ lazy val samples = (project in file("modules//samples"))
   )
 
 lazy val configPolicy = (project in file("modules/config-policy"))
-  // `ollama` at runtime, not only for tests: the CLI loads real provider config, and CI's
-  // config-policy-check job runs it against a smoke config naming `provider = "ollama"`,
-  // which only resolves when llm4s-ollama's services entry is on the classpath.
-  .dependsOn(core, ollama)
+  // Every carved provider module, at runtime: `CheckPolicies` loads real provider config
+  // through the registry, so a config naming a provider whose module is absent fails as "not
+  // registered" before any policy runs. It must accept whatever a user's config names, not
+  // just what CI's smoke config (ollama) happens to exercise. A provider carve adds itself
+  // here; `CheckPoliciesProvidersSpec` checks each one resolves.
+  .dependsOn(core, ollama, gemini)
   .settings(
     name := "llm4s-config-policy",
     commonSettings,
@@ -687,7 +718,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   )
 
 lazy val it = (project in file("modules/it"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
   .settings(
     name := "llm4s-it",
     commonSettings,
@@ -739,7 +770,7 @@ lazy val it = (project in file("modules/it"))
 // A module is listed here if and only if it is published. When a slice adds one, add it in
 // the same commit, or its API silently vanishes from the site.
 lazy val docs = (project in file("modules/docs"))
-  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
+  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
   .settings(
     name           := "llm4s-docs",
     commonSettings,
@@ -757,6 +788,7 @@ lazy val docs = (project in file("modules/docs"))
         (image / Compile / sources).value ++
         (speech / Compile / sources).value ++
         (ollama / Compile / sources).value ++
+        (gemini / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (traceOpentelemetry / Compile / sources).value ++

@@ -21,11 +21,11 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             endpoint = None,
             apiVersion = None,
           ),
-          ProviderName("gemini-main") -> RawNamedProviderSection(
-            provider = Some("gemini"),
-            model = Some("gemini-2.5-flash"),
-            baseUrl = Some("https://generativelanguage.googleapis.com/v1beta"),
-            apiKey = Some("google-key"),
+          ProviderName("anthropic-main") -> RawNamedProviderSection(
+            provider = Some("anthropic"),
+            model = Some("claude-sonnet-4-5"),
+            baseUrl = Some("https://api.anthropic.com"),
+            apiKey = Some("anthropic-key"),
             organization = None,
             endpoint = None,
             apiVersion = None,
@@ -36,7 +36,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
       ProvidersConfigLoader.validate(raw) match
         case Right(cfg) =>
           cfg.selectedProvider.map(_.asName) shouldBe Some("openai-main")
-          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "gemini-main")
+          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "anthropic-main")
 
           val openai = cfg.namedProviders(ProviderName("openai-main"))
           openai.provider shouldBe ProviderId("openai")
@@ -45,10 +45,10 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
           openai.apiKey.map(_.asKey) shouldBe Some("sk-openai")
           openai.organization shouldBe Some("org-demo")
 
-          val gemini = cfg.namedProviders(ProviderName("gemini-main"))
-          gemini.provider shouldBe ProviderId("gemini")
-          gemini.model.asString shouldBe "gemini-2.5-flash"
-          gemini.apiKey.map(_.asKey) shouldBe Some("google-key")
+          val anthropic = cfg.namedProviders(ProviderName("anthropic-main"))
+          anthropic.provider shouldBe ProviderId("anthropic")
+          anthropic.model.asString shouldBe "claude-sonnet-4-5"
+          anthropic.apiKey.map(_.asKey) shouldBe Some("anthropic-key")
         case Left(err) =>
           fail(s"Expected ProvidersConfig, got error: ${err.message}")
     }

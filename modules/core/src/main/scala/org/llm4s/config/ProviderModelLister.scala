@@ -131,41 +131,6 @@ object ProviderModelListers:
           else Right(all)
       yield models
 
-  /** Model lister for the Gemini provider, using paginated API requests. */
-  object Gemini extends ProviderModelLister:
-    def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
-      for
-        gemini <- config.requireProvider(ProviderId("gemini"))
-        apiKey <- gemini.requireApiKey
-        baseUrl = gemini.baseUrlOrDefault(DefaultConfig.DEFAULT_GEMINI_BASE_URL)
-        models <- listGeminiModels(baseUrl, apiKey, httpClient)
-      yield models
-
-    private def listGeminiModels(
-      baseUrl: BaseUrl,
-      apiKey: org.llm4s.types.ProviderModelTypes.ApiKey,
-      httpClient: Llm4sHttpClient,
-      pageToken: Option[String] = None,
-      acc: List[DiscoveredModel] = Nil
-    ): Result[List[DiscoveredModel]] =
-      for
-        response <- httpClient
-          .getResult(
-            s"${baseUrl.asUrl}/models",
-            headers = Map("x-goog-api-key" -> apiKey.asKey),
-            params = Map("pageSize" -> "1000") ++ pageToken.map("pageToken" -> _),
-            timeout = 10000
-          )
-          .mapServiceError("gemini", "Failed to discover models")
-        okResponse   <- response.ensureSuccess("gemini")
-        jsonResponse <- okResponse.toJson("responseBody")
-        page         <- parseGeminiPage(jsonResponse.body)
-        all = acc ++ page.models
-        models <- page.nextPageToken match
-          case Some(token) if token.nonEmpty => listGeminiModels(baseUrl, apiKey, httpClient, Some(token), all)
-          case _                             => Right(all)
-      yield models
-
   /** Model lister for the DeepSeek provider using the OpenAI-compatible models endpoint. */
   val DeepSeek: ProviderModelLister =
     openAICompatible(ProviderId("deepseek"), DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
@@ -285,51 +250,6 @@ object ProviderModelListers:
             obj.get("type").flatMap(_.strOpt).map("type" -> _),
           ).flatten.toMap
         Right(Some(DiscoveredModel(ModelName(id), ProviderId("anthropic"), metadata)))
-
-  private def parseGeminiModels(json: ujson.Value): Result[List[DiscoveredModel]] =
-    val modelsResult =
-      Try(json("models").arr.toList).toResult.left
-        .map(err => ValidationError("models", s"Missing or invalid Gemini models payload: ${err.message}"))
-
-    modelsResult.flatMap: models =>
-      models.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)):
-        case (accResult, modelJson) =>
-          for
-            acc    <- accResult
-            parsed <- parseGeminiModel(modelJson)
-          yield parsed match
-            case Some(model) => acc :+ model
-            case None        => acc
-
-  final private case class GeminiPage(
-    models: List[DiscoveredModel],
-    nextPageToken: Option[String]
-  )
-
-  private def parseGeminiPage(json: ujson.Value): Result[GeminiPage] =
-    for
-      models        <- parseGeminiModels(json)
-      nextPageToken <- parseOptionalString(json, "nextPageToken")
-    yield GeminiPage(models, nextPageToken)
-
-  private def parseGeminiModel(json: ujson.Value): Result[Option[DiscoveredModel]] =
-    val obj = json.obj
-    obj.get("name").flatMap(_.strOpt).filter(_.nonEmpty) match
-      case None => Right(None)
-      case Some(name) =>
-        val modelId = name.stripPrefix("models/")
-        val metadata =
-          List(
-            obj.get("displayName").flatMap(_.strOpt).map("displayName" -> _),
-            obj.get("description").flatMap(_.strOpt).map("description" -> _),
-            obj.get("inputTokenLimit").flatMap(_.numOpt).map(n => "inputTokenLimit" -> n.toLong.toString),
-            obj.get("outputTokenLimit").flatMap(_.numOpt).map(n => "outputTokenLimit" -> n.toLong.toString),
-            obj
-              .get("supportedGenerationMethods")
-              .flatMap(_.arrOpt)
-              .map(methods => "supportedGenerationMethods" -> methods.flatMap(_.strOpt).mkString(",")),
-          ).flatten.toMap
-        Right(Some(DiscoveredModel(ModelName(modelId), ProviderId("gemini"), metadata)))
 
   private def parseOptionalString(json: ujson.Value, field: String): Result[Option[String]] =
     Right(json.obj.get(field).flatMap(_.strOpt).filter(_.nonEmpty))

@@ -230,6 +230,27 @@ saying `ollama` is not registered and naming the providers that are. Package nam
 unchanged; see the
 [migration note](../reference/migration.md#slice-5-llm4s-ollama).
 
+### For Gemini and Vertex AI
+
+{: .note }
+> Not yet published. `llm4s-gemini` exists in the build as of
+> [#1132](https://github.com/llm4s/llm4s/issues/1132) but ships in the next release;
+> in `0.4.1` and earlier Gemini and Vertex AI are still inside `llm4s-core`.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-gemini" % llm4sVersion
+```
+
+Carries both of Google's chat providers: the Gemini API client and model listing, and the
+Vertex AI client with its OAuth authentication. It adds no third-party dependency of its own -
+Vertex AI authentication is implemented without a Google SDK. Adding it is all the registration
+there is: the module declares itself to the provider registry, so `provider = "gemini"` (or
+`"google"`) and `provider = "vertexai"` (or `"vertex"`) resolve with no code change. Without it,
+they fail with an error saying the provider is not registered and naming the providers that
+are. Package names are unchanged; see the
+[migration note](../reference/migration.md#slice-5-llm4s-gemini).
+
 ### For image generation and vision
 
 {: .note }

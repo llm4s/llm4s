@@ -87,21 +87,6 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     }
   }
 
-  test("Gemini provider with GeminiConfig returns GeminiClient") {
-    val cfg: ProviderConfig = GeminiConfig(
-      apiKey = "key",
-      model = "gemini-2.0-flash",
-      baseUrl = "https://example.invalid/v1beta",
-      contextWindow = 1048576,
-      reserveCompletion = 8192
-    )
-    val res = LLMConnect.getClient(ProviderId("gemini"), cfg)
-    res match {
-      case Right(client) => client.getClass.getSimpleName shouldBe "GeminiClient"
-      case Left(err)     => fail(s"Expected Right, got Left($err)")
-    }
-  }
-
   test("DeepSeek provider with DeepSeekConfig returns DeepSeekClient") {
     val cfg: ProviderConfig = DeepSeekConfig(
       apiKey = "key",

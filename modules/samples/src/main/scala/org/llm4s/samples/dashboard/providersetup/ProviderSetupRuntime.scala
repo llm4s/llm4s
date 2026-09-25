@@ -251,7 +251,7 @@ private[providersetup] object ProviderSetupRuntime:
           model  <- requiredModel(input, "Session override for Gemini needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Gemini needs `set api-key <key>`.")
           config <- GeminiConfig
-            .fromValues(model, apiKey, input.baseUrl.getOrElse(DefaultConfig.DEFAULT_GEMINI_BASE_URL))
+            .fromValues(model, apiKey, input.baseUrl.getOrElse(GeminiConfig.DEFAULT_BASE_URL))
             .left
             .map(_.message)
         yield activeSession(

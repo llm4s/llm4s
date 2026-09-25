@@ -68,6 +68,10 @@ flags:
     paths:
       - modules/ollama/src/main/scala
     carryforward: true
+  gemini:
+    paths:
+      - modules/gemini/src/main/scala
+    carryforward: true
   knowledgegraph-neo4j:
     paths:
       - modules/knowledgegraph-neo4j/src/main/scala

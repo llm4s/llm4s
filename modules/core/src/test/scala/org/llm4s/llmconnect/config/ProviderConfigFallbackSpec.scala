@@ -92,42 +92,6 @@ class ProviderConfigFallbackSpec extends AnyFlatSpec with Matchers with EitherVa
     cfg.reserveCompletion shouldBe 4096
   }
 
-  "GeminiConfig fallback" should "return 1048576 for gemini-2-like model" in {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-2", apiKey, baseUrl).value
-    cfg.contextWindow shouldBe 1048576
-    cfg.reserveCompletion shouldBe 8192
-  }
-
-  it should "return 1048576 for gemini-1.5-like model" in {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-1.5-pro", apiKey, baseUrl).value
-    cfg.contextWindow shouldBe 1048576
-    cfg.reserveCompletion shouldBe 8192
-  }
-
-  it should "return 32768 for gemini-1.0-like model" in {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-1.0", apiKey, baseUrl).value
-    cfg.contextWindow shouldBe 32768
-    cfg.reserveCompletion shouldBe 8192
-  }
-
-  it should "return 1048576 for gemini-pro-like model" in {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-pro", apiKey, baseUrl).value
-    cfg.contextWindow shouldBe 1048576
-    cfg.reserveCompletion shouldBe 8192
-  }
-
-  it should "return 1048576 for gemini-flash-like model" in {
-    val cfg = GeminiConfig.fromValues("patch-cov-gemini-flash", apiKey, baseUrl).value
-    cfg.contextWindow shouldBe 1048576
-    cfg.reserveCompletion shouldBe 8192
-  }
-
-  it should "return 1048576 for unknown model" in {
-    val cfg = GeminiConfig.fromValues("patch-cov-unknown", apiKey, baseUrl).value
-    cfg.contextWindow shouldBe 1048576
-    cfg.reserveCompletion shouldBe 8192
-  }
-
   "DeepSeekConfig fallback" should "return 128000 for unregistered model (default branch)" in {
     val cfg = DeepSeekConfig.fromValues("patch-cov-deepseek-reasoner", apiKey, baseUrl).value
     cfg.contextWindow shouldBe 128000

@@ -116,32 +116,6 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers with EitherValues {
       .value shouldBe a[ConfigurationError]
   }
 
-  // ================================= GEMINI CONFIG =================================
-
-  test("GeminiConfig.fromValues appends v1beta when baseUrl is the API host root") {
-    val config = GeminiConfig
-      .fromValues(
-        modelName = "gemini-1.5-flash",
-        apiKey = "test-key",
-        baseUrl = "https://generativelanguage.googleapis.com"
-      )
-      .value
-
-    config.baseUrl shouldBe "https://generativelanguage.googleapis.com/v1beta"
-  }
-
-  test("GeminiConfig.fromValues preserves explicit versioned baseUrl") {
-    val config = GeminiConfig
-      .fromValues(
-        modelName = "gemini-1.5-flash",
-        apiKey = "test-key",
-        baseUrl = "https://generativelanguage.googleapis.com/v1beta"
-      )
-      .value
-
-    config.baseUrl shouldBe "https://generativelanguage.googleapis.com/v1beta"
-  }
-
   // ================================= AZURE CONFIG =================================
 
   test("AzureConfig.fromValues creates config with correct model") {
@@ -273,18 +247,14 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers with EitherValues {
 
   test("every fromValues factory returns a Left for a blank required field") {
     val blanks: Seq[(String, Either[org.llm4s.error.LLMError, ProviderConfig])] = Seq(
-      "Azure endpoint"      -> AzureConfig.fromValues("gpt-4o", " ", "key", "2024-02-15"),
-      "Azure apiKey"        -> AzureConfig.fromValues("gpt-4o", "https://azure.example", " ", "2024-02-15"),
-      "Anthropic baseUrl"   -> AnthropicConfig.fromValues("claude-3", "key", " "),
-      "Gemini apiKey"       -> GeminiConfig.fromValues("gemini-2.0-flash", " ", "https://example.invalid"),
-      "Gemini baseUrl"      -> GeminiConfig.fromValues("gemini-2.0-flash", "key", " "),
-      "DeepSeek apiKey"     -> DeepSeekConfig.fromValues("deepseek-chat", " ", DeepSeekConfig.DEFAULT_BASE_URL),
-      "DeepSeek baseUrl"    -> DeepSeekConfig.fromValues("deepseek-chat", "key", " "),
-      "Cohere apiKey"       -> CohereConfig.fromValues("command-r", " ", CohereConfig.DEFAULT_BASE_URL),
-      "Cohere baseUrl"      -> CohereConfig.fromValues("command-r", "key", " "),
-      "Mistral apiKey"      -> MistralConfig.fromValues("mistral-small-latest", " ", MistralConfig.DEFAULT_BASE_URL),
-      "Vertex AI projectId" -> VertexAIConfig.fromValues("gemini-2.0-flash", projectId = " "),
-      "Vertex AI location"  -> VertexAIConfig.fromValues("gemini-2.0-flash", projectId = "p", location = " ")
+      "Azure endpoint"    -> AzureConfig.fromValues("gpt-4o", " ", "key", "2024-02-15"),
+      "Azure apiKey"      -> AzureConfig.fromValues("gpt-4o", "https://azure.example", " ", "2024-02-15"),
+      "Anthropic baseUrl" -> AnthropicConfig.fromValues("claude-3", "key", " "),
+      "DeepSeek apiKey"   -> DeepSeekConfig.fromValues("deepseek-chat", " ", DeepSeekConfig.DEFAULT_BASE_URL),
+      "DeepSeek baseUrl"  -> DeepSeekConfig.fromValues("deepseek-chat", "key", " "),
+      "Cohere apiKey"     -> CohereConfig.fromValues("command-r", " ", CohereConfig.DEFAULT_BASE_URL),
+      "Cohere baseUrl"    -> CohereConfig.fromValues("command-r", "key", " "),
+      "Mistral apiKey"    -> MistralConfig.fromValues("mistral-small-latest", " ", MistralConfig.DEFAULT_BASE_URL)
     )
 
     blanks.foreach { case (field, result) =>
@@ -292,12 +262,5 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers with EitherValues {
         result.left.value.message shouldBe s"$field must be non-empty"
       }
     }
-  }
-
-  test("VertexAIConfig.fromValues builds a config for a non-blank project and location") {
-    val config = VertexAIConfig.fromValues("gemini-2.0-flash", projectId = "my-project").value
-
-    config.projectId shouldBe "my-project"
-    config.location shouldBe VertexAIConfig.DEFAULT_LOCATION
   }
 }

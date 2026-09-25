@@ -120,27 +120,6 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           fail(s"Expected Z.ai NamedProviderConfig, got error: ${err.message}")
     }
 
-    "validate and normalize a Gemini named provider section" in {
-      validate(
-        "gemini-main",
-        RawNamedProviderSection(
-          provider = Some("gemini"),
-          model = Some("gemini-2.5-flash"),
-          baseUrl = Some("https://generativelanguage.googleapis.com/v1beta"),
-          apiKey = Some("google-key"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
-        )
-      ) match
-        case Right(cfg) =>
-          cfg.provider shouldBe ProviderId("gemini")
-          cfg.model.asString shouldBe "gemini-2.5-flash"
-          cfg.apiKey.map(_.asKey) shouldBe Some("google-key")
-        case Left(err) =>
-          fail(s"Expected Gemini NamedProviderConfig, got error: ${err.message}")
-    }
-
     "validate and normalize a DeepSeek named provider section" in {
       validate(
         "deepseek-main",
@@ -202,68 +181,6 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           cfg.apiKey.map(_.asKey) shouldBe Some("mistral-key")
         case Left(err) =>
           fail(s"Expected Mistral NamedProviderConfig, got error: ${err.message}")
-    }
-
-    // Regression for the gap found while scoping #1131: `vertexai` was a supported provider in
-    // NamedProviderLoader and LLMConnect, but had no capabilities entry and no validator, so
-    // validation rejected it outright and it could never be reached from config at all.
-    "validate and normalize a Vertex AI named provider section" in {
-      validate(
-        "vertex-main",
-        RawNamedProviderSection(
-          provider = Some("vertexai"),
-          model = Some("gemini-2.0-flash"),
-          baseUrl = None,
-          apiKey = Some("/path/to/credentials.json"),
-          organization = Some("europe-west4"),
-          endpoint = Some("my-gcp-project"),
-          apiVersion = None,
-        )
-      ) match
-        case Right(cfg) =>
-          cfg.provider shouldBe ProviderId("vertexai")
-          cfg.model.asString shouldBe "gemini-2.0-flash"
-          cfg.endpoint shouldBe Some("my-gcp-project")
-          cfg.organization shouldBe Some("europe-west4")
-        case Left(err) =>
-          fail(s"Expected Vertex AI NamedProviderConfig, got error: ${err.message}")
-    }
-
-    "accept the 'vertex' alias for Vertex AI" in {
-      validate(
-        "vertex-alias",
-        RawNamedProviderSection(
-          provider = Some("Vertex"),
-          model = Some("gemini-2.0-flash"),
-          baseUrl = None,
-          apiKey = None,
-          organization = None,
-          endpoint = Some("my-gcp-project"),
-          apiVersion = None,
-        )
-      ) match
-        case Right(cfg) => cfg.provider shouldBe ProviderId("vertexai")
-        case Left(err)  => fail(s"Expected the 'vertex' alias to resolve, got error: ${err.message}")
-    }
-
-    "fail clearly when a Vertex AI section omits the GCP project id" in {
-      validate(
-        "vertex-missing",
-        RawNamedProviderSection(
-          provider = Some("vertexai"),
-          model = Some("gemini-2.0-flash"),
-          baseUrl = None,
-          apiKey = None,
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
-        )
-      ) match
-        case Left(err) =>
-          err.message should include("Provider 'vertex-missing' (provider = vertexai) is missing required fields")
-          err.message should include("- endpoint: the GCP project ID that owns your Vertex AI resources")
-        case Right(cfg) =>
-          fail(s"Expected a missing-endpoint failure, got config: $cfg")
     }
 
     "fail clearly when provider field is missing" in {

@@ -44,16 +44,6 @@ class ConfigRedactionSpec extends AnyFlatSpec with Matchers with EitherValues {
     (anthropic.toString should not).include(secret)
     anthropic.toString should include("***")
 
-    val gemini = GeminiConfig
-      .fromValues(
-        modelName = "gemini-1.5-pro",
-        apiKey = secret,
-        baseUrl = "https://example.invalid"
-      )
-      .value
-    (gemini.toString should not).include(secret)
-    gemini.toString should include("***")
-
     val zai = ZaiConfig
       .fromValues(
         modelName = "glm-4.5",

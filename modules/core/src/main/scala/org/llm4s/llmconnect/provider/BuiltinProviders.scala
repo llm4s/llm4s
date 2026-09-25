@@ -13,6 +13,7 @@ import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, Llm4sProviderModu
  * its own module with its own `Llm4sProviderModule`, and this list shrinks
  * to whatever is left. Ollama has gone: it is `llm4s-ollama`'s
  * `Llm4sOllamaModule` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
+ * So have Gemini and Vertex AI: they are `llm4s-gemini`'s `Llm4sGeminiModule`.
  *
  * Nothing else should grow a provider list: a new provider is a new
  * `ProviderDescriptor` (or `EmbeddingProviderDescriptor`) plus an entry here,
@@ -27,11 +28,9 @@ object BuiltinProviders extends Llm4sProviderModule:
     AzureProvider,
     AnthropicProvider,
     ZaiProvider,
-    GeminiProvider,
     DeepSeekProvider,
     CohereProvider,
-    MistralProvider,
-    VertexAIProvider
+    MistralProvider
   )
 
   override val embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(

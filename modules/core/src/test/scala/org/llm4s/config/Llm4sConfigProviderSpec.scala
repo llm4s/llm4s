@@ -2,7 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.{ ProviderId, ProviderName }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
-import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAIConfig, VertexAIConfig }
+import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAIConfig }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.llmconnect.spi.fixtures.FixtureProvider
 import org.scalatest.matchers.should.Matchers
@@ -70,38 +70,6 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         case Right(cfg)  => fail(s"Expected the fixture provider's own error, got $cfg")
     }
 
-    // Regression for the #1131 scoping finding: before the capabilities registry gained a
-    // `vertexai` entry, this HOCON failed validation outright, even though NamedProviderLoader
-    // and LLMConnect had supported Vertex AI all along.
-    "load a Vertex AI named provider end to end" in {
-      val hocon =
-        """
-          |llm4s {
-          |  providers {
-          |    vertex-main {
-          |      provider = "vertexai"
-          |      model = "gemini-2.0-flash"
-          |      endpoint = "my-gcp-project"
-          |      organization = "europe-west4"
-          |    }
-          |  }
-          |}
-          |""".stripMargin
-
-      val cfg =
-        Llm4sConfig.provider(ConfigSource.string(hocon), "vertex-main").fold(err => fail(err.toString), identity)
-
-      cfg match
-        case vertex: VertexAIConfig =>
-          vertex.projectId shouldBe "my-gcp-project"
-          vertex.location shouldBe "europe-west4"
-          vertex.model shouldBe "gemini-2.0-flash"
-          vertex.providerId shouldBe ProviderId("vertexai")
-          vertex.endpointUrl shouldBe Some("https://europe-west4-aiplatform.googleapis.com/v1")
-        case other =>
-          fail(s"Expected VertexAIConfig, got $other")
-    }
-
     "fail when a sibling named provider is invalid even if the requested provider is valid" in {
       val hocon =
         """
@@ -112,9 +80,9 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
           |      model = "gpt-4o-mini"
           |      apiKey = "named-openai-key"
           |    }
-          |    broken-gemini {
-          |      provider = "gemini"
-          |      model = "gemini-2.5-flash"
+          |    broken-anthropic {
+          |      provider = "anthropic"
+          |      model = "claude-sonnet-4-5"
           |    }
           |  }
           |}
@@ -124,8 +92,8 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
 
       result match
         case Left(err) =>
-          err.message should include("Provider 'broken-gemini' (provider = gemini) is missing required fields")
-          err.message should include("- apiKey: set it in llm4s.conf under providers.broken-gemini.apiKey")
+          err.message should include("Provider 'broken-anthropic' (provider = anthropic) is missing required fields")
+          err.message should include("- apiKey: set it in llm4s.conf under providers.broken-anthropic.apiKey")
         case Right(cfg) =>
           fail(s"Expected invalid sibling named provider to fail whole config, got config: $cfg")
     }
@@ -141,10 +109,10 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
           |      model = "gpt-4o-mini"
           |      apiKey = "named-openai-key"
           |    }
-          |    gemini-main {
-          |      provider = "gemini"
-          |      model = "gemini-2.5-flash"
-          |      apiKey = "google-key"
+          |    anthropic-main {
+          |      provider = "anthropic"
+          |      model = "claude-sonnet-4-5"
+          |      apiKey = "anthropic-key"
           |    }
           |  }
           |}
@@ -153,7 +121,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       val cfg = Llm4sConfig.providers(ConfigSource.string(hocon)).fold(err => fail(err.toString), identity)
 
       cfg.selectedProvider shouldBe Some(ProviderName("openai-main"))
-      cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "gemini-main")
+      cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "anthropic-main")
     }
 
     "load the configured default provider name" in {

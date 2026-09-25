@@ -131,7 +131,7 @@ object ChatTuiConfig:
         val key = ChatTuiEnv.get("GEMINI_API_KEY").orElse(ChatTuiEnv.get("GOOGLE_API_KEY")).filter(_.nonEmpty)
         key match {
           case Some(apiKey) =>
-            val baseUrl = ChatTuiEnv.getOrElse("GEMINI_BASE_URL", DefaultConfig.DEFAULT_GEMINI_BASE_URL)
+            val baseUrl = ChatTuiEnv.getOrElse("GEMINI_BASE_URL", GeminiConfig.DEFAULT_BASE_URL)
             GeminiConfig.fromValues(model, apiKey, baseUrl)
           case None =>
             Left(ConfigurationError("LLM_MODEL=gemini/... requires GOOGLE_API_KEY or GEMINI_API_KEY"))
