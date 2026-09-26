@@ -37,6 +37,8 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
       "DeepSeek apiKey"  -> DeepSeekConfig.fromValues("deepseek-chat", " ", DeepSeekConfig.DEFAULT_BASE_URL),
       "DeepSeek baseUrl" -> DeepSeekConfig.fromValues("deepseek-chat", "key", " "),
       "Mistral apiKey"   -> MistralConfig.fromValues("mistral-small-latest", " ", MistralConfig.DEFAULT_BASE_URL),
+      "Cohere apiKey"    -> CohereConfig.fromValues("command-r", " ", CohereConfig.DEFAULT_BASE_URL),
+      "Cohere baseUrl"   -> CohereConfig.fromValues("command-r", "key", " "),
       "OpenAI-compatible model"   -> OpenAICompatibleConfig.fromValues(" ", "http://localhost:8000/v1"),
       "OpenAI-compatible baseUrl" -> OpenAICompatibleConfig.fromValues("m", " ")
     )

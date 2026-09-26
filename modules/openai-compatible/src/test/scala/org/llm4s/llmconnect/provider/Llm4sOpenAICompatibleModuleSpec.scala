@@ -13,8 +13,9 @@ import org.scalatest.wordspec.AnyWordSpec
 /**
  * `llm4s-openai-compatible` registers itself, and what it registers works.
  *
- * These are the DeepSeek, Z.ai, OpenRouter and Mistral rows of core's `BuiltinProvidersSpec`,
- * which left with the providers (#1132) - Mistral's with its `streaming = false`, which no longer holds, plus the generic `openai-compatible` provider and the part
+ * These are the DeepSeek, Z.ai, OpenRouter, Mistral and Cohere rows of core's `BuiltinProvidersSpec`,
+ * which left with the providers (#1132). Mistral's and Cohere's asserted `streaming = false`
+ * (#925); on the shared client they stream, plus the generic `openai-compatible` provider and the part
  * that only a carved module has to prove: that depending on it is enough - the services
  * entry is found and the descriptors arrive.
  */
@@ -30,7 +31,8 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
     (DeepSeekProvider, "DeepSeekConfig", "DeepSeekClient"),
     (ZaiProvider, "ZaiConfig", "ZaiClient"),
     (OpenRouterProvider, "OpenAIConfig", "OpenRouterClient"),
-    (MistralProvider, "MistralConfig", "MistralClient")
+    (MistralProvider, "MistralConfig", "MistralClient"),
+    (CohereProvider, "CohereConfig", "CohereClient")
   )
 
   private val chatIds = expectations.map(_._1.id.asString)
@@ -116,7 +118,8 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
       DeepSeekProvider.modelLister shouldBe defined
       OpenRouterProvider.modelLister shouldBe defined
       MistralProvider.modelLister shouldBe defined
-      // Z.ai had no lister in core either.
+      // Z.ai and Cohere had no lister in core either.
       ZaiProvider.modelLister shouldBe None
+      CohereProvider.modelLister shouldBe None
     }
   }

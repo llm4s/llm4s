@@ -218,7 +218,7 @@ class OpenAICompatibleClient(
       case UserMessage(content) =>
         ujson.Obj("role" -> "user", "content" -> dialect.encodeContent(content))
       case SystemMessage(content) =>
-        ujson.Obj("role" -> "system", "content" -> dialect.encodeContent(content))
+        ujson.Obj("role" -> dialect.systemRole, "content" -> dialect.encodeContent(content))
       case AssistantMessage(content, toolCalls) =>
         val message = ujson.Obj("role" -> "assistant")
         content.filter(_.nonEmpty) match {
@@ -257,7 +257,7 @@ class OpenAICompatibleClient(
     if (options.frequencyPenalty != 0) body("frequency_penalty") = options.frequencyPenalty
     if (options.tools.nonEmpty) body("tools") = new ToolRegistry(options.tools).getOpenAITools()
     options.responseFormat.foreach { fmt =>
-      ResponseFormatMapper.toOpenAIResponseFormat(fmt).foreach(rf => body("response_format") = rf)
+      dialect.encodeResponseFormat(fmt).foreach(rf => body("response_format") = rf)
     }
     dialect.addReasoning(body, settings.model, options)
     body

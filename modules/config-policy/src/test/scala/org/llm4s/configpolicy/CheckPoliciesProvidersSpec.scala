@@ -67,6 +67,11 @@ class CheckPoliciesProvidersSpec extends AnyWordSpec with Matchers {
         Right(ProviderId("mistral"))
     }
 
+    "resolve a cohere config" in {
+      providerIdFor("""provider = "cohere", model = "command-a-03-2025", apiKey = "test-key"""") shouldBe
+        Right(ProviderId("cohere"))
+    }
+
     "resolve an openai-compatible config, which needs no API key" in {
       providerIdFor("""provider = "openai-compatible", model = "m", baseUrl = "http://localhost:8000/v1"""") shouldBe
         Right(ProviderId("openai-compatible"))

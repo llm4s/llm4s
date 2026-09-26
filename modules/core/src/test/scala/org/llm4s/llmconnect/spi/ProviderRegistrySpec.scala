@@ -127,7 +127,6 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
       // Plus `fixturechat`, the test-only provider core's test classpath declares in its own
       // META-INF/services (org.llm4s.testutil.FixtureChatProvider).
       ProviderRegistry.default.ids shouldBe Seq(
-        "cohere",
         "fixturechat"
       )
     }

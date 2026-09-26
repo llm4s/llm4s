@@ -30,9 +30,7 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
   private given ContextWindowResolver = ContextWindowResolver(registryService)
 
   /** Descriptor, the config class it builds, and the client class that config produces. */
-  private val expectations: Seq[(ProviderDescriptor, String, String)] = Seq(
-    (CohereProvider, "CohereConfig", "CohereClient")
-  )
+  private val expectations: Seq[(ProviderDescriptor, String, String)] = Seq.empty
 
   /** A section carrying every field any built-in provider asks for. */
   private def section(descriptor: ProviderDescriptor): NamedProviderConfig =
@@ -91,13 +89,8 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
     }
 
     "declare whether it implements streaming" in {
-      // Cohere returns a Left from streamComplete (#925). The point of putting this in the
-      // descriptor is that it is visible without making a call and reading the error.
-      CohereProvider.features.streaming shouldBe false
-
       expectations
         .map(_._1)
-        .filterNot(_ == CohereProvider)
         .foreach(descriptor => withClue(s"${descriptor.id.asString}: ")(descriptor.features.streaming shouldBe true))
     }
   }

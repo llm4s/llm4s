@@ -12,9 +12,9 @@ package org.llm4s.llmconnect.spi
  * The flags default to `true` because a provider that omits them is claiming
  * the full interface; a provider that cannot honour part of it must say so, and
  * saying so is then visible to users rather than buried in a `Left` at call
- * time. Cohere currently declares `streaming = false` — see
- * [[https://github.com/llm4s/llm4s/issues/925 #925]]; Mistral did too, until it moved onto
- * `llm4s-openai-compatible`'s shared client.
+ * time. Cohere and Mistral declared `streaming = false` until they moved onto
+ * `llm4s-openai-compatible`'s shared client, which streams
+ * ([[https://github.com/llm4s/llm4s/issues/925 #925]]).
  *
  * @param streaming   whether `LLMClient.streamComplete` is implemented.
  * @param toolCalling whether the provider accepts tool/function definitions.

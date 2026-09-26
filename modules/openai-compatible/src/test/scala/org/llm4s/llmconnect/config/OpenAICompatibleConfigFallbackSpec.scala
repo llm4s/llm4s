@@ -31,6 +31,12 @@ class OpenAICompatibleConfigFallbackSpec extends AnyFlatSpec with Matchers with 
     cfg.reserveCompletion shouldBe 4096
   }
 
+  "CohereConfig fallback" should "return 128000 for any unregistered model" in {
+    val cfg = CohereConfig.fromValues("patch-cov-unknown", apiKey, baseUrl).value
+    cfg.contextWindow shouldBe 128000
+    cfg.reserveCompletion shouldBe 4096
+  }
+
   "ZaiConfig fallback" should "return 200000 for GLM-4.7-like model" in {
     val cfg = ZaiConfig.fromValues("patch-cov-GLM-4.7", apiKey, baseUrl).value
     cfg.contextWindow shouldBe 200000

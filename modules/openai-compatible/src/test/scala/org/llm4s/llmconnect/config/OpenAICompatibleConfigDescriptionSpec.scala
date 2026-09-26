@@ -7,7 +7,8 @@ import org.scalatest.wordspec.AnyWordSpec
 /**
  * `providerId`, `endpointUrl` and `withModel` for the configs `llm4s-openai-compatible`
  * holds - the rows of core's `ProviderConfigDescriptionSpec` that moved here with them
- * (#1132), plus the generic `OpenAICompatibleConfig`. `OpenAIConfig` is here because it
+ * (#1132), plus the generic `OpenAICompatibleConfig`. `MistralConfig` and `CohereConfig` were the
+ * last rows there; with them gone core builds no config, and its spec went too. `OpenAIConfig` is here because it
  * lives in this module - OpenRouter builds one - and `llm4s-openai` takes it from here.
  */
 class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
@@ -16,10 +17,11 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
   private val zai      = ZaiConfig("k", "GLM-4.7", ZaiConfig.DEFAULT_BASE_URL, 200000, 4096)
   private val deepseek = DeepSeekConfig("k", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
   private val mistral  = MistralConfig("k", "mistral-large-latest", MistralConfig.DEFAULT_BASE_URL, 128000, 4096)
+  private val cohere   = CohereConfig("k", "command-r", CohereConfig.DEFAULT_BASE_URL, 128000, 4096)
   private val generic =
     OpenAICompatibleConfig("m", "http://localhost:8000/v1", Some("k"), 32768, 4096, Map("X-Team" -> "search"))
 
-  private val all: Seq[ProviderConfig] = Seq(openai, zai, deepseek, mistral, generic)
+  private val all: Seq[ProviderConfig] = Seq(openai, zai, deepseek, mistral, cohere, generic)
 
   "ProviderConfig.providerId" should {
     "name each provider in its canonical spelling" in {
@@ -28,6 +30,7 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
       zai.providerId shouldBe ProviderId("zai")
       deepseek.providerId shouldBe ProviderId("deepseek")
       mistral.providerId shouldBe ProviderId("mistral")
+      cohere.providerId shouldBe ProviderId("cohere")
       generic.providerId shouldBe ProviderId("openai-compatible")
     }
 
@@ -42,6 +45,7 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
       zai.endpointUrl shouldBe Some(ZaiConfig.DEFAULT_BASE_URL)
       deepseek.endpointUrl shouldBe Some(DeepSeekConfig.DEFAULT_BASE_URL)
       mistral.endpointUrl shouldBe Some(MistralConfig.DEFAULT_BASE_URL)
+      cohere.endpointUrl shouldBe Some(CohereConfig.DEFAULT_BASE_URL)
       generic.endpointUrl shouldBe Some("http://localhost:8000/v1")
     }
   }

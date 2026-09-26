@@ -5,12 +5,12 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 /**
- * Named provider sections, validated against the providers core ships.
+ * Named provider sections: the validation that does not depend on the provider.
  *
  * The OpenAI and Azure cases moved to `llm4s-openai`'s `OpenAINamedProviderSpec` with the
  * providers (#1132), as the Anthropic and Gemini cases did before them, and the OpenRouter, DeepSeek
- * and Z.ai cases - and, when it moved onto the shared client, Mistral's - to
- * `llm4s-openai-compatible`'s `OpenAICompatibleNamedProviderSpec`.
+ * and Z.ai cases - and, when they moved onto the shared client, Mistral's and Cohere's - to
+ * `llm4s-openai-compatible`'s `OpenAICompatibleNamedProviderSpec`. Core ships no provider.
  */
 class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
 
@@ -18,27 +18,6 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
     NamedProviderConfigValidator.validate(ProviderName(providerName), section)
 
   "NamedProviderConfigValidator" should {
-
-    "validate and normalize a Cohere named provider section" in {
-      validate(
-        "cohere-main",
-        RawNamedProviderSection(
-          provider = Some("cohere"),
-          model = Some("command-r-plus"),
-          baseUrl = Some("https://api.cohere.com"),
-          apiKey = Some("cohere-key"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
-        )
-      ) match
-        case Right(cfg) =>
-          cfg.provider shouldBe ProviderId("cohere")
-          cfg.model.asString shouldBe "command-r-plus"
-          cfg.apiKey.map(_.asKey) shouldBe Some("cohere-key")
-        case Left(err) =>
-          fail(s"Expected Cohere NamedProviderConfig, got error: ${err.message}")
-    }
 
     "fail clearly when provider field is missing" in {
       validate(

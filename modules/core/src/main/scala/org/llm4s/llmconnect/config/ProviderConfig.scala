@@ -3,7 +3,6 @@ package org.llm4s.llmconnect.config
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
-import org.llm4s.util.Redaction
 
 /**
  * Identifies a specific LLM provider, model, and connection details.
@@ -81,74 +80,4 @@ object ProviderConfig {
       (),
       ConfigurationError(s"$provider $field must be non-empty", List(field))
     )
-}
-
-/**
- * Configuration for the Cohere API.
- *
- * Prefer [[CohereConfig.fromValues]] over the primary constructor; it resolves
- * `contextWindow` and `reserveCompletion` automatically from the model name.
- *
- * @param apiKey        Cohere API key; redacted in `toString`.
- * @param model         Model identifier, e.g. `"command-r-plus"`.
- * @param baseUrl       API base URL; defaults to [[CohereConfig.DEFAULT_BASE_URL]].
- * @param contextWindow Model's total token capacity (prompt + completion combined).
- * @param reserveCompletion Tokens held back from prompt history for the completion.
- */
-case class CohereConfig(
-  apiKey: String,
-  model: String,
-  baseUrl: String,
-  contextWindow: Int,
-  reserveCompletion: Int
-) extends ProviderConfig:
-  override val providerId: ProviderId                 = ProviderId("cohere")
-  override def endpointUrl: Option[String]            = Some(baseUrl)
-  override def withModel(model: String): CohereConfig = copy(model = model)
-  override def toString: String =
-    s"CohereConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, baseUrl=$baseUrl, contextWindow=$contextWindow, " +
-      s"reserveCompletion=$reserveCompletion)"
-
-object CohereConfig {
-  private val DefaultContextWindow     = 128000
-  private val DefaultReserveCompletion = 4096
-
-  val DEFAULT_BASE_URL: String = "https://api.cohere.com"
-
-  private val cohereFallback: String => (Int, Int) = _ => (DefaultContextWindow, DefaultReserveCompletion)
-
-  /**
-   * Constructs a [[CohereConfig]], resolving `contextWindow` and
-   * `reserveCompletion` from the model name automatically.
-   *
-   * @param modelName Model identifier, e.g. `"command-r-plus"`.
-   * @param apiKey    Cohere API key; must be non-empty.
-   * @param baseUrl   API base URL; must be non-empty. Defaults to
-   *                  [[CohereConfig.DEFAULT_BASE_URL]] when loaded via
-   *                  [[org.llm4s.config.Llm4sConfig]].
-   */
-  def fromValues(
-    modelName: String,
-    apiKey: String,
-    baseUrl: String
-  )(using resolver: ContextWindowResolver): Result[CohereConfig] =
-    for {
-      _ <- ProviderConfig.nonEmpty("Cohere", "apiKey", apiKey)
-      _ <- ProviderConfig.nonEmpty("Cohere", "baseUrl", baseUrl)
-    } yield {
-      val (cw, rc) = resolver.resolve(
-        lookupProviders = Seq("cohere"),
-        modelName = modelName,
-        defaultContextWindow = DefaultContextWindow,
-        defaultReserve = DefaultReserveCompletion,
-        fallbackResolver = cohereFallback
-      )
-      CohereConfig(
-        apiKey = apiKey,
-        model = modelName,
-        baseUrl = baseUrl,
-        contextWindow = cw,
-        reserveCompletion = rc
-      )
-    }
 }
