@@ -1,11 +1,12 @@
 package org.llm4s.rag.evaluation
 
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
-import org.llm4s.llmconnect.config.{ DeepSeekConfig, EmbeddingModelConfig, EmbeddingProviderConfig }
+import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
+import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -156,10 +157,10 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
       Right(new MockEmbeddingProvider)
   }
 
-  private def withFixture = ProviderRegistry.builtin.withEmbeddingProvider(FixtureEmbeddings)
+  private def withFixture = ProviderRegistry.of(FixtureChatProvider).withEmbeddingProvider(FixtureEmbeddings)
 
   private def chat =
-    DeepSeekConfig("k", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
+    FixtureChatConfig("k", "fixture-model")
 
   private def embeddings(model: String) =
     "fixture" -> EmbeddingProviderConfig("http://localhost:9999", model, "key")

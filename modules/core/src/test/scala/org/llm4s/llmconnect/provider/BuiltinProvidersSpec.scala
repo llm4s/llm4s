@@ -2,9 +2,10 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LlmClientOptions
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, DeepSeekConfig }
+import org.llm4s.llmconnect.config.ContextWindowResolver
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
+import org.llm4s.testutil.FixtureChatConfig
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -78,14 +79,17 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
     }
 
     "refuse a config belonging to another provider" in {
-      val foreign = DeepSeekConfig("k", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
+      // The test fixture's config belongs to no built-in, so every one of them must refuse it.
+      val foreign = FixtureChatConfig("k", "fixture-model")
 
-      expectations.filterNot(_._1 == DeepSeekProvider).foreach { (descriptor, _, _) =>
+      expectations.foreach { (descriptor, _, _) =>
         descriptor.buildClient(foreign, LlmClientOptions.default) match
           case Left(error) =>
-            error.message should include(s"Invalid config type DeepSeekConfig for provider ${descriptor.id.asString}")
+            error.message should include(
+              s"Invalid config type FixtureChatConfig for provider ${descriptor.id.asString}"
+            )
           case Right(client) =>
-            fail(s"${descriptor.id.asString} accepted a DeepSeekConfig and built $client")
+            fail(s"${descriptor.id.asString} accepted a FixtureChatConfig and built $client")
       }
     }
 

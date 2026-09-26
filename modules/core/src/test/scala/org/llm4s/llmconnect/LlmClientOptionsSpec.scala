@@ -3,9 +3,9 @@ package org.llm4s.llmconnect
 import org.scalatest.EitherValues
 import java.time.Instant
 
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, DeepSeekConfig, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
@@ -46,18 +46,18 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("LLMConnect.getClient accepts explicit options for provider-checked construction") {
-    val cfg = DeepSeekConfig
+    val cfg = FixtureChatConfig
       .fromValues(
-        modelName = "deepseek-chat",
+        model = "fixture-model",
         apiKey = "sk-test",
-        baseUrl = DeepSeekConfig.DEFAULT_BASE_URL
+        baseUrl = FixtureChatProvider.DefaultBaseUrl
       )
       .value
     val options = LlmClientOptions(
       exchangeLogging = ProviderExchangeLogging.enabled(ProviderExchangeSink.noop)
     )
 
-    val res = LLMConnect.getClient(ProviderId("deepseek"), cfg, options)
+    val res = LLMConnect.getClient(FixtureChatProvider.id, cfg, options)
 
     res.isRight shouldBe true
   }

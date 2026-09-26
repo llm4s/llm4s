@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.spi
 
 import org.llm4s.llmconnect.spi.fixtures.{ FixtureEmbeddings, FixtureProvider }
+import org.llm4s.testutil.FixtureChatProvider
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -15,7 +16,10 @@ import java.net.URLClassLoader
  * `src/test/resources/provider-discovery`, each holding a services file. They
  * live in subdirectories rather than at the resource root deliberately: a
  * services file at the root would be on every test's classpath and would
- * change what `ProviderRegistry.default` holds for the whole suite.
+ * change what `ProviderRegistry.default` holds for the whole suite. The one
+ * root entry, `FixtureChatProviderModule`, is there for exactly that reason:
+ * it is the stand-in provider every suite may rely on (see
+ * `org.llm4s.testutil.FixtureChatProvider`).
  *
  * The loaders delegate to the test class loader, so core's own services entry
  * is visible too. That is the realistic arrangement — a real classpath has the
@@ -100,8 +104,9 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
 
       registry.resolveEmbedding(ProviderId("fixtureembed")) shouldBe Right(FixtureEmbeddings)
       registry.embeddingIds should contain("fixtureembed")
-      // It contributes nothing to the chat namespace.
-      registry.ids shouldBe builtinIds
+      // It contributes nothing to the chat namespace: the chat ids are exactly what the test
+      // classpath holds without it - the built-ins and the test fixture provider.
+      registry.ids shouldBe ProviderRegistry.default.ids
 
       val module = registry.report.modules
         .find(_.moduleClass == "org.llm4s.llmconnect.spi.fixtures.FixtureEmbeddingModule")
@@ -222,7 +227,9 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
   "the default registry" should {
     "be the discovered one, and hold every built-in provider" in {
       ProviderRegistry.default.report.discovered shouldBe true
-      ProviderRegistry.default.ids shouldBe builtinIds
+      // And the test fixture provider that core's test resources declare at the root, which
+      // is the only thing on this classpath besides the built-ins.
+      ProviderRegistry.default.ids shouldBe (builtinIds :+ FixtureChatProvider.id.asString).sorted
       ProviderRegistry.default.embeddingIds shouldBe ProviderRegistry.builtin.embeddingIds
     }
   }
@@ -230,30 +237,31 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
   "the two provider namespaces" should {
 
     "be independent, so a provider can supply one without the other" in {
-      val registry = ProviderRegistry.builtin
+      val registry = ProviderRegistry.builtin.withProvider(FixtureChatProvider)
 
-      // DeepSeek supplies only chat; Voyage only embeddings. OpenAI, which supplies both
+      // The fixture supplies only chat; Voyage only embeddings. OpenAI, which supplies both
       // under one id, is checked in `llm4s-openai`'s `Llm4sOpenAIModuleSpec` (#1132). That
       // overlap without containment is why the embedding descriptor is a separate trait.
-      registry.ids should contain("deepseek")
-      (registry.embeddingIds should not).contain("deepseek")
+      registry.ids should contain("fixturechat")
+      (registry.embeddingIds should not).contain("fixturechat")
       registry.embeddingIds should contain("voyage")
       (registry.ids should not).contain("voyage")
     }
 
     "not resolve a chat provider as an embedding one" in {
       val error = ProviderRegistry.builtin
-        .resolveEmbedding(ProviderId("deepseek"), Some("llm4s.embeddings.model"))
+        .withProvider(FixtureChatProvider)
+        .resolveEmbedding(ProviderId("fixturechat"), Some("llm4s.embeddings.model"))
         .left
         .toOption
-        .getOrElse(fail("expected deepseek to supply no embedding provider"))
+        .getOrElse(fail("expected fixturechat to supply no embedding provider"))
         .message
 
-      error should include("Embedding provider 'deepseek'")
+      error should include("Embedding provider 'fixturechat'")
       error should include("(from llm4s.embeddings.model)")
       // It lists the embedding providers, not the chat ones - the point of separate namespaces.
       error should include("voyage")
-      (error should not).include("deepseek,")
+      (error should not).include("fixturechat,")
     }
 
     "each point at the registration call that accepts their own descriptor type" in {

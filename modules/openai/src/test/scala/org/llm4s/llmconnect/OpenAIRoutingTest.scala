@@ -3,6 +3,7 @@ package org.llm4s.llmconnect
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.config.*
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
+import org.llm4s.testutil.FixtureChatConfig
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -76,13 +77,7 @@ class OpenAIRoutingTest extends AnyFunSuite with Matchers {
   }
 
   test("OpenAI provider with non-OpenAIConfig should throw IllegalArgumentException") {
-    val wrongCfg: ProviderConfig = DeepSeekConfig(
-      apiKey = "key",
-      model = "deepseek-chat",
-      baseUrl = "https://example.invalid/v1",
-      contextWindow = 128000,
-      reserveCompletion = 8192
-    )
+    val wrongCfg: ProviderConfig = FixtureChatConfig(apiKey = "key", model = "fixture-model")
 
     val res = LLMConnect.getClient(ProviderId("openai"), wrongCfg)
     res.isLeft shouldBe true

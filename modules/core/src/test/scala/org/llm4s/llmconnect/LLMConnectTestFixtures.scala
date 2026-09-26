@@ -196,48 +196,6 @@ object LLMConnectTestFixtures {
         |  "eval_count": 5
         |}""".stripMargin
 
-    val anthropicCompletion: String =
-      """{
-        |  "id": "msg_01abc",
-        |  "type": "message",
-        |  "role": "assistant",
-        |  "content": [
-        |    {
-        |      "type": "text",
-        |      "text": "The answer is 4."
-        |    }
-        |  ],
-        |  "model": "claude-3-sonnet-20240229",
-        |  "stop_reason": "end_turn",
-        |  "usage": {
-        |    "input_tokens": 12,
-        |    "output_tokens": 5
-        |  }
-        |}""".stripMargin
-
-    val anthropicCompletionWithThinking: String =
-      """{
-        |  "id": "msg_02def",
-        |  "type": "message",
-        |  "role": "assistant",
-        |  "content": [
-        |    {
-        |      "type": "thinking",
-        |      "thinking": "Let me calculate 2 + 2..."
-        |    },
-        |    {
-        |      "type": "text",
-        |      "text": "The answer is 4."
-        |    }
-        |  ],
-        |  "model": "claude-3-sonnet-20240229",
-        |  "stop_reason": "end_turn",
-        |  "usage": {
-        |    "input_tokens": 12,
-        |    "output_tokens": 5
-        |  }
-        |}""".stripMargin
-
     val sseStreamChunk: String =
       """data: {"id":"chatcmpl-xyz","choices":[{"index":0,"delta":{"content":"Hello"}}]}"""
 

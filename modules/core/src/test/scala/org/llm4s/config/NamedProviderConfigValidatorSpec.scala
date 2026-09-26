@@ -160,16 +160,16 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         case Left(err) =>
           err.message should include("'moonbeam'")
           err.message should include("Registered providers:")
-          err.message should include("deepseek")
+          err.message should include("fixturechat")
         case Right(cfg) =>
           fail(s"Expected unresolvable provider failure, got config: $cfg")
     }
 
     "fail clearly when model field is missing" in {
       validate(
-        "deepseek-main",
+        "fixturechat-main",
         RawNamedProviderSection(
-          provider = Some("deepseek"),
+          provider = Some("fixturechat"),
           model = Some("   "),
           baseUrl = None,
           apiKey = Some("sk-test"),

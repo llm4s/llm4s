@@ -11,8 +11,8 @@ import pureconfig.ConfigSource
  *
  * Moved from core's `NamedProviderConfigValidatorSpec` with the provider (#1132); core's
  * config-loading specs that used Anthropic only as a convenient API-key provider now use
- * DeepSeek instead. These resolve `anthropic` through `ProviderRegistry.default`, so they
- * also prove this module's services entry is found.
+ * the test fixture `FixtureChatProvider` instead. These resolve `anthropic` through
+ * `ProviderRegistry.default`, so they also prove this module's services entry is found.
  */
 class AnthropicNamedProviderSpec extends AnyWordSpec with Matchers:
 

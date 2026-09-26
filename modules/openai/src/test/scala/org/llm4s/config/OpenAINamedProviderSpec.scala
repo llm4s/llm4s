@@ -14,9 +14,9 @@ import pureconfig.ConfigSource
  *
  * The validator cases moved from core's `NamedProviderConfigValidatorSpec` with the
  * providers (#1132); core's config-loading specs that used OpenAI only as a convenient
- * API-key provider now use DeepSeek instead, and the OpenAI end-to-end cases they covered
- * are here. These resolve the providers through `ProviderRegistry.default`, so they also
- * prove this module's services entry is found.
+ * API-key provider now use the test fixture `FixtureChatProvider` instead, and the OpenAI
+ * end-to-end cases they covered are here. These resolve the providers through
+ * `ProviderRegistry.default`, so they also prove this module's services entry is found.
  */
 class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
 

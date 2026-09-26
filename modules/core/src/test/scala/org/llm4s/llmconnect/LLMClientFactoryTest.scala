@@ -30,20 +30,20 @@ class LLMClientFactoryTest extends AnyFunSuite with Matchers {
     }
   }
 
-  test("LLMConnect.getClient returns DeepSeekClient for the default named DeepSeek provider") {
+  test("LLMConnect.getClient returns the client of the default named provider") {
     val props = Map(
-      "llm4s.providers.provider"               -> "deepseek-main",
-      "llm4s.providers.deepseek-main.provider" -> "deepseek",
-      "llm4s.providers.deepseek-main.model"    -> "deepseek-chat",
-      "llm4s.providers.deepseek-main.apiKey"   -> "sk",
-      "llm4s.providers.deepseek-main.baseUrl"  -> "https://api.deepseek.com"
+      "llm4s.providers.provider"                  -> "fixturechat-main",
+      "llm4s.providers.fixturechat-main.provider" -> "fixturechat",
+      "llm4s.providers.fixturechat-main.model"    -> "fixture-model",
+      "llm4s.providers.fixturechat-main.apiKey"   -> "sk",
+      "llm4s.providers.fixturechat-main.baseUrl"  -> "https://fixturechat.invalid/v2"
     )
 
     withProps(props) {
       given ModelRegistryService = registryService
       val res                    = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
       res match {
-        case Right(client) => client.getClass.getSimpleName shouldBe "DeepSeekClient"
+        case Right(client) => client.getClass.getSimpleName shouldBe "FixtureChatClient"
         case Left(err)     => fail(s"Expected Right, got Left($err)")
       }
     }

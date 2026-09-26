@@ -5,6 +5,7 @@ import org.scalatest.matchers.should.Matchers
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.llmconnect.config._
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
+import org.llm4s.testutil.FixtureChatConfig
 
 /**
  * `LLMConnect` routes each config to its own provider's client, and refuses a mismatch.
@@ -92,13 +93,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
   }
 
   test("OpenRouter provider with non-OpenAIConfig should throw IllegalArgumentException") {
-    val wrongCfg: ProviderConfig = DeepSeekConfig(
-      apiKey = "key",
-      model = "deepseek-chat",
-      baseUrl = "https://example.invalid/v1",
-      contextWindow = 128000,
-      reserveCompletion = 8192
-    )
+    val wrongCfg: ProviderConfig = FixtureChatConfig(apiKey = "key", model = "fixture-model")
 
     val res = LLMConnect.getClient(ProviderId("openrouter"), wrongCfg)
     res.isLeft shouldBe true

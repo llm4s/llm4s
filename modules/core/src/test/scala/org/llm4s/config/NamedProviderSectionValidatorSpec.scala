@@ -2,8 +2,8 @@ package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.provider.DeepSeekProvider
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
+import org.llm4s.testutil.FixtureChatProvider
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -18,8 +18,9 @@ import org.scalatest.matchers.should.Matchers
  * [[org.llm4s.llmconnect.spi.ProviderConfigSpec]] instead of core holding an
  * object per provider.
  *
- * DeepSeek stands in for "a provider with an API key and a default base URL". The Azure
- * cases, which are about Azure's own endpoint requirement, moved to `llm4s-openai`'s
+ * The test fixture `FixtureChatProvider` stands in for "a provider with an API key and a
+ * default base URL", so these cases do not move each time a real provider leaves core. The
+ * Azure cases, which are about Azure's own endpoint requirement, moved to `llm4s-openai`'s
  * `AzureSectionValidationSpec` with the provider (#1132).
  */
 class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
@@ -48,21 +49,22 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
   private def errorFrom(result: org.llm4s.types.Result[NamedProviderConfig]): String =
     result.left.toOption.getOrElse(fail(s"Expected Left, got $result")).asInstanceOf[ConfigurationError].message
 
-  "DeepSeek validation" should "mention missing DeepSeek fields by name" in {
-    val message = errorFrom(validate("my-deepseek", DeepSeekProvider, section("deepseek", "deepseek-chat")))
+  "API-key validation" should "mention the missing fields by name" in {
+    val message =
+      errorFrom(validate("my-fixture", FixtureChatProvider, section("fixturechat", "fixture-model")))
 
-    message should include("Provider 'my-deepseek' (provider = deepseek) is missing required fields")
+    message should include("Provider 'my-fixture' (provider = fixturechat) is missing required fields")
     message should include(
-      "- apiKey: set it in llm4s.conf under providers.my-deepseek.apiKey (optionally from an env var, e.g. apiKey = ${?DEEPSEEK_API_KEY})"
+      "- apiKey: set it in llm4s.conf under providers.my-fixture.apiKey (optionally from an env var, e.g. apiKey = ${?FIXTURECHAT_API_KEY})"
     )
   }
 
   it should "not demand a baseUrl, because the descriptor supplies a default" in {
     val result =
-      validate("my-deepseek", DeepSeekProvider, section("deepseek", "deepseek-chat", apiKey = Some("sk-test")))
+      validate("my-fixture", FixtureChatProvider, section("fixturechat", "fixture-model", apiKey = Some("sk-test")))
 
     result.map(_.baseUrl) shouldBe Right(None)
-    DeepSeekProvider.configSpec.defaultBaseUrl shouldBe Some(DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
+    FixtureChatProvider.configSpec.defaultBaseUrl shouldBe Some(FixtureChatProvider.DefaultBaseUrl)
   }
 
   "a provider from outside core" should "get its requirements honoured with default example text" in {
@@ -92,24 +94,29 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
 
   "validation" should "return the normalized section when all required fields are present" in {
     val result = validate(
-      "my-deepseek",
-      DeepSeekProvider,
-      section("deepseek", "deepseek-chat", baseUrl = Some("https://api.deepseek.com"), apiKey = Some("sk-test-key"))
+      "my-fixture",
+      FixtureChatProvider,
+      section(
+        "fixturechat",
+        "fixture-model",
+        baseUrl = Some("https://fixturechat.invalid/v2"),
+        apiKey = Some("sk-test-key")
+      )
     )
 
     val config = result.getOrElse(fail(s"Expected Right, got $result"))
-    config.provider shouldBe ProviderId("deepseek")
+    config.provider shouldBe ProviderId("fixturechat")
     config.apiKey.map(_.asKey) shouldBe Some("sk-test-key")
-    config.baseUrl.map(_.asUrl) shouldBe Some("https://api.deepseek.com")
+    config.baseUrl.map(_.asUrl) shouldBe Some("https://fixturechat.invalid/v2")
   }
 
   it should "trim whitespace and filter empty strings for all optional fields" in {
     val result = validate(
       "my-trim-test",
-      DeepSeekProvider,
+      FixtureChatProvider,
       section(
-        "deepseek",
-        "deepseek-chat",
+        "fixturechat",
+        "fixture-model",
         baseUrl = Some("  https://api.example.com  "),
         apiKey = Some("  sk-test-key  "),
         organization = Some("  org-123  "),
@@ -119,7 +126,7 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
     )
 
     val config = result.getOrElse(fail(s"Expected Right, got $result"))
-    config.provider shouldBe ProviderId("deepseek")
+    config.provider shouldBe ProviderId("fixturechat")
     config.baseUrl.map(_.asUrl) shouldBe Some("https://api.example.com")
     config.apiKey.map(_.asKey) shouldBe Some("sk-test-key")
     config.organization shouldBe Some("org-123")
@@ -129,8 +136,8 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
 
   it should "reject a section whose provider is not the one being validated against" in {
     val message =
-      errorFrom(validate("my-deepseek", DeepSeekProvider, section("openai", "gpt-4", apiKey = Some("k"))))
+      errorFrom(validate("my-fixture", FixtureChatProvider, section("openai", "gpt-4", apiKey = Some("k"))))
 
-    message should include("Configured provider 'my-deepseek' resolved to unexpected provider 'openai'")
+    message should include("Configured provider 'my-fixture' resolved to unexpected provider 'openai'")
   }
 }
