@@ -43,13 +43,21 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers:
       registry.report.modules.map(_.moduleClass) should contain(classOf[Llm4sOllamaModule].getName)
     }
 
-    "not be part of core's built-in set, which no longer ships Ollama" in {
-      ProviderRegistry.builtin.find(ProviderId("ollama")) shouldBe None
-      ProviderRegistry.builtin.findEmbedding(ProviderId("ollama")) shouldBe None
+    "be the only module that supplies ollama, for chat or embeddings" in {
+      // Core held these in `BuiltinProviders` until #1132 deleted it; nothing but this
+      // module may supply them now.
+      val modules = ProviderRegistry.default.report.modules
+      Seq("ollama").foreach { id =>
+        modules.filter(_.providerIds.contains(id)).map(_.moduleClass) shouldBe Seq(classOf[Llm4sOllamaModule].getName)
+      }
+      Seq("ollama").foreach { id =>
+        modules.filter(_.embeddingProviderIds.contains(id)).map(_.moduleClass) shouldBe
+          Seq(classOf[Llm4sOllamaModule].getName)
+      }
     }
 
     "be registrable explicitly where discovery cannot run" in {
-      val registry = ProviderRegistry.builtin.withModule(new Llm4sOllamaModule)
+      val registry = ProviderRegistry.ofModules(new Llm4sOllamaModule)
 
       registry.get(ProviderId("ollama")) shouldBe Right(OllamaProvider)
       registry.findEmbedding(ProviderId("ollama")) shouldBe Some(OllamaEmbeddingProvider)

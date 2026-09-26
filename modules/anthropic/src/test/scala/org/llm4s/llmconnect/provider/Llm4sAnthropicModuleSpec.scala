@@ -48,12 +48,19 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers:
       ProviderRegistry.default.findEmbedding(ProviderId("anthropic")) shouldBe None
     }
 
-    "not be part of core's built-in set, which no longer ships Anthropic" in {
-      ProviderRegistry.builtin.find(ProviderId("anthropic")) shouldBe None
+    "be the only module that supplies anthropic" in {
+      // Core held these in `BuiltinProviders` until #1132 deleted it; nothing but this
+      // module may supply them now.
+      val modules = ProviderRegistry.default.report.modules
+      Seq("anthropic").foreach { id =>
+        modules.filter(_.providerIds.contains(id)).map(_.moduleClass) shouldBe Seq(
+          classOf[Llm4sAnthropicModule].getName
+        )
+      }
     }
 
     "be registrable explicitly where discovery cannot run" in {
-      val registry = ProviderRegistry.builtin.withModule(new Llm4sAnthropicModule)
+      val registry = ProviderRegistry.ofModules(new Llm4sAnthropicModule)
 
       registry.get(ProviderId("anthropic")) shouldBe Right(AnthropicProvider)
     }

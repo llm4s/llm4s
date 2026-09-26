@@ -14,7 +14,7 @@ import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, Llm4sProviderModu
  * than merged - register it explicitly:
  *
  * {{{
- * given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sOllamaModule)
+ * given ProviderRegistry = ProviderRegistry.ofModules(new Llm4sOllamaModule)
  * }}}
  *
  * A `class` rather than an `object` because `java.util.ServiceLoader`

@@ -21,10 +21,12 @@ import java.net.URLClassLoader
  * it is the stand-in provider every suite may rely on (see
  * `org.llm4s.testutil.FixtureChatProvider`).
  *
- * The loaders delegate to the test class loader, so core's own services entry
- * is visible too. That is the realistic arrangement — a real classpath has the
- * built-ins and the extra module together — and it is what makes the
- * "one broken jar must not take out the others" cases meaningful.
+ * The loaders delegate to the test class loader, so the test classpath's own
+ * services entry - the fixture providers - is visible too. That is the realistic
+ * arrangement — a real classpath has the provider modules it depends on and the
+ * extra module together — and it is what makes the "one broken jar must not take
+ * out the others" cases meaningful. Core itself ships no provider and so no
+ * services entry (#1132).
  */
 class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
 
@@ -35,16 +37,21 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
       .getOrElse(fail(s"fixture directory 'provider-discovery/$directory/' is missing from test resources"))
     new URLClassLoader(Array(url), parent)
 
-  private val builtinIds = ProviderRegistry.builtin.ids
+  /** The chat providers the test classpath holds without any fixture directory: `fixturechat`. */
+  private val classpathIds = ProviderRegistry.default.ids
 
   "discovery" should {
 
-    "find the built-in providers through core's own services file" in {
+    "find the providers on the classpath through their services files, and none from core" in {
       val registry = ProviderRegistry.discover(getClass.getClassLoader)
 
-      registry.ids should contain allElementsOf builtinIds
+      registry.ids should contain allElementsOf classpathIds
       registry.report.discovered shouldBe true
       registry.report.modules.map(_.moduleClass) should contain(
+        "org.llm4s.testutil.FixtureChatProviderModule"
+      )
+      // Core held a `BuiltinProviderModule` until its last provider client left it (#1132).
+      (registry.report.modules.map(_.moduleClass) should not).contain(
         "org.llm4s.llmconnect.provider.BuiltinProviderModule"
       )
       registry.report.failures shouldBe empty
@@ -55,7 +62,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
 
       registry.get(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
       // The point of the SPI: the new provider arrives without displacing anything.
-      registry.ids should contain allElementsOf builtinIds
+      registry.ids should contain allElementsOf classpathIds
 
       val fixtureModule = registry.report.modules
         .find(_.moduleClass == "org.llm4s.llmconnect.spi.fixtures.FixtureProviderModule")
@@ -78,7 +85,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
       val registry = ProviderRegistry.discover(loaderFor("mixed"))
 
       registry.get(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
-      registry.ids should contain allElementsOf builtinIds
+      registry.ids should contain allElementsOf classpathIds
       registry.report.hasFailures shouldBe true
     }
 
@@ -92,9 +99,9 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
       detail should include("LinkageErrorProviderModule")
       detail should include("java.lang.AbstractMethodError")
 
-      // The module behind the broken one, and the built-ins, are unaffected.
+      // The module behind the broken one, and the classpath's providers, are unaffected.
       registry.get(ProviderId("fixturecloud")) shouldBe Right(FixtureProvider)
-      registry.ids should contain allElementsOf builtinIds
+      registry.ids should contain allElementsOf classpathIds
     }
 
     "find an embedding-only provider module" in {
@@ -105,7 +112,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
       registry.resolveEmbedding(ProviderId("fixtureembed")) shouldBe Right(FixtureEmbeddings)
       registry.embeddingIds should contain("fixtureembed")
       // It contributes nothing to the chat namespace: the chat ids are exactly what the test
-      // classpath holds without it - the built-ins and the test fixture provider.
+      // classpath holds without it - the test fixture provider.
       registry.ids shouldBe ProviderRegistry.default.ids
 
       val module = registry.report.modules
@@ -142,8 +149,8 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
 
       registry.report.failures.map(_.detail).mkString should include("ThrowingProviderModule")
       registry.report.failures.map(_.detail).mkString should include("this module is broken")
-      // The built-ins, discovered from the parent loader, are unaffected.
-      registry.ids should contain allElementsOf builtinIds
+      // The classpath's providers, discovered from the parent loader, are unaffected.
+      registry.ids should contain allElementsOf classpathIds
     }
   }
 
@@ -225,13 +232,12 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
   }
 
   "the default registry" should {
-    "be the discovered one, and hold every built-in provider" in {
+    "be the discovered one, holding only the test fixtures, since core ships no provider" in {
       ProviderRegistry.default.report.discovered shouldBe true
-      // And the test fixture provider that core's test resources declare at the root, which
-      // is the only thing on this classpath besides the built-ins.
-      ProviderRegistry.default.ids shouldBe (builtinIds :+ FixtureChatProvider.id.asString).sorted
-      ProviderRegistry.default.embeddingIds shouldBe
-        (ProviderRegistry.builtin.embeddingIds :+ FixtureEmbeddingProvider.id.asString).sorted
+      // The test fixture providers that core's test resources declare at the root are the only
+      // providers on this classpath: every client has left core for a module of its own.
+      ProviderRegistry.default.ids shouldBe Seq(FixtureChatProvider.id.asString)
+      ProviderRegistry.default.embeddingIds shouldBe Seq(FixtureEmbeddingProvider.id.asString)
     }
   }
 
@@ -239,7 +245,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
 
     "be independent, so a provider can supply one without the other" in {
       val registry =
-        ProviderRegistry.builtin.withProvider(FixtureChatProvider).withEmbeddingProvider(FixtureEmbeddingProvider)
+        ProviderRegistry.of(FixtureChatProvider).withEmbeddingProvider(FixtureEmbeddingProvider)
 
       // One fixture supplies only chat, the other - Voyage's shape - only embeddings. OpenAI,
       // which supplies both under one id, is checked in `llm4s-openai`'s
@@ -252,8 +258,8 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
     }
 
     "not resolve a chat provider as an embedding one" in {
-      val error = ProviderRegistry.builtin
-        .withProvider(FixtureChatProvider)
+      val error = ProviderRegistry
+        .of(FixtureChatProvider)
         .withEmbeddingProvider(FixtureEmbeddingProvider)
         .resolveEmbedding(ProviderId("fixturechat"), Some("llm4s.embeddings.model"))
         .left
@@ -271,14 +277,16 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
     "each point at the registration call that accepts their own descriptor type" in {
       // `of` takes chat descriptors and `ofEmbeddings` embedding ones, so an error naming the
       // wrong one hands the reader a compile error as their next step.
-      val chat = ProviderRegistry.builtin
+      val chat = ProviderRegistry
+        .of()
         .resolve(ProviderId("moonbeam"))
         .left
         .toOption
         .getOrElse(fail("expected an unresolved-provider error"))
         .message
 
-      val embedding = ProviderRegistry.builtin
+      val embedding = ProviderRegistry
+        .of()
         .resolveEmbedding(ProviderId("moonbeam"))
         .left
         .toOption
@@ -294,14 +302,14 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
       ProviderRegistry.default.canonicalEmbeddingId(FixtureEmbeddingProvider.Alias).asString shouldBe
         "fixtureembedding"
       // An id nothing claims is returned canonicalised but unchanged.
-      ProviderRegistry.builtin.canonicalEmbeddingId("Moonbeam").asString shouldBe "moonbeam"
+      ProviderRegistry.default.canonicalEmbeddingId("Moonbeam").asString shouldBe "moonbeam"
     }
 
     "let an explicitly registered embedding provider override a discovered one" in {
-      val registry = ProviderRegistry.builtin.withEmbeddingProvider(FixtureEmbeddings)
+      val registry = ProviderRegistry.default.withEmbeddingProvider(FixtureEmbeddings)
 
       registry.resolveEmbedding(ProviderId("fixtureembed")) shouldBe Right(FixtureEmbeddings)
       // Registering an embedding provider leaves the chat namespace alone.
-      registry.ids shouldBe builtinIds
+      registry.ids shouldBe classpathIds
     }
   }

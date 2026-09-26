@@ -62,12 +62,19 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
       new Llm4sOpenAICompatibleModule().embeddingProviders shouldBe empty
     }
 
-    "not be part of core's built-in set, which no longer ships them" in {
-      chatIds.foreach(id => ProviderRegistry.builtin.find(ProviderId(id)) shouldBe None)
+    "be the only module that supplies them" in {
+      // Core held these in `BuiltinProviders` until #1132 deleted it; nothing but this
+      // module may supply them now.
+      val modules = ProviderRegistry.default.report.modules
+      chatIds.foreach { id =>
+        modules.filter(_.providerIds.contains(id)).map(_.moduleClass) shouldBe Seq(
+          classOf[Llm4sOpenAICompatibleModule].getName
+        )
+      }
     }
 
     "be registrable explicitly where discovery cannot run" in {
-      val registry = ProviderRegistry.builtin.withModule(new Llm4sOpenAICompatibleModule)
+      val registry = ProviderRegistry.ofModules(new Llm4sOpenAICompatibleModule)
 
       expectations.foreach((descriptor, _, _) => registry.get(descriptor.id) shouldBe Right(descriptor))
     }

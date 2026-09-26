@@ -14,8 +14,8 @@ import org.llm4s.types.Result
  * the config names a provider through
  * [[org.llm4s.llmconnect.config.ProviderConfig.providerId]], and that provider's
  * [[org.llm4s.llmconnect.spi.ProviderDescriptor]] builds its own client. `LLMConnect`
- * itself knows no provider names, so a provider supplied by another module is reached
- * the same way a built-in one is.
+ * itself knows no provider names, and `llm4s-core` ships no provider: every one - the
+ * project's own provider modules and a third party's alike - is reached the same way.
  *
  * Pass a different registry with `using` to resolve against a custom set of providers;
  * with none in scope, [[org.llm4s.llmconnect.spi.ProviderRegistry.default]] is used.

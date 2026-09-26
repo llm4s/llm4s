@@ -67,7 +67,7 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
 
     "let a user descriptor win over a discovered one of the same id" in {
       // The test fixture provider is discovered through core's test META-INF/services, the same
-      // path the built-ins take, so it stands in for any provider already on the classpath.
+      // path every provider module takes, so it stands in for any provider already on the classpath.
       val replacement = new StubProvider("fixturechat")
       ProviderRegistry.default.withProvider(replacement).get(ProviderId("fixturechat")) shouldBe Right(replacement)
     }
@@ -123,9 +123,10 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
   }
 
   "the default registry" should {
-    "hold every provider built into llm4s-core" in {
-      // Plus `fixturechat`, the test-only provider core's test classpath declares in its own
-      // META-INF/services (org.llm4s.testutil.FixtureChatProvider).
+    "hold no provider from llm4s-core, which ships none" in {
+      // Only `fixturechat`, the test-only provider core's test classpath declares in its own
+      // META-INF/services (org.llm4s.testutil.FixtureChatProvider). This listed core's own
+      // providers until the last of them moved to a module (#1132).
       ProviderRegistry.default.ids shouldBe Seq(
         "fixturechat"
       )

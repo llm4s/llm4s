@@ -18,7 +18,7 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  * it explicitly:
  *
  * {{{
- * given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sOpenAICompatibleModule)
+ * given ProviderRegistry = ProviderRegistry.ofModules(new Llm4sOpenAICompatibleModule)
  * }}}
  *
  * A `class` rather than an `object` because `java.util.ServiceLoader`

@@ -30,7 +30,7 @@ Slice order — each is an issue with its own scope and gotchas:
 | 2 ✅ | [#1129](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` |
 | 3 ✅ | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` |
 | 4 ✅ | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
-| 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` so far |
+| 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (incl. Mistral, Cohere), `llm4s-voyage`; core holds no client |
 | 6 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability`, then 0.4.0 + MiMa |
 
 **Invariants for every carve:**
@@ -57,15 +57,22 @@ Slice order — each is an issue with its own scope and gotchas:
    `org.llm4s.llmconnect.spi.ProviderDescriptor`, list it in an `Llm4sProviderModule`, and
    declare that module in `META-INF/services/org.llm4s.llmconnect.spi.Llm4sProviderModule` - a
    `class` with a public no-arg constructor, never an `object`. Adding a provider is then adding
-   a dependency; `ProviderRegistry.of` / `.withProvider` remain for explicit registration. Nothing in
-   `llm4s-core` needs editing: `ProviderCapabilities`, `ProviderCapabilitiesRegistry` and the
-   twelve `NamedProviderValidators` objects are gone, and the dispatch `match` expressions in
-   `LLMConnect` and `NamedProviderLoader` with them. The one remaining central list is
-   `BuiltinProviders`, which exists only because core still holds most clients and leaves with
-   slice 5. A provider added there must also be added to `BuiltinProvidersSpec`, which is what
-   replaced the compiler's exhaustivity check over the old closed `enum`. `modules/ollama` is the
-   worked example of a provider that has left: its own `Llm4sOllamaModule`, services entry,
-   `reference.conf` block and round-trip spec, and nothing of it in core.
+   a dependency; `ProviderRegistry.of` / `.ofModules` / `.withProvider` remain for explicit
+   registration. Nothing in `llm4s-core` needs editing: `ProviderCapabilities`,
+   `ProviderCapabilitiesRegistry` and the twelve `NamedProviderValidators` objects are gone, and
+   the dispatch `match` expressions in `LLMConnect` and `NamedProviderLoader` with them.
+   **`llm4s-core` ships no provider and holds no provider list**: `BuiltinProviders`,
+   `BuiltinProviderModule`, `BuiltinProvidersSpec`, core's main `META-INF/services` entry and
+   `ProviderRegistry.builtin` were deleted when the last client left core in slice 5
+   ([#1132](https://github.com/llm4s/llm4s/issues/1132)). Never add a provider, a provider
+   list or a services entry back to core. Each provider module proves its own registration
+   instead, in an `Llm4s<Name>ModuleSpec`: discovered through `ProviderRegistry.discover()`,
+   the only module supplying its ids, registrable with `ProviderRegistry.ofModules`, and a
+   config-to-client round trip per descriptor - that spec is what replaced the compiler's
+   exhaustivity check over the old closed `enum`. `modules/ollama` (chat plus embeddings) and
+   `modules/providers/voyage` (embeddings only) are the worked examples: their own
+   `Llm4s<Name>Module`, services entry, `reference.conf` block and module spec, and nothing of
+   them in core.
 
 Current per-module coverage floors are recorded in [#1127](https://github.com/llm4s/llm4s/issues/1127); floors ratchet upward and are never lowered.
 
@@ -87,7 +94,9 @@ llm4s/
 │   ├── gemini/                # Gemini API + Vertex AI chat providers (published)
 │   ├── anthropic/             # Anthropic Claude chat provider + Anthropic SDK (published)
 │   ├── openai/                # OpenAI, Azure, Requesty chat + OpenAI embeddings + Azure SDK (published)
-│   ├── openai-compatible/     # One SDK-free chat-completions client: DeepSeek, Z.ai, OpenRouter, generic (published)
+│   ├── openai-compatible/     # One SDK-free chat-completions client: DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, generic (published)
+│   ├── providers/             # Community provider modules, one `llm4s-<name>` each (published)
+│   │   └── voyage/            # Voyage AI embedding provider
 │   ├── samples/               # Usage examples
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI
@@ -135,10 +144,20 @@ provider, the standard dialect configured entirely from a named section (`baseUr
 optional `apiKey`, `contextWindow`, `reserveCompletion`, `headers`; the last three are fields of
 `NamedProviderConfig` that other providers ignore). **A new OpenAI-compatible provider is a
 dialect and a descriptor in that module, or just config** - check whether `openai-compatible`
-covers it before writing one; never another copy of the client. `BuiltinProviders` now holds only
-Cohere, Mistral and Voyage. `StreamingResponseHandler` (with `forProvider`,
-`OpenAIStreamingHandler` and `AnthropicStreamingHandler`) and `OpenRouterToolCallDeserializer`
-were deleted with it: no client used them. A streamed tool call is split across deltas that
+covers it before writing one; never another copy of the client. Mistral and Cohere followed as
+dialects: Mistral over its OpenAI-format `/v1/chat/completions` (nine-character tool-call ids,
+no empty assistant turns, content-as-chunks with thinking), Cohere over its OpenAI-compatibility
+API (`https://api.cohere.ai/compatibility/v1`; `developer` system role, `json_object`+`schema`
+response format; a configured native root gets `/compatibility/v1` appended). That gave both
+streaming, which they had never had (#925). The dialect hook therefore also has
+`sendEmptyAssistantTurns`, `encodeToolCallId`, `systemRole` and `encodeResponseFormat`, and the
+base client reports streamed token usage. Community providers that are **not** OpenAI-compatible
+live under `modules/providers/<name>`, published as `llm4s-<name>`: Voyage
+(`modules/providers/voyage`, `llm4s-voyage`, embeddings only) was the first. With it core held
+no client, and `BuiltinProviders` went (invariant 8). `StreamingResponseHandler` (with
+`forProvider`, `OpenAIStreamingHandler` and `AnthropicStreamingHandler`) and
+`OpenRouterToolCallDeserializer` were deleted with the openai-compatible carve: no client used
+them. A streamed tool call is split across deltas that
 continuations identify only by `index`; clients must give each continuation its call's id
 (`OpenAICompatibleClient.StreamToolCalls`), because `StreamingAccumulator` keys calls by id and
 skips a chunk with none. Tests that need an
@@ -146,8 +165,11 @@ incidental API-key provider - and never a real one, which would leave core in a 
 use `org.llm4s.testutil.FixtureChatProvider` (id `fixturechat`, `FixtureChatConfig`, a canned
 no-network client). It lives in core's test sources, is registered by core's **test**
 `META-INF/services`, so `ProviderRegistry.default` resolves it in core and in every module
-depending on `core % "test->test"`, and is never in `BuiltinProviders`; core's test
-`application.conf` default is `fixturechat-main`. A spec that builds its own registry passes
+depending on `core % "test->test"`; core's test `application.conf` default is
+`fixturechat-main`. Its embedding counterpart is `org.llm4s.testutil.FixtureEmbeddingProvider`
+(id `fixtureembedding`, alias, API key, default base URL, env-var names, declared dimensions,
+canned vectors), registered the same way; use it wherever a spec needs "some embedding
+provider", as core's embedding config, registry and dimension specs do. A spec that builds its own registry passes
 it to `ProviderRegistry.of`/`.withProvider`, and a provider spec proving it refuses a foreign
 config uses a `FixtureChatConfig`. When a stand-in test checked a real provider's own facts in
 passing, those move to that provider's spec (`DeepSeekNamedProviderSpec`, now in
@@ -414,8 +436,16 @@ class MySpec extends AnyFlatSpec with Matchers {
 3. Run with `sbt "samples/runMain org.llm4s.samples.<category>.YourExample"`
 
 ### New Provider
-Follow invariant 8 above: a `ProviderDescriptor` in its own module, listed in an
-`Llm4sProviderModule` declared in `META-INF/services`. `modules/ollama` is the template.
+Follow invariant 8 above: a `ProviderDescriptor` (or `EmbeddingProviderDescriptor`) in a module
+of its own, listed in an `Llm4sProviderModule` declared in `META-INF/services`, with an
+`Llm4s<Name>ModuleSpec` proving discovery and the round trip. Nothing goes in core. Where:
+- **OpenAI-compatible** (speaks `/chat/completions`): first check the generic
+  `openai-compatible` provider covers it with config alone; if not, a dialect and descriptor in
+  `modules/openai-compatible` (Mistral and Cohere are the examples).
+- **Anything else**: `modules/providers/<name>`, artifact `llm4s-<name>`, depending only on
+  core; `modules/providers/voyage` is the template, `modules/ollama` for chat plus embeddings.
+Wire it into the root and `docs` aggregates and the docs source list, `samples`, `it`, and
+`configPolicy` if it has chat providers; add a coverage floor, a codecov flag and a CI upload.
 
 ### New Tool
 1. Define function returning `Result[T]`

@@ -62,13 +62,17 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers:
       ProviderRegistry.default.findEmbedding(ProviderId("vertexai")) shouldBe None
     }
 
-    "not be part of core's built-in set, which no longer ships Gemini or Vertex AI" in {
-      ProviderRegistry.builtin.find(ProviderId("gemini")) shouldBe None
-      ProviderRegistry.builtin.find(ProviderId("vertexai")) shouldBe None
+    "be the only module that supplies gemini and vertexai" in {
+      // Core held these in `BuiltinProviders` until #1132 deleted it; nothing but this
+      // module may supply them now.
+      val modules = ProviderRegistry.default.report.modules
+      Seq("gemini", "vertexai").foreach { id =>
+        modules.filter(_.providerIds.contains(id)).map(_.moduleClass) shouldBe Seq(classOf[Llm4sGeminiModule].getName)
+      }
     }
 
     "be registrable explicitly where discovery cannot run" in {
-      val registry = ProviderRegistry.builtin.withModule(new Llm4sGeminiModule)
+      val registry = ProviderRegistry.ofModules(new Llm4sGeminiModule)
 
       registry.get(ProviderId("gemini")) shouldBe Right(GeminiProvider)
       registry.get(ProviderId("vertexai")) shouldBe Right(VertexAIProvider)

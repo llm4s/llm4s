@@ -19,7 +19,7 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  * merged - register it explicitly:
  *
  * {{{
- * given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sGeminiModule)
+ * given ProviderRegistry = ProviderRegistry.ofModules(new Llm4sGeminiModule)
  * }}}
  *
  * A `class` rather than an `object` because `java.util.ServiceLoader`

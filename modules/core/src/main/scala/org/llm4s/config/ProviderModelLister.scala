@@ -37,12 +37,12 @@ trait ProviderModelLister:
   ): Result[List[DiscoveredModel]]
 
 /**
- * Model listers for the providers built into `llm4s-core`, and the factory
- * behind most of them.
+ * The factory behind most providers' model listers.
  *
- * A provider module outside core supplies its own lister the same way: call
- * [[openAICompatible]] if the provider serves the OpenAI `/models` shape, or
- * implement [[ProviderModelLister]] if it does not.
+ * `llm4s-core` ships no provider, so it holds no lister of its own: each provider
+ * module supplies one on its descriptor - calling [[openAICompatible]] if the
+ * provider serves the OpenAI `/models` shape, or implementing
+ * [[ProviderModelLister]] if it does not.
  */
 object ProviderModelListers:
 

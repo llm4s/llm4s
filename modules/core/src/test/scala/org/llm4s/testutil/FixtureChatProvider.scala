@@ -17,7 +17,7 @@ import org.llm4s.types.Result
  * resolves, validates an API key, has a default base URL, lists models and builds a client.
  * They used to borrow whichever real provider was still in core, and had to be rewritten
  * each time slice 5 of #1126 carved that provider out (#1132). This one
- * never leaves: it lives in core's test sources and is not in `BuiltinProviders`.
+ * never leaves: it lives in core's test sources, and core itself ships no provider.
  *
  * It has the common shape, an API key and a default base URL, and makes no network calls:
  * its client answers every request with [[FixtureChatClient.Reply]], and its base URL is on

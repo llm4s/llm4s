@@ -20,6 +20,13 @@ import scala.util.control.NonFatal
  * `ProviderRegistry.default` — every provider on the classpath — unless the
  * caller supplies another.
  *
+ * `llm4s-core` ships no provider: every one comes from a provider module
+ * (`llm4s-openai`, `llm4s-anthropic`, `llm4s-gemini`, `llm4s-ollama`,
+ * `llm4s-openai-compatible`, `llm4s-voyage`, or a third party's), found through
+ * its `META-INF/services` entry. Where discovery cannot run - a shaded fat jar
+ * whose services files were merged away - [[ProviderRegistry.ofModules]] builds
+ * the registry from the modules named explicitly.
+ *
  * Chat and embedding providers are held in separate namespaces, because the
  * two sets overlap without either containing the other - OpenAI and Ollama
  * supply both, Voyage only embeddings, Anthropic only chat. The same id may
@@ -203,7 +210,7 @@ object ProviderRegistry:
   ): ProviderRegistry =
     // Deduplicate by id keeping the *last* registration, so `withProvider` overrides rather
     // than silently losing to what is already there - a user-supplied descriptor must be able
-    // to replace a built-in one of the same name.
+    // to replace a discovered one of the same name.
     new ProviderRegistry(
       lastWins(descriptors)(_.id.asString),
       lastWins(embeddingDescriptors)(_.id.asString),
@@ -332,17 +339,6 @@ object ProviderRegistry:
   private def defaultClassLoader: ClassLoader =
     Option(Thread.currentThread.getContextClassLoader)
       .getOrElse(classOf[Llm4sProviderModule].getClassLoader)
-
-  /**
-   * The providers built into `llm4s-core`, without consulting the classpath.
-   *
-   * Use this when discovery cannot work — a shaded fat jar whose
-   * `META-INF/services` entries were merged away is the usual reason — or when
-   * an application wants exactly these providers and nothing a dependency might
-   * add.
-   */
-  lazy val builtin: ProviderRegistry =
-    ofModules(org.llm4s.llmconnect.provider.BuiltinProviders)
 
   /**
    * The registry used when a caller supplies none: everything discovered on the

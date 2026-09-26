@@ -16,7 +16,7 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  * explicitly:
  *
  * {{{
- * given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sAnthropicModule)
+ * given ProviderRegistry = ProviderRegistry.ofModules(new Llm4sAnthropicModule)
  * }}}
  *
  * A `class` rather than an `object` because `java.util.ServiceLoader`
