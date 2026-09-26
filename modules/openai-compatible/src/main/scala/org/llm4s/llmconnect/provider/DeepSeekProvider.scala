@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.config.{ DefaultConfig, ProviderModelLister, ProviderModelListers }
+import org.llm4s.config.{ DeepSeekModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, DeepSeekConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -14,9 +14,9 @@ object DeepSeekProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("deepseek")
 
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DeepSeekConfig.DEFAULT_BASE_URL)
 
-  override val modelLister: Option[ProviderModelLister] = Some(ProviderModelListers.DeepSeek)
+  override val modelLister: Option[ProviderModelLister] = Some(DeepSeekModelLister)
 
   def buildConfig(providerName: String, section: NamedProviderConfig)(using
     ContextWindowResolver

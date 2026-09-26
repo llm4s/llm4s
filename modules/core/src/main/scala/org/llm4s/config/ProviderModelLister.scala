@@ -55,14 +55,23 @@ object ProviderModelListers:
    * own descriptor can usually call this rather than implement
    * [[ProviderModelLister]] from scratch.
    *
+   * Every request carries `Authorization: Bearer <apiKey>` when the section has a key, the
+   * section's `organization` as `OpenAI-Organization`, then `extraHeaders`, then the
+   * section's own `headers`.
+   *
    *  @param provider       the `ProviderId` that owns the returned models; the config section must name it
    *  @param defaultBaseUrl base URL used when the section does not override it
    *  @param modelsPath     path of the listing endpoint, relative to the base URL
+   *  @param extraHeaders   headers the provider requires on every request, e.g. OpenRouter's `X-Title`
+   *  @param apiKeyRequired whether a section without an `apiKey` fails; `false` for endpoints,
+   *                        such as a local server, that take unauthenticated requests
    */
   def openAICompatible(
     provider: ProviderId,
     defaultBaseUrl: String,
-    modelsPath: String = "/models"
+    modelsPath: String = "/models",
+    extraHeaders: Map[String, String] = Map.empty,
+    apiKeyRequired: Boolean = true
   ): ProviderModelLister =
     new ProviderModelLister:
       def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
@@ -71,16 +80,18 @@ object ProviderModelListers:
           provider = provider,
           defaultBaseUrl = defaultBaseUrl,
           modelsPath = modelsPath,
+          extraHeaders = extraHeaders,
+          apiKeyRequired = apiKeyRequired,
           httpClient = httpClient
         )
 
   /** Model lister for the OpenRouter provider. */
   val OpenRouter: ProviderModelLister =
-    openAICompatible(ProviderId("openrouter"), DefaultConfig.DEFAULT_OPENROUTER_BASE_URL)
-
-  /** Model lister for the DeepSeek provider using the OpenAI-compatible models endpoint. */
-  val DeepSeek: ProviderModelLister =
-    openAICompatible(ProviderId("deepseek"), DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
+    openAICompatible(
+      ProviderId("openrouter"),
+      DefaultConfig.DEFAULT_OPENROUTER_BASE_URL,
+      extraHeaders = Map("HTTP-Referer" -> "https://github.com/llm4s/llm4s", "X-Title" -> "LLM4S")
+    )
 
   /** Model lister for the Mistral provider using the OpenAI-compatible models endpoint. */
   val Mistral: ProviderModelLister =
@@ -91,13 +102,15 @@ object ProviderModelListers:
     provider: ProviderId,
     defaultBaseUrl: String,
     modelsPath: String,
+    extraHeaders: Map[String, String],
+    apiKeyRequired: Boolean,
     httpClient: Llm4sHttpClient
   ): Result[List[DiscoveredModel]] =
     for
       normalized <- config.requireProvider(provider)
-      apiKey     <- normalized.requireApiKey
+      apiKey     <- if apiKeyRequired then normalized.requireApiKey.map(Some(_)) else Right(normalized.apiKey)
       baseUrl = normalized.baseUrlOrDefault(defaultBaseUrl)
-      headers = authHeaders(normalized, apiKey)
+      headers = requestHeaders(normalized, apiKey, extraHeaders)
       response <- httpClient
         .getResult(s"${baseUrl.asUrl}$modelsPath", headers = headers, timeout = 10000)
         .mapServiceError(provider.asString, "Failed to discover models")
@@ -106,20 +119,15 @@ object ProviderModelListers:
       models       <- parseOpenAICompatibleModels(jsonResponse.body, provider)
     yield models
 
-  private def authHeaders(
+  private def requestHeaders(
     config: NamedProviderConfig,
-    apiKey: org.llm4s.types.ProviderModelTypes.ApiKey
+    apiKey: Option[org.llm4s.types.ProviderModelTypes.ApiKey],
+    extraHeaders: Map[String, String]
   ): Map[String, String] =
-    val base =
-      Map("Authorization" -> s"Bearer ${apiKey.asKey}") ++
-        config.organization.map(org => "OpenAI-Organization" -> org)
-
-    if config.provider == ProviderId("openrouter") then
-      base ++ Map(
-        "HTTP-Referer" -> "https://github.com/llm4s/llm4s",
-        "X-Title"      -> "LLM4S"
-      )
-    else base
+    apiKey.map(key => "Authorization" -> s"Bearer ${key.asKey}").toMap ++
+      config.organization.map(org => "OpenAI-Organization" -> org) ++
+      extraHeaders ++
+      config.headers
 
   private def parseOpenAICompatibleModels(
     json: ujson.Value,

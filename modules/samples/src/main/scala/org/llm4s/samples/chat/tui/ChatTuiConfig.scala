@@ -146,7 +146,7 @@ object ChatTuiConfig:
 
       case "deepseek" =>
         requireKey("DEEPSEEK_API_KEY").flatMap { apiKey =>
-          val baseUrl = ChatTuiEnv.getOrElse("DEEPSEEK_BASE_URL", DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
+          val baseUrl = ChatTuiEnv.getOrElse("DEEPSEEK_BASE_URL", DeepSeekConfig.DEFAULT_BASE_URL)
           DeepSeekConfig.fromValues(model, apiKey, baseUrl)
         }
 

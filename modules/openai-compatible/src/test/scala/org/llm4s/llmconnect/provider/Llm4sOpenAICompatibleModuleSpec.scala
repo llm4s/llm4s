@@ -11,19 +11,14 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 /**
- * Round-trips every provider `llm4s-core` registers: config section →
- * `ProviderConfig` → `LLMClient`.
+ * `llm4s-openai-compatible` registers itself, and what it registers works.
  *
- * Dispatch used to be `match` expressions over a closed `enum`, so the compiler
- * checked that a new provider had been handled everywhere. The registry is a
- * runtime lookup and the compiler cannot; this spec is the replacement for that
- * guarantee, and a new built-in provider must appear in [[expectations]] or
- * fail here. A provider that moves to its own module takes its round trip with it
- * (`Llm4sOllamaModuleSpec` in `llm4s-ollama`, `Llm4sGeminiModuleSpec` in `llm4s-gemini`,
- * `Llm4sAnthropicModuleSpec` in `llm4s-anthropic`, `Llm4sOpenAIModuleSpec` in `llm4s-openai`,
- * `Llm4sOpenAICompatibleModuleSpec` in `llm4s-openai-compatible`).
+ * These are the DeepSeek, Z.ai and OpenRouter rows of core's `BuiltinProvidersSpec`, which
+ * left with the providers (#1132), plus the generic `openai-compatible` provider and the part
+ * that only a carved module has to prove: that depending on it is enough - the services
+ * entry is found and the descriptors arrive.
  */
-class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
+class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
 
   private val registryService         = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
   private given ModelRegistryService  = registryService
@@ -31,33 +26,51 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
 
   /** Descriptor, the config class it builds, and the client class that config produces. */
   private val expectations: Seq[(ProviderDescriptor, String, String)] = Seq(
-    (OpenRouterProvider, "OpenAIConfig", "OpenRouterClient"),
-    (ZaiProvider, "ZaiConfig", "ZaiClient"),
-    (CohereProvider, "CohereConfig", "CohereClient"),
-    (MistralProvider, "MistralConfig", "MistralClient")
+    (OpenAICompatibleProvider, "OpenAICompatibleConfig", "OpenAICompatibleClient"),
+    (DeepSeekProvider, "DeepSeekConfig", "DeepSeekClient")
   )
 
-  /** A section carrying every field any built-in provider asks for. */
+  private val chatIds = expectations.map(_._1.id.asString)
+
+  /** A section carrying every field any of the providers asks for. */
   private def section(descriptor: ProviderDescriptor): NamedProviderConfig =
     NamedProviderConfig(
       provider = descriptor.id,
       model = ModelName("test-model"),
-      baseUrl = descriptor.configSpec.defaultBaseUrl.map(BaseUrl(_)).orElse(Some(BaseUrl("http://localhost:11434"))),
+      baseUrl = descriptor.configSpec.defaultBaseUrl.orElse(Some("http://localhost:8000/v1")).map(BaseUrl(_)),
       apiKey = Some(ApiKey("test-key")),
-      organization = Some("test-org"),
-      endpoint = Some("test-endpoint"),
+      organization = None,
+      endpoint = None,
       apiVersion = None
     )
 
-  "every provider built into llm4s-core" should {
+  "the llm4s-openai-compatible services entry" should {
 
-    "be registered under its own id" in {
-      expectations.foreach { (descriptor, _, _) =>
-        ProviderRegistry.default.get(descriptor.id) shouldBe Right(descriptor)
-      }
+    "be discovered, contributing every provider the module holds" in {
+      val registry = ProviderRegistry.discover()
+
+      expectations.foreach((descriptor, _, _) => registry.get(descriptor.id) shouldBe Right(descriptor))
+      registry.report.modules.map(_.moduleClass) should contain(classOf[Llm4sOpenAICompatibleModule].getName)
     }
 
-    "build its own config from a config section" in {
+    "contribute no embedding providers" in {
+      new Llm4sOpenAICompatibleModule().embeddingProviders shouldBe empty
+    }
+
+    "not be part of core's built-in set, which no longer ships them" in {
+      chatIds.foreach(id => ProviderRegistry.builtin.find(ProviderId(id)) shouldBe None)
+    }
+
+    "be registrable explicitly where discovery cannot run" in {
+      val registry = ProviderRegistry.builtin.withModule(new Llm4sOpenAICompatibleModule)
+
+      expectations.foreach((descriptor, _, _) => registry.get(descriptor.id) shouldBe Right(descriptor))
+    }
+  }
+
+  "the llm4s-openai-compatible providers" should {
+
+    "build their own config from a config section" in {
       expectations.foreach { (descriptor, configClass, _) =>
         descriptor.buildConfig("test-instance", section(descriptor)) match
           case Right(config) => config.getClass.getSimpleName shouldBe configClass
@@ -65,7 +78,7 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
       }
     }
 
-    "build its own client from the config it produced" in {
+    "build their own client from the config they produced" in {
       expectations.foreach { (descriptor, _, clientClass) =>
         val result =
           descriptor.buildConfig("test-instance", section(descriptor)).flatMap { config =>
@@ -79,7 +92,6 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
     }
 
     "refuse a config belonging to another provider" in {
-      // The test fixture's config belongs to no built-in, so every one of them must refuse it.
       val foreign = FixtureChatConfig("k", "fixture-model")
 
       expectations.foreach { (descriptor, _, _) =>
@@ -93,15 +105,12 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
       }
     }
 
-    "declare whether it implements streaming" in {
-      // Cohere and Mistral return a Left from streamComplete (#925). The point of putting this
-      // in the descriptor is that it is visible without making a call and reading the error.
-      CohereProvider.features.streaming shouldBe false
-      MistralProvider.features.streaming shouldBe false
-
-      expectations
-        .map(_._1)
-        .filterNot(descriptor => descriptor == CohereProvider || descriptor == MistralProvider)
-        .foreach(descriptor => withClue(s"${descriptor.id.asString}: ")(descriptor.features.streaming shouldBe true))
+    "declare streaming and a model lister" in {
+      expectations.foreach { (descriptor, _, _) =>
+        withClue(s"${descriptor.id.asString}: ") {
+          descriptor.features.streaming shouldBe true
+          descriptor.modelLister shouldBe defined
+        }
+      }
     }
   }

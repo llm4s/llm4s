@@ -27,13 +27,7 @@ object ConfigKeys {
    */
   val OPENROUTER_BASE_URL = "OPENAI_BASE_URL" // alias via base URL
 
-  // ---- DeepSeek -----------------------------------------------------------
-
-  /** DeepSeek API key. */
-  val DEEPSEEK_API_KEY = "DEEPSEEK_API_KEY"
-
-  /** Overrides the DeepSeek API base URL. Defaults to `"https://api.deepseek.com"`. */
-  val DEEPSEEK_BASE_URL = "DEEPSEEK_BASE_URL"
+  // DeepSeek keys are `OpenAICompatibleConfigKeys` in `llm4s-openai-compatible` (#1132).
 
   // ---- Langfuse tracing ---------------------------------------------------
 

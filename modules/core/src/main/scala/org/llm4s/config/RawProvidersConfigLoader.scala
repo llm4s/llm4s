@@ -12,9 +12,18 @@ import scala.jdk.CollectionConverters.*
 private[config] object RawProvidersConfigLoader:
 
   private given namedProviderSectionReader: PureConfigReader[RawNamedProviderSection] =
-    PureConfigReader.forProduct7("provider", "model", "baseUrl", "apiKey", "organization", "endpoint", "apiVersion")(
-      RawNamedProviderSection.apply
-    )
+    PureConfigReader.forProduct10(
+      "provider",
+      "model",
+      "baseUrl",
+      "apiKey",
+      "organization",
+      "endpoint",
+      "apiVersion",
+      "contextWindow",
+      "reserveCompletion",
+      "headers"
+    )(RawNamedProviderSection.apply)
 
   private given rawProvidersConfigReader: PureConfigReader[RawProvidersConfig] =
     PureConfigReader.fromCursor { cursor =>

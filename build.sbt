@@ -182,6 +182,7 @@ lazy val llm4s = (project in file("."))
     gemini,
     anthropic,
     openai,
+    openaiCompatible,
     samples,
     configPolicy,
     workspaceShared,
@@ -611,6 +612,28 @@ lazy val anthropic = (project in file("modules/anthropic"))
     )
   )
 
+// `llm4s-openai-compatible` is a consolidation, not a pure move (#1132): DeepSeek, Z.ai and
+// OpenRouter each had their own ~400-line copy of the same SDK-free chat-completions client, so
+// they leave core as dialects over one `OpenAICompatibleClient`, which also serves the generic
+// `openai-compatible` provider for any compatible endpoint. No dependency beyond core - keep it
+// that way, so any user of an OpenAI-compatible endpoint can take it without an SDK.
+
+lazy val openaiCompatible = (project in file("modules/openai-compatible"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    name := "llm4s-openai-compatible",
+    commonSettings,
+    coverageFloor(80),
+    Test / fork := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 // The OpenAI family carves fourth, split by shared client: OpenAI, Azure and Requesty all run
 // on `OpenAIClient` and the Azure OpenAI SDK, so they move together and take the SDK out of
 // core - after this core has no vendor SDK at all. OpenRouter, DeepSeek and Z.ai speak the
@@ -700,7 +723,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules//samples"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, knowledgegraphNeo4j)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, knowledgegraphNeo4j)
   .settings(
     name := "llm4s-samples",
     commonSettings,
@@ -717,7 +740,7 @@ lazy val configPolicy = (project in file("modules/config-policy"))
   // registered" before any policy runs. It must accept whatever a user's config names, not
   // just what CI's smoke config (ollama) happens to exercise. A provider carve adds itself
   // here; `CheckPoliciesProvidersSpec` checks each one resolves.
-  .dependsOn(core, ollama, gemini, anthropic, openai)
+  .dependsOn(core, ollama, gemini, anthropic, openai, openaiCompatible)
   .settings(
     name := "llm4s-config-policy",
     commonSettings,
@@ -780,7 +803,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   )
 
 lazy val it = (project in file("modules/it"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
   .settings(
     name := "llm4s-it",
     commonSettings,
@@ -832,7 +855,7 @@ lazy val it = (project in file("modules/it"))
 // A module is listed here if and only if it is published. When a slice adds one, add it in
 // the same commit, or its API silently vanishes from the site.
 lazy val docs = (project in file("modules/docs"))
-  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
+  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
   .settings(
     name           := "llm4s-docs",
     commonSettings,
@@ -853,6 +876,7 @@ lazy val docs = (project in file("modules/docs"))
         (gemini / Compile / sources).value ++
         (anthropic / Compile / sources).value ++
         (openai / Compile / sources).value ++
+        (openaiCompatible / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (traceOpentelemetry / Compile / sources).value ++

@@ -11,7 +11,8 @@ import org.llm4s.testutil.FixtureChatConfig
  * `LLMConnect` routes each config to its own provider's client, and refuses a mismatch.
  *
  * The OpenAI and Azure cases moved to `llm4s-openai`'s `OpenAIRoutingTest` with the
- * providers (#1132).
+ * providers (#1132), and the DeepSeek case to `llm4s-openai-compatible`'s
+ * `OpenAICompatibleRoutingTest`.
  */
 class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
   private given ModelRegistryService = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
@@ -43,21 +44,6 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     val res = LLMConnect.getClient(ProviderId("zai"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "ZaiClient"
-      case Left(err)     => fail(s"Expected Right, got Left($err)")
-    }
-  }
-
-  test("DeepSeek provider with DeepSeekConfig returns DeepSeekClient") {
-    val cfg: ProviderConfig = DeepSeekConfig(
-      apiKey = "key",
-      model = "deepseek-chat",
-      baseUrl = "https://example.invalid/v1",
-      contextWindow = 128000,
-      reserveCompletion = 8192
-    )
-    val res = LLMConnect.getClient(ProviderId("deepseek"), cfg)
-    res match {
-      case Right(client) => client.getClass.getSimpleName shouldBe "DeepSeekClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
     }
   }

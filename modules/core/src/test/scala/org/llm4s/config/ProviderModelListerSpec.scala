@@ -52,30 +52,8 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
         fail(s"Expected discovered OpenRouter models, got error: ${err.message}")
   }
 
-  test("DeepSeek lister discovers models from /models") {
-    val config = namedConfig(ProviderId("deepseek"), "deepseek-chat", apiKey = Some("ds-key"))
-    val responseBody =
-      """{
-        |  "data": [
-        |    {
-        |      "id": "deepseek-chat",
-        |      "created": 1710000000,
-        |      "owned_by": "deepseek"
-        |    }
-        |  ]
-        |}""".stripMargin
-
-    val mockHttp = MockHttpClient(HttpResponse(200, responseBody, Map.empty))
-    val result   = ProviderModelListers.DeepSeek.listModels(config, mockHttp)
-
-    result match
-      case Right(models) =>
-        models.map(_.name.asString) shouldBe List("deepseek-chat")
-        models.map(_.provider) shouldBe List(ProviderId("deepseek"))
-        mockHttp.lastUrl shouldBe Some("https://api.deepseek.com/models")
-      case Left(err) =>
-        fail(s"Expected discovered DeepSeek models, got error: ${err.message}")
-  }
+  // The DeepSeek lister moved to llm4s-openai-compatible as `DeepSeekModelLister`, and its
+  // test to that module's `OpenAICompatibleModelListerSpec` (#1132).
 
   test("Mistral lister discovers models from /v1/models") {
     val config = namedConfig(ProviderId("mistral"), "mistral-large-latest", apiKey = Some("mistral-key"))
