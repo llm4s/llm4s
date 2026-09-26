@@ -15,10 +15,8 @@ class ProviderConfigFallbackSpec extends AnyFlatSpec with Matchers with EitherVa
   private given ContextWindowResolver =
     ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
 
-  val azureEndpoint = "https://azure.example.com"
-  val azureVersion  = "2024-02-15"
-  val apiKey        = "sk-test"
-  val baseUrl       = "https://api.example.com"
+  val apiKey  = "sk-test"
+  val baseUrl = "https://api.example.com"
 
   "OpenAIConfig fallback" should "return 128000 for gpt-4o-like model" in {
     val cfg = OpenAIConfig.fromValues("patch-cov-gpt-4o", apiKey, None, baseUrl).value
@@ -28,42 +26,6 @@ class ProviderConfigFallbackSpec extends AnyFlatSpec with Matchers with EitherVa
 
   it should "return 8192 for unknown model" in {
     val cfg = OpenAIConfig.fromValues("patch-cov-unknown", apiKey, None, baseUrl).value
-    cfg.contextWindow shouldBe 8192
-    cfg.reserveCompletion shouldBe 4096
-  }
-
-  "AzureConfig fallback" should "return 128000 for gpt-4o-like model" in {
-    val cfg = AzureConfig.fromValues("patch-cov-gpt-4o", azureEndpoint, apiKey, azureVersion).value
-    cfg.contextWindow shouldBe 128000
-    cfg.reserveCompletion shouldBe 4096
-  }
-
-  it should "return 128000 for gpt-4-turbo-like model" in {
-    val cfg = AzureConfig.fromValues("patch-cov-gpt-4-turbo", azureEndpoint, apiKey, azureVersion).value
-    cfg.contextWindow shouldBe 128000
-    cfg.reserveCompletion shouldBe 4096
-  }
-
-  it should "return 8192 for gpt-4-like model" in {
-    val cfg = AzureConfig.fromValues("patch-cov-gpt-4", azureEndpoint, apiKey, azureVersion).value
-    cfg.contextWindow shouldBe 8192
-    cfg.reserveCompletion shouldBe 4096
-  }
-
-  it should "return 16384 for gpt-3.5-turbo-like model" in {
-    val cfg = AzureConfig.fromValues("patch-cov-gpt-3.5-turbo", azureEndpoint, apiKey, azureVersion).value
-    cfg.contextWindow shouldBe 16384
-    cfg.reserveCompletion shouldBe 4096
-  }
-
-  it should "return 128000 for o1-like model" in {
-    val cfg = AzureConfig.fromValues("patch-cov-o1-mini", azureEndpoint, apiKey, azureVersion).value
-    cfg.contextWindow shouldBe 128000
-    cfg.reserveCompletion shouldBe 4096
-  }
-
-  it should "return 8192 for unknown model" in {
-    val cfg = AzureConfig.fromValues("patch-cov-unknown", azureEndpoint, apiKey, azureVersion).value
     cfg.contextWindow shouldBe 8192
     cfg.reserveCompletion shouldBe 4096
   }

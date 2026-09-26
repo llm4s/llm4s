@@ -74,17 +74,9 @@ object ProviderModelListers:
           httpClient = httpClient
         )
 
-  /** Model lister for the OpenAI provider. */
-  val OpenAI: ProviderModelLister =
-    openAICompatible(ProviderId("openai"), DefaultConfig.DEFAULT_OPENAI_BASE_URL)
-
   /** Model lister for the OpenRouter provider. */
   val OpenRouter: ProviderModelLister =
     openAICompatible(ProviderId("openrouter"), DefaultConfig.DEFAULT_OPENROUTER_BASE_URL)
-
-  /** Model lister for the Requesty provider. */
-  val Requesty: ProviderModelLister =
-    openAICompatible(ProviderId("requesty"), DefaultConfig.DEFAULT_REQUESTY_BASE_URL)
 
   /** Model lister for the DeepSeek provider using the OpenAI-compatible models endpoint. */
   val DeepSeek: ProviderModelLister =

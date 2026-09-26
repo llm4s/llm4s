@@ -14,16 +14,6 @@ class EmbeddingClientFactorySpec extends AnyWordSpec with Matchers {
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
 
   "EmbeddingClient.from(provider,cfg)" should {
-    "build client for openai without throwing" in {
-      val cfg = EmbeddingProviderConfig(
-        baseUrl = "https://api.openai.com/v1",
-        model = "text-embedding-3-small",
-        apiKey = "sk-test"
-      )
-      val res = EmbeddingClient.from("openai", cfg)
-      res.isRight shouldBe true
-    }
-
     "build client for voyage without throwing" in {
       val cfg = EmbeddingProviderConfig(
         baseUrl = "https://api.voyage.ai",

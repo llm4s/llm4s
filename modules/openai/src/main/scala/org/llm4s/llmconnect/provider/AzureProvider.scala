@@ -1,6 +1,5 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.config.DefaultConfig
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
@@ -35,7 +34,7 @@ object AzureProvider extends ProviderDescriptor:
         "llm4s.providers.<name>.endpoint"
       )
       apiKey <- ProviderDescriptor.requireApiKey(providerName, section)
-      apiVersion = section.apiVersion.getOrElse(DefaultConfig.DEFAULT_AZURE_V2025_01_01_PREVIEW)
+      apiVersion = section.apiVersion.getOrElse(AzureConfig.DEFAULT_API_VERSION)
       config <- AzureConfig.fromValues(section.model.asString, endpoint, apiKey, apiVersion)
     yield config
 

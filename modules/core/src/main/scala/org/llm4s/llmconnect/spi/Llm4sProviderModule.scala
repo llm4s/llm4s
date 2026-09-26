@@ -5,7 +5,7 @@ package org.llm4s.llmconnect.spi
  *
  * The discovered unit is a module rather than a single `ProviderDescriptor`
  * so that one artifact can supply several related providers — `llm4s-openai`
- * contributes OpenAI, Azure, OpenRouter and Requesty from a single entry.
+ * contributes OpenAI, Azure, Requesty and OpenAI embeddings from a single entry.
  *
  * Implementations must be a plain `class` with a public no-arg constructor,
  * '''not''' a Scala `object`: `java.util.ServiceLoader` instantiates the named

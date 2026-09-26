@@ -1,5 +1,103 @@
 # Migration Guide
 
+## Slice 5: `llm4s-openai`
+
+The fourth provider module of slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)),
+carrying the three providers that share `OpenAIClient` - OpenAI (`provider = "openai"`), Azure
+OpenAI (`"azure"`) and Requesty (`"requesty"`) - and the OpenAI embedding provider
+(`EMBEDDING_MODEL=openai/<model>`). It is in the build but not yet in a release; `0.4.1` and
+earlier still ship them inside `llm4s-core`.
+
+With it goes the Azure OpenAI SDK (`com.azure:azure-ai-openai`), which `OpenAIClient` is built
+on: `llm4s-core` no longer depends on it, and with the Anthropic SDK already gone, core now
+depends on no vendor SDK at all.
+
+OpenRouter, DeepSeek and Z.ai are **not** in this module. They speak the OpenAI wire format but
+each has its own client with no SDK, so bundling them here would make their users download the
+Azure SDK for nothing; they stay in `llm4s-core` for now and get modules of their own later.
+
+### What moved
+
+| Code | Now in |
+|---|---|
+| `OpenAIClient`, `OpenAIProvider`, `AzureProvider`, `RequestyProvider`, `OpenAIEmbeddingProvider` (`org.llm4s.llmconnect.provider`) | `llm4s-openai` |
+| `AzureConfig` (`org.llm4s.llmconnect.config`) | `llm4s-openai` |
+| `AzureToolHelper` (`org.llm4s.toolapi`) | `llm4s-openai` |
+| `ProviderModelListers.OpenAI` / `.Requesty` → `OpenAIModelLister` / `RequestyModelLister` (`org.llm4s.config`) | `llm4s-openai` |
+| `DefaultConfig.DEFAULT_OPENAI_BASE_URL` → `OpenAIProvider.DEFAULT_BASE_URL` | `llm4s-openai` |
+| `DefaultConfig.DEFAULT_REQUESTY_BASE_URL` → `RequestyProvider.DEFAULT_BASE_URL` | `llm4s-openai` |
+| `DefaultConfig.DEFAULT_AZURE_V2025_01_01_PREVIEW` → `AzureConfig.DEFAULT_API_VERSION` | `llm4s-openai` |
+| `ConfigKeys.OPENAI_*`, `REQUESTY_BASE_URL`, `AZURE_*`, `OPENAI_EMBEDDING_*` → `OpenAIConfigKeys` (`org.llm4s.config`) | `llm4s-openai` |
+| the commented `openai-main`, `requesty-main` and `azure-main` examples, and the `llm4s.embeddings.openai` block, in `reference.conf` | `llm4s-openai`'s `reference.conf` |
+
+Package names are unchanged, so `import org.llm4s.llmconnect.provider.OpenAIClient` keeps
+working once the dependency is added:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-openai" % version
+```
+
+### What stayed in core
+
+- **`OpenAIConfig`**, because OpenRouter builds one too: `OpenRouterProvider` and
+  `OpenRouterClient` take an `OpenAIConfig`, and its `providerId` answers `openrouter` for an
+  OpenRouter base URL. It moves when OpenRouter does.
+- **`OpenAIStreamingHandler`**, the SSE parser behind
+  `StreamingResponseHandler.forProvider("openai" | "azure" | "openrouter")`, which OpenRouter's
+  path shares. `OpenAIClient` streams through the Azure SDK.
+- **`ConfigKeys.OPENROUTER_BASE_URL`**, still naming `OPENAI_BASE_URL`.
+- Strings that do not reach a client: `ToolRegistry.getOpenAITools` and
+  `getToolDefinitionsSafe("openai")`, the `openai/...` model-registry data, the `sk-` secret
+  pattern, config-policy allow-lists.
+
+### Registration is the dependency
+
+`llm4s-openai` declares `Llm4sOpenAIModule` in its `META-INF/services`, so
+`ProviderRegistry.default` finds it and `provider = "openai"`, `"azure"` and `"requesty"`, and
+`EMBEDDING_MODEL=openai/<model>`, resolve as before. Without the dependency they fail with the
+registry's error, which says the provider is not registered and names the providers that are.
+
+`ProviderRegistry.builtin` no longer includes them. If you used `builtin` to avoid classpath
+discovery (a shaded fat jar, typically), add the module explicitly:
+
+```scala
+given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sOpenAIModule)
+```
+
+**`llm4s-rag` users:** `RAGConfig.default` embeds with `openai/text-embedding-3-small`. A
+pipeline built from the default therefore needs `llm4s-openai` too; otherwise name the provider
+you ship with `.withEmbeddings("voyage", ...)` (or `"ollama"` with `llm4s-ollama`).
+`llm4s-rag` does not depend on `llm4s-openai` itself, so it does not bring the Azure SDK.
+
+### Source breaks
+
+1. **`ToolRegistry.addToAzureOptions(options)` is removed.** Its signature exposed the Azure SDK
+   type `ChatCompletionsOptions` from core's `ToolRegistry`, so core could not drop the SDK while
+   it existed. Call `AzureToolHelper.addToolsToOptions(registry, options)` instead - same
+   package (`org.llm4s.toolapi`), now in `llm4s-openai`, with the same result.
+2. **`ProviderModelListers.OpenAI` and `.Requesty` are now `OpenAIModelLister` and
+   `RequestyModelLister`**, in the same package (`org.llm4s.config`). The descriptors'
+   `modelLister` returns them, so code that reached a lister through the descriptor is
+   unaffected.
+3. **Three defaults moved off `DefaultConfig`**: `DEFAULT_OPENAI_BASE_URL` is now
+   `OpenAIProvider.DEFAULT_BASE_URL`, `DEFAULT_REQUESTY_BASE_URL` is now
+   `RequestyProvider.DEFAULT_BASE_URL`, and `DEFAULT_AZURE_V2025_01_01_PREVIEW` is now
+   `AzureConfig.DEFAULT_API_VERSION`. The values are unchanged. The base URLs live on the
+   descriptors rather than on `OpenAIConfig` because `OpenAIConfig` stays in core.
+4. **`ConfigKeys.OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_ORG`, `REQUESTY_BASE_URL`,
+   `AZURE_API_BASE`, `AZURE_API_KEY`, `AZURE_API_VERSION`, `OPENAI_EMBEDDING_BASE_URL` and
+   `OPENAI_EMBEDDING_MODEL` are now on `OpenAIConfigKeys`**, in the same package, as
+   `ConfigKeys.ANTHROPIC_*` became `AnthropicConfigKeys`. The strings are unchanged.
+5. **`ProviderRegistry.builtin` no longer includes `openai`, `azure` or `requesty`, nor the
+   `openai` embedding provider** - see above.
+
+### What did *not* change
+
+Every configuration key and environment variable: `llm4s.providers.<name>` with
+`provider = "openai"`, `"azure"` or `"requesty"` and their `apiKey`, `baseUrl`, `organization`,
+`endpoint` and `apiVersion`; `llm4s.embeddings.openai.*`, `OPENAI_EMBEDDING_BASE_URL` and
+`OPENAI_EMBEDDING_MODEL`; and `llm4s.openai.apiKey` as the key OpenAI embeddings share with chat.
+
 ## Slice 5: `llm4s-anthropic`
 
 The third provider module of slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)),

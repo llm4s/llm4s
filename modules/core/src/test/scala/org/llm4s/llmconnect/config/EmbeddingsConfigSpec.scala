@@ -23,24 +23,6 @@ class EmbeddingsConfigSpec extends AnyWordSpec with Matchers {
   }
 
   "Llm4sConfig.embeddings" should {
-    "load OpenAI embeddings config via llm4s.*" in {
-      val props = Map(
-        "llm4s.embeddings.provider"       -> "openai",
-        "llm4s.embeddings.openai.baseUrl" -> "https://example.com/v1",
-        "llm4s.embeddings.openai.model"   -> "text-embedding-3-small",
-        // API key is shared with core OpenAI config keys
-        "llm4s.openai.apiKey" -> "sk-test"
-      )
-      withProps(props) {
-        val (provider, cfg) =
-          Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
-        provider shouldBe "openai"
-        cfg.baseUrl shouldBe "https://example.com/v1"
-        cfg.model shouldBe "text-embedding-3-small"
-        cfg.apiKey shouldBe "sk-test"
-      }
-    }
-
     "load VoyageAI embeddings config via llm4s.*" in {
       val props = Map(
         "llm4s.embeddings.provider"       -> "voyage",

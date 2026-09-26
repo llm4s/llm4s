@@ -81,6 +81,23 @@ class RAGEmbeddingResolutionSpec extends AnyFlatSpec with Matchers with EitherVa
     error.message should include("fake")
   }
 
+  it should "name llm4s-openai when the default config's provider is missing" in {
+    given ProviderRegistry = ProviderRegistry.ofEmbeddings(new FakeEmbeddings)
+    val error              = RAG.build(RAGConfig.default, resolver()).left.value
+
+    error shouldBe a[ConfigurationError]
+    error.message should include("Embedding provider 'openai' is not registered")
+    error.message should include("\"org.llm4s\" %% \"llm4s-openai\"")
+    error.message should include(".withEmbeddings(")
+  }
+
+  it should "leave the registry's error alone for a provider other than the default" in {
+    given ProviderRegistry = ProviderRegistry.ofEmbeddings(new FakeEmbeddings)
+    val error              = RAG.build(RAGConfig().withEmbeddings("ollama", "nomic-embed-text"), resolver()).left.value
+
+    (error.message should not).include("llm4s-openai")
+  }
+
   it should "take the model from the resolved provider config when the RAG config names none" in {
     val fake               = new FakeEmbeddings
     given ProviderRegistry = ProviderRegistry.ofEmbeddings(fake)

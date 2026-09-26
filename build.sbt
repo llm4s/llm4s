@@ -181,6 +181,7 @@ lazy val llm4s = (project in file("."))
     ollama,
     gemini,
     anthropic,
+    openai,
     samples,
     configPolicy,
     workspaceShared,
@@ -265,13 +266,14 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
-    // Measured 75.15% statement coverage after the `anthropic` carve (`sbt coverage core/test
-    // core/coverageReport`); it was 75.27% after `gemini`, 75.86% after `ollama`, 74.33% with
-    // slice 3 complete, 74.89% after `image`, 74.05% after `mcp`, 73.85% after slice 2 and
-    // 72.42% on main @ 5a62e2ac before any of them. A carve moves the number in whichever
-    // direction the departing code sat - `speech` (80.68%), `gemini` (87.53%) and `anthropic`
-    // (81.32%) pulled it down, the slice-4 SPI work and the `ollama` carve pushed it up. Floor is the measured value rounded down to the nearest
-    // 5; ratchet it up, never down.
+    // Measured 75.57% statement coverage after the `openai` carve (`sbt coverage core/test
+    // core/coverageReport`); it was 75.15% after `anthropic`, 75.27% after `gemini`, 75.86%
+    // after `ollama`, 74.33% with slice 3 complete, 74.89% after `image`, 74.05% after `mcp`,
+    // 73.85% after slice 2 and 72.42% on main @ 5a62e2ac before any of them. A carve moves the
+    // number in whichever direction the departing code sat - `speech` (80.68%), `gemini`
+    // (87.53%) and `anthropic` (81.32%) pulled it down, the slice-4 SPI work and the `ollama`
+    // and `openai` (62.34%) carves pushed it up. Floor is the measured value rounded down to
+    // the nearest 5; ratchet it up, never down.
     //
     // Held at 70 rather than ratcheted to 75 while slice 5 is in flight: each provider carve
     // moves this number in whichever direction the departing client sat, and a floor with
@@ -310,7 +312,6 @@ lazy val core = (project in file("modules/core"))
     Compile / mainClass := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
-      Deps.azureOpenAI,
       Deps.jtokkit,
       Deps.scalatest % Test,
       Deps.scalamock % Test,
@@ -343,7 +344,10 @@ lazy val knowledgegraph = (project in file("modules/knowledgegraph"))
 lazy val rag = (project in file("modules/rag"))
   // `media` is declared explicitly, not inherited through core: core's edge to it is
   // temporary and goes away with the `llm4s-image` carve, but `MediaExtractor`'s does not.
-  .dependsOn(media, core % "compile->compile;test->test", knowledgegraph)
+  // `openai` is test-only: `RAGConfig.default` names the `openai` embedding provider, which
+  // left core with `llm4s-openai` (#1132), and the mocked RAG suites build from that default.
+  // `llm4s-rag` itself does not depend on it - a user names whichever provider they ship.
+  .dependsOn(media, core % "compile->compile;test->test", knowledgegraph, openai % "test->compile")
   .settings(
     name := "llm4s-rag",
     commonSettings,
@@ -607,6 +611,36 @@ lazy val anthropic = (project in file("modules/anthropic"))
     )
   )
 
+// The OpenAI family carves fourth, split by shared client: OpenAI, Azure and Requesty all run
+// on `OpenAIClient` and the Azure OpenAI SDK, so they move together and take the SDK out of
+// core - after this core has no vendor SDK at all. OpenRouter, DeepSeek and Z.ai speak the
+// same wire format but have their own SDK-free clients, so they stay in core for their own
+// modules later, and with them `OpenAIConfig` (which OpenRouter shares) and
+// `OpenAIStreamingHandler` (behind `StreamingResponseHandler.forProvider`).
+
+lazy val openai = (project in file("modules/openai"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    name := "llm4s-openai",
+    commonSettings,
+    // Measured 62.34% statement coverage (`sbt coverage openai/test openai/coverageReport`) on
+    // the code as carved out of core, plus `AzureToolHelperSpec` (the helper had no test while
+    // it sat in core). Floor is the measured value rounded down to the nearest 5. Never lower
+    // it. It is low because `OpenAIClient` (65%) and `OpenAIEmbeddingProvider`'s HTTP client
+    // were thinly tested in core too - the carve moved the gap rather than made it. The
+    // `@Cloud` OpenAI smoke suite in `modules/it` is not counted here.
+    coverageFloor(60),
+    Test / fork := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.azureOpenAI,
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 lazy val workspaceShared = (project in file("modules/workspace/workspaceShared"))
   .settings(
     name := "llm4s-workspace-shared",
@@ -629,7 +663,8 @@ lazy val workspaceClient = (project in file("modules/workspace/workspaceClient")
     // The Anthropic and Azure OpenAI SDKs used to be declared here too - a stale copy of
     // core's list. Nothing in this module imports com.anthropic or com.azure; they were
     // removed with the `anthropic` carve (#1132) so the Anthropic SDK leaves this module's
-    // published POM as well as core's.
+    // published POM as well as core's. Since the `openai` carve, Azure no longer reaches it
+    // transitively through core either.
     libraryDependencies ++= Seq(
       Deps.jtokkit,
       Deps.websocket,
@@ -665,7 +700,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules//samples"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, knowledgegraphNeo4j)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, knowledgegraphNeo4j)
   .settings(
     name := "llm4s-samples",
     commonSettings,
@@ -682,7 +717,7 @@ lazy val configPolicy = (project in file("modules/config-policy"))
   // registered" before any policy runs. It must accept whatever a user's config names, not
   // just what CI's smoke config (ollama) happens to exercise. A provider carve adds itself
   // here; `CheckPoliciesProvidersSpec` checks each one resolves.
-  .dependsOn(core, ollama, gemini, anthropic)
+  .dependsOn(core, ollama, gemini, anthropic, openai)
   .settings(
     name := "llm4s-config-policy",
     commonSettings,
@@ -745,7 +780,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   )
 
 lazy val it = (project in file("modules/it"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
   .settings(
     name := "llm4s-it",
     commonSettings,
@@ -797,7 +832,7 @@ lazy val it = (project in file("modules/it"))
 // A module is listed here if and only if it is published. When a slice adds one, add it in
 // the same commit, or its API silently vanishes from the site.
 lazy val docs = (project in file("modules/docs"))
-  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
+  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
   .settings(
     name           := "llm4s-docs",
     commonSettings,
@@ -817,6 +852,7 @@ lazy val docs = (project in file("modules/docs"))
         (ollama / Compile / sources).value ++
         (gemini / Compile / sources).value ++
         (anthropic / Compile / sources).value ++
+        (openai / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (traceOpentelemetry / Compile / sources).value ++

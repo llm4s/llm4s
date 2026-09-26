@@ -4,35 +4,18 @@ import org.llm4s.config.ProvidersConfigModel.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
+/**
+ * Named provider sections, validated against the providers core ships.
+ *
+ * The OpenAI and Azure cases moved to `llm4s-openai`'s `OpenAINamedProviderSpec` with the
+ * providers (#1132), as the Anthropic and Gemini cases did before them.
+ */
 class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
 
   private def validate(providerName: String, section: RawNamedProviderSection) =
     NamedProviderConfigValidator.validate(ProviderName(providerName), section)
 
   "NamedProviderConfigValidator" should {
-
-    "validate and normalize an OpenAI named provider section" in {
-      validate(
-        "openai-main",
-        RawNamedProviderSection(
-          provider = Some(" openai "),
-          model = Some(" gpt-4o-mini "),
-          baseUrl = Some(" https://api.openai.com/v1 "),
-          apiKey = Some(" sk-test "),
-          organization = Some(" org-demo "),
-          endpoint = None,
-          apiVersion = None,
-        )
-      ) match
-        case Right(cfg) =>
-          cfg.provider shouldBe ProviderId("openai")
-          cfg.model.asString shouldBe "gpt-4o-mini"
-          cfg.baseUrl.map(_.asUrl) shouldBe Some("https://api.openai.com/v1")
-          cfg.apiKey.map(_.asKey) shouldBe Some("sk-test")
-          cfg.organization shouldBe Some("org-demo")
-        case Left(err) =>
-          fail(s"Expected OpenAI NamedProviderConfig, got error: ${err.message}")
-    }
 
     "validate and normalize an OpenRouter named provider section" in {
       validate(
@@ -53,29 +36,6 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           cfg.apiKey.map(_.asKey) shouldBe Some("or-key")
         case Left(err) =>
           fail(s"Expected OpenRouter NamedProviderConfig, got error: ${err.message}")
-    }
-
-    "validate and normalize an Azure named provider section" in {
-      validate(
-        "azure-main",
-        RawNamedProviderSection(
-          provider = Some("azure"),
-          model = Some("gpt-4o"),
-          baseUrl = None,
-          apiKey = Some("azure-key"),
-          organization = None,
-          endpoint = Some("https://my-resource.openai.azure.com"),
-          apiVersion = Some("2024-02-01"),
-        )
-      ) match
-        case Right(cfg) =>
-          cfg.provider shouldBe ProviderId("azure")
-          cfg.model.asString shouldBe "gpt-4o"
-          cfg.apiKey.map(_.asKey) shouldBe Some("azure-key")
-          cfg.endpoint shouldBe Some("https://my-resource.openai.azure.com")
-          cfg.apiVersion shouldBe Some("2024-02-01")
-        case Left(err) =>
-          fail(s"Expected Azure NamedProviderConfig, got error: ${err.message}")
     }
 
     "validate and normalize a Z.ai named provider section" in {
@@ -200,16 +160,16 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
         case Left(err) =>
           err.message should include("'moonbeam'")
           err.message should include("Registered providers:")
-          err.message should include("openai")
+          err.message should include("deepseek")
         case Right(cfg) =>
           fail(s"Expected unresolvable provider failure, got config: $cfg")
     }
 
     "fail clearly when model field is missing" in {
       validate(
-        "openai-main",
+        "deepseek-main",
         RawNamedProviderSection(
-          provider = Some("openai"),
+          provider = Some("deepseek"),
           model = Some("   "),
           baseUrl = None,
           apiKey = Some("sk-test"),
@@ -224,41 +184,4 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           fail(s"Expected missing model validation failure, got config: $cfg")
     }
 
-    "fail clearly when OpenAI apiKey is missing" in {
-      validate(
-        "openai-main",
-        RawNamedProviderSection(
-          provider = Some("openai"),
-          model = Some("gpt-4o-mini"),
-          baseUrl = None,
-          apiKey = Some("   "),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
-        )
-      ) match
-        case Left(err) =>
-          err.message should include("- apiKey: set it in llm4s.conf under providers.openai-main.apiKey")
-        case Right(cfg) =>
-          fail(s"Expected missing OpenAI apiKey failure, got config: $cfg")
-    }
-
-    "fail clearly when Azure endpoint is missing" in {
-      validate(
-        "azure-main",
-        RawNamedProviderSection(
-          provider = Some("azure"),
-          model = Some("gpt-4o"),
-          baseUrl = None,
-          apiKey = Some("azure-key"),
-          organization = None,
-          endpoint = Some("   "),
-          apiVersion = None,
-        )
-      ) match
-        case Left(err) =>
-          err.message should include("- endpoint: the model endpoint/deployment name in your Azure OpenAI resource")
-        case Right(cfg) =>
-          fail(s"Expected missing Azure endpoint failure, got config: $cfg")
-    }
   }

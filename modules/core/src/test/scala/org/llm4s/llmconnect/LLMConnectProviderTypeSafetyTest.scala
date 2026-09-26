@@ -6,24 +6,14 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.llmconnect.config._
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 
+/**
+ * `LLMConnect` routes each config to its own provider's client, and refuses a mismatch.
+ *
+ * The OpenAI and Azure cases moved to `llm4s-openai`'s `OpenAIRoutingTest` with the
+ * providers (#1132).
+ */
 class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
   private given ModelRegistryService = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
-
-  test("OpenAI provider with OpenAIConfig returns OpenAIClient") {
-    val cfg: ProviderConfig = OpenAIConfig(
-      apiKey = "key",
-      model = "gpt-4o",
-      organization = None,
-      baseUrl = "https://api.openai.com/v1",
-      contextWindow = 128000,
-      reserveCompletion = 4096
-    )
-    val res = LLMConnect.getClient(ProviderId("openai"), cfg)
-    res match {
-      case Right(client) => client.getClass.getSimpleName shouldBe "OpenAIClient"
-      case Left(err)     => fail(s"Expected Right, got Left($err)")
-    }
-  }
 
   test("OpenRouter provider with OpenAIConfig returns OpenRouterClient") {
     val cfg: ProviderConfig = OpenAIConfig(
@@ -37,22 +27,6 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     val res = LLMConnect.getClient(ProviderId("openrouter"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "OpenRouterClient"
-      case Left(err)     => fail(s"Expected Right, got Left($err)")
-    }
-  }
-
-  test("Azure provider with AzureConfig returns OpenAIClient (Azure-backed)") {
-    val cfg: ProviderConfig = AzureConfig(
-      endpoint = "https://example.azure.com",
-      apiKey = "key",
-      model = "gpt-4o",
-      apiVersion = "V2025_01_01_PREVIEW",
-      contextWindow = 128000,
-      reserveCompletion = 4096
-    )
-    val res = LLMConnect.getClient(ProviderId("azure"), cfg)
-    res match {
-      case Right(client) => client.getClass.getSimpleName shouldBe "OpenAIClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
     }
   }
@@ -117,7 +91,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     }
   }
 
-  test("OpenAI provider with non-OpenAIConfig should throw IllegalArgumentException") {
+  test("OpenRouter provider with non-OpenAIConfig should throw IllegalArgumentException") {
     val wrongCfg: ProviderConfig = DeepSeekConfig(
       apiKey = "key",
       model = "deepseek-chat",
@@ -126,35 +100,7 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
       reserveCompletion = 8192
     )
 
-    val res = LLMConnect.getClient(ProviderId("openai"), wrongCfg)
-    res.isLeft shouldBe true
-  }
-
-  test("OpenRouter provider with non-OpenAIConfig should throw IllegalArgumentException") {
-    val wrongCfg: ProviderConfig = AzureConfig(
-      endpoint = "https://example.azure.com",
-      apiKey = "key",
-      model = "gpt-4o",
-      apiVersion = "V2025_01_01_PREVIEW",
-      contextWindow = 128000,
-      reserveCompletion = 4096
-    )
-
     val res = LLMConnect.getClient(ProviderId("openrouter"), wrongCfg)
-    res.isLeft shouldBe true
-  }
-
-  test("Azure provider with non-AzureConfig should throw IllegalArgumentException") {
-    val wrongCfg: ProviderConfig = OpenAIConfig(
-      apiKey = "key",
-      model = "gpt-4o",
-      organization = None,
-      baseUrl = "https://api.openai.com/v1",
-      contextWindow = 128000,
-      reserveCompletion = 4096
-    )
-
-    val res = LLMConnect.getClient(ProviderId("azure"), wrongCfg)
     res.isLeft shouldBe true
   }
 

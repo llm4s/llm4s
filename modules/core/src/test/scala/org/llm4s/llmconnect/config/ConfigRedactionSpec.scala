@@ -23,17 +23,6 @@ class ConfigRedactionSpec extends AnyFlatSpec with Matchers with EitherValues {
     (openai.toString should not).include(secret)
     openai.toString should include("***")
 
-    val azure = AzureConfig
-      .fromValues(
-        modelName = "gpt-4",
-        endpoint = "https://example.invalid",
-        apiKey = secret,
-        apiVersion = "2024-02-01"
-      )
-      .value
-    (azure.toString should not).include(secret)
-    azure.toString should include("***")
-
     val zai = ZaiConfig
       .fromValues(
         modelName = "glm-4.5",

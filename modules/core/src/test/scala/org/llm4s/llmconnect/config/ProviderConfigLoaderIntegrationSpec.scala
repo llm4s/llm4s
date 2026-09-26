@@ -28,26 +28,6 @@ class DefaultProviderIntegrationSpec extends AnyWordSpec with Matchers {
   }
 
   "Llm4sConfig.defaultProvider" should {
-    "load OpenAI config from named providers" in {
-      val props = Map(
-        "llm4s.providers.provider"             -> "openai-main",
-        "llm4s.providers.openai-main.provider" -> "openai",
-        "llm4s.providers.openai-main.model"    -> "gpt-4o",
-        "llm4s.providers.openai-main.apiKey"   -> "test-key"
-      )
-
-      withProps(props) {
-        val prov = Llm4sConfig.defaultProvider().fold(err => fail(err.toString), identity)
-        prov match {
-          case openai: OpenAIConfig =>
-            openai.model shouldBe "gpt-4o"
-            openai.apiKey shouldBe "test-key"
-            openai.baseUrl should startWith("https://api.openai.com/")
-          case other => fail(s"Expected OpenAIConfig, got $other")
-        }
-      }
-    }
-
     "load Mistral config from the configured default named provider" in {
       val props = Map(
         "llm4s.providers.provider"              -> "mistral-main",

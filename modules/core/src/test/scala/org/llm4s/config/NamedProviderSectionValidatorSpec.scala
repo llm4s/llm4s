@@ -2,7 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.provider.{ AzureProvider, OpenAIProvider }
+import org.llm4s.llmconnect.provider.DeepSeekProvider
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.flatspec.AnyFlatSpec
@@ -17,6 +17,10 @@ import org.scalatest.matchers.should.Matchers
  * provider now declares its requirements in a
  * [[org.llm4s.llmconnect.spi.ProviderConfigSpec]] instead of core holding an
  * object per provider.
+ *
+ * DeepSeek stands in for "a provider with an API key and a default base URL". The Azure
+ * cases, which are about Azure's own endpoint requirement, moved to `llm4s-openai`'s
+ * `AzureSectionValidationSpec` with the provider (#1132).
  */
 class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
 
@@ -44,30 +48,21 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
   private def errorFrom(result: org.llm4s.types.Result[NamedProviderConfig]): String =
     result.left.toOption.getOrElse(fail(s"Expected Left, got $result")).asInstanceOf[ConfigurationError].message
 
-  "Azure validation" should "mention missing Azure fields by name" in {
-    val message = errorFrom(validate("my-azure", AzureProvider, section("azure", "gpt-4")))
+  "DeepSeek validation" should "mention missing DeepSeek fields by name" in {
+    val message = errorFrom(validate("my-deepseek", DeepSeekProvider, section("deepseek", "deepseek-chat")))
 
-    message should include("Provider 'my-azure' (provider = azure) is missing required fields")
+    message should include("Provider 'my-deepseek' (provider = deepseek) is missing required fields")
     message should include(
-      "- apiKey: set it in llm4s.conf under providers.my-azure.apiKey (optionally from an env var, e.g. apiKey = ${?AZURE_API_KEY})"
-    )
-    message should include("- endpoint: the model endpoint/deployment name in your Azure OpenAI resource")
-  }
-
-  "OpenAI validation" should "mention missing OpenAI fields by name" in {
-    val message = errorFrom(validate("my-openai", OpenAIProvider, section("openai", "gpt-4")))
-
-    message should include("Provider 'my-openai' (provider = openai) is missing required fields")
-    message should include(
-      "- apiKey: set it in llm4s.conf under providers.my-openai.apiKey (optionally from an env var, e.g. apiKey = ${?OPENAI_API_KEY})"
+      "- apiKey: set it in llm4s.conf under providers.my-deepseek.apiKey (optionally from an env var, e.g. apiKey = ${?DEEPSEEK_API_KEY})"
     )
   }
 
   it should "not demand a baseUrl, because the descriptor supplies a default" in {
-    val result = validate("my-openai", OpenAIProvider, section("openai", "gpt-4", apiKey = Some("sk-test")))
+    val result =
+      validate("my-deepseek", DeepSeekProvider, section("deepseek", "deepseek-chat", apiKey = Some("sk-test")))
 
     result.map(_.baseUrl) shouldBe Right(None)
-    OpenAIProvider.configSpec.defaultBaseUrl shouldBe Some(DefaultConfig.DEFAULT_OPENAI_BASE_URL)
+    DeepSeekProvider.configSpec.defaultBaseUrl shouldBe Some(DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
   }
 
   "a provider from outside core" should "get its requirements honoured with default example text" in {
@@ -97,24 +92,24 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
 
   "validation" should "return the normalized section when all required fields are present" in {
     val result = validate(
-      "my-openai",
-      OpenAIProvider,
-      section("openai", "gpt-4", baseUrl = Some("https://api.openai.com/v1"), apiKey = Some("sk-test-key"))
+      "my-deepseek",
+      DeepSeekProvider,
+      section("deepseek", "deepseek-chat", baseUrl = Some("https://api.deepseek.com"), apiKey = Some("sk-test-key"))
     )
 
     val config = result.getOrElse(fail(s"Expected Right, got $result"))
-    config.provider shouldBe ProviderId("openai")
+    config.provider shouldBe ProviderId("deepseek")
     config.apiKey.map(_.asKey) shouldBe Some("sk-test-key")
-    config.baseUrl.map(_.asUrl) shouldBe Some("https://api.openai.com/v1")
+    config.baseUrl.map(_.asUrl) shouldBe Some("https://api.deepseek.com")
   }
 
   it should "trim whitespace and filter empty strings for all optional fields" in {
     val result = validate(
       "my-trim-test",
-      OpenAIProvider,
+      DeepSeekProvider,
       section(
-        "openai",
-        "gpt-4",
+        "deepseek",
+        "deepseek-chat",
         baseUrl = Some("  https://api.example.com  "),
         apiKey = Some("  sk-test-key  "),
         organization = Some("  org-123  "),
@@ -124,7 +119,7 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
     )
 
     val config = result.getOrElse(fail(s"Expected Right, got $result"))
-    config.provider shouldBe ProviderId("openai")
+    config.provider shouldBe ProviderId("deepseek")
     config.baseUrl.map(_.asUrl) shouldBe Some("https://api.example.com")
     config.apiKey.map(_.asKey) shouldBe Some("sk-test-key")
     config.organization shouldBe Some("org-123")
@@ -132,22 +127,10 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
     config.apiVersion shouldBe None // should be filtered out because it's empty
   }
 
-  it should "accept Azure when all required fields including endpoint are present" in {
-    val result = validate(
-      "my-azure",
-      AzureProvider,
-      section("azure", "gpt-4", apiKey = Some("azure-key"), endpoint = Some("my-deployment"))
-    )
-
-    val config = result.getOrElse(fail(s"Expected Right, got $result"))
-    config.provider shouldBe ProviderId("azure")
-    config.apiKey.map(_.asKey) shouldBe Some("azure-key")
-    config.endpoint shouldBe Some("my-deployment")
-  }
-
   it should "reject a section whose provider is not the one being validated against" in {
-    val message = errorFrom(validate("my-azure", AzureProvider, section("openai", "gpt-4", apiKey = Some("k"))))
+    val message =
+      errorFrom(validate("my-deepseek", DeepSeekProvider, section("openai", "gpt-4", apiKey = Some("k"))))
 
-    message should include("Configured provider 'my-azure' resolved to unexpected provider 'openai'")
+    message should include("Configured provider 'my-deepseek' resolved to unexpected provider 'openai'")
   }
 }

@@ -2,7 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.{ ProviderId, ProviderName }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
-import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAIConfig }
+import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.llmconnect.spi.fixtures.FixtureProvider
 import org.scalatest.matchers.should.Matchers
@@ -75,10 +75,10 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    openai-main {
-          |      provider = "openai"
-          |      model = "gpt-4o-mini"
-          |      apiKey = "named-openai-key"
+          |    deepseek-primary {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      apiKey = "named-deepseek-key"
           |    }
           |    broken-deepseek {
           |      provider = "deepseek"
@@ -88,7 +88,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
           |}
           |""".stripMargin
 
-      val result = Llm4sConfig.provider(ConfigSource.string(hocon), "openai-main")
+      val result = Llm4sConfig.provider(ConfigSource.string(hocon), "deepseek-primary")
 
       result match
         case Left(err) =>
@@ -103,11 +103,11 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "openai-main"
-          |    openai-main {
-          |      provider = "openai"
-          |      model = "gpt-4o-mini"
-          |      apiKey = "named-openai-key"
+          |    provider = "deepseek-primary"
+          |    deepseek-primary {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      apiKey = "named-deepseek-key"
           |    }
           |    deepseek-main {
           |      provider = "deepseek"
@@ -120,8 +120,8 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
 
       val cfg = Llm4sConfig.providers(ConfigSource.string(hocon)).fold(err => fail(err.toString), identity)
 
-      cfg.selectedProvider shouldBe Some(ProviderName("openai-main"))
-      cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "deepseek-main")
+      cfg.selectedProvider shouldBe Some(ProviderName("deepseek-primary"))
+      cfg.namedProviders.keySet.map(_.asName) shouldBe Set("deepseek-primary", "deepseek-main")
     }
 
     "load the configured default provider name" in {
@@ -129,11 +129,11 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "openai-main"
-          |    openai-main {
-          |      provider = "openai"
-          |      model = "gpt-4o-mini"
-          |      apiKey = "named-openai-key"
+          |    provider = "deepseek-primary"
+          |    deepseek-primary {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      apiKey = "named-deepseek-key"
           |    }
           |  }
           |}
@@ -141,7 +141,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
 
       val providerName =
         Llm4sConfig.defaultProviderName(ConfigSource.string(hocon)).fold(err => fail(err.toString), identity)
-      providerName shouldBe ProviderName("openai-main")
+      providerName shouldBe ProviderName("deepseek-primary")
     }
 
     "load the configured default provider as ProviderConfig" in {
@@ -149,11 +149,11 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "openai-main"
-          |    openai-main {
-          |      provider = "openai"
-          |      model = "gpt-4o-mini"
-          |      apiKey = "named-openai-key"
+          |    provider = "deepseek-primary"
+          |    deepseek-primary {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      apiKey = "named-deepseek-key"
           |    }
           |  }
           |}
@@ -162,12 +162,12 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       val cfg = Llm4sConfig.defaultProvider(ConfigSource.string(hocon)).fold(err => fail(err.toString), identity)
 
       cfg match
-        case openai: OpenAIConfig =>
-          openai.model shouldBe "gpt-4o-mini"
-          openai.apiKey shouldBe "named-openai-key"
-          openai.baseUrl shouldBe DefaultConfig.DEFAULT_OPENAI_BASE_URL
+        case deepseek: DeepSeekConfig =>
+          deepseek.model shouldBe "deepseek-chat"
+          deepseek.apiKey shouldBe "named-deepseek-key"
+          deepseek.baseUrl shouldBe DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL
         case other =>
-          fail(s"Expected OpenAIConfig, got $other")
+          fail(s"Expected DeepSeekConfig, got $other")
     }
 
     "list models for a configured named provider by name" in {
@@ -175,10 +175,10 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "openai-main"
-          |    openai-main {
-          |      provider = "openai"
-          |      model = "gpt-4o-mini"
+          |    provider = "deepseek-primary"
+          |    deepseek-primary {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
           |      apiKey = "sk-test"
           |    }
           |  }
@@ -188,19 +188,19 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       val responseBody =
         """{
           |  "data": [
-          |    { "id": "gpt-4o-mini", "created": 1710000000, "owned_by": "openai" }
+          |    { "id": "deepseek-chat", "created": 1710000000, "owned_by": "deepseek" }
           |  ]
           |}""".stripMargin
 
       val httpClient = new MockHttpClient(HttpResponse(200, responseBody, Map.empty))
 
-      val result = Llm4sConfig.listModels("openai-main", ConfigSource.string(hocon), httpClient)
+      val result = Llm4sConfig.listModels("deepseek-primary", ConfigSource.string(hocon), httpClient)
 
       result match
         case Right(models) =>
-          models.map(_.name.asString) shouldBe List("gpt-4o-mini")
-          models.map(_.provider) shouldBe List(ProviderId("openai"))
-          httpClient.lastUrl shouldBe Some(s"${DefaultConfig.DEFAULT_OPENAI_BASE_URL}/models")
+          models.map(_.name.asString) shouldBe List("deepseek-chat")
+          models.map(_.provider) shouldBe List(ProviderId("deepseek"))
+          httpClient.lastUrl shouldBe Some(s"${DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL}/models")
         case Left(err) =>
           fail(s"Expected listed models, got error: ${err.message}")
     }
@@ -210,10 +210,10 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "openai-main"
-          |    openai-main {
-          |      provider = "openai"
-          |      model = "gpt-4o-mini"
+          |    provider = "deepseek-primary"
+          |    deepseek-primary {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
           |      apiKey = "sk-test"
           |    }
           |  }
@@ -239,10 +239,10 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    openai-main {
-          |      provider = "openai"
-          |      model = "gpt-4o-mini"
-          |      apiKey = "named-openai-key"
+          |    deepseek-primary {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      apiKey = "named-deepseek-key"
           |    }
           |  }
           |}
@@ -260,10 +260,10 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    openai-main {
-          |      provider = "openai"
-          |      model = "gpt-4o-mini"
-          |      apiKey = "named-openai-key"
+          |    deepseek-primary {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      apiKey = "named-deepseek-key"
           |    }
           |  }
           |}

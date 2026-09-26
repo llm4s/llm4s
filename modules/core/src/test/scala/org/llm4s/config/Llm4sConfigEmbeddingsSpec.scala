@@ -11,6 +11,8 @@ import org.scalatest.wordspec.AnyWordSpec
 
 /**
  * Sanity checks for Llm4sConfig.embeddings under controlled configuration.
+ *
+ * The OpenAI cases moved to `llm4s-openai`'s `OpenAIEmbeddingsSpec` with the provider (#1132).
  */
 class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
 
@@ -28,25 +30,6 @@ class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
   }
 
   "Llm4sConfig.embeddings" should {
-    "load OpenAI embeddings config via llm4s.*" in {
-      val props = Map(
-        "llm4s.embeddings.provider"       -> "openai",
-        "llm4s.embeddings.openai.baseUrl" -> "https://example.com/v1",
-        "llm4s.embeddings.openai.model"   -> "text-embedding-3-small",
-        // API key is shared with core OpenAI config keys
-        "llm4s.openai.apiKey" -> "sk-test"
-      )
-      withProps(props) {
-        val (provider, cfg): (String, EmbeddingProviderConfig) =
-          Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
-
-        provider shouldBe "openai"
-        cfg.baseUrl shouldBe "https://example.com/v1"
-        cfg.model shouldBe "text-embedding-3-small"
-        cfg.apiKey shouldBe "sk-test"
-      }
-    }
-
     "load VoyageAI embeddings config via llm4s.*" in {
       val props = Map(
         "llm4s.embeddings.provider"       -> "voyage",
@@ -67,23 +50,6 @@ class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
 
     // --- Unified EMBEDDING_MODEL format tests ---
 
-    "load OpenAI embeddings via unified EMBEDDING_MODEL format" in {
-      val props = Map(
-        "llm4s.embeddings.model" -> "openai/text-embedding-3-small",
-        // No explicit baseUrl - should use default
-        "llm4s.openai.apiKey" -> "sk-test"
-      )
-      withProps(props) {
-        val (provider, cfg): (String, EmbeddingProviderConfig) =
-          Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
-
-        provider shouldBe "openai"
-        cfg.model shouldBe "text-embedding-3-small"
-        cfg.baseUrl shouldBe "https://api.openai.com/v1" // Default base URL
-        cfg.apiKey shouldBe "sk-test"
-      }
-    }
-
     "load Voyage embeddings via unified EMBEDDING_MODEL format" in {
       val props = Map(
         "llm4s.embeddings.model"         -> "voyage/voyage-3",
@@ -103,32 +69,16 @@ class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
 
     "prefer unified model format over legacy provider" in {
       val props = Map(
-        "llm4s.embeddings.model"    -> "openai/text-embedding-3-large", // Takes precedence
-        "llm4s.embeddings.provider" -> "voyage",                        // Should be ignored
-        "llm4s.openai.apiKey"       -> "sk-test"
+        "llm4s.embeddings.model"         -> "voyage/voyage-3-large", // Takes precedence
+        "llm4s.embeddings.provider"      -> "openai",                // Should be ignored
+        "llm4s.embeddings.voyage.apiKey" -> "vk-test"
       )
       withProps(props) {
         val (provider, cfg): (String, EmbeddingProviderConfig) =
           Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
 
-        provider shouldBe "openai" // Unified format wins
-        cfg.model shouldBe "text-embedding-3-large"
-      }
-    }
-
-    "allow custom base URL with unified format" in {
-      val props = Map(
-        "llm4s.embeddings.model"          -> "openai/text-embedding-3-small",
-        "llm4s.embeddings.openai.baseUrl" -> "https://custom.openai.com/v1",
-        "llm4s.openai.apiKey"             -> "sk-test"
-      )
-      withProps(props) {
-        val (provider, cfg): (String, EmbeddingProviderConfig) =
-          Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
-
-        provider shouldBe "openai"
-        cfg.model shouldBe "text-embedding-3-small"
-        cfg.baseUrl shouldBe "https://custom.openai.com/v1" // Custom base URL
+        provider shouldBe "voyage" // Unified format wins
+        cfg.model shouldBe "voyage-3-large"
       }
     }
 
