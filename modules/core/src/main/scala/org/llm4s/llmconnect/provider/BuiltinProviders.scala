@@ -26,7 +26,6 @@ object BuiltinProviders extends Llm4sProviderModule:
 
   override val chatProviders: Seq[ProviderDescriptor] = Seq(
     OpenRouterProvider,
-    ZaiProvider,
     CohereProvider,
     MistralProvider
   )

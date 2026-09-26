@@ -130,8 +130,7 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
         "cohere",
         "fixturechat",
         "mistral",
-        "openrouter",
-        "zai"
+        "openrouter"
       )
     }
   }

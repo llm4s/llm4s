@@ -47,6 +47,27 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           fail(s"Expected DeepSeek NamedProviderConfig, got error: ${err.message}")
     }
 
+    "validate and normalize a Z.ai named provider section" in {
+      validate(
+        "zai-main",
+        RawNamedProviderSection(
+          provider = Some("zai"),
+          model = Some("GLM-4.7"),
+          baseUrl = Some("https://api.z.ai/api/paas/v4"),
+          apiKey = Some("zai-key"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.provider shouldBe ProviderId("zai")
+          cfg.model.asString shouldBe "GLM-4.7"
+          cfg.apiKey.map(_.asKey) shouldBe Some("zai-key")
+        case Left(err) =>
+          fail(s"Expected Z.ai NamedProviderConfig, got error: ${err.message}")
+    }
+
     "accept an openai-compatible section with no apiKey" in {
       validate(
         "local-vllm",

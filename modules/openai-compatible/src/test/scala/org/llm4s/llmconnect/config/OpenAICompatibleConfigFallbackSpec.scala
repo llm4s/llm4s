@@ -19,6 +19,24 @@ class OpenAICompatibleConfigFallbackSpec extends AnyFlatSpec with Matchers with 
   val apiKey  = "sk-test"
   val baseUrl = "https://api.example.com"
 
+  "ZaiConfig fallback" should "return 200000 for GLM-4.7-like model" in {
+    val cfg = ZaiConfig.fromValues("patch-cov-GLM-4.7", apiKey, baseUrl).value
+    cfg.contextWindow shouldBe 200000
+    cfg.reserveCompletion shouldBe 4096
+  }
+
+  it should "return 128000 for GLM-4.5-like model" in {
+    val cfg = ZaiConfig.fromValues("patch-cov-GLM-4.5", apiKey, baseUrl).value
+    cfg.contextWindow shouldBe 128000
+    cfg.reserveCompletion shouldBe 4096
+  }
+
+  it should "return 128000 for unknown model" in {
+    val cfg = ZaiConfig.fromValues("patch-cov-unknown", apiKey, baseUrl).value
+    cfg.contextWindow shouldBe 128000
+    cfg.reserveCompletion shouldBe 4096
+  }
+
   "DeepSeekConfig fallback" should "return 128000 for unregistered model (default branch)" in {
     val cfg = DeepSeekConfig.fromValues("patch-cov-deepseek-reasoner", apiKey, baseUrl).value
     cfg.contextWindow shouldBe 128000

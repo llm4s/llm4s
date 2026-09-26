@@ -27,7 +27,8 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
   /** Descriptor, the config class it builds, and the client class that config produces. */
   private val expectations: Seq[(ProviderDescriptor, String, String)] = Seq(
     (OpenAICompatibleProvider, "OpenAICompatibleConfig", "OpenAICompatibleClient"),
-    (DeepSeekProvider, "DeepSeekConfig", "DeepSeekClient")
+    (DeepSeekProvider, "DeepSeekConfig", "DeepSeekClient"),
+    (ZaiProvider, "ZaiConfig", "ZaiClient")
   )
 
   private val chatIds = expectations.map(_._1.id.asString)
@@ -105,12 +106,13 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
       }
     }
 
-    "declare streaming and a model lister" in {
+    "declare streaming, and a model lister where the provider has one" in {
       expectations.foreach { (descriptor, _, _) =>
-        withClue(s"${descriptor.id.asString}: ") {
-          descriptor.features.streaming shouldBe true
-          descriptor.modelLister shouldBe defined
-        }
+        withClue(s"${descriptor.id.asString}: ")(descriptor.features.streaming shouldBe true)
       }
+      OpenAICompatibleProvider.modelLister shouldBe defined
+      DeepSeekProvider.modelLister shouldBe defined
+      // Z.ai had no lister in core either.
+      ZaiProvider.modelLister shouldBe None
     }
   }

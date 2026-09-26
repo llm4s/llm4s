@@ -31,12 +31,41 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
     }
   }
 
+  test("Zai provider with ZaiConfig returns ZaiClient") {
+    val cfg: ProviderConfig = ZaiConfig(
+      apiKey = "key",
+      model = "GLM-4.7",
+      baseUrl = "https://api.z.ai/api/paas/v4",
+      contextWindow = 128000,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(ProviderId("zai"), cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "ZaiClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
   test("openai-compatible provider with OpenAICompatibleConfig returns OpenAICompatibleClient") {
     val cfg: ProviderConfig = OpenAICompatibleConfig(model = "m", baseUrl = "http://localhost:8000/v1")
     LLMConnect.getClient(cfg).map(_.getClass.getSimpleName) shouldBe Right("OpenAICompatibleClient")
     LLMConnect.getClient(ProviderId("openai-compatible"), cfg).map(_.getContextWindow()) shouldBe Right(
       OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW
     )
+  }
+
+  test("Zai provider with non-ZaiConfig should throw IllegalArgumentException") {
+    val wrongCfg: ProviderConfig = OpenAIConfig(
+      apiKey = "key",
+      model = "gpt-4o",
+      organization = None,
+      baseUrl = "https://api.openai.com/v1",
+      contextWindow = 128000,
+      reserveCompletion = 4096
+    )
+
+    val res = LLMConnect.getClient(ProviderId("zai"), wrongCfg)
+    res.isLeft shouldBe true
   }
 
   test("openai-compatible provider refuses another provider's config") {

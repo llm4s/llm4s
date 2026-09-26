@@ -11,14 +11,16 @@ import org.scalatest.wordspec.AnyWordSpec
  */
 class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
 
+  private val zai      = ZaiConfig("k", "GLM-4.7", ZaiConfig.DEFAULT_BASE_URL, 200000, 4096)
   private val deepseek = DeepSeekConfig("k", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
   private val generic =
     OpenAICompatibleConfig("m", "http://localhost:8000/v1", Some("k"), 32768, 4096, Map("X-Team" -> "search"))
 
-  private val all: Seq[ProviderConfig] = Seq(deepseek, generic)
+  private val all: Seq[ProviderConfig] = Seq(zai, deepseek, generic)
 
   "ProviderConfig.providerId" should {
     "name each provider in its canonical spelling" in {
+      zai.providerId shouldBe ProviderId("zai")
       deepseek.providerId shouldBe ProviderId("deepseek")
       generic.providerId shouldBe ProviderId("openai-compatible")
     }
@@ -30,6 +32,7 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
 
   "ProviderConfig.endpointUrl" should {
     "return the URL the config will actually contact" in {
+      zai.endpointUrl shouldBe Some(ZaiConfig.DEFAULT_BASE_URL)
       deepseek.endpointUrl shouldBe Some(DeepSeekConfig.DEFAULT_BASE_URL)
       generic.endpointUrl shouldBe Some("http://localhost:8000/v1")
     }

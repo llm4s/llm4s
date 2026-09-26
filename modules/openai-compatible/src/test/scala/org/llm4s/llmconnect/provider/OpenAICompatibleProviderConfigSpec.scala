@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.error.ConfigurationError
 import org.scalatest.EitherValues
 import org.llm4s.llmconnect.config._
 import org.scalatest.funsuite.AnyFunSuite
@@ -34,6 +35,84 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
         result.left.value.message shouldBe s"$field must be non-empty"
       }
     }
+  }
+
+  // ================================= ZAI CONFIG =================================
+
+  test("ZaiConfig.fromValues creates config with correct model") {
+    val config = ZaiConfig
+      .fromValues(
+        modelName = "GLM-4.7",
+        apiKey = "test-key",
+        baseUrl = "https://api.z.ai/api/paas/v4"
+      )
+      .value
+
+    config.model shouldBe "GLM-4.7"
+    config.apiKey shouldBe "test-key"
+    config.baseUrl shouldBe "https://api.z.ai/api/paas/v4"
+  }
+
+  test("ZaiConfig.fromValues sets correct context window for GLM-4.7") {
+    val config = ZaiConfig
+      .fromValues(
+        modelName = "GLM-4.7",
+        apiKey = "test-key",
+        baseUrl = "https://api.z.ai/api/paas/v4"
+      )
+      .value
+
+    config.contextWindow shouldBe 200000
+  }
+
+  test("ZaiConfig.fromValues sets correct context window for GLM-4.5-air") {
+    val config = ZaiConfig
+      .fromValues(
+        modelName = "GLM-4.5-air",
+        apiKey = "test-key",
+        baseUrl = "https://api.z.ai/api/paas/v4"
+      )
+      .value
+
+    config.contextWindow shouldBe 128000
+  }
+
+  test("ZaiConfig.fromValues fails for empty apiKey") {
+    ZaiConfig
+      .fromValues(
+        modelName = "GLM-4.7",
+        apiKey = "",
+        baseUrl = "https://api.z.ai/api/paas/v4"
+      )
+      .left
+      .value shouldBe a[ConfigurationError]
+  }
+
+  test("ZaiConfig.fromValues fails for empty baseUrl") {
+    ZaiConfig
+      .fromValues(
+        modelName = "GLM-4.7",
+        apiKey = "test-key",
+        baseUrl = ""
+      )
+      .left
+      .value shouldBe a[ConfigurationError]
+  }
+
+  test("ZaiConfig.fromValues sets reserveCompletion for all models") {
+    val config = ZaiConfig.fromValues("GLM-4.7", "test-key", "https://api.z.ai/api/paas/v4").value
+    config.reserveCompletion should be > 0
+  }
+
+  // ================================= PROVIDER CONFIG TRAIT =================================
+
+  test("All config types implement ProviderConfig trait") {
+    val openai: ProviderConfig = OpenAIConfig.fromValues("gpt-4o", "key", None, "https://api.openai.com/v1").value
+    val zai: ProviderConfig =
+      ZaiConfig.fromValues("GLM-4.7", "key", "https://api.z.ai/api/paas/v4").value
+
+    openai.model shouldBe "gpt-4o"
+    zai.model shouldBe "GLM-4.7"
   }
 
   // ============================ OpenAICompatibleConfig ============================

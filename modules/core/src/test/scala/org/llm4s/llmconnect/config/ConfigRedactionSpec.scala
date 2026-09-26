@@ -22,16 +22,8 @@ class ConfigRedactionSpec extends AnyFlatSpec with Matchers with EitherValues {
       .value
     (openai.toString should not).include(secret)
     openai.toString should include("***")
-
-    val zai = ZaiConfig
-      .fromValues(
-        modelName = "glm-4.5",
-        apiKey = secret,
-        baseUrl = "https://example.invalid"
-      )
-      .value
-    (zai.toString should not).include(secret)
-    zai.toString should include("***")
+    // The ZaiConfig half of this case moved to llm4s-openai-compatible's
+    // OpenAICompatibleConfigRedactionSpec with the config (#1132).
   }
 
   "LangfuseConfig toString" should "not leak keys" in {

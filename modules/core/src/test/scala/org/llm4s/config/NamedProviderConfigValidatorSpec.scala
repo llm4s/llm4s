@@ -8,8 +8,8 @@ import org.scalatest.wordspec.AnyWordSpec
  * Named provider sections, validated against the providers core ships.
  *
  * The OpenAI and Azure cases moved to `llm4s-openai`'s `OpenAINamedProviderSpec` with the
- * providers (#1132), as the Anthropic and Gemini cases did before them, and the DeepSeek case
- * to `llm4s-openai-compatible`'s `OpenAICompatibleNamedProviderSpec`.
+ * providers (#1132), as the Anthropic and Gemini cases did before them, and the DeepSeek
+ * and Z.ai cases to `llm4s-openai-compatible`'s `OpenAICompatibleNamedProviderSpec`.
  */
 class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
 
@@ -37,27 +37,6 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           cfg.apiKey.map(_.asKey) shouldBe Some("or-key")
         case Left(err) =>
           fail(s"Expected OpenRouter NamedProviderConfig, got error: ${err.message}")
-    }
-
-    "validate and normalize a Z.ai named provider section" in {
-      validate(
-        "zai-main",
-        RawNamedProviderSection(
-          provider = Some("zai"),
-          model = Some("GLM-4.7"),
-          baseUrl = Some("https://api.z.ai/api/paas/v4"),
-          apiKey = Some("zai-key"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
-        )
-      ) match
-        case Right(cfg) =>
-          cfg.provider shouldBe ProviderId("zai")
-          cfg.model.asString shouldBe "GLM-4.7"
-          cfg.apiKey.map(_.asKey) shouldBe Some("zai-key")
-        case Left(err) =>
-          fail(s"Expected Z.ai NamedProviderConfig, got error: ${err.message}")
     }
 
     "validate and normalize a Cohere named provider section" in {
