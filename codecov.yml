@@ -80,6 +80,10 @@ flags:
     paths:
       - modules/openai/src/main/scala
     carryforward: true
+  openai-compatible:
+    paths:
+      - modules/openai-compatible/src/main/scala
+    carryforward: true
   knowledgegraph-neo4j:
     paths:
       - modules/knowledgegraph-neo4j/src/main/scala

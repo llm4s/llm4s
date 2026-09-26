@@ -1,5 +1,125 @@
 # Migration Guide
 
+## Slice 5: `llm4s-openai-compatible`
+
+The fifth provider module of slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)),
+carrying DeepSeek (`provider = "deepseek"`), Z.ai (`"zai"`), OpenRouter (`"openrouter"`) and a
+new generic provider, `"openai-compatible"`, for any other endpoint that speaks the OpenAI
+`/chat/completions` API. It is in the build but not yet in a release; `0.4.1` and earlier still
+ship DeepSeek, Z.ai and OpenRouter inside `llm4s-core`, and have no generic provider.
+
+Unlike the earlier carves this is a **consolidation, not a pure move**. DeepSeek, Z.ai and
+OpenRouter each had their own ~400-line copy of the same SDK-free client; they are now thin
+subclasses of one `OpenAICompatibleClient`, each with a small `OpenAICompatibleDialect` for what
+genuinely differs (headers, content encoding, reasoning parameters, thinking extraction,
+tool-call parsing). The module depends on nothing but `llm4s-core`.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % version
+```
+
+### What moved
+
+| Code | Now in |
+|---|---|
+| `DeepSeekClient`, `DeepSeekProvider`, `ZaiClient`, `ZaiProvider`, `OpenRouterClient`, `OpenRouterProvider` (`org.llm4s.llmconnect.provider`) | `llm4s-openai-compatible` |
+| `DeepSeekConfig`, `ZaiConfig`, `OpenAIConfig` (`org.llm4s.llmconnect.config`) | `llm4s-openai-compatible` |
+| `ProviderModelListers.DeepSeek` / `.OpenRouter` → `DeepSeekModelLister` / `OpenRouterModelLister` (`org.llm4s.config`) | `llm4s-openai-compatible` |
+| `DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL` → `DeepSeekConfig.DEFAULT_BASE_URL` | `llm4s-openai-compatible` |
+| `DefaultConfig.DEFAULT_OPENROUTER_BASE_URL` → `OpenRouterProvider.DEFAULT_BASE_URL` | `llm4s-openai-compatible` |
+| `ConfigKeys.DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `OPENROUTER_BASE_URL` → `OpenAICompatibleConfigKeys` (`org.llm4s.config`) | `llm4s-openai-compatible` |
+| the commented `deepseek-main`, `zai-main` and `openrouter-main` examples in `reference.conf` | `llm4s-openai-compatible`'s `reference.conf` |
+
+New: `OpenAICompatibleClient`, `OpenAICompatibleDialect`, `OpenAICompatibleConfig`,
+`OpenAICompatibleProvider`, `OpenAICompatibleModelLister`, `Llm4sOpenAICompatibleModule`.
+
+Package names are unchanged, and so are the public shapes of the three clients - their
+constructors and companion `apply` overloads - their descriptors and their configs, so
+`new DeepSeekClient(config)` or `OpenRouterClient(config, metrics)` compile as before once the
+dependency is added.
+
+**`llm4s-openai` users:** `OpenAIConfig` moved here, and `llm4s-openai` now depends on
+`llm4s-openai-compatible` to get it. That module brings no SDK, and nothing changes in your build.
+
+### The generic `openai-compatible` provider
+
+```hocon
+llm4s.providers {
+  local-vllm {
+    provider = "openai-compatible"
+    baseUrl = "http://localhost:8000/v1"   # required
+    model = "Qwen/Qwen2.5-7B-Instruct"     # required
+    # apiKey = ...                        # optional; no Authorization header without one
+    # contextWindow = 32768               # optional; default 8192
+    # reserveCompletion = 4096            # optional; default 2048
+    # headers { X-Team = "search" }       # optional
+  }
+}
+```
+
+To support it, a named provider section may now carry `contextWindow`, `reserveCompletion` and a
+`headers` object, which `NamedProviderConfig` exposes. Providers other than `openai-compatible`
+ignore them. See [OpenAI-compatible endpoints](../guide/providers.md#openai-compatible-endpoints).
+
+### Registration is the dependency
+
+`llm4s-openai-compatible` declares `Llm4sOpenAICompatibleModule` in its `META-INF/services`, so
+`ProviderRegistry.default` finds it. Without the dependency, `provider = "deepseek"`, `"zai"` and
+`"openrouter"` fail with the registry's error, which names the providers that are registered.
+`ProviderRegistry.builtin` no longer includes them; where discovery cannot run:
+
+```scala
+given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sOpenAICompatibleModule)
+```
+
+### Behaviour changes
+
+The three copies had drifted apart; the shared client does each thing one way:
+
+1. **DeepSeek returns thinking.** `deepseek-reasoner`'s `reasoning_content` is now
+   `Completion.thinking` and is streamed as thinking deltas; the old client dropped it. Its
+   `completion_tokens_details.reasoning_tokens` is `TokenUsage.thinkingTokens`.
+2. **The stream body is closed on every failure.** Z.ai and OpenRouter left it open on an error
+   status.
+3. **Every call records exactly one provider exchange**, including a request that cannot be sent
+   (DeepSeek and Z.ai recorded none for a non-streaming one; OpenRouter recorded failures twice).
+4. **OpenRouter sends assistant content as a string.** The old client passed an `Option` through
+   ujson's implicit conversion, so `"hi"` went out as `["hi"]` and no content as `[]`; it is now
+   `"hi"`, `""` or `null`.
+5. **Z.ai reads usage given as an array**, which its client meant to support but never matched.
+6. **A reply's `message.contentOpt` is `None` when the reply has no text** for all three (it was
+   `Some("")` for DeepSeek and Z.ai); `Completion.content` is `""` either way.
+7. **Replies are read leniently where the copies threw**: a missing `id`, `created` or `model`
+   defaults, a streamed event with no `choices` is skipped, and a malformed non-streaming reply is
+   a `Left` for all three (Z.ai could throw). OpenRouter keeps its strict tool-call parsing;
+   DeepSeek and Z.ai keep their lenient one.
+
+### Source breaks
+
+1. **`ProviderModelListers.DeepSeek` and `.OpenRouter` are now `DeepSeekModelLister` and
+   `OpenRouterModelLister`**, in the same package. The descriptors' `modelLister` returns them.
+2. **`DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL` and `DEFAULT_OPENROUTER_BASE_URL` are now
+   `DeepSeekConfig.DEFAULT_BASE_URL` and `OpenRouterProvider.DEFAULT_BASE_URL`.** The values are
+   unchanged.
+3. **`ConfigKeys.DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL` and `OPENROUTER_BASE_URL` are now on
+   `OpenAICompatibleConfigKeys`**, in the same package. The strings are unchanged.
+4. **`ProviderRegistry.builtin` no longer includes `deepseek`, `zai` or `openrouter`** - see above.
+5. **`NamedProviderConfig` and `RawNamedProviderSection` gained three trailing fields** with
+   defaults (`contextWindow`, `reserveCompletion`, `headers`), so construction by name or by
+   position is unaffected; a pattern match that destructures all seven fields must add three.
+   `NamedProviderConfig.toString` now redacts the API key and header values.
+6. **`ProviderModelListers.openAICompatible` gained two defaulted parameters**, `extraHeaders`
+   and `apiKeyRequired`; existing calls compile unchanged. It no longer special-cases OpenRouter,
+   whose lister passes its headers explicitly.
+
+`OpenRouterToolCallDeserializer`, `OpenAIStreamingHandler` and
+`StreamingResponseHandler.forProvider("openrouter")` stay in `llm4s-core`, unused by any client.
+
+### What did *not* change
+
+Every configuration key and environment variable for DeepSeek, Z.ai and OpenRouter: their
+`provider` ids, `apiKey`, `baseUrl` and `organization`, and their default base URLs.
+
 ## Slice 5: `llm4s-openai`
 
 The fourth provider module of slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)),
@@ -14,7 +134,8 @@ depends on no vendor SDK at all.
 
 OpenRouter, DeepSeek and Z.ai are **not** in this module. They speak the OpenAI wire format but
 each has its own client with no SDK, so bundling them here would make their users download the
-Azure SDK for nothing; they stay in `llm4s-core` for now and get modules of their own later.
+Azure SDK for nothing. They went on to `llm4s-openai-compatible` - see
+[above](#slice-5-llm4s-openai-compatible).
 
 ### What moved
 
@@ -41,11 +162,13 @@ libraryDependencies += "org.llm4s" %% "llm4s-openai" % version
 
 - **`OpenAIConfig`**, because OpenRouter builds one too: `OpenRouterProvider` and
   `OpenRouterClient` take an `OpenAIConfig`, and its `providerId` answers `openrouter` for an
-  OpenRouter base URL. It moves when OpenRouter does.
+  OpenRouter base URL. It moved when OpenRouter did, to `llm4s-openai-compatible`, which
+  `llm4s-openai` now depends on.
 - **`OpenAIStreamingHandler`**, the SSE parser behind
   `StreamingResponseHandler.forProvider("openai" | "azure" | "openrouter")`, which OpenRouter's
   path shares. `OpenAIClient` streams through the Azure SDK.
-- **`ConfigKeys.OPENROUTER_BASE_URL`**, still naming `OPENAI_BASE_URL`.
+- **`ConfigKeys.OPENROUTER_BASE_URL`**, still naming `OPENAI_BASE_URL` (since moved to
+  `OpenAICompatibleConfigKeys`).
 - Strings that do not reach a client: `ToolRegistry.getOpenAITools` and
   `getToolDefinitionsSafe("openai")`, the `openai/...` model-registry data, the `sk-` secret
   pattern, config-policy allow-lists.

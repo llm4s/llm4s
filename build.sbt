@@ -267,12 +267,12 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
-    // Measured 75.57% statement coverage after the `openai` carve (`sbt coverage core/test
-    // core/coverageReport`); it was 75.15% after `anthropic`, 75.27% after `gemini`, 75.86%
+    // Measured 75.32% statement coverage after the `openai-compatible` carve (`sbt coverage
+    // core/test core/coverageReport`); it was 75.57% after `openai`, 75.15% after `anthropic`, 75.27% after `gemini`, 75.86%
     // after `ollama`, 74.33% with slice 3 complete, 74.89% after `image`, 74.05% after `mcp`,
     // 73.85% after slice 2 and 72.42% on main @ 5a62e2ac before any of them. A carve moves the
     // number in whichever direction the departing code sat - `speech` (80.68%), `gemini`
-    // (87.53%) and `anthropic` (81.32%) pulled it down, the slice-4 SPI work and the `ollama`
+    // (87.53%), `anthropic` (81.32%) and `openai-compatible` pulled it down, the slice-4 SPI work and the `ollama`
     // and `openai` (62.34%) carves pushed it up. Floor is the measured value rounded down to
     // the nearest 5; ratchet it up, never down.
     //
@@ -623,7 +623,12 @@ lazy val openaiCompatible = (project in file("modules/openai-compatible"))
   .settings(
     name := "llm4s-openai-compatible",
     commonSettings,
-    coverageFloor(80),
+    // Measured 92.68% statement coverage (`sbt coverage openaiCompatible/test
+    // openaiCompatible/coverageReport`) with the three clients consolidated onto
+    // `OpenAICompatibleClient`, their suites moved from core, and the generic provider's and
+    // dialects' own specs. Floor is the measured value rounded down to the nearest 5. Never lower
+    // it. The `@Cloud` DeepSeek and OpenRouter smoke suites in `modules/it` are not counted here.
+    coverageFloor(90),
     Test / fork := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,

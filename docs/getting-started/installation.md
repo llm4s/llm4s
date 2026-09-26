@@ -292,11 +292,33 @@ all the registration there is: the module declares itself to the provider regist
 with no code change. Without it, they fail with an error saying the provider is not registered
 and naming the providers that are.
 
-OpenRouter, DeepSeek and Z.ai speak the OpenAI wire format but have their own clients with no
-SDK, and are not part of this module - they are still in `llm4s-core`. `llm4s-rag`'s
-`RAGConfig.default` embeds with `openai`, so a RAG pipeline built from the default needs this
-module too, or `.withEmbeddings(...)` naming a provider you do ship. Package names are
+OpenRouter, DeepSeek and Z.ai speak the OpenAI wire format with no SDK, and are in
+`llm4s-openai-compatible` (below), which this module depends on for `OpenAIConfig`.
+`llm4s-rag`'s `RAGConfig.default` embeds with `openai`, so a RAG pipeline built from the default
+needs this module too, or `.withEmbeddings(...)` naming a provider you do ship. Package names are
 unchanged; see the [migration note](../reference/migration.md#slice-5-llm4s-openai).
+
+### For DeepSeek, Z.ai, OpenRouter and any OpenAI-compatible endpoint
+
+{: .note }
+> Not yet published. `llm4s-openai-compatible` exists in the build as of
+> [#1132](https://github.com/llm4s/llm4s/issues/1132) but ships in the next release;
+> in `0.4.1` and earlier DeepSeek, Z.ai and OpenRouter are still inside `llm4s-core`.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
+```
+
+One SDK-free client for the OpenAI `/chat/completions` API, and the providers that run on it:
+DeepSeek (`provider = "deepseek"`), Z.ai (`"zai"`), OpenRouter (`"openrouter"`), and a generic
+`"openai-compatible"` provider for any other endpoint that speaks the API - Groq, Together,
+Fireworks, a vLLM, LM Studio or llama.cpp server, an internal gateway - configured with a
+`baseUrl` and a `model`, and no code. See
+[OpenAI-compatible endpoints](../guide/providers.md#openai-compatible-endpoints). The module
+brings no dependency beyond `llm4s-core`, and adding it registers the providers. Package names
+are unchanged; see the
+[migration note](../reference/migration.md#slice-5-llm4s-openai-compatible).
 
 ### For image generation and vision
 

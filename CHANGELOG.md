@@ -22,6 +22,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`llm4s-openai-compatible`: DeepSeek, Z.ai and OpenRouter leave `llm4s-core` on one shared
+  client, and a generic `openai-compatible` provider joins them** - the fifth provider module of
+  slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)), and a consolidation rather than
+  a pure move. The three providers each had a ~400-line copy of the same SDK-free
+  chat-completions client; they are now thin subclasses of one `OpenAICompatibleClient`, each
+  with a small `OpenAICompatibleDialect` for what differs. `DeepSeekConfig`, `ZaiConfig` and
+  `OpenAIConfig` move with them (package unchanged; `llm4s-openai` now depends on this SDK-free
+  module for `OpenAIConfig`). The clients' constructors and `apply` overloads, the descriptors
+  and the configs keep their shapes. The new `provider = "openai-compatible"` serves any
+  endpoint speaking the OpenAI chat-completions API from config alone: `baseUrl` and `model`
+  required, `apiKey` optional (no `Authorization` header without one), and `contextWindow`,
+  `reserveCompletion` and `headers` read from the section - which named provider sections may
+  now carry.
+
+  Behaviour changes from the consolidation: DeepSeek returns `deepseek-reasoner`'s
+  `reasoning_content` as thinking; the stream body is closed on every failure (Z.ai and
+  OpenRouter leaked it on an error status); each call records exactly one provider exchange;
+  OpenRouter sends assistant content as a string (it sent `["text"]` by accident); Z.ai reads
+  usage given as an array.
+
+  Source breaks: `ProviderModelListers.DeepSeek` / `.OpenRouter` are now `DeepSeekModelLister` /
+  `OpenRouterModelLister`; `DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL` and
+  `DEFAULT_OPENROUTER_BASE_URL` are now `DeepSeekConfig.DEFAULT_BASE_URL` and
+  `OpenRouterProvider.DEFAULT_BASE_URL`; `ConfigKeys.DEEPSEEK_*` and `OPENROUTER_BASE_URL` are on
+  `OpenAICompatibleConfigKeys`; `NamedProviderConfig` and `RawNamedProviderSection` gained three
+  defaulted trailing fields; `ProviderRegistry.builtin` no longer includes these providers. No
+  configuration key or environment variable changed. See the
+  [migration guide](docs/reference/migration.md#slice-5-llm4s-openai-compatible).
+
 - **`llm4s-openai`: OpenAI, Azure OpenAI and Requesty leave `llm4s-core`, and take the Azure
   OpenAI SDK with it** - the fourth provider module of slice 5
   ([#1132](https://github.com/llm4s/llm4s/issues/1132)). The providers that share `OpenAIClient`
