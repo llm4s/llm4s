@@ -236,20 +236,6 @@ object LLMConnectTestFixtures {
         |  }
         |]""".stripMargin
 
-    val openRouterFormat: String =
-      """[
-        |  [
-        |    {
-        |      "id": "call_abc123",
-        |      "type": "function",
-        |      "function": {
-        |        "name": "get_weather",
-        |        "arguments": "{\"location\":\"San Francisco\"}"
-        |      }
-        |    }
-        |  ]
-        |]""".stripMargin
-
     val multipleToolCalls: String =
       """[
         |  {

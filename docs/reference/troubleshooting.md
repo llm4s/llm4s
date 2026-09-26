@@ -47,7 +47,7 @@ A: Wrap your tool with a `ToolOutputCompressor` to summarize or truncate large r
 ## Streaming Issues
 
 **Q: streamComplete returns immediately with an empty result**
-A: Check if the provider requires `stream: true` in your `CompletionOptions` or if you are discarding the initial `TokenReceived` events. Use `StreamingResponseHandler` to safely accumulate events.
+A: Check if the provider requires `stream: true` in your `CompletionOptions` or if you are discarding the initial `TokenReceived` events. Use `StreamingAccumulator` to accumulate the chunks passed to your `onChunk` callback.
 
 **Q: streaming chunks arrive out of order**
 A: Ensure you are using `StreamingAccumulator` which correctly buffers and assembles `SSE` streams in sequence automatically.

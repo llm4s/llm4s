@@ -87,9 +87,14 @@ The three copies had drifted apart; the shared client does each thing one way:
    ujson's implicit conversion, so `"hi"` went out as `["hi"]` and no content as `[]`; it is now
    `"hi"`, `""` or `null`.
 5. **Z.ai reads usage given as an array**, which its client meant to support but never matched.
-6. **A reply's `message.contentOpt` is `None` when the reply has no text** for all three (it was
+6. **Streamed tool calls keep all their arguments.** A tool call streamed across several deltas
+   lost every fragment after the first in all three clients: continuations carry only an `index`,
+   the missing id was defaulted to `""`, and `StreamingAccumulator` skips a chunk with no id. The
+   shared client now maps each index to its call's id for the life of the stream, and a streamed
+   `Completion` reports its tool calls in `toolCalls`, as a non-streaming one does.
+7. **A reply's `message.contentOpt` is `None` when the reply has no text** for all three (it was
    `Some("")` for DeepSeek and Z.ai); `Completion.content` is `""` either way.
-7. **Replies are read leniently where the copies threw**: a missing `id`, `created` or `model`
+8. **Replies are read leniently where the copies threw**: a missing `id`, `created` or `model`
    defaults, a streamed event with no `choices` is skipped, and a malformed non-streaming reply is
    a `Left` for all three (Z.ai could throw). OpenRouter keeps its strict tool-call parsing;
    DeepSeek and Z.ai keep their lenient one.
@@ -112,8 +117,15 @@ The three copies had drifted apart; the shared client does each thing one way:
    and `apiKeyRequired`; existing calls compile unchanged. It no longer special-cases OpenRouter,
    whose lister passes its headers explicitly.
 
-`OpenRouterToolCallDeserializer`, `OpenAIStreamingHandler` and
-`StreamingResponseHandler.forProvider("openrouter")` stay in `llm4s-core`, unused by any client.
+7. **`OpenRouterToolCallDeserializer` is removed** from `org.llm4s.llmconnect.serialization`. No
+   client used it after the consolidation. The "double-nested" array it parsed was an artefact
+   of the old `OpenRouterClient`, not OpenRouter's format; use `StandardToolCallDeserializer`
+   (which stays), as `OpenRouterClient` now does.
+8. **`StreamingResponseHandler` is removed**, with `BaseStreamingResponseHandler`,
+   `OpenAIStreamingHandler`, `AnthropicStreamingHandler` and `StreamingResponseHandler.forProvider`
+   (`org.llm4s.llmconnect.streaming`). No client streamed through them - each parses its own
+   stream and accumulates with `StreamingAccumulator`, which stays - and `forProvider` was called
+   only from tests. To assemble streamed chunks yourself, feed them to a `StreamingAccumulator`.
 
 ### What did *not* change
 
@@ -164,7 +176,8 @@ libraryDependencies += "org.llm4s" %% "llm4s-openai" % version
   `OpenRouterClient` take an `OpenAIConfig`, and its `providerId` answers `openrouter` for an
   OpenRouter base URL. It moved when OpenRouter did, to `llm4s-openai-compatible`, which
   `llm4s-openai` now depends on.
-- **`OpenAIStreamingHandler`**, the SSE parser behind
+- **`OpenAIStreamingHandler`** (since removed with `StreamingResponseHandler`; see
+  [`llm4s-openai-compatible`](#slice-5-llm4s-openai-compatible)), the SSE parser behind
   `StreamingResponseHandler.forProvider("openai" | "azure" | "openrouter")`, which OpenRouter's
   path shares. `OpenAIClient` streams through the Azure SDK.
 - **`ConfigKeys.OPENROUTER_BASE_URL`**, still naming `OPENAI_BASE_URL` (since moved to

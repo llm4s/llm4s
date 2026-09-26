@@ -136,8 +136,12 @@ optional `apiKey`, `contextWindow`, `reserveCompletion`, `headers`; the last thr
 `NamedProviderConfig` that other providers ignore). **A new OpenAI-compatible provider is a
 dialect and a descriptor in that module, or just config** - check whether `openai-compatible`
 covers it before writing one; never another copy of the client. `BuiltinProviders` now holds only
-Cohere, Mistral and Voyage. `OpenAIStreamingHandler`, `StreamingResponseHandler.forProvider` and
-`OpenRouterToolCallDeserializer` stay in core, used by no client. Tests that need an
+Cohere, Mistral and Voyage. `StreamingResponseHandler` (with `forProvider`,
+`OpenAIStreamingHandler` and `AnthropicStreamingHandler`) and `OpenRouterToolCallDeserializer`
+were deleted with it: no client used them. A streamed tool call is split across deltas that
+continuations identify only by `index`; clients must give each continuation its call's id
+(`OpenAICompatibleClient.StreamToolCalls`), because `StreamingAccumulator` keys calls by id and
+skips a chunk with none. Tests that need an
 incidental API-key provider - and never a real one, which would leave core in a later carve -
 use `org.llm4s.testutil.FixtureChatProvider` (id `fixturechat`, `FixtureChatConfig`, a canned
 no-network client). It lives in core's test sources, is registered by core's **test**
@@ -149,8 +153,7 @@ config uses a `FixtureChatConfig`. When a stand-in test checked a real provider'
 passing, those move to that provider's spec (`DeepSeekNamedProviderSpec`, now in
 `llm4s-openai-compatible`). Strings that do not reach a client
 (`ToolRegistry`'s `"openai"`/`"anthropic"`/`"gemini"` cases, model-registry data, config-policy
-allow-lists, secret patterns) stay, as does `AnthropicStreamingHandler`, an SDK-free SSE parser
-behind `StreamingResponseHandler.forProvider` that `AnthropicClient` does not use. `llm4s-rag`'s
+allow-lists, secret patterns) stay. `llm4s-rag`'s
 `RAGConfig.default` embeds with `openai`, so `rag` has a **test-only** dependency on `openai`;
 never make it a compile one - that would put the Azure SDK back on every RAG user's classpath.
 

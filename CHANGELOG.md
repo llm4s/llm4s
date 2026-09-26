@@ -47,8 +47,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DEFAULT_OPENROUTER_BASE_URL` are now `DeepSeekConfig.DEFAULT_BASE_URL` and
   `OpenRouterProvider.DEFAULT_BASE_URL`; `ConfigKeys.DEEPSEEK_*` and `OPENROUTER_BASE_URL` are on
   `OpenAICompatibleConfigKeys`; `NamedProviderConfig` and `RawNamedProviderSection` gained three
-  defaulted trailing fields; `ProviderRegistry.builtin` no longer includes these providers. No
-  configuration key or environment variable changed. See the
+  defaulted trailing fields; `ProviderRegistry.builtin` no longer includes these providers.
+  Unused public classes are removed from `llm4s-core`: `OpenRouterToolCallDeserializer` (no
+  client used it; `StandardToolCallDeserializer` stays), and `StreamingResponseHandler` with
+  `BaseStreamingResponseHandler`, `OpenAIStreamingHandler`, `AnthropicStreamingHandler` and
+  `StreamingResponseHandler.forProvider` - no client streamed through them; every client
+  accumulates with `StreamingAccumulator`. No configuration key or environment variable changed.
+
+  Fixed: a streamed tool call split across deltas lost every argument fragment after the first
+  in the DeepSeek, Z.ai and OpenRouter clients (continuations carry only an `index`, and the
+  missing id was defaulted to `""`, which `StreamingAccumulator` skips). The shared client maps
+  each index to its call's id for the life of the stream, and a streamed `Completion` now
+  reports its tool calls in `toolCalls` as a non-streaming one does. See the
   [migration guide](docs/reference/migration.md#slice-5-llm4s-openai-compatible).
 
 - **`llm4s-openai`: OpenAI, Azure OpenAI and Requesty leave `llm4s-core`, and take the Azure

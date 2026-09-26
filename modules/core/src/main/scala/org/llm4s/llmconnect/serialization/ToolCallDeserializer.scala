@@ -22,33 +22,6 @@ trait ToolCallDeserializer {
 }
 
 /**
- * OpenRouter-specific tool call deserializer.
- *
- * Handles OpenRouter's double-nested array structure where tool calls are
- * encoded as an array of arrays, rather than the flat array used by most providers.
- *
- * No client uses this since `OpenRouterClient` moved onto the shared
- * OpenAI-compatible client in `llm4s-openai-compatible`
- * ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]). OpenRouter returns the
- * standard flat array; the nesting came from the old client, whose
- * `Option[ujson.Value]` argument was implicitly wrapped in an array. OpenRouter now
- * parses with [[StandardToolCallDeserializer]], which is equivalent on that input.
- */
-object OpenRouterToolCallDeserializer extends ToolCallDeserializer {
-
-  def deserializeToolCalls(toolCallsJson: Value): Vector[ToolCall] =
-    toolCallsJson.arr.flatMap { callArray =>
-      callArray.arr.map { call =>
-        ToolCall(
-          id = call("id").str,
-          name = call("function")("name").str,
-          arguments = ujson.read(call("function")("arguments").str)
-        )
-      }
-    }.toVector
-}
-
-/**
  * Standard tool call deserializer for most LLM providers (OpenAI, Anthropic, etc.).
  *
  * Expects a flat JSON array of tool call objects, each containing an `id` and
