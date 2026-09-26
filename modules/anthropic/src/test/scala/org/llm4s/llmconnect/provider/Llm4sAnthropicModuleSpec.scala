@@ -2,9 +2,10 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LlmClientOptions
-import org.llm4s.llmconnect.config.{ AnthropicConfig, ContextWindowResolver, DeepSeekConfig }
+import org.llm4s.llmconnect.config.{ AnthropicConfig, ContextWindowResolver }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
+import org.llm4s.testutil.FixtureChatConfig
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -75,11 +76,11 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers:
     }
 
     "refuse a config belonging to another provider" in {
-      val foreign = DeepSeekConfig("k", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
+      val foreign = FixtureChatConfig("k", "fixture-model")
 
       AnthropicProvider.buildClient(foreign, LlmClientOptions.default) match
-        case Left(error)   => error.message should include("Invalid config type DeepSeekConfig for provider anthropic")
-        case Right(client) => fail(s"anthropic accepted a DeepSeekConfig and built $client")
+        case Left(error) => error.message should include("Invalid config type FixtureChatConfig for provider anthropic")
+        case Right(client) => fail(s"anthropic accepted a FixtureChatConfig and built $client")
     }
 
     "declare streaming and a model lister" in {

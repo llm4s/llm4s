@@ -10,22 +10,22 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
 
     "validate and normalize a full providers config" in {
       val raw = RawProvidersConfig(
-        selectedProvider = Some(ProviderName("deepseek-primary")),
+        selectedProvider = Some(ProviderName("fixturechat-primary")),
         namedProviders = Map(
-          ProviderName("deepseek-primary") -> RawNamedProviderSection(
-            provider = Some(" deepseek "),
-            model = Some(" deepseek-chat "),
-            baseUrl = Some(" https://api.deepseek.com/v1 "),
-            apiKey = Some(" sk-deepseek-primary "),
+          ProviderName("fixturechat-primary") -> RawNamedProviderSection(
+            provider = Some(" fixturechat "),
+            model = Some(" fixture-model "),
+            baseUrl = Some(" https://fixturechat.invalid/v2 "),
+            apiKey = Some(" sk-fixture-primary "),
             organization = Some(" org-demo "),
             endpoint = None,
             apiVersion = None,
           ),
-          ProviderName("deepseek-main") -> RawNamedProviderSection(
-            provider = Some("deepseek"),
-            model = Some("deepseek-chat"),
-            baseUrl = Some("https://api.deepseek.com"),
-            apiKey = Some("deepseek-key"),
+          ProviderName("fixturechat-main") -> RawNamedProviderSection(
+            provider = Some("fixturechat"),
+            model = Some("fixture-model"),
+            baseUrl = Some("https://fixturechat.invalid/v1"),
+            apiKey = Some("fixture-key"),
             organization = None,
             endpoint = None,
             apiVersion = None,
@@ -35,20 +35,20 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
 
       ProvidersConfigLoader.validate(raw) match
         case Right(cfg) =>
-          cfg.selectedProvider.map(_.asName) shouldBe Some("deepseek-primary")
-          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("deepseek-primary", "deepseek-main")
+          cfg.selectedProvider.map(_.asName) shouldBe Some("fixturechat-primary")
+          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("fixturechat-primary", "fixturechat-main")
 
-          val primary = cfg.namedProviders(ProviderName("deepseek-primary"))
-          primary.provider shouldBe ProviderId("deepseek")
-          primary.model.asString shouldBe "deepseek-chat"
-          primary.baseUrl.map(_.asUrl) shouldBe Some("https://api.deepseek.com/v1")
-          primary.apiKey.map(_.asKey) shouldBe Some("sk-deepseek-primary")
+          val primary = cfg.namedProviders(ProviderName("fixturechat-primary"))
+          primary.provider shouldBe ProviderId("fixturechat")
+          primary.model.asString shouldBe "fixture-model"
+          primary.baseUrl.map(_.asUrl) shouldBe Some("https://fixturechat.invalid/v2")
+          primary.apiKey.map(_.asKey) shouldBe Some("sk-fixture-primary")
           primary.organization shouldBe Some("org-demo")
 
-          val deepseek = cfg.namedProviders(ProviderName("deepseek-main"))
-          deepseek.provider shouldBe ProviderId("deepseek")
-          deepseek.model.asString shouldBe "deepseek-chat"
-          deepseek.apiKey.map(_.asKey) shouldBe Some("deepseek-key")
+          val main = cfg.namedProviders(ProviderName("fixturechat-main"))
+          main.provider shouldBe ProviderId("fixturechat")
+          main.model.asString shouldBe "fixture-model"
+          main.apiKey.map(_.asKey) shouldBe Some("fixture-key")
         case Left(err) =>
           fail(s"Expected ProvidersConfig, got error: ${err.message}")
     }
@@ -57,11 +57,11 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
       val raw = RawProvidersConfig(
         selectedProvider = None,
         namedProviders = Map(
-          ProviderName("deepseek-main") -> RawNamedProviderSection(
-            provider = Some("deepseek"),
-            model = Some("deepseek-chat"),
+          ProviderName("fixturechat-main") -> RawNamedProviderSection(
+            provider = Some("fixturechat"),
+            model = Some("fixture-model"),
             baseUrl = None,
-            apiKey = Some("deepseek-key"),
+            apiKey = Some("fixture-key"),
             organization = None,
             endpoint = None,
             apiVersion = None,
@@ -72,8 +72,8 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
       ProvidersConfigLoader.validate(raw) match
         case Right(cfg) =>
           cfg.selectedProvider shouldBe None
-          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("deepseek-main")
-          cfg.namedProviders(ProviderName("deepseek-main")).provider shouldBe ProviderId("deepseek")
+          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("fixturechat-main")
+          cfg.namedProviders(ProviderName("fixturechat-main")).provider shouldBe ProviderId("fixturechat")
         case Left(err) =>
           fail(s"Expected ProvidersConfig without selected provider, got error: ${err.message}")
     }
@@ -82,11 +82,11 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
       val raw = RawProvidersConfig(
         selectedProvider = Some(ProviderName("missing-provider")),
         namedProviders = Map(
-          ProviderName("deepseek-primary") -> RawNamedProviderSection(
-            provider = Some("deepseek"),
-            model = Some("deepseek-chat"),
+          ProviderName("fixturechat-primary") -> RawNamedProviderSection(
+            provider = Some("fixturechat"),
+            model = Some("fixture-model"),
             baseUrl = None,
-            apiKey = Some("sk-deepseek-primary"),
+            apiKey = Some("sk-fixture-primary"),
             organization = None,
             endpoint = None,
             apiVersion = None,
@@ -107,9 +107,9 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
         namedProviders = Map(
           ProviderName("broken") -> RawNamedProviderSection(
             provider = None,
-            model = Some("deepseek-chat"),
+            model = Some("fixture-model"),
             baseUrl = None,
-            apiKey = Some("sk-deepseek-primary"),
+            apiKey = Some("sk-fixture-primary"),
             organization = None,
             endpoint = None,
             apiVersion = None,

@@ -124,9 +124,16 @@ Anthropic Java SDK with it. `modules/openai` came fourth with the three provider
 `AzureToolHelper`, and took the Azure OpenAI SDK: **core now depends on no vendor SDK
 (`com.anthropic`, `com.azure`, `com.openai`)**, and must not again. OpenRouter, DeepSeek and Z.ai
 have their own SDK-free clients and stay in core for their own modules later, and with them
-`OpenAIConfig` (OpenRouter builds one) and `OpenAIStreamingHandler`. Core's tests that used
-Gemini, then Anthropic, then OpenAI as an incidental API-key provider now use DeepSeek (core's
-test `application.conf` default is `deepseek-main`); strings that do not reach a client
+`OpenAIConfig` (OpenRouter builds one) and `OpenAIStreamingHandler`. Tests that need an
+incidental API-key provider - and never a real one, which would leave core in a later carve -
+use `org.llm4s.testutil.FixtureChatProvider` (id `fixturechat`, `FixtureChatConfig`, a canned
+no-network client). It lives in core's test sources, is registered by core's **test**
+`META-INF/services`, so `ProviderRegistry.default` resolves it in core and in every module
+depending on `core % "test->test"`, and is never in `BuiltinProviders`; core's test
+`application.conf` default is `fixturechat-main`. A spec that builds its own registry passes
+it to `ProviderRegistry.of`/`.withProvider`, and a provider spec proving it refuses a foreign
+config uses a `FixtureChatConfig`. When a stand-in test checked a real provider's own facts in
+passing, those move to that provider's spec (`DeepSeekNamedProviderSpec`). Strings that do not reach a client
 (`ToolRegistry`'s `"openai"`/`"anthropic"`/`"gemini"` cases, model-registry data, config-policy
 allow-lists, secret patterns) stay, as does `AnthropicStreamingHandler`, an SDK-free SSE parser
 behind `StreamingResponseHandler.forProvider` that `AnthropicClient` does not use. `llm4s-rag`'s

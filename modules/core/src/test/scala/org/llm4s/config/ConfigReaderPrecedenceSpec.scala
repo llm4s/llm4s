@@ -14,11 +14,11 @@ class ConfigReaderPrecedenceSpec extends AnyWordSpec with Matchers {
         .defaultProvider()
         .fold(err => fail(err.toString), identity)
 
-      cfg.model shouldBe "deepseek-chat"
+      cfg.model shouldBe "fixture-model"
     }
 
     "allow -D system property to override application.conf" in {
-      val key      = "llm4s.providers.deepseek-main.apiKey"
+      val key      = "llm4s.providers.fixturechat-main.apiKey"
       val original = System.getProperty(key)
       try {
         System.setProperty(key, "overridden-key")
@@ -28,10 +28,10 @@ class ConfigReaderPrecedenceSpec extends AnyWordSpec with Matchers {
           .defaultProvider()
           .fold(err => fail(err.toString), identity)
         cfg match {
-          case deepseek: org.llm4s.llmconnect.config.DeepSeekConfig =>
-            deepseek.apiKey shouldBe "overridden-key"
+          case fixture: org.llm4s.testutil.FixtureChatConfig =>
+            fixture.apiKey shouldBe "overridden-key"
           case other =>
-            fail(s"Expected DeepSeekConfig, got $other")
+            fail(s"Expected FixtureChatConfig, got $other")
         }
       } finally if (original == null) System.clearProperty(key) else System.setProperty(key, original)
     }

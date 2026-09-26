@@ -2,11 +2,12 @@ package org.llm4s.reliability
 
 import org.llm4s.error.{ ConfigurationError, TimeoutError }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.config.{ DeepSeekConfig, ProviderConfig }
+import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.metrics.MetricsCollector
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
+import org.llm4s.testutil.FixtureChatConfig
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -43,8 +44,8 @@ class ReliableProvidersSpec extends AnyFlatSpec with Matchers {
 
   private given ModelRegistryService = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
 
-  private val deepSeekConfig =
-    DeepSeekConfig("sk-test", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
+  // The test fixture provider, which core's test classpath registers through META-INF/services.
+  private val fixtureConfig = FixtureChatConfig(apiKey = "sk-test", model = "fixture-model")
 
   // ==========================================================================
   // ReliableProviders.wrap
@@ -192,14 +193,14 @@ class ReliableProvidersSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "ReliableProviders.wrap(config)" should "build and wrap the client the config names" in {
-    ReliableProviders.wrap(deepSeekConfig) match {
+    ReliableProviders.wrap(fixtureConfig) match {
       case Right(client) => client shouldBe a[ReliableClient]
-      case Left(error)   => fail(s"Expected a reliable DeepSeek client, got: ${error.message}")
+      case Left(error)   => fail(s"Expected a reliable fixture client, got: ${error.message}")
     }
   }
 
   it should "accept a reliability config and a metrics collector" in {
-    val result = ReliableProviders.wrap(deepSeekConfig, ReliabilityConfig.aggressive, MetricsCollector.noop)
+    val result = ReliableProviders.wrap(fixtureConfig, ReliabilityConfig.aggressive, MetricsCollector.noop)
     result.map(_.getClass.getSimpleName) shouldBe Right("ReliableClient")
   }
 
@@ -225,7 +226,7 @@ class ReliableProvidersSpec extends AnyFlatSpec with Matchers {
     // registry is the only thing deciding what can be built.
     given ProviderRegistry = ProviderRegistry.of()
 
-    ReliableProviders.wrap(deepSeekConfig).isLeft shouldBe true
+    ReliableProviders.wrap(fixtureConfig).isLeft shouldBe true
   }
 
   "ReliableClient.apply(client, config, collector)" should "create with metrics" in {

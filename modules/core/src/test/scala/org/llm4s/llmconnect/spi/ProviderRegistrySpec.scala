@@ -65,9 +65,11 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
       registry.ids shouldBe Seq("acme", "beta")
     }
 
-    "let a user descriptor win over a built-in of the same id" in {
-      val replacement = new StubProvider("deepseek")
-      ProviderRegistry.default.withProvider(replacement).get(ProviderId("deepseek")) shouldBe Right(replacement)
+    "let a user descriptor win over a discovered one of the same id" in {
+      // The test fixture provider is discovered through core's test META-INF/services, the same
+      // path the built-ins take, so it stands in for any provider already on the classpath.
+      val replacement = new StubProvider("fixturechat")
+      ProviderRegistry.default.withProvider(replacement).get(ProviderId("fixturechat")) shouldBe Right(replacement)
     }
   }
 
@@ -122,9 +124,12 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
 
   "the default registry" should {
     "hold every provider built into llm4s-core" in {
+      // Plus `fixturechat`, the test-only provider core's test classpath declares in its own
+      // META-INF/services (org.llm4s.testutil.FixtureChatProvider).
       ProviderRegistry.default.ids shouldBe Seq(
         "cohere",
         "deepseek",
+        "fixturechat",
         "mistral",
         "openrouter",
         "zai"

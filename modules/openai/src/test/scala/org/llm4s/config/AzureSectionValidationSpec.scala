@@ -12,7 +12,7 @@ import org.scalatest.matchers.should.Matchers
  * deployment endpoint, and the messages users see when either is missing.
  *
  * Moved from core's `NamedProviderSectionValidatorSpec` with the provider (#1132); the
- * provider-neutral cases stayed in core, using DeepSeek.
+ * provider-neutral cases stayed in core, using the test fixture `FixtureChatProvider`.
  */
 class AzureSectionValidationSpec extends AnyFlatSpec with Matchers {
 

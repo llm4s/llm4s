@@ -2,9 +2,9 @@ package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.{ ProviderId, ProviderName }
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
-import org.llm4s.llmconnect.config.DeepSeekConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.llmconnect.spi.fixtures.FixtureProvider
+import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import pureconfig.ConfigSource
@@ -17,25 +17,25 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    deepseek-main {
-          |      provider = "deepseek"
-          |      model = "deepseek-chat"
-          |      apiKey = "deepseek-key"
+          |    fixturechat-main {
+          |      provider = "fixturechat"
+          |      model = "fixture-model"
+          |      apiKey = "fixture-key"
           |    }
           |  }
           |}
           |""".stripMargin
 
       val cfg =
-        Llm4sConfig.provider(ConfigSource.string(hocon), "deepseek-main").fold(err => fail(err.toString), identity)
+        Llm4sConfig.provider(ConfigSource.string(hocon), "fixturechat-main").fold(err => fail(err.toString), identity)
 
       cfg match
-        case deepseek: DeepSeekConfig =>
-          deepseek.model shouldBe "deepseek-chat"
-          deepseek.apiKey shouldBe "deepseek-key"
-          deepseek.baseUrl shouldBe DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL
+        case fixture: FixtureChatConfig =>
+          fixture.model shouldBe "fixture-model"
+          fixture.apiKey shouldBe "fixture-key"
+          fixture.baseUrl shouldBe FixtureChatProvider.DefaultBaseUrl
         case other =>
-          fail(s"Expected DeepSeekConfig, got $other")
+          fail(s"Expected FixtureChatConfig, got $other")
     }
 
     // The registry is what decides whether a `provider = "..."` entry can resolve, and it is
@@ -75,25 +75,27 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    deepseek-primary {
-          |      provider = "deepseek"
-          |      model = "deepseek-chat"
-          |      apiKey = "named-deepseek-key"
+          |    fixturechat-primary {
+          |      provider = "fixturechat"
+          |      model = "fixture-model"
+          |      apiKey = "named-fixture-key"
           |    }
-          |    broken-deepseek {
-          |      provider = "deepseek"
-          |      model = "deepseek-chat"
+          |    broken-fixturechat {
+          |      provider = "fixturechat"
+          |      model = "fixture-model"
           |    }
           |  }
           |}
           |""".stripMargin
 
-      val result = Llm4sConfig.provider(ConfigSource.string(hocon), "deepseek-primary")
+      val result = Llm4sConfig.provider(ConfigSource.string(hocon), "fixturechat-primary")
 
       result match
         case Left(err) =>
-          err.message should include("Provider 'broken-deepseek' (provider = deepseek) is missing required fields")
-          err.message should include("- apiKey: set it in llm4s.conf under providers.broken-deepseek.apiKey")
+          err.message should include(
+            "Provider 'broken-fixturechat' (provider = fixturechat) is missing required fields"
+          )
+          err.message should include("- apiKey: set it in llm4s.conf under providers.broken-fixturechat.apiKey")
         case Right(cfg) =>
           fail(s"Expected invalid sibling named provider to fail whole config, got config: $cfg")
     }
@@ -103,16 +105,16 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "deepseek-primary"
-          |    deepseek-primary {
-          |      provider = "deepseek"
-          |      model = "deepseek-chat"
-          |      apiKey = "named-deepseek-key"
+          |    provider = "fixturechat-primary"
+          |    fixturechat-primary {
+          |      provider = "fixturechat"
+          |      model = "fixture-model"
+          |      apiKey = "named-fixture-key"
           |    }
-          |    deepseek-main {
-          |      provider = "deepseek"
-          |      model = "deepseek-chat"
-          |      apiKey = "deepseek-key"
+          |    fixturechat-main {
+          |      provider = "fixturechat"
+          |      model = "fixture-model"
+          |      apiKey = "fixture-key"
           |    }
           |  }
           |}
@@ -120,8 +122,8 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
 
       val cfg = Llm4sConfig.providers(ConfigSource.string(hocon)).fold(err => fail(err.toString), identity)
 
-      cfg.selectedProvider shouldBe Some(ProviderName("deepseek-primary"))
-      cfg.namedProviders.keySet.map(_.asName) shouldBe Set("deepseek-primary", "deepseek-main")
+      cfg.selectedProvider shouldBe Some(ProviderName("fixturechat-primary"))
+      cfg.namedProviders.keySet.map(_.asName) shouldBe Set("fixturechat-primary", "fixturechat-main")
     }
 
     "load the configured default provider name" in {
@@ -129,11 +131,11 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "deepseek-primary"
-          |    deepseek-primary {
-          |      provider = "deepseek"
-          |      model = "deepseek-chat"
-          |      apiKey = "named-deepseek-key"
+          |    provider = "fixturechat-primary"
+          |    fixturechat-primary {
+          |      provider = "fixturechat"
+          |      model = "fixture-model"
+          |      apiKey = "named-fixture-key"
           |    }
           |  }
           |}
@@ -141,7 +143,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
 
       val providerName =
         Llm4sConfig.defaultProviderName(ConfigSource.string(hocon)).fold(err => fail(err.toString), identity)
-      providerName shouldBe ProviderName("deepseek-primary")
+      providerName shouldBe ProviderName("fixturechat-primary")
     }
 
     "load the configured default provider as ProviderConfig" in {
@@ -149,11 +151,11 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "deepseek-primary"
-          |    deepseek-primary {
-          |      provider = "deepseek"
-          |      model = "deepseek-chat"
-          |      apiKey = "named-deepseek-key"
+          |    provider = "fixturechat-primary"
+          |    fixturechat-primary {
+          |      provider = "fixturechat"
+          |      model = "fixture-model"
+          |      apiKey = "named-fixture-key"
           |    }
           |  }
           |}
@@ -162,12 +164,12 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       val cfg = Llm4sConfig.defaultProvider(ConfigSource.string(hocon)).fold(err => fail(err.toString), identity)
 
       cfg match
-        case deepseek: DeepSeekConfig =>
-          deepseek.model shouldBe "deepseek-chat"
-          deepseek.apiKey shouldBe "named-deepseek-key"
-          deepseek.baseUrl shouldBe DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL
+        case fixture: FixtureChatConfig =>
+          fixture.model shouldBe "fixture-model"
+          fixture.apiKey shouldBe "named-fixture-key"
+          fixture.baseUrl shouldBe FixtureChatProvider.DefaultBaseUrl
         case other =>
-          fail(s"Expected DeepSeekConfig, got $other")
+          fail(s"Expected FixtureChatConfig, got $other")
     }
 
     "list models for a configured named provider by name" in {
@@ -175,10 +177,10 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "deepseek-primary"
-          |    deepseek-primary {
-          |      provider = "deepseek"
-          |      model = "deepseek-chat"
+          |    provider = "fixturechat-primary"
+          |    fixturechat-primary {
+          |      provider = "fixturechat"
+          |      model = "fixture-model"
           |      apiKey = "sk-test"
           |    }
           |  }
@@ -188,19 +190,19 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       val responseBody =
         """{
           |  "data": [
-          |    { "id": "deepseek-chat", "created": 1710000000, "owned_by": "deepseek" }
+          |    { "id": "fixture-model", "created": 1710000000, "owned_by": "fixturechat" }
           |  ]
           |}""".stripMargin
 
       val httpClient = new MockHttpClient(HttpResponse(200, responseBody, Map.empty))
 
-      val result = Llm4sConfig.listModels("deepseek-primary", ConfigSource.string(hocon), httpClient)
+      val result = Llm4sConfig.listModels("fixturechat-primary", ConfigSource.string(hocon), httpClient)
 
       result match
         case Right(models) =>
-          models.map(_.name.asString) shouldBe List("deepseek-chat")
-          models.map(_.provider) shouldBe List(ProviderId("deepseek"))
-          httpClient.lastUrl shouldBe Some(s"${DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL}/models")
+          models.map(_.name.asString) shouldBe List("fixture-model")
+          models.map(_.provider) shouldBe List(ProviderId("fixturechat"))
+          httpClient.lastUrl shouldBe Some(s"${FixtureChatProvider.DefaultBaseUrl}/models")
         case Left(err) =>
           fail(s"Expected listed models, got error: ${err.message}")
     }
@@ -210,10 +212,10 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "deepseek-primary"
-          |    deepseek-primary {
-          |      provider = "deepseek"
-          |      model = "deepseek-chat"
+          |    provider = "fixturechat-primary"
+          |    fixturechat-primary {
+          |      provider = "fixturechat"
+          |      model = "fixture-model"
           |      apiKey = "sk-test"
           |    }
           |  }
@@ -239,10 +241,10 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    deepseek-primary {
-          |      provider = "deepseek"
-          |      model = "deepseek-chat"
-          |      apiKey = "named-deepseek-key"
+          |    fixturechat-primary {
+          |      provider = "fixturechat"
+          |      model = "fixture-model"
+          |      apiKey = "named-fixture-key"
           |    }
           |  }
           |}
@@ -260,10 +262,10 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    deepseek-primary {
-          |      provider = "deepseek"
-          |      model = "deepseek-chat"
-          |      apiKey = "named-deepseek-key"
+          |    fixturechat-primary {
+          |      provider = "fixturechat"
+          |      model = "fixture-model"
+          |      apiKey = "named-fixture-key"
           |    }
           |  }
           |}
