@@ -79,10 +79,6 @@ object ConfigKeys {
   /** Enables or disables document chunking (`true`/`false`). Default: `true`. */
   val CHUNKING_ENABLED = "CHUNKING_ENABLED"
 
-  // Mistral
-  val MISTRAL_API_KEY  = "MISTRAL_API_KEY"
-  val MISTRAL_BASE_URL = "MISTRAL_BASE_URL"
-
   // Tool API Keys
   // ---- Tool API keys ------------------------------------------------------
 

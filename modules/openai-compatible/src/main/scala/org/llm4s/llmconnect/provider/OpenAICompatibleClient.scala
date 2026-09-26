@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
 import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
@@ -166,11 +167,21 @@ class OpenAICompatibleClient(
   }
 
   private def renderRequest(conversation: Conversation, options: CompletionOptions, stream: Boolean): Result[String] =
-    Try {
-      val body = createRequestBody(conversation, options)
-      if (stream) body("stream") = true
-      body.render()
-    }.toResult
+    // An empty `messages` array is rejected by every chat-completions endpoint; saying so here
+    // costs no round trip and names the problem.
+    Either
+      .cond(
+        conversation.messages.nonEmpty,
+        (),
+        ValidationError("conversation", s"${settings.displayName} requires at least one message")
+      )
+      .flatMap { _ =>
+        Try {
+          val body = createRequestBody(conversation, options)
+          if (stream) body("stream") = true
+          body.render()
+        }.toResult
+      }
       .tapRight { requestText =>
         logger.debug(s"Sending request to ${settings.displayName} API at $endpoint")
         logger.debug(s"Request body: ${Redaction.redactForLogging(requestText)}")
@@ -198,7 +209,12 @@ class OpenAICompatibleClient(
    * Scoped to the provider package so specs can inspect it.
    */
   protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
-    val messages = conversation.messages.map {
+    val sendable = conversation.messages.filterNot {
+      case AssistantMessage(content, toolCalls) =>
+        content.forall(_.isEmpty) && toolCalls.isEmpty && !dialect.sendEmptyAssistantTurns
+      case _ => false
+    }
+    val messages = sendable.map {
       case UserMessage(content) =>
         ujson.Obj("role" -> "user", "content" -> dialect.encodeContent(content))
       case SystemMessage(content) =>
@@ -214,7 +230,7 @@ class OpenAICompatibleClient(
         if (toolCalls.nonEmpty) {
           message("tool_calls") = ujson.Arr.from(toolCalls.map { tc =>
             ujson.Obj(
-              "id"       -> tc.id,
+              "id"       -> dialect.encodeToolCallId(tc.id),
               "type"     -> "function",
               "function" -> ujson.Obj("name" -> tc.name, "arguments" -> tc.arguments.render())
             )
@@ -222,7 +238,11 @@ class OpenAICompatibleClient(
         }
         message
       case ToolMessage(content, toolCallId) =>
-        ujson.Obj("role" -> "tool", "tool_call_id" -> toolCallId, "content" -> dialect.encodeContent(content))
+        ujson.Obj(
+          "role"         -> "tool",
+          "tool_call_id" -> dialect.encodeToolCallId(toolCallId),
+          "content"      -> dialect.encodeContent(content)
+        )
     }
 
     val body = ujson.Obj(

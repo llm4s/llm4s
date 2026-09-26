@@ -25,8 +25,7 @@ import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, Llm4sProviderModu
 object BuiltinProviders extends Llm4sProviderModule:
 
   override val chatProviders: Seq[ProviderDescriptor] = Seq(
-    CohereProvider,
-    MistralProvider
+    CohereProvider
   )
 
   override val embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(

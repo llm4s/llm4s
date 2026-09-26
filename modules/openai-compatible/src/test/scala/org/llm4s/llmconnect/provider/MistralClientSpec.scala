@@ -14,6 +14,15 @@ import java.nio.charset.StandardCharsets
 import scala.collection.mutable.ListBuffer
 import org.llm4s.model.ModelRegistryService
 
+/**
+ * `MistralClient` against a local server speaking Mistral's `/v1/chat/completions`.
+ *
+ * These cases moved from core with the client (#1132). Mistral now runs on the shared
+ * `OpenAICompatibleClient`, and six of them assert what that changed; each says so where it
+ * does: reply text is no longer trimmed, a reply with no text is an empty completion rather
+ * than an error, a missing `id` or `created` is left empty rather than invented, and a tool
+ * message is sent rather than refused. Streaming is in `MistralClientStreamingSpec`.
+ */
 class MistralClientSpec extends AnyFlatSpec with Matchers {
 
   private given ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
@@ -90,7 +99,10 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  it should "handle response with whitespace in content" in withServer { exchange =>
+  // The old client trimmed reply text. The shared client passes it through as the model sent
+  // it - as every other provider does, and as streaming must, since a delta's leading space is
+  // part of the text.
+  it should "keep whitespace in content as the model sent it" in withServer { exchange =>
     val body =
       """{
         |  "id": "cmpl-xyz",
@@ -125,7 +137,7 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
     result.fold(
       err => fail(s"Expected Right, got Left($err)"),
       completion => {
-        completion.content shouldBe "Hello world"
+        completion.content shouldBe "  Hello world  "
         completion.usage.isDefined shouldBe true
         completion.usage.foreach { u =>
           u.promptTokens shouldBe 5
@@ -135,7 +147,10 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  it should "fail with ValidationError when required text is missing" in withServer { exchange =>
+  // The old client failed a reply with no text. Now that Mistral supports tools, a reply whose
+  // content is empty is ordinary - the model may have answered with tool calls only - so it is
+  // an empty completion, as it is for every provider on the shared client.
+  it should "return an empty completion when the reply has no text" in withServer { exchange =>
     val body =
       """{
         |  "id": "cmpl-empty",
@@ -163,11 +178,12 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
 
     val result = client.complete(conversation, CompletionOptions())
     result.fold(
-      err => {
-        err shouldBe a[ValidationError]
-        err.message should include("Missing required text")
-      },
-      _ => fail("Expected Left(ValidationError)")
+      err => fail(s"Expected Right, got Left($err)"),
+      completion => {
+        completion.content shouldBe ""
+        completion.message.contentOpt shouldBe Some("")
+        completion.toolCalls shouldBe empty
+      }
     )
   }
 
@@ -320,7 +336,9 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
     )
   }
 
-  it should "generate a fallback UUID when response has no id" in withServer { exchange =>
+  // The old client invented a random UUID. The shared client leaves the id empty, as it does
+  // for every provider: an id the provider never issued matches nothing in its logs.
+  it should "leave the id empty when the response has none" in withServer { exchange =>
     val body =
       """{
         |  "created": 1700000000,
@@ -352,11 +370,12 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
     val result = client.complete(conversation, CompletionOptions())
     result.fold(
       err => fail(s"Expected Right, got Left($err)"),
-      completion => completion.id should not be empty
+      completion => completion.id shouldBe ""
     )
   }
 
-  it should "use current time when response has no created field" in withServer { exchange =>
+  // Likewise `created`: the old client used the current time, the shared client leaves it 0.
+  it should "leave created at 0 when the response has no created field" in withServer { exchange =>
     val body =
       """{
         |  "id": "cmpl-no-created",
@@ -384,12 +403,14 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
     os.close()
   } { baseUrl =>
     val client = new MistralClient(config(baseUrl))
-    val before = System.currentTimeMillis() / 1000
 
     val result = client.complete(conversation, CompletionOptions())
     result.fold(
       err => fail(s"Expected Right, got Left($err)"),
-      completion => completion.created should be >= before
+      completion => {
+        completion.created shouldBe 0L
+        completion.content shouldBe "World"
+      }
     )
   }
 
@@ -658,23 +679,28 @@ class MistralClientSpec extends AnyFlatSpec with Matchers {
     exchanges.head.responseBody.value should include("Logged response")
   }
 
-  it should "fail fast with ValidationError for unsupported message types" in withServer { exchange =>
-    exchange.sendResponseHeaders(200, 0)
-    exchange.getResponseBody.close()
-  } { baseUrl =>
-    val client = new MistralClient(config(baseUrl))
-    val unsupportedConversation = Conversation(
-      Seq(UserMessage("Hello"), ToolMessage("tool result", "call-123"))
-    )
+  // The old client refused a tool message ("Mistral does not support message type:
+  // ToolMessage"), so no tool-using conversation could continue. It is now sent, with its id in
+  // the nine-character form Mistral insists on.
+  it should "send a tool message, with its id in Mistral's format" in {
+    var sent: Option[ujson.Value] = None
+    withServer { exchange =>
+      sent = Some(ujson.read(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8)))
+      val bytes =
+        """{"id":"t","created":1,"model":"mistral-small-latest","choices":[{"message":{"content":"done"}}]}"""
+          .getBytes(StandardCharsets.UTF_8)
+      exchange.sendResponseHeaders(200, bytes.length)
+      exchange.getResponseBody.write(bytes)
+      exchange.getResponseBody.close()
+    } { baseUrl =>
+      val client           = new MistralClient(config(baseUrl))
+      val toolConversation = Conversation(Seq(UserMessage("Hello"), ToolMessage("tool result", "call-123")))
 
-    val result = client.complete(unsupportedConversation, CompletionOptions())
-    result.fold(
-      err => {
-        err shouldBe a[ValidationError]
-        err.message should include("does not support message type")
-        err.message should include("ToolMessage")
-      },
-      _ => fail("Expected Left(ValidationError) for unsupported message type")
-    )
+      client.complete(toolConversation, CompletionOptions()).map(_.content) shouldBe Right("done")
+    }
+    val tool = sent.value("messages")(1)
+    tool("role").str shouldBe "tool"
+    tool("content").str shouldBe "tool result"
+    (tool("tool_call_id").str should fullyMatch).regex("[a-zA-Z0-9]{9}")
   }
 }

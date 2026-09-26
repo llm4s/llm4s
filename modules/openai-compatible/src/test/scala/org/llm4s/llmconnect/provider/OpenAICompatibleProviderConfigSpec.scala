@@ -34,8 +34,9 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
 
   test("every fromValues factory returns a Left for a blank required field") {
     val blanks: Seq[(String, Either[org.llm4s.error.LLMError, ProviderConfig])] = Seq(
-      "DeepSeek apiKey"           -> DeepSeekConfig.fromValues("deepseek-chat", " ", DeepSeekConfig.DEFAULT_BASE_URL),
-      "DeepSeek baseUrl"          -> DeepSeekConfig.fromValues("deepseek-chat", "key", " "),
+      "DeepSeek apiKey"  -> DeepSeekConfig.fromValues("deepseek-chat", " ", DeepSeekConfig.DEFAULT_BASE_URL),
+      "DeepSeek baseUrl" -> DeepSeekConfig.fromValues("deepseek-chat", "key", " "),
+      "Mistral apiKey"   -> MistralConfig.fromValues("mistral-small-latest", " ", MistralConfig.DEFAULT_BASE_URL),
       "OpenAI-compatible model"   -> OpenAICompatibleConfig.fromValues(" ", "http://localhost:8000/v1"),
       "OpenAI-compatible baseUrl" -> OpenAICompatibleConfig.fromValues("m", " ")
     )

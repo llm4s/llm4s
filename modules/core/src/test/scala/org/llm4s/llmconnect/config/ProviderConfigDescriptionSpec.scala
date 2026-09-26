@@ -16,20 +16,19 @@ import org.scalatest.wordspec.AnyWordSpec
  * takes its checks with it - `OllamaConfigSpec` in `llm4s-ollama`, `GeminiConfigSpec`
  * in `llm4s-gemini`, `AnthropicConfigSpec` in `llm4s-anthropic`, `AzureConfigSpec` in
  * `llm4s-openai`, and `OpenAIConfig`, `DeepSeekConfig` and `ZaiConfig` in
- * `llm4s-openai-compatible`'s `OpenAICompatibleConfigDescriptionSpec`.
+ * `llm4s-openai-compatible`'s `OpenAICompatibleConfigDescriptionSpec`, where `MistralConfig`
+ * followed.
  */
 class ProviderConfigDescriptionSpec extends AnyWordSpec with Matchers:
 
-  private val cohere  = CohereConfig("k", "command-r", CohereConfig.DEFAULT_BASE_URL, 128000, 4096)
-  private val mistral = MistralConfig("k", "mistral-large-latest", MistralConfig.DEFAULT_BASE_URL, 128000, 4096)
+  private val cohere = CohereConfig("k", "command-r", CohereConfig.DEFAULT_BASE_URL, 128000, 4096)
 
   private val all: Seq[ProviderConfig] =
-    Seq(cohere, mistral)
+    Seq(cohere)
 
   "ProviderConfig.providerId" should {
     "name each provider in its canonical spelling" in {
       cohere.providerId shouldBe ProviderId("cohere")
-      mistral.providerId shouldBe ProviderId("mistral")
     }
 
     "be distinct across the configs core builds" in {
@@ -40,7 +39,6 @@ class ProviderConfigDescriptionSpec extends AnyWordSpec with Matchers:
   "ProviderConfig.endpointUrl" should {
     "return the URL the config will actually contact" in {
       cohere.endpointUrl shouldBe Some(CohereConfig.DEFAULT_BASE_URL)
-      mistral.endpointUrl shouldBe Some(MistralConfig.DEFAULT_BASE_URL)
     }
   }
 

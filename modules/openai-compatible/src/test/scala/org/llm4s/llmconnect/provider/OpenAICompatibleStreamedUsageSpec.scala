@@ -76,7 +76,12 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
 
   it should "ignore a usage report without both counts rather than fail the stream" in {
     val completion = client
-      .consumeStream(200, stream(delta("hi", "\"stop\"", ""","usage":{"prompt_tokens":3}""")), new StringBuilder, _ => ())
+      .consumeStream(
+        200,
+        stream(delta("hi", "\"stop\"", ""","usage":{"prompt_tokens":3}""")),
+        new StringBuilder,
+        _ => ()
+      )
       .value
 
     completion.content shouldBe "hi"
@@ -105,9 +110,9 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
         OpenAICompatibleConfig("m", baseUrl, None),
         exchangeLogging = ProviderExchangeLogging.enabled(sink)
       ).value
-      c.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
-        .value
-        .usage shouldBe Some(TokenUsage(10, 5, 15))
+      c.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ()).value.usage shouldBe Some(
+        TokenUsage(10, 5, 15)
+      )
     }
     recorded should have size 1
   }

@@ -13,7 +13,7 @@ import pureconfig.ConfigSource
 /**
  * Named provider sections for the providers `llm4s-openai-compatible` holds.
  *
- * The DeepSeek, Z.ai and OpenRouter cases are core's `NamedProviderConfigValidatorSpec`
+ * The DeepSeek, Z.ai, OpenRouter and Mistral cases are core's `NamedProviderConfigValidatorSpec`
  * cases, which moved here with the providers (#1132). The rest is the generic
  * `openai-compatible` provider, from HOCON to a working config: `baseUrl` and `model`
  * required, `apiKey` optional, and the context window, reserve and headers read from the
@@ -87,6 +87,27 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           cfg.apiKey.map(_.asKey) shouldBe Some("zai-key")
         case Left(err) =>
           fail(s"Expected Z.ai NamedProviderConfig, got error: ${err.message}")
+    }
+
+    "validate and normalize a Mistral named provider section" in {
+      validate(
+        "mistral-main",
+        RawNamedProviderSection(
+          provider = Some("mistral"),
+          model = Some("mistral-large-latest"),
+          baseUrl = Some("https://api.mistral.ai"),
+          apiKey = Some("mistral-key"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.provider shouldBe ProviderId("mistral")
+          cfg.model.asString shouldBe "mistral-large-latest"
+          cfg.apiKey.map(_.asKey) shouldBe Some("mistral-key")
+        case Left(err) =>
+          fail(s"Expected Mistral NamedProviderConfig, got error: ${err.message}")
     }
 
     "accept an openai-compatible section with no apiKey" in {

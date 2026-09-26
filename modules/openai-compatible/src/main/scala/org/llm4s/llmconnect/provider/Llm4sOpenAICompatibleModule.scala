@@ -5,8 +5,8 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
 /**
  * Registers `llm4s-openai-compatible`'s providers: the generic
  * `openai-compatible` provider, for any endpoint speaking the OpenAI
- * `/chat/completions` API, DeepSeek (`deepseek`), Z.ai (`zai`) and OpenRouter
- * (`openrouter`), each running on
+ * `/chat/completions` API, DeepSeek (`deepseek`), Z.ai (`zai`), OpenRouter
+ * (`openrouter`) and Mistral (`mistral`), each running on
  * [[OpenAICompatibleClient]] with its own [[OpenAICompatibleDialect]].
  *
  * Declared in this module's
@@ -26,4 +26,4 @@ import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderDescriptor }
  */
 final class Llm4sOpenAICompatibleModule extends Llm4sProviderModule:
   override def chatProviders: Seq[ProviderDescriptor] =
-    Seq(OpenAICompatibleProvider, DeepSeekProvider, ZaiProvider, OpenRouterProvider)
+    Seq(OpenAICompatibleProvider, DeepSeekProvider, ZaiProvider, OpenRouterProvider, MistralProvider)

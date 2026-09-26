@@ -1,25 +1,28 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.config.{ ProviderModelLister, ProviderModelListers }
+import org.llm4s.config.{ MistralModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, MistralConfig, ProviderConfig }
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor, ProviderFeatures }
+import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
-/** Registration for the Mistral API. */
+/**
+ * Registration for the Mistral AI API.
+ *
+ * Streaming is supported - the default [[org.llm4s.llmconnect.spi.ProviderFeatures]] - since
+ * Mistral moved onto the shared OpenAI-compatible client
+ * ([[https://github.com/llm4s/llm4s/issues/925 #925]], [[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
+ */
 object MistralProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("mistral")
 
   val configSpec: ProviderConfigSpec =
     ProviderConfigSpec.apiKeyAndDefaultBaseUrl(MistralConfig.DEFAULT_BASE_URL)
 
-  /** `MistralClient.streamComplete` returns a `Left` - see #925. */
-  override val features: ProviderFeatures = ProviderFeatures(streaming = false)
-
-  override val modelLister: Option[ProviderModelLister] = Some(ProviderModelListers.Mistral)
+  override val modelLister: Option[ProviderModelLister] = Some(MistralModelLister)
 
   def buildConfig(providerName: String, section: NamedProviderConfig)(using
     ContextWindowResolver

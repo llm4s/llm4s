@@ -16,16 +16,17 @@ import scala.util.Try
  *
  *  - '''Request:''' extra [[headers]]; how message text is encoded
  *    ([[encodeContent]]); whether an assistant turn with no text still sends
- *    `content` ([[alwaysSendAssistantContent]]); and any reasoning fields
- *    ([[addReasoning]]).
+ *    `content` ([[alwaysSendAssistantContent]]) or is sent at all
+ *    ([[sendEmptyAssistantTurns]]); the tool-call ids the provider
+ *    accepts ([[encodeToolCallId]]); and any reasoning fields ([[addReasoning]]).
  *  - '''Response:''' how `content` is read back ([[decodeContent]]); where the
  *    model's thinking is ([[thinking]]); where its reasoning-token count is
  *    ([[reasoningTokens]]); and how a non-streaming `tool_calls` array is
  *    parsed ([[parseToolCalls]]).
  *
  * The generic `openai-compatible` provider uses [[OpenAICompatibleDialect.standard]],
- * which overrides nothing but headers. DeepSeek, Z.ai and OpenRouter each
- * override two to five members. A new OpenAI-compatible provider whose
+ * which overrides nothing but headers. DeepSeek, Z.ai, OpenRouter and Mistral each
+ * override two to six members. A new OpenAI-compatible provider whose
  * differences fit these members is a dialect and a descriptor, not a client;
  * one whose differences do not should extend this trait rather than fork
  * [[OpenAICompatibleClient]] ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
@@ -47,6 +48,24 @@ trait OpenAICompatibleDialect:
    * omitted, which is what most providers expect alongside `tool_calls`.
    */
   def alwaysSendAssistantContent: Boolean = false
+
+  /**
+   * Whether an assistant turn with neither text nor tool calls is sent at all. Standard:
+   * `true` - it goes out as `{"role": "assistant"}` (with `content` if
+   * [[alwaysSendAssistantContent]]). A provider that rejects a message carrying neither
+   * `content` nor `tool_calls`, as Mistral does, answers `false` and the turn is left out.
+   */
+  def sendEmptyAssistantTurns: Boolean = true
+
+  /**
+   * The id sent for a tool call - on an assistant turn's `tool_calls` and on the `tool`
+   * message answering it. Standard: the id as the model produced it.
+   *
+   * A provider that accepts only its own id format overrides this. It must map the same id to
+   * the same result every time, since the call and its answer are encoded separately and must
+   * still match; ids that came from another provider in the same conversation go through it too.
+   */
+  def encodeToolCallId(id: String): String = id
 
   /**
    * Adds provider-specific reasoning fields to a request body, given the

@@ -9,7 +9,7 @@ import org.llm4s.testutil.FixtureChatConfig
 
 /**
  * `LLMConnect` routes each `llm4s-openai-compatible` config to its own client, and refuses a
- * mismatch. The DeepSeek, Z.ai and OpenRouter cases are core's routing cases
+ * mismatch. The DeepSeek, Z.ai, OpenRouter and Mistral cases are core's routing cases
  * (`LLMConnectProviderTypeSafetyTest`, `LLMConnectResultTest`,
  * `LLMConnectEnvReaderRoutingTest`), moved here with the providers (#1132).
  */
@@ -58,6 +58,21 @@ class OpenAICompatibleRoutingTest extends AnyFunSuite with Matchers {
     val res = LLMConnect.getClient(ProviderId("zai"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "ZaiClient"
+      case Left(err)     => fail(s"Expected Right, got Left($err)")
+    }
+  }
+
+  test("Mistral provider with MistralConfig returns MistralClient") {
+    val cfg: ProviderConfig = MistralConfig(
+      apiKey = "key",
+      model = "mistral-small-latest",
+      baseUrl = "https://example.invalid",
+      contextWindow = 128000,
+      reserveCompletion = 4096
+    )
+    val res = LLMConnect.getClient(ProviderId("mistral"), cfg)
+    res match {
+      case Right(client) => client.getClass.getSimpleName shouldBe "MistralClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
     }
   }

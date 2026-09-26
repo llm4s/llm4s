@@ -2,7 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.{ BaseUrl, NamedProviderConfig, ProviderId }
 import org.llm4s.http.Llm4sHttpClient
-import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAICompatibleConfig }
+import org.llm4s.llmconnect.config.{ DeepSeekConfig, MistralConfig, OpenAICompatibleConfig }
 import org.llm4s.llmconnect.provider.{ OpenRouterDialect, OpenRouterProvider }
 import org.llm4s.types.Result
 
@@ -32,6 +32,24 @@ object OpenRouterModelLister extends ProviderModelLister:
       ProviderId("openrouter"),
       OpenRouterProvider.DEFAULT_BASE_URL,
       extraHeaders = OpenRouterDialect.headers.toMap
+    )
+
+  def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
+    delegate.listModels(config, httpClient)
+
+/**
+ * Model lister for the Mistral provider: `GET <baseUrl>/v1/models`, where `baseUrl` is the
+ * API root, as it is for chat.
+ *
+ * This was `ProviderModelListers.Mistral` until the provider moved to
+ * `llm4s-openai-compatible` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
+ */
+object MistralModelLister extends ProviderModelLister:
+  private val delegate =
+    ProviderModelListers.openAICompatible(
+      ProviderId("mistral"),
+      MistralConfig.DEFAULT_BASE_URL,
+      modelsPath = "/v1/models"
     )
 
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =

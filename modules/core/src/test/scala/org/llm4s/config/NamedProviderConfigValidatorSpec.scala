@@ -9,7 +9,8 @@ import org.scalatest.wordspec.AnyWordSpec
  *
  * The OpenAI and Azure cases moved to `llm4s-openai`'s `OpenAINamedProviderSpec` with the
  * providers (#1132), as the Anthropic and Gemini cases did before them, and the OpenRouter, DeepSeek
- * and Z.ai cases to `llm4s-openai-compatible`'s `OpenAICompatibleNamedProviderSpec`.
+ * and Z.ai cases - and, when it moved onto the shared client, Mistral's - to
+ * `llm4s-openai-compatible`'s `OpenAICompatibleNamedProviderSpec`.
  */
 class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
 
@@ -37,27 +38,6 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           cfg.apiKey.map(_.asKey) shouldBe Some("cohere-key")
         case Left(err) =>
           fail(s"Expected Cohere NamedProviderConfig, got error: ${err.message}")
-    }
-
-    "validate and normalize a Mistral named provider section" in {
-      validate(
-        "mistral-main",
-        RawNamedProviderSection(
-          provider = Some("mistral"),
-          model = Some("mistral-large-latest"),
-          baseUrl = Some("https://api.mistral.ai"),
-          apiKey = Some("mistral-key"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
-        )
-      ) match
-        case Right(cfg) =>
-          cfg.provider shouldBe ProviderId("mistral")
-          cfg.model.asString shouldBe "mistral-large-latest"
-          cfg.apiKey.map(_.asKey) shouldBe Some("mistral-key")
-        case Left(err) =>
-          fail(s"Expected Mistral NamedProviderConfig, got error: ${err.message}")
     }
 
     "fail clearly when provider field is missing" in {

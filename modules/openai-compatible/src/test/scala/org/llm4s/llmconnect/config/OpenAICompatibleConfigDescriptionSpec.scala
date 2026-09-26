@@ -15,10 +15,11 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
   private val openai   = OpenAIConfig("k", "gpt-4o", None, "https://api.openai.com/v1", 128000, 4096)
   private val zai      = ZaiConfig("k", "GLM-4.7", ZaiConfig.DEFAULT_BASE_URL, 200000, 4096)
   private val deepseek = DeepSeekConfig("k", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
+  private val mistral  = MistralConfig("k", "mistral-large-latest", MistralConfig.DEFAULT_BASE_URL, 128000, 4096)
   private val generic =
     OpenAICompatibleConfig("m", "http://localhost:8000/v1", Some("k"), 32768, 4096, Map("X-Team" -> "search"))
 
-  private val all: Seq[ProviderConfig] = Seq(openai, zai, deepseek, generic)
+  private val all: Seq[ProviderConfig] = Seq(openai, zai, deepseek, mistral, generic)
 
   "ProviderConfig.providerId" should {
     "name each provider in its canonical spelling" in {
@@ -26,6 +27,7 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
       openai.copy(baseUrl = "https://openrouter.ai/api/v1").providerId shouldBe ProviderId("openrouter")
       zai.providerId shouldBe ProviderId("zai")
       deepseek.providerId shouldBe ProviderId("deepseek")
+      mistral.providerId shouldBe ProviderId("mistral")
       generic.providerId shouldBe ProviderId("openai-compatible")
     }
 
@@ -39,6 +41,7 @@ class OpenAICompatibleConfigDescriptionSpec extends AnyWordSpec with Matchers:
       openai.endpointUrl shouldBe Some("https://api.openai.com/v1")
       zai.endpointUrl shouldBe Some(ZaiConfig.DEFAULT_BASE_URL)
       deepseek.endpointUrl shouldBe Some(DeepSeekConfig.DEFAULT_BASE_URL)
+      mistral.endpointUrl shouldBe Some(MistralConfig.DEFAULT_BASE_URL)
       generic.endpointUrl shouldBe Some("http://localhost:8000/v1")
     }
   }

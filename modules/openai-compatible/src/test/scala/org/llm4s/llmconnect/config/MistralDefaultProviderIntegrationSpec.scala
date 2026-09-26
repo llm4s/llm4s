@@ -8,7 +8,13 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import scala.util.Using
 
-class DefaultProviderIntegrationSpec extends AnyWordSpec with Matchers {
+/**
+ * A Mistral named provider loads end to end from system properties, defaulting its base URL.
+ *
+ * This was core's `DefaultProviderIntegrationSpec` (in `ProviderConfigLoaderIntegrationSpec.scala`),
+ * whose one case was Mistral's; it moved here, renamed, when Mistral left core (#1132).
+ */
+class MistralDefaultProviderIntegrationSpec extends AnyWordSpec with Matchers {
   private def withProps(props: Map[String, String])(f: => Unit): Unit =
     Using.resource(SystemPropertiesOverride(props))(_ => f)
 

@@ -31,8 +31,7 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
 
   /** Descriptor, the config class it builds, and the client class that config produces. */
   private val expectations: Seq[(ProviderDescriptor, String, String)] = Seq(
-    (CohereProvider, "CohereConfig", "CohereClient"),
-    (MistralProvider, "MistralConfig", "MistralClient")
+    (CohereProvider, "CohereConfig", "CohereClient")
   )
 
   /** A section carrying every field any built-in provider asks for. */
@@ -92,14 +91,13 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
     }
 
     "declare whether it implements streaming" in {
-      // Cohere and Mistral return a Left from streamComplete (#925). The point of putting this
-      // in the descriptor is that it is visible without making a call and reading the error.
+      // Cohere returns a Left from streamComplete (#925). The point of putting this in the
+      // descriptor is that it is visible without making a call and reading the error.
       CohereProvider.features.streaming shouldBe false
-      MistralProvider.features.streaming shouldBe false
 
       expectations
         .map(_._1)
-        .filterNot(descriptor => descriptor == CohereProvider || descriptor == MistralProvider)
+        .filterNot(_ == CohereProvider)
         .foreach(descriptor => withClue(s"${descriptor.id.asString}: ")(descriptor.features.streaming shouldBe true))
     }
   }

@@ -62,6 +62,11 @@ class CheckPoliciesProvidersSpec extends AnyWordSpec with Matchers {
         Right(ProviderId("deepseek"))
     }
 
+    "resolve a mistral config" in {
+      providerIdFor("""provider = "mistral", model = "mistral-small-latest", apiKey = "test-key"""") shouldBe
+        Right(ProviderId("mistral"))
+    }
+
     "resolve an openai-compatible config, which needs no API key" in {
       providerIdFor("""provider = "openai-compatible", model = "m", baseUrl = "http://localhost:8000/v1"""") shouldBe
         Right(ProviderId("openai-compatible"))

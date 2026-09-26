@@ -18,8 +18,7 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   test("every fromValues factory returns a Left for a blank required field") {
     val blanks: Seq[(String, Either[org.llm4s.error.LLMError, ProviderConfig])] = Seq(
       "Cohere apiKey"  -> CohereConfig.fromValues("command-r", " ", CohereConfig.DEFAULT_BASE_URL),
-      "Cohere baseUrl" -> CohereConfig.fromValues("command-r", "key", " "),
-      "Mistral apiKey" -> MistralConfig.fromValues("mistral-small-latest", " ", MistralConfig.DEFAULT_BASE_URL)
+      "Cohere baseUrl" -> CohereConfig.fromValues("command-r", "key", " ")
     )
 
     blanks.foreach { case (field, result) =>

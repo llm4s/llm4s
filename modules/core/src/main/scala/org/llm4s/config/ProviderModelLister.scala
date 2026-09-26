@@ -6,7 +6,6 @@ import org.llm4s.http.HttpResponse.*
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderId }
-import org.llm4s.llmconnect.config.MistralConfig
 
 import scala.util.Try
 
@@ -83,10 +82,6 @@ object ProviderModelListers:
           apiKeyRequired = apiKeyRequired,
           httpClient = httpClient
         )
-
-  /** Model lister for the Mistral provider using the OpenAI-compatible models endpoint. */
-  val Mistral: ProviderModelLister =
-    openAICompatible(ProviderId("mistral"), MistralConfig.DEFAULT_BASE_URL, modelsPath = "/v1/models")
 
   private def listOpenAICompatibleModels(
     config: NamedProviderConfig,

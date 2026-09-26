@@ -11,7 +11,7 @@ import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
  *
  * The OpenAI and Azure cases moved to `llm4s-openai`'s `OpenAIRoutingTest` with the
  * providers (#1132), and the DeepSeek, Z.ai and OpenRouter cases to `llm4s-openai-compatible`'s
- * `OpenAICompatibleRoutingTest`.
+ * `OpenAICompatibleRoutingTest`, where Mistral's followed when it moved onto the shared client.
  */
 class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
   private given ModelRegistryService = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
@@ -27,21 +27,6 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     val res = LLMConnect.getClient(ProviderId("cohere"), cfg)
     res match {
       case Right(client) => client.getClass.getSimpleName shouldBe "CohereClient"
-      case Left(err)     => fail(s"Expected Right, got Left($err)")
-    }
-  }
-
-  test("Mistral provider with MistralConfig returns MistralClient") {
-    val cfg: ProviderConfig = MistralConfig(
-      apiKey = "key",
-      model = "mistral-small-latest",
-      baseUrl = "https://example.invalid",
-      contextWindow = 128000,
-      reserveCompletion = 4096
-    )
-    val res = LLMConnect.getClient(ProviderId("mistral"), cfg)
-    res match {
-      case Right(client) => client.getClass.getSimpleName shouldBe "MistralClient"
       case Left(err)     => fail(s"Expected Right, got Left($err)")
     }
   }
