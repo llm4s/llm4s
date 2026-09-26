@@ -20,7 +20,8 @@ import org.scalatest.wordspec.AnyWordSpec
  * guarantee, and a new built-in provider must appear in [[expectations]] or
  * fail here. A provider that moves to its own module takes its round trip with it
  * (`Llm4sOllamaModuleSpec` in `llm4s-ollama`, `Llm4sGeminiModuleSpec` in `llm4s-gemini`,
- * `Llm4sAnthropicModuleSpec` in `llm4s-anthropic`, `Llm4sOpenAIModuleSpec` in `llm4s-openai`).
+ * `Llm4sAnthropicModuleSpec` in `llm4s-anthropic`, `Llm4sOpenAIModuleSpec` in `llm4s-openai`,
+ * `Llm4sOpenAICompatibleModuleSpec` in `llm4s-openai-compatible`).
  */
 class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
 
@@ -30,9 +31,6 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
 
   /** Descriptor, the config class it builds, and the client class that config produces. */
   private val expectations: Seq[(ProviderDescriptor, String, String)] = Seq(
-    (OpenRouterProvider, "OpenAIConfig", "OpenRouterClient"),
-    (ZaiProvider, "ZaiConfig", "ZaiClient"),
-    (DeepSeekProvider, "DeepSeekConfig", "DeepSeekClient"),
     (CohereProvider, "CohereConfig", "CohereClient"),
     (MistralProvider, "MistralConfig", "MistralClient")
   )

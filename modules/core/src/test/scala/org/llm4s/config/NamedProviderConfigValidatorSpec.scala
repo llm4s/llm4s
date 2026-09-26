@@ -8,7 +8,8 @@ import org.scalatest.wordspec.AnyWordSpec
  * Named provider sections, validated against the providers core ships.
  *
  * The OpenAI and Azure cases moved to `llm4s-openai`'s `OpenAINamedProviderSpec` with the
- * providers (#1132), as the Anthropic and Gemini cases did before them.
+ * providers (#1132), as the Anthropic and Gemini cases did before them, and the OpenRouter, DeepSeek
+ * and Z.ai cases to `llm4s-openai-compatible`'s `OpenAICompatibleNamedProviderSpec`.
  */
 class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
 
@@ -16,69 +17,6 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
     NamedProviderConfigValidator.validate(ProviderName(providerName), section)
 
   "NamedProviderConfigValidator" should {
-
-    "validate and normalize an OpenRouter named provider section" in {
-      validate(
-        "openrouter-main",
-        RawNamedProviderSection(
-          provider = Some("openrouter"),
-          model = Some("openai/gpt-4o-mini"),
-          baseUrl = Some("https://openrouter.ai/api/v1"),
-          apiKey = Some("or-key"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
-        )
-      ) match
-        case Right(cfg) =>
-          cfg.provider shouldBe ProviderId("openrouter")
-          cfg.model.asString shouldBe "openai/gpt-4o-mini"
-          cfg.apiKey.map(_.asKey) shouldBe Some("or-key")
-        case Left(err) =>
-          fail(s"Expected OpenRouter NamedProviderConfig, got error: ${err.message}")
-    }
-
-    "validate and normalize a Z.ai named provider section" in {
-      validate(
-        "zai-main",
-        RawNamedProviderSection(
-          provider = Some("zai"),
-          model = Some("GLM-4.7"),
-          baseUrl = Some("https://api.z.ai/api/paas/v4"),
-          apiKey = Some("zai-key"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
-        )
-      ) match
-        case Right(cfg) =>
-          cfg.provider shouldBe ProviderId("zai")
-          cfg.model.asString shouldBe "GLM-4.7"
-          cfg.apiKey.map(_.asKey) shouldBe Some("zai-key")
-        case Left(err) =>
-          fail(s"Expected Z.ai NamedProviderConfig, got error: ${err.message}")
-    }
-
-    "validate and normalize a DeepSeek named provider section" in {
-      validate(
-        "deepseek-main",
-        RawNamedProviderSection(
-          provider = Some("deepseek"),
-          model = Some("deepseek-chat"),
-          baseUrl = Some("https://api.deepseek.com"),
-          apiKey = Some("deepseek-key"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
-        )
-      ) match
-        case Right(cfg) =>
-          cfg.provider shouldBe ProviderId("deepseek")
-          cfg.model.asString shouldBe "deepseek-chat"
-          cfg.apiKey.map(_.asKey) shouldBe Some("deepseek-key")
-        case Left(err) =>
-          fail(s"Expected DeepSeek NamedProviderConfig, got error: ${err.message}")
-    }
 
     "validate and normalize a Cohere named provider section" in {
       validate(

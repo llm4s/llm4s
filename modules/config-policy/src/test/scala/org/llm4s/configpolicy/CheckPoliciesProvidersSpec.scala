@@ -57,6 +57,16 @@ class CheckPoliciesProvidersSpec extends AnyWordSpec with Matchers {
         Right(ProviderId("openai"))
     }
 
+    "resolve a deepseek config" in {
+      providerIdFor("""provider = "deepseek", model = "deepseek-chat", apiKey = "test-key"""") shouldBe
+        Right(ProviderId("deepseek"))
+    }
+
+    "resolve an openai-compatible config, which needs no API key" in {
+      providerIdFor("""provider = "openai-compatible", model = "m", baseUrl = "http://localhost:8000/v1"""") shouldBe
+        Right(ProviderId("openai-compatible"))
+    }
+
     "resolve a vertexai config" in {
       providerIdFor("""provider = "vertexai", model = "gemini-2.0-flash", endpoint = "my-project"""") shouldBe
         Right(ProviderId("vertexai"))

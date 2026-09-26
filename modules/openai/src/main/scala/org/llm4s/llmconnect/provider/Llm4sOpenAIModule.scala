@@ -7,9 +7,10 @@ import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, Llm4sProviderModu
  * OpenAI (id `openai`), Azure OpenAI (`azure`) and Requesty (`requesty`) - and
  * the OpenAI embedding provider (`openai`).
  *
- * OpenRouter, DeepSeek and Z.ai speak the same wire format but have their own
- * SDK-free clients, so they are not part of this module
- * ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
+ * OpenRouter, DeepSeek and Z.ai speak the same wire format without an SDK, so
+ * they are `llm4s-openai-compatible`'s, on its shared `OpenAICompatibleClient`
+ * ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]). This module depends on
+ * that one for `OpenAIConfig`.
  *
  * Declared in this module's
  * `META-INF/services/org.llm4s.llmconnect.spi.Llm4sProviderModule`, so adding

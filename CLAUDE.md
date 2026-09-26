@@ -30,7 +30,7 @@ Slice order — each is an issue with its own scope and gotchas:
 | 2 ✅ | [#1129](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` |
 | 3 ✅ | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` |
 | 4 ✅ | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
-| 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai` so far |
+| 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` so far |
 | 6 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability`, then 0.4.0 + MiMa |
 
 **Invariants for every carve:**
@@ -87,6 +87,7 @@ llm4s/
 │   ├── gemini/                # Gemini API + Vertex AI chat providers (published)
 │   ├── anthropic/             # Anthropic Claude chat provider + Anthropic SDK (published)
 │   ├── openai/                # OpenAI, Azure, Requesty chat + OpenAI embeddings + Azure SDK (published)
+│   ├── openai-compatible/     # One SDK-free chat-completions client: DeepSeek, Z.ai, OpenRouter, generic (published)
 │   ├── samples/               # Usage examples
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI
@@ -122,9 +123,21 @@ the same JSON format and needs no extra dependency. `modules/anthropic` came thi
 Anthropic Java SDK with it. `modules/openai` came fourth with the three providers that share
 `OpenAIClient` - OpenAI, Azure and Requesty - plus `OpenAIEmbeddingProvider`, `AzureConfig` and
 `AzureToolHelper`, and took the Azure OpenAI SDK: **core now depends on no vendor SDK
-(`com.anthropic`, `com.azure`, `com.openai`)**, and must not again. OpenRouter, DeepSeek and Z.ai
-have their own SDK-free clients and stay in core for their own modules later, and with them
-`OpenAIConfig` (OpenRouter builds one) and `OpenAIStreamingHandler`. Tests that need an
+(`com.anthropic`, `com.azure`, `com.openai`)**, and must not again. `modules/openai-compatible`
+came fifth and is a **consolidation, not a pure move**: DeepSeek, Z.ai and OpenRouter had three
+~400-line copies of one SDK-free chat-completions client, and are now thin subclasses of
+`OpenAICompatibleClient`, each with an `OpenAICompatibleDialect` (headers, content encoding,
+assistant-content policy, reasoning request, content/thinking/reasoning-token decoding,
+tool-call parser - every member defaults to the standard format). The module also holds
+`OpenAIConfig` - `llm4s-openai` depends on it for that, never the reverse, which would put the
+Azure SDK on every OpenAI-compatible user's classpath - and the generic `openai-compatible`
+provider, the standard dialect configured entirely from a named section (`baseUrl`, `model`,
+optional `apiKey`, `contextWindow`, `reserveCompletion`, `headers`; the last three are fields of
+`NamedProviderConfig` that other providers ignore). **A new OpenAI-compatible provider is a
+dialect and a descriptor in that module, or just config** - check whether `openai-compatible`
+covers it before writing one; never another copy of the client. `BuiltinProviders` now holds only
+Cohere, Mistral and Voyage. `OpenAIStreamingHandler`, `StreamingResponseHandler.forProvider` and
+`OpenRouterToolCallDeserializer` stay in core, used by no client. Tests that need an
 incidental API-key provider - and never a real one, which would leave core in a later carve -
 use `org.llm4s.testutil.FixtureChatProvider` (id `fixturechat`, `FixtureChatConfig`, a canned
 no-network client). It lives in core's test sources, is registered by core's **test**
@@ -133,7 +146,8 @@ depending on `core % "test->test"`, and is never in `BuiltinProviders`; core's t
 `application.conf` default is `fixturechat-main`. A spec that builds its own registry passes
 it to `ProviderRegistry.of`/`.withProvider`, and a provider spec proving it refuses a foreign
 config uses a `FixtureChatConfig`. When a stand-in test checked a real provider's own facts in
-passing, those move to that provider's spec (`DeepSeekNamedProviderSpec`). Strings that do not reach a client
+passing, those move to that provider's spec (`DeepSeekNamedProviderSpec`, now in
+`llm4s-openai-compatible`). Strings that do not reach a client
 (`ToolRegistry`'s `"openai"`/`"anthropic"`/`"gemini"` cases, model-registry data, config-policy
 allow-lists, secret patterns) stay, as does `AnthropicStreamingHandler`, an SDK-free SSE parser
 behind `StreamingResponseHandler.forProvider` that `AnthropicClient` does not use. `llm4s-rag`'s

@@ -40,7 +40,7 @@ class DeepSeekNamedProviderSpec extends AnyWordSpec with Matchers:
         case Right(deepseek: DeepSeekConfig) =>
           deepseek.model shouldBe "deepseek-chat"
           deepseek.apiKey shouldBe "deepseek-key"
-          deepseek.baseUrl shouldBe DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL
+          deepseek.baseUrl shouldBe DeepSeekConfig.DEFAULT_BASE_URL
         case other =>
           fail(s"Expected DeepSeekConfig, got $other")
     }
@@ -54,7 +54,7 @@ class DeepSeekNamedProviderSpec extends AnyWordSpec with Matchers:
         case Right(models) =>
           models.map(_.name.asString) shouldBe List("deepseek-chat")
           models.map(_.provider) shouldBe List(ProviderId("deepseek"))
-          httpClient.lastUrl shouldBe Some(s"${DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL}/models")
+          httpClient.lastUrl shouldBe Some(s"${DeepSeekConfig.DEFAULT_BASE_URL}/models")
         case Left(err) =>
           fail(s"Expected listed models, got error: ${err.message}")
     }
@@ -78,6 +78,6 @@ class DeepSeekNamedProviderSpec extends AnyWordSpec with Matchers:
       message should include("Provider 'my-deepseek' (provider = deepseek) is missing required fields")
       message should include("e.g. apiKey = ${?DEEPSEEK_API_KEY}")
       (message should not).include("baseUrl")
-      DeepSeekProvider.configSpec.defaultBaseUrl shouldBe Some(DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
+      DeepSeekProvider.configSpec.defaultBaseUrl shouldBe Some(DeepSeekConfig.DEFAULT_BASE_URL)
     }
   }

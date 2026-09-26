@@ -21,6 +21,9 @@ object ProvidersConfigModel:
    *  @param endpoint    provider-dependent: the endpoint URL for Azure, or the GCP
    *                     project ID for VertexAI
    *  @param apiVersion  optional API version string (Azure-specific)
+   *  @param contextWindow     optional context window, for providers that cannot know it (`openai-compatible`)
+   *  @param reserveCompletion optional completion reserve, for providers that cannot know it (`openai-compatible`)
+   *  @param headers     optional extra HTTP headers sent on every request (`openai-compatible`)
    */
   final case class RawNamedProviderSection(
     provider: Option[String],
@@ -29,7 +32,10 @@ object ProvidersConfigModel:
     apiKey: Option[String],
     organization: Option[String],
     endpoint: Option[String],
-    apiVersion: Option[String]
+    apiVersion: Option[String],
+    contextWindow: Option[Int] = None,
+    reserveCompletion: Option[Int] = None,
+    headers: Option[Map[String, String]] = None
   )
 
   /**
@@ -56,6 +62,12 @@ object ProvidersConfigModel:
    *  @param endpoint     provider-dependent: the endpoint URL for Azure, or the GCP
    *                      project ID for VertexAI
    *  @param apiVersion   optional API version string (Azure-specific)
+   *  @param contextWindow     optional context window. Read by providers that cannot derive one
+   *                           from the model name - the generic `openai-compatible` provider -
+   *                           and ignored by the rest.
+   *  @param reserveCompletion optional completion reserve; read and ignored as `contextWindow` is.
+   *  @param headers      extra HTTP headers sent on every request; read by `openai-compatible`
+   *                      and ignored by the rest. Values are redacted in `toString`.
    */
   final case class NamedProviderConfig(
     provider: ProviderId,
@@ -64,8 +76,17 @@ object ProvidersConfigModel:
     apiKey: Option[ApiKey],
     organization: Option[String],
     endpoint: Option[String],
-    apiVersion: Option[String]
+    apiVersion: Option[String],
+    contextWindow: Option[Int] = None,
+    reserveCompletion: Option[Int] = None,
+    headers: Map[String, String] = Map.empty
   ):
+    // The API key and header values are credentials (`x-api-key`, a gateway token), so both are
+    // redacted; header names are kept because they are what a user needs to debug a section.
+    override def toString: String =
+      s"NamedProviderConfig($provider,$model,$baseUrl,${apiKey.map(_ => "***")},$organization,$endpoint,$apiVersion," +
+        s"$contextWindow,$reserveCompletion,${headers.keys.map(k => s"$k -> ***").mkString("Map(", ", ", ")")})"
+
     /**
      * Returns this config if its provider matches `expected`, otherwise a `ConfigurationError`.
      *

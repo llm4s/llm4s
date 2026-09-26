@@ -128,11 +128,8 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
       // META-INF/services (org.llm4s.testutil.FixtureChatProvider).
       ProviderRegistry.default.ids shouldBe Seq(
         "cohere",
-        "deepseek",
         "fixturechat",
-        "mistral",
-        "openrouter",
-        "zai"
+        "mistral"
       )
     }
   }

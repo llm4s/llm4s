@@ -1,9 +1,9 @@
 package org.llm4s.samples.chat.tui
 
-import org.llm4s.config.{ DefaultConfig, Llm4sConfig }
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.*
-import org.llm4s.llmconnect.provider.{ OpenAIProvider, RequestyProvider }
+import org.llm4s.llmconnect.provider.{ OpenAIProvider, OpenRouterProvider, RequestyProvider }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 
@@ -107,7 +107,7 @@ object ChatTuiConfig:
 
       case "openrouter" =>
         requireKey("OPENROUTER_API_KEY").flatMap { apiKey =>
-          val baseUrl = ChatTuiEnv.getOrElse("OPENAI_BASE_URL", DefaultConfig.DEFAULT_OPENROUTER_BASE_URL)
+          val baseUrl = ChatTuiEnv.getOrElse("OPENAI_BASE_URL", OpenRouterProvider.DEFAULT_BASE_URL)
           OpenAIConfig.fromValues(model, apiKey, None, baseUrl)
         }
 
@@ -146,7 +146,7 @@ object ChatTuiConfig:
 
       case "deepseek" =>
         requireKey("DEEPSEEK_API_KEY").flatMap { apiKey =>
-          val baseUrl = ChatTuiEnv.getOrElse("DEEPSEEK_BASE_URL", DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
+          val baseUrl = ChatTuiEnv.getOrElse("DEEPSEEK_BASE_URL", DeepSeekConfig.DEFAULT_BASE_URL)
           DeepSeekConfig.fromValues(model, apiKey, baseUrl)
         }
 

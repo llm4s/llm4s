@@ -7,7 +7,7 @@ import org.scalatest.matchers.should.Matchers
 
 class ProviderConfigConstructionTest extends AnyFunSuite with Matchers with EitherValues {
 
-  // `OpenAIConfig` stays in core because OpenRouter shares it; the OpenAI default URL moved
+  // `OpenAIConfig` lives in llm4s-openai-compatible with OpenRouter; the OpenAI default URL moved
   // to `llm4s-openai` with the client (#1132), so it is spelled out here.
   private val DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1"
 

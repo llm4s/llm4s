@@ -182,6 +182,7 @@ lazy val llm4s = (project in file("."))
     gemini,
     anthropic,
     openai,
+    openaiCompatible,
     samples,
     configPolicy,
     workspaceShared,
@@ -266,12 +267,12 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
-    // Measured 75.57% statement coverage after the `openai` carve (`sbt coverage core/test
-    // core/coverageReport`); it was 75.15% after `anthropic`, 75.27% after `gemini`, 75.86%
+    // Measured 75.32% statement coverage after the `openai-compatible` carve (`sbt coverage
+    // core/test core/coverageReport`); it was 75.57% after `openai`, 75.15% after `anthropic`, 75.27% after `gemini`, 75.86%
     // after `ollama`, 74.33% with slice 3 complete, 74.89% after `image`, 74.05% after `mcp`,
     // 73.85% after slice 2 and 72.42% on main @ 5a62e2ac before any of them. A carve moves the
     // number in whichever direction the departing code sat - `speech` (80.68%), `gemini`
-    // (87.53%) and `anthropic` (81.32%) pulled it down, the slice-4 SPI work and the `ollama`
+    // (87.53%), `anthropic` (81.32%) and `openai-compatible` pulled it down, the slice-4 SPI work and the `ollama`
     // and `openai` (62.34%) carves pushed it up. Floor is the measured value rounded down to
     // the nearest 5; ratchet it up, never down.
     //
@@ -611,15 +612,43 @@ lazy val anthropic = (project in file("modules/anthropic"))
     )
   )
 
+// `llm4s-openai-compatible` is a consolidation, not a pure move (#1132): DeepSeek, Z.ai and
+// OpenRouter each had their own ~400-line copy of the same SDK-free chat-completions client, so
+// they leave core as dialects over one `OpenAICompatibleClient`, which also serves the generic
+// `openai-compatible` provider for any compatible endpoint. No dependency beyond core - keep it
+// that way, so any user of an OpenAI-compatible endpoint can take it without an SDK.
+
+lazy val openaiCompatible = (project in file("modules/openai-compatible"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    name := "llm4s-openai-compatible",
+    commonSettings,
+    // Measured 92.68% statement coverage (`sbt coverage openaiCompatible/test
+    // openaiCompatible/coverageReport`) with the three clients consolidated onto
+    // `OpenAICompatibleClient`, their suites moved from core, and the generic provider's and
+    // dialects' own specs. Floor is the measured value rounded down to the nearest 5. Never lower
+    // it. The `@Cloud` DeepSeek and OpenRouter smoke suites in `modules/it` are not counted here.
+    coverageFloor(90),
+    Test / fork := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 // The OpenAI family carves fourth, split by shared client: OpenAI, Azure and Requesty all run
 // on `OpenAIClient` and the Azure OpenAI SDK, so they move together and take the SDK out of
 // core - after this core has no vendor SDK at all. OpenRouter, DeepSeek and Z.ai speak the
-// same wire format but have their own SDK-free clients, so they stay in core for their own
-// modules later, and with them `OpenAIConfig` (which OpenRouter shares) and
-// `OpenAIStreamingHandler` (behind `StreamingResponseHandler.forProvider`).
+// same wire format without an SDK, so they are `llm4s-openai-compatible` above, which also
+// holds `OpenAIConfig` (OpenRouter builds one). `openai` depends on that module for the config;
+// it adds no SDK. The reverse edge must never exist - it would put the Azure SDK on the
+// classpath of every OpenAI-compatible user.
 
 lazy val openai = (project in file("modules/openai"))
-  .dependsOn(core % "compile->compile;test->test")
+  .dependsOn(core % "compile->compile;test->test", openaiCompatible)
   .settings(
     name := "llm4s-openai",
     commonSettings,
@@ -700,7 +729,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules//samples"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, knowledgegraphNeo4j)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, knowledgegraphNeo4j)
   .settings(
     name := "llm4s-samples",
     commonSettings,
@@ -717,7 +746,7 @@ lazy val configPolicy = (project in file("modules/config-policy"))
   // registered" before any policy runs. It must accept whatever a user's config names, not
   // just what CI's smoke config (ollama) happens to exercise. A provider carve adds itself
   // here; `CheckPoliciesProvidersSpec` checks each one resolves.
-  .dependsOn(core, ollama, gemini, anthropic, openai)
+  .dependsOn(core, ollama, gemini, anthropic, openai, openaiCompatible)
   .settings(
     name := "llm4s-config-policy",
     commonSettings,
@@ -780,7 +809,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   )
 
 lazy val it = (project in file("modules/it"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
   .settings(
     name := "llm4s-it",
     commonSettings,
@@ -832,7 +861,7 @@ lazy val it = (project in file("modules/it"))
 // A module is listed here if and only if it is published. When a slice adds one, add it in
 // the same commit, or its API silently vanishes from the site.
 lazy val docs = (project in file("modules/docs"))
-  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
+  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
   .settings(
     name           := "llm4s-docs",
     commonSettings,
@@ -853,6 +882,7 @@ lazy val docs = (project in file("modules/docs"))
         (gemini / Compile / sources).value ++
         (anthropic / Compile / sources).value ++
         (openai / Compile / sources).value ++
+        (openaiCompatible / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (traceOpentelemetry / Compile / sources).value ++

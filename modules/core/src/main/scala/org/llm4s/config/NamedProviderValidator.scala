@@ -41,9 +41,10 @@ private[llm4s] object NamedProviderSectionValidator:
       val spec = descriptor.configSpec
       val id   = descriptor.id.asString
 
-      // `ProviderId` is already the canonical lowercase spelling, so the env-var prefix is a
-      // straight upper-casing of it - "openai" -> "OPENAI", as it was under `ProviderKind`.
-      val envPrefix     = id.toUpperCase(Locale.ROOT)
+      // `ProviderId` is already the canonical lowercase spelling, so the env-var prefix is its
+      // upper-casing - "openai" -> "OPENAI", as it was under `ProviderKind` - with anything an
+      // environment variable name cannot hold made `_`: "openai-compatible" -> "OPENAI_COMPATIBLE".
+      val envPrefix     = id.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9_]", "_")
       val missingFields = Seq.newBuilder[String]
 
       if spec.requiresApiKey && normalized.apiKey.isEmpty then

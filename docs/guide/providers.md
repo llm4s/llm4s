@@ -21,7 +21,7 @@ LLM4S supports multiple LLM providers out of the box. Choose your provider, conf
 
 ## Supported Providers
 
-LLM4S supports 7 major LLM providers plus local models:
+LLM4S supports these LLM providers, plus any endpoint that speaks the OpenAI chat-completions API:
 
 | Provider | Type | Best For | Setup |
 |----------|------|----------|-------|
@@ -30,6 +30,9 @@ LLM4S supports 7 major LLM providers plus local models:
 | **Google Gemini** | Cloud | Free tier, Gemini 2.0 models | Medium |
 | **Azure OpenAI** | Cloud Enterprise | Enterprise deployments, VPC isolation | Hard |
 | **DeepSeek** | Cloud | Cost-effective, reasoning models | Easy |
+| **OpenRouter** | Cloud gateway | Many vendors' models behind one key | Easy |
+| **Z.ai** | Cloud | GLM models | Easy |
+| **OpenAI-compatible** | Any | Groq, Together, vLLM, LM Studio, gateways - config only | Easy |
 | **Cohere** | Cloud | Production RAG, low latency | Easy |
 | **Ollama** | Local | Private, no API key, offline | Easy |
 
@@ -342,13 +345,23 @@ Similar to OpenAI but often bundled with enterprise agreements.
 
 ## DeepSeek
 
+From the release after `0.4.1`, DeepSeek ships in `llm4s-openai-compatible`, with Z.ai,
+OpenRouter and the generic [OpenAI-compatible](#openai-compatible-endpoints) provider; adding it
+registers them:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
+```
+
+In `0.4.1` and earlier it is part of `llm4s-core`. See the
+[installation guide](../getting-started/installation.md#for-deepseek-zai-openrouter-and-any-openai-compatible-endpoint).
+
 ### Setup
 
 1. **Get API key** from [platform.deepseek.com](https://platform.deepseek.com/api_keys)
 2. **Set environment variables:**
 
 ```bash
-export LLM_MODEL=deepseek/deepseek-chat
 export DEEPSEEK_API_KEY=sk-...
 ```
 
@@ -357,11 +370,15 @@ export DEEPSEEK_API_KEY=sk-...
 In `application.conf`:
 
 ```hocon
-llm {
+llm4s {
   providers {
-    deepseek {
-      api-key = ${?DEEPSEEK_API_KEY}
-      base-url = "https://api.deepseek.com"
+    provider = "deepseek-main"
+
+    deepseek-main {
+      provider = "deepseek"
+      model = "deepseek-chat"
+      apiKey = ${?DEEPSEEK_API_KEY}
+      # baseUrl defaults to https://api.deepseek.com
     }
   }
 }
@@ -370,7 +387,8 @@ llm {
 ### Available Models
 
 - **Chat:** `deepseek-chat` (best for general use)
-- **Reasoning:** `deepseek-reasoner` (extended thinking)
+- **Reasoning:** `deepseek-reasoner` (extended thinking). Its chain of thought
+  (`reasoning_content`) is returned as `Completion.thinking`, and streamed as thinking deltas.
 
 ### Costs
 
@@ -382,6 +400,98 @@ Very competitive: ~$0.14-$0.28 per 1M input tokens
 - Reasoning model rivals GPT-4o
 - Good for translations and multilingual tasks
 - Supports very long contexts
+
+---
+
+## OpenRouter and Z.ai
+
+Both ship in `llm4s-openai-compatible` from the release after `0.4.1`, as DeepSeek does.
+
+```hocon
+llm4s {
+  providers {
+    openrouter-main {
+      provider = "openrouter"
+      model = "anthropic/claude-3.5-sonnet"
+      apiKey = ${?OPENROUTER_API_KEY}
+      # baseUrl defaults to https://openrouter.ai/api/v1
+    }
+
+    zai-main {
+      provider = "zai"
+      model = "GLM-4.7"
+      apiKey = ${?ZAI_API_KEY}
+      # baseUrl defaults to https://api.z.ai/api/paas/v4
+    }
+  }
+}
+```
+
+OpenRouter maps `CompletionOptions.reasoning` onto the underlying model: a thinking budget for
+Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest.
+
+---
+
+## OpenAI-compatible endpoints
+
+Any server that speaks the OpenAI `/chat/completions` API works with
+`provider = "openai-compatible"` - hosted APIs such as Groq, Together or Fireworks, local servers
+such as vLLM, LM Studio or llama.cpp, or an internal gateway. It needs no code and no module of
+its own, only `llm4s-openai-compatible`:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
+```
+
+Each named section is one endpoint, so several can sit side by side:
+
+```hocon
+llm4s {
+  providers {
+    provider = "groq-main"
+
+    groq-main {
+      provider = "openai-compatible"
+      baseUrl = "https://api.groq.com/openai/v1"
+      model = "llama-3.3-70b-versatile"
+      apiKey = ${?GROQ_API_KEY}
+      contextWindow = 131072
+      reserveCompletion = 8192
+    }
+
+    local-vllm {
+      provider = "openai-compatible"
+      baseUrl = "http://localhost:8000/v1"
+      model = "Qwen/Qwen2.5-7B-Instruct"
+      # no apiKey: none is sent
+    }
+
+    internal-gateway {
+      provider = "openai-compatible"
+      baseUrl = "https://llm-gateway.internal.example/v1"
+      model = "gpt-4o-mini"
+      headers {
+        X-Team = "search"
+        X-Gateway-Token = ${?GATEWAY_TOKEN}
+      }
+    }
+  }
+}
+```
+
+| Key | Required | Meaning |
+|-----|----------|---------|
+| `baseUrl` | yes | Requests go to `<baseUrl>/chat/completions`, and model listing to `<baseUrl>/models` |
+| `model` | yes | Sent as-is in every request |
+| `apiKey` | no | Sent as `Authorization: Bearer <key>`; with none, no `Authorization` header is sent |
+| `contextWindow` | no | The model's context window. Default 8192, which is deliberately small: set the real value |
+| `reserveCompletion` | no | Tokens held back for the reply. Default 2048, or a quarter of a smaller window |
+| `headers` | no | Extra headers sent on every request; values are redacted when the config is printed |
+
+The generic provider sends the plain chat-completions format: no reasoning parameters and no
+provider-specific decoding, so `CompletionOptions.reasoning` is ignored and thinking fields in a
+reply are not read. A provider that needs those gets its own dialect in `llm4s-openai-compatible`,
+as DeepSeek, Z.ai and OpenRouter have.
 
 ---
 
