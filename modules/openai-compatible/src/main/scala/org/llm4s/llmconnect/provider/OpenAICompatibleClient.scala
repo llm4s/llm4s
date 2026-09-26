@@ -127,13 +127,19 @@ class OpenAICompatibleClient(
     val toolCalls   = new StreamToolCalls
     val sseParser   = SSEParser.createStreamingParser()
     val reader      = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))
+    var usage       = Option.empty[TokenUsage]
     Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
       rawStream.append(line).append('\n')
       sseParser.addChunk(line + "\n")
       while (sseParser.hasEvents)
         sseParser.nextEvent().foreach { event =>
           event.data.filter(_ != "[DONE]").foreach { data =>
-            parseStreamingEvent(ujson.read(data), toolCalls).foreach { (chunk, rawArguments) =>
+            val json = ujson.read(data)
+            // Usage arrives on the last event, alongside the final delta or on an event of its
+            // own with no choices. A later report replaces an earlier one; one without both
+            // counts is ignored rather than failing the stream.
+            streamedUsage(json).foreach(u => usage = Some(u))
+            parseStreamingEvent(json, toolCalls).foreach { (chunk, rawArguments) =>
               // The accumulator concatenates argument fragments, so it gets each fragment
               // verbatim. The parsed form handed to `onChunk` cannot be concatenated safely:
               // a fragment that is itself valid JSON, such as `"Paris"`, parses to the bare
@@ -149,10 +155,12 @@ class OpenAICompatibleClient(
     // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
     // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
     accumulator.toCompletion.map { c =>
+      val finalUsage = usage.orElse(c.usage)
       c.copy(
         model = settings.model,
         toolCalls = c.message.toolCalls.toList,
-        estimatedCost = c.usage.flatMap(u => CostEstimator.estimate(settings.model, u))
+        usage = finalUsage,
+        estimatedCost = finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u))
       )
     }
   }
@@ -268,6 +276,17 @@ class OpenAICompatibleClient(
         thinkingTokens = dialect.reasoningTokens(ujson.Obj.from(u))
       )
     }
+
+  /**
+   * The token usage a streamed event reports, if it reports a usable one.
+   *
+   * Providers that report usage on a stream do so on its last event - Mistral and DeepSeek
+   * always, OpenAI when asked with `stream_options.include_usage` - and send `"usage": null`
+   * or omit it elsewhere. Unlike [[parseUsage]] on a completion, a malformed report here is
+   * dropped rather than failing a stream whose text has already been delivered.
+   */
+  private def streamedUsage(json: ujson.Value): Option[TokenUsage] =
+    json.objOpt.flatMap(_.get("usage")).flatMap(u => Try(parseUsage(u)).toOption.flatten)
 
   /**
    * One streamed event as chunks: one per tool call, the first also carrying the text, finish
