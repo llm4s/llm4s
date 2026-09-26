@@ -21,7 +21,7 @@ import scala.util.Try
  * and which refused tool messages.
  *
  * Requests go to `<baseUrl>/v1/chat/completions`, where `baseUrl` is the API root
- * (`https://api.mistral.ai` by default); see [[MistralConfig.apiBaseUrl]].
+ * (`https://api.mistral.ai` by default); see [[org.llm4s.llmconnect.config.MistralConfig.apiBaseUrl]].
  *
  * @param config          Mistral configuration: API key, model, base URL and context settings.
  * @param metrics         receives per-call latency and token-usage events.

@@ -24,7 +24,7 @@ import scala.util.Try
  * format.
  *
  * Requests go to `<baseUrl>/chat/completions`, where `baseUrl` is mapped through
- * [[CohereConfig.compatibilityBaseUrl]], so a config naming the native root still works.
+ * [[org.llm4s.llmconnect.config.CohereConfig.compatibilityBaseUrl]], so a config naming the native root still works.
  *
  * @param config          Cohere configuration: API key, model, base URL and context settings.
  * @param metrics         receives per-call latency and token-usage events.

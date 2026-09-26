@@ -268,8 +268,9 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
-    // Measured 75.32% statement coverage after the `openai-compatible` carve (`sbt coverage
-    // core/test core/coverageReport`); it was 75.57% after `openai`, 75.15% after `anthropic`, 75.27% after `gemini`, 75.86%
+    // Measured 74.65% statement coverage with every provider client gone - Mistral, Cohere and
+    // Voyage were the last (`sbt coverage core/test core/coverageReport`); it was 75.32% after
+    // `openai-compatible`, 75.57% after `openai`, 75.15% after `anthropic`, 75.27% after `gemini`, 75.86%
     // after `ollama`, 74.33% with slice 3 complete, 74.89% after `image`, 74.05% after `mcp`,
     // 73.85% after slice 2 and 72.42% on main @ 5a62e2ac before any of them. A carve moves the
     // number in whichever direction the departing code sat - `speech` (80.68%), `gemini`
@@ -624,11 +625,12 @@ lazy val openaiCompatible = (project in file("modules/openai-compatible"))
   .settings(
     name := "llm4s-openai-compatible",
     commonSettings,
-    // Measured 92.68% statement coverage (`sbt coverage openaiCompatible/test
-    // openaiCompatible/coverageReport`) with the three clients consolidated onto
-    // `OpenAICompatibleClient`, their suites moved from core, and the generic provider's and
-    // dialects' own specs. Floor is the measured value rounded down to the nearest 5. Never lower
-    // it. The `@Cloud` DeepSeek and OpenRouter smoke suites in `modules/it` are not counted here.
+    // Measured 92.92% statement coverage (`sbt coverage openaiCompatible/test
+    // openaiCompatible/coverageReport`) with Mistral and Cohere added as dialects; it was 92.68%
+    // with the first three clients consolidated onto `OpenAICompatibleClient`, their suites moved
+    // from core, and the generic provider's and dialects' own specs. Floor is the measured value
+    // rounded down to the nearest 5. Never lower it. The `@Cloud` DeepSeek, OpenRouter and Cohere
+    // smoke suites in `modules/it` are not counted here.
     coverageFloor(90),
     Test / fork := true,
     Compile / mainClass             := None,
