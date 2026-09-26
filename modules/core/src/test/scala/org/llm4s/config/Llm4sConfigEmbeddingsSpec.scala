@@ -13,6 +13,8 @@ import org.scalatest.wordspec.AnyWordSpec
  * Sanity checks for Llm4sConfig.embeddings under controlled configuration.
  *
  * The OpenAI cases moved to `llm4s-openai`'s `OpenAIEmbeddingsSpec` with the provider (#1132).
+ * The Voyage cases use core's test `FixtureEmbeddingProvider` since Voyage moved to
+ * `llm4s-voyage`, whose `VoyageEmbeddingsSpec` has their Voyage versions.
  */
 class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
 
@@ -30,55 +32,55 @@ class Llm4sConfigEmbeddingsSpec extends AnyWordSpec with Matchers {
   }
 
   "Llm4sConfig.embeddings" should {
-    "load VoyageAI embeddings config via llm4s.*" in {
+    "load embeddings config via llm4s.*" in {
       val props = Map(
-        "llm4s.embeddings.provider"       -> "voyage",
-        "llm4s.embeddings.voyage.baseUrl" -> "https://api.voyage.ai",
-        "llm4s.embeddings.voyage.model"   -> "voyage-3-large",
-        "llm4s.embeddings.voyage.apiKey"  -> "vk-test"
+        "llm4s.embeddings.provider"                 -> "fixtureembedding",
+        "llm4s.embeddings.fixtureembedding.baseUrl" -> "https://embeddings.example.test",
+        "llm4s.embeddings.fixtureembedding.model"   -> "fixture-embed-large",
+        "llm4s.embeddings.fixtureembedding.apiKey"  -> "vk-test"
       )
       withProps(props) {
         val (provider, cfg): (String, EmbeddingProviderConfig) =
           Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
 
-        provider shouldBe "voyage"
-        cfg.baseUrl shouldBe "https://api.voyage.ai"
-        cfg.model shouldBe "voyage-3-large"
+        provider shouldBe "fixtureembedding"
+        cfg.baseUrl shouldBe "https://embeddings.example.test"
+        cfg.model shouldBe "fixture-embed-large"
         cfg.apiKey shouldBe "vk-test"
       }
     }
 
     // --- Unified EMBEDDING_MODEL format tests ---
 
-    "load Voyage embeddings via unified EMBEDDING_MODEL format" in {
+    "load embeddings via unified EMBEDDING_MODEL format" in {
       val props = Map(
-        "llm4s.embeddings.model"         -> "voyage/voyage-3",
-        "llm4s.embeddings.voyage.apiKey" -> "vk-test"
+        "llm4s.embeddings.model"                   -> "fixtureembedding/fixture-embed-small",
+        "llm4s.embeddings.fixtureembedding.apiKey" -> "vk-test"
         // No explicit baseUrl - should use default
       )
       withProps(props) {
         val (provider, cfg): (String, EmbeddingProviderConfig) =
           Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
 
-        provider shouldBe "voyage"
-        cfg.model shouldBe "voyage-3"
-        cfg.baseUrl shouldBe "https://api.voyageai.com/v1" // Default base URL
+        provider shouldBe "fixtureembedding"
+        cfg.model shouldBe "fixture-embed-small"
+        cfg.baseUrl shouldBe "https://fixtureembedding.invalid/v1" // Default base URL
         cfg.apiKey shouldBe "vk-test"
       }
     }
 
     "prefer unified model format over legacy provider" in {
       val props = Map(
-        "llm4s.embeddings.model"         -> "voyage/voyage-3-large", // Takes precedence
-        "llm4s.embeddings.provider"      -> "openai",                // Should be ignored
-        "llm4s.embeddings.voyage.apiKey" -> "vk-test"
+        "llm4s.embeddings.model"                   -> "fixtureembedding/fixture-embed-large", // Takes precedence
+        "llm4s.embeddings.provider"                -> "openai",                               // Should be ignored
+        "llm4s.embeddings.fixtureembedding.apiKey" -> "vk-test"
       )
       withProps(props) {
         val (provider, cfg): (String, EmbeddingProviderConfig) =
           Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
 
-        provider shouldBe "voyage" // Unified format wins
-        cfg.model shouldBe "voyage-3-large"
+        provider shouldBe "fixtureembedding" // Unified format wins
+        cfg.model shouldBe "fixture-embed-large"
       }
     }
 

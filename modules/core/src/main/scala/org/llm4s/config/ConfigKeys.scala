@@ -15,7 +15,8 @@ package org.llm4s.config
  */
 object ConfigKeys {
   // OpenAI, Requesty and Azure OpenAI keys are `OpenAIConfigKeys` in `llm4s-openai`, and the
-  // OpenRouter and DeepSeek keys `OpenAICompatibleConfigKeys` in `llm4s-openai-compatible` (#1132).
+  // OpenRouter, DeepSeek and Mistral keys `OpenAICompatibleConfigKeys` in
+  // `llm4s-openai-compatible`, and the Voyage keys `VoyageConfigKeys` in `llm4s-voyage` (#1132).
 
   // ---- Langfuse tracing ---------------------------------------------------
 
@@ -56,17 +57,6 @@ object ConfigKeys {
 
   /** Query string used when searching an embedding index. */
   val EMBEDDING_QUERY = "EMBEDDING_QUERY"
-
-  // ---- Embeddings: Voyage AI ----------------------------------------------
-
-  /** Voyage AI API key (`pa-...`). */
-  val VOYAGE_API_KEY = "VOYAGE_API_KEY"
-
-  /** Overrides the Voyage AI embedding base URL. */
-  val VOYAGE_EMBEDDING_BASE_URL = "VOYAGE_EMBEDDING_BASE_URL"
-
-  /** Selects the Voyage AI embedding model when using the legacy provider format. */
-  val VOYAGE_EMBEDDING_MODEL = "VOYAGE_EMBEDDING_MODEL"
 
   // ---- Embeddings: chunking -----------------------------------------------
 

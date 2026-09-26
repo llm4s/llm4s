@@ -7,6 +7,10 @@ import org.llm4s.config.Llm4sConfig
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
+/**
+ * `Llm4sConfig.embeddings` from `llm4s.*` system properties. This used Voyage until it moved
+ * to `llm4s-voyage` (#1132), and now uses core's test `FixtureEmbeddingProvider`.
+ */
 class EmbeddingsConfigSpec extends AnyWordSpec with Matchers {
 
   private def withProps(props: Map[String, String])(f: => Unit): Unit = {
@@ -23,19 +27,19 @@ class EmbeddingsConfigSpec extends AnyWordSpec with Matchers {
   }
 
   "Llm4sConfig.embeddings" should {
-    "load VoyageAI embeddings config via llm4s.*" in {
+    "load embeddings config via llm4s.*" in {
       val props = Map(
-        "llm4s.embeddings.provider"       -> "voyage",
-        "llm4s.embeddings.voyage.baseUrl" -> "https://api.voyage.ai",
-        "llm4s.embeddings.voyage.model"   -> "voyage-3-large",
-        "llm4s.embeddings.voyage.apiKey"  -> "vk-test"
+        "llm4s.embeddings.provider"                 -> "fixtureembedding",
+        "llm4s.embeddings.fixtureembedding.baseUrl" -> "https://embeddings.example.test",
+        "llm4s.embeddings.fixtureembedding.model"   -> "fixture-embed-large",
+        "llm4s.embeddings.fixtureembedding.apiKey"  -> "vk-test"
       )
       withProps(props) {
         val (provider, cfg) =
           Llm4sConfig.embeddings().fold(err => fail(err.toString), identity)
-        provider shouldBe "voyage"
-        cfg.baseUrl shouldBe "https://api.voyage.ai"
-        cfg.model shouldBe "voyage-3-large"
+        provider shouldBe "fixtureembedding"
+        cfg.baseUrl shouldBe "https://embeddings.example.test"
+        cfg.model shouldBe "fixture-embed-large"
         cfg.apiKey shouldBe "vk-test"
       }
     }

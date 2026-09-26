@@ -84,6 +84,10 @@ flags:
     paths:
       - modules/openai-compatible/src/main/scala
     carryforward: true
+  voyage:
+    paths:
+      - modules/providers/voyage/src/main/scala
+    carryforward: true
   knowledgegraph-neo4j:
     paths:
       - modules/knowledgegraph-neo4j/src/main/scala

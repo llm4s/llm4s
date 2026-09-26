@@ -1,5 +1,7 @@
-# The test-only chat provider that core's specs, and those of every module depending on
-# `core % "test->test"`, use when they need "some provider" rather than a particular one.
-# See org.llm4s.testutil.FixtureChatProvider. It is on the test classpath only, so it is
-# never published and never in ProviderRegistry.builtin.
+# The test-only providers that core's specs, and those of every module depending on
+# `core % "test->test"`, use when they need "some provider" rather than a particular one:
+# a chat provider (org.llm4s.testutil.FixtureChatProvider) and an embedding provider
+# (org.llm4s.testutil.FixtureEmbeddingProvider). They are on the test classpath only, so they
+# are never published.
 org.llm4s.testutil.FixtureChatProviderModule
+org.llm4s.testutil.FixtureEmbeddingProviderModule

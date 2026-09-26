@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.spi
 
 import org.llm4s.llmconnect.spi.fixtures.{ FixtureEmbeddings, FixtureProvider }
-import org.llm4s.testutil.FixtureChatProvider
+import org.llm4s.testutil.{ FixtureChatProvider, FixtureEmbeddingProvider }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -230,27 +230,31 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
       // And the test fixture provider that core's test resources declare at the root, which
       // is the only thing on this classpath besides the built-ins.
       ProviderRegistry.default.ids shouldBe (builtinIds :+ FixtureChatProvider.id.asString).sorted
-      ProviderRegistry.default.embeddingIds shouldBe ProviderRegistry.builtin.embeddingIds
+      ProviderRegistry.default.embeddingIds shouldBe
+        (ProviderRegistry.builtin.embeddingIds :+ FixtureEmbeddingProvider.id.asString).sorted
     }
   }
 
   "the two provider namespaces" should {
 
     "be independent, so a provider can supply one without the other" in {
-      val registry = ProviderRegistry.builtin.withProvider(FixtureChatProvider)
+      val registry =
+        ProviderRegistry.builtin.withProvider(FixtureChatProvider).withEmbeddingProvider(FixtureEmbeddingProvider)
 
-      // The fixture supplies only chat; Voyage only embeddings. OpenAI, which supplies both
-      // under one id, is checked in `llm4s-openai`'s `Llm4sOpenAIModuleSpec` (#1132). That
-      // overlap without containment is why the embedding descriptor is a separate trait.
+      // One fixture supplies only chat, the other - Voyage's shape - only embeddings. OpenAI,
+      // which supplies both under one id, is checked in `llm4s-openai`'s
+      // `Llm4sOpenAIModuleSpec` (#1132). That overlap without containment is why the embedding
+      // descriptor is a separate trait.
       registry.ids should contain("fixturechat")
       (registry.embeddingIds should not).contain("fixturechat")
-      registry.embeddingIds should contain("voyage")
-      (registry.ids should not).contain("voyage")
+      registry.embeddingIds should contain("fixtureembedding")
+      (registry.ids should not).contain("fixtureembedding")
     }
 
     "not resolve a chat provider as an embedding one" in {
       val error = ProviderRegistry.builtin
         .withProvider(FixtureChatProvider)
+        .withEmbeddingProvider(FixtureEmbeddingProvider)
         .resolveEmbedding(ProviderId("fixturechat"), Some("llm4s.embeddings.model"))
         .left
         .toOption
@@ -260,7 +264,7 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
       error should include("Embedding provider 'fixturechat'")
       error should include("(from llm4s.embeddings.model)")
       // It lists the embedding providers, not the chat ones - the point of separate namespaces.
-      error should include("voyage")
+      error should include("fixtureembedding")
       (error should not).include("fixturechat,")
     }
 
@@ -287,7 +291,8 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
     }
 
     "fold an embedding alias onto its canonical id" in {
-      ProviderRegistry.builtin.canonicalEmbeddingId("voyageai").asString shouldBe "voyage"
+      ProviderRegistry.default.canonicalEmbeddingId(FixtureEmbeddingProvider.Alias).asString shouldBe
+        "fixtureembedding"
       // An id nothing claims is returned canonicalised but unchanged.
       ProviderRegistry.builtin.canonicalEmbeddingId("Moonbeam").asString shouldBe "moonbeam"
     }

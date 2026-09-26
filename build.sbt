@@ -183,6 +183,7 @@ lazy val llm4s = (project in file("."))
     anthropic,
     openai,
     openaiCompatible,
+    voyage,
     samples,
     configPolicy,
     workspaceShared,
@@ -639,6 +640,30 @@ lazy val openaiCompatible = (project in file("modules/openai-compatible"))
     )
   )
 
+// Community providers that are not OpenAI-compatible live under `modules/providers/<name>`, one
+// published `llm4s-<name>` artifact each, on the same release train (#1132). Voyage is the first:
+// an embedding provider only, carved as-is from core with its config keys, `reference.conf`
+// block and model dimensions. No dependency beyond core.
+
+lazy val voyage = (project in file("modules/providers/voyage"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    name := "llm4s-voyage",
+    commonSettings,
+    // Measured 89.69% statement coverage (`sbt coverage voyage/test voyage/coverageReport`)
+    // on the code as carved out of core. Floor is the measured value rounded down to the nearest
+    // 5. Never lower it.
+    coverageFloor(85),
+    Test / fork := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.scalatest % Test,
+      Deps.scalamock % Test
+    )
+  )
+
 // The OpenAI family carves fourth, split by shared client: OpenAI, Azure and Requesty all run
 // on `OpenAIClient` and the Azure OpenAI SDK, so they move together and take the SDK out of
 // core - after this core has no vendor SDK at all. OpenRouter, DeepSeek and Z.ai speak the
@@ -729,7 +754,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules//samples"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, knowledgegraphNeo4j)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, voyage, knowledgegraphNeo4j)
   .settings(
     name := "llm4s-samples",
     commonSettings,
@@ -809,7 +834,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   )
 
 lazy val it = (project in file("modules/it"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
+  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, voyage, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
   .settings(
     name := "llm4s-it",
     commonSettings,
@@ -861,7 +886,7 @@ lazy val it = (project in file("modules/it"))
 // A module is listed here if and only if it is published. When a slice adds one, add it in
 // the same commit, or its API silently vanishes from the site.
 lazy val docs = (project in file("modules/docs"))
-  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
+  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, voyage, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
   .settings(
     name           := "llm4s-docs",
     commonSettings,
@@ -883,6 +908,7 @@ lazy val docs = (project in file("modules/docs"))
         (anthropic / Compile / sources).value ++
         (openai / Compile / sources).value ++
         (openaiCompatible / Compile / sources).value ++
+        (voyage / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (traceOpentelemetry / Compile / sources).value ++

@@ -23,9 +23,9 @@ import org.llm4s.types.Result
  * val result: Result[EmbeddingResponse] = provider.embed(request)
  * }}}
  *
- * @see [[OpenAIEmbeddingProvider]] for OpenAI text-embedding models
- * @see [[VoyageAIEmbeddingProvider]] for VoyageAI embedding models
- * @see [[OllamaEmbeddingProvider]] for local Ollama embedding models
+ * @see [[OpenAIEmbeddingProvider]] for OpenAI text-embedding models (`llm4s-openai`)
+ * @see [[VoyageAIEmbeddingProvider]] for VoyageAI embedding models (`llm4s-voyage`)
+ * @see [[OllamaEmbeddingProvider]] for local Ollama embedding models (`llm4s-ollama`)
  */
 trait EmbeddingProvider {
 

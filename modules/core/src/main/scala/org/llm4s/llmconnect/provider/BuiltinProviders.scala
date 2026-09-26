@@ -26,6 +26,4 @@ object BuiltinProviders extends Llm4sProviderModule:
 
   override val chatProviders: Seq[ProviderDescriptor] = Seq.empty
 
-  override val embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(
-    VoyageAIEmbeddingProvider
-  )
+  override val embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq.empty

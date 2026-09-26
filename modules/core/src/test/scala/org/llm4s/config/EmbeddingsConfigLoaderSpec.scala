@@ -12,7 +12,9 @@ import org.scalatest.EitherValues
  * without relying on environment variables or external configuration files.
  *
  * The OpenAI embedding cases moved to `llm4s-openai`'s `OpenAIEmbeddingsConfigLoaderSpec`
- * with the provider (#1132); the provider-neutral cases use Voyage.
+ * with the provider (#1132). The provider-neutral cases used Voyage until it moved to
+ * `llm4s-voyage` too; they now use core's test `FixtureEmbeddingProvider`, and their Voyage
+ * versions are in that module's `VoyageEmbeddingsSpec`.
  */
 class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValues {
 
@@ -22,13 +24,13 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
   "EmbeddingsConfigLoader with unified model format" should {
 
-    "successfully load Voyage embeddings via provider/model format" in {
+    "successfully load embeddings via provider/model format" in {
       val hocon =
         """
           |llm4s {
           |  embeddings {
-          |    model = "voyage/voyage-3-large"
-          |    voyage {
+          |    model = "fixtureembedding/fixture-embed-large"
+          |    fixtureembedding {
           |      apiKey = "vk-test-key"
           |    }
           |  }
@@ -39,10 +41,10 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
       result.isRight shouldBe true
       val (provider, cfg) = result.value
-      provider shouldBe "voyage"
-      cfg.model shouldBe "voyage-3-large"
+      provider shouldBe "fixtureembedding"
+      cfg.model shouldBe "fixture-embed-large"
       cfg.apiKey shouldBe "vk-test-key"
-      cfg.baseUrl shouldBe "https://api.voyageai.com/v1"
+      cfg.baseUrl shouldBe "https://fixtureembedding.invalid/v1"
     }
 
     "fail with clear error for invalid model format (missing slash)" in {
@@ -91,15 +93,15 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
   "EmbeddingsConfigLoader with legacy provider format" should {
 
-    "successfully load Voyage embeddings via legacy provider setting" in {
+    "successfully load embeddings via legacy provider setting" in {
       val hocon =
         """
           |llm4s {
           |  embeddings {
-          |    provider = "voyage"
-          |    voyage {
+          |    provider = "fixtureembedding"
+          |    fixtureembedding {
           |      apiKey = "vk-legacy"
-          |      model = "voyage-2"
+          |      model = "fixture-embed-large"
           |    }
           |  }
           |}
@@ -109,8 +111,8 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
       result.isRight shouldBe true
       val (provider, cfg) = result.value
-      provider shouldBe "voyage"
-      cfg.model shouldBe "voyage-2"
+      provider shouldBe "fixtureembedding"
+      cfg.model shouldBe "fixture-embed-large"
       cfg.apiKey shouldBe "vk-legacy"
     }
 
@@ -160,14 +162,14 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
   "EmbeddingsConfigLoader validation" should {
 
-    "fail with clear error when Voyage API key is missing" in {
+    "fail with clear error when the API key is missing" in {
       val hocon =
         """
           |llm4s {
           |  embeddings {
-          |    model = "voyage/voyage-3"
-          |    voyage {
-          |      baseUrl = "https://api.voyageai.com/v1"
+          |    model = "fixtureembedding/fixture-embed-small"
+          |    fixtureembedding {
+          |      baseUrl = "https://fixtureembedding.invalid/v1"
           |    }
           |  }
           |}
@@ -177,19 +179,19 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
       result.isLeft shouldBe true
       val error = result.left.value
-      error.message should include("Missing voyage embeddings apiKey")
-      error.message should include("llm4s.embeddings.voyage.apiKey")
-      error.message should include("VOYAGE_API_KEY")
-      error.message should include("VOYAGE_API_KEY")
+      error.message should include("Missing fixtureembedding embeddings apiKey")
+      error.message should include("llm4s.embeddings.fixtureembedding.apiKey")
+      error.message should include("FIXTURE_EMBEDDING_API_KEY")
+      error.message should include("FIXTURE_EMBEDDING_API_KEY")
     }
 
-    "fail with clear error when Voyage model is missing in legacy mode" in {
+    "fail with clear error when the model is missing in legacy mode" in {
       val hocon =
         """
           |llm4s {
           |  embeddings {
-          |    provider = "voyage"
-          |    voyage {
+          |    provider = "fixtureembedding"
+          |    fixtureembedding {
           |      apiKey = "vk-test"
           |    }
           |  }
@@ -200,8 +202,8 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
       result.isLeft shouldBe true
       val error = result.left.value
-      error.message should include("Missing voyage embeddings model")
-      error.message should include("VOYAGE_EMBEDDING_MODEL")
+      error.message should include("Missing fixtureembedding embeddings model")
+      error.message should include("FIXTURE_EMBEDDING_MODEL")
     }
   }
 
@@ -211,13 +213,13 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
 
   "EmbeddingsConfigLoader default values" should {
 
-    "use default baseUrl for Voyage when not specified" in {
+    "use the provider's default baseUrl when not specified" in {
       val hocon =
         """
           |llm4s {
           |  embeddings {
-          |    model = "voyage/voyage-3"
-          |    voyage {
+          |    model = "fixtureembedding/fixture-embed-small"
+          |    fixtureembedding {
           |      apiKey = "vk-test"
           |    }
           |  }
@@ -227,7 +229,7 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
 
       result.isRight shouldBe true
-      result.value._2.baseUrl shouldBe "https://api.voyageai.com/v1"
+      result.value._2.baseUrl shouldBe "https://fixtureembedding.invalid/v1"
     }
   }
 
@@ -306,9 +308,9 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
         """
           |llm4s {
           |  embeddings {
-          |    model = "voyage/voyage-3-large"
+          |    model = "fixtureembedding/fixture-embed-large"
           |    provider = "openai"
-          |    voyage {
+          |    fixtureembedding {
           |      apiKey = "vk-unified"
           |    }
           |    openai {
@@ -326,8 +328,8 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       result.isRight shouldBe true
       val (provider, cfg) = result.value
       // Unified format should take precedence
-      provider shouldBe "voyage"
-      cfg.model shouldBe "voyage-3-large"
+      provider shouldBe "fixtureembedding"
+      cfg.model shouldBe "fixture-embed-large"
     }
   }
 
@@ -397,8 +399,8 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
         """
           |llm4s {
           |  embeddings {
-          |    model = "  voyage/voyage-3  "
-          |    voyage {
+          |    model = "  fixtureembedding/fixture-embed-small  "
+          |    fixtureembedding {
           |      apiKey = "vk-test"
           |    }
           |  }
@@ -408,7 +410,7 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       val result = EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
 
       result.isRight shouldBe true
-      result.value._2.model shouldBe "voyage-3"
+      result.value._2.model shouldBe "fixture-embed-small"
     }
 
     "trim whitespace from API keys" in {
@@ -416,8 +418,8 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
         """
           |llm4s {
           |  embeddings {
-          |    model = "voyage/voyage-3"
-          |    voyage {
+          |    model = "fixtureembedding/fixture-embed-small"
+          |    fixtureembedding {
           |      apiKey = "  vk-trimmed  "
           |    }
           |  }

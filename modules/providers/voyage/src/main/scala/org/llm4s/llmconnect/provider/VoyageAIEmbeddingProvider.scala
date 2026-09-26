@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoKeywordCatch
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.config.VoyageConfigKeys
 import org.llm4s.http.{ HttpResponse => Llm4sHttpResponse, Llm4sHttpClient }
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
@@ -29,6 +30,9 @@ import scala.util.control.NonFatal
  * client at all, which is why [[org.llm4s.llmconnect.spi.EmbeddingProviderDescriptor]]
  * is a separate trait rather than a method on the chat descriptor.
  *
+ * It lives in `llm4s-voyage` and is registered by [[Llm4sVoyageModule]]; it was built into
+ * `llm4s-core` until [[https://github.com/llm4s/llm4s/issues/1132 #1132]], package unchanged.
+ *
  * @see [[EmbeddingProvider]] for the common embedding interface
  */
 object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
@@ -40,8 +44,8 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
     defaultBaseUrl = Some("https://api.voyageai.com/v1"),
-    apiKeyEnv = Some("VOYAGE_API_KEY"),
-    modelEnv = Some("VOYAGE_EMBEDDING_MODEL")
+    apiKeyEnv = Some(VoyageConfigKeys.VOYAGE_API_KEY),
+    modelEnv = Some(VoyageConfigKeys.VOYAGE_EMBEDDING_MODEL)
   )
 
   /**
