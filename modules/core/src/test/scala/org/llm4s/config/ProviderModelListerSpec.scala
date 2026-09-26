@@ -124,55 +124,6 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
         fail(s"Expected malformed Anthropic pagination failure, got models: $models")
   }
 
-  test("Gemini lister discovers models from /models") {
-    val config = namedConfig(ProviderId("gemini"), "gemini-3-flash-preview", apiKey = Some("google-key"))
-    val firstResponseBody =
-      """{
-        |  "models": [
-        |    {
-        |      "name": "models/gemini-2.0-flash",
-        |      "displayName": "Gemini 2.0 Flash",
-        |      "description": "Fast model",
-        |      "inputTokenLimit": 1048576,
-        |      "outputTokenLimit": 8192,
-        |      "supportedGenerationMethods": ["generateContent", "countTokens"]
-        |    }
-        |  ],
-        |  "nextPageToken": "page-2"
-        |}""".stripMargin
-
-    val secondResponseBody =
-      """{
-        |  "models": [
-        |    {
-        |      "name": "models/gemini-2.5-pro",
-        |      "displayName": "Gemini 2.5 Pro",
-        |      "description": "Reasoning model"
-        |    }
-        |  ]
-        |}""".stripMargin
-
-    val mockHttp = MockHttpClient(
-      Seq(
-        HttpResponse(200, firstResponseBody, Map.empty),
-        HttpResponse(200, secondResponseBody, Map.empty)
-      )
-    )
-    val result = ProviderModelListers.Gemini.listModels(config, mockHttp)
-
-    result match
-      case Right(models) =>
-        models.map(_.name.asString) shouldBe List("gemini-2.0-flash", "gemini-2.5-pro")
-        models.map(_.provider) shouldBe List(ProviderId("gemini"), ProviderId("gemini"))
-        mockHttp.lastUrl shouldBe Some("https://generativelanguage.googleapis.com/v1beta/models")
-        mockHttp.getRequests.map(_._3) shouldBe Seq(
-          Map("pageSize" -> "1000"),
-          Map("pageSize" -> "1000", "pageToken" -> "page-2")
-        )
-      case Left(err) =>
-        fail(s"Expected discovered Gemini models, got error: ${err.message}")
-  }
-
   test("OpenRouter lister includes required OpenRouter headers") {
     val config = namedConfig(ProviderId("openrouter"), "openai/gpt-4o-mini", apiKey = Some("or-key"))
     val responseBody =

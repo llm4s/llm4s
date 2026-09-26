@@ -19,7 +19,7 @@ import org.scalatest.wordspec.AnyWordSpec
  * runtime lookup and the compiler cannot; this spec is the replacement for that
  * guarantee, and a new built-in provider must appear in [[expectations]] or
  * fail here. A provider that moves to its own module takes its round trip with it
- * (`Llm4sOllamaModuleSpec` in `llm4s-ollama`).
+ * (`Llm4sOllamaModuleSpec` in `llm4s-ollama`, `Llm4sGeminiModuleSpec` in `llm4s-gemini`).
  */
 class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
 
@@ -35,11 +35,9 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
     (AzureProvider, "AzureConfig", "OpenAIClient"),
     (AnthropicProvider, "AnthropicConfig", "AnthropicClient"),
     (ZaiProvider, "ZaiConfig", "ZaiClient"),
-    (GeminiProvider, "GeminiConfig", "GeminiClient"),
     (DeepSeekProvider, "DeepSeekConfig", "DeepSeekClient"),
     (CohereProvider, "CohereConfig", "CohereClient"),
-    (MistralProvider, "MistralConfig", "MistralClient"),
-    (VertexAIProvider, "VertexAIConfig", "VertexAIClient")
+    (MistralProvider, "MistralConfig", "MistralClient")
   )
 
   /** A section carrying every field any built-in provider asks for. */

@@ -1,6 +1,5 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.config.DefaultConfig
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, VertexAIConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
@@ -41,7 +40,7 @@ object VertexAIProvider extends ProviderDescriptor:
         VertexAIConfig.fromValues(
           modelName = section.model.asString,
           projectId = projectId,
-          location = section.organization.getOrElse(DefaultConfig.DEFAULT_VERTEXAI_LOCATION),
+          location = section.organization.getOrElse(VertexAIConfig.DEFAULT_LOCATION),
           credentialFilePath = section.apiKey.map(_.asKey)
         )
       }

@@ -1,5 +1,79 @@
 # Migration Guide
 
+## Slice 5: `llm4s-gemini`
+
+The second provider module of slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)),
+carrying both of Google's chat providers: the Gemini API (`provider = "gemini"`, alias
+`"google"`) and Vertex AI (`provider = "vertexai"`, alias `"vertex"`). It is in the build but
+not yet in a release; `0.4.1` and earlier still ship both inside `llm4s-core`.
+
+### Why Vertex AI is in the same module
+
+`VertexAIClient` only calls Google's `publishers/google` models - Gemini - using the same JSON
+request and response format as `GeminiClient`. The two differ in endpoint (Vertex is scoped to
+a GCP project and region on `aiplatform.googleapis.com`) and in authentication (Vertex uses
+OAuth2, implemented by `VertexAIAuthProvider` without a Google SDK), not in dependencies. So
+bundling them costs a Gemini-API user nothing, while splitting Vertex AI out later would be a
+breaking move for its users; bundling now is the direction that stays safe.
+
+### What moved
+
+| Code | Now in |
+|---|---|
+| `GeminiClient`, `GeminiProvider` (`org.llm4s.llmconnect.provider`) | `llm4s-gemini` |
+| `VertexAIClient`, `VertexAIProvider`, `VertexAIAuthProvider` (`org.llm4s.llmconnect.provider`) | `llm4s-gemini` |
+| `GeminiConfig`, `VertexAIConfig` (`org.llm4s.llmconnect.config`) | `llm4s-gemini` |
+| `ProviderModelListers.Gemini` → `GeminiModelLister` (`org.llm4s.config`) | `llm4s-gemini` |
+| `DefaultConfig.DEFAULT_GEMINI_BASE_URL` → `GeminiConfig.DEFAULT_BASE_URL` | `llm4s-gemini` |
+| `DefaultConfig.DEFAULT_VERTEXAI_LOCATION` → `VertexAIConfig.DEFAULT_LOCATION` (already existed) | `llm4s-gemini` |
+| the commented `gemini-main` example in `reference.conf` | `llm4s-gemini`'s `reference.conf`, with a `vertexai-main` example beside it |
+
+Package names are unchanged, so `import org.llm4s.llmconnect.config.GeminiConfig` keeps
+working once the dependency is added:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-gemini" % version
+```
+
+### Registration is the dependency
+
+`llm4s-gemini` declares `Llm4sGeminiModule` in its `META-INF/services`, so
+`ProviderRegistry.default` finds it and `provider = "gemini"`, `"google"`, `"vertexai"` and
+`"vertex"` resolve as before. Without the dependency they fail with the registry's error, which
+says the provider is not registered and names the providers that are.
+
+`ProviderRegistry.builtin` no longer includes Gemini or Vertex AI. If you used `builtin` to
+avoid classpath discovery (a shaded fat jar, typically), add the module explicitly:
+
+```scala
+given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sGeminiModule)
+```
+
+### Source breaks
+
+Three names could not keep their fully-qualified path, because they were members of objects
+that stay in core:
+
+1. **`ProviderModelListers.Gemini` is now `GeminiModelLister`**, in the same package
+   (`org.llm4s.config`). `GeminiProvider.modelLister` returns it, so code that reached the
+   lister through the descriptor is unaffected.
+2. **`DefaultConfig.DEFAULT_GEMINI_BASE_URL` is now `GeminiConfig.DEFAULT_BASE_URL`**, the
+   same place `DeepSeekConfig`, `CohereConfig` and `MistralConfig` keep theirs. The value is
+   unchanged.
+3. **`DefaultConfig.DEFAULT_VERTEXAI_LOCATION` is removed**; use
+   `VertexAIConfig.DEFAULT_LOCATION`, which already held the same `"us-central1"`.
+
+### What did *not* change
+
+Every configuration key and environment variable: `llm4s.providers.<name>` with
+`provider = "gemini"` or `"vertexai"`, the Vertex AI reading of `endpoint` (GCP project id),
+`organization` (region) and `apiKey` (credential file path), and `GOOGLE_APPLICATION_CREDENTIALS`
+for Vertex AI authentication.
+
+Strings that name Gemini without depending on its client stay in core and answer the same with
+or without `llm4s-gemini`: `ToolRegistry.getToolDefinitionsSafe("gemini")`, the `gemini/...`
+entries in the embedded model registry data, and config-policy allow-lists.
+
 ## Slice 4 (close-out): the last closed provider list, and `fromValues` stops throwing
 
 The last items deferred from slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)).

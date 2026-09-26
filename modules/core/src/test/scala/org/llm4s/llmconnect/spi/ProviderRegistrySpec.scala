@@ -127,18 +127,11 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
         "azure",
         "cohere",
         "deepseek",
-        "gemini",
         "mistral",
         "openai",
         "openrouter",
         "requesty",
-        "vertexai",
         "zai"
       )
-    }
-
-    "resolve the historical provider spellings" in {
-      ProviderRegistry.default.canonicalId("google") shouldBe ProviderId("gemini")
-      ProviderRegistry.default.canonicalId("vertex") shouldBe ProviderId("vertexai")
     }
   }

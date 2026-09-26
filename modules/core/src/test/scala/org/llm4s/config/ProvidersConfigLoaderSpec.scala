@@ -22,11 +22,11 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
           |      apiKey = "sk-openai"
           |      organization = "org-demo"
           |    }
-          |    gemini-main {
-          |      provider = "gemini"
-          |      model = "gemini-2.5-flash"
-          |      baseUrl = "https://generativelanguage.googleapis.com/v1beta"
-          |      apiKey = "google-key"
+          |    anthropic-main {
+          |      provider = "anthropic"
+          |      model = "claude-sonnet-4-5"
+          |      baseUrl = "https://api.anthropic.com"
+          |      apiKey = "anthropic-key"
           |    }
           |  }
           |}
@@ -37,7 +37,7 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
       result match
         case Right(cfg) =>
           cfg.selectedProvider.map(_.asName) shouldBe Some("openai-main")
-          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "gemini-main")
+          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "anthropic-main")
 
           val openai = cfg.namedProviders(ProviderName("openai-main"))
           openai.provider shouldBe ProviderId("openai")
@@ -46,11 +46,11 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
           openai.apiKey.map(_.asKey) shouldBe Some("sk-openai")
           openai.organization shouldBe Some("org-demo")
 
-          val gemini = cfg.namedProviders(ProviderName("gemini-main"))
-          gemini.provider shouldBe ProviderId("gemini")
-          gemini.model.asString shouldBe "gemini-2.5-flash"
-          gemini.baseUrl.map(_.asUrl) shouldBe Some("https://generativelanguage.googleapis.com/v1beta")
-          gemini.apiKey.map(_.asKey) shouldBe Some("google-key")
+          val anthropic = cfg.namedProviders(ProviderName("anthropic-main"))
+          anthropic.provider shouldBe ProviderId("anthropic")
+          anthropic.model.asString shouldBe "claude-sonnet-4-5"
+          anthropic.baseUrl.map(_.asUrl) shouldBe Some("https://api.anthropic.com")
+          anthropic.apiKey.map(_.asKey) shouldBe Some("anthropic-key")
         case Left(err) =>
           fail(s"Expected ProvidersConfig, got error: ${err.message}")
     }
@@ -60,17 +60,17 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "gemini-main"
+          |    provider = "anthropic-main"
           |    openai-main {
           |      provider = "openai"
           |      model = "gpt-4o-mini"
           |      apiKey = "sk-openai"
           |    }
-          |    gemini-main {
-          |      provider = "gemini"
-          |      model = "gemini-2.5-flash"
-          |      apiKey = "google-key"
-          |      baseUrl = "https://generativelanguage.googleapis.com/v1beta"
+          |    anthropic-main {
+          |      provider = "anthropic"
+          |      model = "claude-sonnet-4-5"
+          |      apiKey = "anthropic-key"
+          |      baseUrl = "https://api.anthropic.com"
           |    }
           |  }
           |}
@@ -90,10 +90,10 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
                 fail(s"Expected selected provider '${selectedProviderName.asName}' to exist in namedProviders")
               )
 
-          selectedProviderName.asName shouldBe "gemini-main"
-          selectedProvider.provider shouldBe ProviderId("gemini")
-          selectedProvider.model.asString shouldBe "gemini-2.5-flash"
-          selectedProvider.apiKey.map(_.asKey) shouldBe Some("google-key")
+          selectedProviderName.asName shouldBe "anthropic-main"
+          selectedProvider.provider shouldBe ProviderId("anthropic")
+          selectedProvider.model.asString shouldBe "claude-sonnet-4-5"
+          selectedProvider.apiKey.map(_.asKey) shouldBe Some("anthropic-key")
         case Left(err) =>
           fail(s"Expected ProvidersConfig, got error: ${err.message}")
     }
@@ -132,10 +132,10 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
           |      model = "gpt-4o-mini"
           |      apiKey = "sk-openai"
           |    }
-          |    gemini-main {
-          |      provider = "gemini"
-          |      model = "gemini-2.5-flash"
-          |      apiKey = "google-key"
+          |    anthropic-main {
+          |      provider = "anthropic"
+          |      model = "claude-sonnet-4-5"
+          |      apiKey = "anthropic-key"
           |    }
           |  }
           |}
@@ -146,7 +146,7 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
       result match
         case Right(cfg) =>
           cfg.selectedProvider shouldBe None
-          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "gemini-main")
+          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "anthropic-main")
         case Left(err) =>
           fail(s"Expected ProvidersConfig without selected provider, got error: ${err.message}")
     }
@@ -162,9 +162,9 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
           |      model = "gpt-4o-mini"
           |      apiKey = "sk-openai"
           |    }
-          |    broken-gemini {
-          |      provider = "gemini"
-          |      model = "gemini-2.5-flash"
+          |    broken-anthropic {
+          |      provider = "anthropic"
+          |      model = "claude-sonnet-4-5"
           |    }
           |  }
           |}
@@ -174,8 +174,8 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
 
       result match
         case Left(err) =>
-          err.message should include("Provider 'broken-gemini' (provider = gemini) is missing required fields")
-          err.message should include("- apiKey: set it in llm4s.conf under providers.broken-gemini.apiKey")
+          err.message should include("Provider 'broken-anthropic' (provider = anthropic) is missing required fields")
+          err.message should include("- apiKey: set it in llm4s.conf under providers.broken-anthropic.apiKey")
         case Right(cfg) =>
           fail(s"Expected invalid named provider to fail whole providers config, got config: $cfg")
     }

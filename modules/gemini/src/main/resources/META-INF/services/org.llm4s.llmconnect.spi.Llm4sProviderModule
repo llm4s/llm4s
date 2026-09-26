@@ -1,0 +1,7 @@
+# llm4s-gemini: the Google Gemini API and Vertex AI chat clients. Discovered by
+# ProviderRegistry.discover (#1131, #1132).
+#
+# If you bundle llm4s into a fat jar, this file must be CONCATENATED with the
+# services files of llm4s-core and any other provider modules, not overwritten;
+# see the note in llm4s-core's copy of this file.
+org.llm4s.llmconnect.provider.Llm4sGeminiModule

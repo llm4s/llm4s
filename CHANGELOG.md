@@ -22,6 +22,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`llm4s-gemini`: Gemini and Vertex AI leave `llm4s-core`** - the second provider module of
+  slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)). `GeminiClient`,
+  `GeminiProvider`, `GeminiConfig`, `VertexAIClient`, `VertexAIProvider`,
+  `VertexAIAuthProvider`, `VertexAIConfig` and the Gemini model lister move to the new
+  `llm4s-gemini` artifact, with their tests, the `gemini-main` example from `reference.conf`,
+  and an `Llm4sGeminiModule` declared in `META-INF/services` - so adding the dependency is the
+  whole of registration. Package names are unchanged, and the `google` and `vertex` provider
+  spellings still resolve.
+
+  Vertex AI ships in `llm4s-gemini` rather than its own module: it only calls Google's Gemini
+  models, in the same JSON format as the Gemini API, and differs only in endpoint and in its
+  OAuth authentication, which is hand-rolled rather than a Google SDK - so it adds no
+  dependency for Gemini-API users, and splitting it out later would be the breaking direction.
+
+  Three names move because the objects they were members of stay in core:
+  `ProviderModelListers.Gemini` is now `GeminiModelLister` (still in `org.llm4s.config`),
+  `DefaultConfig.DEFAULT_GEMINI_BASE_URL` is now `GeminiConfig.DEFAULT_BASE_URL`, and
+  `DefaultConfig.DEFAULT_VERTEXAI_LOCATION` is gone in favour of the existing
+  `VertexAIConfig.DEFAULT_LOCATION`. `ProviderRegistry.builtin` no longer includes Gemini or
+  Vertex AI; `ProviderRegistry.builtin.withModule(new Llm4sGeminiModule)` restores them where
+  classpath discovery is unavailable. No configuration key or environment variable changed.
+  See the [migration guide](docs/reference/migration.md#slice-5-llm4s-gemini).
+
 - **`ProviderConfig` factories return `Result` instead of throwing** - the other item deferred
   from slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)). Every `fromValues` on a
   `ProviderConfig` subtype (`OpenAIConfig`, `AzureConfig`, `AnthropicConfig`, `ZaiConfig`,

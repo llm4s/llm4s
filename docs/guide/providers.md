@@ -194,6 +194,16 @@ Claude models generally score higher on reasoning benchmarks.
 
 ## Google Gemini
 
+From the release after `0.4.1`, Gemini (and Vertex AI) support ships in its own artifact,
+alongside `llm4s-core`; adding it registers both providers:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-gemini" % llm4sVersion
+```
+
+In `0.4.1` and earlier they are part of `llm4s-core`. See the
+[installation guide](../getting-started/installation.md#for-gemini-and-vertex-ai).
+
 ### Setup
 
 1. **Get an API key** from [aistudio.google.com/apikey](https://aistudio.google.com/apikey)

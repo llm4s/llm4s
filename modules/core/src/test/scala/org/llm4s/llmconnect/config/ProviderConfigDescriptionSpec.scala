@@ -13,7 +13,8 @@ import org.scalatest.wordspec.AnyWordSpec
  * the compiler no longer checks that a new subtype has been considered
  * everywhere, so this spec is what keeps that guarantee: every config built into
  * core is checked here, and a new one must be added. A config that leaves core
- * takes its checks with it - `OllamaConfigSpec` in `llm4s-ollama`.
+ * takes its checks with it - `OllamaConfigSpec` in `llm4s-ollama`, `GeminiConfigSpec`
+ * in `llm4s-gemini`.
  */
 class ProviderConfigDescriptionSpec extends AnyWordSpec with Matchers:
 
@@ -21,14 +22,12 @@ class ProviderConfigDescriptionSpec extends AnyWordSpec with Matchers:
   private val azure     = AzureConfig("https://x.openai.azure.com", "k", "gpt-4o", "2025-01-01-preview", 128000, 4096)
   private val anthropic = AnthropicConfig("k", "claude-sonnet-4-5", "https://api.anthropic.com", 200000, 4096)
   private val zai       = ZaiConfig("k", "GLM-4.7", ZaiConfig.DEFAULT_BASE_URL, 200000, 4096)
-  private val gemini    = GeminiConfig("k", "gemini-2.0-flash", "https://x.invalid/v1beta", 1048576, 8192)
   private val deepseek  = DeepSeekConfig("k", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
   private val cohere    = CohereConfig("k", "command-r", CohereConfig.DEFAULT_BASE_URL, 128000, 4096)
   private val mistral   = MistralConfig("k", "mistral-large-latest", MistralConfig.DEFAULT_BASE_URL, 128000, 4096)
-  private val vertexai  = VertexAIConfig("proj", "us-central1", "gemini-2.0-flash", None, 1048576, 8192)
 
   private val all: Seq[ProviderConfig] =
-    Seq(openai, azure, anthropic, zai, gemini, deepseek, cohere, mistral, vertexai)
+    Seq(openai, azure, anthropic, zai, deepseek, cohere, mistral)
 
   "ProviderConfig.providerId" should {
     "name each provider in its canonical spelling" in {
@@ -36,11 +35,9 @@ class ProviderConfigDescriptionSpec extends AnyWordSpec with Matchers:
       azure.providerId shouldBe ProviderId("azure")
       anthropic.providerId shouldBe ProviderId("anthropic")
       zai.providerId shouldBe ProviderId("zai")
-      gemini.providerId shouldBe ProviderId("gemini")
       deepseek.providerId shouldBe ProviderId("deepseek")
       cohere.providerId shouldBe ProviderId("cohere")
       mistral.providerId shouldBe ProviderId("mistral")
-      vertexai.providerId shouldBe ProviderId("vertexai")
     }
 
     "be distinct across the configs core builds" in {
@@ -55,12 +52,9 @@ class ProviderConfigDescriptionSpec extends AnyWordSpec with Matchers:
       azure.endpointUrl shouldBe Some("https://x.openai.azure.com")
       anthropic.endpointUrl shouldBe Some("https://api.anthropic.com")
       zai.endpointUrl shouldBe Some(ZaiConfig.DEFAULT_BASE_URL)
-      gemini.endpointUrl shouldBe Some("https://x.invalid/v1beta")
       deepseek.endpointUrl shouldBe Some(DeepSeekConfig.DEFAULT_BASE_URL)
       cohere.endpointUrl shouldBe Some(CohereConfig.DEFAULT_BASE_URL)
       mistral.endpointUrl shouldBe Some(MistralConfig.DEFAULT_BASE_URL)
-      // Vertex derives its URL from the location; the old ConfigPolicy match returned None here.
-      vertexai.endpointUrl shouldBe Some("https://us-central1-aiplatform.googleapis.com/v1")
     }
   }
 
@@ -80,6 +74,5 @@ class ProviderConfigDescriptionSpec extends AnyWordSpec with Matchers:
     "leave provider-specific fields untouched" in {
       azure.withModel("m").asInstanceOf[AzureConfig].apiVersion shouldBe azure.apiVersion
       openai.withModel("m").asInstanceOf[OpenAIConfig].apiKey shouldBe openai.apiKey
-      vertexai.withModel("m").asInstanceOf[VertexAIConfig].projectId shouldBe vertexai.projectId
     }
   }

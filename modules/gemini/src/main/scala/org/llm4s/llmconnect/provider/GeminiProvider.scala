@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.config.{ DefaultConfig, ProviderModelLister, ProviderModelListers }
+import org.llm4s.config.{ GeminiModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, GeminiConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -17,9 +17,9 @@ object GeminiProvider extends ProviderDescriptor:
   override val aliases: Set[String] = Set("google")
 
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DefaultConfig.DEFAULT_GEMINI_BASE_URL)
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(GeminiConfig.DEFAULT_BASE_URL)
 
-  override val modelLister: Option[ProviderModelLister] = Some(ProviderModelListers.Gemini)
+  override val modelLister: Option[ProviderModelLister] = Some(GeminiModelLister)
 
   def buildConfig(providerName: String, section: NamedProviderConfig)(using
     ContextWindowResolver
