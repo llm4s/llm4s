@@ -123,7 +123,6 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
   "the default registry" should {
     "hold every provider built into llm4s-core" in {
       ProviderRegistry.default.ids shouldBe Seq(
-        "anthropic",
         "azure",
         "cohere",
         "deepseek",

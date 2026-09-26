@@ -1,7 +1,7 @@
 package org.llm4s.rag.evaluation
 
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
-import org.llm4s.llmconnect.config.{ AnthropicConfig, EmbeddingModelConfig, EmbeddingProviderConfig }
+import org.llm4s.llmconnect.config.{ DeepSeekConfig, EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, ProviderRegistry }
@@ -159,7 +159,7 @@ class RAGASFactorySpec extends AnyFlatSpec with Matchers {
   private def withFixture = ProviderRegistry.builtin.withEmbeddingProvider(FixtureEmbeddings)
 
   private def chat =
-    AnthropicConfig("k", "claude-sonnet-4-5", "https://api.anthropic.com", 200000, 4096)
+    DeepSeekConfig("k", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
 
   private def embeddings(model: String) =
     "fixture" -> EmbeddingProviderConfig("http://localhost:9999", model, "key")

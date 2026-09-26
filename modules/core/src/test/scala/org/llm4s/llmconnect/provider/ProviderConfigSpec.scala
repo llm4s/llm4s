@@ -78,44 +78,6 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers with EitherValues {
       .value shouldBe a[ConfigurationError]
   }
 
-  // ================================= ANTHROPIC CONFIG =================================
-
-  test("AnthropicConfig.fromValues creates config with correct model") {
-    val config = AnthropicConfig
-      .fromValues(
-        modelName = "claude-3-sonnet-20240229",
-        apiKey = "test-key",
-        baseUrl = "https://api.anthropic.com"
-      )
-      .value
-
-    config.model shouldBe "claude-3-sonnet-20240229"
-    config.apiKey shouldBe "test-key"
-  }
-
-  test("AnthropicConfig.fromValues sets large context window for claude-3") {
-    val config = AnthropicConfig
-      .fromValues(
-        modelName = "claude-3-opus-20240229",
-        apiKey = "test-key",
-        baseUrl = "https://api.anthropic.com"
-      )
-      .value
-
-    config.contextWindow shouldBe 200000
-  }
-
-  test("AnthropicConfig.fromValues fails for empty apiKey") {
-    AnthropicConfig
-      .fromValues(
-        modelName = "claude-3-sonnet",
-        apiKey = "",
-        baseUrl = "https://api.anthropic.com"
-      )
-      .left
-      .value shouldBe a[ConfigurationError]
-  }
-
   // ================================= AZURE CONFIG =================================
 
   test("AzureConfig.fromValues creates config with correct model") {
@@ -216,15 +178,12 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers with EitherValues {
 
   test("All config types implement ProviderConfig trait") {
     val openai: ProviderConfig = OpenAIConfig.fromValues("gpt-4o", "key", None, "https://api.openai.com/v1").value
-    val anthropic: ProviderConfig =
-      AnthropicConfig.fromValues("claude-3-sonnet", "key", "https://api.anthropic.com").value
     val azure: ProviderConfig =
       AzureConfig.fromValues("gpt-4o", "https://azure.openai.com", "key", "2024-02-15").value
     val zai: ProviderConfig =
       ZaiConfig.fromValues("GLM-4.7", "key", "https://api.z.ai/api/paas/v4").value
 
     openai.model shouldBe "gpt-4o"
-    anthropic.model shouldBe "claude-3-sonnet"
     azure.model shouldBe "gpt-4o"
     zai.model shouldBe "GLM-4.7"
   }
@@ -242,19 +201,18 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("fromValues reports the first blank field when several are blank") {
-    AnthropicConfig.fromValues("claude-3", "", "").left.value.message shouldBe "Anthropic apiKey must be non-empty"
+    DeepSeekConfig.fromValues("deepseek-chat", "", "").left.value.message shouldBe "DeepSeek apiKey must be non-empty"
   }
 
   test("every fromValues factory returns a Left for a blank required field") {
     val blanks: Seq[(String, Either[org.llm4s.error.LLMError, ProviderConfig])] = Seq(
-      "Azure endpoint"    -> AzureConfig.fromValues("gpt-4o", " ", "key", "2024-02-15"),
-      "Azure apiKey"      -> AzureConfig.fromValues("gpt-4o", "https://azure.example", " ", "2024-02-15"),
-      "Anthropic baseUrl" -> AnthropicConfig.fromValues("claude-3", "key", " "),
-      "DeepSeek apiKey"   -> DeepSeekConfig.fromValues("deepseek-chat", " ", DeepSeekConfig.DEFAULT_BASE_URL),
-      "DeepSeek baseUrl"  -> DeepSeekConfig.fromValues("deepseek-chat", "key", " "),
-      "Cohere apiKey"     -> CohereConfig.fromValues("command-r", " ", CohereConfig.DEFAULT_BASE_URL),
-      "Cohere baseUrl"    -> CohereConfig.fromValues("command-r", "key", " "),
-      "Mistral apiKey"    -> MistralConfig.fromValues("mistral-small-latest", " ", MistralConfig.DEFAULT_BASE_URL)
+      "Azure endpoint"   -> AzureConfig.fromValues("gpt-4o", " ", "key", "2024-02-15"),
+      "Azure apiKey"     -> AzureConfig.fromValues("gpt-4o", "https://azure.example", " ", "2024-02-15"),
+      "DeepSeek apiKey"  -> DeepSeekConfig.fromValues("deepseek-chat", " ", DeepSeekConfig.DEFAULT_BASE_URL),
+      "DeepSeek baseUrl" -> DeepSeekConfig.fromValues("deepseek-chat", "key", " "),
+      "Cohere apiKey"    -> CohereConfig.fromValues("command-r", " ", CohereConfig.DEFAULT_BASE_URL),
+      "Cohere baseUrl"   -> CohereConfig.fromValues("command-r", "key", " "),
+      "Mistral apiKey"   -> MistralConfig.fromValues("mistral-small-latest", " ", MistralConfig.DEFAULT_BASE_URL)
     )
 
     blanks.foreach { case (field, result) =>

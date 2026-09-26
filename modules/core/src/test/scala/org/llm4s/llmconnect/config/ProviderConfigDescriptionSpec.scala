@@ -14,26 +14,24 @@ import org.scalatest.wordspec.AnyWordSpec
  * everywhere, so this spec is what keeps that guarantee: every config built into
  * core is checked here, and a new one must be added. A config that leaves core
  * takes its checks with it - `OllamaConfigSpec` in `llm4s-ollama`, `GeminiConfigSpec`
- * in `llm4s-gemini`.
+ * in `llm4s-gemini`, `AnthropicConfigSpec` in `llm4s-anthropic`.
  */
 class ProviderConfigDescriptionSpec extends AnyWordSpec with Matchers:
 
-  private val openai    = OpenAIConfig("k", "gpt-4o", None, "https://api.openai.com/v1", 128000, 4096)
-  private val azure     = AzureConfig("https://x.openai.azure.com", "k", "gpt-4o", "2025-01-01-preview", 128000, 4096)
-  private val anthropic = AnthropicConfig("k", "claude-sonnet-4-5", "https://api.anthropic.com", 200000, 4096)
-  private val zai       = ZaiConfig("k", "GLM-4.7", ZaiConfig.DEFAULT_BASE_URL, 200000, 4096)
-  private val deepseek  = DeepSeekConfig("k", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
-  private val cohere    = CohereConfig("k", "command-r", CohereConfig.DEFAULT_BASE_URL, 128000, 4096)
-  private val mistral   = MistralConfig("k", "mistral-large-latest", MistralConfig.DEFAULT_BASE_URL, 128000, 4096)
+  private val openai   = OpenAIConfig("k", "gpt-4o", None, "https://api.openai.com/v1", 128000, 4096)
+  private val azure    = AzureConfig("https://x.openai.azure.com", "k", "gpt-4o", "2025-01-01-preview", 128000, 4096)
+  private val zai      = ZaiConfig("k", "GLM-4.7", ZaiConfig.DEFAULT_BASE_URL, 200000, 4096)
+  private val deepseek = DeepSeekConfig("k", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
+  private val cohere   = CohereConfig("k", "command-r", CohereConfig.DEFAULT_BASE_URL, 128000, 4096)
+  private val mistral  = MistralConfig("k", "mistral-large-latest", MistralConfig.DEFAULT_BASE_URL, 128000, 4096)
 
   private val all: Seq[ProviderConfig] =
-    Seq(openai, azure, anthropic, zai, deepseek, cohere, mistral)
+    Seq(openai, azure, zai, deepseek, cohere, mistral)
 
   "ProviderConfig.providerId" should {
     "name each provider in its canonical spelling" in {
       openai.providerId shouldBe ProviderId("openai")
       azure.providerId shouldBe ProviderId("azure")
-      anthropic.providerId shouldBe ProviderId("anthropic")
       zai.providerId shouldBe ProviderId("zai")
       deepseek.providerId shouldBe ProviderId("deepseek")
       cohere.providerId shouldBe ProviderId("cohere")
@@ -50,7 +48,6 @@ class ProviderConfigDescriptionSpec extends AnyWordSpec with Matchers:
       openai.endpointUrl shouldBe Some("https://api.openai.com/v1")
       // Azure's endpoint field, not a baseUrl - the distinction the old match existed to make.
       azure.endpointUrl shouldBe Some("https://x.openai.azure.com")
-      anthropic.endpointUrl shouldBe Some("https://api.anthropic.com")
       zai.endpointUrl shouldBe Some(ZaiConfig.DEFAULT_BASE_URL)
       deepseek.endpointUrl shouldBe Some(DeepSeekConfig.DEFAULT_BASE_URL)
       cohere.endpointUrl shouldBe Some(CohereConfig.DEFAULT_BASE_URL)

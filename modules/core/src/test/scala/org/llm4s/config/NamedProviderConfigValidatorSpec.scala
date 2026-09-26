@@ -78,27 +78,6 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           fail(s"Expected Azure NamedProviderConfig, got error: ${err.message}")
     }
 
-    "validate and normalize an Anthropic named provider section" in {
-      validate(
-        "anthropic-main",
-        RawNamedProviderSection(
-          provider = Some("anthropic"),
-          model = Some("claude-sonnet-4-20250514"),
-          baseUrl = Some("https://api.anthropic.com"),
-          apiKey = Some("sk-ant-test"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
-        )
-      ) match
-        case Right(cfg) =>
-          cfg.provider shouldBe ProviderId("anthropic")
-          cfg.model.asString shouldBe "claude-sonnet-4-20250514"
-          cfg.apiKey.map(_.asKey) shouldBe Some("sk-ant-test")
-        case Left(err) =>
-          fail(s"Expected Anthropic NamedProviderConfig, got error: ${err.message}")
-    }
-
     "validate and normalize a Z.ai named provider section" in {
       validate(
         "zai-main",

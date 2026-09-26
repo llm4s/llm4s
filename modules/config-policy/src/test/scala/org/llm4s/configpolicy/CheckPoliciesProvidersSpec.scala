@@ -34,6 +34,11 @@ class CheckPoliciesProvidersSpec extends AnyWordSpec with Matchers {
         Right(ProviderId("gemini"))
     }
 
+    "resolve an anthropic config" in {
+      providerIdFor("""provider = "anthropic", model = "claude-sonnet-4-5", apiKey = "test-key"""") shouldBe
+        Right(ProviderId("anthropic"))
+    }
+
     "resolve a vertexai config" in {
       providerIdFor("""provider = "vertexai", model = "gemini-2.0-flash", endpoint = "my-project"""") shouldBe
         Right(ProviderId("vertexai"))

@@ -1,5 +1,73 @@
 # Migration Guide
 
+## Slice 5: `llm4s-anthropic`
+
+The third provider module of slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)),
+carrying the Anthropic Claude chat provider (`provider = "anthropic"`). It is in the build but
+not yet in a release; `0.4.1` and earlier still ship it inside `llm4s-core`.
+
+With it goes the Anthropic Java SDK (`com.anthropic:anthropic-java`): `llm4s-core` no longer
+depends on it, so an application that does not use Anthropic no longer carries it. It was also
+declared, unused, by `llm4s-workspace-client`, and has been removed from there too.
+
+### What moved
+
+| Code | Now in |
+|---|---|
+| `AnthropicClient`, `AnthropicProvider` (`org.llm4s.llmconnect.provider`) | `llm4s-anthropic` |
+| `AnthropicConfig` (`org.llm4s.llmconnect.config`) | `llm4s-anthropic` |
+| `ProviderModelListers.Anthropic` → `AnthropicModelLister` (`org.llm4s.config`) | `llm4s-anthropic` |
+| `DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL` → `AnthropicConfig.DEFAULT_BASE_URL` | `llm4s-anthropic` |
+| `ConfigKeys.ANTHROPIC_API_KEY`, `ConfigKeys.ANTHROPIC_BASE_URL` → `AnthropicConfigKeys` (`org.llm4s.config`) | `llm4s-anthropic` |
+| the commented `anthropic-main` example in `reference.conf` | `llm4s-anthropic`'s `reference.conf` |
+
+Package names are unchanged, so `import org.llm4s.llmconnect.config.AnthropicConfig` keeps
+working once the dependency is added:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-anthropic" % version
+```
+
+### Registration is the dependency
+
+`llm4s-anthropic` declares `Llm4sAnthropicModule` in its `META-INF/services`, so
+`ProviderRegistry.default` finds it and `provider = "anthropic"` resolves as before. Without the
+dependency it fails with the registry's error, which says the provider is not registered and
+names the providers that are.
+
+`ProviderRegistry.builtin` no longer includes Anthropic. If you used `builtin` to avoid
+classpath discovery (a shaded fat jar, typically), add the module explicitly:
+
+```scala
+given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sAnthropicModule)
+```
+
+### Source breaks
+
+Three names could not keep their fully-qualified path, because they were members of objects
+that stay in core:
+
+1. **`ProviderModelListers.Anthropic` is now `AnthropicModelLister`**, in the same package
+   (`org.llm4s.config`). `AnthropicProvider.modelLister` returns it, so code that reached the
+   lister through the descriptor is unaffected.
+2. **`DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL` is now `AnthropicConfig.DEFAULT_BASE_URL`**, the
+   same place `GeminiConfig`, `DeepSeekConfig` and `MistralConfig` keep theirs. The value is
+   unchanged.
+3. **`ConfigKeys.ANTHROPIC_API_KEY` and `ConfigKeys.ANTHROPIC_BASE_URL` are now
+   `AnthropicConfigKeys.ANTHROPIC_API_KEY` and `AnthropicConfigKeys.ANTHROPIC_BASE_URL`**, in the
+   same package, as `ConfigKeys.OLLAMA_*` became `OllamaConfigKeys`. The strings are unchanged.
+
+### What did *not* change
+
+Every configuration key and environment variable: `llm4s.providers.<name>` with
+`provider = "anthropic"`, `apiKey` and the optional `baseUrl`.
+
+What names Anthropic without depending on its client stays in core and answers the same with or
+without `llm4s-anthropic`: `ToolRegistry.getToolDefinitionsSafe("anthropic")`, the
+`anthropic/...` entries in the embedded model registry data, the `sk-ant-` secret pattern,
+config-policy allow-lists, and `AnthropicStreamingHandler` - the SDK-free SSE parser behind
+`StreamingResponseHandler.forProvider("anthropic")`, which `AnthropicClient` does not use.
+
 ## Slice 5: `llm4s-gemini`
 
 The second provider module of slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)),

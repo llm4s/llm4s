@@ -34,16 +34,6 @@ class ConfigRedactionSpec extends AnyFlatSpec with Matchers with EitherValues {
     (azure.toString should not).include(secret)
     azure.toString should include("***")
 
-    val anthropic = AnthropicConfig
-      .fromValues(
-        modelName = "claude-3-5-sonnet-20241022",
-        apiKey = secret,
-        baseUrl = "https://example.invalid"
-      )
-      .value
-    (anthropic.toString should not).include(secret)
-    anthropic.toString should include("***")
-
     val zai = ZaiConfig
       .fromValues(
         modelName = "glm-4.5",

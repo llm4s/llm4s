@@ -56,12 +56,6 @@ class ProviderConfigConstructionTest extends AnyFunSuite with Matchers with Eith
     res.isLeft shouldBe true
   }
 
-  test("AnthropicConfig.load returns Left when api key missing") {
-    val res =
-      AnthropicConfig.fromValues("claude-3", "", "https://api.anthropic.com")
-    res.isLeft shouldBe true
-  }
-
   test("OpenAIConfig.fromValues constructs an OpenAI config") {
     val openAi = OpenAIConfig.fromValues("gpt-4o", "sk", None, DEFAULT_OPENAI_BASE_URL).value
     openAi shouldBe a[OpenAIConfig]

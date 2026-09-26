@@ -143,9 +143,9 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
 
   "a provider that is registered for chat only" should {
     "not be configurable as an embedding provider" in {
-      val error = load("""llm4s { embeddings { model = "anthropic/whatever" } }""").left.value.message
+      val error = load("""llm4s { embeddings { model = "deepseek/whatever" } }""").left.value.message
 
-      error should include("Embedding provider 'anthropic'")
+      error should include("Embedding provider 'deepseek'")
       error should include("is not registered")
     }
   }
