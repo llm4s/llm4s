@@ -25,7 +25,7 @@ object Versions {
   val pureconfig = "0.17.10"
 
   val openaiJava  = "4.69.3"
-  val anthropic   = "2.42.0"
+  val anthropic   = "2.65.0"
   val jtokkit     = "1.1.0"
   val websocket   = "1.6.0"
   val ujson       = "4.4.3"
