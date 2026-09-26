@@ -58,7 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in the DeepSeek, Z.ai and OpenRouter clients (continuations carry only an `index`, and the
   missing id was defaulted to `""`, which `StreamingAccumulator` skips). The shared client maps
   each index to its call's id for the life of the stream, and a streamed `Completion` now
-  reports its tool calls in `toolCalls` as a non-streaming one does. See the
+  reports its tool calls in `toolCalls` as a non-streaming one does.
+
+  `llm4s-config-policy`'s `dev` preset now allows `openai-compatible`; the `prod` preset does not,
+  since the provider can point at any endpoint - production allows it explicitly. See the
   [migration guide](docs/reference/migration.md#slice-5-llm4s-openai-compatible).
 
 - **`llm4s-openai`: OpenAI, Azure OpenAI and Requesty leave `llm4s-core`, and take the Azure

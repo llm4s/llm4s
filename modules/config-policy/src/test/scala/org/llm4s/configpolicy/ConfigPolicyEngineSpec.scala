@@ -1,7 +1,7 @@
 package org.llm4s.configpolicy
 
 import org.scalatest.EitherValues
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, OllamaConfig, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, OllamaConfig, OpenAICompatibleConfig, OpenAIConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -20,6 +20,23 @@ class ConfigPolicyEngineSpec extends AnyWordSpec with Matchers with EitherValues
         CatalogEnvironment.Dev
       )
       violations shouldBe empty
+    }
+
+    "allow the generic openai-compatible provider under the dev preset" in {
+      val cfg = OpenAICompatibleConfig.fromValues("qwen", "http://localhost:8000/v1").value
+      ConfigPolicyEngine.check(cfg, ConfigPolicy.devSandbox, CatalogEnvironment.Dev) shouldBe empty
+    }
+
+    "reject the generic openai-compatible provider under the prod preset unless explicitly allowed" in {
+      val cfg = OpenAICompatibleConfig.fromValues("gpt-4o-mini", "https://gateway.example/v1").value
+      ConfigPolicyEngine.check(cfg, ConfigPolicy.prodSafeDefaults, CatalogEnvironment.Prod) should contain(
+        PolicyViolation("allowedProviders", "Provider 'openai-compatible' is not allowed")
+      )
+
+      val optedIn = ConfigPolicy.prodSafeDefaults
+        .withAllowedProviders("openai", "anthropic", "azure", "gemini", "deepseek", "openai-compatible")
+        .withAllowedModelPatterns("openai-compatible/gpt-4o-mini")
+      ConfigPolicyEngine.check(cfg, optedIn, CatalogEnvironment.Prod) shouldBe empty
     }
 
     "fail when provider is not in allowlist" in {

@@ -27,11 +27,20 @@ final case class ConfigPolicy(
 object ConfigPolicy {
   val permissive: ConfigPolicy = ConfigPolicy()
 
+  /**
+   * Dev: the common providers, plus the generic `openai-compatible` provider for local servers
+   * (vLLM, LM Studio, llama.cpp) and experiments.
+   */
   val devSandbox: ConfigPolicy =
     ConfigPolicy()
-      .withAllowedProviders("openai", "anthropic", "ollama", "gemini", "deepseek")
+      .withAllowedProviders("openai", "anthropic", "ollama", "gemini", "deepseek", "openai-compatible")
       .withMaxContextWindow(CatalogEnvironment.Dev, 128000)
 
+  /**
+   * Prod: named providers with pinned model patterns. The generic `openai-compatible` provider is
+   * deliberately '''not''' allowed: it can point at any endpoint, so production must opt in by
+   * adding it (ideally with `withRequiredBaseUrlPattern` for the endpoints it may use).
+   */
   val prodSafeDefaults: ConfigPolicy =
     ConfigPolicy()
       .withAllowedProviders("openai", "anthropic", "azure", "gemini", "deepseek")

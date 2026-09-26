@@ -493,6 +493,10 @@ provider-specific decoding, so `CompletionOptions.reasoning` is ignored and thin
 reply are not read. A provider that needs those gets its own dialect in `llm4s-openai-compatible`,
 as DeepSeek, Z.ai and OpenRouter have.
 
+If you gate configs with `llm4s-config-policy`, its `dev` preset allows `openai-compatible` and its
+`prod` preset does not: since the provider can point anywhere, production must allow it explicitly
+(see `modules/config-policy/README.md`).
+
 ---
 
 ## Cohere
