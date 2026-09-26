@@ -28,7 +28,8 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
   private val expectations: Seq[(ProviderDescriptor, String, String)] = Seq(
     (OpenAICompatibleProvider, "OpenAICompatibleConfig", "OpenAICompatibleClient"),
     (DeepSeekProvider, "DeepSeekConfig", "DeepSeekClient"),
-    (ZaiProvider, "ZaiConfig", "ZaiClient")
+    (ZaiProvider, "ZaiConfig", "ZaiClient"),
+    (OpenRouterProvider, "OpenAIConfig", "OpenRouterClient")
   )
 
   private val chatIds = expectations.map(_._1.id.asString)
@@ -112,6 +113,7 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
       }
       OpenAICompatibleProvider.modelLister shouldBe defined
       DeepSeekProvider.modelLister shouldBe defined
+      OpenRouterProvider.modelLister shouldBe defined
       // Z.ai had no lister in core either.
       ZaiProvider.modelLister shouldBe None
     }

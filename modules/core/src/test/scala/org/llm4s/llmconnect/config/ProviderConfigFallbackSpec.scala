@@ -18,18 +18,6 @@ class ProviderConfigFallbackSpec extends AnyFlatSpec with Matchers with EitherVa
   val apiKey  = "sk-test"
   val baseUrl = "https://api.example.com"
 
-  "OpenAIConfig fallback" should "return 128000 for gpt-4o-like model" in {
-    val cfg = OpenAIConfig.fromValues("patch-cov-gpt-4o", apiKey, None, baseUrl).value
-    cfg.contextWindow shouldBe 128000
-    cfg.reserveCompletion shouldBe 4096
-  }
-
-  it should "return 8192 for unknown model" in {
-    val cfg = OpenAIConfig.fromValues("patch-cov-unknown", apiKey, None, baseUrl).value
-    cfg.contextWindow shouldBe 8192
-    cfg.reserveCompletion shouldBe 4096
-  }
-
   "CohereConfig fallback" should "return 128000 for any unregistered model" in {
     val cfg = CohereConfig.fromValues("patch-cov-unknown", apiKey, baseUrl).value
     cfg.contextWindow shouldBe 128000

@@ -3,7 +3,6 @@ package org.llm4s.config
 import org.llm4s.error.ValidationError
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.http.HttpResponse.*
-import org.llm4s.config.DefaultConfig
 import org.llm4s.types.{ Result, TryOps }
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderId }
@@ -84,14 +83,6 @@ object ProviderModelListers:
           apiKeyRequired = apiKeyRequired,
           httpClient = httpClient
         )
-
-  /** Model lister for the OpenRouter provider. */
-  val OpenRouter: ProviderModelLister =
-    openAICompatible(
-      ProviderId("openrouter"),
-      DefaultConfig.DEFAULT_OPENROUTER_BASE_URL,
-      extraHeaders = Map("HTTP-Referer" -> "https://github.com/llm4s/llm4s", "X-Title" -> "LLM4S")
-    )
 
   /** Model lister for the Mistral provider using the OpenAI-compatible models endpoint. */
   val Mistral: ProviderModelLister =

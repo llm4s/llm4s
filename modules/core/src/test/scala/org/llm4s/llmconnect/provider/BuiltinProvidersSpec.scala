@@ -31,7 +31,6 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
 
   /** Descriptor, the config class it builds, and the client class that config produces. */
   private val expectations: Seq[(ProviderDescriptor, String, String)] = Seq(
-    (OpenRouterProvider, "OpenAIConfig", "OpenRouterClient"),
     (CohereProvider, "CohereConfig", "CohereClient"),
     (MistralProvider, "MistralConfig", "MistralClient")
   )

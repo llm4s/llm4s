@@ -24,36 +24,9 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
       apiVersion = None
     )
 
-  test("OpenRouter lister includes required OpenRouter headers") {
-    val config = namedConfig(ProviderId("openrouter"), "openai/gpt-4o-mini", apiKey = Some("or-key"))
-    val responseBody =
-      """{
-        |  "data": [
-        |    {
-        |      "id": "openai/gpt-4o-mini",
-        |      "created": 1710000000,
-        |      "owned_by": "openrouter"
-        |    }
-        |  ]
-        |}""".stripMargin
-
-    val mockHttp = MockHttpClient(HttpResponse(200, responseBody, Map.empty))
-    val result   = ProviderModelListers.OpenRouter.listModels(config, mockHttp)
-
-    result match
-      case Right(models) =>
-        models.map(_.name.asString) shouldBe List("openai/gpt-4o-mini")
-        models.map(_.provider) shouldBe List(ProviderId("openrouter"))
-        mockHttp.lastUrl shouldBe Some("https://openrouter.ai/api/v1/models")
-        mockHttp.lastHeaders shouldBe defined
-        mockHttp.lastHeaders.get should contain("HTTP-Referer" -> "https://github.com/llm4s/llm4s")
-        mockHttp.lastHeaders.get should contain("X-Title" -> "LLM4S")
-      case Left(err) =>
-        fail(s"Expected discovered OpenRouter models, got error: ${err.message}")
-  }
-
-  // The DeepSeek lister moved to llm4s-openai-compatible as `DeepSeekModelLister`, and its
-  // test to that module's `OpenAICompatibleModelListerSpec` (#1132).
+  // The OpenRouter and DeepSeek listers moved to llm4s-openai-compatible as
+  // `OpenRouterModelLister` and `DeepSeekModelLister`, and their tests
+  // to that module's `OpenAICompatibleModelListerSpec` (#1132).
 
   test("Mistral lister discovers models from /v1/models") {
     val config = namedConfig(ProviderId("mistral"), "mistral-large-latest", apiKey = Some("mistral-key"))

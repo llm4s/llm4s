@@ -8,8 +8,8 @@ package org.llm4s.config
  * `ConfigKeys.AZURE_*` in `llm4s-core` until the providers moved to their own
  * module ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]): a key belongs
  * with the code that reads it, so that `ConfigKeys` does not name variables for
- * a provider that may not be on the classpath. `ConfigKeys.OPENROUTER_BASE_URL`
- * stays in core with OpenRouter, and still names `OPENAI_BASE_URL`.
+ * a provider that may not be on the classpath. OpenRouter's alias is
+ * `OpenAICompatibleConfigKeys.OPENROUTER_BASE_URL` in `llm4s-openai-compatible`.
  */
 object OpenAIConfigKeys {
   // ---- OpenAI -------------------------------------------------------------

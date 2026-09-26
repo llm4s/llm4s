@@ -16,6 +16,17 @@ class OpenAICompatibleConfigRedactionSpec extends AnyFlatSpec with Matchers with
   private val secret = "SECRET_TEST_VALUE_12345"
 
   "Provider config toString" should "not leak apiKey values" in {
+    val openai = OpenAIConfig
+      .fromValues(
+        modelName = "gpt-4",
+        apiKey = secret,
+        organization = Some("org"),
+        baseUrl = "https://example.invalid/v1"
+      )
+      .value
+    (openai.toString should not).include(secret)
+    openai.toString should include("***")
+
     val zai = ZaiConfig
       .fromValues(
         modelName = "glm-4.5",

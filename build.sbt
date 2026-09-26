@@ -637,12 +637,13 @@ lazy val openaiCompatible = (project in file("modules/openai-compatible"))
 // The OpenAI family carves fourth, split by shared client: OpenAI, Azure and Requesty all run
 // on `OpenAIClient` and the Azure OpenAI SDK, so they move together and take the SDK out of
 // core - after this core has no vendor SDK at all. OpenRouter, DeepSeek and Z.ai speak the
-// same wire format but have their own SDK-free clients, so they stay in core for their own
-// modules later, and with them `OpenAIConfig` (which OpenRouter shares) and
-// `OpenAIStreamingHandler` (behind `StreamingResponseHandler.forProvider`).
+// same wire format without an SDK, so they are `llm4s-openai-compatible` above, which also
+// holds `OpenAIConfig` (OpenRouter builds one). `openai` depends on that module for the config;
+// it adds no SDK. The reverse edge must never exist - it would put the Azure SDK on the
+// classpath of every OpenAI-compatible user.
 
 lazy val openai = (project in file("modules/openai"))
-  .dependsOn(core % "compile->compile;test->test")
+  .dependsOn(core % "compile->compile;test->test", openaiCompatible)
   .settings(
     name := "llm4s-openai",
     commonSettings,

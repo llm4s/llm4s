@@ -3,7 +3,6 @@ package org.llm4s.llmconnect
 import org.scalatest.EitherValues
 import java.time.Instant
 
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider }
 import org.scalatest.funsuite.AnyFunSuite
@@ -12,9 +11,6 @@ import org.scalatest.matchers.should.Matchers
 class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
   private val registryService        = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
   private given ModelRegistryService = registryService
-
-  private given ContextWindowResolver =
-    ContextWindowResolver(registryService)
 
   test("LlmClientOptions.default keeps exchange logging disabled") {
     LlmClientOptions.default.exchangeLogging shouldBe ProviderExchangeLogging.Disabled
@@ -28,12 +24,12 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("LLMConnect.getClient accepts explicit options for config-driven construction") {
-    val cfg = OpenAIConfig
+    // This used an OpenRouter OpenAIConfig until OpenRouter and OpenAIConfig left core (#1132).
+    val cfg = FixtureChatConfig
       .fromValues(
-        modelName = "gpt-4o",
+        model = "fixture-model",
         apiKey = "sk-test",
-        organization = None,
-        baseUrl = "https://openrouter.ai/api/v1"
+        baseUrl = FixtureChatProvider.DefaultBaseUrl
       )
       .value
     val options = LlmClientOptions(

@@ -129,8 +129,7 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
       ProviderRegistry.default.ids shouldBe Seq(
         "cohere",
         "fixturechat",
-        "mistral",
-        "openrouter"
+        "mistral"
       )
     }
   }

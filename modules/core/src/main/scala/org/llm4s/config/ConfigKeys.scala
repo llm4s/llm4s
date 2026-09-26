@@ -14,20 +14,8 @@ package org.llm4s.config
  *  - `EMBEDDING_MODEL` — required when using embeddings; format `provider/model`.
  */
 object ConfigKeys {
-  // OpenAI, Requesty and Azure OpenAI keys are `OpenAIConfigKeys` in `llm4s-openai` (#1132).
-
-  // ---- OpenRouter (OpenAI-compatible) -------------------------------------
-
-  /**
-   * OpenRouter base URL alias.
-   *
-   * OpenRouter uses the `OPENAI_BASE_URL` variable - there is no separate
-   * `OPENROUTER_BASE_URL`. Point `OPENAI_BASE_URL` at your OpenRouter endpoint
-   * and configure a named provider with `provider = "openrouter"`.
-   */
-  val OPENROUTER_BASE_URL = "OPENAI_BASE_URL" // alias via base URL
-
-  // DeepSeek keys are `OpenAICompatibleConfigKeys` in `llm4s-openai-compatible` (#1132).
+  // OpenAI, Requesty and Azure OpenAI keys are `OpenAIConfigKeys` in `llm4s-openai`, and the
+  // OpenRouter and DeepSeek keys `OpenAICompatibleConfigKeys` in `llm4s-openai-compatible` (#1132).
 
   // ---- Langfuse tracing ---------------------------------------------------
 

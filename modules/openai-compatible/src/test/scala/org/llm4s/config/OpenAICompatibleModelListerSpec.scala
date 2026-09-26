@@ -32,6 +32,34 @@ class OpenAICompatibleModelListerSpec extends AnyFunSuite with Matchers:
 
   private val modelsBody = """{ "data": [ { "id": "some-model", "created": 1710000000, "owned_by": "x" } ] }"""
 
+  test("OpenRouter lister includes required OpenRouter headers") {
+    val config = namedConfig(ProviderId("openrouter"), "openai/gpt-4o-mini", apiKey = Some("or-key"))
+    val responseBody =
+      """{
+        |  "data": [
+        |    {
+        |      "id": "openai/gpt-4o-mini",
+        |      "created": 1710000000,
+        |      "owned_by": "openrouter"
+        |    }
+        |  ]
+        |}""".stripMargin
+
+    val mockHttp = MockHttpClient(HttpResponse(200, responseBody, Map.empty))
+    val result   = OpenRouterModelLister.listModels(config, mockHttp)
+
+    result match
+      case Right(models) =>
+        models.map(_.name.asString) shouldBe List("openai/gpt-4o-mini")
+        models.map(_.provider) shouldBe List(ProviderId("openrouter"))
+        mockHttp.lastUrl shouldBe Some("https://openrouter.ai/api/v1/models")
+        mockHttp.lastHeaders shouldBe defined
+        mockHttp.lastHeaders.get should contain("HTTP-Referer" -> "https://github.com/llm4s/llm4s")
+        mockHttp.lastHeaders.get should contain("X-Title" -> "LLM4S")
+      case Left(err) =>
+        fail(s"Expected discovered OpenRouter models, got error: ${err.message}")
+  }
+
   test("DeepSeek lister discovers models from /models") {
     val config = namedConfig(ProviderId("deepseek"), "deepseek-chat", apiKey = Some("ds-key"))
     val responseBody =

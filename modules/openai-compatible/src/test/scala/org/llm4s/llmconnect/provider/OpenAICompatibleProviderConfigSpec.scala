@@ -18,6 +18,16 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
 
   // ============================ fromValues VALIDATION ============================
 
+  test("fromValues names the provider and the field, and reports the field as missing") {
+    val error = OpenAIConfig.fromValues("gpt-4o", "   ", None, "https://api.openai.com/v1").left.value
+
+    error.message shouldBe "OpenAI apiKey must be non-empty"
+    error match {
+      case ConfigurationError(_, missingKeys) => missingKeys shouldBe List("apiKey")
+      case other                              => fail(s"expected a ConfigurationError, got $other")
+    }
+  }
+
   test("fromValues reports the first blank field when several are blank") {
     DeepSeekConfig.fromValues("deepseek-chat", "", "").left.value.message shouldBe "DeepSeek apiKey must be non-empty"
   }
@@ -35,6 +45,73 @@ class OpenAICompatibleProviderConfigSpec extends AnyFunSuite with Matchers with 
         result.left.value.message shouldBe s"$field must be non-empty"
       }
     }
+  }
+
+  // ================================= OPENAI CONFIG =================================
+
+  test("OpenAIConfig.fromValues creates config with correct model") {
+    val config = OpenAIConfig
+      .fromValues(
+        modelName = "gpt-4o",
+        apiKey = "test-key",
+        organization = Some("test-org"),
+        baseUrl = "https://api.openai.com/v1"
+      )
+      .value
+
+    config.model shouldBe "gpt-4o"
+    config.apiKey shouldBe "test-key"
+    config.organization shouldBe Some("test-org")
+  }
+
+  test("OpenAIConfig.fromValues sets correct context window for gpt-4o") {
+    val config = OpenAIConfig
+      .fromValues(
+        modelName = "gpt-4o",
+        apiKey = "test-key",
+        organization = None,
+        baseUrl = "https://api.openai.com/v1"
+      )
+      .value
+
+    config.contextWindow shouldBe 128000
+  }
+
+  test("OpenAIConfig.fromValues sets correct context window for gpt-4") {
+    val config = OpenAIConfig
+      .fromValues(
+        modelName = "gpt-4",
+        apiKey = "test-key",
+        organization = None,
+        baseUrl = "https://api.openai.com/v1"
+      )
+      .value
+
+    config.contextWindow shouldBe 8192
+  }
+
+  test("OpenAIConfig.fromValues fails for empty apiKey") {
+    OpenAIConfig
+      .fromValues(
+        modelName = "gpt-4o",
+        apiKey = "",
+        organization = None,
+        baseUrl = "https://api.openai.com/v1"
+      )
+      .left
+      .value shouldBe a[ConfigurationError]
+  }
+
+  test("OpenAIConfig.fromValues fails for empty baseUrl") {
+    OpenAIConfig
+      .fromValues(
+        modelName = "gpt-4o",
+        apiKey = "test-key",
+        organization = None,
+        baseUrl = ""
+      )
+      .left
+      .value shouldBe a[ConfigurationError]
   }
 
   // ================================= ZAI CONFIG =================================

@@ -3,6 +3,7 @@ package org.llm4s.config
 import org.llm4s.config.ProvidersConfigModel.{ BaseUrl, NamedProviderConfig, ProviderId }
 import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAICompatibleConfig }
+import org.llm4s.llmconnect.provider.{ OpenRouterDialect, OpenRouterProvider }
 import org.llm4s.types.Result
 
 /**
@@ -14,6 +15,24 @@ import org.llm4s.types.Result
 object DeepSeekModelLister extends ProviderModelLister:
   private val delegate =
     ProviderModelListers.openAICompatible(ProviderId("deepseek"), DeepSeekConfig.DEFAULT_BASE_URL)
+
+  def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
+    delegate.listModels(config, httpClient)
+
+/**
+ * Model lister for the OpenRouter provider, sending the `HTTP-Referer` and
+ * `X-Title` headers OpenRouter asks for.
+ *
+ * This was `ProviderModelListers.OpenRouter` until the provider moved to
+ * `llm4s-openai-compatible` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
+ */
+object OpenRouterModelLister extends ProviderModelLister:
+  private val delegate =
+    ProviderModelListers.openAICompatible(
+      ProviderId("openrouter"),
+      OpenRouterProvider.DEFAULT_BASE_URL,
+      extraHeaders = OpenRouterDialect.headers.toMap
+    )
 
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
     delegate.listModels(config, httpClient)

@@ -7,9 +7,8 @@ package org.llm4s.config
  * corresponding environment variables or config keys are not set.
  */
 object DefaultConfig {
-  val DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-  val DEFAULT_LANGFUSE_URL        = "https://cloud.langfuse.com/api/public/ingestion"
-  val DEFAULT_LANGFUSE_ENV        = "production"
-  val DEFAULT_LANGFUSE_RELEASE    = "1.0.0"
-  val DEFAULT_LANGFUSE_VERSION    = "1.0.0"
+  val DEFAULT_LANGFUSE_URL     = "https://cloud.langfuse.com/api/public/ingestion"
+  val DEFAULT_LANGFUSE_ENV     = "production"
+  val DEFAULT_LANGFUSE_RELEASE = "1.0.0"
+  val DEFAULT_LANGFUSE_VERSION = "1.0.0"
 }

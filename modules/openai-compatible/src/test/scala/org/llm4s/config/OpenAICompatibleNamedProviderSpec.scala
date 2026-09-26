@@ -47,6 +47,27 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           fail(s"Expected DeepSeek NamedProviderConfig, got error: ${err.message}")
     }
 
+    "validate and normalize an OpenRouter named provider section" in {
+      validate(
+        "openrouter-main",
+        RawNamedProviderSection(
+          provider = Some("openrouter"),
+          model = Some("openai/gpt-4o-mini"),
+          baseUrl = Some("https://openrouter.ai/api/v1"),
+          apiKey = Some("or-key"),
+          organization = None,
+          endpoint = None,
+          apiVersion = None,
+        )
+      ) match
+        case Right(cfg) =>
+          cfg.provider shouldBe ProviderId("openrouter")
+          cfg.model.asString shouldBe "openai/gpt-4o-mini"
+          cfg.apiKey.map(_.asKey) shouldBe Some("or-key")
+        case Left(err) =>
+          fail(s"Expected OpenRouter NamedProviderConfig, got error: ${err.message}")
+    }
+
     "validate and normalize a Z.ai named provider section" in {
       validate(
         "zai-main",
