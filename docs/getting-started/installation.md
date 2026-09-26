@@ -285,8 +285,10 @@ libraryDependencies += "org.llm4s" %% "llm4s-openai" % llm4sVersion
 
 Carries the three providers that share `OpenAIClient` - OpenAI, Azure OpenAI and Requesty - the
 OpenAI embedding provider, and OpenAI and Requesty model listing. **This is the module that
-brings the Azure OpenAI SDK** (`com.azure:azure-ai-openai`), which used to sit on every
-`llm4s-core` user's classpath; with it gone, `llm4s-core` depends on no vendor SDK. Adding it is
+brings OpenAI's Java SDK** (`com.openai:openai-java`, with OkHttp, Jackson and the Kotlin
+standard library), which serves Azure OpenAI as well. It replaced Microsoft's deprecated
+`com.azure:azure-ai-openai`, which used to sit on every `llm4s-core` user's classpath;
+`llm4s-core` depends on no vendor SDK. Adding it is
 all the registration there is: the module declares itself to the provider registry, so
 `provider = "openai"`, `"azure"` and `"requesty"`, and `EMBEDDING_MODEL=openai/<model>`, resolve
 with no code change. Without it, they fail with an error saying the provider is not registered

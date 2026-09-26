@@ -289,7 +289,11 @@ Great for cost-conscious projects and high-volume applications.
 ## Azure OpenAI
 
 Azure OpenAI ships in `llm4s-openai` with OpenAI itself, from the release after `0.4.1`; see
-[OpenAI](#openai) above.
+[OpenAI](#openai) above. It runs on OpenAI's Java SDK (`com.openai:openai-java`), which covers
+Azure too: requests go to `<endpoint>/openai/deployments/<deployment>/chat/completions` with an
+`api-key` header and the `api-version` query parameter. `apiVersion` accepts the wire form
+(`2024-10-21`) or the constant name (`V2024_10_21`); an endpoint ending in `/openai/v1` uses
+Azure's unified v1 API.
 
 ### Setup
 

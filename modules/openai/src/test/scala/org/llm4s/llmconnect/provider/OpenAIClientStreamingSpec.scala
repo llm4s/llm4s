@@ -1,28 +1,21 @@
 package org.llm4s.llmconnect.provider
 
 import org.scalatest.EitherValues
-import com.azure.ai.openai.models.{ ChatCompletions, ChatCompletionsOptions }
-import com.azure.core.util.IterableStream
-import com.azure.json.JsonProviders
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
+import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ chunk, stream, transport }
 import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.OptionValues._
 
 import scala.collection.mutable.ListBuffer
-import scala.jdk.CollectionConverters._
-import scala.util.Using
 
 final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
-
-  private def completionsFromJson(json: String): ChatCompletions =
-    Using.resource(JsonProviders.createReader(json))(ChatCompletions.fromJson)
 
   "OpenAIClient.streamComplete" should "safely handle null/empty choices and update tokens only when finished" in {
     val model = "gpt-4"
@@ -36,16 +29,16 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
       )
       .value
 
-    val noChoices    = completionsFromJson("""{"id":"chatcmpl-1","created":0,"choices":null}""")
-    val emptyChoices = completionsFromJson("""{"id":"chatcmpl-1","created":0,"choices":[]}""")
-    val contentChunk = completionsFromJson(
+    val noChoices    = chunk("""{"id":"chatcmpl-1","created":0,"choices":null}""")
+    val emptyChoices = chunk("""{"id":"chatcmpl-1","created":0,"choices":[]}""")
+    val contentChunk = chunk(
       """{
         |"id":"chatcmpl-1",
         |"created":0,
         |"choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"}}]
         |}""".stripMargin
     )
-    val stopChunkWithUsage = completionsFromJson(
+    val stopChunkWithUsage = chunk(
       """{
         |"id":"chatcmpl-1",
         |"created":0,
@@ -54,26 +47,13 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
         |}""".stripMargin
     )
 
-    val stream =
-      new IterableStream[ChatCompletions](List(noChoices, emptyChoices, contentChunk, stopChunkWithUsage).asJava)
-
-    val transport = new OpenAIClientTransport {
-      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions =
-        throw new UnsupportedOperationException("not used in this test")
-
-      override def getChatCompletionsStream(
-        model: String,
-        options: ChatCompletionsOptions
-      ): IterableStream[ChatCompletions] =
-        stream
-    }
-
-    val client = OpenAIClient.forTest(model, transport, config)
+    val chunks = stream(noChoices, emptyChoices, contentChunk, stopChunkWithUsage)
+    val client = OpenAIClient.forTest(model, transport(streaming = _ => chunks), config)
 
     val conversation = Conversation(Seq(UserMessage("hello")))
-    val chunks       = scala.collection.mutable.ListBuffer.empty[String]
+    val received     = scala.collection.mutable.ListBuffer.empty[String]
 
-    val result = client.streamComplete(conversation, CompletionOptions(), c => chunks += c.content.getOrElse(""))
+    val result = client.streamComplete(conversation, CompletionOptions(), c => received += c.content.getOrElse(""))
 
     result.isRight shouldBe true
 
@@ -85,7 +65,9 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
     completion.usage.map(_.completionTokens) shouldBe Some(5)
 
     // Only the real content chunk contributes non-empty content.
-    chunks.toList should contain("Hi")
+    received.toList should contain("Hi")
+    // The SDK stream holds the HTTP response open; it is closed once read.
+    chunks.closed shouldBe true
   }
 
   it should "record provider exchanges for native streaming when logging is enabled" in {
@@ -98,14 +80,14 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
         baseUrl = "https://example.invalid/v1"
       )
       .value
-    val contentChunk = completionsFromJson(
+    val contentChunk = chunk(
       """{
         |"id":"chatcmpl-stream-1",
         |"created":0,
         |"choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"}}]
         |}""".stripMargin
     )
-    val stopChunk = completionsFromJson(
+    val stopChunk = chunk(
       """{
         |"id":"chatcmpl-stream-1",
         |"created":0,
@@ -113,26 +95,14 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
         |"usage":{"completion_tokens":3,"prompt_tokens":7,"total_tokens":10}
         |}""".stripMargin
     )
-    val stream   = new IterableStream[ChatCompletions](List(contentChunk, stopChunk).asJava)
     val recorded = ListBuffer.empty[ProviderExchange]
     val sink = new ProviderExchangeSink:
       override def record(exchange: ProviderExchange): Unit =
         recorded += exchange
 
-    val transport = new OpenAIClientTransport {
-      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions =
-        throw new UnsupportedOperationException("not used in this test")
-
-      override def getChatCompletionsStream(
-        model: String,
-        options: ChatCompletionsOptions
-      ): IterableStream[ChatCompletions] =
-        stream
-    }
-
     val client = OpenAIClient.forTest(
       model,
-      transport,
+      transport(streaming = _ => stream(contentChunk, stopChunk)),
       config,
       exchangeLogging = ProviderExchangeLogging.enabled(sink)
     )
@@ -164,20 +134,9 @@ final class OpenAIClientStreamingSpec extends AnyFlatSpec with Matchers with Eit
       override def record(exchange: ProviderExchange): Unit =
         recorded += exchange
 
-    val transport = new OpenAIClientTransport {
-      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions =
-        throw new UnsupportedOperationException("not used in this test")
-
-      override def getChatCompletionsStream(
-        model: String,
-        options: ChatCompletionsOptions
-      ): IterableStream[ChatCompletions] =
-        throw new RuntimeException("stream connection failed")
-    }
-
     val client = OpenAIClient.forTest(
       model,
-      transport,
+      transport(streaming = _ => throw new RuntimeException("stream connection failed")),
       config,
       exchangeLogging = ProviderExchangeLogging.enabled(sink)
     )

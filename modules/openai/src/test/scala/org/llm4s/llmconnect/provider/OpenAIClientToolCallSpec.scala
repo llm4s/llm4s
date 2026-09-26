@@ -1,30 +1,21 @@
 package org.llm4s.llmconnect.provider
 
 import org.scalatest.EitherValues
-import com.azure.ai.openai.models.{
-  ChatCompletions,
-  ChatCompletionsOptions,
-  ChatCompletionsJsonResponseFormat,
-  ChatCompletionsJsonSchemaResponseFormat
-}
-import com.azure.json.JsonProviders
+import com.openai.models.chat.completions.ChatCompletionCreateParams
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ResponseFormat, UserMessage }
+import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ completion => completionOf, transport }
 import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import scala.collection.mutable.ListBuffer
-import scala.util.Using
 
 final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
-
-  private def completionsFromJson(json: String): ChatCompletions =
-    Using.resource(JsonProviders.createReader(json))(ChatCompletions.fromJson)
 
   "OpenAIClient.complete" should "parse tool call arguments into JSON objects" in {
     val model = "gpt-4"
@@ -38,7 +29,7 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
       )
       .value
 
-    val completions = completionsFromJson(
+    val completions = completionOf(
       """{
         |"id":"chatcmpl-1",
         |"created":0,
@@ -61,17 +52,7 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
         |}""".stripMargin
     )
 
-    val transport = new OpenAIClientTransport {
-      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions = completions
-
-      override def getChatCompletionsStream(
-        model: String,
-        options: ChatCompletionsOptions
-      ): com.azure.core.util.IterableStream[ChatCompletions] =
-        throw new UnsupportedOperationException("not used in this test")
-    }
-
-    val client = OpenAIClient.forTest(model, transport, config)
+    val client = OpenAIClient.forTest(model, transport(complete = _ => completions), config)
 
     val result = client.complete(Conversation(Seq(UserMessage("hello"))), CompletionOptions())
 
@@ -80,7 +61,7 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
     completion.toolCalls(0).arguments("x").num shouldBe 1
   }
 
-  it should "set ChatCompletionsJsonResponseFormat when ResponseFormat.Json is used" in {
+  it should "send a json_object response format when ResponseFormat.Json is used" in {
     val model = "gpt-4"
     val config = OpenAIConfig
       .fromValues(
@@ -91,33 +72,26 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
       )
       .value
 
-    val completions = completionsFromJson(
+    val completions = completionOf(
       """{"id":"chatcmpl-1","created":0,"choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],
         |"usage":{"completion_tokens":1,"prompt_tokens":1,"total_tokens":2}}""".stripMargin
     )
 
-    var capturedOptions: ChatCompletionsOptions = null
-    val transport = new OpenAIClientTransport {
-      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions = {
-        capturedOptions = options
-        completions
-      }
-      override def getChatCompletionsStream(
-        model: String,
-        options: ChatCompletionsOptions
-      ): com.azure.core.util.IterableStream[ChatCompletions] =
-        throw new UnsupportedOperationException("not used")
-    }
+    var capturedOptions: ChatCompletionCreateParams = null
+    val capturing = transport(complete = { params =>
+      capturedOptions = params
+      completions
+    })
 
-    val client  = OpenAIClient.forTest(model, transport, config)
+    val client  = OpenAIClient.forTest(model, capturing, config)
     val options = CompletionOptions().withResponseFormat(ResponseFormat.Json)
     client.complete(Conversation(Seq(UserMessage("hello"))), options)
 
     capturedOptions should not be null
-    capturedOptions.getResponseFormat shouldBe a[ChatCompletionsJsonResponseFormat]
+    capturedOptions.responseFormat().get().isJsonObject shouldBe true
   }
 
-  it should "set ChatCompletionsJsonSchemaResponseFormat when ResponseFormat.JsonSchema is used" in {
+  it should "send a json_schema response format when ResponseFormat.JsonSchema is used" in {
     val model = "gpt-4"
     val config = OpenAIConfig
       .fromValues(
@@ -128,38 +102,29 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
       )
       .value
 
-    val completions = completionsFromJson(
+    val completions = completionOf(
       """{"id":"chatcmpl-1","created":0,"choices":[{"index":0,"message":{"role":"assistant","content":"ok"}}],
         |"usage":{"completion_tokens":1,"prompt_tokens":1,"total_tokens":2}}""".stripMargin
     )
 
-    var capturedOptions: ChatCompletionsOptions = null
-    val transport = new OpenAIClientTransport {
-      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions = {
-        capturedOptions = options
-        completions
-      }
-      override def getChatCompletionsStream(
-        model: String,
-        options: ChatCompletionsOptions
-      ): com.azure.core.util.IterableStream[ChatCompletions] =
-        throw new UnsupportedOperationException("not used")
-    }
+    var capturedOptions: ChatCompletionCreateParams = null
+    val capturing = transport(complete = { params =>
+      capturedOptions = params
+      completions
+    })
 
-    val client  = OpenAIClient.forTest(model, transport, config)
+    val client  = OpenAIClient.forTest(model, capturing, config)
     val schema  = ujson.Obj("type" -> "object")
     val options = CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))
     val result  = client.complete(Conversation(Seq(UserMessage("hello"))), options)
 
     result.isRight shouldBe true
     capturedOptions should not be null
-    capturedOptions.getResponseFormat match {
-      case fmt: ChatCompletionsJsonSchemaResponseFormat =>
-        fmt.getJsonSchema.getName shouldBe "response"
-        fmt.getJsonSchema.isStrict shouldBe true
-      case other =>
-        fail(s"Expected ChatCompletionsJsonSchemaResponseFormat but got ${other.getClass.getSimpleName}")
-    }
+    val format = capturedOptions.responseFormat().get()
+    format.isJsonSchema shouldBe true
+    format.asJsonSchema().jsonSchema().name() shouldBe "response"
+    format.asJsonSchema().jsonSchema().strict().get() shouldBe true
+    format.asJsonSchema().jsonSchema().schema().get()._additionalProperties().get("type").toString shouldBe "object"
   }
 
   it should "record a provider exchange when logging is enabled" in {
@@ -173,7 +138,7 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
       )
       .value
 
-    val completions = completionsFromJson(
+    val completions = completionOf(
       """{"id":"chatcmpl-1","created":0,"model":"gpt-4","choices":[{"index":0,"message":{"role":"assistant","content":"logged ok"}}],
         |"usage":{"completion_tokens":1,"prompt_tokens":1,"total_tokens":2}}""".stripMargin
     )
@@ -183,20 +148,9 @@ final class OpenAIClientToolCallSpec extends AnyFlatSpec with Matchers with Eith
       override def record(exchange: ProviderExchange): Unit =
         recorded += exchange
 
-    val transport = new OpenAIClientTransport {
-      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions =
-        completions
-
-      override def getChatCompletionsStream(
-        model: String,
-        options: ChatCompletionsOptions
-      ): com.azure.core.util.IterableStream[ChatCompletions] =
-        throw new UnsupportedOperationException("not used")
-    }
-
     val client = OpenAIClient.forTest(
       model,
-      transport,
+      transport(complete = _ => completions),
       config,
       exchangeLogging = ProviderExchangeLogging.enabled(sink)
     )

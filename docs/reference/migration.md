@@ -132,6 +132,79 @@ The three copies had drifted apart; the shared client does each thing one way:
 Every configuration key and environment variable for DeepSeek, Z.ai and OpenRouter: their
 `provider` ids, `apiKey`, `baseUrl` and `organization`, and their default base URLs.
 
+## Slice 5: `llm4s-openai` moves to `openai-java`
+
+`llm4s-openai`'s `OpenAIClient` - behind `provider = "openai"`, `"azure"` and `"requesty"` - now
+runs on OpenAI's official Java SDK, `com.openai:openai-java`, instead of Microsoft's
+`com.azure:azure-ai-openai`. Microsoft has
+[deprecated that SDK](https://learn.microsoft.com/en-us/java/api/overview/azure/ai-openai-readme?view=azure-java-preview)
+(its last release, 1.0.0-beta.16, was on 2025-03-26) and points to `openai-java`, which also
+covers Azure OpenAI ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
+
+**Most users change nothing.** `OpenAIClient`'s constructors and `apply` overloads,
+`OpenAIProvider`, `AzureProvider`, `RequestyProvider`, `OpenAIConfig` and `AzureConfig`, every
+configuration key and every environment variable are unchanged. Your dependency tree changes:
+`llm4s-openai` now brings OkHttp, Jackson (2.x) and the Kotlin standard library rather than the
+Azure core libraries. `openai-java` checks its Jackson version when a client is built and fails
+on a Jackson it cannot use (a different major version, anything before 2.13.4, or 2.18.1); if
+your application pins Jackson, keep it on a compatible 2.x.
+
+### How Azure is configured
+
+As before: `endpoint` is the resource endpoint (`https://<resource>.openai.azure.com`), `model`
+is the deployment name, `apiKey` is sent as the `api-key` header, and `apiVersion` as the
+`api-version` query parameter, so a request goes to
+`<endpoint>/openai/deployments/<deployment>/chat/completions?api-version=<version>`. The client
+tells the SDK this is Azure rather than letting it guess from the host name, so an endpoint on
+your own domain (API Management, a private endpoint) keeps working. Two things are new:
+
+- **`apiVersion` takes either form.** The wire form (`2024-10-21`, `2025-01-01-preview`), which
+  the docs have always shown, now works; before, only the Azure SDK's constant names
+  (`V2024_10_21`, `V2025_01_01_PREVIEW` - the form of `AzureConfig.DEFAULT_API_VERSION`) did.
+  Both still work.
+- **An endpoint ending in `/openai/v1`** uses Azure's unified v1 API: the deployment goes in the
+  request body and `api-version` is sent only if you set one other than the default.
+
+### Source break: `AzureToolHelper` is now `OpenAIToolHelper`
+
+`AzureToolHelper` took and returned Azure SDK types, so it could not survive the SDK. It is
+replaced, in the same package (`org.llm4s.toolapi`) and module, by `OpenAIToolHelper` over
+`openai-java`'s types (`com.openai.models.chat.completions`):
+
+| Before (`AzureToolHelper`) | Now (`OpenAIToolHelper`) |
+|---|---|
+| `addToolsToOptions(registry, options: ChatCompletionsOptions): ChatCompletionsOptions` | `addToolsToParams(registry, builder: ChatCompletionCreateParams.Builder): ChatCompletionCreateParams.Builder` |
+| `convertToolRegistryToAzureTools(registry): java.util.List[ChatCompletionsToolDefinition]` | `convertToolRegistryToOpenAITools(registry): java.util.List[ChatCompletionTool]` |
+
+```scala
+import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
+import com.openai.models.chat.completions.ChatCompletionCreateParams
+
+val params = OpenAIToolHelper
+  .addToolsToParams(new ToolRegistry(tools), ChatCompletionCreateParams.builder().model("gpt-4o"))
+```
+
+If you called the Azure SDK yourself alongside llm4s, add `com.azure:azure-ai-openai` to your
+own build: `llm4s-openai` no longer brings it.
+
+### Behaviour changes
+
+1. **Streamed tool calls keep their arguments.** A streamed tool call arrives split across
+   deltas, and only the first carries the call's `id`; the Azure SDK path keyed calls by `id`, so
+   every later fragment - usually all of the arguments - was lost. Continuations are now matched
+   by `index`, fragments are concatenated verbatim, and a streamed `Completion` reports its tool
+   calls in `toolCalls` as a non-streaming one does.
+2. **`OpenAIConfig.organization` is sent** as the `OpenAI-Organization` header. The Azure SDK
+   ignored it.
+3. **HTTP errors map by status code**: 401 and 403 to `AuthenticationError`, 429 to
+   `RateLimitError`, 400 to `ValidationError`, anything else to `ServiceError`, each naming the
+   provider. Before, they were classified by searching the exception message, and most became
+   `UnknownError`.
+4. **Streamed token usage** is read from whichever chunk carries it, including a usage-only final
+   chunk, not only from the chunk with the finish reason.
+5. **`close()` releases the SDK's HTTP client** (connections and threads); before it released
+   nothing.
+
 ## Slice 5: `llm4s-openai`
 
 The fourth provider module of slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)),

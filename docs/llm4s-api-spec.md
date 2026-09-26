@@ -303,14 +303,12 @@ trait ToolAdapter[T] {
   def convertTools(tools: Seq[ToolFunction[_, _]]): T
 }
 
-// Example adapter for Azure OpenAI. AzureToolHelper (org.llm4s.toolapi) ships in the
-// llm4s-openai module, with the Azure OpenAI SDK it targets - not in llm4s-core.
-class AzureToolAdapter extends ToolAdapter[ChatCompletionsOptions] {
-  def convertTools(tools: Seq[ToolFunction[_, _]]): ChatCompletionsOptions = {
-    val chatOptions = new ChatCompletionsOptions()
-    AzureToolHelper.addToolsToOptions(new ToolRegistry(tools), chatOptions)
-    chatOptions
-  }
+// Example adapter for OpenAI and Azure OpenAI. OpenAIToolHelper (org.llm4s.toolapi) ships in
+// the llm4s-openai module, with the openai-java SDK it targets - not in llm4s-core.
+// (It replaced AzureToolHelper when llm4s-openai left the deprecated Azure SDK, #1132.)
+class OpenAIToolAdapter extends ToolAdapter[java.util.List[ChatCompletionTool]] {
+  def convertTools(tools: Seq[ToolFunction[_, _]]): java.util.List[ChatCompletionTool] =
+    OpenAIToolHelper.convertToolRegistryToOpenAITools(new ToolRegistry(tools))
 }
 ```
 
@@ -406,6 +404,10 @@ class OpenAIClient(config: OpenAIConfig) extends LLMClient {
 
 ### Unified OpenAI Client Implementation (handles both OpenAI and Azure)
 
+> Historical sketch: the shipped `OpenAIClient` (in `llm4s-openai`) now runs on OpenAI's
+> `openai-java` SDK, not the Azure SDK shown here, and converts tools with `OpenAIToolHelper`
+> ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
+
 ```scala
 class OpenAIClient private (private val model: String, private val client: AzureOpenAIClient) extends LLMClient {
   
@@ -446,7 +448,7 @@ class OpenAIClient private (private val model: String, private val client: Azure
       // Add tools if specified
       if (options.tools.nonEmpty) {
         val toolRegistry = new ToolRegistry(options.tools)
-        // AzureToolHelper is in llm4s-openai (org.llm4s.toolapi), not llm4s-core
+        // (The shipped client now uses OpenAIToolHelper, over openai-java types.)
         AzureToolHelper.addToolsToOptions(toolRegistry, chatOptions)
       }
       

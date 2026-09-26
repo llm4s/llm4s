@@ -15,7 +15,7 @@
     <logger name="io.netty" level="INFO"/>
 
     <!-- Set other noisy loggers to INFO -->
-    <logger name="com.azure" level="INFO"/>
+    <logger name="com.openai" level="INFO"/>
     <logger name="reactor" level="INFO"/>
 
     <root level="INFO">
