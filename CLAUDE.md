@@ -30,7 +30,7 @@ Slice order — each is an issue with its own scope and gotchas:
 | 2 ✅ | [#1129](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` |
 | 3 ✅ | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` |
 | 4 ✅ | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
-| 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic` so far |
+| 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai` so far |
 | 6 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability`, then 0.4.0 + MiMa |
 
 **Invariants for every carve:**
@@ -86,6 +86,7 @@ llm4s/
 │   ├── ollama/                # Ollama chat + embedding provider (published)
 │   ├── gemini/                # Gemini API + Vertex AI chat providers (published)
 │   ├── anthropic/             # Anthropic Claude chat provider + Anthropic SDK (published)
+│   ├── openai/                # OpenAI, Azure, Requesty chat + OpenAI embeddings + Azure SDK (published)
 │   ├── samples/               # Usage examples
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI
@@ -118,13 +119,19 @@ use Ollama as a convenient no-key provider any more - use a fixture descriptor, 
 `EmbeddingProviderSpiSpec` and `ModelDimensionRegistrySpec` do. `modules/gemini` followed,
 carrying both Google providers - the Gemini API and Vertex AI, which only calls Gemini models in
 the same JSON format and needs no extra dependency. `modules/anthropic` came third and took the
-Anthropic Java SDK with it: **core no longer depends on `com.anthropic`**, and must not again -
-the only vendor SDK left in core is Azure OpenAI, which leaves with `llm4s-openai`. Core's tests
-that used Gemini, then Anthropic, as an incidental API-key provider now use DeepSeek; strings that
-do not reach a client (`ToolRegistry`'s `"anthropic"`/`"gemini"` cases, model-registry data,
-config-policy allow-lists, the `sk-ant-` secret pattern) stay, as does `AnthropicStreamingHandler`,
-an SDK-free SSE parser behind `StreamingResponseHandler.forProvider` that `AnthropicClient` does
-not use.
+Anthropic Java SDK with it. `modules/openai` came fourth with the three providers that share
+`OpenAIClient` - OpenAI, Azure and Requesty - plus `OpenAIEmbeddingProvider`, `AzureConfig` and
+`AzureToolHelper`, and took the Azure OpenAI SDK: **core now depends on no vendor SDK
+(`com.anthropic`, `com.azure`, `com.openai`)**, and must not again. OpenRouter, DeepSeek and Z.ai
+have their own SDK-free clients and stay in core for their own modules later, and with them
+`OpenAIConfig` (OpenRouter builds one) and `OpenAIStreamingHandler`. Core's tests that used
+Gemini, then Anthropic, then OpenAI as an incidental API-key provider now use DeepSeek (core's
+test `application.conf` default is `deepseek-main`); strings that do not reach a client
+(`ToolRegistry`'s `"openai"`/`"anthropic"`/`"gemini"` cases, model-registry data, config-policy
+allow-lists, secret patterns) stay, as does `AnthropicStreamingHandler`, an SDK-free SSE parser
+behind `StreamingResponseHandler.forProvider` that `AnthropicClient` does not use. `llm4s-rag`'s
+`RAGConfig.default` embeds with `openai`, so `rag` has a **test-only** dependency on `openai`;
+never make it a compile one - that would put the Azure SDK back on every RAG user's classpath.
 
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must

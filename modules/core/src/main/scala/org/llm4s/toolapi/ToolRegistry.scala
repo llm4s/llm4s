@@ -378,17 +378,6 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
     case Right(tools) => tools
     case Left(e)      => throw new IllegalArgumentException(e.formatted)
   }
-
-  /**
-   * Adds the tools from this registry to an Azure OpenAI ChatCompletionsOptions
-   *
-   * @param chatOptions The chat options to add the tools to
-   * @return The updated chat options
-   */
-  def addToAzureOptions(
-    chatOptions: com.azure.ai.openai.models.ChatCompletionsOptions
-  ): com.azure.ai.openai.models.ChatCompletionsOptions =
-    AzureToolHelper.addToolsToOptions(this, chatOptions)
 }
 
 object ToolRegistry {

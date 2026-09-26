@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.config.{ DefaultConfig, ProviderModelLister, ProviderModelListers }
+import org.llm4s.config.{ ProviderModelLister, RequestyModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -9,14 +9,27 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 
-/** Registration for the OpenAI API. */
-object OpenAIProvider extends ProviderDescriptor:
-  val id: ProviderId = ProviderId("openai")
+/**
+ * Registration for Requesty.
+ *
+ * Requesty is an OpenAI-compatible router: it reuses both `OpenAIConfig` and
+ * `OpenAIClient`, and differs only in its default base URL.
+ */
+object RequestyProvider extends ProviderDescriptor:
+  val id: ProviderId = ProviderId("requesty")
+
+  /**
+   * The Requesty router base URL used when a provider section sets no `baseUrl`.
+   *
+   * This was `DefaultConfig.DEFAULT_REQUESTY_BASE_URL` in `llm4s-core` until the
+   * provider moved to `llm4s-openai` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
+   */
+  val DEFAULT_BASE_URL: String = "https://router.requesty.ai/v1"
 
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DefaultConfig.DEFAULT_OPENAI_BASE_URL)
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL)
 
-  override val modelLister: Option[ProviderModelLister] = Some(ProviderModelListers.OpenAI)
+  override val modelLister: Option[ProviderModelLister] = Some(RequestyModelLister)
 
   def buildConfig(providerName: String, section: NamedProviderConfig)(using
     ContextWindowResolver

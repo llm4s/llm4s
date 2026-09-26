@@ -66,8 +66,8 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
     }
 
     "let a user descriptor win over a built-in of the same id" in {
-      val replacement = new StubProvider("openai")
-      ProviderRegistry.default.withProvider(replacement).get(ProviderId("openai")) shouldBe Right(replacement)
+      val replacement = new StubProvider("deepseek")
+      ProviderRegistry.default.withProvider(replacement).get(ProviderId("deepseek")) shouldBe Right(replacement)
     }
   }
 
@@ -123,13 +123,10 @@ class ProviderRegistrySpec extends AnyWordSpec with Matchers:
   "the default registry" should {
     "hold every provider built into llm4s-core" in {
       ProviderRegistry.default.ids shouldBe Seq(
-        "azure",
         "cohere",
         "deepseek",
         "mistral",
-        "openai",
         "openrouter",
-        "requesty",
         "zai"
       )
     }

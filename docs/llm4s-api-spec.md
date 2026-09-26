@@ -303,7 +303,8 @@ trait ToolAdapter[T] {
   def convertTools(tools: Seq[ToolFunction[_, _]]): T
 }
 
-// Example adapter for Azure OpenAI
+// Example adapter for Azure OpenAI. AzureToolHelper (org.llm4s.toolapi) ships in the
+// llm4s-openai module, with the Azure OpenAI SDK it targets - not in llm4s-core.
 class AzureToolAdapter extends ToolAdapter[ChatCompletionsOptions] {
   def convertTools(tools: Seq[ToolFunction[_, _]]): ChatCompletionsOptions = {
     val chatOptions = new ChatCompletionsOptions()
@@ -445,6 +446,7 @@ class OpenAIClient private (private val model: String, private val client: Azure
       // Add tools if specified
       if (options.tools.nonEmpty) {
         val toolRegistry = new ToolRegistry(options.tools)
+        // AzureToolHelper is in llm4s-openai (org.llm4s.toolapi), not llm4s-core
         AzureToolHelper.addToolsToOptions(toolRegistry, chatOptions)
       }
       

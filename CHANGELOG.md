@@ -22,6 +22,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`llm4s-openai`: OpenAI, Azure OpenAI and Requesty leave `llm4s-core`, and take the Azure
+  OpenAI SDK with it** - the fourth provider module of slice 5
+  ([#1132](https://github.com/llm4s/llm4s/issues/1132)). The providers that share `OpenAIClient`
+  move to the new `llm4s-openai` artifact: `OpenAIClient`, `OpenAIProvider`, `AzureProvider`,
+  `RequestyProvider`, `AzureConfig`, `OpenAIEmbeddingProvider`, `AzureToolHelper` and the OpenAI
+  and Requesty model listers, with their tests, the `openai-main`, `requesty-main` and
+  `azure-main` examples and the `llm4s.embeddings.openai` block from `reference.conf`, and an
+  `Llm4sOpenAIModule` declared in `META-INF/services`. Package names are unchanged.
+  `llm4s-core` no longer depends on `com.azure:azure-ai-openai`, and so depends on no vendor SDK.
+  OpenRouter, DeepSeek and Z.ai have their own SDK-free clients and stay in core for now; so do
+  `OpenAIConfig`, which OpenRouter shares, and `OpenAIStreamingHandler`.
+
+  Source breaks: `ToolRegistry.addToAzureOptions` is removed - call
+  `AzureToolHelper.addToolsToOptions(registry, options)` from `llm4s-openai` instead, since it
+  exposed an Azure SDK type from core's `ToolRegistry`. `ProviderModelListers.OpenAI` /
+  `.Requesty` are now `OpenAIModelLister` / `RequestyModelLister` (still in `org.llm4s.config`);
+  `DefaultConfig.DEFAULT_OPENAI_BASE_URL`, `DEFAULT_REQUESTY_BASE_URL` and
+  `DEFAULT_AZURE_V2025_01_01_PREVIEW` are now `OpenAIProvider.DEFAULT_BASE_URL`,
+  `RequestyProvider.DEFAULT_BASE_URL` and `AzureConfig.DEFAULT_API_VERSION`; and the OpenAI,
+  Requesty, Azure and OpenAI-embedding names on `ConfigKeys` are now on `OpenAIConfigKeys`
+  (`ConfigKeys.OPENROUTER_BASE_URL` stays). `ProviderRegistry.builtin` no longer includes these
+  providers; `ProviderRegistry.builtin.withModule(new Llm4sOpenAIModule)` restores them. No
+  configuration key or environment variable changed, but `llm4s-rag`'s `RAGConfig.default`
+  embeds with `openai` and so now needs `llm4s-openai` on the classpath. See the
+  [migration guide](docs/reference/migration.md#slice-5-llm4s-openai).
+
 - **`llm4s-anthropic`: Anthropic leaves `llm4s-core`, and takes the Anthropic SDK with it** -
   the third provider module of slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
   `AnthropicClient`, `AnthropicProvider`, `AnthropicConfig` and the Anthropic model lister move

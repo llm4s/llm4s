@@ -1,10 +1,11 @@
 package org.llm4s.samples.dashboard.providersetup
 
-import org.llm4s.config.{ DefaultConfig, DiscoveredModel, ProvidersConfigModel }
+import org.llm4s.config.{ DiscoveredModel, ProvidersConfigModel }
 import org.llm4s.error.ValidationError
 import org.llm4s.llmconnect.config.*
 import org.llm4s.llmconnect.model.{ AssistantMessage, Conversation, SystemMessage, UserMessage }
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect, LlmClientOptions, ProviderExchangeLogging }
+import org.llm4s.llmconnect.provider.OpenAIProvider
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupMessages.*
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupModel.*
@@ -202,7 +203,7 @@ private[providersetup] object ProviderSetupRuntime:
               model,
               apiKey,
               input.organization,
-              input.baseUrl.getOrElse(DefaultConfig.DEFAULT_OPENAI_BASE_URL)
+              input.baseUrl.getOrElse(OpenAIProvider.DEFAULT_BASE_URL)
             )
             .left
             .map(_.message)
@@ -222,7 +223,7 @@ private[providersetup] object ProviderSetupRuntime:
               model,
               endpoint,
               apiKey,
-              input.apiVersion.getOrElse(DefaultConfig.DEFAULT_AZURE_V2025_01_01_PREVIEW)
+              input.apiVersion.getOrElse(AzureConfig.DEFAULT_API_VERSION)
             )
             .left
             .map(_.message)

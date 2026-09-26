@@ -189,6 +189,7 @@ jobs:
           ollama/test ollama/coverageReport
           gemini/test gemini/coverageReport
           anthropic/test anthropic/coverageReport
+          openai/test openai/coverageReport
           coverageAggregate
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes
@@ -310,6 +311,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/anthropic/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: anthropic
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload openai coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/openai/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: openai
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

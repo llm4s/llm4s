@@ -3,6 +3,7 @@ package org.llm4s.samples.chat.tui
 import org.llm4s.config.{ DefaultConfig, Llm4sConfig }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.*
+import org.llm4s.llmconnect.provider.{ OpenAIProvider, RequestyProvider }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 
@@ -99,7 +100,7 @@ object ChatTuiConfig:
     provider match {
       case "openai" =>
         requireKey("OPENAI_API_KEY").flatMap { apiKey =>
-          val baseUrl = ChatTuiEnv.getOrElse("OPENAI_BASE_URL", DefaultConfig.DEFAULT_OPENAI_BASE_URL)
+          val baseUrl = ChatTuiEnv.getOrElse("OPENAI_BASE_URL", OpenAIProvider.DEFAULT_BASE_URL)
           val org     = ChatTuiEnv.get("OPENAI_ORGANIZATION").filter(_.nonEmpty)
           OpenAIConfig.fromValues(model, apiKey, org, baseUrl)
         }
@@ -112,7 +113,7 @@ object ChatTuiConfig:
 
       case "requesty" =>
         requireKey("REQUESTY_API_KEY").flatMap { apiKey =>
-          val baseUrl = ChatTuiEnv.getOrElse("OPENAI_BASE_URL", DefaultConfig.DEFAULT_REQUESTY_BASE_URL)
+          val baseUrl = ChatTuiEnv.getOrElse("OPENAI_BASE_URL", RequestyProvider.DEFAULT_BASE_URL)
           OpenAIConfig.fromValues(model, apiKey, None, baseUrl)
         }
 

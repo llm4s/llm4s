@@ -39,6 +39,24 @@ class CheckPoliciesProvidersSpec extends AnyWordSpec with Matchers {
         Right(ProviderId("anthropic"))
     }
 
+    "resolve an openai config" in {
+      providerIdFor("""provider = "openai", model = "gpt-4o-mini", apiKey = "test-key"""") shouldBe
+        Right(ProviderId("openai"))
+    }
+
+    "resolve an azure config" in {
+      providerIdFor(
+        """provider = "azure", model = "gpt-4o", apiKey = "test-key", endpoint = "https://x.openai.azure.com""""
+      ) shouldBe Right(ProviderId("azure"))
+    }
+
+    "resolve a requesty config" in {
+      // Requesty builds an OpenAIConfig, whose providerId is derived from the base URL and so
+      // reads `openai`; resolving at all is what this checks.
+      providerIdFor("""provider = "requesty", model = "openai/gpt-4o-mini", apiKey = "test-key"""") shouldBe
+        Right(ProviderId("openai"))
+    }
+
     "resolve a vertexai config" in {
       providerIdFor("""provider = "vertexai", model = "gemini-2.0-flash", endpoint = "my-project"""") shouldBe
         Right(ProviderId("vertexai"))
