@@ -277,4 +277,30 @@ class OpenAICompatibleClientSpec extends AnyFlatSpec with Matchers with EitherVa
     body.closed shouldBe true
     raw.result() should include("[DONE]")
   }
+
+  // ==========================================================================
+  // Streamed tool-call order
+  // ==========================================================================
+
+  "consumeStream" should "return several interleaved tool calls in index order" in {
+    // Ids chosen so hash order and index order disagree (StreamingAccumulator kept an unordered
+    // map before #1132, and Completion.toolCalls came back in hash order).
+    val ids = Seq("call_zeta", "call_alpha", "call_mu", "call_beta")
+    def event(calls: String*) =
+      s"""data: {"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[${calls.mkString(",")}]}}]}"""
+    val openings = ids.zipWithIndex.map { (id, i) =>
+      s"""{"index":$i,"id":"$id","type":"function","function":{"name":"tool_$i","arguments":"{\\"n\\":"}}"""
+    }
+    val continuations = ids.indices.reverse.map(i => s"""{"index":$i,"function":{"arguments":"$i}"}}""")
+    val sse = (Seq(event(openings*)) ++ continuations.map(event(_)) ++ Seq(
+      """data: {"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}""",
+      "data: [DONE]"
+    )).mkString("", "\n\n", "\n\n")
+
+    val completion = streamingClient.consumeStream(200, new TrackingBody(sse), new StringBuilder, _ => ()).value
+
+    completion.toolCalls.map(_.id) shouldBe ids
+    completion.toolCalls.map(_.arguments("n").num.toInt) shouldBe ids.indices
+    completion.message.toolCalls.map(_.id) shouldBe ids
+  }
 }

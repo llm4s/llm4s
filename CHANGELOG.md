@@ -88,11 +88,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Fixed: **streamed tool calls lost their arguments.** `OpenAIClient` keyed streamed tool calls
   by `id`, which only a call's first delta carries, so every continuation fragment was dropped;
   it now matches continuations by `index`, passes fragments through verbatim, and fills
-  `Completion.toolCalls` on streams as `complete` does. Behaviour changes: `AzureConfig.apiVersion`
+  `Completion.toolCalls` on streams as `complete` does. Also fixed, in `llm4s-core`:
+  `StreamingAccumulator` returned several streamed tool calls in hash order (it kept them in an
+  unordered map), so `Completion.toolCalls` and the message's tool calls could come back out of
+  the provider's index order; they now keep the order the stream first named them, for every
+  client that accumulates with it, `OpenAICompatibleClient` included. Behaviour changes: `AzureConfig.apiVersion`
   accepts the wire form (`2024-10-21`, as the docs show) as well as the old constant name
   (`V2024_10_21`), where only the latter worked before; an Azure endpoint ending in `/openai/v1`
   uses Azure's unified v1 API; `OpenAIConfig.organization` is now sent as `OpenAI-Organization`
-  (the Azure SDK ignored it); HTTP errors map by status (401/403 `AuthenticationError`, 429
+  (the Azure SDK ignored it); Azure and Requesty clients label their errors, metrics and
+  exchange log `azure` and `requesty` (every one said `openai`); HTTP errors map by status (401/403 `AuthenticationError`, 429
   `RateLimitError`, 400 `ValidationError`, otherwise `ServiceError`) rather than by matching the
   message; streamed token usage is read from whichever chunk carries it; and `close()` releases
   the HTTP client. See the

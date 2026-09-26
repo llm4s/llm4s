@@ -45,4 +45,6 @@ object RequestyProvider extends ProviderDescriptor:
   ): Result[LLMClient] =
     ProviderDescriptor
       .expectConfig[OpenAIConfig](id, config)
-      .flatMap(OpenAIClient(_, options.metrics, options.exchangeLogging))
+      // Not `OpenAIClient(config, ...)`: that labels the client with the config's `providerId`,
+      // which for Requesty's `OpenAIConfig` reads `openai` (#1132).
+      .flatMap(OpenAIClient.forProvider(_, id, options.metrics, options.exchangeLogging))

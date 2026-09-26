@@ -32,6 +32,7 @@ import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.{ ModelRegistryService, TransformationResult }
 import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.slf4j.{ Logger, LoggerFactory }
 
@@ -78,20 +79,25 @@ private[provider] trait OpenAIClientTransport {
  * @param transport the SDK calls this client makes
  * @param config provider configuration containing context window and reserve completion settings
  * @param metrics metrics collector for observability (default: noop)
+ * @param provider the provider this client serves - `openai`, `azure` or `requesty` - which labels
+ *                 its metrics, exchange log and errors
  */
 class OpenAIClient private[provider] (
   private val model: String,
   private val transport: OpenAIClientTransport,
   private val config: ProviderConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector,
-  exchangeLogging: ProviderExchangeLogging
+  exchangeLogging: ProviderExchangeLogging,
+  provider: ProviderId = OpenAIProvider.id
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
   private lazy val logger: Logger = LoggerFactory.getLogger(getClass)
 
-  protected def clientDescription: String = s"OpenAI client for model $model"
-  protected def providerName: String      = "openai"
+  private val displayName: String = OpenAIClient.displayName(provider)
+
+  protected def clientDescription: String = s"$displayName client for model $model"
+  protected def providerName: String      = provider.asString
   protected def modelName: String         = model
 
   /**
@@ -118,14 +124,21 @@ class OpenAIClient private[provider] (
    * @param metrics metrics collector (default: noop)
    */
   def this(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) =
-    this(config.model, OpenAIClientTransport.azure(config), config, metrics, ProviderExchangeLogging.Disabled)
+    this(
+      config.model,
+      OpenAIClientTransport.azure(config),
+      config,
+      metrics,
+      ProviderExchangeLogging.Disabled,
+      config.providerId
+    )
 
   def this(
     config: AzureConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
   )(using ModelRegistryService) =
-    this(config.model, OpenAIClientTransport.azure(config), config, metrics, exchangeLogging)
+    this(config.model, OpenAIClientTransport.azure(config), config, metrics, exchangeLogging, config.providerId)
 
   override def complete(
     conversation: Conversation,
@@ -187,14 +200,14 @@ class OpenAIClient private[provider] (
   }
 
   override protected def releaseResources(): Unit = {
-    Try(transport.close()).failed.foreach(e => logger.warn(s"Closing the OpenAI client for model $model failed", e))
-    logger.debug(s"OpenAI client for model $model closed")
+    Try(transport.close()).failed.foreach(e => logger.warn(s"Closing the $clientDescription failed", e))
+    logger.debug(s"$clientDescription closed")
   }
 
   /** Runs one SDK call, logging and mapping any failure to an [[LLMError]]. */
   private def call[A](what: String)(body: => A): Result[A] =
     Try(body).toEither.left.map { e =>
-      logger.error(s"OpenAI $what failed for model $model", e)
+      logger.error(s"$displayName $what failed for model $model", e)
       OpenAIClient.mapError(e, providerName)
     }
 
@@ -567,9 +580,33 @@ object OpenAIClient {
     transport: OpenAIClientTransport,
     config: ProviderConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
-    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+    provider: ProviderId = OpenAIProvider.id
   )(using ModelRegistryService): OpenAIClient =
-    new OpenAIClient(model, transport, config, metrics, exchangeLogging)
+    new OpenAIClient(model, transport, config, metrics, exchangeLogging, provider)
+
+  /**
+   * A client for an OpenAI-compatible `config` that labels its metrics, exchange log and errors
+   * with `provider` rather than `openai`. Requesty builds its client through this: its config is
+   * an [[OpenAIConfig]], whose `providerId` is derived from the base URL and so reads `openai`.
+   */
+  private[provider] def forProvider(
+    config: OpenAIConfig,
+    provider: ProviderId,
+    metrics: org.llm4s.metrics.MetricsCollector,
+    exchangeLogging: ProviderExchangeLogging
+  )(using ModelRegistryService): Result[OpenAIClient] =
+    Try(
+      new OpenAIClient(config.model, OpenAIClientTransport.openAI(config), config, metrics, exchangeLogging, provider)
+    ).toResult
+
+  /** How log lines and the "already closed" error name the provider. */
+  private def displayName(provider: ProviderId): String = provider.asString match {
+    case "openai"   => "OpenAI"
+    case "azure"    => "Azure OpenAI"
+    case "requesty" => "Requesty"
+    case other      => other
+  }
 
   /**
    * Maps an SDK failure to an [[LLMError]]. An HTTP error from the service keeps its status

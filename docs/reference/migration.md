@@ -204,6 +204,15 @@ own build: `llm4s-openai` no longer brings it.
    chunk, not only from the chunk with the finish reason.
 5. **`close()` releases the SDK's HTTP client** (connections and threads); before it released
    nothing.
+6. **Azure and Requesty are labelled as themselves.** Their errors (`AuthenticationError.provider`
+   and the error context), metrics and provider-exchange log now say `azure` and `requesty`;
+   every one said `openai` before. Requesty takes its label from its descriptor: a Requesty
+   `OpenAIConfig` still reports `providerId` = `openai`, derived from its base URL, so an
+   `OpenAIClient(config)` you build yourself from one is labelled `openai`.
+7. **Several streamed tool calls come back in the order the stream named them**, in
+   `Completion.toolCalls` and on the message. `llm4s-core`'s `StreamingAccumulator` kept them in
+   an unordered map, so they could come back in hash order; this applies to every client that
+   streams through it.
 
 ## Slice 5: `llm4s-openai`
 

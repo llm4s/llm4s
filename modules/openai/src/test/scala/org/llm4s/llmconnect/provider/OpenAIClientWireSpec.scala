@@ -3,8 +3,17 @@ package org.llm4s.llmconnect.provider
 import com.openai.azure.AzureUrlPathMode
 import com.sun.net.httpserver.HttpExchange
 import org.llm4s.error.AuthenticationError
+import org.llm4s.error.LLMError
+import org.llm4s.llmconnect.{
+  LLMClient,
+  LlmClientOptions,
+  ProviderExchange,
+  ProviderExchangeLogging,
+  ProviderExchangeSink
+}
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
+import org.llm4s.metrics.MockMetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testutil.LocalProviderTestServer
 import org.scalatest.EitherValues
@@ -13,6 +22,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
+import scala.collection.mutable.ListBuffer
 
 /**
  * `OpenAIClient` over the real `openai-java` transport, against a local HTTP server: the URL,
@@ -204,5 +214,73 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
     OpenAIClientTransport.azureUrlPathMode("https://r.openai.azure.com") shouldBe AzureUrlPathMode.LEGACY
     OpenAIClientTransport.azureUrlPathMode("https://gw.example.com/") shouldBe AzureUrlPathMode.LEGACY
     OpenAIClientTransport.azureUrlPathMode("https://r.openai.azure.com/openai/v1/") shouldBe AzureUrlPathMode.UNIFIED
+  }
+
+  // Each provider's errors, metrics and exchange log carry its own name, not "openai" (#1209
+  // review): Azure's from `AzureConfig.providerId`, Requesty's from its descriptor, because a
+  // Requesty `OpenAIConfig` reports `providerId` = `openai` from its base URL.
+
+  private def unauthorized =
+    """{"error":{"message":"Access denied","type":"invalid_request_error","code":"401"}}"""
+
+  final private case class Reported(error: LLMError, metrics: MockMetricsCollector, exchanges: List[ProviderExchange])
+
+  /** Builds a client through `build`, makes one call that fails with a 401, and returns what was reported. */
+  private def failOnce(build: (String, LlmClientOptions) => LLMClient): Reported = {
+    val metrics  = new MockMetricsCollector
+    val recorded = ListBuffer.empty[ProviderExchange]
+    val sink = new ProviderExchangeSink:
+      override def record(exchange: ProviderExchange): Unit = recorded += exchange
+    val error = new AtomicReference[LLMError]()
+    LocalProviderTestServer.withServer("/") { exchange =>
+      exchange.getRequestBody.readAllBytes()
+      LocalProviderTestServer.sendJsonResponse(exchange, 401, unauthorized)
+    } { baseUrl =>
+      val client = build(baseUrl, LlmClientOptions(metrics, ProviderExchangeLogging.enabled(sink)))
+      error.set(client.complete(hello, CompletionOptions()).left.value)
+      client.close()
+    }
+    Reported(error.get(), metrics, recorded.toList)
+  }
+
+  private def assertLabelled(provider: String, reported: Reported): Unit = {
+    reported.error shouldBe an[AuthenticationError]
+    reported.error.asInstanceOf[AuthenticationError].provider shouldBe provider
+    reported.error.context("provider") shouldBe provider
+    reported.metrics.requestCalls.map(_._1).toSeq shouldBe Seq(provider)
+    reported.exchanges.map(_.provider) shouldBe List(provider)
+  }
+
+  "OpenAIClient's provider label" should "be azure for an Azure client, in errors, metrics and the exchange log" in {
+    val reported = failOnce { (baseUrl, options) =>
+      val config = AzureConfig.fromValues("my-deploy", baseUrl, "azure-key", AzureConfig.DEFAULT_API_VERSION).value
+      AzureProvider.buildClient(config, options).value
+    }
+    assertLabelled("azure", reported)
+  }
+
+  it should "be requesty for a Requesty client built by its descriptor" in {
+    val reported = failOnce { (baseUrl, options) =>
+      val config = OpenAIConfig.fromValues("openai/gpt-4o-mini", "rq-key", None, baseUrl).value
+      RequestyProvider.buildClient(config, options).value
+    }
+    assertLabelled("requesty", reported)
+  }
+
+  it should "stay openai for an OpenAI client" in {
+    val reported = failOnce { (baseUrl, options) =>
+      val config = OpenAIConfig.fromValues("gpt-4o", "sk-test", None, baseUrl).value
+      OpenAIProvider.buildClient(config, options).value
+    }
+    assertLabelled("openai", reported)
+  }
+
+  it should "name the provider in the already-closed error" in {
+    val azure  = AzureConfig.fromValues("my-deploy", "https://r.openai.azure.com", "k", "2024-10-21").value
+    val client = OpenAIClient(azure).value
+    client.close()
+    client.complete(hello, CompletionOptions()).left.value.message should include(
+      "Azure OpenAI client for model my-deploy"
+    )
   }
 }

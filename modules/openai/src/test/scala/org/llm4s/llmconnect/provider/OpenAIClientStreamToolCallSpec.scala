@@ -123,4 +123,19 @@ final class OpenAIClientStreamToolCallSpec extends AnyFlatSpec with Matchers wit
     completion.content shouldBe "hi"
     completion.toolCalls shouldBe empty
   }
+
+  it should "return three or more interleaved tool calls in index order" in {
+    // Ids chosen so hash order and index order disagree: `StreamingAccumulator` kept partial calls
+    // in an unordered map before #1132, so `Completion.toolCalls` came back in hash order.
+    val ids = Seq("call_zeta", "call_alpha", "call_mu", "call_beta")
+    val (completion, _) = run(
+      (Seq(toolDelta(ids.zipWithIndex.map((id, i) => opening(i, id, s"tool_$i", """{"n":"""))*)) ++
+        ids.indices.reverse.map(i => toolDelta(continuation(i, s"$i}"))) :+ finish)*
+    )
+
+    completion.toolCalls.map(_.id) shouldBe ids
+    completion.toolCalls.map(_.name) shouldBe ids.indices.map(i => s"tool_$i")
+    completion.toolCalls.map(_.arguments("n").num.toInt) shouldBe ids.indices
+    completion.message.toolCalls.map(_.id) shouldBe ids
+  }
 }
