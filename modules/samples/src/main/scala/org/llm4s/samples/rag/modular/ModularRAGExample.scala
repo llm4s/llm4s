@@ -109,11 +109,10 @@ object ModularRAGExample extends App {
       for {
         providerTuple <- Llm4sConfig.embeddings()
         (providerName, embeddingCfg) = providerTuple
-        embeddingProvider <- ModularRAGSupport.toEmbeddingProvider(providerName)
         rag <- {
           val base = RAG
             .builder()
-            .withEmbeddings(embeddingProvider, embeddingCfg.model)
+            .withEmbeddings(providerName, embeddingCfg.model)
             .withChunking(ChunkerFactory.Strategy.Sentence, 800, 150)
             .withTopK(defaultTopK)
             .inMemory

@@ -7,6 +7,7 @@ import org.llm4s.llmconnect.LLMClient
 import org.llm4s.rag.loader.{ DirectoryLoader, DocumentLoader, LoadingConfig }
 import org.llm4s.rag.permissions.SearchIndex
 import org.llm4s.trace.Tracing
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.vectorstore.FusionStrategy
 import org.llm4s.rag.transform.QueryTransformer
 
@@ -20,11 +21,11 @@ import org.llm4s.rag.transform.QueryTransformer
  * {{{
  * // Minimal configuration
  * val config = RAGConfig()
- *   .withEmbeddings(EmbeddingProvider.OpenAI)
+ *   .withEmbeddings("openai")
  *
  * // Full customization with SQLite
  * val config = RAGConfig()
- *   .withEmbeddings(EmbeddingProvider.OpenAI, "text-embedding-3-large")
+ *   .withEmbeddings("openai", "text-embedding-3-large")
  *   .withChunking(ChunkerFactory.Strategy.Sentence, 800, 150)
  *   .withRRF(60)
  *   .withSQLite("./rag.db")
@@ -32,14 +33,22 @@ import org.llm4s.rag.transform.QueryTransformer
  *
  * // Using PostgreSQL with pgvector
  * val config = RAGConfig()
- *   .withEmbeddings(EmbeddingProvider.OpenAI)
+ *   .withEmbeddings("openai")
  *   .withPgVector("jdbc:postgresql://localhost:5432/mydb", "user", "pass", "embeddings")
  * }}}
+ *
+ * @param embeddingProvider id of the embedding provider, resolved through the
+ *                          [[org.llm4s.llmconnect.spi.ProviderRegistry]] when the pipeline is
+ *                          built - the same id as in `EMBEDDING_MODEL=<id>/<model>`. Any
+ *                          provider on the classpath can be named, and one that is not
+ *                          fails the build with the registry's "not registered" error.
+ * @param embeddingModel    the model to embed with. When `None`, the model of the resolved
+ *                          provider config is used, then the provider's own default.
  */
 final case class RAGConfig(
   // Embedding settings
-  embeddingProvider: EmbeddingProvider = EmbeddingProvider.OpenAI,
-  embeddingModel: Option[String] = None,
+  embeddingProvider: ProviderId = ProviderId("openai"),
+  embeddingModel: Option[String] = Some("text-embedding-3-small"),
   embeddingDimensions: Option[Int] = None,
   // Chunking settings
   chunkingStrategy: ChunkerFactory.Strategy = ChunkerFactory.Strategy.Sentence,
@@ -79,17 +88,25 @@ final case class RAGConfig(
 
   // ========== Embedding Configuration ==========
 
-  /** Configure embedding provider */
-  def withEmbeddings(provider: EmbeddingProvider): RAGConfig =
-    copy(embeddingProvider = provider)
+  /**
+   * Configure the embedding provider, taking its model from the provider config
+   * the pipeline is built with, or failing that the provider's own default.
+   *
+   * Any model set earlier is cleared: it belonged to the previous provider.
+   *
+   * @param provider an embedding provider id or alias, as in `EMBEDDING_MODEL=<id>/<model>`,
+   *                 e.g. `"openai"`, `"voyage"`, or `"ollama"` with `llm4s-ollama` on the classpath.
+   */
+  def withEmbeddings(provider: String): RAGConfig =
+    copy(embeddingProvider = ProviderId(provider), embeddingModel = None)
 
   /** Configure embedding provider and model */
-  def withEmbeddings(provider: EmbeddingProvider, model: String): RAGConfig =
-    copy(embeddingProvider = provider, embeddingModel = Some(model))
+  def withEmbeddings(provider: String, model: String): RAGConfig =
+    copy(embeddingProvider = ProviderId(provider), embeddingModel = Some(model))
 
   /** Configure embedding provider, model, and dimensions */
-  def withEmbeddings(provider: EmbeddingProvider, model: String, dimensions: Int): RAGConfig =
-    copy(embeddingProvider = provider, embeddingModel = Some(model), embeddingDimensions = Some(dimensions))
+  def withEmbeddings(provider: String, model: String, dimensions: Int): RAGConfig =
+    copy(embeddingProvider = ProviderId(provider), embeddingModel = Some(model), embeddingDimensions = Some(dimensions))
 
   /** Override embedding dimensions (auto-detected by default) */
   def withEmbeddingDimensions(dims: Int): RAGConfig =
@@ -387,7 +404,7 @@ final case class RAGConfig(
    *   searchIndex <- PgSearchIndex.fromJdbcUrl(jdbcUrl, user, password)
    *   _           <- searchIndex.initializeSchema()
    *   rag <- RAG.builder()
-   *     .withEmbeddings(EmbeddingProvider.OpenAI)
+   *     .withEmbeddings("openai")
    *     .withSearchIndex(searchIndex)
    *     .build()
    * } yield rag
@@ -434,7 +451,7 @@ final case class RAGConfig(
 
 object RAGConfig {
 
-  /** Default configuration - OpenAI embeddings, sentence chunking, RRF fusion, in-memory */
+  /** Default configuration - OpenAI `text-embedding-3-small` embeddings, sentence chunking, RRF fusion, in-memory */
   val default: RAGConfig = RAGConfig()
 
   /** Configuration for production use with persistent storage */

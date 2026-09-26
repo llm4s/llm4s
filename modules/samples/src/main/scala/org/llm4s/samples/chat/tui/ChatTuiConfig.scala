@@ -98,33 +98,33 @@ object ChatTuiConfig:
   private def buildProvider(provider: String, model: String)(using ContextWindowResolver): Result[ProviderConfig] =
     provider match {
       case "openai" =>
-        requireKey("OPENAI_API_KEY").map { apiKey =>
+        requireKey("OPENAI_API_KEY").flatMap { apiKey =>
           val baseUrl = ChatTuiEnv.getOrElse("OPENAI_BASE_URL", DefaultConfig.DEFAULT_OPENAI_BASE_URL)
           val org     = ChatTuiEnv.get("OPENAI_ORGANIZATION").filter(_.nonEmpty)
           OpenAIConfig.fromValues(model, apiKey, org, baseUrl)
         }
 
       case "openrouter" =>
-        requireKey("OPENROUTER_API_KEY").map { apiKey =>
+        requireKey("OPENROUTER_API_KEY").flatMap { apiKey =>
           val baseUrl = ChatTuiEnv.getOrElse("OPENAI_BASE_URL", DefaultConfig.DEFAULT_OPENROUTER_BASE_URL)
           OpenAIConfig.fromValues(model, apiKey, None, baseUrl)
         }
 
       case "requesty" =>
-        requireKey("REQUESTY_API_KEY").map { apiKey =>
+        requireKey("REQUESTY_API_KEY").flatMap { apiKey =>
           val baseUrl = ChatTuiEnv.getOrElse("OPENAI_BASE_URL", DefaultConfig.DEFAULT_REQUESTY_BASE_URL)
           OpenAIConfig.fromValues(model, apiKey, None, baseUrl)
         }
 
       case "anthropic" =>
-        requireKey("ANTHROPIC_API_KEY").map { apiKey =>
+        requireKey("ANTHROPIC_API_KEY").flatMap { apiKey =>
           val baseUrl = ChatTuiEnv.getOrElse("ANTHROPIC_BASE_URL", DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL)
           AnthropicConfig.fromValues(model, apiKey, baseUrl)
         }
 
       case "ollama" =>
         val baseUrl = ChatTuiEnv.getOrElse("OLLAMA_BASE_URL", "http://localhost:11434")
-        Right(OllamaConfig.fromValues(model, baseUrl))
+        OllamaConfig.fromValues(model, baseUrl)
 
       case "gemini" =>
         // Gemini accepts either GOOGLE_API_KEY or GEMINI_API_KEY.
@@ -132,31 +132,31 @@ object ChatTuiConfig:
         key match {
           case Some(apiKey) =>
             val baseUrl = ChatTuiEnv.getOrElse("GEMINI_BASE_URL", DefaultConfig.DEFAULT_GEMINI_BASE_URL)
-            Right(GeminiConfig.fromValues(model, apiKey, baseUrl))
+            GeminiConfig.fromValues(model, apiKey, baseUrl)
           case None =>
             Left(ConfigurationError("LLM_MODEL=gemini/... requires GOOGLE_API_KEY or GEMINI_API_KEY"))
         }
 
       case "zai" =>
-        requireKey("ZAI_API_KEY").map { apiKey =>
+        requireKey("ZAI_API_KEY").flatMap { apiKey =>
           val baseUrl = ChatTuiEnv.getOrElse("ZAI_BASE_URL", ZaiConfig.DEFAULT_BASE_URL)
           ZaiConfig.fromValues(model, apiKey, baseUrl)
         }
 
       case "deepseek" =>
-        requireKey("DEEPSEEK_API_KEY").map { apiKey =>
+        requireKey("DEEPSEEK_API_KEY").flatMap { apiKey =>
           val baseUrl = ChatTuiEnv.getOrElse("DEEPSEEK_BASE_URL", DefaultConfig.DEFAULT_DEEPSEEK_BASE_URL)
           DeepSeekConfig.fromValues(model, apiKey, baseUrl)
         }
 
       case "mistral" =>
-        requireKey("MISTRAL_API_KEY").map { apiKey =>
+        requireKey("MISTRAL_API_KEY").flatMap { apiKey =>
           val baseUrl = ChatTuiEnv.getOrElse("MISTRAL_BASE_URL", MistralConfig.DEFAULT_BASE_URL)
           MistralConfig.fromValues(model, apiKey, baseUrl)
         }
 
       case "cohere" =>
-        requireKey("COHERE_API_KEY").map { apiKey =>
+        requireKey("COHERE_API_KEY").flatMap { apiKey =>
           val baseUrl = ChatTuiEnv.getOrElse("COHERE_BASE_URL", CohereConfig.DEFAULT_BASE_URL)
           CohereConfig.fromValues(model, apiKey, baseUrl)
         }

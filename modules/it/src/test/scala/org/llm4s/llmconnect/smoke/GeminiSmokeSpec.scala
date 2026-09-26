@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.smoke
 
+import org.scalatest.EitherValues
 import org.llm4s.error.AuthenticationError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, GeminiConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, StreamedChunk, UserMessage }
@@ -20,7 +21,7 @@ import org.llm4s.it.tags.Cloud
  * Requires: `GEMINI_API_KEY` environment variable.
  */
 @Cloud
-class GeminiSmokeSpec extends AnyFlatSpec with Matchers {
+class GeminiSmokeSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private given mrs: ModelRegistryService = ModelRegistryService.default().toOption.get
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
@@ -28,11 +29,13 @@ class GeminiSmokeSpec extends AnyFlatSpec with Matchers {
   private val apiKey: Option[String] = Option(System.getenv("GEMINI_API_KEY")).filter(_.nonEmpty)
 
   private def config(key: String): GeminiConfig =
-    GeminiConfig.fromValues(
-      modelName = "gemini-1.5-flash",
-      apiKey = key,
-      baseUrl = "https://generativelanguage.googleapis.com/v1beta"
-    )
+    GeminiConfig
+      .fromValues(
+        modelName = "gemini-1.5-flash",
+        apiKey = key,
+        baseUrl = "https://generativelanguage.googleapis.com/v1beta"
+      )
+      .value
 
   private def conversation: Conversation = Conversation(Seq(UserMessage("Say hi in one word")))
 

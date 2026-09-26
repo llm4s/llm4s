@@ -197,29 +197,32 @@ import org.llm4s.reliability.{ ReliabilityConfig, ReliableProviders }
 import org.llm4s.llmconnect.config._
 
 // OpenAI
-ReliableProviders.wrap(OpenAIConfig.fromValues("gpt-4o", "sk-...", None, "https://api.openai.com/v1"))
+OpenAIConfig.fromValues("gpt-4o", "sk-...", None, "https://api.openai.com/v1").flatMap(ReliableProviders.wrap(_))
 
 // Azure OpenAI
-ReliableProviders.wrap(
-  AzureConfig.fromValues("my-deployment", "https://your-resource.openai.azure.com/", "...", "V2025_01_01_PREVIEW")
-)
+AzureConfig
+  .fromValues("my-deployment", "https://your-resource.openai.azure.com/", "...", "V2025_01_01_PREVIEW")
+  .flatMap(ReliableProviders.wrap(_))
 
 // Anthropic
-ReliableProviders.wrap(AnthropicConfig.fromValues("claude-sonnet-4-5-latest", "sk-ant-...", "https://api.anthropic.com"))
+AnthropicConfig
+  .fromValues("claude-sonnet-4-5-latest", "sk-ant-...", "https://api.anthropic.com")
+  .flatMap(ReliableProviders.wrap(_))
 
-// Ollama - no API key, and the base URL is wherever you run it
-ReliableProviders.wrap(OllamaConfig.fromValues("llama3.1", "http://localhost:11434"))
+// Ollama (llm4s-ollama) - no API key, and the base URL is wherever you run it
+OllamaConfig.fromValues("llama3.1", "http://localhost:11434").flatMap(ReliableProviders.wrap(_))
 
 // OpenRouter - an OpenAIConfig pointed at OpenRouter
-ReliableProviders.wrap(
-  OpenAIConfig.fromValues("anthropic/claude-sonnet-4-5", "sk-or-...", None, "https://openrouter.ai/api/v1"),
-  ReliabilityConfig.aggressive
-)
+OpenAIConfig
+  .fromValues("anthropic/claude-sonnet-4-5", "sk-or-...", None, "https://openrouter.ai/api/v1")
+  .flatMap(ReliableProviders.wrap(_, ReliabilityConfig.aggressive))
 ```
 
 Each `fromValues` needs a `given ContextWindowResolver` in scope, which
-`Llm4sConfig.modelRegistryService()` supplies; in most applications the config
-comes from `Llm4sConfig.defaultProvider()` instead of being built by hand.
+`Llm4sConfig.modelRegistryService()` supplies, and returns a `Result`: a blank
+credential or endpoint is a `ConfigurationError`, so it chains with `flatMap`.
+In most applications the config comes from `Llm4sConfig.defaultProvider()`
+instead of being built by hand.
 
 ## Retry Policies
 

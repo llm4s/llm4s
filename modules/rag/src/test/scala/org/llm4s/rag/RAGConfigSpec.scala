@@ -5,6 +5,7 @@ import org.scalatest.matchers.should.Matchers
 import org.llm4s.chunking.{ ChunkerFactory, ChunkingConfig }
 import org.llm4s.vectorstore.FusionStrategy
 import org.llm4s.rag.loader.{ DirectoryLoader, LoadingConfig }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 
 /**
  * Tests for RAGConfig builder pattern.
@@ -18,8 +19,8 @@ class RAGConfigSpec extends AnyFlatSpec with Matchers {
   "RAGConfig" should "have sensible defaults" in {
     val config = RAGConfig()
 
-    config.embeddingProvider shouldBe EmbeddingProvider.OpenAI
-    config.embeddingModel shouldBe None
+    config.embeddingProvider shouldBe ProviderId("openai")
+    config.embeddingModel shouldBe Some("text-embedding-3-small")
     config.embeddingDimensions shouldBe None
     config.chunkingStrategy shouldBe ChunkerFactory.Strategy.Sentence
     config.topK shouldBe 5
@@ -55,19 +56,33 @@ class RAGConfigSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "RAGConfig.withEmbeddings" should "set provider" in {
-    val config = RAGConfig().withEmbeddings(EmbeddingProvider.Voyage)
-    config.embeddingProvider shouldBe EmbeddingProvider.Voyage
+    val config = RAGConfig().withEmbeddings("voyage")
+    config.embeddingProvider shouldBe ProviderId("voyage")
+  }
+
+  it should "clear a model set for the previous provider" in {
+    val config = RAGConfig().withEmbeddings("openai", "text-embedding-3-large").withEmbeddings("voyage")
+    config.embeddingModel shouldBe None
+  }
+
+  it should "canonicalise the provider id" in {
+    RAGConfig().withEmbeddings(" Voyage ").embeddingProvider shouldBe ProviderId("voyage")
+  }
+
+  it should "accept a provider id llm4s-rag knows nothing about" in {
+    // Resolution happens at build time, against the registry; the config does not gatekeep.
+    RAGConfig().withEmbeddings("jina", "jina-embeddings-v3").embeddingProvider shouldBe ProviderId("jina")
   }
 
   it should "set provider and model" in {
-    val config = RAGConfig().withEmbeddings(EmbeddingProvider.OpenAI, "text-embedding-3-large")
-    config.embeddingProvider shouldBe EmbeddingProvider.OpenAI
+    val config = RAGConfig().withEmbeddings("openai", "text-embedding-3-large")
+    config.embeddingProvider shouldBe ProviderId("openai")
     config.embeddingModel shouldBe Some("text-embedding-3-large")
   }
 
   it should "set provider, model, and dimensions" in {
-    val config = RAGConfig().withEmbeddings(EmbeddingProvider.OpenAI, "text-embedding-3-large", 3072)
-    config.embeddingProvider shouldBe EmbeddingProvider.OpenAI
+    val config = RAGConfig().withEmbeddings("openai", "text-embedding-3-large", 3072)
+    config.embeddingProvider shouldBe ProviderId("openai")
     config.embeddingModel shouldBe Some("text-embedding-3-large")
     config.embeddingDimensions shouldBe Some(3072)
   }
@@ -289,7 +304,7 @@ class RAGConfigSpec extends AnyFlatSpec with Matchers {
 
   "RAGConfig" should "support fluent chaining" in {
     val config = RAGConfig()
-      .withEmbeddings(EmbeddingProvider.OpenAI, "text-embedding-3-large")
+      .withEmbeddings("openai", "text-embedding-3-large")
       .withChunking(ChunkerFactory.Strategy.Sentence, 800, 150)
       .withRRF(60)
       .withTopK(10)
@@ -301,7 +316,7 @@ class RAGConfigSpec extends AnyFlatSpec with Matchers {
       .withParallelism(4)
       .withBatchSize(32)
 
-    config.embeddingProvider shouldBe EmbeddingProvider.OpenAI
+    config.embeddingProvider shouldBe ProviderId("openai")
     config.embeddingModel shouldBe Some("text-embedding-3-large")
     config.chunkingStrategy shouldBe ChunkerFactory.Strategy.Sentence
     config.chunkingConfig.targetSize shouldBe 800

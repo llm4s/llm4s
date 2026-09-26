@@ -45,7 +45,7 @@ class RAGWithSearchIndexSpec extends AnyFlatSpec with Matchers {
     val mockIndex = new TestableSearchIndex()
 
     val config = RAGConfig.default
-      .withEmbeddings(EmbeddingProvider.OpenAI)
+      .withEmbeddings("openai")
       .withSearchIndex(mockIndex)
 
     config.searchIndex shouldBe defined

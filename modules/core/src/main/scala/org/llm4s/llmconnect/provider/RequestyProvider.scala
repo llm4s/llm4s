@@ -29,7 +29,8 @@ object RequestyProvider extends ProviderDescriptor:
     for
       apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-    yield OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl)
+      config  <- OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl)
+    yield config
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

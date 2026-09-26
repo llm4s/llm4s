@@ -186,25 +186,30 @@ private[providersetup] object ProviderSetupRuntime:
             input,
             "Session override for the default provider needs `set base-url <url>`."
           )
+          config <- OllamaConfig.fromValues(model, baseUrl).left.map(_.message)
         yield activeSession(
           providerId = "ollama",
           model = model,
-          config = OllamaConfig.fromValues(model, baseUrl),
+          config = config,
           note = s"Using session override values for the default provider in this app run only. Base URL: $baseUrl"
         )
       case "openai" =>
         for
           model  <- requiredModel(input, "Session override for OpenAI needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for OpenAI needs `set api-key <key>`.")
+          config <- OpenAIConfig
+            .fromValues(
+              model,
+              apiKey,
+              input.organization,
+              input.baseUrl.getOrElse(DefaultConfig.DEFAULT_OPENAI_BASE_URL)
+            )
+            .left
+            .map(_.message)
         yield activeSession(
           providerId = "openai",
           model = model,
-          config = OpenAIConfig.fromValues(
-            model,
-            apiKey,
-            input.organization,
-            input.baseUrl.getOrElse(DefaultConfig.DEFAULT_OPENAI_BASE_URL)
-          ),
+          config = config,
           note = "Using session override values for OpenAI in this app run only."
         )
       case "azure" =>
@@ -212,77 +217,103 @@ private[providersetup] object ProviderSetupRuntime:
           model    <- requiredModel(input, "Session override for Azure OpenAI needs `set model <deployment>`.")
           endpoint <- requiredEndpoint(input, "Session override for Azure OpenAI needs `set endpoint <url>`.")
           apiKey   <- requiredApiKey(input, "Session override for Azure OpenAI needs `set api-key <key>`.")
+          config <- AzureConfig
+            .fromValues(
+              model,
+              endpoint,
+              apiKey,
+              input.apiVersion.getOrElse(DefaultConfig.DEFAULT_AZURE_V2025_01_01_PREVIEW)
+            )
+            .left
+            .map(_.message)
         yield activeSession(
           providerId = "azure",
           model = model,
-          config = AzureConfig.fromValues(
-            model,
-            endpoint,
-            apiKey,
-            input.apiVersion.getOrElse(DefaultConfig.DEFAULT_AZURE_V2025_01_01_PREVIEW)
-          ),
+          config = config,
           note = "Using session override values for Azure OpenAI in this app run only."
         )
       case "anthropic" =>
         for
           model  <- requiredModel(input, "Session override for Anthropic needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Anthropic needs `set api-key <key>`.")
+          config <- AnthropicConfig
+            .fromValues(model, apiKey, input.baseUrl.getOrElse(DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL))
+            .left
+            .map(_.message)
         yield activeSession(
           providerId = "anthropic",
           model = model,
-          config = AnthropicConfig
-            .fromValues(model, apiKey, input.baseUrl.getOrElse(DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL)),
+          config = config,
           note = "Using session override values for Anthropic in this app run only."
         )
       case "gemini" =>
         for
           model  <- requiredModel(input, "Session override for Gemini needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Gemini needs `set api-key <key>`.")
+          config <- GeminiConfig
+            .fromValues(model, apiKey, input.baseUrl.getOrElse(DefaultConfig.DEFAULT_GEMINI_BASE_URL))
+            .left
+            .map(_.message)
         yield activeSession(
           providerId = "gemini",
           model = model,
-          config =
-            GeminiConfig.fromValues(model, apiKey, input.baseUrl.getOrElse(DefaultConfig.DEFAULT_GEMINI_BASE_URL)),
+          config = config,
           note = "Using session override values for Gemini in this app run only."
         )
       case "deepseek" =>
         for
           model  <- requiredModel(input, "Session override for DeepSeek needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for DeepSeek needs `set api-key <key>`.")
+          config <- DeepSeekConfig
+            .fromValues(model, apiKey, input.baseUrl.getOrElse(DeepSeekConfig.DEFAULT_BASE_URL))
+            .left
+            .map(_.message)
         yield activeSession(
           providerId = "deepseek",
           model = model,
-          config = DeepSeekConfig.fromValues(model, apiKey, input.baseUrl.getOrElse(DeepSeekConfig.DEFAULT_BASE_URL)),
+          config = config,
           note = "Using session override values for DeepSeek in this app run only."
         )
       case "cohere" =>
         for
           model  <- requiredModel(input, "Session override for Cohere needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Cohere needs `set api-key <key>`.")
+          config <- CohereConfig
+            .fromValues(model, apiKey, input.baseUrl.getOrElse(CohereConfig.DEFAULT_BASE_URL))
+            .left
+            .map(_.message)
         yield activeSession(
           providerId = "cohere",
           model = model,
-          config = CohereConfig.fromValues(model, apiKey, input.baseUrl.getOrElse(CohereConfig.DEFAULT_BASE_URL)),
+          config = config,
           note = "Using session override values for Cohere in this app run only."
         )
       case "mistral" =>
         for
           model  <- requiredModel(input, "Session override for Mistral needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Mistral needs `set api-key <key>`.")
+          config <- MistralConfig
+            .fromValues(model, apiKey, input.baseUrl.getOrElse(MistralConfig.DEFAULT_BASE_URL))
+            .left
+            .map(_.message)
         yield activeSession(
           providerId = "mistral",
           model = model,
-          config = MistralConfig.fromValues(model, apiKey, input.baseUrl.getOrElse(MistralConfig.DEFAULT_BASE_URL)),
+          config = config,
           note = "Using session override values for Mistral in this app run only."
         )
       case "zai" =>
         for
           model  <- requiredModel(input, "Session override for Z.ai needs `set model <model>`.")
           apiKey <- requiredApiKey(input, "Session override for Z.ai needs `set api-key <key>`.")
+          config <- ZaiConfig
+            .fromValues(model, apiKey, input.baseUrl.getOrElse(ZaiConfig.DEFAULT_BASE_URL))
+            .left
+            .map(_.message)
         yield activeSession(
           providerId = "zai",
           model = model,
-          config = ZaiConfig.fromValues(model, apiKey, input.baseUrl.getOrElse(ZaiConfig.DEFAULT_BASE_URL)),
+          config = config,
           note = "Using session override values for Z.ai in this app run only."
         )
       case other =>

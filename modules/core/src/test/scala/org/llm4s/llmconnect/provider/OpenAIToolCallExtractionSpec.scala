@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.scalatest.EitherValues
 import com.azure.ai.openai.models.{ ChatCompletions, ChatCompletionsOptions }
 import com.azure.json.JsonProviders
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
@@ -10,7 +11,7 @@ import org.scalatest.matchers.should.Matchers
 
 import scala.util.Using
 
-final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers {
+final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
@@ -21,12 +22,14 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers {
   "OpenAIClient.extractToolCalls" should "extract multiple tool calls with complex arguments" in {
     val model = "gpt-4"
 
-    val config = OpenAIConfig.fromValues(
-      modelName = model,
-      apiKey = "test-api-key",
-      organization = None,
-      baseUrl = "https://example.invalid/v1"
-    )
+    val config = OpenAIConfig
+      .fromValues(
+        modelName = model,
+        apiKey = "test-api-key",
+        organization = None,
+        baseUrl = "https://example.invalid/v1"
+      )
+      .value
 
     // Test with multiple tool calls with different argument structures
     val completions = completionsFromJson(
@@ -96,12 +99,14 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers {
   "OpenAIClient.extractToolCalls" should "ignore tool calls with invalid JSON arguments" in {
     val model = "gpt-4"
 
-    val config = OpenAIConfig.fromValues(
-      modelName = model,
-      apiKey = "test-api-key",
-      organization = None,
-      baseUrl = "https://example.invalid/v1"
-    )
+    val config = OpenAIConfig
+      .fromValues(
+        modelName = model,
+        apiKey = "test-api-key",
+        organization = None,
+        baseUrl = "https://example.invalid/v1"
+      )
+      .value
 
     // Mix of valid and invalid tool calls
     val completions = completionsFromJson(

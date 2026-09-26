@@ -1,6 +1,8 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.error.ConfigurationError
 import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 import org.llm4s.util.Redaction
 
@@ -17,6 +19,9 @@ import org.llm4s.util.Redaction
  * Prefer each subtype's `fromValues` factory over its primary constructor:
  * `fromValues` resolves `contextWindow` and `reserveCompletion` automatically
  * from the model name, so you only need to supply credentials and endpoint.
+ * It returns a `Result`: a blank credential or endpoint is a
+ * [[org.llm4s.error.ConfigurationError]] naming the provider and the field,
+ * never a thrown exception.
  *
  * This trait is deliberately '''not''' `sealed`. In Scala 3 `sealed` confines
  * subtypes to the same source file, which would keep every provider's config in
@@ -57,6 +62,26 @@ trait ProviderConfig {
 
   /** The same provider and credentials, pointed at a different model. */
   def withModel(model: String): ProviderConfig
+}
+
+object ProviderConfig {
+
+  /**
+   * The check behind every `fromValues` factory: `value` must not be blank.
+   *
+   * A blank credential or endpoint is a configuration mistake, so it is reported
+   * as a [[org.llm4s.error.ConfigurationError]] naming the provider and the
+   * field, not thrown.
+   *
+   * @param provider the provider's display name, e.g. `"OpenAI"`.
+   * @param field    the parameter name, e.g. `"apiKey"`; also reported as the missing key.
+   */
+  private[llm4s] def nonEmpty(provider: String, field: String, value: String): Result[Unit] =
+    Either.cond(
+      value.trim.nonEmpty,
+      (),
+      ConfigurationError(s"$provider $field must be non-empty", List(field))
+    )
 }
 
 /**
@@ -139,25 +164,27 @@ object OpenAIConfig {
     apiKey: String,
     organization: Option[String],
     baseUrl: String
-  )(using resolver: ContextWindowResolver): OpenAIConfig = {
-    require(apiKey.trim.nonEmpty, "OpenAI apiKey must be non-empty")
-    require(baseUrl.trim.nonEmpty, "OpenAI baseUrl must be non-empty")
-    val (cw, rc) = resolver.resolve(
-      lookupProviders = Seq("openai"),
-      modelName = modelName,
-      defaultContextWindow = 8192,
-      defaultReserve = standardReserve,
-      fallbackResolver = openAIFallback
-    )
-    OpenAIConfig(
-      apiKey = apiKey,
-      model = modelName,
-      organization = organization,
-      baseUrl = baseUrl,
-      contextWindow = cw,
-      reserveCompletion = rc
-    )
-  }
+  )(using resolver: ContextWindowResolver): Result[OpenAIConfig] =
+    for {
+      _ <- ProviderConfig.nonEmpty("OpenAI", "apiKey", apiKey)
+      _ <- ProviderConfig.nonEmpty("OpenAI", "baseUrl", baseUrl)
+    } yield {
+      val (cw, rc) = resolver.resolve(
+        lookupProviders = Seq("openai"),
+        modelName = modelName,
+        defaultContextWindow = 8192,
+        defaultReserve = standardReserve,
+        fallbackResolver = openAIFallback
+      )
+      OpenAIConfig(
+        apiKey = apiKey,
+        model = modelName,
+        organization = organization,
+        baseUrl = baseUrl,
+        contextWindow = cw,
+        reserveCompletion = rc
+      )
+    }
 }
 
 /**
@@ -225,26 +252,28 @@ object AzureConfig {
     endpoint: String,
     apiKey: String,
     apiVersion: String
-  )(using resolver: ContextWindowResolver): AzureConfig = {
-    require(endpoint.trim.nonEmpty, "Azure endpoint must be non-empty")
-    require(apiKey.trim.nonEmpty, "Azure apiKey must be non-empty")
-    val (cw, rc) = resolver.resolve(
-      lookupProviders = Seq("azure", "openai"),
-      modelName = modelName,
-      defaultContextWindow = 8192,
-      defaultReserve = standardReserve,
-      fallbackResolver = azureFallback,
-      logPrefix = "Azure "
-    )
-    AzureConfig(
-      endpoint = endpoint,
-      apiKey = apiKey,
-      model = modelName,
-      apiVersion = apiVersion,
-      contextWindow = cw,
-      reserveCompletion = rc
-    )
-  }
+  )(using resolver: ContextWindowResolver): Result[AzureConfig] =
+    for {
+      _ <- ProviderConfig.nonEmpty("Azure", "endpoint", endpoint)
+      _ <- ProviderConfig.nonEmpty("Azure", "apiKey", apiKey)
+    } yield {
+      val (cw, rc) = resolver.resolve(
+        lookupProviders = Seq("azure", "openai"),
+        modelName = modelName,
+        defaultContextWindow = 8192,
+        defaultReserve = standardReserve,
+        fallbackResolver = azureFallback,
+        logPrefix = "Azure "
+      )
+      AzureConfig(
+        endpoint = endpoint,
+        apiKey = apiKey,
+        model = modelName,
+        apiVersion = apiVersion,
+        contextWindow = cw,
+        reserveCompletion = rc
+      )
+    }
 }
 
 /**
@@ -297,24 +326,26 @@ object AnthropicConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  )(using resolver: ContextWindowResolver): AnthropicConfig = {
-    require(apiKey.trim.nonEmpty, "Anthropic apiKey must be non-empty")
-    require(baseUrl.trim.nonEmpty, "Anthropic baseUrl must be non-empty")
-    val (cw, rc) = resolver.resolve(
-      lookupProviders = Seq("anthropic"),
-      modelName = modelName,
-      defaultContextWindow = 200000,
-      defaultReserve = standardReserve,
-      fallbackResolver = anthropicFallback
-    )
-    AnthropicConfig(
-      apiKey = apiKey,
-      model = modelName,
-      baseUrl = baseUrl,
-      contextWindow = cw,
-      reserveCompletion = rc
-    )
-  }
+  )(using resolver: ContextWindowResolver): Result[AnthropicConfig] =
+    for {
+      _ <- ProviderConfig.nonEmpty("Anthropic", "apiKey", apiKey)
+      _ <- ProviderConfig.nonEmpty("Anthropic", "baseUrl", baseUrl)
+    } yield {
+      val (cw, rc) = resolver.resolve(
+        lookupProviders = Seq("anthropic"),
+        modelName = modelName,
+        defaultContextWindow = 200000,
+        defaultReserve = standardReserve,
+        fallbackResolver = anthropicFallback
+      )
+      AnthropicConfig(
+        apiKey = apiKey,
+        model = modelName,
+        baseUrl = baseUrl,
+        contextWindow = cw,
+        reserveCompletion = rc
+      )
+    }
 }
 
 /**
@@ -369,24 +400,26 @@ object ZaiConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  )(using resolver: ContextWindowResolver): ZaiConfig = {
-    require(apiKey.trim.nonEmpty, "Zai apiKey must be non-empty")
-    require(baseUrl.trim.nonEmpty, "Zai baseUrl must be non-empty")
-    val (cw, rc) = resolver.resolve(
-      lookupProviders = Seq("zai"),
-      modelName = modelName,
-      defaultContextWindow = 128000,
-      defaultReserve = standardReserve,
-      fallbackResolver = zaiFallback
-    )
-    ZaiConfig(
-      apiKey = apiKey,
-      model = modelName,
-      baseUrl = baseUrl,
-      contextWindow = cw,
-      reserveCompletion = rc
-    )
-  }
+  )(using resolver: ContextWindowResolver): Result[ZaiConfig] =
+    for {
+      _ <- ProviderConfig.nonEmpty("Zai", "apiKey", apiKey)
+      _ <- ProviderConfig.nonEmpty("Zai", "baseUrl", baseUrl)
+    } yield {
+      val (cw, rc) = resolver.resolve(
+        lookupProviders = Seq("zai"),
+        modelName = modelName,
+        defaultContextWindow = 128000,
+        defaultReserve = standardReserve,
+        fallbackResolver = zaiFallback
+      )
+      ZaiConfig(
+        apiKey = apiKey,
+        model = modelName,
+        baseUrl = baseUrl,
+        contextWindow = cw,
+        reserveCompletion = rc
+      )
+    }
 }
 
 /**
@@ -441,25 +474,27 @@ object GeminiConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  )(using resolver: ContextWindowResolver): GeminiConfig = {
-    require(apiKey.trim.nonEmpty, "Gemini apiKey must be non-empty")
-    require(baseUrl.trim.nonEmpty, "Gemini baseUrl must be non-empty")
-    val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
-    val (cw, rc) = resolver.resolve(
-      lookupProviders = Seq("gemini", "google"),
-      modelName = modelName,
-      defaultContextWindow = 1048576,
-      defaultReserve = standardReserve,
-      fallbackResolver = geminiFallback
-    )
-    GeminiConfig(
-      apiKey = apiKey,
-      model = modelName,
-      baseUrl = normalizedBaseUrl,
-      contextWindow = cw,
-      reserveCompletion = rc
-    )
-  }
+  )(using resolver: ContextWindowResolver): Result[GeminiConfig] =
+    for {
+      _ <- ProviderConfig.nonEmpty("Gemini", "apiKey", apiKey)
+      _ <- ProviderConfig.nonEmpty("Gemini", "baseUrl", baseUrl)
+    } yield {
+      val normalizedBaseUrl = normalizeBaseUrl(baseUrl)
+      val (cw, rc) = resolver.resolve(
+        lookupProviders = Seq("gemini", "google"),
+        modelName = modelName,
+        defaultContextWindow = 1048576,
+        defaultReserve = standardReserve,
+        fallbackResolver = geminiFallback
+      )
+      GeminiConfig(
+        apiKey = apiKey,
+        model = modelName,
+        baseUrl = normalizedBaseUrl,
+        contextWindow = cw,
+        reserveCompletion = rc
+      )
+    }
 
   private def normalizeBaseUrl(baseUrl: String): String = {
     val trimmed = baseUrl.trim.stripSuffix("/")
@@ -534,24 +569,26 @@ object DeepSeekConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  )(using resolver: ContextWindowResolver): DeepSeekConfig = {
-    require(apiKey.trim.nonEmpty, "DeepSeek apiKey must be non-empty")
-    require(baseUrl.trim.nonEmpty, "DeepSeek baseUrl must be non-empty")
-    val (cw, rc) = resolver.resolve(
-      lookupProviders = Seq("deepseek"),
-      modelName = modelName,
-      defaultContextWindow = 64000,
-      defaultReserve = standardReserve,
-      fallbackResolver = deepSeekFallback
-    )
-    DeepSeekConfig(
-      apiKey = apiKey,
-      model = modelName,
-      baseUrl = baseUrl,
-      contextWindow = cw,
-      reserveCompletion = rc
-    )
-  }
+  )(using resolver: ContextWindowResolver): Result[DeepSeekConfig] =
+    for {
+      _ <- ProviderConfig.nonEmpty("DeepSeek", "apiKey", apiKey)
+      _ <- ProviderConfig.nonEmpty("DeepSeek", "baseUrl", baseUrl)
+    } yield {
+      val (cw, rc) = resolver.resolve(
+        lookupProviders = Seq("deepseek"),
+        modelName = modelName,
+        defaultContextWindow = 64000,
+        defaultReserve = standardReserve,
+        fallbackResolver = deepSeekFallback
+      )
+      DeepSeekConfig(
+        apiKey = apiKey,
+        model = modelName,
+        baseUrl = baseUrl,
+        contextWindow = cw,
+        reserveCompletion = rc
+      )
+    }
 }
 
 /**
@@ -602,24 +639,26 @@ object CohereConfig {
     modelName: String,
     apiKey: String,
     baseUrl: String
-  )(using resolver: ContextWindowResolver): CohereConfig = {
-    require(apiKey.trim.nonEmpty, "Cohere apiKey must be non-empty")
-    require(baseUrl.trim.nonEmpty, "Cohere baseUrl must be non-empty")
-    val (cw, rc) = resolver.resolve(
-      lookupProviders = Seq("cohere"),
-      modelName = modelName,
-      defaultContextWindow = DefaultContextWindow,
-      defaultReserve = DefaultReserveCompletion,
-      fallbackResolver = cohereFallback
-    )
-    CohereConfig(
-      apiKey = apiKey,
-      model = modelName,
-      baseUrl = baseUrl,
-      contextWindow = cw,
-      reserveCompletion = rc
-    )
-  }
+  )(using resolver: ContextWindowResolver): Result[CohereConfig] =
+    for {
+      _ <- ProviderConfig.nonEmpty("Cohere", "apiKey", apiKey)
+      _ <- ProviderConfig.nonEmpty("Cohere", "baseUrl", baseUrl)
+    } yield {
+      val (cw, rc) = resolver.resolve(
+        lookupProviders = Seq("cohere"),
+        modelName = modelName,
+        defaultContextWindow = DefaultContextWindow,
+        defaultReserve = DefaultReserveCompletion,
+        fallbackResolver = cohereFallback
+      )
+      CohereConfig(
+        apiKey = apiKey,
+        model = modelName,
+        baseUrl = baseUrl,
+        contextWindow = cw,
+        reserveCompletion = rc
+      )
+    }
 }
 
 case class MistralConfig(
@@ -649,23 +688,26 @@ object MistralConfig:
     modelName: String,
     apiKey: String,
     baseUrl: String
-  )(using resolver: ContextWindowResolver): MistralConfig =
-    require(apiKey.trim.nonEmpty, "Mistral apiKey must be non-empty")
-    require(baseUrl.trim.nonEmpty, "Mistral baseUrl must be non-empty")
-    val (cw, rc) = resolver.resolve(
-      lookupProviders = Seq("mistral"),
-      modelName = modelName,
-      defaultContextWindow = DefaultContextWindow,
-      defaultReserve = DefaultReserveCompletion,
-      fallbackResolver = mistralFallback
-    )
-    MistralConfig(
-      apiKey = apiKey,
-      model = modelName,
-      baseUrl = baseUrl,
-      contextWindow = cw,
-      reserveCompletion = rc
-    )
+  )(using resolver: ContextWindowResolver): Result[MistralConfig] =
+    for {
+      _ <- ProviderConfig.nonEmpty("Mistral", "apiKey", apiKey)
+      _ <- ProviderConfig.nonEmpty("Mistral", "baseUrl", baseUrl)
+    } yield {
+      val (cw, rc) = resolver.resolve(
+        lookupProviders = Seq("mistral"),
+        modelName = modelName,
+        defaultContextWindow = DefaultContextWindow,
+        defaultReserve = DefaultReserveCompletion,
+        fallbackResolver = mistralFallback
+      )
+      MistralConfig(
+        apiKey = apiKey,
+        model = modelName,
+        baseUrl = baseUrl,
+        contextWindow = cw,
+        reserveCompletion = rc
+      )
+    }
 
 /**
  * Configuration for Google Cloud Vertex AI.
@@ -727,21 +769,24 @@ object VertexAIConfig:
     projectId: String,
     location: String = DEFAULT_LOCATION,
     credentialFilePath: Option[String] = None
-  )(using resolver: ContextWindowResolver): VertexAIConfig =
-    require(projectId.trim.nonEmpty, "Vertex AI projectId must be non-empty")
-    require(location.trim.nonEmpty, "Vertex AI location must be non-empty")
-    val (cw, rc) = resolver.resolve(
-      lookupProviders = Seq("gemini", "vertexai"),
-      modelName = modelName,
-      defaultContextWindow = DefaultContextWindow,
-      defaultReserve = DefaultReserveCompletion,
-      fallbackResolver = vertexAiFallback
-    )
-    VertexAIConfig(
-      projectId = projectId,
-      location = location,
-      model = modelName,
-      credentialFilePath = credentialFilePath,
-      contextWindow = cw,
-      reserveCompletion = rc
-    )
+  )(using resolver: ContextWindowResolver): Result[VertexAIConfig] =
+    for {
+      _ <- ProviderConfig.nonEmpty("Vertex AI", "projectId", projectId)
+      _ <- ProviderConfig.nonEmpty("Vertex AI", "location", location)
+    } yield {
+      val (cw, rc) = resolver.resolve(
+        lookupProviders = Seq("gemini", "vertexai"),
+        modelName = modelName,
+        defaultContextWindow = DefaultContextWindow,
+        defaultReserve = DefaultReserveCompletion,
+        fallbackResolver = vertexAiFallback
+      )
+      VertexAIConfig(
+        projectId = projectId,
+        location = location,
+        model = modelName,
+        credentialFilePath = credentialFilePath,
+        contextWindow = cw,
+        reserveCompletion = rc
+      )
+    }

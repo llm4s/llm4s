@@ -575,7 +575,7 @@ Use `withPgHybrid()` to configure fully PostgreSQL-based hybrid search in the RA
 import org.llm4s.rag._
 
 val config = RAGConfig()
-  .withEmbeddings(EmbeddingProvider.OpenAI)
+  .withEmbeddings("openai")
   .withPgHybrid(
     connectionString = "jdbc:postgresql://localhost:5432/mydb",
     user = "postgres",

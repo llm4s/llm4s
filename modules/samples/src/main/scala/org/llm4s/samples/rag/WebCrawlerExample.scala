@@ -160,7 +160,7 @@ object WebCrawlerExample extends App {
 
   logger.info("    // Build-time crawl integration:")
   logger.info("    val rag = RAG.builder()")
-  logger.info("      .withEmbeddings(EmbeddingProvider.OpenAI)")
+  logger.info("      .withEmbeddings(\"openai\")")
   logger.info("      .withDocuments(WebCrawlerLoader.forDocs(\"https://docs.example.com\"))")
   logger.info("      .build()")
   logger.info("      .toOption.get")

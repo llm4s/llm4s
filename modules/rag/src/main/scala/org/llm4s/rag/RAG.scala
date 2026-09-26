@@ -6,6 +6,7 @@ import org.llm4s.knowledgegraph.graphrag.{ GraphRAG, GraphRAGAnswer, GraphRAGMod
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
 import org.llm4s.llmconnect.model.*
+import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.extract.TikaDocumentExtractor
 import org.llm4s.rag.loader.*
@@ -32,7 +33,7 @@ import scala.concurrent.{ ExecutionContext, Future }
  * {{{
  * // Create pipeline
  * val rag = RAG.builder()
- *   .withEmbeddings(EmbeddingProvider.OpenAI)
+ *   .withEmbeddings("openai")
  *   .withChunking(ChunkerFactory.Strategy.Sentence, 800, 150)
  *   .build()
  *   .toOption.get
@@ -45,7 +46,7 @@ import scala.concurrent.{ ExecutionContext, Future }
  *
  * // With answer generation (requires LLM client)
  * val ragWithLLM = RAG.builder()
- *   .withEmbeddings(EmbeddingProvider.OpenAI)
+ *   .withEmbeddings("openai")
  *   .withLLM(llmClient)
  *   .build()
  *   .toOption.get
@@ -1164,12 +1165,20 @@ object RAG {
 
   /**
    * Build a RAG pipeline from configuration.
+   *
+   * `config.embeddingProvider` is resolved through the given [[org.llm4s.llmconnect.spi.ProviderRegistry]] -
+   * by default every provider on the classpath - so an embedding provider that
+   * ships in its own module is usable here with nothing in `llm4s-rag` edited,
+   * and one that is absent fails with the registry's "not registered" error.
+   *
+   * @param resolveEmbeddingProvider supplies the provider config for the resolved, canonical
+   *                                 embedding provider id - typically from `Llm4sConfig.embeddings()`.
    */
   def build(
     config: RAGConfig,
     resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig] = missingEmbeddingProviderConfig,
     resolveRerankerConfig: () => Result[Option[RerankProviderConfig]] = () => Right(None)
-  )(using ModelRegistryService): Result[RAG] =
+  )(using ModelRegistryService, ProviderRegistry): Result[RAG] =
     build(config, None, resolveEmbeddingProvider, resolveRerankerConfig)
 
   /**
@@ -1180,7 +1189,7 @@ object RAG {
     config: RAGConfig,
     embeddingClient: EmbeddingClient,
     resolveRerankerConfig: () => Result[Option[RerankProviderConfig]] = () => Right(None)
-  )(using ModelRegistryService): Result[RAG] =
+  )(using ModelRegistryService, ProviderRegistry): Result[RAG] =
     build(config, Some(embeddingClient), _ => Right(EmbeddingProviderConfig("", "", "")), resolveRerankerConfig)
 
   private def build(
@@ -1188,14 +1197,11 @@ object RAG {
     existingClient: Option[EmbeddingClient],
     resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig],
     resolveRerankerConfig: () => Result[Option[RerankProviderConfig]]
-  )(using ModelRegistryService): Result[RAG] =
+  )(using ModelRegistryService, ProviderRegistry): Result[RAG] =
     for {
-      embeddingClient <- existingClient match {
-        case Some(c) => Right(c)
-        case None    => createEmbeddingClient(config, resolveEmbeddingProvider)
-      }
-      embeddingModelConfig = createEmbeddingModelConfig(config)
-      chunker              = createChunker(config, embeddingClient, embeddingModelConfig)
+      embeddings <- createEmbeddings(config, existingClient, resolveEmbeddingProvider)
+      (embeddingClient, embeddingModelConfig) = embeddings
+      chunker                                 = createChunker(config, embeddingClient, embeddingModelConfig)
       hybridSearcher <- createHybridSearcher(config)
       reranker       <- createReranker(config, resolveRerankerConfig)
       registry       <- createRegistry(config)
@@ -1248,38 +1254,77 @@ object RAG {
    * Extension method to build from config.
    */
   implicit class RAGConfigOps(private val config: RAGConfig) extends AnyVal {
-    def build(using ModelRegistryService): Result[RAG] =
+    def build(using ModelRegistryService, ProviderRegistry): Result[RAG] =
       RAG.build(config)
 
     def build(
       resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig],
       resolveRerankerConfig: () => Result[Option[RerankProviderConfig]] = () => Right(None)
-    )(using ModelRegistryService): Result[RAG] =
+    )(using ModelRegistryService, ProviderRegistry): Result[RAG] =
       RAG.build(config, resolveEmbeddingProvider, resolveRerankerConfig)
   }
 
   // ========== Private Builders ==========
 
-  private def createEmbeddingClient(
+  /**
+   * Resolves `config.embeddingProvider` through the registry and produces the
+   * embedding client together with the model it embeds with.
+   *
+   * The model is the one the config names, else the one in the resolved provider
+   * config, else the provider's own default. Dimensions likewise come from the
+   * config, else from the provider's descriptor.
+   *
+   * @param existingClient an already-built client, used instead of building one; the
+   *                       provider is still resolved, since it supplies the model's defaults.
+   */
+  private def createEmbeddings(
     config: RAGConfig,
+    existingClient: Option[EmbeddingClient],
     resolveEmbeddingProvider: String => Result[EmbeddingProviderConfig]
-  )(using service: ModelRegistryService): Result[EmbeddingClient] = {
-    val expectedProvider = config.embeddingProvider match {
-      case EmbeddingProvider.OpenAI => "openai"
-      case EmbeddingProvider.Voyage => "voyage"
-      case EmbeddingProvider.Ollama => "ollama"
-    }
+  )(using ModelRegistryService, ProviderRegistry): Result[(EmbeddingClient, EmbeddingModelConfig)] = {
+    val registry = summon[ProviderRegistry]
+    val id       = registry.canonicalEmbeddingId(config.embeddingProvider.asString)
 
-    val model = config.embeddingModel.getOrElse(defaultModel(config.embeddingProvider))
-
-    resolveEmbeddingProvider(expectedProvider).flatMap { providerConfig =>
-      EmbeddingClient.from(expectedProvider, providerConfig.copy(model = model))
-    }
+    for {
+      descriptor <- registry.resolveEmbedding(id)
+      clientAndModel <- existingClient match {
+        case Some(client) =>
+          embeddingModel(config, descriptor, None).map(model => (client, model))
+        case None =>
+          for {
+            providerConfig <- resolveEmbeddingProvider(id.asString)
+            model          <- embeddingModel(config, descriptor, Some(providerConfig.model))
+            provider       <- descriptor.build(providerConfig.copy(model = model))
+          } yield (new EmbeddingClient(provider), model)
+      }
+      (client, model) = clientAndModel
+    } yield (client, createEmbeddingModelConfig(config, descriptor, model))
   }
 
-  private def createEmbeddingModelConfig(config: RAGConfig): EmbeddingModelConfig = {
-    val model = config.embeddingModel.getOrElse(defaultModel(config.embeddingProvider))
-    val dims  = config.embeddingDimensions.getOrElse(defaultDimensions.getOrElse(model, 1536))
+  private def embeddingModel(
+    config: RAGConfig,
+    descriptor: EmbeddingProviderDescriptor,
+    resolvedModel: Option[String]
+  ): Result[String] =
+    config.embeddingModel
+      .orElse(resolvedModel.filter(_.trim.nonEmpty))
+      .orElse(descriptor.configSpec.defaultModel)
+      .toRight(
+        ConfigurationError(
+          s"No embedding model for provider '${descriptor.id.asString}'. " +
+            s"Name one with .withEmbeddings(\"${descriptor.id.asString}\", \"<model>\") " +
+            "or supply it in the resolved EmbeddingProviderConfig."
+        )
+      )
+
+  private def createEmbeddingModelConfig(
+    config: RAGConfig,
+    descriptor: EmbeddingProviderDescriptor,
+    model: String
+  ): EmbeddingModelConfig = {
+    // A model the provider does not declare still embeds; 1536 (OpenAI's small model) is the
+    // historical fallback for a dimension nothing states.
+    val dims = config.embeddingDimensions.orElse(descriptor.dimensionsOf(model)).getOrElse(1536)
     EmbeddingModelConfig(model, dims)
   }
 
@@ -1364,22 +1409,4 @@ object RAG {
             )
         }
     }
-
-  private def defaultModel(provider: EmbeddingProvider): String = provider match {
-    case EmbeddingProvider.OpenAI => "text-embedding-3-small"
-    case EmbeddingProvider.Voyage => "voyage-3"
-    case EmbeddingProvider.Ollama => "nomic-embed-text"
-  }
-
-  private val defaultDimensions: Map[String, Int] = Map(
-    "text-embedding-3-small" -> 1536,
-    "text-embedding-3-large" -> 3072,
-    "text-embedding-ada-002" -> 1536,
-    "voyage-3"               -> 1024,
-    "voyage-3-lite"          -> 512,
-    "voyage-code-3"          -> 1024,
-    "nomic-embed-text"       -> 768,
-    "mxbai-embed-large"      -> 1024,
-    "all-minilm"             -> 384
-  )
 }

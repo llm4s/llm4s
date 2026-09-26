@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.config
 
 import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.Result
 
 /**
  * Configuration for a locally-running Ollama instance.
@@ -46,20 +47,20 @@ object OllamaConfig {
   def fromValues(
     modelName: String,
     baseUrl: String
-  )(using resolver: ContextWindowResolver): OllamaConfig = {
-    require(baseUrl.trim.nonEmpty, "Ollama baseUrl must be non-empty")
-    val (cw, rc) = resolver.resolve(
-      lookupProviders = Seq("ollama"),
-      modelName = modelName,
-      defaultContextWindow = 8192,
-      defaultReserve = standardReserve,
-      fallbackResolver = ollamaFallback
-    )
-    OllamaConfig(
-      model = modelName,
-      baseUrl = baseUrl,
-      contextWindow = cw,
-      reserveCompletion = rc
-    )
-  }
+  )(using resolver: ContextWindowResolver): Result[OllamaConfig] =
+    ProviderConfig.nonEmpty("Ollama", "baseUrl", baseUrl).map { _ =>
+      val (cw, rc) = resolver.resolve(
+        lookupProviders = Seq("ollama"),
+        modelName = modelName,
+        defaultContextWindow = 8192,
+        defaultReserve = standardReserve,
+        fallbackResolver = ollamaFallback
+      )
+      OllamaConfig(
+        model = modelName,
+        baseUrl = baseUrl,
+        contextWindow = cw,
+        reserveCompletion = rc
+      )
+    }
 }

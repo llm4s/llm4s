@@ -400,7 +400,7 @@ class RAGWithMocksSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach
   }
 
   it should "create RAG with custom embedding provider" in {
-    val config = RAGConfig.default.withEmbeddings(EmbeddingProvider.OpenAI, "text-embedding-3-small")
+    val config = RAGConfig.default.withEmbeddings("openai", "text-embedding-3-small")
     val result = createMockRAG(config = config)
     result.isRight shouldBe true
   }

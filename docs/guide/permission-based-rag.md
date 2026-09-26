@@ -57,7 +57,7 @@ psql -c "CREATE EXTENSION IF NOT EXISTS vector;"
 ### Minimal Example
 
 ```scala
-import org.llm4s.rag.{ EmbeddingProvider, RAG }
+import org.llm4s.rag.RAG
 import org.llm4s.rag.RAG.RAGConfigOps
 import org.llm4s.rag.permissions._
 import org.llm4s.rag.permissions.pg.PgSearchIndex
@@ -78,7 +78,7 @@ searchIndex.collections.create(CollectionConfig.publicLeaf(collectionPath))
 
 // 3. Build RAG with permission support
 val rag = RAG.builder()
-  .withEmbeddings(EmbeddingProvider.OpenAI)
+  .withEmbeddings("openai")
   .withSearchIndex(searchIndex)
   .build()
   .getOrElse(throw new RuntimeException("Failed to build RAG"))
@@ -485,7 +485,7 @@ results.foreach { searchResults =>
 ```scala
 // Requires LLM client to be configured
 val rag = RAG.builder()
-  .withEmbeddings(EmbeddingProvider.OpenAI)
+  .withEmbeddings("openai")
   .withSearchIndex(searchIndex)
   .withLLM(llmClient)  // Add LLM for answer generation
   .build()
@@ -629,7 +629,7 @@ This:
 Here's a complete example showing a multi-tenant document system:
 
 ```scala
-import org.llm4s.rag.{ EmbeddingProvider, RAG }
+import org.llm4s.rag.RAG
 import org.llm4s.rag.RAG.RAGConfigOps
 import org.llm4s.rag.permissions._
 import org.llm4s.rag.permissions.pg.PgSearchIndex
@@ -677,7 +677,7 @@ object MultiTenantRAGExample extends App {
 
   // 4. Build RAG
   val rag = RAG.builder()
-    .withEmbeddings(EmbeddingProvider.OpenAI)
+    .withEmbeddings("openai")
     .withSearchIndex(searchIndex)
     .build()
     .getOrElse(throw new RuntimeException("Failed to build RAG"))

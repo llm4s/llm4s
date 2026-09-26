@@ -73,13 +73,14 @@ object SemanticCachingSample extends App {
     apiKey: String
   )(using ContextWindowResolver, ModelRegistryService): Result[LLMClient] = {
     println("=== Semantic Caching Demo ===\n")
-    val openAIConfig = OpenAIConfig.fromValues(
-      modelName = "gpt-4o-mini",
-      apiKey = apiKey,
-      organization = None,
-      baseUrl = "https://api.openai.com"
-    )
-    OpenAIClient(openAIConfig)
+    OpenAIConfig
+      .fromValues(
+        modelName = "gpt-4o-mini",
+        apiKey = apiKey,
+        organization = None,
+        baseUrl = "https://api.openai.com"
+      )
+      .flatMap(openAIConfig => OpenAIClient(openAIConfig))
   }
 
   private def createEmbeddingClient(apiKey: String)(using ModelRegistryService): Result[EmbeddingClient] = {

@@ -4,6 +4,7 @@ import org.llm4s.chunking.ChunkerFactory
 import org.llm4s.knowledgegraph.graphrag.GraphRAGConfig
 import org.llm4s.knowledgegraph.storage.InMemoryGraphStore
 import org.llm4s.llmconnect.model.TokenUsage
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.vectorstore.FusionStrategy
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -11,29 +12,6 @@ import org.scalatest.matchers.should.Matchers
 class RAGSpec extends AnyFlatSpec with Matchers {
 
   // ========== RAGTypes Tests ==========
-
-  "EmbeddingProvider" should "parse from string correctly" in {
-    EmbeddingProvider.fromString("openai") shouldBe Some(EmbeddingProvider.OpenAI)
-    EmbeddingProvider.fromString("OpenAI") shouldBe Some(EmbeddingProvider.OpenAI)
-    EmbeddingProvider.fromString("OPENAI") shouldBe Some(EmbeddingProvider.OpenAI)
-    EmbeddingProvider.fromString("voyage") shouldBe Some(EmbeddingProvider.Voyage)
-    EmbeddingProvider.fromString("ollama") shouldBe Some(EmbeddingProvider.Ollama)
-    EmbeddingProvider.fromString("unknown") shouldBe None
-  }
-
-  it should "have correct names" in {
-    EmbeddingProvider.OpenAI.name shouldBe "openai"
-    EmbeddingProvider.Voyage.name shouldBe "voyage"
-    EmbeddingProvider.Ollama.name shouldBe "ollama"
-  }
-
-  it should "list all values" in {
-    (EmbeddingProvider.values should contain).allOf(
-      EmbeddingProvider.OpenAI,
-      EmbeddingProvider.Voyage,
-      EmbeddingProvider.Ollama
-    )
-  }
 
   "RerankingStrategy" should "have correct case objects" in {
     RerankingStrategy.None shouldBe a[RerankingStrategy]
@@ -106,8 +84,8 @@ class RAGSpec extends AnyFlatSpec with Matchers {
 
   "RAGConfig" should "have sensible defaults" in {
     val config = RAGConfig()
-    config.embeddingProvider shouldBe EmbeddingProvider.OpenAI
-    config.embeddingModel shouldBe None
+    config.embeddingProvider shouldBe ProviderId("openai")
+    config.embeddingModel shouldBe Some("text-embedding-3-small")
     config.embeddingDimensions shouldBe None
     config.chunkingStrategy shouldBe ChunkerFactory.Strategy.Sentence
     config.fusionStrategy shouldBe a[FusionStrategy.RRF]
@@ -121,11 +99,11 @@ class RAGSpec extends AnyFlatSpec with Matchers {
 
   it should "support fluent embedding configuration" in {
     val config = RAGConfig()
-      .withEmbeddings(EmbeddingProvider.Voyage)
-      .withEmbeddings(EmbeddingProvider.OpenAI, "text-embedding-3-large")
+      .withEmbeddings("voyage")
+      .withEmbeddings("openai", "text-embedding-3-large")
       .withEmbeddingDimensions(3072)
 
-    config.embeddingProvider shouldBe EmbeddingProvider.OpenAI
+    config.embeddingProvider shouldBe ProviderId("openai")
     config.embeddingModel shouldBe Some("text-embedding-3-large")
     config.embeddingDimensions shouldBe Some(3072)
   }
@@ -232,7 +210,7 @@ class RAGSpec extends AnyFlatSpec with Matchers {
     // This tests that the implicit conversion is available at compile time
     // The actual build would require env vars, so we just verify the config
     val config = RAGConfig()
-    config.withEmbeddings(EmbeddingProvider.OpenAI) shouldBe a[RAGConfig]
+    config.withEmbeddings("openai") shouldBe a[RAGConfig]
 
     // Verify the implicit class exists (would fail to compile if not)
     val ops = new RAG.RAGConfigOps(config)

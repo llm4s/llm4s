@@ -36,7 +36,8 @@ object AzureProvider extends ProviderDescriptor:
       )
       apiKey <- ProviderDescriptor.requireApiKey(providerName, section)
       apiVersion = section.apiVersion.getOrElse(DefaultConfig.DEFAULT_AZURE_V2025_01_01_PREVIEW)
-    yield AzureConfig.fromValues(section.model.asString, endpoint, apiKey, apiVersion)
+      config <- AzureConfig.fromValues(section.model.asString, endpoint, apiKey, apiVersion)
+    yield config
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

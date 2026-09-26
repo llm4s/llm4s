@@ -1,12 +1,13 @@
 package org.llm4s.llmconnect
 
+import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OllamaConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 
-class OllamaRoutingTest extends AnyFunSuite with Matchers {
+class OllamaRoutingTest extends AnyFunSuite with Matchers with EitherValues {
   private val registryService        = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
   private given ModelRegistryService = registryService
 
@@ -28,16 +29,18 @@ class OllamaRoutingTest extends AnyFunSuite with Matchers {
   }
 
   test("OllamaConfig.from(reader) uses provided base URL") {
-    val cfg = OllamaConfig.fromValues("mistral:latest", "http://lan-host:11434")
+    val cfg = OllamaConfig.fromValues("mistral:latest", "http://lan-host:11434").value
     cfg.baseUrl shouldBe "http://lan-host:11434"
     cfg.model shouldBe "mistral:latest"
   }
 
   test("LLMConnect.getClient returns OllamaClient for Ollama provider") {
-    val cfg = OllamaConfig.fromValues(
-      modelName = "llama3.1",
-      baseUrl = "http://localhost:11434"
-    )
+    val cfg = OllamaConfig
+      .fromValues(
+        modelName = "llama3.1",
+        baseUrl = "http://localhost:11434"
+      )
+      .value
 
     val res = LLMConnect.getClient(ProviderId("ollama"), cfg)
     res match {

@@ -31,7 +31,7 @@ object OllamaProvider extends ProviderDescriptor:
   ): Result[ProviderConfig] =
     ProviderDescriptor
       .resolveBaseUrl(providerName, section, configSpec)
-      .map(baseUrl => OllamaConfig.fromValues(section.model.asString, baseUrl))
+      .flatMap(baseUrl => OllamaConfig.fromValues(section.model.asString, baseUrl))
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

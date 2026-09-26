@@ -24,7 +24,8 @@ object AnthropicProvider extends ProviderDescriptor:
     for
       apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-    yield AnthropicConfig.fromValues(section.model.asString, apiKey, baseUrl)
+      config  <- AnthropicConfig.fromValues(section.model.asString, apiKey, baseUrl)
+    yield config
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
     ModelRegistryService

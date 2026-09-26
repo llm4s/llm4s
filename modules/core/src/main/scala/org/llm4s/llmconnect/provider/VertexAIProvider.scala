@@ -37,7 +37,7 @@ object VertexAIProvider extends ProviderDescriptor:
         section.endpoint,
         "llm4s.providers.<name>.endpoint"
       )
-      .map { projectId =>
+      .flatMap { projectId =>
         VertexAIConfig.fromValues(
           modelName = section.model.asString,
           projectId = projectId,

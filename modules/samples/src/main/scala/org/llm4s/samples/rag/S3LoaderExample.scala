@@ -2,7 +2,7 @@ package org.llm4s.samples.rag
 
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.rag.loader.s3.{ S3DocumentSource, S3Loader }
-import org.llm4s.rag.{ EmbeddingProvider, RAG, RAGSearchResult }
+import org.llm4s.rag.{ RAG, RAGSearchResult }
 
 import org.slf4j.LoggerFactory
 import scala.util.chaining._
@@ -52,7 +52,7 @@ object S3LoaderExample {
       RAG.build(
         RAG
           .builder()
-          .withEmbeddings(EmbeddingProvider.OpenAI)
+          .withEmbeddings("openai")
       )(using service)
     }
 

@@ -3,7 +3,7 @@ package org.llm4s.samples.rag
 import org.llm4s.chunking.ChunkerFactory
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.rag.{ EmbeddingProvider, RAG, RAGConfig }
+import org.llm4s.rag.{ RAG, RAGConfig }
 
 import org.slf4j.LoggerFactory
 import scala.util.chaining._
@@ -40,14 +40,14 @@ object RAGBuilderExample extends App {
   logger.info("--- Example 1: Minimal Configuration ---")
   logger.info("""
     |val rag = RAG.builder()
-    |  .withEmbeddings(EmbeddingProvider.OpenAI)
+    |  .withEmbeddings("openai")
     |  .build()
   """.stripMargin)
 
   val minimalConfig = RAG
     .builder()
-    .withEmbeddings(EmbeddingProvider.OpenAI)
-    .tap(c => logger.info("Embedding provider: {}", c.embeddingProvider.name))
+    .withEmbeddings("openai")
+    .tap(c => logger.info("Embedding provider: {}", c.embeddingProvider.asString))
     .tap(c => logger.info("Chunking strategy: {}", c.chunkingStrategy))
     .tap(c => logger.info("Fusion strategy: {}", c.fusionStrategy))
     .tap(c => logger.info("Top K: {}", c.topK))
@@ -56,7 +56,7 @@ object RAGBuilderExample extends App {
   logger.info("--- Example 2: Full Customization ---")
   logger.info("""
     |val rag = RAG.builder()
-    |  .withEmbeddings(EmbeddingProvider.OpenAI, "text-embedding-3-large")
+    |  .withEmbeddings("openai", "text-embedding-3-large")
     |  .withChunking(ChunkerFactory.Strategy.Sentence, 800, 150)
     |  .withRRF(60)
     |  .withCohereReranking()
@@ -67,7 +67,7 @@ object RAGBuilderExample extends App {
 
   val fullConfig = RAG
     .builder()
-    .withEmbeddings(EmbeddingProvider.OpenAI, "text-embedding-3-large")
+    .withEmbeddings("openai", "text-embedding-3-large")
     .withChunking(ChunkerFactory.Strategy.Sentence, 800, 150)
     .withRRF(60)
     .withCohereReranking()
@@ -99,15 +99,15 @@ object RAGBuilderExample extends App {
   logger.info("Ollama (local, no API key):")
   val ollamaConfig = RAG
     .builder()
-    .withEmbeddings(EmbeddingProvider.Ollama, "nomic-embed-text")
-    .tap(c => logger.info("  Provider: {}", c.embeddingProvider.name))
+    .withEmbeddings("ollama", "nomic-embed-text")
+    .tap(c => logger.info("  Provider: {}", c.embeddingProvider.asString))
     .tap(c => logger.info("  Model: {}", c.embeddingModel.getOrElse("default")))
 
   logger.info("Voyage AI:")
   val voyageConfig = RAG
     .builder()
-    .withEmbeddings(EmbeddingProvider.Voyage, "voyage-3")
-    .tap(c => logger.info("  Provider: {}", c.embeddingProvider.name))
+    .withEmbeddings("voyage", "voyage-3")
+    .tap(c => logger.info("  Provider: {}", c.embeddingProvider.asString))
     .tap(c => logger.info("  Model: {}", c.embeddingModel.getOrElse("default")))
 
   // ========== Example 5: Different Fusion Strategies ==========
@@ -152,7 +152,7 @@ object RAGBuilderExample extends App {
       rag <- RAG.build(
         RAG
           .builder()
-          .withEmbeddings(EmbeddingProvider.OpenAI)
+          .withEmbeddings("openai")
           .withTopK(3)
           .withLLM(llmClient)
       )(using service)

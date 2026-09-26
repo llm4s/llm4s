@@ -1,11 +1,13 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.error.ConfigurationError
+import org.scalatest.EitherValues
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, MistralConfig }
 import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-class MistralConfigSpec extends AnyFlatSpec with Matchers:
+class MistralConfigSpec extends AnyFlatSpec with Matchers with EitherValues:
 
   private given ContextWindowResolver =
     ContextWindowResolver(org.llm4s.model.ModelRegistryTestSupport.defaultService())
@@ -13,19 +15,22 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers:
   // ============ fromValues validation ============
 
   "MistralConfig.fromValues" should "reject an empty API key" in {
-    an[IllegalArgumentException] should be thrownBy {
-      MistralConfig.fromValues("mistral-small-latest", apiKey = "   ", baseUrl = "https://api.mistral.ai")
-    }
+    MistralConfig
+      .fromValues("mistral-small-latest", apiKey = "   ", baseUrl = "https://api.mistral.ai")
+      .left
+      .value shouldBe a[ConfigurationError]
   }
 
   it should "reject an empty base URL" in {
-    an[IllegalArgumentException] should be thrownBy {
-      MistralConfig.fromValues("mistral-small-latest", apiKey = "key", baseUrl = "  ")
-    }
+    MistralConfig
+      .fromValues("mistral-small-latest", apiKey = "key", baseUrl = "  ")
+      .left
+      .value shouldBe a[ConfigurationError]
   }
 
   it should "produce a valid config with non-empty inputs" in {
-    val cfg = MistralConfig.fromValues("mistral-small-latest", apiKey = "sk-test", baseUrl = "https://api.mistral.ai")
+    val cfg =
+      MistralConfig.fromValues("mistral-small-latest", apiKey = "sk-test", baseUrl = "https://api.mistral.ai").value
     cfg.apiKey shouldBe "sk-test"
     cfg.model shouldBe "mistral-small-latest"
     cfg.baseUrl shouldBe "https://api.mistral.ai"
@@ -43,7 +48,7 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers:
 
     val maxTokens = canonical.contextWindow.getOrElse(fail("contextWindow not defined for mistral-small-latest"))
     val cfg =
-      MistralConfig.fromValues("mistral-small-latest", apiKey = "key", baseUrl = MistralConfig.DEFAULT_BASE_URL)
+      MistralConfig.fromValues("mistral-small-latest", apiKey = "key", baseUrl = MistralConfig.DEFAULT_BASE_URL).value
     cfg.contextWindow should be <= maxTokens
   }
 
@@ -54,13 +59,14 @@ class MistralConfigSpec extends AnyFlatSpec with Matchers:
       .getOrElse(fail("codestral-latest not found via service"))
 
     val maxTokens = canonical.contextWindow.getOrElse(fail("contextWindow not defined for codestral-latest"))
-    val cfg = MistralConfig.fromValues("codestral-latest", apiKey = "key", baseUrl = MistralConfig.DEFAULT_BASE_URL)
+    val cfg =
+      MistralConfig.fromValues("codestral-latest", apiKey = "key", baseUrl = MistralConfig.DEFAULT_BASE_URL).value
     cfg.contextWindow should be <= maxTokens
   }
 
   it should "return default 128000 for unknown model names" in {
     val cfg =
-      MistralConfig.fromValues("some-unknown-model-xyz", apiKey = "key", baseUrl = MistralConfig.DEFAULT_BASE_URL)
+      MistralConfig.fromValues("some-unknown-model-xyz", apiKey = "key", baseUrl = MistralConfig.DEFAULT_BASE_URL).value
     cfg.contextWindow shouldBe 128000
     cfg.reserveCompletion shouldBe 4096
   }
