@@ -24,31 +24,6 @@ class ProviderModelListerSpec extends AnyFunSuite with Matchers:
       apiVersion = None
     )
 
-  test("OpenAI lister discovers models from /models") {
-    val config = namedConfig(ProviderId("openai"), "gpt-4o-mini", apiKey = Some("sk-test"))
-    val responseBody =
-      """{
-        |  "data": [
-        |    {
-        |      "id": "gpt-4o-mini",
-        |      "created": 1710000000,
-        |      "owned_by": "openai"
-        |    }
-        |  ]
-        |}""".stripMargin
-
-    val mockHttp = MockHttpClient(HttpResponse(200, responseBody, Map.empty))
-    val result   = ProviderModelListers.OpenAI.listModels(config, mockHttp)
-
-    result match
-      case Right(models) =>
-        models.map(_.name.asString) shouldBe List("gpt-4o-mini")
-        models.map(_.provider) shouldBe List(ProviderId("openai"))
-        mockHttp.lastUrl shouldBe Some("https://api.openai.com/v1/models")
-      case Left(err) =>
-        fail(s"Expected discovered OpenAI models, got error: ${err.message}")
-  }
-
   test("OpenRouter lister includes required OpenRouter headers") {
     val config = namedConfig(ProviderId("openrouter"), "openai/gpt-4o-mini", apiKey = Some("or-key"))
     val responseBody =

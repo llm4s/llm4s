@@ -59,8 +59,28 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
   }
 
+  /**
+   * A provider whose key lives outside its own section - OpenAI's shape, whose embeddings
+   * reuse the chat client's key. OpenAI itself is checked in `llm4s-openai` (#1132).
+   */
+  private object SharedKeyFixtureEmbeddings extends EmbeddingProviderDescriptor {
+    val id: ProviderId = ProviderId("sharedkeyfixture")
+
+    override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
+      requiresApiKey = true,
+      defaultBaseUrl = Some("https://sharedkey.example/v1"),
+      apiKeyPath = Some("llm4s.sharedkeyfixture.apiKey")
+    )
+
+    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+      Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
+  }
+
   private given ProviderRegistry =
-    ProviderRegistry.default.withEmbeddingProvider(FixtureEmbeddings).withEmbeddingProvider(KeylessFixtureEmbeddings)
+    ProviderRegistry.default
+      .withEmbeddingProvider(FixtureEmbeddings)
+      .withEmbeddingProvider(KeylessFixtureEmbeddings)
+      .withEmbeddingProvider(SharedKeyFixtureEmbeddings)
 
   private def load(hocon: String): Result[(String, EmbeddingProviderConfig)] =
     EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
@@ -171,11 +191,11 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
   "a credential the provider keeps outside its own section" should {
 
     "be resolved from the path its descriptor declares" in {
-      // OpenAI's shape: no apiKey under llm4s.embeddings.openai, read from the chat key.
+      // OpenAI's shape: no apiKey under its embeddings section, read from the chat key.
       val (_, config) = load(
         """llm4s {
-          |  openai { apiKey = "sk-shared" }
-          |  embeddings { model = "openai/text-embedding-3-small" }
+          |  sharedkeyfixture { apiKey = "sk-shared" }
+          |  embeddings { model = "sharedkeyfixture/fixture-small" }
           |}""".stripMargin
       ).value
 
@@ -185,10 +205,10 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
     "lose to an explicit key in the provider's own section" in {
       val (_, config) = load(
         """llm4s {
-          |  openai { apiKey = "sk-shared" }
+          |  sharedkeyfixture { apiKey = "sk-shared" }
           |  embeddings {
-          |    model = "openai/text-embedding-3-small"
-          |    openai { apiKey = "sk-embeddings-only" }
+          |    model = "sharedkeyfixture/fixture-small"
+          |    sharedkeyfixture { apiKey = "sk-embeddings-only" }
           |  }
           |}""".stripMargin
       ).value
@@ -197,11 +217,11 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
     }
 
     "be reported against the path it is actually set at" in {
-      val error = load("""llm4s { embeddings { model = "openai/text-embedding-3-small" } }""").left.value.message
+      val error = load("""llm4s { embeddings { model = "sharedkeyfixture/fixture-small" } }""").left.value.message
 
-      error should include("llm4s.openai.apiKey")
+      error should include("llm4s.sharedkeyfixture.apiKey")
       // Not the embeddings section, where setting it would do nothing.
-      (error should not).include("llm4s.embeddings.openai.apiKey")
+      (error should not).include("llm4s.embeddings.sharedkeyfixture.apiKey")
     }
   }
 

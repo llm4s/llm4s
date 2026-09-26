@@ -10,13 +10,13 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
 
     "validate and normalize a full providers config" in {
       val raw = RawProvidersConfig(
-        selectedProvider = Some(ProviderName("openai-main")),
+        selectedProvider = Some(ProviderName("deepseek-primary")),
         namedProviders = Map(
-          ProviderName("openai-main") -> RawNamedProviderSection(
-            provider = Some(" openai "),
-            model = Some(" gpt-4o-mini "),
-            baseUrl = Some(" https://api.openai.com/v1 "),
-            apiKey = Some(" sk-openai "),
+          ProviderName("deepseek-primary") -> RawNamedProviderSection(
+            provider = Some(" deepseek "),
+            model = Some(" deepseek-chat "),
+            baseUrl = Some(" https://api.deepseek.com/v1 "),
+            apiKey = Some(" sk-deepseek-primary "),
             organization = Some(" org-demo "),
             endpoint = None,
             apiVersion = None,
@@ -35,15 +35,15 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
 
       ProvidersConfigLoader.validate(raw) match
         case Right(cfg) =>
-          cfg.selectedProvider.map(_.asName) shouldBe Some("openai-main")
-          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "deepseek-main")
+          cfg.selectedProvider.map(_.asName) shouldBe Some("deepseek-primary")
+          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("deepseek-primary", "deepseek-main")
 
-          val openai = cfg.namedProviders(ProviderName("openai-main"))
-          openai.provider shouldBe ProviderId("openai")
-          openai.model.asString shouldBe "gpt-4o-mini"
-          openai.baseUrl.map(_.asUrl) shouldBe Some("https://api.openai.com/v1")
-          openai.apiKey.map(_.asKey) shouldBe Some("sk-openai")
-          openai.organization shouldBe Some("org-demo")
+          val primary = cfg.namedProviders(ProviderName("deepseek-primary"))
+          primary.provider shouldBe ProviderId("deepseek")
+          primary.model.asString shouldBe "deepseek-chat"
+          primary.baseUrl.map(_.asUrl) shouldBe Some("https://api.deepseek.com/v1")
+          primary.apiKey.map(_.asKey) shouldBe Some("sk-deepseek-primary")
+          primary.organization shouldBe Some("org-demo")
 
           val deepseek = cfg.namedProviders(ProviderName("deepseek-main"))
           deepseek.provider shouldBe ProviderId("deepseek")
@@ -82,11 +82,11 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
       val raw = RawProvidersConfig(
         selectedProvider = Some(ProviderName("missing-provider")),
         namedProviders = Map(
-          ProviderName("openai-main") -> RawNamedProviderSection(
-            provider = Some("openai"),
-            model = Some("gpt-4o-mini"),
+          ProviderName("deepseek-primary") -> RawNamedProviderSection(
+            provider = Some("deepseek"),
+            model = Some("deepseek-chat"),
             baseUrl = None,
-            apiKey = Some("sk-openai"),
+            apiKey = Some("sk-deepseek-primary"),
             organization = None,
             endpoint = None,
             apiVersion = None,
@@ -107,9 +107,9 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
         namedProviders = Map(
           ProviderName("broken") -> RawNamedProviderSection(
             provider = None,
-            model = Some("gpt-4o-mini"),
+            model = Some("deepseek-chat"),
             baseUrl = None,
-            apiKey = Some("sk-openai"),
+            apiKey = Some("sk-deepseek-primary"),
             organization = None,
             endpoint = None,
             apiVersion = None,

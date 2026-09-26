@@ -76,6 +76,10 @@ flags:
     paths:
       - modules/anthropic/src/main/scala
     carryforward: true
+  openai:
+    paths:
+      - modules/openai/src/main/scala
+    carryforward: true
   knowledgegraph-neo4j:
     paths:
       - modules/knowledgegraph-neo4j/src/main/scala

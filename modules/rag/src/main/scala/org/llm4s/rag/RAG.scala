@@ -1,7 +1,7 @@
 package org.llm4s.rag
 
 import org.llm4s.chunking.{ ChunkerFactory, DocumentChunk, DocumentChunker }
-import org.llm4s.error.{ ConfigurationError, ProcessingError }
+import org.llm4s.error.{ ConfigurationError, LLMError, ProcessingError }
 import org.llm4s.knowledgegraph.graphrag.{ GraphRAG, GraphRAGAnswer, GraphRAGMode }
 import org.llm4s.llmconnect.{ EmbeddingClient, LLMClient }
 import org.llm4s.llmconnect.config.{ EmbeddingModelConfig, EmbeddingProviderConfig }
@@ -14,6 +14,7 @@ import org.llm4s.rag.permissions.*
 import org.llm4s.rag.transform.QueryTransformer
 import org.llm4s.reranker.{ RerankProviderConfig, Reranker, RerankerFactory }
 import org.llm4s.trace.Tracing
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.*
 
@@ -1286,7 +1287,7 @@ object RAG {
     val id       = registry.canonicalEmbeddingId(config.embeddingProvider.asString)
 
     for {
-      descriptor <- registry.resolveEmbedding(id)
+      descriptor <- registry.resolveEmbedding(id).left.map(withDefaultProviderHint(id, _))
       clientAndModel <- existingClient match {
         case Some(client) =>
           embeddingModel(config, descriptor, None).map(model => (client, model))
@@ -1300,6 +1301,25 @@ object RAG {
       (client, model) = clientAndModel
     } yield (client, createEmbeddingModelConfig(config, descriptor, model))
   }
+
+  /**
+   * Names the module to add when the missing provider is RAG's default.
+   *
+   * `RAGConfig.default` embeds with OpenAI, which ships in `llm4s-openai` rather than
+   * `llm4s-rag`. The registry's own error can only say "add the dependency that
+   * supplies it"; a pipeline built from the default config would otherwise fail
+   * without saying which one.
+   */
+  private def withDefaultProviderHint(id: ProviderId, error: LLMError): LLMError =
+    error match
+      case e: ConfigurationError if id == RAGConfig.DefaultEmbeddingProvider =>
+        ConfigurationError(
+          e.message + s" '${id.asString}' is RAGConfig's default embedding provider and ships in " +
+            "llm4s-openai: add \"org.llm4s\" %% \"llm4s-openai\" to your dependencies, or choose a " +
+            "registered provider with .withEmbeddings(\"<provider>\", \"<model>\").",
+          e.missingKeys
+        )
+      case other => other
 
   private def embeddingModel(
     config: RAGConfig,

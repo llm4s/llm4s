@@ -68,6 +68,17 @@ See [MODEL_METADATA.md](/MODEL_METADATA.md) for the complete model list. Quick r
 
 ## OpenAI
 
+From the release after `0.4.1`, OpenAI support - chat, embeddings, and the Azure OpenAI and
+Requesty providers that share its client - ships in its own artifact, alongside `llm4s-core`;
+adding it registers the providers:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-openai" % llm4sVersion
+```
+
+In `0.4.1` and earlier it is part of `llm4s-core`. See the
+[installation guide](../getting-started/installation.md#for-openai-azure-openai-and-requesty).
+
 ### Setup
 
 1. **Get an API key** from [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
@@ -273,6 +284,9 @@ Great for cost-conscious projects and high-volume applications.
 ---
 
 ## Azure OpenAI
+
+Azure OpenAI ships in `llm4s-openai` with OpenAI itself, from the release after `0.4.1`; see
+[OpenAI](#openai) above.
 
 ### Setup
 

@@ -30,20 +30,20 @@ class LLMClientFactoryTest extends AnyFunSuite with Matchers {
     }
   }
 
-  test("LLMConnect.getClient returns OpenAIClient for the default named OpenAI provider") {
+  test("LLMConnect.getClient returns DeepSeekClient for the default named DeepSeek provider") {
     val props = Map(
-      "llm4s.providers.provider"             -> "openai-main",
-      "llm4s.providers.openai-main.provider" -> "openai",
-      "llm4s.providers.openai-main.model"    -> "gpt-4o",
-      "llm4s.providers.openai-main.apiKey"   -> "sk",
-      "llm4s.providers.openai-main.baseUrl"  -> "https://api.openai.com/v1"
+      "llm4s.providers.provider"               -> "deepseek-main",
+      "llm4s.providers.deepseek-main.provider" -> "deepseek",
+      "llm4s.providers.deepseek-main.model"    -> "deepseek-chat",
+      "llm4s.providers.deepseek-main.apiKey"   -> "sk",
+      "llm4s.providers.deepseek-main.baseUrl"  -> "https://api.deepseek.com"
     )
 
     withProps(props) {
       given ModelRegistryService = registryService
       val res                    = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
       res match {
-        case Right(client) => client.getClass.getSimpleName shouldBe "OpenAIClient"
+        case Right(client) => client.getClass.getSimpleName shouldBe "DeepSeekClient"
         case Left(err)     => fail(s"Expected Right, got Left($err)")
       }
     }

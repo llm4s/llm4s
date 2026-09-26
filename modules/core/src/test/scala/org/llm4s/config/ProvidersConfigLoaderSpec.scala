@@ -14,12 +14,12 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "openai-main"
-          |    openai-main {
-          |      provider = "openai"
-          |      model = "gpt-4o-mini"
-          |      baseUrl = "https://api.openai.com/v1"
-          |      apiKey = "sk-openai"
+          |    provider = "deepseek-primary"
+          |    deepseek-primary {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      baseUrl = "https://api.deepseek.com/v1"
+          |      apiKey = "sk-deepseek-primary"
           |      organization = "org-demo"
           |    }
           |    deepseek-main {
@@ -36,15 +36,15 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
 
       result match
         case Right(cfg) =>
-          cfg.selectedProvider.map(_.asName) shouldBe Some("openai-main")
-          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "deepseek-main")
+          cfg.selectedProvider.map(_.asName) shouldBe Some("deepseek-primary")
+          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("deepseek-primary", "deepseek-main")
 
-          val openai = cfg.namedProviders(ProviderName("openai-main"))
-          openai.provider shouldBe ProviderId("openai")
-          openai.model.asString shouldBe "gpt-4o-mini"
-          openai.baseUrl.map(_.asUrl) shouldBe Some("https://api.openai.com/v1")
-          openai.apiKey.map(_.asKey) shouldBe Some("sk-openai")
-          openai.organization shouldBe Some("org-demo")
+          val primary = cfg.namedProviders(ProviderName("deepseek-primary"))
+          primary.provider shouldBe ProviderId("deepseek")
+          primary.model.asString shouldBe "deepseek-chat"
+          primary.baseUrl.map(_.asUrl) shouldBe Some("https://api.deepseek.com/v1")
+          primary.apiKey.map(_.asKey) shouldBe Some("sk-deepseek-primary")
+          primary.organization shouldBe Some("org-demo")
 
           val deepseek = cfg.namedProviders(ProviderName("deepseek-main"))
           deepseek.provider shouldBe ProviderId("deepseek")
@@ -61,10 +61,10 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
           |llm4s {
           |  providers {
           |    provider = "deepseek-main"
-          |    openai-main {
-          |      provider = "openai"
-          |      model = "gpt-4o-mini"
-          |      apiKey = "sk-openai"
+          |    deepseek-primary {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      apiKey = "sk-deepseek-primary"
           |    }
           |    deepseek-main {
           |      provider = "deepseek"
@@ -104,10 +104,10 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
           |llm4s {
           |  providers {
           |    provider = "missing-provider"
-          |    openai-main {
-          |      provider = "openai"
-          |      model = "gpt-4o-mini"
-          |      apiKey = "sk-openai"
+          |    deepseek-primary {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      apiKey = "sk-deepseek-primary"
           |    }
           |  }
           |}
@@ -127,10 +127,10 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    openai-main {
-          |      provider = "openai"
-          |      model = "gpt-4o-mini"
-          |      apiKey = "sk-openai"
+          |    deepseek-primary {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      apiKey = "sk-deepseek-primary"
           |    }
           |    deepseek-main {
           |      provider = "deepseek"
@@ -146,7 +146,7 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
       result match
         case Right(cfg) =>
           cfg.selectedProvider shouldBe None
-          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "deepseek-main")
+          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("deepseek-primary", "deepseek-main")
         case Left(err) =>
           fail(s"Expected ProvidersConfig without selected provider, got error: ${err.message}")
     }
@@ -156,11 +156,11 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "openai-main"
-          |    openai-main {
-          |      provider = "openai"
-          |      model = "gpt-4o-mini"
-          |      apiKey = "sk-openai"
+          |    provider = "deepseek-primary"
+          |    deepseek-primary {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      apiKey = "sk-deepseek-primary"
           |    }
           |    broken-deepseek {
           |      provider = "deepseek"

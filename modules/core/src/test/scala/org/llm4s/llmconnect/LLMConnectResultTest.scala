@@ -30,23 +30,6 @@ class LLMConnectResultTest extends AnyFunSuite with Matchers {
     }
   }
 
-  test("getClient returns OpenAIClient for the default named OpenAI provider") {
-    val props = Map(
-      "llm4s.providers.provider"             -> "openai-main",
-      "llm4s.providers.openai-main.provider" -> "openai",
-      "llm4s.providers.openai-main.model"    -> "gpt-4o",
-      "llm4s.providers.openai-main.apiKey"   -> "sk",
-      "llm4s.providers.openai-main.baseUrl"  -> "https://api.openai.com/v1"
-    )
-
-    val res = withProps(props) {
-      given ModelRegistryService = registryService
-      Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
-    }
-    res.isRight shouldBe true
-    res.toOption.get.getClass.getSimpleName shouldBe "OpenAIClient"
-  }
-
   test("getClient returns OpenRouterClient for the default named OpenRouter provider") {
     val props = Map(
       "llm4s.providers.provider"                 -> "openrouter-main",
@@ -64,20 +47,4 @@ class LLMConnectResultTest extends AnyFunSuite with Matchers {
     res.toOption.get.getClass.getSimpleName shouldBe "OpenRouterClient"
   }
 
-  test("getClient returns OpenAIClient for the default named Azure provider") {
-    val props = Map(
-      "llm4s.providers.provider"            -> "azure-main",
-      "llm4s.providers.azure-main.provider" -> "azure",
-      "llm4s.providers.azure-main.model"    -> "gpt-4o",
-      "llm4s.providers.azure-main.endpoint" -> "https://example.azure.com",
-      "llm4s.providers.azure-main.apiKey"   -> "az-sk"
-    )
-
-    val res = withProps(props) {
-      given ModelRegistryService = registryService
-      Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
-    }
-    res.isRight shouldBe true
-    res.toOption.get.getClass.getSimpleName shouldBe "OpenAIClient"
-  }
 }

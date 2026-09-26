@@ -78,35 +78,6 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers with EitherValues {
       .value shouldBe a[ConfigurationError]
   }
 
-  // ================================= AZURE CONFIG =================================
-
-  test("AzureConfig.fromValues creates config with correct model") {
-    val config = AzureConfig
-      .fromValues(
-        modelName = "gpt-4o",
-        endpoint = "https://my-resource.openai.azure.com",
-        apiKey = "test-key",
-        apiVersion = "2024-02-15-preview"
-      )
-      .value
-
-    config.model shouldBe "gpt-4o"
-    config.endpoint shouldBe "https://my-resource.openai.azure.com"
-    config.apiVersion shouldBe "2024-02-15-preview"
-  }
-
-  test("AzureConfig.fromValues fails for empty endpoint") {
-    AzureConfig
-      .fromValues(
-        modelName = "gpt-4o",
-        endpoint = "",
-        apiKey = "test-key",
-        apiVersion = "2024-02-15-preview"
-      )
-      .left
-      .value shouldBe a[ConfigurationError]
-  }
-
   // ================================= ZAI CONFIG =================================
 
   test("ZaiConfig.fromValues creates config with correct model") {
@@ -178,13 +149,10 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers with EitherValues {
 
   test("All config types implement ProviderConfig trait") {
     val openai: ProviderConfig = OpenAIConfig.fromValues("gpt-4o", "key", None, "https://api.openai.com/v1").value
-    val azure: ProviderConfig =
-      AzureConfig.fromValues("gpt-4o", "https://azure.openai.com", "key", "2024-02-15").value
     val zai: ProviderConfig =
       ZaiConfig.fromValues("GLM-4.7", "key", "https://api.z.ai/api/paas/v4").value
 
     openai.model shouldBe "gpt-4o"
-    azure.model shouldBe "gpt-4o"
     zai.model shouldBe "GLM-4.7"
   }
 
@@ -206,8 +174,6 @@ class ProviderConfigSpec extends AnyFunSuite with Matchers with EitherValues {
 
   test("every fromValues factory returns a Left for a blank required field") {
     val blanks: Seq[(String, Either[org.llm4s.error.LLMError, ProviderConfig])] = Seq(
-      "Azure endpoint"   -> AzureConfig.fromValues("gpt-4o", " ", "key", "2024-02-15"),
-      "Azure apiKey"     -> AzureConfig.fromValues("gpt-4o", "https://azure.example", " ", "2024-02-15"),
       "DeepSeek apiKey"  -> DeepSeekConfig.fromValues("deepseek-chat", " ", DeepSeekConfig.DEFAULT_BASE_URL),
       "DeepSeek baseUrl" -> DeepSeekConfig.fromValues("deepseek-chat", "key", " "),
       "Cohere apiKey"    -> CohereConfig.fromValues("command-r", " ", CohereConfig.DEFAULT_BASE_URL),

@@ -3,7 +3,7 @@ package org.llm4s.config
 // scalafix:off DisableSyntax.NoConfigFactory
 import com.typesafe.config.ConfigFactory
 // scalafix:on DisableSyntax.NoConfigFactory
-import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ModelDimensionRegistry }
+import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor, ProviderRegistry }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -32,28 +32,6 @@ class Llm4sConfigTextModelSpec extends AnyWordSpec with Matchers with EitherValu
   }
 
   "Llm4sConfig.textEmbeddingModel" should {
-    "return OpenAI text model settings with dimensions from the registry" in {
-      val props = Map(
-        "llm4s.embeddings.provider"       -> "openai",
-        "llm4s.embeddings.openai.baseUrl" -> "https://example.com/v1",
-        "llm4s.embeddings.openai.model"   -> "text-embedding-3-small",
-        // API key is shared with core OpenAI config keys
-        "llm4s.openai.apiKey" -> "sk-test"
-      )
-
-      withProps(props) {
-        val pure = Llm4sConfig.textEmbeddingModel().fold(err => fail(err.toString), identity)
-
-        pure.provider shouldBe "openai"
-        pure.modelName shouldBe "text-embedding-3-small"
-
-        // And explicitly via the registry as an extra safety check
-        val expectedDims =
-          ModelDimensionRegistry.getDimension("openai", pure.modelName).fold(err => fail(err.formatted), identity)
-        pure.dimensions shouldBe expectedDims
-      }
-    }
-
     "resolve the provider and its dimensions through the caller's registry" in {
       val props = Map("llm4s.embeddings.model" -> "fixturelocal/fixture-encoder")
 

@@ -3,7 +3,7 @@ package org.llm4s.llmconnect
 import org.scalatest.EitherValues
 import java.time.Instant
 
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, DeepSeekConfig, OpenAIConfig }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.funsuite.AnyFunSuite
@@ -46,19 +46,18 @@ class LlmClientOptionsSpec extends AnyFunSuite with Matchers with EitherValues {
   }
 
   test("LLMConnect.getClient accepts explicit options for provider-checked construction") {
-    val cfg = OpenAIConfig
+    val cfg = DeepSeekConfig
       .fromValues(
-        modelName = "gpt-4o",
+        modelName = "deepseek-chat",
         apiKey = "sk-test",
-        organization = None,
-        baseUrl = "https://api.openai.com/v1"
+        baseUrl = DeepSeekConfig.DEFAULT_BASE_URL
       )
       .value
     val options = LlmClientOptions(
       exchangeLogging = ProviderExchangeLogging.enabled(ProviderExchangeSink.noop)
     )
 
-    val res = LLMConnect.getClient(ProviderId("openai"), cfg, options)
+    val res = LLMConnect.getClient(ProviderId("deepseek"), cfg, options)
 
     res.isRight shouldBe true
   }

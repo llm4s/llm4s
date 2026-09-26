@@ -1,6 +1,5 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.config.DefaultConfig
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, DeepSeekConfig }
@@ -20,7 +19,7 @@ import org.scalatest.wordspec.AnyWordSpec
  * guarantee, and a new built-in provider must appear in [[expectations]] or
  * fail here. A provider that moves to its own module takes its round trip with it
  * (`Llm4sOllamaModuleSpec` in `llm4s-ollama`, `Llm4sGeminiModuleSpec` in `llm4s-gemini`,
- * `Llm4sAnthropicModuleSpec` in `llm4s-anthropic`).
+ * `Llm4sAnthropicModuleSpec` in `llm4s-anthropic`, `Llm4sOpenAIModuleSpec` in `llm4s-openai`).
  */
 class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
 
@@ -30,10 +29,7 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
 
   /** Descriptor, the config class it builds, and the client class that config produces. */
   private val expectations: Seq[(ProviderDescriptor, String, String)] = Seq(
-    (OpenAIProvider, "OpenAIConfig", "OpenAIClient"),
     (OpenRouterProvider, "OpenAIConfig", "OpenRouterClient"),
-    (RequestyProvider, "OpenAIConfig", "OpenAIClient"),
-    (AzureProvider, "AzureConfig", "OpenAIClient"),
     (ZaiProvider, "ZaiConfig", "ZaiClient"),
     (DeepSeekProvider, "DeepSeekConfig", "DeepSeekClient"),
     (CohereProvider, "CohereConfig", "CohereClient"),
@@ -49,7 +45,7 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
       apiKey = Some(ApiKey("test-key")),
       organization = Some("test-org"),
       endpoint = Some("test-endpoint"),
-      apiVersion = Some(DefaultConfig.DEFAULT_AZURE_V2025_01_01_PREVIEW)
+      apiVersion = None
     )
 
   "every provider built into llm4s-core" should {

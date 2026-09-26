@@ -271,6 +271,33 @@ Without it, it fails with an error saying the provider is not registered and nam
 providers that are. Package names are unchanged; see the
 [migration note](../reference/migration.md#slice-5-llm4s-anthropic).
 
+### For OpenAI, Azure OpenAI and Requesty
+
+{: .note }
+> Not yet published. `llm4s-openai` exists in the build as of
+> [#1132](https://github.com/llm4s/llm4s/issues/1132) but ships in the next release;
+> in `0.4.1` and earlier these providers are still inside `llm4s-core`.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-openai" % llm4sVersion
+```
+
+Carries the three providers that share `OpenAIClient` - OpenAI, Azure OpenAI and Requesty - the
+OpenAI embedding provider, and OpenAI and Requesty model listing. **This is the module that
+brings the Azure OpenAI SDK** (`com.azure:azure-ai-openai`), which used to sit on every
+`llm4s-core` user's classpath; with it gone, `llm4s-core` depends on no vendor SDK. Adding it is
+all the registration there is: the module declares itself to the provider registry, so
+`provider = "openai"`, `"azure"` and `"requesty"`, and `EMBEDDING_MODEL=openai/<model>`, resolve
+with no code change. Without it, they fail with an error saying the provider is not registered
+and naming the providers that are.
+
+OpenRouter, DeepSeek and Z.ai speak the OpenAI wire format but have their own clients with no
+SDK, and are not part of this module - they are still in `llm4s-core`. `llm4s-rag`'s
+`RAGConfig.default` embeds with `openai`, so a RAG pipeline built from the default needs this
+module too, or `.withEmbeddings(...)` naming a provider you do ship. Package names are
+unchanged; see the [migration note](../reference/migration.md#slice-5-llm4s-openai).
+
 ### For image generation and vision
 
 {: .note }

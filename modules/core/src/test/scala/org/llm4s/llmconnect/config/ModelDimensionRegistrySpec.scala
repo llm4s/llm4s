@@ -1,11 +1,6 @@
 package org.llm4s.llmconnect.config
 
-import org.llm4s.llmconnect.provider.{
-  BuiltinProviders,
-  EmbeddingProvider,
-  OpenAIEmbeddingProvider,
-  VoyageAIEmbeddingProvider
-}
+import org.llm4s.llmconnect.provider.{ BuiltinProviders, EmbeddingProvider, VoyageAIEmbeddingProvider }
 import org.llm4s.llmconnect.spi.{ EmbeddingProviderDescriptor, ProviderRegistry }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -18,7 +13,8 @@ import org.scalatest.wordspec.AnyWordSpec
  * (#1131). It used to hold a central table covering openai, voyage and local, so
  * `EMBEDDING_MODEL=ollama/nomic-embed-text` - documented in the README - failed
  * with "Unknown model" at `Llm4sConfig.textEmbeddingModel()`. Ollama's own
- * dimensions are checked in `llm4s-ollama`, which now owns them.
+ * dimensions are checked in `llm4s-ollama`, which now owns them, and OpenAI's in
+ * `llm4s-openai` (#1132).
  */
 class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherValues {
 
@@ -26,9 +22,7 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
 
   "ModelDimensionRegistry" should {
 
-    "know the documented OpenAI and Voyage models" in {
-      ModelDimensionRegistry.getDimension("openai", "text-embedding-3-small").value shouldBe 1536
-      ModelDimensionRegistry.getDimension("openai", "text-embedding-3-large").value shouldBe 3072
+    "know the documented Voyage models" in {
       ModelDimensionRegistry.getDimension("voyage", "voyage-3").value shouldBe 1024
     }
 
@@ -38,7 +32,7 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
 
     "resolve a provider alias and ignore the provider's case" in {
       ModelDimensionRegistry.getDimension("voyageai", "voyage-3").value shouldBe 1024
-      ModelDimensionRegistry.getDimension("OpenAI", "text-embedding-3-small").value shouldBe 1536
+      ModelDimensionRegistry.getDimension("Voyage", "voyage-3").value shouldBe 1024
     }
 
     "answer the local non-text encoders without a registered provider" in {
@@ -67,8 +61,8 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
     }
 
     "name the model and provider when a registered provider does not declare the model" in {
-      ModelDimensionRegistry.getDimension("openai", "gpt-4o").left.value.formatted should include(
-        "Unknown model 'gpt-4o' for provider 'openai'"
+      ModelDimensionRegistry.getDimension("voyage", "gpt-4o").left.value.formatted should include(
+        "Unknown model 'gpt-4o' for provider 'voyage'"
       )
     }
 
@@ -105,7 +99,7 @@ class ModelDimensionRegistrySpec extends AnyWordSpec with Matchers with EitherVa
           }
         }
       }
-      Seq(OpenAIEmbeddingProvider, VoyageAIEmbeddingProvider).foreach { descriptor =>
+      Seq(VoyageAIEmbeddingProvider).foreach { descriptor =>
         withClue(descriptor.id.asString) {
           descriptor.modelDimensions should not be empty
         }

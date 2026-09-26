@@ -229,13 +229,12 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
 
   "the two provider namespaces" should {
 
-    "be independent, so one id can name a chat and an embedding provider" in {
+    "be independent, so a provider can supply one without the other" in {
       val registry = ProviderRegistry.builtin
 
-      // OpenAI supplies both; DeepSeek only chat; Voyage only embeddings. That overlap
-      // without containment is why the embedding descriptor is a separate trait.
-      registry.ids should contain("openai")
-      registry.embeddingIds should contain("openai")
+      // DeepSeek supplies only chat; Voyage only embeddings. OpenAI, which supplies both
+      // under one id, is checked in `llm4s-openai`'s `Llm4sOpenAIModuleSpec` (#1132). That
+      // overlap without containment is why the embedding descriptor is a separate trait.
       registry.ids should contain("deepseek")
       (registry.embeddingIds should not).contain("deepseek")
       registry.embeddingIds should contain("voyage")
