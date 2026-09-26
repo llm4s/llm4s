@@ -1,5 +1,95 @@
 # Migration Guide
 
+## Slice 5: Mistral, Cohere and Voyage leave core; core ships no provider
+
+The last provider clients leave `llm4s-core` ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
+None of this is in a release yet; `0.4.1` and earlier still ship Mistral, Cohere and Voyage inside
+`llm4s-core`.
+
+| Provider | Now in | Add |
+|---|---|---|
+| Mistral (`provider = "mistral"`) | `llm4s-openai-compatible`, as a dialect | `"org.llm4s" %% "llm4s-openai-compatible"` |
+| Cohere (`provider = "cohere"`) | `llm4s-openai-compatible`, as a dialect | `"org.llm4s" %% "llm4s-openai-compatible"` |
+| Voyage AI embeddings (`EMBEDDING_MODEL=voyage/...`) | `llm4s-voyage` (`modules/providers/voyage`) | `"org.llm4s" %% "llm4s-voyage"` |
+
+Package names are unchanged, and so are the names and constructors of `MistralClient`,
+`MistralProvider`, `MistralConfig`, `CohereClient`, `CohereProvider`, `CohereConfig` and
+`VoyageAIEmbeddingProvider`, so imports compile as before once the dependency is added. No
+environment variable or config key changed its name; `llm4s.embeddings.voyage` moved to
+`llm4s-voyage`'s `reference.conf`, so it exists exactly when the module is on the classpath.
+
+### Mistral and Cohere stream now
+
+Both are [OpenAI-compatible](#slice-5-llm4s-openai-compatible), so they are small dialects on
+the shared `OpenAICompatibleClient` rather than clients of their own. Both gain **streaming**
+(`streamComplete` returned "not supported" - [#925](https://github.com/llm4s/llm4s/issues/925)),
+streamed tool calls and token usage, **tool calling** and structured output; their descriptors no
+longer declare `streaming = false`.
+
+- **Mistral** posts to `<baseUrl>/v1/chat/completions` as before (`baseUrl` is the API root,
+  `https://api.mistral.ai`); a `baseUrl` already ending in `/v1` is no longer doubled. Tool-call ids
+  are sent in the nine-character form Mistral insists on; a reasoning model's thinking is returned
+  as `Completion.thinking`.
+- **Cohere** now calls Cohere's
+  [OpenAI-compatibility API](https://docs.cohere.com/docs/compatibility-api) instead of the native
+  `/v2/chat`. `CohereConfig.DEFAULT_BASE_URL` is now `https://api.cohere.ai/compatibility/v1` (it
+  was `https://api.cohere.com`). **A configured `baseUrl` keeps working:** one that does not end in
+  `/compatibility/v1` is taken to be a Cohere API root, as it was, and gets `/compatibility/v1`
+  appended (after a trailing `/v1` or `/v2` is dropped); `CohereConfig.fromValues` stores and logs
+  the mapped URL, so `endpointUrl` and policy checks see where requests really go. A proxy that
+  forwarded only `/v2/chat` must now forward `/compatibility/v1/chat/completions`. System messages
+  go under the `developer` role and a JSON schema as `{"type": "json_object", "schema": ...}`, as
+  Cohere documents.
+
+Behaviour changes for both, now that they share the client DeepSeek, Z.ai and OpenRouter use:
+
+1. **Reply text is not trimmed** (the old clients trimmed it).
+2. **A reply with no text is an empty completion**, not a `ValidationError` - with tool calling,
+   a reply may carry only tool calls.
+3. **A missing `id` or `created` is left `""` / `0`** rather than a random UUID / the current time
+   (Mistral), and Cohere's `created` now comes from the reply.
+4. **A `ToolMessage` is sent** rather than refused (Mistral) or silently dropped (Cohere).
+5. `CompletionOptions.reasoning` is still not sent to either: Mistral's `reasoning_effort` and
+   Cohere's accept only some models or values.
+
+The shared client itself changed for every provider on it: **streamed completions now report
+token usage** and a cost estimate (they always came back with `usage = None`), and an empty
+conversation fails with a `ValidationError` before any request is sent.
+
+### Core ships no provider
+
+With those three gone, `llm4s-core` holds no provider client, and the list that existed only
+because it did is removed:
+
+- **`BuiltinProviders` and `BuiltinProviderModule`** (`org.llm4s.llmconnect.provider`) are
+  deleted, with core's `META-INF/services/org.llm4s.llmconnect.spi.Llm4sProviderModule` entry.
+- **`ProviderRegistry.builtin` is deleted.** It would now be empty. Where discovery cannot run - a
+  fat jar whose services files were overwritten - name the provider modules you ship:
+
+  ```scala
+  given ProviderRegistry =
+    ProviderRegistry.ofModules(new Llm4sOpenAIModule, new Llm4sOpenAICompatibleModule, new Llm4sVoyageModule)
+  ```
+
+`ProviderRegistry.default` (discovery) is unchanged, and so is every call site that relies on it.
+Core's `llmconnect/provider` package now holds only provider-neutral helpers: `CostEstimator`,
+`EmbeddingProvider`, `HttpErrorMapper`, `MetricsRecording`, `ProviderExchangeRecorder` and
+`ProviderResultOps`.
+
+### Source breaks
+
+1. **`BuiltinProviders`, `BuiltinProviderModule` and `ProviderRegistry.builtin` are removed** -
+   see above.
+2. **`ProviderModelListers.Mistral` is now `MistralModelLister`** (`org.llm4s.config`, in
+   `llm4s-openai-compatible`); `MistralProvider.modelLister` returns it.
+3. **`ConfigKeys.MISTRAL_API_KEY` and `MISTRAL_BASE_URL` are now on `OpenAICompatibleConfigKeys`**,
+   and **`ConfigKeys.VOYAGE_API_KEY`, `VOYAGE_EMBEDDING_BASE_URL` and `VOYAGE_EMBEDDING_MODEL` on
+   `VoyageConfigKeys`** (`llm4s-voyage`), both in `org.llm4s.config`. The strings are unchanged.
+4. **`CohereConfig.DEFAULT_BASE_URL` changed value** - see above.
+5. **`OpenAICompatibleDialect` gained four members** - `sendEmptyAssistantTurns`,
+   `encodeToolCallId`, `systemRole` and `encodeResponseFormat` - each defaulting to the standard
+   format, so an existing dialect compiles and behaves as before.
+
 ## Slice 5: `llm4s-openai-compatible`
 
 The fifth provider module of slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)),
@@ -69,7 +159,7 @@ ignore them. See [OpenAI-compatible endpoints](../guide/providers.md#openai-comp
 `ProviderRegistry.builtin` no longer includes them; where discovery cannot run:
 
 ```scala
-given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sOpenAICompatibleModule)
+given ProviderRegistry = ProviderRegistry.ofModules(new Llm4sOpenAICompatibleModule) // `builtin` was removed later in slice 5
 ```
 
 ### Behaviour changes
@@ -197,7 +287,7 @@ registry's error, which says the provider is not registered and names the provid
 discovery (a shaded fat jar, typically), add the module explicitly:
 
 ```scala
-given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sOpenAIModule)
+given ProviderRegistry = ProviderRegistry.ofModules(new Llm4sOpenAIModule) // `builtin` was removed later in slice 5
 ```
 
 **`llm4s-rag` users:** `RAGConfig.default` embeds with `openai/text-embedding-3-small`. A
@@ -273,7 +363,7 @@ names the providers that are.
 classpath discovery (a shaded fat jar, typically), add the module explicitly:
 
 ```scala
-given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sAnthropicModule)
+given ProviderRegistry = ProviderRegistry.ofModules(new Llm4sAnthropicModule) // `builtin` was removed later in slice 5
 ```
 
 ### Source breaks
@@ -348,7 +438,7 @@ says the provider is not registered and names the providers that are.
 avoid classpath discovery (a shaded fat jar, typically), add the module explicitly:
 
 ```scala
-given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sGeminiModule)
+given ProviderRegistry = ProviderRegistry.ofModules(new Llm4sGeminiModule) // `builtin` was removed later in slice 5
 ```
 
 ### Source breaks
@@ -516,7 +606,7 @@ used `builtin` to avoid classpath discovery (a shaded fat jar, typically), add t
 explicitly:
 
 ```scala
-given ProviderRegistry = ProviderRegistry.builtin.withModule(new Llm4sOllamaModule)
+given ProviderRegistry = ProviderRegistry.ofModules(new Llm4sOllamaModule) // `builtin` was removed later in slice 5
 ```
 
 ### Source breaks
@@ -835,9 +925,10 @@ That is the whole registration. `ProviderRegistry.default` - what every `Llm4sCo
 `LLMConnect` call uses when the caller supplies no registry - is now
 `ProviderRegistry.discover()`, computed once on first use.
 
-`llm4s-core` declares itself the same way, through
-`org.llm4s.llmconnect.provider.BuiltinProviderModule`. There is no special case for the
-built-ins: they are discovered exactly as a third-party module is.
+`llm4s-core` declared its own providers the same way, through
+`org.llm4s.llmconnect.provider.BuiltinProviderModule`, with no special case: they were
+discovered exactly as a third-party module is. (Since slice 5 core ships no provider, and that
+module is gone.)
 
 ### One broken jar cannot take out the others
 
@@ -884,12 +975,13 @@ assembly / assemblyMergeStrategy := {
 If you cannot, register explicitly - this is what the escape hatch is for:
 
 ```scala
-val registry = ProviderRegistry.builtin.withProvider(BedrockProvider)
+val registry = ProviderRegistry.ofModules(new Llm4sOpenAIModule).withProvider(BedrockProvider)
 LLMConnect.getClient(config)(using registry)
 ```
 
-`ProviderRegistry.builtin` is the providers compiled into `llm4s-core`, with no classpath scan
-at all.
+`ProviderRegistry.ofModules` builds a registry from the modules you name, with no classpath scan
+at all. (This section first suggested `ProviderRegistry.builtin`, the providers compiled into
+`llm4s-core`; it was removed when the last of them left core.)
 
 ### `Llm4sConfig` takes the registry
 
@@ -975,7 +1067,7 @@ All in `org.llm4s.llmconnect.spi`:
 |---|---|
 | `ProviderDescriptor` | one provider: id, aliases, config shape, features, model lister, and the two builders |
 | `ProviderConfigSpec` | which section fields the provider requires, its default base URL, and the text shown when a field is missing |
-| `ProviderFeatures` | what the client actually implements, declared statically (Cohere and Mistral declare `streaming = false` - [#925](https://github.com/llm4s/llm4s/issues/925)) |
+| `ProviderFeatures` | what the client actually implements, declared statically (Cohere and Mistral declared `streaming = false` until slice 5 - [#925](https://github.com/llm4s/llm4s/issues/925)) |
 | `ProviderRegistry` | an immutable set of descriptors; `of`, `withProvider`, `withModule`, and lookup that returns `Result` |
 | `Llm4sProviderModule` | the unit of registration - one module, several providers |
 

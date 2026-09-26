@@ -298,7 +298,7 @@ Explore **69 working examples** covering all features:
 | **Azure OpenAI** | ✅ Complete | All Azure-hosted models |
 | **Ollama** | ✅ Complete | Llama, Mistral, local models |
 | **Google Gemini** | ✅ Complete | Gemini 2.0, 1.5 Pro/Flash |
-| **Cohere** | 🚧 Planned | Coming soon |
+| **DeepSeek, OpenRouter, Z.ai, Mistral, Cohere** | ✅ Chat, streaming, tools | via `llm4s-openai-compatible` |
 
 ---
 

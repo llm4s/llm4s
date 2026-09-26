@@ -93,7 +93,7 @@ GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta  # Optional
 # Cohere Configuration
 # ===================
 COHERE_API_KEY=your-cohere-api-key
-COHERE_BASE_URL=https://api.cohere.com  # Optional
+COHERE_BASE_URL=https://api.cohere.ai/compatibility/v1  # Optional; a native root is mapped
 
 # ===================
 # Tracing Configuration
@@ -417,6 +417,11 @@ VOYAGE_API_KEY=pa-...
 # Ollama embeddings (local, no API key needed)
 EMBEDDING_MODEL=ollama/nomic-embed-text
 ```
+
+Each embedding provider comes from its module: `openai` from `llm4s-openai`, `voyage` from
+`llm4s-voyage` and `ollama` from `llm4s-ollama` (in `0.4.1` and earlier, `openai` and `voyage` are
+inside `llm4s-core`). Without the module, the provider id fails with an error naming the
+registered embedding providers.
 
 Default base URLs are used automatically:
 - OpenAI: `https://api.openai.com/v1`

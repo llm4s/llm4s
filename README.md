@@ -80,7 +80,7 @@ LLM4S is under active pre-1.0 development. The latest published release is [v0.4
 
 The framework already provides multi-provider clients, agents and tool calling, RAG and vector stores, memory, guardrails, tracing and metrics, reliability wrappers, workspace isolation, MCP support, and image and speech APIs.
 
-On `main`, the first four modularization slices are complete: RAG, knowledge graph, memory, MCP, shared media types, image, and speech have been carved out of `llm4s-core` into focused modules with smaller dependency footprints, and providers now register through an SPI. Provider clients are moving into modules of their own, starting with `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai` and `llm4s-openai-compatible` (DeepSeek, Z.ai, OpenRouter and any OpenAI-compatible endpoint). These split modules are in the build but have not yet been published as separate artifacts; v0.4.1 still ships this functionality through `llm4s-core`. See the [1.0 scope](https://llm4s.org/reference/v1-scope) and [migration guide](https://github.com/llm4s/llm4s/blob/main/docs/reference/migration.md) for module maturity and upgrade details.
+On `main`, the first four modularization slices are complete: RAG, knowledge graph, memory, MCP, shared media types, image, and speech have been carved out of `llm4s-core` into focused modules with smaller dependency footprints, and providers now register through an SPI. Provider clients have moved into modules of their own - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint) and `llm4s-voyage` - and `llm4s-core` holds none. These split modules are in the build but have not yet been published as separate artifacts; v0.4.1 still ships this functionality through `llm4s-core`. See the [1.0 scope](https://llm4s.org/reference/v1-scope) and [migration guide](https://github.com/llm4s/llm4s/blob/main/docs/reference/migration.md) for module maturity and upgrade details.
 
 The path to 1.0 is focused on stable API boundaries, provider capability parity and contract tests, Java/Kotlin/Spring/Gradle interoperability, security hardening, deterministic CI, production observability and cost controls, runnable documentation, and maintained reference applications. See the [roadmap](https://llm4s.org/reference/roadmap) for the full stabilization plan.
 
@@ -257,9 +257,9 @@ DEEPSEEK_API_KEY=<your_deepseek_api_key>
 Or Cohere:
 
 ```
-LLM_MODEL=cohere/command-r
+LLM_MODEL=cohere/command-a-03-2025
 COHERE_API_KEY=<your_cohere_api_key>
-COHERE_BASE_URL=https://api.cohere.com
+# Optional: COHERE_BASE_URL defaults to https://api.cohere.ai/compatibility/v1
 ```
 
 This will allow you to run the non-containerized examples.
@@ -496,7 +496,7 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
 
 - Embeddings: provider configuration
   - Key: `EMBEDDING_PROVIDER` or `llm4s.embeddings.provider` (required)
-  - Supported providers: `openai`, `voyage`, `ollama` (the last from `llm4s-ollama` once it is published)
+  - Supported providers: `openai` (`llm4s-openai`), `voyage` (`llm4s-voyage`), `ollama` (`llm4s-ollama`); each from its module once published
   - Type: `(String, EmbeddingProviderConfig)`
   - Loader: `Llm4sConfig.embeddings()`
   - Provider-specific keys:

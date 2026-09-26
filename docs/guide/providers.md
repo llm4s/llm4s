@@ -33,7 +33,8 @@ LLM4S supports these LLM providers, plus any endpoint that speaks the OpenAI cha
 | **OpenRouter** | Cloud gateway | Many vendors' models behind one key | Easy |
 | **Z.ai** | Cloud | GLM models | Easy |
 | **OpenAI-compatible** | Any | Groq, Together, vLLM, LM Studio, gateways - config only | Easy |
-| **Cohere** | Cloud | Production RAG, low latency | Easy |
+| **Mistral** | Cloud | Mistral and Magistral models | Easy |
+| **Cohere** | Cloud | Command models, RAG | Easy |
 | **Ollama** | Local | Private, no API key, offline | Easy |
 
 ---
@@ -63,7 +64,9 @@ See [MODEL_METADATA.md](/MODEL_METADATA.md) for the complete model list. Quick r
 
 **DeepSeek:** `deepseek-chat`, `deepseek-reasoner`
 
-**Cohere:** `command-r-plus`, `command-r`
+**Mistral:** `mistral-large-latest`, `mistral-small-latest`, `magistral-medium-latest`
+
+**Cohere:** `command-a-03-2025`
 
 **Ollama:** `mistral`, `llama2`, `neural-chat`, `nomic-embed-text` (100+ models)
 
@@ -499,7 +502,71 @@ If you gate configs with `llm4s-config-policy`, its `dev` preset allows `openai-
 
 ---
 
+## Mistral
+
+From the release after `0.4.1`, Mistral ships in `llm4s-openai-compatible`: Mistral's API is
+the OpenAI `/v1/chat/completions` format, so it runs on the shared client with a small dialect.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
+```
+
+In `0.4.1` and earlier it is part of `llm4s-core`, and does not stream
+([#925](https://github.com/llm4s/llm4s/issues/925)).
+
+### Setup
+
+1. **Get API key** from [console.mistral.ai](https://console.mistral.ai/api-keys)
+2. **Set environment variables:**
+
+```bash
+export MISTRAL_API_KEY=your-key
+```
+
+### Configuration
+
+```hocon
+llm4s {
+  providers {
+    provider = "mistral-main"
+
+    mistral-main {
+      provider = "mistral"
+      model = "mistral-large-latest"
+      apiKey = ${?MISTRAL_API_KEY}
+      # baseUrl defaults to https://api.mistral.ai - the API root; requests go to
+      # <baseUrl>/v1/chat/completions, and a baseUrl already ending in /v1 is used as it is
+    }
+  }
+}
+```
+
+### What it supports
+
+Chat, **streaming** (text, tool calls and token usage), **tool calling**, structured output
+(`ResponseFormat.Json` and `ResponseFormat.JsonSchema`), model listing and exchange logging.
+
+- **Tool-call ids.** Mistral accepts only nine-letter-or-digit ids. Its own pass through; any
+  other id in the conversation (from another provider, say) is mapped to a stable nine-character
+  one, the same for the call and its answer.
+- **Reasoning models** (Magistral) return their reasoning as `Completion.thinking`, and stream it
+  as thinking deltas.
+- `CompletionOptions.reasoning` is not sent: only some Mistral models accept `reasoning_effort`.
+
+---
+
 ## Cohere
+
+From the release after `0.4.1`, Cohere ships in `llm4s-openai-compatible` and calls Cohere's
+[OpenAI-compatibility API](https://docs.cohere.com/docs/compatibility-api)
+(`https://api.cohere.ai/compatibility/v1`) rather than its native v2 `/v2/chat`:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
+```
+
+In `0.4.1` and earlier it is part of `llm4s-core`, calls `/v2/chat`, sends text only and does
+not stream ([#925](https://github.com/llm4s/llm4s/issues/925)).
 
 ### Setup
 
@@ -507,39 +574,43 @@ If you gate configs with `llm4s-config-policy`, its `dev` preset allows `openai-
 2. **Set environment variables:**
 
 ```bash
-export LLM_MODEL=cohere/command-r-plus
 export COHERE_API_KEY=your-key
 ```
 
 ### Configuration
 
-In `application.conf`:
-
 ```hocon
-llm {
+llm4s {
   providers {
-    cohere {
-      api-key = ${?COHERE_API_KEY}
-      base-url = "https://api.cohere.com"
+    provider = "cohere-main"
+
+    cohere-main {
+      provider = "cohere"
+      model = "command-a-03-2025"
+      apiKey = ${?COHERE_API_KEY}
+      # baseUrl defaults to https://api.cohere.ai/compatibility/v1
     }
   }
 }
 ```
 
+A `baseUrl` naming Cohere's native API root, as configs written for `0.4.1` do
+(`https://api.cohere.com`, with or without `/v1` or `/v2`), is mapped to
+`<root>/compatibility/v1` and logged; a proxy root is treated the same way. A `baseUrl` already
+ending in `/compatibility/v1` is used as it is.
+
+### What it supports
+
+Chat, **streaming** (text, tool calls and token usage), **tool calling**, structured output and
+exchange logging. System messages are sent under the `developer` role, and a JSON schema as
+`{"type": "json_object", "schema": ...}`, as Cohere's compatibility API documents.
+`CompletionOptions.reasoning` is not sent. Cohere's reranker (`llm4s-rag`) is separate and
+unchanged.
+
 ### Available Models
 
-- **Best:** `command-r-plus` (advanced reasoning)
-- **Standard:** `command-r` (balanced)
-
-### Costs
-
-Competitive for production RAG use cases.
-
-### Tips
-
-- Optimized for retrieval-augmented generation
-- Fast token generation for streaming
-- Safe and reliable for enterprise use
+`command-a-03-2025` and the other Command models your key can use; see
+[Cohere's model list](https://docs.cohere.com/docs/models).
 
 ---
 
@@ -680,8 +751,8 @@ export OLLAMA_BASE_URL=http://localhost:11434
 # Gemini
 export GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 
-# Cohere
-export COHERE_BASE_URL=https://api.cohere.com
+# Cohere (its OpenAI-compatibility API; a native root is mapped to <root>/compatibility/v1)
+export COHERE_BASE_URL=https://api.cohere.ai/compatibility/v1
 
 # DeepSeek
 export DEEPSEEK_BASE_URL=https://api.deepseek.com

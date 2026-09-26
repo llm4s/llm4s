@@ -298,12 +298,13 @@ OpenRouter, DeepSeek and Z.ai speak the OpenAI wire format with no SDK, and are 
 needs this module too, or `.withEmbeddings(...)` naming a provider you do ship. Package names are
 unchanged; see the [migration note](../reference/migration.md#slice-5-llm4s-openai).
 
-### For DeepSeek, Z.ai, OpenRouter and any OpenAI-compatible endpoint
+### For DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint
 
 {: .note }
 > Not yet published. `llm4s-openai-compatible` exists in the build as of
 > [#1132](https://github.com/llm4s/llm4s/issues/1132) but ships in the next release;
-> in `0.4.1` and earlier DeepSeek, Z.ai and OpenRouter are still inside `llm4s-core`.
+> in `0.4.1` and earlier DeepSeek, Z.ai, OpenRouter, Mistral and Cohere are still inside
+> `llm4s-core`.
 
 ```scala
 // same version as llm4s-core
@@ -311,14 +312,32 @@ libraryDependencies += "org.llm4s" %% "llm4s-openai-compatible" % llm4sVersion
 ```
 
 One SDK-free client for the OpenAI `/chat/completions` API, and the providers that run on it:
-DeepSeek (`provider = "deepseek"`), Z.ai (`"zai"`), OpenRouter (`"openrouter"`), and a generic
+DeepSeek (`provider = "deepseek"`), Z.ai (`"zai"`), OpenRouter (`"openrouter"`), Mistral
+(`"mistral"`), Cohere (`"cohere"`, through Cohere's OpenAI-compatibility API), and a generic
 `"openai-compatible"` provider for any other endpoint that speaks the API - Groq, Together,
 Fireworks, a vLLM, LM Studio or llama.cpp server, an internal gateway - configured with a
 `baseUrl` and a `model`, and no code. See
 [OpenAI-compatible endpoints](../guide/providers.md#openai-compatible-endpoints). The module
 brings no dependency beyond `llm4s-core`, and adding it registers the providers. Package names
 are unchanged; see the
-[migration note](../reference/migration.md#slice-5-llm4s-openai-compatible).
+[migration note](../reference/migration.md#slice-5-llm4s-openai-compatible), and for Mistral and
+Cohere [this one](../reference/migration.md#slice-5-mistral-cohere-and-voyage-leave-core-core-ships-no-provider).
+
+### For Voyage AI embeddings
+
+{: .note }
+> Not yet published. `llm4s-voyage` exists in the build as of
+> [#1132](https://github.com/llm4s/llm4s/issues/1132) but ships in the next release;
+> in `0.4.1` and earlier Voyage is still inside `llm4s-core`.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-voyage" % llm4sVersion
+```
+
+The Voyage AI embedding provider (`EMBEDDING_MODEL=voyage/<model>`), with its
+`llm4s.embeddings.voyage` config block. It is the first community provider module under
+`modules/providers/`, and brings no dependency beyond `llm4s-core`.
 
 ### For image generation and vision
 
@@ -417,7 +436,7 @@ OLLAMA_BASE_URL=http://localhost:11434
 
 # Cohere
 COHERE_API_KEY=your-cohere-api-key
-COHERE_BASE_URL=https://api.cohere.com  # Optional
+COHERE_BASE_URL=https://api.cohere.ai/compatibility/v1  # Optional; a native root is mapped
 ```
 
 Load the `.env` file before running:

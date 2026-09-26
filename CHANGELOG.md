@@ -22,6 +22,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **Mistral, Cohere and Voyage leave `llm4s-core`, which now ships no provider** - the end of
+  core's provider clients in slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
+  Mistral and Cohere become dialects in `llm4s-openai-compatible`: Mistral over its OpenAI-format
+  `/v1/chat/completions` (nine-character tool-call ids, no empty assistant turns, Magistral
+  content chunks read as text and thinking), Cohere over Cohere's OpenAI-compatibility API
+  (`developer` system role, `json_object` + `schema` response format). Voyage AI embeddings are
+  carved as-is into `llm4s-voyage` (`modules/providers/voyage`), the first community provider
+  module, with its `llm4s.embeddings.voyage` block. Class names, packages and constructors are
+  unchanged; add `llm4s-openai-compatible` for Mistral or Cohere, `llm4s-voyage` for Voyage.
+
+  Fixed ([#925](https://github.com/llm4s/llm4s/issues/925)): **Mistral and Cohere stream** - their
+  `streamComplete` returned "not supported" - and gain tool calling and structured output; their
+  descriptors no longer declare `streaming = false`. Fixed for every provider on
+  `OpenAICompatibleClient`: streamed completions report token usage and a cost estimate (they
+  always had `usage = None`).
+
+  Behaviour changes: Cohere calls `https://api.cohere.ai/compatibility/v1` by default instead of
+  the native `/v2/chat`, and a configured native root (`https://api.cohere.com`, with or without
+  `/v1` or `/v2`) is mapped to `<root>/compatibility/v1` and logged. For Mistral and Cohere, reply
+  text is no longer trimmed, a reply with no text is an empty completion rather than an error, a
+  missing `id`/`created` is `""`/`0` rather than invented, and a `ToolMessage` is sent rather than
+  refused (Mistral) or dropped (Cohere). A Mistral `baseUrl` ending in `/v1` is no longer doubled.
+  An empty conversation fails before any request on the shared client.
+
+  Source breaks: `BuiltinProviders`, `BuiltinProviderModule`, core's
+  `META-INF/services` entry and `ProviderRegistry.builtin` are removed - use
+  `ProviderRegistry.ofModules(...)` where discovery cannot run; `ProviderModelListers.Mistral` is
+  now `MistralModelLister`; `ConfigKeys.MISTRAL_*` moved to `OpenAICompatibleConfigKeys` and
+  `ConfigKeys.VOYAGE_*` to `VoyageConfigKeys` (strings unchanged); `CohereConfig.DEFAULT_BASE_URL`
+  changed value; `OpenAICompatibleDialect` gained `sendEmptyAssistantTurns`, `encodeToolCallId`,
+  `systemRole` and `encodeResponseFormat`, all defaulting to the standard format. See the
+  [migration note](docs/reference/migration.md#slice-5-mistral-cohere-and-voyage-leave-core-core-ships-no-provider).
 - **`llm4s-openai-compatible`: DeepSeek, Z.ai and OpenRouter leave `llm4s-core` on one shared
   client, and a generic `openai-compatible` provider joins them** - the fifth provider module of
   slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)), and a consolidation rather than
