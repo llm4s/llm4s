@@ -47,7 +47,7 @@ import org.llm4s.rag.transform.QueryTransformer
  */
 final case class RAGConfig(
   // Embedding settings
-  embeddingProvider: ProviderId = ProviderId("openai"),
+  embeddingProvider: ProviderId = RAGConfig.DefaultEmbeddingProvider,
   embeddingModel: Option[String] = Some("text-embedding-3-small"),
   embeddingDimensions: Option[Int] = None,
   // Chunking settings
@@ -450,6 +450,9 @@ final case class RAGConfig(
 }
 
 object RAGConfig {
+
+  /** The embedding provider a default config names. It ships in `llm4s-openai`, not `llm4s-rag`. */
+  val DefaultEmbeddingProvider: ProviderId = ProviderId("openai")
 
   /** Default configuration - OpenAI `text-embedding-3-small` embeddings, sentence chunking, RRF fusion, in-memory */
   val default: RAGConfig = RAGConfig()
