@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
+import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming.{ SSEParser, StreamingAccumulator, StreamingToolArgumentParser }
@@ -123,6 +124,7 @@ class OpenAICompatibleClient(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
     val accumulator = StreamingAccumulator.create()
+    val toolCalls   = new StreamToolCalls
     val sseParser   = SSEParser.createStreamingParser()
     val reader      = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8))
     Iterator.continually(reader.readLine()).takeWhile(_ != null).foreach { line =>
@@ -131,15 +133,27 @@ class OpenAICompatibleClient(
       while (sseParser.hasEvents)
         sseParser.nextEvent().foreach { event =>
           event.data.filter(_ != "[DONE]").foreach { data =>
-            parseStreamingChunks(ujson.read(data)).foreach { chunk =>
-              accumulator.addChunk(chunk)
+            parseStreamingEvent(ujson.read(data), toolCalls).foreach { (chunk, rawArguments) =>
+              // The accumulator concatenates argument fragments, so it gets each fragment
+              // verbatim. The parsed form handed to `onChunk` cannot be concatenated safely:
+              // a fragment that is itself valid JSON, such as `"Paris"`, parses to the bare
+              // string and would lose its quotes.
+              accumulator.addChunk(
+                chunk.copy(toolCall = chunk.toolCall.map(_.copy(arguments = ujson.Str(rawArguments))))
+              )
               onChunk(chunk)
             }
           }
         }
     }
+    // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
+    // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
     accumulator.toCompletion.map { c =>
-      c.copy(model = settings.model, estimatedCost = c.usage.flatMap(u => CostEstimator.estimate(settings.model, u)))
+      c.copy(
+        model = settings.model,
+        toolCalls = c.message.toolCalls.toList,
+        estimatedCost = c.usage.flatMap(u => CostEstimator.estimate(settings.model, u))
+      )
     }
   }
 
@@ -255,8 +269,21 @@ class OpenAICompatibleClient(
       )
     }
 
-  /** One streamed event as chunks: one per tool call, the first also carrying the text, finish reason and thinking. */
-  protected[provider] def parseStreamingChunks(json: ujson.Value): Seq[StreamedChunk] =
+  /**
+   * One streamed event as chunks: one per tool call, the first also carrying the text, finish
+   * reason and thinking. Scoped to the provider package so specs can inspect it.
+   *
+   * `toolCalls` is the state of the stream this event belongs to - see [[StreamToolCalls]]. The
+   * default, a fresh one, is right only for an event read on its own.
+   */
+  protected[provider] def parseStreamingChunks(
+    json: ujson.Value,
+    toolCalls: StreamToolCalls = new StreamToolCalls
+  ): Seq[StreamedChunk] =
+    parseStreamingEvent(json, toolCalls).map(_._1)
+
+  /** As [[parseStreamingChunks]], pairing each chunk with its raw argument fragment. */
+  private def parseStreamingEvent(json: ujson.Value, toolCalls: StreamToolCalls): Seq[(StreamedChunk, String)] =
     json.obj.get("choices").flatMap(_.arrOpt).flatMap(_.headOption) match {
       case None => Seq.empty
       case Some(choice) =>
@@ -266,19 +293,23 @@ class OpenAICompatibleClient(
         val thinking     = dialect.thinking(delta)
         val chunkId      = json.obj.get("id").flatMap(_.strOpt).getOrElse("")
 
-        val toolCalls = delta.obj.get("tool_calls").flatMap(_.arrOpt).toSeq.flatten.collect {
-          case call if call.obj.contains("function") =>
+        val calls = delta.obj.get("tool_calls").flatMap(_.arrOpt).toSeq.flatten.zipWithIndex.collect {
+          case (call, position) if call.obj.contains("function") =>
             val function = call("function")
-            ToolCall(
-              id = call.obj.get("id").flatMap(_.strOpt).getOrElse(""),
-              name = function.obj.get("name").flatMap(_.strOpt).getOrElse(""),
-              arguments =
-                StreamingToolArgumentParser.parse(function.obj.get("arguments").flatMap(_.strOpt).getOrElse(""))
+            val raw      = function.obj.get("arguments").flatMap(_.strOpt).getOrElse("")
+            val (id, name) = toolCalls.resolve(
+              index = call.obj.get("index").flatMap(_.numOpt).map(_.toInt).getOrElse(position),
+              id = call.obj.get("id").flatMap(_.strOpt).filter(_.nonEmpty),
+              name = function.obj.get("name").flatMap(_.strOpt).filter(_.nonEmpty)
             )
+            (ToolCall(id, name, StreamingToolArgumentParser.parse(raw)), raw)
         }
 
-        val first = StreamedChunk(chunkId, content, toolCalls.headOption, finishReason, thinking)
-        first +: toolCalls.drop(1).map(tc => StreamedChunk(chunkId, None, Some(tc), None, None))
+        val first = (
+          StreamedChunk(chunkId, content, calls.headOption.map(_._1), finishReason, thinking),
+          calls.headOption.fold("")(_._2)
+        )
+        first +: calls.drop(1).map((tc, raw) => (StreamedChunk(chunkId, None, Some(tc), None, None), raw))
     }
 
   private def recordExchange(
@@ -309,6 +340,29 @@ class OpenAICompatibleClient(
 }
 
 object OpenAICompatibleClient {
+
+  /**
+   * The tool calls seen so far in one stream, by their `index`.
+   *
+   * A streamed tool call is split across deltas: the first carries its `id`, `name` and the
+   * start of its arguments, and each continuation carries only its `index` and the next
+   * argument fragment. Several calls can be interleaved, told apart by `index`. Continuations
+   * are given the id and name their index was first seen with, so the chunks a caller receives
+   * - and the ones `StreamingAccumulator`, which keys calls by id and skips a chunk with none,
+   * accumulates - all name their call. (Before #1132 each client defaulted a missing id to `""`,
+   * and every continuation's arguments were dropped.)
+   */
+  final class StreamToolCalls {
+    private val byIndex = scala.collection.mutable.Map.empty[Int, (String, String)]
+
+    /** The id and name for a call at `index`, recording what this delta supplies. */
+    private[provider] def resolve(index: Int, id: Option[String], name: Option[String]): (String, String) = {
+      val (knownId, knownName) = byIndex.getOrElse(index, ("", ""))
+      val resolved             = (id.getOrElse(knownId), name.getOrElse(knownName))
+      if (resolved._1.nonEmpty) byIndex(index) = resolved
+      resolved
+    }
+  }
 
   /**
    * Where an [[OpenAICompatibleClient]] sends requests, and how it describes itself.
