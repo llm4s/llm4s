@@ -57,21 +57,6 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
     }
   }
 
-  test("Anthropic provider with AnthropicConfig returns AnthropicClient") {
-    val cfg: ProviderConfig = AnthropicConfig(
-      apiKey = "key",
-      model = "claude-3-sonnet",
-      baseUrl = "https://api.anthropic.com",
-      contextWindow = 200000,
-      reserveCompletion = 4096
-    )
-    val res = LLMConnect.getClient(ProviderId("anthropic"), cfg)
-    res match {
-      case Right(client) => client.getClass.getSimpleName shouldBe "AnthropicClient"
-      case Left(err)     => fail(s"Expected Right, got Left($err)")
-    }
-  }
-
   test("Zai provider with ZaiConfig returns ZaiClient") {
     val cfg: ProviderConfig = ZaiConfig(
       apiKey = "key",
@@ -133,12 +118,12 @@ class LLMConnectProviderTypeSafetyTest extends AnyFunSuite with Matchers {
   }
 
   test("OpenAI provider with non-OpenAIConfig should throw IllegalArgumentException") {
-    val wrongCfg: ProviderConfig = AnthropicConfig(
+    val wrongCfg: ProviderConfig = DeepSeekConfig(
       apiKey = "key",
-      model = "claude-3-sonnet",
-      baseUrl = "https://api.anthropic.com",
-      contextWindow = 200000,
-      reserveCompletion = 4096
+      model = "deepseek-chat",
+      baseUrl = "https://example.invalid/v1",
+      contextWindow = 128000,
+      reserveCompletion = 8192
     )
 
     val res = LLMConnect.getClient(ProviderId("openai"), wrongCfg)

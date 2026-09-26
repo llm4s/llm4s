@@ -48,23 +48,4 @@ class LLMClientFactoryTest extends AnyFunSuite with Matchers {
       }
     }
   }
-
-  test("LLMConnect.getClient returns AnthropicClient for the default named Anthropic provider") {
-    val props = Map(
-      "llm4s.providers.provider"                -> "anthropic-main",
-      "llm4s.providers.anthropic-main.provider" -> "anthropic",
-      "llm4s.providers.anthropic-main.model"    -> "claude-3-sonnet",
-      "llm4s.providers.anthropic-main.apiKey"   -> "sk-anthropic",
-      "llm4s.providers.anthropic-main.baseUrl"  -> "https://api.anthropic.com"
-    )
-
-    withProps(props) {
-      given ModelRegistryService = registryService
-      val res                    = Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
-      res match {
-        case Right(client) => client.getClass.getSimpleName shouldBe "AnthropicClient"
-        case Left(err)     => fail(s"Expected Right, got Left($err)")
-      }
-    }
-  }
 }

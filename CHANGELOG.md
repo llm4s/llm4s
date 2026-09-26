@@ -22,6 +22,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`llm4s-anthropic`: Anthropic leaves `llm4s-core`, and takes the Anthropic SDK with it** -
+  the third provider module of slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
+  `AnthropicClient`, `AnthropicProvider`, `AnthropicConfig` and the Anthropic model lister move
+  to the new `llm4s-anthropic` artifact, with their tests, the `anthropic-main` example from
+  `reference.conf`, and an `Llm4sAnthropicModule` declared in `META-INF/services` - so adding the
+  dependency is the whole of registration. Package names are unchanged. `llm4s-core` no longer
+  depends on `com.anthropic:anthropic-java`; nor does `llm4s-workspace-client`, which declared
+  it (and the Azure OpenAI SDK) without importing either.
+
+  Three names move because the objects they were members of stay in core:
+  `ProviderModelListers.Anthropic` is now `AnthropicModelLister` (still in `org.llm4s.config`),
+  `DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL` is now `AnthropicConfig.DEFAULT_BASE_URL`, and
+  `ConfigKeys.ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` are now on `AnthropicConfigKeys`.
+  `ProviderRegistry.builtin` no longer includes Anthropic;
+  `ProviderRegistry.builtin.withModule(new Llm4sAnthropicModule)` restores it where classpath
+  discovery is unavailable. No configuration key or environment variable changed. See the
+  [migration guide](docs/reference/migration.md#slice-5-llm4s-anthropic).
+
 - **`llm4s-gemini`: Gemini and Vertex AI leave `llm4s-core`** - the second provider module of
   slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)). `GeminiClient`,
   `GeminiProvider`, `GeminiConfig`, `VertexAIClient`, `VertexAIProvider`,

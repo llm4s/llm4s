@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.config.DefaultConfig
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LlmClientOptions
-import org.llm4s.llmconnect.config.{ AnthropicConfig, ContextWindowResolver }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, DeepSeekConfig }
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.llm4s.types.ProviderModelTypes.*
@@ -19,7 +19,8 @@ import org.scalatest.wordspec.AnyWordSpec
  * runtime lookup and the compiler cannot; this spec is the replacement for that
  * guarantee, and a new built-in provider must appear in [[expectations]] or
  * fail here. A provider that moves to its own module takes its round trip with it
- * (`Llm4sOllamaModuleSpec` in `llm4s-ollama`, `Llm4sGeminiModuleSpec` in `llm4s-gemini`).
+ * (`Llm4sOllamaModuleSpec` in `llm4s-ollama`, `Llm4sGeminiModuleSpec` in `llm4s-gemini`,
+ * `Llm4sAnthropicModuleSpec` in `llm4s-anthropic`).
  */
 class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
 
@@ -33,7 +34,6 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
     (OpenRouterProvider, "OpenAIConfig", "OpenRouterClient"),
     (RequestyProvider, "OpenAIConfig", "OpenAIClient"),
     (AzureProvider, "AzureConfig", "OpenAIClient"),
-    (AnthropicProvider, "AnthropicConfig", "AnthropicClient"),
     (ZaiProvider, "ZaiConfig", "ZaiClient"),
     (DeepSeekProvider, "DeepSeekConfig", "DeepSeekClient"),
     (CohereProvider, "CohereConfig", "CohereClient"),
@@ -82,14 +82,14 @@ class BuiltinProvidersSpec extends AnyWordSpec with Matchers:
     }
 
     "refuse a config belonging to another provider" in {
-      val foreign = AnthropicConfig("k", "claude-sonnet-4-5", "https://api.anthropic.com", 200000, 4096)
+      val foreign = DeepSeekConfig("k", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
 
-      expectations.filterNot(_._1 == AnthropicProvider).foreach { (descriptor, _, _) =>
+      expectations.filterNot(_._1 == DeepSeekProvider).foreach { (descriptor, _, _) =>
         descriptor.buildClient(foreign, LlmClientOptions.default) match
           case Left(error) =>
-            error.message should include(s"Invalid config type AnthropicConfig for provider ${descriptor.id.asString}")
+            error.message should include(s"Invalid config type DeepSeekConfig for provider ${descriptor.id.asString}")
           case Right(client) =>
-            fail(s"${descriptor.id.asString} accepted an AnthropicConfig and built $client")
+            fail(s"${descriptor.id.asString} accepted a DeepSeekConfig and built $client")
       }
     }
 

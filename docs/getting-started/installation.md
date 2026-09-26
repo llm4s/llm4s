@@ -251,6 +251,26 @@ they fail with an error saying the provider is not registered and naming the pro
 are. Package names are unchanged; see the
 [migration note](../reference/migration.md#slice-5-llm4s-gemini).
 
+### For Anthropic
+
+{: .note }
+> Not yet published. `llm4s-anthropic` exists in the build as of
+> [#1132](https://github.com/llm4s/llm4s/issues/1132) but ships in the next release;
+> in `0.4.1` and earlier Anthropic is still inside `llm4s-core`.
+
+```scala
+// same version as llm4s-core
+libraryDependencies += "org.llm4s" %% "llm4s-anthropic" % llm4sVersion
+```
+
+Carries the Anthropic Claude chat client and Anthropic model listing. **This is the module that
+brings the Anthropic Java SDK** (`com.anthropic:anthropic-java`), which used to sit on every
+`llm4s-core` user's classpath. Adding it is all the registration there is: the module declares
+itself to the provider registry, so `provider = "anthropic"` resolves with no code change.
+Without it, it fails with an error saying the provider is not registered and naming the
+providers that are. Package names are unchanged; see the
+[migration note](../reference/migration.md#slice-5-llm4s-anthropic).
+
 ### For image generation and vision
 
 {: .note }

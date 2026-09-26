@@ -66,14 +66,6 @@ object ConfigKeys {
   /** Azure OpenAI API version string, e.g. `"2025-01-01-preview"`. */
   val AZURE_API_VERSION = "AZURE_API_VERSION"
 
-  // ---- Anthropic ----------------------------------------------------------
-
-  /** Anthropic API key (`sk-ant-...`). */
-  val ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
-
-  /** Overrides the Anthropic API base URL. Defaults to `"https://api.anthropic.com"`. */
-  val ANTHROPIC_BASE_URL = "ANTHROPIC_BASE_URL"
-
   // ---- DeepSeek -----------------------------------------------------------
 
   /** DeepSeek API key. */

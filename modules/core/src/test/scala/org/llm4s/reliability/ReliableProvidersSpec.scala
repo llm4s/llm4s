@@ -2,7 +2,7 @@ package org.llm4s.reliability
 
 import org.llm4s.error.{ ConfigurationError, TimeoutError }
 import org.llm4s.llmconnect.LLMClient
-import org.llm4s.llmconnect.config.{ AnthropicConfig, ProviderConfig }
+import org.llm4s.llmconnect.config.{ DeepSeekConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.metrics.MetricsCollector
@@ -43,8 +43,8 @@ class ReliableProvidersSpec extends AnyFlatSpec with Matchers {
 
   private given ModelRegistryService = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
 
-  private val anthropicConfig =
-    AnthropicConfig("sk-test", "claude-sonnet-4-5-latest", "https://api.anthropic.com", 200000, 4096)
+  private val deepSeekConfig =
+    DeepSeekConfig("sk-test", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
 
   // ==========================================================================
   // ReliableProviders.wrap
@@ -192,14 +192,14 @@ class ReliableProvidersSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "ReliableProviders.wrap(config)" should "build and wrap the client the config names" in {
-    ReliableProviders.wrap(anthropicConfig) match {
+    ReliableProviders.wrap(deepSeekConfig) match {
       case Right(client) => client shouldBe a[ReliableClient]
-      case Left(error)   => fail(s"Expected a reliable Anthropic client, got: ${error.message}")
+      case Left(error)   => fail(s"Expected a reliable DeepSeek client, got: ${error.message}")
     }
   }
 
   it should "accept a reliability config and a metrics collector" in {
-    val result = ReliableProviders.wrap(anthropicConfig, ReliabilityConfig.aggressive, MetricsCollector.noop)
+    val result = ReliableProviders.wrap(deepSeekConfig, ReliabilityConfig.aggressive, MetricsCollector.noop)
     result.map(_.getClass.getSimpleName) shouldBe Right("ReliableClient")
   }
 
@@ -225,7 +225,7 @@ class ReliableProvidersSpec extends AnyFlatSpec with Matchers {
     // registry is the only thing deciding what can be built.
     given ProviderRegistry = ProviderRegistry.of()
 
-    ReliableProviders.wrap(anthropicConfig).isLeft shouldBe true
+    ReliableProviders.wrap(deepSeekConfig).isLeft shouldBe true
   }
 
   "ReliableClient.apply(client, config, collector)" should "create with metrics" in {

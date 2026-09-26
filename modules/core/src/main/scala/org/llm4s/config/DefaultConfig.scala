@@ -10,7 +10,6 @@ object DefaultConfig {
   val DEFAULT_OPENAI_BASE_URL           = "https://api.openai.com/v1"
   val DEFAULT_OPENROUTER_BASE_URL       = "https://openrouter.ai/api/v1"
   val DEFAULT_REQUESTY_BASE_URL         = "https://router.requesty.ai/v1"
-  val DEFAULT_ANTHROPIC_BASE_URL        = "https://api.anthropic.com"
   val DEFAULT_DEEPSEEK_BASE_URL         = "https://api.deepseek.com"
   val DEFAULT_LANGFUSE_URL              = "https://cloud.langfuse.com/api/public/ingestion"
   val DEFAULT_LANGFUSE_ENV              = "production"

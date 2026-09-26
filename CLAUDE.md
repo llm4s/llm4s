@@ -29,8 +29,8 @@ Slice order — each is an issue with its own scope and gotchas:
 | 1 ✅ | [#1128](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` |
 | 2 ✅ | [#1129](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` |
 | 3 ✅ | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` |
-| 4 🚧 | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
-| 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini` so far |
+| 4 ✅ | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
+| 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic` so far |
 | 6 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability`, then 0.4.0 + MiMa |
 
 **Invariants for every carve:**
@@ -85,6 +85,7 @@ llm4s/
 │   ├── speech/                # Speech-to-text and text-to-speech (published)
 │   ├── ollama/                # Ollama chat + embedding provider (published)
 │   ├── gemini/                # Gemini API + Vertex AI chat providers (published)
+│   ├── anthropic/             # Anthropic Claude chat provider + Anthropic SDK (published)
 │   ├── samples/               # Usage examples
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI
@@ -116,9 +117,14 @@ Slice 5 has begun: `modules/ollama` carries the Ollama chat client, embedding pr
 use Ollama as a convenient no-key provider any more - use a fixture descriptor, as
 `EmbeddingProviderSpiSpec` and `ModelDimensionRegistrySpec` do. `modules/gemini` followed,
 carrying both Google providers - the Gemini API and Vertex AI, which only calls Gemini models in
-the same JSON format and needs no extra dependency. Core's tests that used Gemini as an
-incidental API-key provider now use Anthropic; `"gemini"` strings that do not reach the client
-(`ToolRegistry`, model-registry data, config-policy allow-lists) stay.
+the same JSON format and needs no extra dependency. `modules/anthropic` came third and took the
+Anthropic Java SDK with it: **core no longer depends on `com.anthropic`**, and must not again -
+the only vendor SDK left in core is Azure OpenAI, which leaves with `llm4s-openai`. Core's tests
+that used Gemini, then Anthropic, as an incidental API-key provider now use DeepSeek; strings that
+do not reach a client (`ToolRegistry`'s `"anthropic"`/`"gemini"` cases, model-registry data,
+config-policy allow-lists, the `sk-ant-` secret pattern) stay, as does `AnthropicStreamingHandler`,
+an SDK-free SSE parser behind `StreamingResponseHandler.forProvider` that `AnthropicClient` does
+not use.
 
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must

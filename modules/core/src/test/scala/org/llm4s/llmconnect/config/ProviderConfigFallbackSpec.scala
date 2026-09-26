@@ -68,30 +68,6 @@ class ProviderConfigFallbackSpec extends AnyFlatSpec with Matchers with EitherVa
     cfg.reserveCompletion shouldBe 4096
   }
 
-  "AnthropicConfig fallback" should "return 200000 for claude-3-like model" in {
-    val cfg = AnthropicConfig.fromValues("patch-cov-claude-3", apiKey, baseUrl).value
-    cfg.contextWindow shouldBe 200000
-    cfg.reserveCompletion shouldBe 4096
-  }
-
-  it should "return 200000 for claude-3.5-like model" in {
-    val cfg = AnthropicConfig.fromValues("patch-cov-claude-3.5-sonnet", apiKey, baseUrl).value
-    cfg.contextWindow shouldBe 200000
-    cfg.reserveCompletion shouldBe 4096
-  }
-
-  it should "return 100000 for claude-instant-like model" in {
-    val cfg = AnthropicConfig.fromValues("patch-cov-claude-instant", apiKey, baseUrl).value
-    cfg.contextWindow shouldBe 100000
-    cfg.reserveCompletion shouldBe 4096
-  }
-
-  it should "return 200000 for unknown model" in {
-    val cfg = AnthropicConfig.fromValues("patch-cov-unknown", apiKey, baseUrl).value
-    cfg.contextWindow shouldBe 200000
-    cfg.reserveCompletion shouldBe 4096
-  }
-
   "DeepSeekConfig fallback" should "return 128000 for unregistered model (default branch)" in {
     val cfg = DeepSeekConfig.fromValues("patch-cov-deepseek-reasoner", apiKey, baseUrl).value
     cfg.contextWindow shouldBe 128000

@@ -41,7 +41,7 @@ private[provider] trait OpenAIClientTransport {
  * which fully supports the `reasoning_effort` parameter. The Azure SDK used by this client
  * does not yet expose the `reasoning_effort` API parameter.
  *
- * For Anthropic Claude models with extended thinking, use [[AnthropicClient]] which has
+ * For Anthropic Claude models with extended thinking, use `AnthropicClient` (in `llm4s-anthropic`), which has
  * full support for the `thinking` parameter with `budget_tokens`.
  *
  * @param model the model identifier (e.g., "gpt-4", "gpt-3.5-turbo")

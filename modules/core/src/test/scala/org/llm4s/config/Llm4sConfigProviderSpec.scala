@@ -80,9 +80,9 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
           |      model = "gpt-4o-mini"
           |      apiKey = "named-openai-key"
           |    }
-          |    broken-anthropic {
-          |      provider = "anthropic"
-          |      model = "claude-sonnet-4-5"
+          |    broken-deepseek {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
           |    }
           |  }
           |}
@@ -92,8 +92,8 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
 
       result match
         case Left(err) =>
-          err.message should include("Provider 'broken-anthropic' (provider = anthropic) is missing required fields")
-          err.message should include("- apiKey: set it in llm4s.conf under providers.broken-anthropic.apiKey")
+          err.message should include("Provider 'broken-deepseek' (provider = deepseek) is missing required fields")
+          err.message should include("- apiKey: set it in llm4s.conf under providers.broken-deepseek.apiKey")
         case Right(cfg) =>
           fail(s"Expected invalid sibling named provider to fail whole config, got config: $cfg")
     }
@@ -109,10 +109,10 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
           |      model = "gpt-4o-mini"
           |      apiKey = "named-openai-key"
           |    }
-          |    anthropic-main {
-          |      provider = "anthropic"
-          |      model = "claude-sonnet-4-5"
-          |      apiKey = "anthropic-key"
+          |    deepseek-main {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      apiKey = "deepseek-key"
           |    }
           |  }
           |}
@@ -121,7 +121,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       val cfg = Llm4sConfig.providers(ConfigSource.string(hocon)).fold(err => fail(err.toString), identity)
 
       cfg.selectedProvider shouldBe Some(ProviderName("openai-main"))
-      cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "anthropic-main")
+      cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "deepseek-main")
     }
 
     "load the configured default provider name" in {

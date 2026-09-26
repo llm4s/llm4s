@@ -2,7 +2,7 @@ package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LlmClientOptions
-import org.llm4s.llmconnect.config.{ AnthropicConfig, ContextWindowResolver }
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, DeepSeekConfig }
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.llm4s.types.ProviderModelTypes.*
@@ -98,14 +98,14 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers:
     }
 
     "refuse a config belonging to another provider" in {
-      val foreign = AnthropicConfig("k", "claude-sonnet-4-5", "https://api.anthropic.com", 200000, 4096)
+      val foreign = DeepSeekConfig("k", "deepseek-chat", DeepSeekConfig.DEFAULT_BASE_URL, 128000, 8192)
 
       expectations.foreach { (descriptor, _, _) =>
         descriptor.buildClient(foreign, LlmClientOptions.default) match
           case Left(error) =>
-            error.message should include(s"Invalid config type AnthropicConfig for provider ${descriptor.id.asString}")
+            error.message should include(s"Invalid config type DeepSeekConfig for provider ${descriptor.id.asString}")
           case Right(client) =>
-            fail(s"${descriptor.id.asString} accepted an AnthropicConfig and built $client")
+            fail(s"${descriptor.id.asString} accepted a DeepSeekConfig and built $client")
       }
     }
 

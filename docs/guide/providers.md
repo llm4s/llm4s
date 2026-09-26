@@ -134,6 +134,16 @@ See [OpenAI Pricing](https://openai.com/pricing). Generally:
 
 ## Anthropic
 
+From the release after `0.4.1`, Anthropic support ships in its own artifact, alongside
+`llm4s-core`; adding it registers the provider:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-anthropic" % llm4sVersion
+```
+
+In `0.4.1` and earlier it is part of `llm4s-core`. See the
+[installation guide](../getting-started/installation.md#for-anthropic).
+
 ### Setup
 
 1. **Get an API key** from [console.anthropic.com](https://console.anthropic.com/account/keys)

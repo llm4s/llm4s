@@ -232,29 +232,29 @@ class ProviderDiscoverySpec extends AnyWordSpec with Matchers:
     "be independent, so one id can name a chat and an embedding provider" in {
       val registry = ProviderRegistry.builtin
 
-      // OpenAI supplies both; Anthropic only chat; Voyage only embeddings. That overlap
+      // OpenAI supplies both; DeepSeek only chat; Voyage only embeddings. That overlap
       // without containment is why the embedding descriptor is a separate trait.
       registry.ids should contain("openai")
       registry.embeddingIds should contain("openai")
-      registry.ids should contain("anthropic")
-      (registry.embeddingIds should not).contain("anthropic")
+      registry.ids should contain("deepseek")
+      (registry.embeddingIds should not).contain("deepseek")
       registry.embeddingIds should contain("voyage")
       (registry.ids should not).contain("voyage")
     }
 
     "not resolve a chat provider as an embedding one" in {
       val error = ProviderRegistry.builtin
-        .resolveEmbedding(ProviderId("anthropic"), Some("llm4s.embeddings.model"))
+        .resolveEmbedding(ProviderId("deepseek"), Some("llm4s.embeddings.model"))
         .left
         .toOption
-        .getOrElse(fail("expected anthropic to supply no embedding provider"))
+        .getOrElse(fail("expected deepseek to supply no embedding provider"))
         .message
 
-      error should include("Embedding provider 'anthropic'")
+      error should include("Embedding provider 'deepseek'")
       error should include("(from llm4s.embeddings.model)")
       // It lists the embedding providers, not the chat ones - the point of separate namespaces.
       error should include("voyage")
-      (error should not).include("anthropic,")
+      (error should not).include("deepseek,")
     }
 
     "each point at the registration call that accepts their own descriptor type" in {

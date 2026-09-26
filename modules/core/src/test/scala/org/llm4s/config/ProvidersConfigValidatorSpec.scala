@@ -21,11 +21,11 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             endpoint = None,
             apiVersion = None,
           ),
-          ProviderName("anthropic-main") -> RawNamedProviderSection(
-            provider = Some("anthropic"),
-            model = Some("claude-sonnet-4-5"),
-            baseUrl = Some("https://api.anthropic.com"),
-            apiKey = Some("anthropic-key"),
+          ProviderName("deepseek-main") -> RawNamedProviderSection(
+            provider = Some("deepseek"),
+            model = Some("deepseek-chat"),
+            baseUrl = Some("https://api.deepseek.com"),
+            apiKey = Some("deepseek-key"),
             organization = None,
             endpoint = None,
             apiVersion = None,
@@ -36,7 +36,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
       ProvidersConfigLoader.validate(raw) match
         case Right(cfg) =>
           cfg.selectedProvider.map(_.asName) shouldBe Some("openai-main")
-          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "anthropic-main")
+          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "deepseek-main")
 
           val openai = cfg.namedProviders(ProviderName("openai-main"))
           openai.provider shouldBe ProviderId("openai")
@@ -45,10 +45,10 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
           openai.apiKey.map(_.asKey) shouldBe Some("sk-openai")
           openai.organization shouldBe Some("org-demo")
 
-          val anthropic = cfg.namedProviders(ProviderName("anthropic-main"))
-          anthropic.provider shouldBe ProviderId("anthropic")
-          anthropic.model.asString shouldBe "claude-sonnet-4-5"
-          anthropic.apiKey.map(_.asKey) shouldBe Some("anthropic-key")
+          val deepseek = cfg.namedProviders(ProviderName("deepseek-main"))
+          deepseek.provider shouldBe ProviderId("deepseek")
+          deepseek.model.asString shouldBe "deepseek-chat"
+          deepseek.apiKey.map(_.asKey) shouldBe Some("deepseek-key")
         case Left(err) =>
           fail(s"Expected ProvidersConfig, got error: ${err.message}")
     }
@@ -57,11 +57,11 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
       val raw = RawProvidersConfig(
         selectedProvider = None,
         namedProviders = Map(
-          ProviderName("anthropic-main") -> RawNamedProviderSection(
-            provider = Some("anthropic"),
-            model = Some("claude-sonnet-4-5"),
+          ProviderName("deepseek-main") -> RawNamedProviderSection(
+            provider = Some("deepseek"),
+            model = Some("deepseek-chat"),
             baseUrl = None,
-            apiKey = Some("sk-ant-test"),
+            apiKey = Some("deepseek-key"),
             organization = None,
             endpoint = None,
             apiVersion = None,
@@ -72,8 +72,8 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
       ProvidersConfigLoader.validate(raw) match
         case Right(cfg) =>
           cfg.selectedProvider shouldBe None
-          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("anthropic-main")
-          cfg.namedProviders(ProviderName("anthropic-main")).provider shouldBe ProviderId("anthropic")
+          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("deepseek-main")
+          cfg.namedProviders(ProviderName("deepseek-main")).provider shouldBe ProviderId("deepseek")
         case Left(err) =>
           fail(s"Expected ProvidersConfig without selected provider, got error: ${err.message}")
     }

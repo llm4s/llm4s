@@ -118,7 +118,7 @@ object ChatTuiConfig:
 
       case "anthropic" =>
         requireKey("ANTHROPIC_API_KEY").flatMap { apiKey =>
-          val baseUrl = ChatTuiEnv.getOrElse("ANTHROPIC_BASE_URL", DefaultConfig.DEFAULT_ANTHROPIC_BASE_URL)
+          val baseUrl = ChatTuiEnv.getOrElse("ANTHROPIC_BASE_URL", AnthropicConfig.DEFAULT_BASE_URL)
           AnthropicConfig.fromValues(model, apiKey, baseUrl)
         }
 

@@ -22,11 +22,11 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
           |      apiKey = "sk-openai"
           |      organization = "org-demo"
           |    }
-          |    anthropic-main {
-          |      provider = "anthropic"
-          |      model = "claude-sonnet-4-5"
-          |      baseUrl = "https://api.anthropic.com"
-          |      apiKey = "anthropic-key"
+          |    deepseek-main {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      baseUrl = "https://api.deepseek.com"
+          |      apiKey = "deepseek-key"
           |    }
           |  }
           |}
@@ -37,7 +37,7 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
       result match
         case Right(cfg) =>
           cfg.selectedProvider.map(_.asName) shouldBe Some("openai-main")
-          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "anthropic-main")
+          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "deepseek-main")
 
           val openai = cfg.namedProviders(ProviderName("openai-main"))
           openai.provider shouldBe ProviderId("openai")
@@ -46,11 +46,11 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
           openai.apiKey.map(_.asKey) shouldBe Some("sk-openai")
           openai.organization shouldBe Some("org-demo")
 
-          val anthropic = cfg.namedProviders(ProviderName("anthropic-main"))
-          anthropic.provider shouldBe ProviderId("anthropic")
-          anthropic.model.asString shouldBe "claude-sonnet-4-5"
-          anthropic.baseUrl.map(_.asUrl) shouldBe Some("https://api.anthropic.com")
-          anthropic.apiKey.map(_.asKey) shouldBe Some("anthropic-key")
+          val deepseek = cfg.namedProviders(ProviderName("deepseek-main"))
+          deepseek.provider shouldBe ProviderId("deepseek")
+          deepseek.model.asString shouldBe "deepseek-chat"
+          deepseek.baseUrl.map(_.asUrl) shouldBe Some("https://api.deepseek.com")
+          deepseek.apiKey.map(_.asKey) shouldBe Some("deepseek-key")
         case Left(err) =>
           fail(s"Expected ProvidersConfig, got error: ${err.message}")
     }
@@ -60,17 +60,17 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
         """
           |llm4s {
           |  providers {
-          |    provider = "anthropic-main"
+          |    provider = "deepseek-main"
           |    openai-main {
           |      provider = "openai"
           |      model = "gpt-4o-mini"
           |      apiKey = "sk-openai"
           |    }
-          |    anthropic-main {
-          |      provider = "anthropic"
-          |      model = "claude-sonnet-4-5"
-          |      apiKey = "anthropic-key"
-          |      baseUrl = "https://api.anthropic.com"
+          |    deepseek-main {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      apiKey = "deepseek-key"
+          |      baseUrl = "https://api.deepseek.com"
           |    }
           |  }
           |}
@@ -90,10 +90,10 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
                 fail(s"Expected selected provider '${selectedProviderName.asName}' to exist in namedProviders")
               )
 
-          selectedProviderName.asName shouldBe "anthropic-main"
-          selectedProvider.provider shouldBe ProviderId("anthropic")
-          selectedProvider.model.asString shouldBe "claude-sonnet-4-5"
-          selectedProvider.apiKey.map(_.asKey) shouldBe Some("anthropic-key")
+          selectedProviderName.asName shouldBe "deepseek-main"
+          selectedProvider.provider shouldBe ProviderId("deepseek")
+          selectedProvider.model.asString shouldBe "deepseek-chat"
+          selectedProvider.apiKey.map(_.asKey) shouldBe Some("deepseek-key")
         case Left(err) =>
           fail(s"Expected ProvidersConfig, got error: ${err.message}")
     }
@@ -132,10 +132,10 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
           |      model = "gpt-4o-mini"
           |      apiKey = "sk-openai"
           |    }
-          |    anthropic-main {
-          |      provider = "anthropic"
-          |      model = "claude-sonnet-4-5"
-          |      apiKey = "anthropic-key"
+          |    deepseek-main {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
+          |      apiKey = "deepseek-key"
           |    }
           |  }
           |}
@@ -146,7 +146,7 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
       result match
         case Right(cfg) =>
           cfg.selectedProvider shouldBe None
-          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "anthropic-main")
+          cfg.namedProviders.keySet.map(_.asName) shouldBe Set("openai-main", "deepseek-main")
         case Left(err) =>
           fail(s"Expected ProvidersConfig without selected provider, got error: ${err.message}")
     }
@@ -162,9 +162,9 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
           |      model = "gpt-4o-mini"
           |      apiKey = "sk-openai"
           |    }
-          |    broken-anthropic {
-          |      provider = "anthropic"
-          |      model = "claude-sonnet-4-5"
+          |    broken-deepseek {
+          |      provider = "deepseek"
+          |      model = "deepseek-chat"
           |    }
           |  }
           |}
@@ -174,8 +174,8 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
 
       result match
         case Left(err) =>
-          err.message should include("Provider 'broken-anthropic' (provider = anthropic) is missing required fields")
-          err.message should include("- apiKey: set it in llm4s.conf under providers.broken-anthropic.apiKey")
+          err.message should include("Provider 'broken-deepseek' (provider = deepseek) is missing required fields")
+          err.message should include("- apiKey: set it in llm4s.conf under providers.broken-deepseek.apiKey")
         case Right(cfg) =>
           fail(s"Expected invalid named provider to fail whole providers config, got config: $cfg")
     }
