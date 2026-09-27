@@ -50,5 +50,8 @@ private[config] object NamedProviderConfigNormalizer:
       apiVersion = section.apiVersion.map(_.trim).filter(_.nonEmpty),
       contextWindow = section.contextWindow,
       reserveCompletion = section.reserveCompletion,
-      headers = section.headers.getOrElse(Map.empty)
+      headers = section.headers.getOrElse(Map.empty),
+      // Trimmed and kept as read. Which of these the provider accepts is decided by
+      // `NamedProviderSectionValidator`, which knows the descriptor; this does not.
+      extras = section.extras.collect { case (key, value) if value.trim.nonEmpty => key -> value.trim }
     )

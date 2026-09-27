@@ -43,7 +43,7 @@ case class VertexAIConfig(
 object VertexAIConfig:
 
   /**
-   * The GCP region used when a named provider section sets no `organization`.
+   * The GCP region used when a named provider section sets no `location`.
    *
    * `DefaultConfig.DEFAULT_VERTEXAI_LOCATION` duplicated this in `llm4s-core`
    * until the provider moved to `llm4s-gemini`

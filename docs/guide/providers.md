@@ -28,6 +28,7 @@ LLM4S supports these LLM providers, plus any endpoint that speaks the OpenAI cha
 | **OpenAI** | Cloud | GPT-4, o1 reasoning, most popular | Medium |
 | **Anthropic** | Cloud | Claude Opus, best for reasoning | Medium |
 | **Google Gemini** | Cloud | Free tier, Gemini 2.0 models | Medium |
+| **Google Vertex AI** | Cloud Enterprise | Gemini models in your own GCP project | Medium |
 | **Azure OpenAI** | Cloud Enterprise | Enterprise deployments, VPC isolation | Hard |
 | **DeepSeek** | Cloud | Cost-effective, reasoning models | Easy |
 | **OpenRouter** | Cloud gateway | Many vendors' models behind one key | Easy |
@@ -286,6 +287,63 @@ Great for cost-conscious projects and high-volume applications.
 - 1M context window for processing large documents
 - Very fast inference latency
 - Strong code generation capabilities
+
+---
+
+## Google Vertex AI
+
+Vertex AI serves the same Gemini models from a GCP project, authenticated with OAuth2 rather
+than an API key. It ships in `llm4s-gemini` beside the Gemini API provider, so the dependency
+above registers both.
+
+### Setup
+
+1. **Pick a GCP project** with the Vertex AI API enabled, and a region that serves your model.
+2. **Authenticate** with Application Default Credentials (`gcloud auth application-default login`),
+   or point `apiKey` at a service-account JSON file. Without `apiKey`, credentials come from
+   `GOOGLE_APPLICATION_CREDENTIALS`, then `~/.config/gcloud/application_default_credentials.json`,
+   then the GCE metadata server.
+
+### Configuration
+
+```hocon
+llm4s {
+  providers {
+    provider = "vertex-main"
+
+    vertex-main {
+      provider = "vertexai"          # "vertex" is accepted as an alias
+      model    = "gemini-2.0-flash"
+      project  = ${?VERTEXAI_PROJECT}
+      location = "europe-west4"      # optional
+      apiKey   = ${?GOOGLE_APPLICATION_CREDENTIALS}  # optional: path to a credential file
+    }
+  }
+}
+```
+
+| Key | Required | Meaning |
+|-----|----------|---------|
+| `project` | yes | The GCP project ID that owns your Vertex AI resources |
+| `location` | no | The GCP region; requests go to `https://<location>-aiplatform.googleapis.com/v1`. Default `us-central1` |
+| `apiKey` | no | A path to a service-account credential file - not an API key |
+
+`project` and `location` are Vertex AI's own keys ([provider-specific keys](#provider-specific-keys)).
+Before [#1215](https://github.com/llm4s/llm4s/issues/1215) Vertex read the project from `endpoint`
+and the region from `organization`. Those still work as deprecated aliases, with a warning each
+time the config loads; rename them. Setting both a key and a different value under its old name
+is an error. See the [migration note](../reference/migration.md#vertex-ai-endpoint-becomes-project-organization-becomes-location).
+
+---
+
+## Provider-specific keys
+
+Every named section shares the built-in fields - `provider`, `model`, `baseUrl`, `apiKey`,
+`organization`, `endpoint`, `apiVersion`, `contextWindow`, `reserveCompletion`, `headers` - and a
+provider may declare keys of its own, such as Vertex AI's `project` and `location`. Its section
+of this guide lists them. A required one that is missing fails the config with its name, the
+section and what it means; a key that is neither built-in nor declared is ignored with a warning
+naming it, so a misspelt key shows up in the log rather than silently doing nothing.
 
 ---
 
@@ -891,8 +949,8 @@ means it was started with a key (`--api-key` for vLLM and `llama-server`, "Requi
 Authentication" in LM Studio), and `apiKey` must then match it.
 
 **Missing `baseUrl`.** A section without one fails to load with
-`baseUrl: set OPENAI_COMPATIBLE_BASE_URL`. No such variable is read: set `baseUrl` in the
-section, from a variable of your choosing if you like (`baseUrl = ${?MY_BASE_URL}`).
+`baseUrl: set it in llm4s.conf under providers.<name>.baseUrl`. Set `baseUrl` in the section,
+from a variable of your choosing if you like (`baseUrl = ${?MY_BASE_URL}`).
 
 **Replies cut short, or context errors.** `contextWindow` defaults to 8192. Set it to the
 model's real window, or the server's configured context for a local server.

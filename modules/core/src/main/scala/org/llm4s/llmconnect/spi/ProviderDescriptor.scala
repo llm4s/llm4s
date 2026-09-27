@@ -26,11 +26,19 @@ import scala.reflect.ClassTag
  * {{{
  * object BedrockProvider extends ProviderDescriptor:
  *   val id         = ProviderId("bedrock")
- *   val configSpec = ProviderConfigSpec(requiresApiKey = true, requiresEndpoint = true)
+ *   val configSpec = ProviderConfigSpec(
+ *     extras = Seq(
+ *       ProviderConfigKey.required("region", "the AWS region hosting the model, e.g. us-east-1"),
+ *       ProviderConfigKey.optional("profile", "the AWS named profile to authenticate with")
+ *     )
+ *   )
  *
  *   def buildConfig(providerName: String, section: NamedProviderConfig)(using
  *     ContextWindowResolver
- *   ): Result[ProviderConfig] = ...
+ *   ): Result[ProviderConfig] =
+ *     ProviderDescriptor
+ *       .requireExtra(providerName, section, "region")
+ *       .flatMap(region => BedrockConfig.fromValues(section.model.asString, region, section.extra("profile")))
  *
  *   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
  *     ModelRegistryService
@@ -51,7 +59,10 @@ trait ProviderDescriptor:
    */
   def aliases: Set[String] = Set.empty
 
-  /** Which config fields this provider requires, and its default endpoint. */
+  /**
+   * Which config fields this provider requires, its default endpoint, and the
+   * provider-specific keys (`ProviderConfigSpec.extras`) its section accepts.
+   */
   def configSpec: ProviderConfigSpec
 
   /** What this provider's client implements. Defaults to the full interface. */
@@ -65,7 +76,9 @@ trait ProviderDescriptor:
    * this provider.
    *
    * The section has already been checked against `configSpec`, so required
-   * fields are present; a `Left` here means something `configSpec` cannot
+   * fields are present and `section.extras` holds exactly the declared
+   * provider-specific keys that have a value (defaults applied, deprecated
+   * aliases resolved). A `Left` here means something `configSpec` cannot
    * express (a malformed value, say).
    *
    * @param providerName the user's instance name (`llm4s.providers.<name>`), for error messages.
@@ -111,6 +124,22 @@ object ProviderDescriptor:
    */
   def requireField[A](providerName: String, fieldName: String, value: Option[A], hint: String): Result[A] =
     value.toRight(ConfigurationError(s"Configured provider '$providerName' is missing $fieldName ($hint)"))
+
+  /**
+   * Reads a provider-specific key that the provider's `ProviderConfigSpec.extras` declares
+   * as required, or gives a default.
+   *
+   * Validation has already enforced that, so this fails only for a section that did not come
+   * through validation - one built in code and handed to `buildConfig` directly.
+   *
+   * @param key the declared key's name, e.g. `"region"`.
+   */
+  def requireExtra(
+    providerName: String,
+    section: ProvidersConfigModel.NamedProviderConfig,
+    key: String
+  ): Result[String] =
+    requireField(providerName, key, section.extra(key), s"llm4s.providers.<name>.$key")
 
   /** Reads the `apiKey` that a `requiresApiKey` [[ProviderConfigSpec]] guarantees is present. */
   def requireApiKey(providerName: String, section: ProvidersConfigModel.NamedProviderConfig): Result[String] =

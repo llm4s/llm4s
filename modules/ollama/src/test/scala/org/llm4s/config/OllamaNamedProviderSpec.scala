@@ -58,7 +58,8 @@ class OllamaNamedProviderSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Left(err) =>
-          err.message should include("- baseUrl: set OLLAMA_BASE_URL")
+          err.message should include("- baseUrl: set it in llm4s.conf under providers.")
+          (err.message should not).include("OLLAMA_BASE_URL")
         case Right(cfg) =>
           fail(s"Expected missing Ollama baseUrl failure, got config: $cfg")
     }
@@ -75,7 +76,11 @@ class OllamaNamedProviderSpec extends AnyWordSpec with Matchers:
         result.left.toOption.getOrElse(fail(s"Expected Left, got $result")).asInstanceOf[ConfigurationError].message
 
       message should include("Provider 'my-ollama' (provider = ollama) is missing required fields")
-      message should include("- baseUrl: set OLLAMA_BASE_URL (e.g. http://localhost:11434)")
+      message should include(
+        "- baseUrl: set it in llm4s.conf under providers.my-ollama.baseUrl (e.g. http://localhost:11434)"
+      )
+      // No variable is read for a named section, so none is suggested (#1215).
+      (message should not).include("OLLAMA_BASE_URL")
     }
   }
 

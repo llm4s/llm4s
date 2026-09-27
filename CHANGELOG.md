@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Provider-specific config keys for named providers** - a descriptor declares keys of its own
+  in `ProviderConfigSpec.extras` (`ProviderConfigKey`: name, description, `required`, `default`,
+  `env`, `deprecatedAliases`), and reads them from the new `NamedProviderConfig.extras` (or
+  `ProviderDescriptor.requireExtra`), instead of reusing `endpoint`, `organization` or `baseUrl`
+  ([#1215](https://github.com/llm4s/llm4s/issues/1215), designed in
+  [#1131](https://github.com/llm4s/llm4s/issues/1131)). They travel the path `headers` does - raw
+  section, normaliser, `NamedProviderConfig` - and are validated like the built-in fields: a
+  missing required key fails with its name, the section and its description, defaults are filled
+  in, and a deprecated alias maps to the current name with a warning. Keys neither built-in nor
+  declared, silently ignored until now, are ignored with a warning naming them. Unblocks Bedrock
+  (`region`, `profile`, [#1008](https://github.com/llm4s/llm4s/issues/1008)) and watsonx
+  (`projectId`, `spaceId`, `iamUrl`, [#1019](https://github.com/llm4s/llm4s/issues/1019)).
+
+  Vertex AI moves to `project` (required) and `location` (default `us-central1`); `endpoint` and
+  `organization` still work as deprecated aliases, with a warning, for a release. The
+  missing-`baseUrl` message no longer tells users to "set `<PROVIDER>_BASE_URL`", a variable
+  nothing read: it names the config key, and an environment variable only when the descriptor
+  declares one it reads (`ProviderConfigSpec.baseUrlEnv`).
+
+  Source breaks: `RawNamedProviderSection` and `NamedProviderConfig` gained a defaulted trailing
+  `extras` parameter (exhaustive pattern matches need one more field); `ProviderConfigSpec` gained
+  defaulted `baseUrlEnv` and `extras`; `VertexAIProvider.configSpec` no longer sets
+  `requiresEndpoint`, and a hand-built `NamedProviderConfig` passed straight to its `buildConfig`
+  must carry `project` in `extras`. An extra key whose value is an object or list is now a load
+  error. See the
+  [migration note](docs/reference/migration.md#named-providers-provider-specific-keys-vertex-ai-project-and-location).
 - **`llm4s-media`, a shared vocabulary for multimodal code** - landed as part of
   [#1130](https://github.com/llm4s/llm4s/issues/1130), ahead of `llm4s-image` and
   `llm4s-speech` so those carves are pure file moves. `org.llm4s.media.MediaType` (MIME string,

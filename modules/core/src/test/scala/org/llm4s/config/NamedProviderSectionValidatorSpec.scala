@@ -88,7 +88,11 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
     val message = errorFrom(validate("my-custom", CustomProvider, section("customcloud", "v1")))
 
     message should include("Provider 'my-custom' (provider = customcloud) is missing required fields")
-    message should include("- baseUrl: set CUSTOMCLOUD_BASE_URL (e.g. https://api.example.com/)")
+    message should include(
+      "- baseUrl: set it in llm4s.conf under providers.my-custom.baseUrl (e.g. https://api.example.com/)"
+    )
+    // Nothing reads CUSTOMCLOUD_BASE_URL, so it is not suggested (#1215).
+    (message should not).include("CUSTOMCLOUD_BASE_URL")
     message should include("- endpoint: the provider endpoint")
   }
 

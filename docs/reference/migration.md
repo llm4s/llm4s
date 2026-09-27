@@ -1,5 +1,71 @@
 # Migration Guide
 
+## Named providers: provider-specific keys; Vertex AI `project` and `location`
+
+A named provider section can now carry keys of the provider's own, declared by the provider
+rather than squeezed into the shared fields ([#1215](https://github.com/llm4s/llm4s/issues/1215)).
+Not in a release yet.
+
+### Vertex AI: `endpoint` becomes `project`, `organization` becomes `location`
+
+Vertex AI used to read its GCP project from `endpoint` and its region from `organization`. It
+now has keys named for what they are:
+
+```hocon
+# before
+vertex-main {
+  provider     = "vertexai"
+  model        = "gemini-2.0-flash"
+  endpoint     = "my-gcp-project"
+  organization = "europe-west4"
+}
+
+# after
+vertex-main {
+  provider = "vertexai"
+  model    = "gemini-2.0-flash"
+  project  = "my-gcp-project"
+  location = "europe-west4"      # optional, default us-central1
+}
+```
+
+The old spellings still work for now, as deprecated aliases: each one logs a warning naming the
+section and the key to rename it to, and will stop working in a later release. Setting both
+`project` and a *different* `endpoint` (or `location` and a different `organization`) is an
+error rather than a guess. A missing project is now reported as
+`- project: the GCP project ID that owns your Vertex AI resources (set it in llm4s.conf under providers.<name>.project)`.
+
+### Unknown keys are reported
+
+A key in a section that is neither a built-in field nor one the provider declares used to be
+ignored silently. It is still ignored - existing configs keep loading - but now with a warning
+that names it and lists the keys the provider accepts, which is how a typo like `regoin` shows
+up. An extra key whose value is an object or list is an error, since none takes one.
+
+### The missing-`baseUrl` hint names only variables that are read
+
+A section missing a required `baseUrl` used to say `set <PROVIDER>_BASE_URL`, for example
+`set OLLAMA_BASE_URL`, though nothing read such a variable for a named section. It now says
+where to set the key - `baseUrl: set it in llm4s.conf under providers.<name>.baseUrl (e.g. ...)` -
+and names an environment variable only when the provider declares one it actually reads
+(`ProviderConfigSpec.baseUrlEnv`). Code matching on the old message text needs updating.
+
+### Source breaks
+
+- `RawNamedProviderSection` and `NamedProviderConfig` gained a trailing `extras` parameter with
+  a default, so construction by name or position still compiles; pattern matches that list
+  every field (`case NamedProviderConfig(a, b, ...)`) need one more.
+- `ProviderConfigSpec` gained `baseUrlEnv` and `extras`, both defaulted.
+- `VertexAIProvider.configSpec` no longer sets `requiresEndpoint`. Code that builds a
+  `NamedProviderConfig` by hand and passes it straight to `VertexAIProvider.buildConfig`,
+  skipping validation, must set `extras = Map("project" -> ..., "location" -> ...)`: the
+  deprecated aliases are resolved by validation, not by `buildConfig`.
+
+### For provider authors
+
+Declare provider-specific keys in `ProviderConfigSpec.extras` and read them from
+`NamedProviderConfig.extras` - see [CONTRIBUTING](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#provider-specific-config-keys).
+
 ## Slice 5: Mistral, Cohere and Voyage leave core; core ships no provider
 
 The last provider clients leave `llm4s-core` ([#1132](https://github.com/llm4s/llm4s/issues/1132)).

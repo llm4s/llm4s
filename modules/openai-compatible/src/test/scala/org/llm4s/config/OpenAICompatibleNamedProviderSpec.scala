@@ -166,7 +166,9 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
       ).left.toOption.getOrElse(fail("Expected a missing-baseUrl failure")).message
 
       message should include("Provider 'no-url' (provider = openai-compatible) is missing required fields")
-      message should include("baseUrl: set OPENAI_COMPATIBLE_BASE_URL (e.g. http://localhost:8000/v1)")
+      message should include(
+        "baseUrl: set it in llm4s.conf under providers.no-url.baseUrl (e.g. http://localhost:8000/v1)"
+      )
       (message should not).include("apiKey")
     }
   }

@@ -16,14 +16,17 @@ object ProvidersConfigModel:
    *  @param baseUrl     optional override for the provider's base URL
    *  @param apiKey      provider-dependent credential: an API key for most providers,
    *                     or a path to a service-account credentials file for VertexAI
-   *  @param organization provider-dependent: the organisation identifier for OpenAI,
-   *                     or the GCP region/location for VertexAI
-   *  @param endpoint    provider-dependent: the endpoint URL for Azure, or the GCP
-   *                     project ID for VertexAI
+   *  @param organization the organisation identifier (OpenAI); a deprecated alias for
+   *                     VertexAI's `location`
+   *  @param endpoint    the endpoint or deployment name (Azure); a deprecated alias for
+   *                     VertexAI's `project`
    *  @param apiVersion  optional API version string (Azure-specific)
    *  @param contextWindow     optional context window, for providers that cannot know it (`openai-compatible`)
    *  @param reserveCompletion optional completion reserve, for providers that cannot know it (`openai-compatible`)
    *  @param headers     optional extra HTTP headers sent on every request (`openai-compatible`)
+   *  @param extras      every other key in the section, as a string: the provider-specific keys a
+   *                     descriptor declares in `ProviderConfigSpec.extras`, and anything unknown,
+   *                     which validation reports and drops
    */
   final case class RawNamedProviderSection(
     provider: Option[String],
@@ -35,7 +38,8 @@ object ProvidersConfigModel:
     apiVersion: Option[String],
     contextWindow: Option[Int] = None,
     reserveCompletion: Option[Int] = None,
-    headers: Option[Map[String, String]] = None
+    headers: Option[Map[String, String]] = None,
+    extras: Map[String, String] = Map.empty
   )
 
   /**
@@ -57,10 +61,10 @@ object ProvidersConfigModel:
    *  @param baseUrl      optional base URL override
    *  @param apiKey       provider-dependent credential: an API key for most providers,
    *                      or a path to a service-account credentials file for VertexAI
-   *  @param organization provider-dependent: the organisation identifier for OpenAI,
-   *                      or the GCP region/location for VertexAI
-   *  @param endpoint     provider-dependent: the endpoint URL for Azure, or the GCP
-   *                      project ID for VertexAI
+   *  @param organization the organisation identifier (OpenAI). VertexAI's region used to be
+   *                      read from here; it is now the provider-specific key `location`.
+   *  @param endpoint     the endpoint or deployment name (Azure). VertexAI's project used to be
+   *                      read from here; it is now the provider-specific key `project`.
    *  @param apiVersion   optional API version string (Azure-specific)
    *  @param contextWindow     optional context window. Read by providers that cannot derive one
    *                           from the model name - the generic `openai-compatible` provider -
@@ -68,6 +72,11 @@ object ProvidersConfigModel:
    *  @param reserveCompletion optional completion reserve; read and ignored as `contextWindow` is.
    *  @param headers      extra HTTP headers sent on every request; read by `openai-compatible`
    *                      and ignored by the rest. Values are redacted in `toString`.
+   *  @param extras       the provider-specific keys its descriptor declares in
+   *                      `ProviderConfigSpec.extras`, as validation leaves them: required ones
+   *                      present, defaults filled in, deprecated aliases resolved to the current
+   *                      name, and undeclared keys dropped. Values are redacted in `toString`,
+   *                      since a provider may declare a credential here.
    */
   final case class NamedProviderConfig(
     provider: ProviderId,
@@ -79,13 +88,25 @@ object ProvidersConfigModel:
     apiVersion: Option[String],
     contextWindow: Option[Int] = None,
     reserveCompletion: Option[Int] = None,
-    headers: Map[String, String] = Map.empty
+    headers: Map[String, String] = Map.empty,
+    extras: Map[String, String] = Map.empty
   ):
-    // The API key and header values are credentials (`x-api-key`, a gateway token), so both are
-    // redacted; header names are kept because they are what a user needs to debug a section.
+    // The API key, header values and extra values may be credentials (`x-api-key`, a gateway
+    // token, a provider-declared secret), so all are redacted; names are kept because they are
+    // what a user needs to debug a section.
     override def toString: String =
       s"NamedProviderConfig($provider,$model,$baseUrl,${apiKey.map(_ => "***")},$organization,$endpoint,$apiVersion," +
-        s"$contextWindow,$reserveCompletion,${headers.keys.map(k => s"$k -> ***").mkString("Map(", ", ", ")")})"
+        s"$contextWindow,$reserveCompletion,${redacted(headers)},${redacted(extras)})"
+
+    private def redacted(values: Map[String, String]): String =
+      values.keys.map(k => s"$k -> ***").mkString("Map(", ", ", ")")
+
+    /**
+     * The value of a provider-specific key, as validation left it.
+     *
+     *  @param key a key the provider declares in `ProviderConfigSpec.extras`
+     */
+    def extra(key: String): Option[String] = extras.get(key)
 
     /**
      * Returns this config if its provider matches `expected`, otherwise a `ConfigurationError`.

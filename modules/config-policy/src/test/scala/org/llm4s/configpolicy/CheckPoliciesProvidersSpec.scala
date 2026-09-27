@@ -78,7 +78,7 @@ class CheckPoliciesProvidersSpec extends AnyWordSpec with Matchers {
     }
 
     "resolve a vertexai config" in {
-      providerIdFor("""provider = "vertexai", model = "gemini-2.0-flash", endpoint = "my-project"""") shouldBe
+      providerIdFor("""provider = "vertexai", model = "gemini-2.0-flash", project = "my-project"""") shouldBe
         Right(ProviderId("vertexai"))
     }
   }
