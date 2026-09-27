@@ -79,6 +79,26 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
       ModelRegistryService
     ): Result[LLMClient] = Left(ConfigurationError("not needed for this test"))
 
+  /** A descriptor that only has a spec: for validation cases that never build a config. */
+  private def stub(idName: String, spec: ProviderConfigSpec): ProviderDescriptor =
+    new ProviderDescriptor:
+      val id: ProviderId                 = ProviderId(idName)
+      val configSpec: ProviderConfigSpec = spec
+      def buildConfig(providerName: String, section: NamedProviderConfig)(using
+        ContextWindowResolver
+      ): Result[ProviderConfig] = Left(ConfigurationError("unused"))
+      def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
+        ModelRegistryService
+      ): Result[LLMClient] = Left(ConfigurationError("unused"))
+
+  /** A key renamed twice: `proj` (a former extra key), then `organization` (a built-in field). */
+  private val twoAliases = stub(
+    "twoaliases",
+    ProviderConfigSpec(extras =
+      Seq(ProviderConfigKey("projectId", "the project", deprecatedAliases = Seq("proj", "organization")))
+    )
+  )
+
   private given ProviderRegistry = ProviderRegistry.of(RegionalProvider, EnvBoundProvider, FixtureChatProvider)
 
   private def section(
@@ -245,15 +265,78 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
     )
   }
 
-  "environment-variable hints" should "name a variable only when the provider declares one it reads" in {
+  it should "not be able to use a built-in field without a string form as a deprecated alias" in {
+    val spec = ProviderConfigSpec(extras =
+      Seq(
+        ProviderConfigKey("modelId", "x", deprecatedAliases = Seq("model")),
+        ProviderConfigKey("h", "x", deprecatedAliases = Seq("headers"))
+      )
+    )
+
+    val message = error(validated(section(provider = "badalias"), stub("badalias", spec)))
+    message should include("Provider 'badalias' declares built-in field(s) model, headers as deprecated aliases")
+    message should include(
+      "only apiKey, apiVersion, baseUrl, contextWindow, endpoint, organization, reserveCompletion can"
+    )
+  }
+
+  "a built-in field as a deprecated alias" should "resolve for every field with a string form, apiKey included" in {
+    val spec = ProviderConfigSpec(extras =
+      Seq(
+        ProviderConfigKey("token", "the access token", required = true, deprecatedAliases = Seq("apiKey")),
+        ProviderConfigKey("window", "the window", deprecatedAliases = Seq("contextWindow"))
+      )
+    )
+    val raw = section(provider = "tokened", apiKey = Some("secret-token")).copy(contextWindow = Some(4096))
+
+    val (config, warnings) = ok(validated(raw, stub("tokened", spec)))
+
+    config.extras shouldBe Map("token" -> "secret-token", "window" -> "4096")
+    warnings.map(_.takeWhile(_ != ';')) shouldBe Seq(
+      "llm4s.providers.my-regional.apiKey is deprecated for provider = tokened",
+      "llm4s.providers.my-regional.contextWindow is deprecated for provider = tokened"
+    )
+  }
+
+  "several deprecated aliases" should "be accepted when they agree, with a warning for each" in {
+    val (config, warnings) =
+      ok(validated(section(provider = "twoaliases", organization = Some("p"), extras = Map("proj" -> "p")), twoAliases))
+
+    config.extras shouldBe Map("projectId" -> "p")
+    warnings.map(_.takeWhile(_ != ';')) shouldBe Seq(
+      "llm4s.providers.my-regional.proj is deprecated for provider = twoaliases",
+      "llm4s.providers.my-regional.organization is deprecated for provider = twoaliases"
+    )
+  }
+
+  it should "be an error when they disagree, rather than silently using the first" in {
+    val message =
+      error(
+        validated(
+          section(provider = "twoaliases", organization = Some("new"), extras = Map("proj" -> "old")),
+          twoAliases
+        )
+      )
+
+    message should include(
+      "- projectId: set through several deprecated aliases with different values (`proj` = \"old\", " +
+        "`organization` = \"new\"); replace them with llm4s.providers.my-regional.projectId"
+    )
+  }
+
+  "environment-variable hints" should "show a declared variable as the binding that reads it" in {
     val message = error(validated(section(provider = "envbound", apiKey = None), EnvBoundProvider, "my-env"))
 
     message should include(
-      "- baseUrl: set it in llm4s.conf under providers.my-env.baseUrl (e.g. http://localhost:9000), or set ENVBOUND_BASE_URL"
+      "- baseUrl: set it in llm4s.conf under providers.my-env.baseUrl (e.g. http://localhost:9000; to read it " +
+        "from ENVBOUND_BASE_URL, add baseUrl = ${?ENVBOUND_BASE_URL} to the section)"
     )
     message should include(
-      "- space: the deployment space id (set it in llm4s.conf under providers.my-env.space, or set ENVBOUND_SPACE)"
+      "- space: the deployment space id (set it in llm4s.conf under providers.my-env.space; to read it from " +
+        "ENVBOUND_SPACE, add space = ${?ENVBOUND_SPACE} to the section)"
     )
+    // Named sections read no variable unbound, so it is never "set X" on its own.
+    (message should not).include("or set")
   }
 
   it should "not invent <PROVIDER>_BASE_URL for a provider that declares none" in {

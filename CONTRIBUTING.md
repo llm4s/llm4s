@@ -142,9 +142,12 @@ def buildConfig(providerName: String, section: NamedProviderConfig)(using Contex
 
 Validation does the rest before `buildConfig` runs: a missing required key fails with its name,
 the section and your `description`; `default`s are filled in; `deprecatedAliases` let you rename a
-key without breaking configs, with a warning; undeclared keys are dropped with a warning. Values
-are strings - parse and reject a malformed one in `buildConfig`. Set `env` (or `baseUrlEnv`) only
-for an environment variable llm4s really reads, since it is suggested in the missing-key error.
+key without breaking configs, with a warning (an alias may be a former extra key or a built-in
+field with a string form, as in `ProviderConfigSpec.BuiltinAliasKeys`); undeclared keys are
+dropped with a warning. Values are strings - parse and reject a malformed one in `buildConfig`.
+Set `env` (or `baseUrlEnv`) to the key's conventional environment variable, if it has one: a
+named section reads no variable by itself, so the missing-key error shows the `key = ${?VAR}`
+binding that would read it, never a bare "set VAR".
 
 ## Testing
 

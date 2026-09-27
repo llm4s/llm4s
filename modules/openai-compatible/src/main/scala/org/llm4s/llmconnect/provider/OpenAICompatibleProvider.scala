@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.config.{ OpenAICompatibleModelLister, ProviderModelLister }
+import org.llm4s.config.{ OpenAICompatibleConfigKeys, OpenAICompatibleModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAICompatibleConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -42,8 +42,14 @@ import org.llm4s.types.Result
 object OpenAICompatibleProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId(OpenAICompatibleConfig.ProviderIdName)
 
+  // `baseUrlEnv` makes a missing-baseUrl error show `baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}`,
+  // the binding that reads the conventional variable; a named section reads none by itself.
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec(requiresBaseUrl = true, baseUrlExample = "e.g. http://localhost:8000/v1")
+    ProviderConfigSpec(
+      requiresBaseUrl = true,
+      baseUrlExample = "e.g. http://localhost:8000/v1",
+      baseUrlEnv = Some(OpenAICompatibleConfigKeys.OPENAI_COMPATIBLE_BASE_URL)
+    )
 
   override val modelLister: Option[ProviderModelLister] = Some(OpenAICompatibleModelLister)
 

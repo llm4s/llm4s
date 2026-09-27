@@ -167,8 +167,11 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
 
       message should include("Provider 'no-url' (provider = openai-compatible) is missing required fields")
       message should include(
-        "baseUrl: set it in llm4s.conf under providers.no-url.baseUrl (e.g. http://localhost:8000/v1)"
+        "baseUrl: set it in llm4s.conf under providers.no-url.baseUrl (e.g. http://localhost:8000/v1; " +
+          "to read it from OPENAI_COMPATIBLE_BASE_URL, add baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL} to the section)"
       )
+      // The variable is shown as a binding, never as "set OPENAI_COMPATIBLE_BASE_URL": nothing reads it unbound.
+      (message should not).include("or set")
       (message should not).include("apiKey")
     }
   }

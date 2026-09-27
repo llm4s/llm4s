@@ -17,8 +17,8 @@ import org.slf4j.LoggerFactory
  *     vertexai-main {
  *       provider  = "vertexai"
  *       model     = "gemini-2.0-flash"
- *       endpoint  = "my-gcp-project"   // GCP project ID
- *       organization = "us-central1"   // GCP region (optional, defaults to us-central1)
+ *       project   = "my-gcp-project"   // GCP project ID
+ *       location  = "us-central1"      // GCP region (optional, defaults to us-central1)
  *       // apiKey = "/path/to/service-account.json"  // optional credential file path
  *     }
  *   }

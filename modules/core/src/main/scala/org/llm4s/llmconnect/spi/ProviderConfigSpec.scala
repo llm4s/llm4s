@@ -20,15 +20,18 @@ package org.llm4s.llmconnect.spi
  * @param required          a section without this key (and without a default) is invalid.
  * @param default           value used when the section omits the key. A key with a default
  *                          is never missing, so `required` is then moot.
- * @param env               an environment variable that llm4s itself reads for this key, if
- *                          one is: named in the missing-key message. Leave it `None` unless the
- *                          variable really is read - named sections only see what the user's
- *                          config sets, so most keys have none.
- * @param deprecatedAliases older names for this key, oldest spelling first. A section that
- *                          sets an alias instead of `name` still works, with a deprecation
- *                          warning; one that sets both to different values is an error. An
- *                          alias may be a built-in field name, which is how a provider moves off
- *                          a repurposed field (Vertex AI's `endpoint` became `project`).
+ * @param env               the conventional environment variable for this key, if it has one.
+ *                          Named sections read no variable by themselves, so the missing-key
+ *                          message shows the binding that reads it - `key = ${?VAR}` - rather
+ *                          than telling the user to set a variable nothing would read.
+ * @param deprecatedAliases older names for this key. A section that sets an alias instead of
+ *                          `name` still works, with a deprecation warning per alias used; one
+ *                          that sets `name` and an alias, or two aliases, to different values is
+ *                          an error. An alias may be a former extra key, or one of the built-in
+ *                          fields in [[ProviderConfigSpec.BuiltinAliasKeys]] - which is how a
+ *                          provider moves off a repurposed field (Vertex AI's `endpoint` became
+ *                          `project`). `provider`, `model` and `headers` cannot be aliases, and
+ *                          a spec naming one fails validation.
  */
 final case class ProviderConfigKey(
   name: String,
@@ -90,10 +93,10 @@ object ProviderConfigKey:
  * @param baseUrlExample       example shown when a required `baseUrl` is missing.
  * @param endpointDescription  what this provider means by `endpoint`, shown when
  *                             a required one is missing (Azure: the deployment name).
- * @param baseUrlEnv           an environment variable that llm4s itself reads for `baseUrl`,
- *                             if one is: named in the missing-`baseUrl` message. `None` - the
- *                             usual case, since named sections read only what the user's config
- *                             sets - means no variable is suggested.
+ * @param baseUrlEnv           the conventional environment variable for `baseUrl`, if the
+ *                             provider has one. The missing-`baseUrl` message then shows the
+ *                             binding that reads it (`baseUrl = ${?VAR}`); `None` means no
+ *                             variable is suggested.
  * @param extras               the provider-specific keys this section accepts.
  */
 final case class ProviderConfigSpec(
@@ -128,6 +131,14 @@ object ProviderConfigSpec:
     "reserveCompletion",
     "headers"
   )
+
+  /**
+   * The built-in fields that can be a deprecated alias (`ProviderConfigKey.deprecatedAliases`):
+   * those with a string form. `provider` and `model` select and drive every provider, and
+   * `headers` is a map, so none of them can stand in for a provider-specific key.
+   */
+  val BuiltinAliasKeys: Set[String] =
+    Set("baseUrl", "apiKey", "organization", "endpoint", "apiVersion", "contextWindow", "reserveCompletion")
 
   /**
    * The common shape: an API key, and a base URL that defaults to the

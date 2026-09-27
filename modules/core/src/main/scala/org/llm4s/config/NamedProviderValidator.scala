@@ -80,15 +80,26 @@ private[llm4s] object NamedProviderSectionValidator:
             )
           else Right((normalized.copy(extras = extras.values), extras.warnings))
 
-  /** A descriptor bug rather than a user one: an extra key may not shadow a built-in field. */
+  /**
+   * A descriptor bug rather than a user one: an extra key may not shadow a built-in field, and a
+   * deprecated alias may name a built-in field only if it has a string form to carry over.
+   */
   private def specError(id: String, spec: ProviderConfigSpec): Option[ConfigurationError] =
     val clashing = spec.extras.map(_.name).filter(ProviderConfigSpec.BuiltinKeys.contains)
-    Option.when(clashing.nonEmpty)(
-      ConfigurationError(
-        s"Provider '$id' declares provider-specific key(s) ${clashing.mkString(", ")}, which are built-in " +
-          "named-provider fields; rename them in its ProviderConfigSpec.extras"
+    val badAliases = spec.extras
+      .flatMap(_.deprecatedAliases)
+      .filter(alias =>
+        ProviderConfigSpec.BuiltinKeys.contains(alias) && !ProviderConfigSpec.BuiltinAliasKeys.contains(alias)
       )
-    )
+    val problems =
+      Option.when(clashing.nonEmpty)(
+        s"declares provider-specific key(s) ${clashing.mkString(", ")}, which are built-in named-provider fields; " +
+          "rename them in its ProviderConfigSpec.extras"
+      ) ++ Option.when(badAliases.nonEmpty)(
+        s"declares built-in field(s) ${badAliases.distinct.mkString(", ")} as deprecated aliases, which cannot " +
+          s"be; only ${ProviderConfigSpec.BuiltinAliasKeys.toSeq.sorted.mkString(", ")} can"
+      )
+    Option.when(problems.nonEmpty)(ConfigurationError(s"Provider '$id' ${problems.mkString("; and ")}"))
 
   private def missingBuiltins(
     name: String,
@@ -109,14 +120,17 @@ private[llm4s] object NamedProviderSectionValidator:
     if spec.requiresBaseUrl && normalized.baseUrl.isEmpty then
       // Name an environment variable only when the provider says one is actually read (#1215). This
       // used to tell every provider's users to "set <PROVIDER>_BASE_URL", and nothing read any of them.
-      missing += s"  - baseUrl: set it in llm4s.conf under providers.$name.baseUrl (${spec.baseUrlExample})" +
-        envHint(spec.baseUrlEnv)
+      missing += s"  - baseUrl: set it in llm4s.conf under providers.$name.baseUrl (${spec.baseUrlExample}" +
+        envHint("baseUrl", spec.baseUrlEnv) + ")"
 
     if spec.requiresEndpoint && normalized.endpoint.isEmpty then missing += s"  - endpoint: ${spec.endpointDescription}"
 
     missing.result()
 
-  private def envHint(env: Option[String]): String = env.fold("")(variable => s", or set $variable")
+  // Named sections read no environment variable by themselves, so a declared variable is shown as the
+  // HOCON binding that makes llm4s read it - accurate whether or not the user has written it yet.
+  private def envHint(key: String, env: Option[String]): String =
+    env.fold("")(variable => s"; to read it from $variable, add $key = $${?$variable} to the section")
 
   /** The provider-specific keys after defaults and aliases, and what is wrong with them. */
   final private case class ResolvedExtras(values: Map[String, String], problems: Seq[String], warnings: Seq[String])
@@ -137,13 +151,17 @@ private[llm4s] object NamedProviderSectionValidator:
     val section = s"llm4s.providers.$name"
 
     // A deprecated alias may be a built-in field (Vertex AI's `endpoint`) or a former extra key.
+    // Every built-in in `BuiltinAliasKeys` is read here; `specError` rejects the others.
     def aliasValue(alias: String): Option[String] =
       alias match
-        case "baseUrl"      => normalized.baseUrl.map(_.asUrl)
-        case "organization" => normalized.organization
-        case "endpoint"     => normalized.endpoint
-        case "apiVersion"   => normalized.apiVersion
-        case other          => normalized.extras.get(other)
+        case "baseUrl"           => normalized.baseUrl.map(_.asUrl)
+        case "apiKey"            => normalized.apiKey.map(_.asKey)
+        case "organization"      => normalized.organization
+        case "endpoint"          => normalized.endpoint
+        case "apiVersion"        => normalized.apiVersion
+        case "contextWindow"     => normalized.contextWindow.map(_.toString)
+        case "reserveCompletion" => normalized.reserveCompletion.map(_.toString)
+        case other               => normalized.extras.get(other)
 
     def resolve(key: ProviderConfigKey): KeyOutcome =
       val aliasHits = key.deprecatedAliases.flatMap(alias => aliasValue(alias).map(alias -> _))
@@ -164,9 +182,19 @@ private[llm4s] object NamedProviderSectionValidator:
               )
             case None => KeyOutcome(Some(value), warnings = aliasHits.map((alias, _) => deprecated(alias)))
         case None =>
-          aliasHits.headOption match
-            case Some((alias, value)) => KeyOutcome(Some(value), warnings = Seq(deprecated(alias)))
-            case None =>
+          aliasHits.map(_._2).distinct match
+            case Seq(value) => KeyOutcome(Some(value), warnings = aliasHits.map((alias, _) => deprecated(alias)))
+            case _ if aliasHits.nonEmpty =>
+              // Several old spellings with different values: which was meant cannot be known.
+              val set = aliasHits.map((alias, value) => s"`$alias` = \"$value\"").mkString(", ")
+              KeyOutcome(
+                None,
+                problems = Seq(
+                  s"  - ${key.name}: set through several deprecated aliases with different values ($set); " +
+                    s"replace them with $section.${key.name}"
+                )
+              )
+            case _ =>
               key.default match
                 case some @ Some(_) => KeyOutcome(some)
                 case None if key.required =>
@@ -174,7 +202,7 @@ private[llm4s] object NamedProviderSectionValidator:
                     None,
                     problems = Seq(
                       s"  - ${key.name}: ${key.description} (set it in llm4s.conf under providers.$name.${key.name}" +
-                        s"${envHint(key.env)})"
+                        s"${envHint(key.name, key.env)})"
                     )
                   )
                 case None => KeyOutcome(None)
