@@ -105,6 +105,7 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 
 **Mitigation (implemented):**
 - Dependabot is configured (`.github/dependabot.yml`) to scan GitHub Actions workflows weekly and flag outdated dependencies.
+- Scala Steward (`.github/workflows/scala-steward.yml`, configured by `.scala-steward.conf`) opens weekly pull requests for outdated sbt dependencies, sbt plugins, sbt itself and the Scala version. Neither tool raises security alerts for sbt dependencies; they keep versions current, which is what keeps published fixes flowing in.
 - The `secret-scan.yml` workflow prevents committed secrets from reaching the repository.
 
 **Recommended practice:** Periodically run `sbt dependencyUpdates` locally and review the OWASP National Vulnerability Database for Scala ecosystem libraries.

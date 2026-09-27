@@ -9,6 +9,9 @@ updates:
       - "dependencies"
       - "github-actions"
 
-# Note: Dependabot does not support SBT. For Scala/SBT dependency CVE scanning
-# use Scala Steward (https://github.com/scala-steward-org/scala-steward) or
-# run `sbt dependencyUpdates` locally against the OWASP NVD.
+# sbt dependencies are NOT managed here. Scala Steward owns them
+# (.github/workflows/scala-steward.yml, .scala-steward.conf): it resolves the
+# build with sbt itself, applies Scalafix migrations and bumps scalaVersion.
+# Dependabot gained an `sbt` ecosystem in May 2026 (version updates only), but
+# enabling it as well would open a second PR for every bump - don't add it
+# without removing Scala Steward.
