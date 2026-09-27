@@ -685,13 +685,14 @@ lazy val openai = (project in file("modules/openai"))
   .settings(
     name := "llm4s-openai",
     commonSettings,
-    // Measured 73.72% statement coverage (`sbt coverage openai/test openai/coverageReport`)
-    // after the move to `openai-java` (#1132), up from 62.34% at the carve: `OpenAIClient` went
-    // from 65% to 78% with the streamed tool-call specs and `OpenAIClientWireSpec`, which drives
-    // the real SDK transport against a local server. Floor is the measured value rounded down to
-    // the nearest 5. Never lower it. `OpenAIEmbeddingProvider`'s HTTP client is still the thin
-    // spot. The `@Cloud` OpenAI smoke suite in `modules/it` is not counted here.
-    coverageFloor(70),
+    // Measured 80.42% statement coverage (`sbt coverage openai/test openai/coverageReport`)
+    // after the move to `openai-java` (#1132), up from 62.34% at the carve and 73.72% at the
+    // switch: `OpenAIClient` is at 85% with the streamed tool-call specs and
+    // `OpenAIClientWireSpec`, which drives the real SDK transport against a local server. Floor is
+    // 75, not 80, because 80.42% leaves under half a point of headroom. Never lower it.
+    // `OpenAIEmbeddingProvider`'s anonymous HTTP client (12%) is still the thin spot. The `@Cloud`
+    // OpenAI smoke suite in `modules/it` is not counted here.
+    coverageFloor(75),
     Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
@@ -872,6 +873,7 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
 // that users combining a provider module with `llm4s-observability-otel` do get. Note that
 // the plain `okhttp:5.x` artifact is an empty stub for Maven/sbt consumers (the classes are in
 // `okhttp-jvm`), so a dependencyOverrides bump of `okhttp` to 5.x would drop the classes.
+// `MixedOkHttpClasspathSpec` (Local tier, so every `sbt test`) re-runs those checks here.
 lazy val it = (project in file("modules/it"))
   .dependsOn(
     core,
