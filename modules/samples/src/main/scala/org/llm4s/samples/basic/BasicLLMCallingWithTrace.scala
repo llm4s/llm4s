@@ -36,7 +36,7 @@ object BasicLLMCallingWithTrace {
         // Complete the conversation
         client.complete(conversation) match {
           case Right(completion) =>
-            logger.info("Model ID={} is created at {}", completion.id, completion.created)
+            logger.info("Completion ID={} from {} created at {}", completion.id, completion.model, completion.created)
             logger.info("Chat Role: {}", completion.message.role)
             logger.info("Message:")
             logger.info("{}", completion.message.content)
@@ -50,7 +50,7 @@ object BasicLLMCallingWithTrace {
               tools = new ToolRegistry(Seq()),
               initialQuery = conversation.messages.collectFirst { case UserMessage(content) => content },
               status = AgentStatus.Complete,
-              logs = Seq(s"Model ID=${completion.id}")
+              logs = Seq(s"Completion ID=${completion.id}")
             )
             tracer.traceAgentState(agentState)
 

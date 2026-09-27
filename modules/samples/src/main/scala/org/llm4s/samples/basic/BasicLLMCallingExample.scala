@@ -100,7 +100,7 @@ object BasicLLMCallingExample {
       _ = {
         // Display the response
         logger.info("Success! Response from {}", completion.model)
-        logger.info("Model ID: {}", completion.id)
+        logger.info("Completion ID: {}", completion.id)
         logger.info("Created at: {}", completion.created)
         logger.info("Chat Role: {}", completion.message.role)
         logger.info("--- Response ---")
