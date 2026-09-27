@@ -624,6 +624,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must name it - and a `provider = "openrouter"` section with a proxy `baseUrl` is no longer
   routed to OpenAI. `None` infers the id from the base URL as before. See the
   [migration note](docs/reference/migration.md#requesty-configs-report-requesty).
+- The Groq example in `llm4s-openai-compatible`'s `reference.conf` and the
+  `OpenAICompatibleProvider` Scaladoc named `llama-3.3-70b-versatile`, which Groq shut down for
+  free and developer tiers on 2026-08-16; they now use `openai/gpt-oss-120b`, as the providers
+  guide's Groq recipe does.
 - **`EMBEDDING_MODEL=ollama/nomic-embed-text` failed `Llm4sConfig.textEmbeddingModel()`** with
   `Unknown model 'nomic-embed-text' for provider 'ollama'`. The configuration is documented in
   the README and `CLAUDE.md`, but the central dimension table covered only `openai`, `voyage`
