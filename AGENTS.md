@@ -41,5 +41,5 @@
 - Always use the structured templates when opening issues or PRs to ensure consistency and completeness.
 
 ## Security & Configuration Tips
-- Never commit secrets. Keep API keys (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `LLM_MODEL`, optional `OPENAI_BASE_URL`) in env vars or an untracked `.env`.
+- Never commit secrets. Providers are configured as named sections under `llm4s.providers` in HOCON; keep API keys in env vars (bound in the section with e.g. `apiKey = ${?OPENAI_API_KEY}`) or in the untracked `application.local.conf`, never in a committed file. llm4s reads no `LLM_MODEL` or provider API-key variable on its own; see `docs/getting-started/configuration.md`.
 - For workspace demos, ensure Docker is running before `sbt docker:publishLocal` or workspace samples, and scrub sensitive data from logs.

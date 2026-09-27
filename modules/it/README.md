@@ -66,4 +66,4 @@ so a service that did not start cannot pass for a suite that did.
 - Qdrant via `QDRANT_TEST_URL` and `QDRANT_TEST_API_KEY`
 - Docker-backed workspace tests via `LLM4S_DOCKER_TESTS=true`; the image tag comes from the build as `LLM4S_WORKSPACE_IMAGE`
 - Ollama via a local server at `http://localhost:11434` with `qwen2.5:0.5b` pulled
-- Cloud provider smoke tests via credentials such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, and `COHERE_API_KEY`
+- Cloud provider smoke tests via credentials such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, and `COHERE_API_KEY`. Each `@Cloud` suite reads its own variable with `System.getenv` and builds the provider config directly; the llm4s library does not read these variables (applications bind them in a named provider section, e.g. `apiKey = ${?OPENAI_API_KEY}`)

@@ -1,5 +1,55 @@
 # Migration Guide
 
+## From `LLM_MODEL` to named provider sections
+
+Since [#903](https://github.com/llm4s/llm4s/pull/903) (in 0.3.2) removed legacy single-provider
+loading, **nothing in llm4s reads `LLM_MODEL`**, nor a provider's API-key or base-URL variable
+(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `AZURE_API_BASE`, `OLLAMA_BASE_URL`, ...).
+No `reference.conf` binds them. Setting them has no effect, and an application that relied on them
+fails at startup with a configuration error. The documentation kept teaching them until
+[#1132](https://github.com/llm4s/llm4s/issues/1132)'s follow-up.
+
+Configure providers as named sections in your own `application.conf`, binding secrets from the
+environment with `${?VAR}` - you choose the variable names:
+
+```hocon
+# src/main/resources/application.conf
+llm4s {
+  providers {
+    provider = "openai-main"          # the default: the name of a section below
+
+    openai-main {
+      provider = "openai"
+      model    = "gpt-4o-mini"
+      apiKey   = ${?OPENAI_API_KEY}
+    }
+  }
+}
+```
+
+| Before | After |
+|---|---|
+| `LLM_MODEL=openai/gpt-4o-mini` | a section with `provider = "openai"`, `model = "gpt-4o-mini"`, selected by `llm4s.providers.provider` |
+| `OPENAI_API_KEY=...` read automatically | `apiKey = ${?OPENAI_API_KEY}` in that section, and the same variable exported |
+| `OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, ... | `baseUrl = "..."` (or `baseUrl = ${?OLLAMA_BASE_URL}`) in the section; Ollama sections require it |
+| switching model by changing `LLM_MODEL` | a second section, selected by changing `provider`, by `-Dllm4s.providers.provider=<name>`, by your own `provider = ${?LLM4S_PROVIDER}` binding, or loaded directly with `Llm4sConfig.provider("<name>")` |
+| `Llm4sConfig.provider()` | `Llm4sConfig.defaultProvider()` |
+
+Two things to know:
+
+- **Every section is validated on each load.** A section whose required `apiKey` is unset, or whose
+  provider module is not on the classpath, fails `defaultProvider()` even when it is not the
+  default. Keep only the sections each environment can fill in.
+- **OpenAI embeddings do not see `OPENAI_API_KEY` either.** With
+  `EMBEDDING_MODEL=openai/<model>` (which *is* bound, by llm4s-core's `reference.conf`), add
+  `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}`.
+
+Variables that `reference.conf` files do bind - `TRACING_MODE`, `LANGFUSE_*`, `OTEL_SERVICE_NAME`,
+`OTEL_EXPORTER_OTLP_ENDPOINT`, `EMBEDDING_MODEL`, `VOYAGE_API_KEY` and others - still work; see
+[the variables llm4s reads](../getting-started/configuration.md#environment-variables-llm4s-reads).
+Two tools read `LLM_MODEL` themselves: the chat-tui sample (`ChatTuiConfig`) and the config-policy
+env check (`EnvCheckPolicies`).
+
 ## Named providers: provider-specific keys; Vertex AI `project` and `location`
 
 A named provider section can now carry keys of the provider's own, declared by the provider
@@ -2154,6 +2204,10 @@ def handleError(error: LLMError): Unit = error match {
    ```
 
 ## Configuration Changes (v0.2.0+)
+
+> `Llm4sConfig.provider()` with no argument, used below, has since become
+> `Llm4sConfig.defaultProvider()`, and providers are configured as named sections - see
+> [From `LLM_MODEL` to named provider sections](#from-llm_model-to-named-provider-sections).
 
 ### EnvLoader and legacy ConfigReader → Llm4sConfig
 

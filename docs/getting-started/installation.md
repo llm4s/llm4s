@@ -405,55 +405,42 @@ docker --version
 
 ---
 
-## API Keys Setup
+## Provider Setup
 
-LLM4S requires API keys for your chosen provider(s). You can configure these via:
+llm4s reads provider configuration from named sections in your `application.conf`, not from
+environment variables of its own. Keep secrets in environment variables and bind them into the
+section with `${?VAR}`:
 
-1. **Environment variables** (recommended)
-2. **Configuration files** (`application.conf`)
-3. **System properties** (`-D` flags)
+```hocon
+# src/main/resources/application.conf
+llm4s {
+  providers {
+    provider = "openai-main"          # the default: the name of a section below
 
-### Environment Variables
-
-Create a `.env` file in your project root (add to `.gitignore`!):
-
-```bash
-# Choose your provider
-LLM_MODEL=openai/gpt-4o
-
-# OpenAI
-OPENAI_API_KEY=sk-proj-...
-OPENAI_BASE_URL=https://api.openai.com/v1  # Optional
-
-# Anthropic
-ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_BASE_URL=https://api.anthropic.com  # Optional
-
-# Azure OpenAI
-AZURE_API_KEY=your-azure-key
-AZURE_API_BASE=https://your-resource.openai.azure.com
-AZURE_DEPLOYMENT_NAME=gpt-4o
-
-# Ollama (local)
-OLLAMA_BASE_URL=http://localhost:11434
-
-# Cohere
-COHERE_API_KEY=your-cohere-api-key
-COHERE_BASE_URL=https://api.cohere.ai/compatibility/v1  # Optional; a native root is mapped
+    openai-main {
+      provider = "openai"
+      model    = "gpt-4o-mini"
+      apiKey   = ${?OPENAI_API_KEY}
+    }
+  }
+}
 ```
 
-Load the `.env` file before running:
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+Setting `OPENAI_API_KEY` alone does nothing: llm4s reads it only because the section binds it,
+and nothing reads `LLM_MODEL`. The [Configuration guide](configuration#named-provider-sections)
+shows sections for every provider, how to [switch between them](configuration#switching-providers),
+and which [environment variables llm4s reads](configuration#environment-variables-llm4s-reads)
+without any binding.
+
+If you keep your variables in a `.env` file (add it to `.gitignore`!), load it before running:
 
 ```bash
 source .env
 sbt run
-```
-
-Or use `sbt-dotenv` plugin:
-
-```scala
-// project/plugins.sbt
-addSbtPlugin("au.com.onegeek" %% "sbt-dotenv" % "2.1.233")
 ```
 
 ### Get API Keys
@@ -498,18 +485,18 @@ Create a simple test file `VerifyInstall.scala`:
 ```scala
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model.UserMessage
+import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
+import org.llm4s.model.ModelRegistryService
 
 object VerifyInstall extends App {
   println("Testing LLM4S installation...")
 
   val result = for {
-    providerConfig <- Llm4sConfig.provider()
-    client <- LLMConnect.getClient(providerConfig)
-    response <- client.complete(
-      messages = List(UserMessage("Say 'LLM4S is working!'")),
-      model = None
-    )
+    providerConfig <- Llm4sConfig.defaultProvider()
+    registry       <- Llm4sConfig.modelRegistryService()
+    given ModelRegistryService = registry
+    client   <- LLMConnect.getClient(providerConfig)
+    response <- client.complete(Conversation(Seq(UserMessage("Say 'LLM4S is working!'"))))
   } yield response
 
   result match {
@@ -541,25 +528,26 @@ Response: LLM4S is working!
 
 ## Troubleshooting
 
-### "API key not found"
+### "missing required fields: apiKey"
 
-**Problem**: LLM4S can't find your API key.
+**Problem**: the provider section has no API key.
 
 **Solution**:
-1. Verify `.env` file exists and is in project root
-2. Check you've sourced it: `source .env`
-3. Verify variable name matches your provider (e.g., `OPENAI_API_KEY`)
-4. Check for typos in the key
+1. Check the section binds the key: `apiKey = ${?OPENAI_API_KEY}`
+2. Check the variable is set in the shell that starts the JVM: `echo $OPENAI_API_KEY`
+   (if you use a `.env` file, `source .env` first)
+3. Check every other section too - all of them are validated on each load, so an unused
+   section with an unset key fails as well
 
-### "Provider not supported"
+### "Configured provider '...' was not found" or an unknown provider id
 
-**Problem**: Invalid `LLM_MODEL` format.
+**Problem**: `llm4s.providers.provider` names a section that does not exist, or a section's
+`provider = "..."` id is not registered.
 
-**Solution**: Use the correct format:
-- OpenAI: `openai/gpt-4o`
-- Anthropic: `anthropic/claude-sonnet-4-5-latest`
-- Azure: `azure/gpt-4o`
-- Ollama: `ollama/llama2`
+**Solution**: make `llm4s.providers.provider` match a section name exactly, and add the module
+for the provider id (for example `llm4s-openai` for `provider = "openai"`; see
+[Optional Dependencies](#optional-dependencies)). Model names go in the section's `model`
+without a provider prefix: `model = "gpt-4o"` for OpenAI, not `openai/gpt-4o`.
 
 ### Compilation Errors
 

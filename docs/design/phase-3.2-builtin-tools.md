@@ -283,6 +283,8 @@ Two sample applications demonstrate built-in tools usage:
    sbt "samples/runMain org.llm4s.samples.toolapi.BuiltinToolsExample"
    ```
 
+> **Superseded:** configuration no longer reads `LLM_MODEL` or provider API-key variables; see [Configuration](../getting-started/configuration.md#named-provider-sections).
+
 2. **BuiltinToolsAgentExample**: Demonstrates tools with an LLM agent
    ```bash
    export LLM_MODEL=openai/gpt-4o

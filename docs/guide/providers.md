@@ -44,14 +44,45 @@ LLM4S supports these LLM providers, plus any endpoint that speaks the OpenAI cha
 
 ### How It Works
 
-LLM4S resolves the named provider you select as the default:
+Each provider you use is a **named section** under `llm4s.providers` in your own
+`application.conf`. `llm4s.providers.provider` names the default section, which
+`Llm4sConfig.defaultProvider()` loads; `Llm4sConfig.provider("<name>")` loads any section by name.
+Secrets come from the environment only through `${?VAR}` bindings you write in the section -
+the library reads no `LLM_MODEL` and no provider API-key variable by itself.
 
-```bash
-# Pick one of your configured named providers
-LLM4S_PROVIDER=openai-main       # Uses your OpenAI named provider
-LLM4S_PROVIDER=anthropic-main    # Uses your Anthropic named provider
-LLM4S_PROVIDER=ollama-local      # Uses your Ollama named provider
+```hocon
+# src/main/resources/application.conf
+llm4s {
+  providers {
+    provider = "openai-main"          # the default: the name of a section below
+
+    openai-main {
+      provider = "openai"
+      model    = "gpt-4o-mini"
+      apiKey   = ${?OPENAI_API_KEY}
+    }
+
+    claude {
+      provider = "anthropic"
+      model    = "claude-sonnet-4-20250514"
+      apiKey   = ${?ANTHROPIC_API_KEY}
+    }
+  }
+}
 ```
+
+```scala
+import org.llm4s.config.Llm4sConfig
+
+val default = Llm4sConfig.defaultProvider()   // openai-main
+val claude  = Llm4sConfig.provider("claude")  // any section, by name
+```
+
+Every section under `llm4s.providers` is validated whenever a provider is loaded, so a section
+whose required `apiKey` variable is unset - or whose provider module is not on the classpath -
+fails the load even when it is not the default. Keep only the sections you can fill in. See
+[Named provider sections](../getting-started/configuration.md#named-provider-sections) and
+[Switching providers](../getting-started/configuration.md#switching-providers) for the full story.
 
 ### Available Models
 
@@ -89,23 +120,11 @@ In `0.4.1` and earlier it is part of `llm4s-core`. See the
 ### Setup
 
 1. **Get an API key** from [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-2. **Set environment variables:**
+2. **Add a named section** to `application.conf` and select it as the default (below).
+3. **Export the variable your section binds:**
 
 ```bash
-export LLM4S_PROVIDER=openai-main
 export OPENAI_API_KEY=sk-proj-...
-```
-
-3. **(Optional) Organization ID** for multi-workspace accounts:
-
-```bash
-export OPENAI_ORGANIZATION=org-...
-```
-
-4. **(Optional) Custom API base URL** for Azure or proxy:
-
-```bash
-export OPENAI_BASE_URL=https://api.openai.com/v1  # Default
 ```
 
 ### Configuration
@@ -118,15 +137,18 @@ llm4s {
     provider = "openai-main"
 
     openai-main {
-      provider = "openai"
-      model = "gpt-4o"
-      apiKey = ${?OPENAI_API_KEY}
-      baseUrl = "https://api.openai.com/v1"
-      organization = ${?OPENAI_ORGANIZATION}
+      provider     = "openai"
+      model        = "gpt-4o"
+      apiKey       = ${?OPENAI_API_KEY}        # required
+      organization = ${?OPENAI_ORGANIZATION}   # optional, for multi-workspace accounts
+      # baseUrl    = "https://my-proxy.example.com/v1"  # optional; default https://api.openai.com/v1
     }
   }
 }
 ```
+
+The variable names are yours to choose: `OPENAI_API_KEY` and `OPENAI_ORGANIZATION` are read only
+because the section binds them.
 
 ### Available Models
 
@@ -165,17 +187,11 @@ In `0.4.1` and earlier it is part of `llm4s-core`. See the
 ### Setup
 
 1. **Get an API key** from [console.anthropic.com](https://console.anthropic.com/account/keys)
-2. **Set environment variables:**
+2. **Add a named section** to `application.conf` and select it as the default (below).
+3. **Export the variable your section binds:**
 
 ```bash
-export LLM4S_PROVIDER=anthropic-main
 export ANTHROPIC_API_KEY=sk-ant-...
-```
-
-3. **(Optional) Custom API base URL:**
-
-```bash
-export ANTHROPIC_BASE_URL=https://api.anthropic.com
 ```
 
 ### Configuration
@@ -189,9 +205,9 @@ llm4s {
 
     anthropic-main {
       provider = "anthropic"
-      model = "claude-opus-4-6"
-      apiKey = ${?ANTHROPIC_API_KEY}
-      baseUrl = "https://api.anthropic.com"
+      model    = "claude-opus-4-6"
+      apiKey   = ${?ANTHROPIC_API_KEY}   # required
+      # baseUrl = "https://my-proxy.example.com"  # optional; default https://api.anthropic.com
     }
   }
 }
@@ -236,17 +252,11 @@ In `0.4.1` and earlier they are part of `llm4s-core`. See the
 
 1. **Get an API key** from [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
    - Free tier available (60 requests per minute)
-2. **Set environment variables:**
+2. **Add a named section** to `application.conf` and select it as the default (below).
+3. **Export the variable your section binds:**
 
 ```bash
-export LLM4S_PROVIDER=gemini-main
-export GOOGLE_API_KEY=your-api-key
-```
-
-3. **(Optional) Custom API base URL:**
-
-```bash
-export GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
+export GEMINI_API_KEY=your-api-key
 ```
 
 ### Configuration
@@ -259,10 +269,10 @@ llm4s {
     provider = "gemini-main"
 
     gemini-main {
-      provider = "gemini"
-      model = "gemini-2.0-flash"
-      apiKey = ${?GOOGLE_API_KEY}
-      baseUrl = "https://generativelanguage.googleapis.com/v1beta"
+      provider = "gemini"            # "google" is accepted as an alias
+      model    = "gemini-2.0-flash"
+      apiKey   = ${?GEMINI_API_KEY}  # required
+      # baseUrl = "..."              # optional; default https://generativelanguage.googleapis.com/v1beta
     }
   }
 }
@@ -361,14 +371,11 @@ Azure's unified v1 API.
 1. **Create resource** in [Azure Portal](https://portal.azure.com)
 2. **Deploy model** (e.g., gpt-4o) to get deployment name
 3. **Get credentials** from Azure Portal → Keys & Endpoint
-4. **Set environment variables:**
+4. **Add a named section** to `application.conf` (below) and export the variables it binds:
 
 ```bash
-export LLM_MODEL=azure/gpt-4o
 export AZURE_API_KEY=your-azure-key
 export AZURE_API_BASE=https://your-resource.openai.azure.com
-export AZURE_DEPLOYMENT_NAME=gpt-4o
-export AZURE_API_VERSION=2024-02-15-preview
 ```
 
 ### Configuration
@@ -376,17 +383,27 @@ export AZURE_API_VERSION=2024-02-15-preview
 In `application.conf`:
 
 ```hocon
-llm {
+llm4s {
   providers {
-    azure {
-      api-key = ${?AZURE_API_KEY}
-      api-base = ${?AZURE_API_BASE}
-      deployment-name = ${?AZURE_DEPLOYMENT_NAME}
-      api-version = "2024-02-15-preview"
+    provider = "azure-main"
+
+    azure-main {
+      provider   = "azure"
+      model      = "gpt-4o"                  # your deployment name
+      endpoint   = ${?AZURE_API_BASE}        # required: your resource's endpoint
+      apiKey     = ${?AZURE_API_KEY}         # required
+      apiVersion = "2024-10-21"              # optional; default V2025_01_01_PREVIEW
     }
   }
 }
 ```
+
+| Key | Required | Meaning |
+|-----|----------|---------|
+| `model` | yes | The deployment name you chose when deploying the model |
+| `endpoint` | yes | The Azure OpenAI resource endpoint |
+| `apiKey` | yes | The resource key |
+| `apiVersion` | no | Azure API version, wire form or constant name |
 
 ### Available Models
 
@@ -424,7 +441,7 @@ In `0.4.1` and earlier it is part of `llm4s-core`. See the
 ### Setup
 
 1. **Get API key** from [platform.deepseek.com](https://platform.deepseek.com/api_keys)
-2. **Set environment variables:**
+2. **Export the variable your section binds** (below):
 
 ```bash
 export DEEPSEEK_API_KEY=sk-...
@@ -1060,7 +1077,7 @@ In `0.4.1` and earlier it is part of `llm4s-core`, and does not stream
 ### Setup
 
 1. **Get API key** from [console.mistral.ai](https://console.mistral.ai/api-keys)
-2. **Set environment variables:**
+2. **Export the variable your section binds** (below):
 
 ```bash
 export MISTRAL_API_KEY=your-key
@@ -1114,7 +1131,7 @@ not stream ([#925](https://github.com/llm4s/llm4s/issues/925)).
 ### Setup
 
 1. **Get API key** from [dashboard.cohere.com](https://dashboard.cohere.com/api-keys)
-2. **Set environment variables:**
+2. **Export the variable your section binds** (below):
 
 ```bash
 export COHERE_API_KEY=your-key
@@ -1159,6 +1176,16 @@ unchanged.
 
 ## Ollama (Local Models)
 
+From the release after `0.4.1`, Ollama support - chat and embeddings - ships in its own
+artifact, alongside `llm4s-core`:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-ollama" % llm4sVersion
+```
+
+In `0.4.1` and earlier it is part of `llm4s-core`. See the
+[installation guide](../getting-started/installation.md#for-ollama-local-models).
+
 ### Setup
 
 1. **Install Ollama** from [ollama.ai](https://ollama.ai)
@@ -1169,24 +1196,23 @@ ollama pull mistral        # Downloads model
 ollama serve               # Runs on http://localhost:11434
 ```
 
-3. **Set environment variables:**
-
-```bash
-export LLM_MODEL=ollama/mistral
-export OLLAMA_BASE_URL=http://localhost:11434
-```
-
-No API key needed!
+3. **Add a named section** to `application.conf` and select it as the default. No API key needed,
+   but `baseUrl` is required - Ollama sections have no default (below).
 
 ### Configuration
 
 In `application.conf`:
 
 ```hocon
-llm {
+llm4s {
   providers {
-    ollama {
-      base-url = "http://localhost:11434"
+    provider = "ollama-local"
+
+    ollama-local {
+      provider = "ollama"
+      model    = "mistral"
+      baseUrl  = "http://localhost:11434"   # required
+      # baseUrl = ${?OLLAMA_BASE_URL}       # optional: let your own variable override it
     }
   }
 }
@@ -1222,12 +1248,19 @@ Free! Just compute (CPU or GPU needed).
 
 **Never commit API keys!**
 
-1. **Use environment variables:**
+1. **Keep keys in environment variables, bound in `application.conf`:**
+
+```hocon
+openai-main { provider = "openai", model = "gpt-4o", apiKey = ${?OPENAI_API_KEY} }
+```
 
 ```bash
 export OPENAI_API_KEY=sk-...
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+   llm4s reads a variable only through a `${?VAR}` binding like this one; exporting it alone does
+   nothing.
 
 2. **Use .env file** (add to `.gitignore`):
 
@@ -1253,7 +1286,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 **Good:**
 
 ```scala
-// Keys from env/config - never hardcoded
+// Keys come from application.conf, which binds them with ${?VAR} - never hardcoded
 val providerConfig = Llm4sConfig.defaultProvider()
 ```
 
@@ -1278,30 +1311,9 @@ sys.env.get("OPENAI_API_KEY")  // Outside config boundary
 
 ### Setting Custom URLs
 
-```bash
-# OpenAI
-export OPENAI_BASE_URL=https://api.openai.com/v1
-
-# Anthropic
-export ANTHROPIC_BASE_URL=https://api.anthropic.com
-
-# Azure OpenAI
-export AZURE_API_BASE=https://your-resource.openai.azure.com
-
-# Ollama
-export OLLAMA_BASE_URL=http://localhost:11434
-
-# Gemini
-export GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
-
-# Cohere (its OpenAI-compatibility API; a native root is mapped to <root>/compatibility/v1)
-export COHERE_BASE_URL=https://api.cohere.ai/compatibility/v1
-
-# DeepSeek
-export DEEPSEEK_BASE_URL=https://api.deepseek.com
-```
-
-### Via application.conf
+A base URL is the `baseUrl` key of the named section (`endpoint` for Azure OpenAI). No
+`<PROVIDER>_BASE_URL` variable is read by itself; bind one if you want the environment to
+override the URL:
 
 ```hocon
 llm4s {
@@ -1310,14 +1322,31 @@ llm4s {
 
     openai-main {
       provider = "openai"
-      model = "gpt-4o"
-      apiKey = ${?OPENAI_API_KEY}
-      baseUrl = ${?OPENAI_BASE_URL}
-      baseUrl = "https://proxy.example.com/openai"
+      model    = "gpt-4o"
+      apiKey   = ${?OPENAI_API_KEY}
+      baseUrl  = "https://proxy.example.com/openai"
+      baseUrl  = ${?OPENAI_BASE_URL}   # optional: overrides the line above when set
     }
   }
 }
 ```
+
+In HOCON the later line wins, and `${?VAR}` with the variable unset leaves the earlier value in
+place. Defaults when `baseUrl` is omitted:
+
+| Provider | Default `baseUrl` |
+|----------|-------------------|
+| `openai` | `https://api.openai.com/v1` |
+| `anthropic` | `https://api.anthropic.com` |
+| `gemini` | `https://generativelanguage.googleapis.com/v1beta` |
+| `deepseek` | `https://api.deepseek.com` |
+| `mistral` | `https://api.mistral.ai` |
+| `cohere` | `https://api.cohere.ai/compatibility/v1` (a native root is mapped to `<root>/compatibility/v1`) |
+| `openrouter` | `https://openrouter.ai/api/v1` |
+| `zai` | `https://api.z.ai/api/paas/v4` |
+| `requesty` | `https://router.requesty.ai/v1` |
+| `ollama` | none - required |
+| `openai-compatible` | none - required |
 
 ---
 
@@ -1353,18 +1382,21 @@ llm4s {
 
 ## Multiple Providers in One App
 
-Switch providers at runtime:
+Configure one named section per provider, then load the default or any section by name:
 
 ```scala
 for {
-  // Get the configured default named provider
-  providerConfig <- Llm4sConfig.defaultProvider()
-  client <- LLMConnect.getClient(providerConfig)
-} yield {
-  // Use the available provider
-  client.complete(conversation)
-}
+  registry <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
+  primaryConfig  <- Llm4sConfig.defaultProvider()      // llm4s.providers.provider
+  fallbackConfig <- Llm4sConfig.provider("claude")     // llm4s.providers.claude
+  primary  <- LLMConnect.getClient(primaryConfig)
+  fallback <- LLMConnect.getClient(fallbackConfig)
+} yield primary.complete(conversation).orElse(fallback.complete(conversation))
 ```
+
+Every section must be loadable - its required keys bound - because all of them are validated
+whenever one is loaded. See [Switching providers](../getting-started/configuration.md#switching-providers).
 
 This enables:
 - **Fallback logic** - Use OpenAI, fall back to Anthropic
@@ -1378,8 +1410,9 @@ This enables:
 ### "Invalid API Key"
 
 ```bash
-# Verify key is set
+# Verify the variable your section binds is set
 echo $OPENAI_API_KEY
+# ...and that the section actually binds it: apiKey = ${?OPENAI_API_KEY}
 
 # Check key format (starts with correct prefix)
 # OpenAI: sk-proj-* or sk-*
@@ -1401,10 +1434,10 @@ ollama serve
 
 ### "Model not found"
 
-```bash
-# Verify model name and provider
-export LLM_MODEL=openai/gpt-4o  # Correct format
+Check the `model` key of the section you selected, and that its `provider` is the one serving
+that model (`model = "gpt-4o"` under `provider = "openai"`; no `openai/` prefix):
 
+```bash
 # Check available models
 # OpenAI: https://platform.openai.com/docs/models
 # Anthropic: https://docs.anthropic.com/claude/reference/models

@@ -681,6 +681,10 @@ response.foreach { r =>
 
 ### Configuration
 
+These variables are bound by `llm4s-rag`'s `reference.conf` , so exporting them sets the
+`llm4s.rerank` keys. `COHERE_API_KEY` here is the reranker's key only; a Cohere chat provider reads
+its key from its own named section.
+
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
 | `RERANK_PROVIDER` | Provider: cohere, none | none |

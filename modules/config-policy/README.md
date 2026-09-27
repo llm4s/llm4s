@@ -55,7 +55,19 @@ With an explicit config file (recommended for reproducible checks):
 sbt "configPolicy/runMain org.llm4s.configpolicy.CheckPolicies --env=dev --config config/examples/application-policy-smoke.conf"
 ```
 
-For ad-hoc usage you can rely on environment variables (e.g. `LLM_MODEL`, `OLLAMA_BASE_URL`) with `reference.conf` defaults.
+`CheckPolicies` evaluates the named provider sections under `llm4s.providers` (see the
+[configuration guide](../../docs/getting-started/configuration.md#named-provider-sections)); any
+environment variables it sees are the ones those sections bind with `${?VAR}`.
+
+For ad-hoc checks without a config file there is the separate env engine, `EnvCheckPolicies`,
+which reads `LLM_PROVIDER`, `LLM_MODEL`, `LLM_MAX_TOKENS`, `LLM_REASONING_BUDGET`, `LLM_REGION`
+(or `AZURE_REGION`) and `OPENAI_BASE_URL` / `OPENAI_COMPATIBLE_BASE_URL` directly from the
+environment. Those variables are this tool's own inputs: the llm4s library does not read them.
+
+```bash
+LLM_PROVIDER=openai LLM_MODEL=gpt-4o-mini \
+  sbt "configPolicy/runMain org.llm4s.configpolicy.EnvCheckPolicies --env=prod --preset=prod-safe"
+```
 
 ## CI
 

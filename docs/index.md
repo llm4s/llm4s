@@ -29,16 +29,16 @@ LLM4S brings the power of large language models to the Scala ecosystem with a fo
 ```scala
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
-import org.llm4s.llmconnect.model.UserMessage
+import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
+import org.llm4s.model.ModelRegistryService
 
-// Simple LLM call with automatic provider selection
+// Simple LLM call using the default provider section from application.conf
 val result = for {
-  providerConfig <- Llm4sConfig.provider()
-  client <- LLMConnect.getClient(providerConfig)
-  response <- client.complete(
-    messages = List(UserMessage("Explain quantum computing")),
-    model = None  // Uses configured model
-  )
+  providerConfig <- Llm4sConfig.defaultProvider()
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
+  client   <- LLMConnect.getClient(providerConfig)
+  response <- client.complete(Conversation(Seq(UserMessage("Explain quantum computing"))))
 } yield response
 
 result match {
@@ -137,18 +137,40 @@ Add LLM4S to your `build.sbt`:
 libraryDependencies += "org.llm4s" %% "llm4s-core" % "{{ site.data.project.latest_release }}"
 ```
 
+In `{{ site.data.project.latest_release }}` the provider clients ship inside `llm4s-core`. On `main`
+they have moved to modules of their own (`llm4s-openai`, `llm4s-anthropic`, `llm4s-gemini`,
+`llm4s-ollama`, `llm4s-openai-compatible`), which from the next release you add alongside
+`llm4s-core` - e.g. `"org.llm4s" %% "llm4s-openai" % llm4sVersion`.
+
 {: .note }
 > **Latest release:** `{{ site.data.project.latest_release }}`
 > Check [Maven Central](https://search.maven.org/search?q=g:org.llm4s%20AND%20a:llm4s-core_3) for the latest release.
 
 ### Configuration
 
-Set your API key and model:
+Define a named provider section in `src/main/resources/application.conf` and select it as the
+default. The API key comes from an environment variable only because the section binds it with
+`${?OPENAI_API_KEY}` - llm4s does not read `LLM_MODEL` or API-key variables on its own:
+
+```hocon
+llm4s {
+  providers {
+    provider = "openai-main"          # the default: the name of a section below
+
+    openai-main {
+      provider = "openai"
+      model    = "gpt-4o-mini"
+      apiKey   = ${?OPENAI_API_KEY}
+    }
+  }
+}
+```
 
 ```bash
-export LLM_MODEL=openai/gpt-4o
 export OPENAI_API_KEY=sk-...
 ```
+
+[Configuration guide →](/getting-started/configuration#named-provider-sections)
 
 ### Your First Program
 
@@ -156,17 +178,19 @@ export OPENAI_API_KEY=sk-...
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
+import org.llm4s.model.ModelRegistryService
 
 object HelloLLM extends App {
   val result = for {
-    providerConfig <- Llm4sConfig.provider()
-    client <- LLMConnect.getClient(providerConfig)
+    providerConfig <- Llm4sConfig.defaultProvider()
+    registry       <- Llm4sConfig.modelRegistryService()
+    given ModelRegistryService = registry
+    client   <- LLMConnect.getClient(providerConfig)
     response <- client.complete(
-      messages = List(
+      Conversation(Seq(
         SystemMessage("You are a helpful assistant."),
         UserMessage("What is Scala?")
-      ),
-      model = None
+      ))
     )
   } yield response.content
 

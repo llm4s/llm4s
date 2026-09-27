@@ -19,381 +19,242 @@ Configure LLM4S for multiple providers, environments, and use cases.
 
 ---
 
-## Configuration Hierarchy
+## How configuration is loaded
 
-LLM4S uses a hierarchical configuration system with the following precedence (highest to lowest):
+`Llm4sConfig` reads [Typesafe Config](https://github.com/lightbend/config) through PureConfig,
+with this precedence (highest first):
 
-1. **System properties** (`-Dkey=value` JVM flags)
-2. **Environment variables** (`.env` file or shell exports)
-3. **application.conf** (HOCON format in your project)
-4. **reference.conf** (Library defaults)
+1. **JVM system properties** - `-Dllm4s.providers.provider=claude`
+2. **Your `application.conf`** - `src/main/resources/application.conf`, or a file named with
+   `-Dconfig.file=/path/to/app.conf` (or `-Dconfig.resource=prod.conf` for another resource)
+3. **`reference.conf`** - the defaults shipped in each llm4s module on the classpath
+
+Environment variables are **not** a layer of their own. llm4s reads one only where a `${?VAR}`
+substitution names it: in a module's `reference.conf` (tracing, embeddings, tools - see
+[Environment variables llm4s reads](#environment-variables-llm4s-reads)), or in your own
+`application.conf`. In particular, nothing reads `LLM_MODEL` or a provider's API-key variable
+such as `OPENAI_API_KEY` unless your `application.conf` binds it.
+
+`${?VAR}` means "the value of `VAR` if it is set, otherwise leave the key unset". A second line
+for the same key overrides the first only when the variable is set, which gives you a default
+with an environment override:
+
+```hocon
+model = "gpt-4o-mini"
+model = ${?OPENAI_MODEL}   # used only when OPENAI_MODEL is set
+```
 
 ---
 
-## Environment Variables
+## Named provider sections
 
-Use environment variables for secrets and for selecting the default named
-provider you want `Llm4sConfig.defaultProvider()` to resolve.
+Chat providers are configured as named sections under `llm4s.providers`. You choose each
+section's name; `provider` inside it says which provider it is, and `llm4s.providers.provider`
+names the section `Llm4sConfig.defaultProvider()` loads.
 
-### Core Settings
-
-```bash
-# Required: default named provider
-LLM4S_PROVIDER=openai-main
-
-# Required: API key for the configured provider
-OPENAI_API_KEY=sk-proj-...
-```
-
-### Complete Environment Setup
-
-Create a `.env` file in your project root:
-
-```bash
-# ===================
-# Named Provider Selection
-# ===================
-LLM4S_PROVIDER=openai-main
-
-# ===================
-# OpenAI Configuration
-# ===================
-OPENAI_API_KEY=sk-proj-...
-OPENAI_BASE_URL=https://api.openai.com/v1  # Optional: Override endpoint
-OPENAI_ORGANIZATION=org-...                # Optional: Organization ID
-
-# ===================
-# Anthropic Configuration
-# ===================
-ANTHROPIC_API_KEY=sk-ant-...
-ANTHROPIC_BASE_URL=https://api.anthropic.com  # Optional
-ANTHROPIC_VERSION=2023-06-01                  # Optional: API version
-
-# ===================
-# Azure OpenAI Configuration
-# ===================
-AZURE_API_KEY=your-azure-key
-AZURE_API_BASE=https://your-resource.openai.azure.com
-AZURE_DEPLOYMENT_NAME=gpt-4o
-AZURE_API_VERSION=2024-02-15-preview  # Optional
-
-# ===================
-# Ollama Configuration
-# ===================
-OLLAMA_BASE_URL=http://localhost:11434
-# No API key needed for Ollama
-
-# ===================
-# Google Gemini Configuration
-# ===================
-GOOGLE_API_KEY=your-google-api-key
-GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta  # Optional
-
-# ===================
-# Cohere Configuration
-# ===================
-COHERE_API_KEY=your-cohere-api-key
-COHERE_BASE_URL=https://api.cohere.ai/compatibility/v1  # Optional; a native root is mapped
-
-# ===================
-# Tracing Configuration
-# ===================
-TRACING_MODE=langfuse  # Options: langfuse, opentelemetry, console, none
-
-# Langfuse settings (if using TRACING_MODE=langfuse)
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_URL=https://cloud.langfuse.com  # or self-hosted
-
-# OpenTelemetry settings (if using TRACING_MODE=opentelemetry)
-OTEL_SERVICE_NAME=llm4s-agent
-OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer <token>  # Optional
-
-# ===================
-# Embeddings Configuration (RAG)
-# ===================
-# Unified format: provider/model (recommended)
-EMBEDDING_MODEL=openai/text-embedding-3-small  # Uses default base URL
-# OPENAI_API_KEY is shared with LLM config above
-
-# Or for Voyage embeddings:
-# EMBEDDING_MODEL=voyage/voyage-3
-# VOYAGE_API_KEY=pa-...
-
-# Or for local embeddings with Ollama (no API key needed):
-# EMBEDDING_MODEL=ollama/nomic-embed-text
-
-# Optional: Override default base URLs
-# OPENAI_EMBEDDING_BASE_URL=https://api.openai.com/v1
-# VOYAGE_EMBEDDING_BASE_URL=https://api.voyageai.com/v1
-# OLLAMA_EMBEDDING_BASE_URL=http://localhost:11434
-
-# ===================
-# Workspace Configuration (Optional)
-# ===================
-WORKSPACE_DIR=/tmp/llm4s-workspace
-WORKSPACE_IMAGE=llm4s/workspace-runner:latest
-WORKSPACE_PORT=8080
-WORKSPACE_CONTAINER_NAME=llm4s-workspace
-```
-
-### Load Environment Variables
-
-**Option 1: Source the file**
-
-```bash
-source .env
-sbt run
-```
-
-**Option 2: Use sbt-dotenv plugin**
-
-{: .warning }
-**Java 16+ Compatibility Issue:** The sbt-dotenv plugin can cause a `java.lang.reflect.InaccessibleObjectException` at startup on Java 16+ due to module system restrictions. Use **Option 1** or **Option 3** as alternatives, or apply the fix below.
-
-Add to `project/plugins.sbt`:
+**1. Add llm4s and the module for your provider:**
 
 ```scala
-addSbtPlugin("au.com.onegeek" %% "sbt-dotenv" % "2.1.233")
+// build.sbt
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"   % llm4sVersion,
+  "org.llm4s" %% "llm4s-openai" % llm4sVersion  // the module for your provider
+)
 ```
 
-Variables automatically load when SBT starts!
+| `provider = ...` | Module |
+|---|---|
+| `openai`, `azure`, `requesty` | `llm4s-openai` |
+| `anthropic` | `llm4s-anthropic` |
+| `gemini`, `vertexai` | `llm4s-gemini` |
+| `ollama` | `llm4s-ollama` |
+| `deepseek`, `zai`, `openrouter`, `mistral`, `cohere`, `openai-compatible` | `llm4s-openai-compatible` |
 
-**Java 16+ Fix:** If you see `InaccessibleObjectException`, create (or add to) `.jvmopts` in your project root:
+The provider modules are on `main` but not yet published: `0.4.1` ships every provider inside
+`llm4s-core`, so with `0.4.1` the `llm4s-core` dependency alone is enough.
 
-```
---add-opens=java.base/java.lang=ALL-UNNAMED
---add-opens=java.base/java.lang.reflect=ALL-UNNAMED
-```
-
-Restart sbt after adding this file. This grants the plugin the reflective access it needs and works on all platforms.
-
-**Option 3: IntelliJ IDEA**
-
-1. Run → Edit Configurations
-2. Environment variables → Add from file
-3. Select your `.env` file
-
----
-
-## Application Configuration (HOCON)
-
-For more complex configurations, use `application.conf`:
-
-### Preferred: Named Providers
-
-For production systems and applications that need multiple configured providers,
-prefer the `llm4s.providers` section.
-
-This keeps:
-
-- provider names and structure in HOCON
-- secrets in environment variables
-- the environment variable names under your control
-
-For example, `${?FOO}` is perfectly valid if that is the name you want to use.
+**2. Add a section to `src/main/resources/application.conf`:**
 
 ```hocon
 llm4s {
   providers {
-    provider = "openai-main"
+    provider = "openai-main"          # the default: the name of a section below
 
     openai-main {
       provider = "openai"
-      model = "gpt-4o-mini"
-      apiKey = ${?OPENAI_MAIN_API_KEY}
-      baseUrl = ${?OPENAI_MAIN_BASE_URL}
-      organization = ${?OPENAI_MAIN_ORGANIZATION}
+      model    = "gpt-4o-mini"
+      apiKey   = ${?OPENAI_API_KEY}
+    }
+  }
+}
+```
+
+**3. Set the variable your section binds:**
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+The variable name is yours to choose: `apiKey = ${?MY_TEAM_OPENAI_KEY}` works just as well.
+
+**4. Load it at the edge of your application:**
+
+```scala
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
+import org.llm4s.model.ModelRegistryService
+
+val result = for {
+  providerConfig <- Llm4sConfig.defaultProvider()
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
+  client   <- LLMConnect.getClient(providerConfig)
+  response <- client.complete(Conversation(Seq(UserMessage("What is Scala?"))))
+} yield response.content
+```
+
+If `OPENAI_API_KEY` is unset, `defaultProvider()` returns a `ConfigurationError` naming the key:
+`apiKey: set it ... under providers.openai-main.apiKey (optionally from an env var, e.g. apiKey = ${?OPENAI_API_KEY})`.
+This exact configuration is exercised by `DocumentedProviderConfigSpec` in `modules/openai`.
+
+Other `Llm4sConfig` calls read the same sections:
+
+```scala
+Llm4sConfig.provider("openai-main")   // any section, by name
+Llm4sConfig.defaultProviderName()     // the value of llm4s.providers.provider
+Llm4sConfig.providers()               // every section, validated
+Llm4sConfig.listModels()              // model discovery for the default section
+Llm4sConfig.listModels("openai-main") // ... or for a named one
+```
+
+### Section keys
+
+| Key | Meaning |
+|---|---|
+| `provider` | Required. The provider id, e.g. `openai`, `anthropic`, `ollama` (table above) |
+| `model` | Required. The model name as the provider spells it, e.g. `gpt-4o-mini` |
+| `apiKey` | The API key; required by every cloud provider |
+| `baseUrl` | Overrides the provider's default endpoint; **required** for `ollama` and `openai-compatible` |
+| `organization` | OpenAI organisation id |
+| `endpoint`, `apiVersion` | Azure OpenAI: the resource endpoint (required) and API version |
+| `project`, `location` | Vertex AI: the GCP project id (required) and region (default `us-central1`) |
+| `contextWindow`, `reserveCompletion`, `headers` | Generic `openai-compatible` endpoints |
+
+Each provider module's `reference.conf` has a commented example section, and the
+[provider guide](../guide/providers) covers each provider in detail.
+
+### Examples for other providers
+
+```hocon
+llm4s {
+  providers {
+    provider = "claude"
+
+    claude {
+      provider = "anthropic"
+      model    = "claude-sonnet-4-20250514"
+      apiKey   = ${?ANTHROPIC_API_KEY}
     }
 
     gemini-main {
       provider = "gemini"
-      model = "gemini-2.0-flash"
-      apiKey = ${?GEMINI_MAIN_API_KEY}
-      baseUrl = ${?GEMINI_MAIN_BASE_URL}
+      model    = "gemini-2.0-flash"
+      apiKey   = ${?GEMINI_API_KEY}
+    }
+
+    azure-main {
+      provider   = "azure"
+      model      = "gpt-4o"
+      apiKey     = ${?AZURE_API_KEY}
+      endpoint   = ${?AZURE_API_BASE}      # https://<resource>.openai.azure.com
+      apiVersion = ${?AZURE_API_VERSION}   # optional
     }
 
     ollama-local {
       provider = "ollama"
-      model = "llama3.2"
-      baseUrl = ${?OLLAMA_LOCAL_BASE_URL}
+      model    = "llama3.2"
+      baseUrl  = "http://localhost:11434"
+      baseUrl  = ${?OLLAMA_BASE_URL}       # optional override
     }
   }
 }
 ```
 
-You can then access the new configuration path with:
-
-```scala
-import org.llm4s.config.Llm4sConfig
-
-val providersResult = Llm4sConfig.providers()
-val defaultName     = Llm4sConfig.defaultProviderName()
-val defaultConfig   = Llm4sConfig.defaultProvider()
-val namedConfig     = Llm4sConfig.provider("openai-main")
-```
-
-Named providers can also be used for model discovery:
-
-```scala
-import org.llm4s.config.Llm4sConfig
-
-val defaultModels = Llm4sConfig.listModels()
-val namedModels   = Llm4sConfig.listModels("openai-main")
-```
-
-See the runnable samples for end-to-end examples:
-
-```bash
-sbt "samples/runMain samples.basic.NamedProviderModelListingExample"
-sbt "samples/runMain samples.basic.SerialNamedProviderModelListingExample"
-sbt "samples/runMain samples.basic.ParallelNamedProviderModelListingExample"
-```
-
-If `llm4s.providers.provider` is set, it must match one of the configured
-provider names. If it is absent, the providers config still loads successfully,
-but requesting the default provider will fail clearly at runtime.
-
-### Access Configuration in Code
-
-```scala
-import org.llm4s.config.Llm4sConfig
-
-object ConfigurationLoader {
-  def load(): Unit = {
-    // 1. Load configuration at the application boundary
-    val configResult = for {
-      providerConfig <- Llm4sConfig.defaultProvider()
-      tracingConfig <- Llm4sConfig.tracing()
-      embeddingsConfig <- Llm4sConfig.embeddings()
-    } yield (providerConfig, tracingConfig, embeddingsConfig)
-
-    // 2. Pass configuration to your application components
-    configResult match {
-      case Right((provider, tracing, embeddings)) =>
-        // Initialize your application with loaded config
-        // val app = new MyApplication(provider, tracing, embeddings)
-        // app.start()
-        println("Configuration loaded successfully")
-      
-      case Left(error) =>
-        Console.err.println(s"Failed to load configuration: $error")
-        System.exit(1)
-    }
-  }
-}
-```
+**Every section is validated whenever any provider is loaded.** A section whose `apiKey`
+variable is unset, or whose provider module is not on the classpath, makes
+`defaultProvider()` fail even when it is not the default. Keep only the sections you can fill
+in every environment the file is used in - the example above loads only when
+`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `AZURE_API_KEY` and `AZURE_API_BASE` are all set.
 
 ---
 
-## Provider-Specific Configuration
+## Switching providers
 
-### OpenAI
+Your code calls `Llm4sConfig.defaultProvider()` and does not change. To use a different
+provider, point `llm4s.providers.provider` at another section:
 
-```bash
-# Example named provider selection
-LLM4S_PROVIDER=openai-main
+- **Edit the file**: `provider = "claude"`.
+- **Bind it to a variable of your own**:
 
-# Required
-OPENAI_API_KEY=sk-proj-...
+  ```hocon
+  llm4s.providers {
+    provider = "openai-main"
+    provider = ${?LLM4S_PROVIDER}   # your binding; any variable name works
+  }
+  ```
 
-# Optional
-OPENAI_BASE_URL=https://api.openai.com/v1
-OPENAI_ORGANIZATION=org-...
+  then `export LLM4S_PROVIDER=claude`.
+- **Override it for one run**: `sbt -Dllm4s.providers.provider=claude run`, or
+  `java -Dllm4s.providers.provider=claude -jar app.jar`.
+- **Load a section by name** instead of the default: `Llm4sConfig.provider("claude")`. This is
+  how an application uses several providers at once.
+
+For per-environment setups (local Ollama in development, a cloud provider in production), keep
+one file per environment - `application.conf` plus `prod.conf` that starts with
+`include "application.conf"` - and pick one with `-Dconfig.resource=prod.conf`. That also keeps
+each file's sections fillable, per the validation rule above.
+
+---
+
+## Running the samples
+
+The repository's samples read `modules/samples/src/main/resources/application.conf`, which
+defines one section, `ollama-local`, as the default, and binds three variables of its own:
+
+| Variable | Bound by the samples' `application.conf` to |
+|---|---|
+| `LLM4S_PROVIDER` | `llm4s.providers.provider` - which section to use |
+| `OLLAMA_MODEL` | `llm4s.providers.ollama-local.model` (default `llama3:latest`) |
+| `OLLAMA_BASE_URL` | `llm4s.providers.ollama-local.baseUrl` (default `http://localhost:11434`) |
+
+These are the samples' bindings, not the library's: your own application reads them only if
+its `application.conf` binds them.
+
+To run a sample against another provider, add a section to
+`modules/samples/src/main/resources/application.local.conf` - git-ignored and included by the
+samples' `application.conf` - and select it:
+
+```hocon
+# modules/samples/src/main/resources/application.local.conf
+llm4s.providers {
+  openai-main {
+    provider = "openai"
+    model    = "gpt-4o-mini"
+    apiKey   = ${?OPENAI_API_KEY}
+  }
+}
 ```
 
-**Available Models:**
-- `gpt-4o` - Latest GPT-4 Optimized
-- `gpt-4-turbo` - Fast GPT-4
-- `gpt-4` - Standard GPT-4
-- `gpt-3.5-turbo` - Fast and cheap
-
-### Anthropic
-
 ```bash
-# Example named provider selection
-LLM4S_PROVIDER=anthropic-main
-
-# Required
-ANTHROPIC_API_KEY=sk-ant-...
-
-# Optional
-ANTHROPIC_BASE_URL=https://api.anthropic.com
-ANTHROPIC_VERSION=2023-06-01
+export OPENAI_API_KEY=sk-...
+export LLM4S_PROVIDER=openai-main
+sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
-**Available Models:**
-- `claude-sonnet-4-5-latest` - Latest Claude 4.5 Sonnet
-- `claude-opus-4-5-latest` - Most capable Claude 4.5 Opus
-- `claude-3-haiku-latest` - Fastest
-
-### Azure OpenAI
-
-```bash
-# Example named provider selection
-LLM4S_PROVIDER=azure-main
-
-# Required
-AZURE_API_KEY=your-azure-key
-AZURE_API_BASE=https://your-resource.openai.azure.com
-AZURE_DEPLOYMENT_NAME=gpt-4o  # Your deployment name
-
-# Optional
-AZURE_API_VERSION=2024-02-15-preview
-```
-
-### Ollama (Local Models)
-
-```bash
-# Example named provider selection
-LLM4S_PROVIDER=ollama-local
-
-# Required
-OLLAMA_BASE_URL=http://localhost:11434
-
-# No API key needed!
-```
-
-**Install Ollama:**
-
-```bash
-# Install
-curl -fsSL https://ollama.com/install.sh | sh
-
-# Pull a model
-ollama pull llama2
-
-# Start server
-ollama serve
-```
-
-### Google Gemini
-
-```bash
-# Model selection
-LLM_MODEL=gemini/gemini-2.0-flash
-LLM_MODEL=gemini/gemini-1.5-pro
-LLM_MODEL=gemini/gemini-1.5-flash
-
-# Required
-GOOGLE_API_KEY=your-google-api-key
-
-# Optional
-GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
-```
-
-**Available Models:**
-- `gemini-2.0-flash` - Latest Gemini 2.0 (fast, multimodal)
-- `gemini-2.5-flash` - Gemini 2.5 Flash (thinking model)
-- `gemini-1.5-pro` - High capability (1M token context)
-- `gemini-1.5-flash` - Fast and efficient (1M token context)
-
-**Get API Key:**
-1. Go to [Google AI Studio](https://aistudio.google.com/)
-2. Click "Get API Key"
-3. Create or select a project
-4. Copy the generated API key
+The chat-tui sample is the exception: `ChatTuiConfig` reads `LLM_MODEL=<provider>/<model>` and
+the matching API-key variable itself, and falls back to `Llm4sConfig.defaultProvider()` when
+`LLM_MODEL` is unset.
 
 ---
 
@@ -403,19 +264,29 @@ LLM4S supports multiple embedding providers for RAG (Retrieval-Augmented Generat
 
 ### Unified Format (Recommended)
 
-Use `EMBEDDING_MODEL` with the format `provider/model-name`, similar to `LLM_MODEL`:
+Embeddings are configured separately from chat providers, under `llm4s.embeddings`. Select
+the provider and model with `llm4s.embeddings.model` in `provider/model-name` form, which core's
+`reference.conf` binds to `EMBEDDING_MODEL`:
 
 ```bash
-# OpenAI embeddings
-EMBEDDING_MODEL=openai/text-embedding-3-small
-OPENAI_API_KEY=sk-...  # Same key as LLM
-
-# Voyage AI embeddings
+# Voyage AI embeddings (llm4s-voyage binds VOYAGE_API_KEY)
 EMBEDDING_MODEL=voyage/voyage-3
 VOYAGE_API_KEY=pa-...
 
 # Ollama embeddings (local, no API key needed)
 EMBEDDING_MODEL=ollama/nomic-embed-text
+```
+
+OpenAI embeddings need one line of your own. Their key is read from
+`llm4s.embeddings.openai.apiKey` (falling back to `llm4s.openai.apiKey`), and no
+`reference.conf` binds either to `OPENAI_API_KEY` - it is not shared with a chat provider
+section. Bind it in `application.conf`:
+
+```hocon
+llm4s.embeddings {
+  model         = "openai/text-embedding-3-small"   # or leave it to EMBEDDING_MODEL
+  openai.apiKey = ${?OPENAI_API_KEY}
+}
 ```
 
 Each embedding provider comes from its module: `openai` from `llm4s-openai`, `voyage` from
@@ -428,10 +299,11 @@ Default base URLs are used automatically:
 - Voyage: `https://api.voyageai.com/v1`
 - Ollama: `http://localhost:11434`
 
-Override base URLs if needed:
+Override base URLs if needed - each module's `reference.conf` binds a variable for it:
 ```bash
-EMBEDDING_MODEL=openai/text-embedding-3-small
-OPENAI_EMBEDDING_BASE_URL=https://custom.openai.com/v1
+OPENAI_EMBEDDING_BASE_URL=https://custom.openai.com/v1   # llm4s-openai
+VOYAGE_EMBEDDING_BASE_URL=https://custom.voyage.ai/v1    # llm4s-voyage
+OLLAMA_EMBEDDING_BASE_URL=http://embeddings-host:11434   # llm4s-ollama
 ```
 
 ### Available Models
@@ -466,7 +338,7 @@ The legacy format using `EMBEDDING_PROVIDER` is still supported for backward com
 EMBEDDING_PROVIDER=openai
 OPENAI_EMBEDDING_BASE_URL=https://api.openai.com/v1
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-OPENAI_API_KEY=sk-...
+# plus llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY} in application.conf (see above)
 
 # Voyage AI
 EMBEDDING_PROVIDER=voyage
@@ -579,17 +451,28 @@ OpenTelemetry provides distributed tracing for observability across your infrast
 TRACING_MODE=opentelemetry
 OTEL_SERVICE_NAME=llm4s-agent
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-OTEL_EXPORTER_OTLP_HEADERS=authorization=Bearer <token>  # Optional
 ```
 
-**Environment Variables:**
+OpenTelemetry tracing needs the `llm4s-observability-otel` module on the classpath.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TRACING_MODE` | `none` | Must be set to `opentelemetry` |
-| `OTEL_SERVICE_NAME` | `llm4s` | Service name for trace identification |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OpenTelemetry Collector endpoint |
-| `OTEL_EXPORTER_OTLP_HEADERS` | (empty) | Additional headers (comma-separated: `key1=value1,key2=value2`) |
+**Settings** (bound in core's `reference.conf`):
+
+| Config key | Variable | Default | Description |
+|----------|----------|---------|-------------|
+| `llm4s.tracing.mode` | `TRACING_MODE` | `console` | Must be `opentelemetry` |
+| `llm4s.tracing.opentelemetry.serviceName` | `OTEL_SERVICE_NAME` | `llm4s-agent` | Service name for trace identification |
+| `llm4s.tracing.opentelemetry.endpoint` | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OpenTelemetry Collector endpoint |
+| `llm4s.tracing.opentelemetry.headers` | (none) | (empty) | Headers sent with every export |
+
+llm4s builds the OTLP exporter itself, so the OpenTelemetry SDK's own
+`OTEL_EXPORTER_OTLP_HEADERS` variable is **not** read. Set headers in `application.conf`,
+binding secrets as usual:
+
+```hocon
+llm4s.tracing.opentelemetry.headers {
+  Authorization = ${?OTEL_AUTH_HEADER}   # e.g. "Bearer <token>"
+}
+```
 
 **Example Configuration:**
 
@@ -603,10 +486,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 TRACING_MODE=opentelemetry
 OTEL_SERVICE_NAME=llm4s-runner
 OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-collector.example.com:4317
-OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer sk-otel-token
-
-# Custom Headers (multiple values)
-OTEL_EXPORTER_OTLP_HEADERS=API-Key=secret123,Environment=production
+OTEL_AUTH_HEADER="Bearer sk-otel-token"   # bound by the headers block above
 ```
 
 **Spans Generated:**
@@ -661,21 +541,13 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.trace.Tracing
 
-// Automatic initialization from environment variables
-val tracing = Tracing.create(Llm4sConfig.tracing())
-
-// Or create directly
-import org.llm4s.trace.OpenTelemetryTracing
-val tracer = OpenTelemetryTracing.fromEnvironment()
-
-// Use tracer
+// Build the tracer that llm4s.tracing.mode selects
 val result = for {
-  _ <- tracer.traceEvent(TraceEvent.AgentInitialized("query", List("tool1")))
-  _ <- tracer.traceTokenUsage(usage, "gpt-4o", "completion")
+  tracer <- Llm4sConfig.tracing().map(Tracing.create)
+  _      <- tracer.traceEvent(TraceEvent.AgentInitialized("query", List("tool1")))
+  _      <- tracer.traceTokenUsage(usage, "gpt-4o", "completion")
+  _       = tracer.shutdown() // always shut down to flush pending spans
 } yield ()
-
-// Always shutdown
-tracer.shutdown()
 ```
 
 ### Disable Tracing
@@ -686,103 +558,83 @@ TRACING_MODE=none
 
 ---
 
-## Multi-Provider Setup
+## Environment variables llm4s reads
 
-Switch between providers without code changes:
+These are the variables bound by a `${?VAR}` in some llm4s module's `reference.conf`, so they
+work without any configuration of your own. Each sets the config key beside it, which you can
+also set in `application.conf` or with `-D`.
 
-```bash
-# Development: Use Ollama (free, local)
-LLM_MODEL=ollama/llama2
-OLLAMA_BASE_URL=http://localhost:11434
+| Variable | Config key | Bound by |
+|---|---|---|
+| `TRACING_MODE` | `llm4s.tracing.mode` (`langfuse`, `opentelemetry`, `console` - the default - or `none`) | `llm4s-core` |
+| `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION` | `llm4s.tracing.langfuse.*` | `llm4s-core` |
+| `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `llm4s.tracing.opentelemetry.serviceName`, `.endpoint` | `llm4s-core` |
+| `EMBEDDING_MODEL` (or legacy `EMBEDDING_PROVIDER`) | `llm4s.embeddings.model` (`.provider`) | `llm4s-core` |
+| `CHUNK_SIZE`, `CHUNK_OVERLAP`, `CHUNKING_ENABLED` | `llm4s.embeddings.chunking.*` | `llm4s-core` |
+| `LLM4S_EXCHANGE_LOGGING_ENABLED`, `LLM4S_EXCHANGE_LOGGING_DIR` | `llm4s.exchangeLogging.*` | `llm4s-core` |
+| `LLM4S_MODEL_REGISTRY_RESOURCE`, `LLM4S_MODEL_REGISTRY_FILE`, `LLM4S_MODEL_REGISTRY_URL` | `llm4s.modelRegistry.*` | `llm4s-core` |
+| `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT`, `WORKSPACE_TRACE_LOG` | `llm4s.workspace.*` | `llm4s-core` |
+| `BRAVE_SEARCH_API_KEY`, `EXA_API_KEY` and the other `BRAVE_*`, `EXA_*` variables, `DUCK_DUCK_GO_SEARCH_API_URL` | `llm4s.tools.*` | `llm4s-core` |
+| `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL` | `llm4s.embeddings.openai.*` | `llm4s-openai` |
+| `VOYAGE_API_KEY`, `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL` | `llm4s.embeddings.voyage.*` | `llm4s-voyage` |
+| `OLLAMA_EMBEDDING_BASE_URL`, `OLLAMA_EMBEDDING_MODEL` | `llm4s.embeddings.ollama.*` | `llm4s-ollama` |
+| `RERANK_PROVIDER`, `COHERE_API_KEY`, `COHERE_RERANK_BASE_URL`, `COHERE_RERANK_MODEL` | `llm4s.rerank.*` (the reranker only, not the Cohere chat provider) | `llm4s-rag` |
+| `PGVECTOR_HOST`, `PGVECTOR_PORT`, `PGVECTOR_DATABASE`, `PGVECTOR_USER`, `PGVECTOR_PASSWORD`, `PGVECTOR_TABLE`, ... | `llm4s.rag.permissions.pg.*` | `llm4s-rag` |
 
-# Staging: Use OpenAI GPT-3.5 (cheap)
-LLM_MODEL=openai/gpt-3.5-turbo
-OPENAI_API_KEY=sk-...
-
-# Production: Use Claude Sonnet (best quality)
-LLM_MODEL=anthropic/claude-sonnet-4-5-latest
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-Your code remains the same:
-
-```scala
-val client = Llm4sConfig.provider().flatMap(LLMConnect.getClient)
-```
-
----
-
-## System Properties
-
-Override any setting via JVM flags:
-
-```bash
-sbt -DLLM_MODEL=openai/gpt-4o \
-    -DOPENAI_API_KEY=sk-... \
-    run
-```
-
-Or in `build.sbt`:
-
-```scala
-javaOptions ++= Seq(
-  s"-DLLM_MODEL=openai/gpt-4o",
-  s"-DOPENAI_API_KEY=${sys.env.getOrElse("OPENAI_API_KEY", "")}"
-)
-```
+**Not read by llm4s** unless your `application.conf` binds them: `LLM_MODEL`, `LLM4S_PROVIDER`,
+every chat provider's key and endpoint variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`GEMINI_API_KEY`, `GOOGLE_API_KEY`, `AZURE_API_KEY`, `AZURE_API_BASE`, `DEEPSEEK_API_KEY`,
+`OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, ...), `OPENAI_API_KEY` for OpenAI embeddings, and
+`OTEL_EXPORTER_OTLP_HEADERS`. `LLM_MODEL` was removed with legacy single-provider loading
+in [#903](https://github.com/llm4s/llm4s/issues/903).
 
 ---
 
-## Environment-Specific Configurations
+## Environment-specific configuration
 
-### Development
+Keep the provider structure in HOCON and inject secrets from the environment. One
+`application.conf` can serve every environment when each section's variables are set in each,
+or you can keep one file per environment:
 
-Create `.env.dev`:
-
-```bash
-LLM_MODEL=ollama/llama2
-OLLAMA_BASE_URL=http://localhost:11434
-TRACING_MODE=console
+```hocon
+# src/main/resources/application.conf - development
+llm4s {
+  providers {
+    provider = "ollama-local"
+    ollama-local {
+      provider = "ollama"
+      model    = "llama3.2"
+      baseUrl  = "http://localhost:11434"
+    }
+  }
+  tracing.mode = "console"
+}
 ```
 
-### Staging
+```hocon
+# src/main/resources/prod.conf - production
+include "application.conf"
 
-Create `.env.staging`:
-
-```bash
-LLM_MODEL=openai/gpt-3.5-turbo
-OPENAI_API_KEY=${STAGING_OPENAI_KEY}
-TRACING_MODE=langfuse
-LANGFUSE_PUBLIC_KEY=${STAGING_LANGFUSE_PUBLIC}
-LANGFUSE_SECRET_KEY=${STAGING_LANGFUSE_SECRET}
+llm4s {
+  providers = null                     # drop the development sections
+  providers {
+    provider = "claude"
+    claude {
+      provider = "anthropic"
+      model    = "claude-sonnet-4-20250514"
+      apiKey   = ${?ANTHROPIC_API_KEY}
+    }
+  }
+  tracing.mode = "langfuse"            # LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY from the environment
+}
 ```
 
-### Production
-
-Create `.env.prod`:
-
 ```bash
-LLM_MODEL=anthropic/claude-sonnet-4-5-latest
-ANTHROPIC_API_KEY=${PROD_ANTHROPIC_KEY}
-
-# Tracing with OpenTelemetry
-TRACING_MODE=opentelemetry
-OTEL_SERVICE_NAME=llm4s-prod
-OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-collector.prod.example.com:4317
-OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer ${OTEL_AUTH_TOKEN}
-
-# Or use Langfuse
-# TRACING_MODE=langfuse
-# LANGFUSE_PUBLIC_KEY=${PROD_LANGFUSE_PUBLIC}
-# LANGFUSE_SECRET_KEY=${PROD_LANGFUSE_SECRET}
+java -Dconfig.resource=prod.conf -jar app.jar
 ```
 
-Load the appropriate file:
-
-```bash
-source .env.prod
-sbt run
-```
+`providers = null` matters: without it the included `ollama-local` section would stay, and be
+validated, in production.
 
 ---
 
@@ -790,9 +642,9 @@ sbt run
 
 ### ✅ DO
 
-1. **Use environment variables** for secrets (API keys)
-2. **Use application.conf** for non-sensitive defaults
-3. **Add .env to .gitignore** to prevent committing secrets
+1. **Keep secrets in environment variables**, bound with `apiKey = ${?VAR}` in `application.conf`
+2. **Keep structure in `application.conf`**: provider sections, models, defaults
+3. **Add `.env` files to `.gitignore`** if you use them to export variables
 4. **Use different configs** for dev/staging/prod
 5. **Validate configuration** at startup
 
@@ -802,9 +654,9 @@ import org.llm4s.config.Llm4sConfig
 object ApplicationBoundary {
   def validateAndStart(): Unit = {
     // Fail fast at startup if config is invalid
-    Llm4sConfig.provider().fold(
+    Llm4sConfig.defaultProvider().fold(
       error => {
-        Console.err.println(s"FATAL: Configuration error: $error")
+        Console.err.println(s"FATAL: Configuration error: ${error.formatted}")
         System.exit(1)
       },
       config => {
@@ -818,7 +670,7 @@ object ApplicationBoundary {
 
 ### ❌ DON'T
 
-1. **Don't hardcode API keys** in source code
+1. **Don't hardcode API keys** in source code or `application.conf`
 2. **Don't commit .env files** to version control
 3. **Don't use System.getenv() directly** (use Llm4sConfig)
 4. **Don't mix production keys** in development
@@ -831,13 +683,16 @@ object ApplicationBoundary {
 ```scala
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.model.ModelRegistryService
 
 object ValidateConfig extends App {
   println("Validating LLM4S configuration...")
 
   // Perform validation at the application edge
   val validationResult = for {
-    providerConfig <- Llm4sConfig.provider()
+    providerConfig <- Llm4sConfig.defaultProvider()
+    registry       <- Llm4sConfig.modelRegistryService()
+    given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
   } yield (providerConfig, client)
 
@@ -847,9 +702,9 @@ object ValidateConfig extends App {
       println(s"✅ Provider: ${config.getClass.getSimpleName}")
       println(s"✅ Client ready: ${client.getClass.getSimpleName}")
       println("✅ Configuration valid!")
-      
+
     case Left(error) =>
-      Console.err.println(s"❌ Configuration error: $error")
+      Console.err.println(s"❌ Configuration error: ${error.formatted}")
       System.exit(1)
   }
 }
@@ -859,77 +714,71 @@ object ValidateConfig extends App {
 
 ## Troubleshooting
 
-### Problem: "API key not found"
+### Problem: "missing required fields: apiKey"
 
 **Symptoms:**
 ```
-Left(ConfigurationError("Missing API key for provider: openai"))
+ConfigurationError: Provider 'openai-main' (provider = openai) is missing required fields:
+  - apiKey: set it in llm4s.conf under providers.openai-main.apiKey (optionally from an env var, e.g. apiKey = ${?OPENAI_API_KEY})
 ```
 
 **Root causes:**
-1. Environment variable not set
-2. Typo in variable name (case-sensitive)
-3. `.env` file not loaded in your shell session
-4. Using wrong shell (check with `echo $SHELL`)
+1. The section has no `apiKey` line, or binds a variable that is not set in this process
+2. You set `OPENAI_API_KEY` (or `LLM_MODEL`) expecting llm4s to read it - it reads only the
+   variables your `application.conf` binds
+3. The failing section is not the default one: **every** section is validated, so an unused
+   section with an unset key fails too
+4. `.env` file not loaded in the shell that starts the JVM
 
 **Debug steps:**
 ```bash
-# Check if variable is set
+# Is the variable your section binds set in this shell?
 echo $OPENAI_API_KEY
 
-# List all LLM4S-related variables
-env | grep -E '(LLM_MODEL|OPENAI|ANTHROPIC|AZURE|OLLAMA)'
-
-# Source .env explicitly
-source .env
-echo $OPENAI_API_KEY  # Should show your key
-
-# Run SBT with explicit env loading
-sbt -Dconfig.override_with_env_vars=true run
+# Does your application.conf bind it? (look for apiKey = ${?OPENAI_API_KEY})
+grep -n apiKey src/main/resources/application.conf
 ```
 
-### Problem: "Invalid model format"
+### Problem: "Configured provider '...' was not found"
 
 **Symptoms:**
 ```
-Left(ConfigurationError("Invalid model format: gpt-4o"))
+ConfigurationError: Configured provider 'openai-main' was not found
 ```
 
-**Fix:** Models must include the provider prefix:
-```bash
-# ✅ Correct format: provider/model-name
-LLM_MODEL=openai/gpt-4o
-LLM_MODEL=anthropic/claude-3-5-sonnet-20241022
-LLM_MODEL=ollama/llama3.2
+**Fix:** `llm4s.providers.provider` (or the name passed to `Llm4sConfig.provider(...)`) must
+match a section name exactly. Check for a typo, and for an `LLM4S_PROVIDER`-style override
+selecting a section this file does not define. If `llm4s.providers.provider` is absent
+altogether, `defaultProvider()` fails with "No default provider configured under
+llm4s.providers.provider" - set it, or call `Llm4sConfig.provider("<name>")`.
 
-# ❌ Wrong - missing provider
-LLM_MODEL=gpt-4o
-LLM_MODEL=claude-3-5-sonnet
-```
+### Problem: "Unknown provider" / provider not registered
+
+**Symptoms:** an error naming `llm4s.providers.<name>.provider` and listing the registered
+providers.
+
+**Fix:** the section's `provider = "..."` id comes from a module that is not on the classpath.
+Add it (see the table in [Named provider sections](#named-provider-sections)), or fix the id's
+spelling.
 
 ### Problem: "Configuration not loading from application.conf"
 
-**Symptoms:** Environment variables work but application.conf is ignored.
+**Symptoms:** `defaultProvider()` behaves as if your sections were not there.
 
 **Debug:**
 ```scala
 import com.typesafe.config.ConfigFactory
 
 val config = ConfigFactory.load()
-println(config.hasPath("llm4s.provider"))  // Should be true
-println(config.getString("llm4s.provider.model"))  // Should show your model
+println(config.hasPath("llm4s.providers.provider"))    // Should be true
+println(config.getString("llm4s.providers.provider"))  // Should name your section
 ```
 
 **Common causes:**
-- application.conf not in `src/main/resources/`
+- application.conf not in `src/main/resources/` (or not on the runtime classpath)
+- `-Dconfig.file` / `-Dconfig.resource` pointing somewhere else
 - HOCON syntax error (missing quotes, wrong nesting)
-- Environment variable overriding config (env vars have higher precedence)
-
-**Fix:** Validate HOCON syntax:
-```bash
-# Test config loading
-sbt "runMain com.typesafe.config.impl.ConfigImpl"
-```
+- A `-D` system property overriding the key (system properties have the highest precedence)
 
 ### Problem: "Provider mismatch"
 
@@ -940,17 +789,15 @@ import org.llm4s.error.AuthenticationError
 Left(AuthenticationError("Invalid API key"))
 ```
 
-**Root cause:** Model provider doesn't match API key provider.
+**Root cause:** the section's `apiKey` binds a variable holding another provider's key.
 
-```bash
-# ✅ Check your configuration
-echo $LLM_MODEL        # Should be openai/...
-echo $OPENAI_API_KEY   # Should start with sk-proj-...
-
-# ❌ Common mismatch:
-LLM_MODEL=openai/gpt-4o
-ANTHROPIC_API_KEY=sk-ant-...  # ❌ Wrong! Need OPENAI_API_KEY
-OPENAI_API_KEY=              # ❌ Wrong - key is empty
+```hocon
+# ❌ Wrong: an OpenAI section reading the Anthropic key
+openai-main {
+  provider = "openai"
+  model    = "gpt-4o"
+  apiKey   = ${?ANTHROPIC_API_KEY}
+}
 ```
 
 ### Problem: "Rate limiting / 429 errors"
@@ -984,19 +831,17 @@ def retryWithBackoff[A](op: => Result[A], maxRetries: Int = 3): Result[A] = {
 }
 ```
 
-2. **Use a cheaper model for testing:**
-```bash
-# Development
-LLM_MODEL=openai/gpt-4o-mini  # 60x cheaper
-
-# Production
-LLM_MODEL=openai/gpt-4o
+2. **Use a cheaper model for testing** - change the section's `model`:
+```hocon
+openai-main {
+  provider = "openai"
+  model    = "gpt-4o-mini"   # development; gpt-4o in production
+  apiKey   = ${?OPENAI_API_KEY}
+}
 ```
 
-3. **Switch to Ollama for development:**
-```bash
-LLM_MODEL=ollama/llama3.2  # Free, no rate limits
-```
+3. **Switch to Ollama for development** - point `llm4s.providers.provider` at an
+   `ollama-local` section (see [Switching providers](#switching-providers)); free, no rate limits.
 
 ### Problem: "Slow responses or timeouts"
 
@@ -1004,12 +849,9 @@ LLM_MODEL=ollama/llama3.2  # Free, no rate limits
 
 **Solutions:**
 
-1. **Increase timeout in application.conf:**
-```hocon
-llm4s {
-  request-timeout = 60 seconds  # Default is 30s
-}
-```
+1. **Request timeouts are not configurable yet.** Each client uses an internal default
+   (two minutes for a completion, five for a stream in the OpenAI-compatible clients);
+   configurable timeouts are tracked in [#712](https://github.com/llm4s/llm4s/issues/712).
 
 2. **Use streaming for long responses:**
 ```scala
@@ -1061,7 +903,7 @@ sbt run
 
 3. **Use a local embedding model (smaller memory footprint):**
 ```bash
-LLM_EMBEDDING_MODEL=ollama/nomic-embed-text
+EMBEDDING_MODEL=ollama/nomic-embed-text
 ```
 
 ---
@@ -1079,9 +921,9 @@ Configuration complete! Now you can:
 
 ## Additional Resources
 
-- **[Llm4sConfig API](/api/#explicit-configuration)** - Detailed API documentation
-- **[Environment Variables Reference](/reference/env-vars)** - Complete list
-- **[Production Guide](/advanced/production)** - Production best practices
+- **[Llm4sConfig API](/api/#4-explicit-configuration)** - Detailed API documentation
+- **[Environment variables llm4s reads](#environment-variables-llm4s-reads)** - Complete list
+- **[Production Guide](../PRODUCTION_DEPLOYMENT)** - Production best practices
 - **[Discord Community](https://discord.gg/4uvTPn6qww)** - Get help with configuration
 
 ---

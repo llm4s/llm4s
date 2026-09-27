@@ -214,55 +214,41 @@ sbt buildAll
 
 You will need an API key for at least one cloud provider, or a local Ollama installation for local models.
 
-Set the environment variables:
+llm4s reads providers from named sections under `llm4s.providers` in `application.conf`; it does
+not read `LLM_MODEL` or provider API-key variables by itself. A section binds the variable it
+needs with `${?VAR}`:
 
-```
-LLM_MODEL=openai/gpt-4o
-OPENAI_API_KEY=<your_openai_api_key>
-```
+```hocon
+llm4s {
+  providers {
+    provider = "openai-main"          # the default: the name of a section below
 
-or Anthropic:
-
-```
-LLM_MODEL=anthropic/claude-sonnet-4-5-latest
-ANTHROPIC_API_KEY=<your_anthropic_api_key>
-```
-
-or OpenRouter:
-
-```
-LLM_MODEL=openai/gpt-4o
-OPENAI_API_KEY=<your_openai_api_key>
-OPENAI_BASE_URL=https://openrouter.ai/api/v1
+    openai-main {
+      provider = "openai"
+      model    = "gpt-4o-mini"
+      apiKey   = ${?OPENAI_API_KEY}
+    }
+  }
+}
 ```
 
-or Z.ai:
+The samples in this repository already have an `application.conf` whose default is a local Ollama
+section (`ollama-local`, overridable with `OLLAMA_MODEL` and `OLLAMA_BASE_URL`). To run them
+against a cloud provider, put a section like the one above in
+`modules/samples/src/main/resources/application.local.conf` (ignored by git) and select it:
 
-```
-LLM_MODEL=zai/GLM-4.7
-ZAI_API_KEY=<your_zai_api_key>
-ZAI_BASE_URL=https://api.z.ai/api/paas/v4
-```
-
-or DeepSeek:
-
-```
-LLM_MODEL=deepseek/deepseek-chat
-DEEPSEEK_API_KEY=<your_deepseek_api_key>
-# Optional: DEEPSEEK_BASE_URL defaults to https://api.deepseek.com
+```bash
+export OPENAI_API_KEY=<your_openai_api_key>
+export LLM4S_PROVIDER=openai-main   # bound by the samples' application.conf
 ```
 
-> **Migration Note:** The `LLMProvider.DeepSeek` case has been added to the sealed `LLMProvider` ADT. If you have exhaustive pattern matches on `LLMProvider`, add a `case LLMProvider.DeepSeek => ...` handler, or use a wildcard `case _ => ...` to gracefully handle future providers.
-
-Or Cohere:
-
-```
-LLM_MODEL=cohere/command-a-03-2025
-COHERE_API_KEY=<your_cohere_api_key>
-# Optional: COHERE_BASE_URL defaults to https://api.cohere.ai/compatibility/v1
-```
-
-This will allow you to run the non-containerized examples.
+Anthropic, Gemini, Azure, OpenRouter, Z.ai, DeepSeek, Mistral, Cohere and generic OpenAI-compatible
+endpoints work the same way with `provider = "anthropic"`, `"gemini"`, `"azure"`, `"openrouter"`,
+`"zai"`, `"deepseek"`, `"mistral"`, `"cohere"` or `"openai-compatible"`; each provider module's
+`reference.conf` has an example section. See the
+[configuration guide](docs/getting-started/configuration.md#named-provider-sections) for all of them
+and [running the samples](docs/getting-started/configuration.md#running-the-samples) for the
+samples' own bindings.
 
 ### Running the Examples
 
@@ -446,13 +432,16 @@ Use the comprehensive [documentation](docs/llm4s-g8-starter-kit.md) to get start
 llm4s exposes a single configuration flow with sensible precedence:
 
 - Precedence: `-D` system properties > `application.conf` (if your app provides it) > `reference.conf` defaults.
-- Environment variables are wired via `${?ENV}` in `reference.conf` (no `.env` reader required).
+- Environment variables are read only where a `${?ENV}` substitution binds them: in a module's `reference.conf`
+  (tracing, embeddings, tools) or in your own `application.conf` (provider sections). No `.env` reader is required,
+  and nothing reads `LLM_MODEL`.
 
 Preferred typed entry points (PureConfig-backed via `Llm4sConfig`):
 
 - Provider / model:
-  - `Llm4sConfig.provider(): Result[ProviderConfig]` – returns the typed provider config (OpenAI/Azure/Anthropic/Ollama).
-  - `LLMConnect.getClient(config: ProviderConfig): Result[LLMClient]` – builds a client from a typed config.
+  - `Llm4sConfig.defaultProvider(): Result[ProviderConfig]` – the typed config of the section `llm4s.providers.provider` names.
+  - `Llm4sConfig.provider(name: String): Result[ProviderConfig]` – the typed config of the section `llm4s.providers.<name>`.
+  - `LLMConnect.getClient(config: ProviderConfig): Result[LLMClient]` – builds a client from a typed config (with a `given ModelRegistryService` from `Llm4sConfig.modelRegistryService()`).
 - Tracing:
   - `Llm4sConfig.tracing(): Result[TracingSettings]` – returns typed tracing settings.
   - `EnhancedTracing.create(settings: TracingSettings): EnhancedTracing` – builds an enhanced tracer from typed settings.
@@ -463,7 +452,7 @@ Preferred typed entry points (PureConfig-backed via `Llm4sConfig`):
 
 Recommended usage patterns:
 
-- Model name for display: `Llm4sConfig.provider().map(_.model)` or prefer `completion.model` from API responses.
+- Model name for display: `Llm4sConfig.defaultProvider().map(_.model)` or prefer `completion.model` from API responses.
 - Tracing:
   - For enhanced tracing: `Llm4sConfig.tracing().map(EnhancedTracing.create)`.
   - For legacy `Tracing`: `Llm4sConfig.tracing().map(Tracing.create)`.
@@ -474,10 +463,11 @@ Recommended usage patterns:
 
 Use these loaders to convert flat keys and HOCON paths into typed, validated settings used by the code:
 
-- LLM model selection
-  - Keys: `llm4s.llm.model` or `LLM_MODEL`
+- LLM provider and model selection
+  - Keys: `llm4s.providers.provider` (the default section's name) and `llm4s.providers.<name>.{provider, model, apiKey, baseUrl, ...}`.
+    No environment variable is bound: bind your own with `${?VAR}` in `application.conf`
   - Type: `ProviderConfig` (with provider-specific subtypes)
-  - Loader: `Llm4sConfig.provider()` + `LLMConnect.getClient(...)`
+  - Loader: `Llm4sConfig.defaultProvider()` or `Llm4sConfig.provider("name")` + `LLMConnect.getClient(...)`
 
 - Tracing configuration
   - Keys: `llm4s.tracing.mode` | `TRACING_MODE`, `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION`
@@ -495,17 +485,20 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
   - UI knobs: `MAX_ROWS_PER_FILE`, `TOP_DIMS_PER_ROW`, `GLOBAL_TOPK`, `SHOW_GLOBAL_TOP`, `COLOR`, `TABLE_WIDTH` → `EmbeddingUiSettings.loadFromEnv()` → `EmbeddingUiSettings`
 
 - Embeddings: provider configuration
-  - Key: `EMBEDDING_PROVIDER` or `llm4s.embeddings.provider` (required)
+  - Key: `EMBEDDING_MODEL` / `llm4s.embeddings.model` as `provider/model` (or legacy `EMBEDDING_PROVIDER` / `llm4s.embeddings.provider`)
   - Supported providers: `openai` (`llm4s-openai`), `voyage` (`llm4s-voyage`), `ollama` (`llm4s-ollama`); each from its module once published
   - Type: `(String, EmbeddingProviderConfig)`
   - Loader: `Llm4sConfig.embeddings()`
   - Provider-specific keys:
-    - **OpenAI**: `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_API_KEY`
+    - **OpenAI**: `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL`; the key is not bound - add
+      `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` to `application.conf`
     - **Voyage**: `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL`, `VOYAGE_API_KEY`
     - **Ollama** (local): `OLLAMA_EMBEDDING_BASE_URL` (default: `http://localhost:11434`), `OLLAMA_EMBEDDING_MODEL`
 
 - Provider API keys and endpoints
-  - Keys: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`, `AZURE_API_BASE`, `AZURE_API_KEY`, `AZURE_API_VERSION`, `OLLAMA_BASE_URL`, `GEMINI_BASE_URL`, `GOOGLE_API_KEY`, `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `COHERE_BASE_URL`, `COHERE_API_KEY`
+  - Keys: `apiKey`, `baseUrl`, `organization`, `endpoint`, `apiVersion`, `project`, `location` inside each
+    `llm4s.providers.<name>` section. Variables such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` are read only
+    when the section binds them, e.g. `apiKey = ${?OPENAI_API_KEY}`
   - Type: concrete `ProviderConfig` (e.g., `OpenAIConfig`, `AnthropicConfig`, `AzureConfig`, `OllamaConfig`, `GeminiConfig`, `DeepSeekConfig`, `CohereConfig`)
   - Loader: `Llm4sConfig.defaultProvider()` or `Llm4sConfig.provider("name")`
 
@@ -524,7 +517,8 @@ Example (no application.conf required):
 sbt -Dllm4s.providers.provider=openai-main -Dllm4s.providers.openai-main.provider=openai -Dllm4s.providers.openai-main.model=gpt-4o -Dllm4s.providers.openai-main.apiKey=sk-... "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
-Or with environment variables / `application.conf`:
+Or with an `openai-main` section in `modules/samples/src/main/resources/application.local.conf`
+(`apiKey = ${?OPENAI_API_KEY}`) and the samples' `LLM4S_PROVIDER` binding:
 
 ```
 export LLM4S_PROVIDER=openai-main

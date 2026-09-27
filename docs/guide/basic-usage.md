@@ -23,7 +23,7 @@ Learn the fundamentals of LLM4S: creating clients, making LLM calls, and handlin
 
 LLM4S makes it simple to integrate Large Language Models into your Scala applications. The core workflow is:
 
-1. **Configure** a named provider via environment variables or config files
+1. **Configure** a named provider section in your `application.conf`
 2. **Create** an LLM client
 3. **Send** messages to the LLM
 4. **Handle** the result (success or error)
@@ -42,11 +42,14 @@ The simplest way to get an LLM response:
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{LLMClient, LLMConnect}
 import org.llm4s.llmconnect.model.{Conversation, UserMessage}
+import org.llm4s.model.ModelRegistryService
 
 object SimpleExample extends App {
   // Step 1: Load the configured default named provider
   val startup = for {
     providerConfig <- Llm4sConfig.defaultProvider()
+    registry       <- Llm4sConfig.modelRegistryService()
+    given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
   } yield {
     // Step 2: Create a simple message
@@ -69,17 +72,32 @@ object SimpleExample extends App {
 }
 ```
 
-**Before running, configure your environment:**
+**Before running, configure a provider** in `src/main/resources/application.conf`:
+
+```hocon
+llm4s {
+  providers {
+    provider = "openai-main"          # the default: the name of a section below
+
+    openai-main {
+      provider = "openai"
+      model    = "gpt-4o-mini"
+      apiKey   = ${?OPENAI_API_KEY}
+    }
+  }
+}
+```
+
+and export the variable the section binds:
 
 ```bash
-# OpenAI
-export LLM4S_PROVIDER=openai-main
 export OPENAI_API_KEY=sk-proj-...
-
-# Or Anthropic
-export LLM4S_PROVIDER=anthropic-main
-export ANTHROPIC_API_KEY=sk-ant-...
 ```
+
+For Anthropic, use a section with `provider = "anthropic"` and `apiKey = ${?ANTHROPIC_API_KEY}`
+and name it in `provider`. llm4s reads no `LLM_MODEL` and no API-key variable by itself - only
+what your `application.conf` binds. See
+[Named provider sections](../getting-started/configuration.md#named-provider-sections).
 
 ### Multi-Provider Pattern
 
@@ -88,11 +106,15 @@ LLM4S resolves whichever named provider you configure as the default:
 ```scala
 val startup = for {
   providerConfig <- Llm4sConfig.defaultProvider()
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   client <- LLMConnect.getClient(providerConfig)
 } yield processWithAnyProvider(client)
 ```
 
-The same code works with any configured named provider without modifications.
+The same code works with any configured named provider without modifications: change
+`llm4s.providers.provider`, or load another section with `Llm4sConfig.provider("<name>")`. See
+[Switching providers](../getting-started/configuration.md#switching-providers).
 
 ### With Explicit Model Selection
 
@@ -101,6 +123,8 @@ If you want to override the configured model:
 ```scala
 val startup = for {
   providerConfig <- Llm4sConfig.defaultProvider()
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   client <- LLMConnect.getClient(providerConfig)
 } yield {
   val conversation = Conversation(Seq(UserMessage("Tell me about Scala")))
@@ -252,43 +276,50 @@ val response = client.complete(conversation)
 
 ## Configuration Methods
 
-### Environment Variables (Recommended)
+### application.conf (Recommended)
 
-Simplest approach for development:
-
-```bash
-# Required
-export LLM_MODEL=openai/gpt-4o
-export OPENAI_API_KEY=sk-...
-
-# Optional settings
-export TRACING_MODE=console
-export EMBEDDING_MODEL=openai/text-embedding-3-small
-```
-
-### HOCON Configuration File
-
-Create `application.conf`:
+Providers are named sections under `llm4s.providers` in your `src/main/resources/application.conf`,
+with secrets bound from the environment by `${?VAR}`:
 
 ```hocon
 llm4s {
-  model = "openai/gpt-4o"
-  llm {
-    openai {
-      api-key = ${?OPENAI_API_KEY}
-      base-url = "https://api.openai.com/v1"
+  providers {
+    provider = "openai-main"
+
+    openai-main {
+      provider = "openai"
+      model    = "gpt-4o"
+      apiKey   = ${?OPENAI_API_KEY}
     }
   }
 }
 ```
 
-### System Properties
+```bash
+export OPENAI_API_KEY=sk-...
+```
 
-Pass via JVM arguments:
+### Environment Variables
+
+llm4s reads an environment variable only where a `${?VAR}` binding names it - in your own
+`application.conf`, as above, or in a module's `reference.conf`. A few settings are bound for you,
+for example:
 
 ```bash
-java -Dllm4s.model=openai/gpt-4o \
-     -Dllm4s.llm.openai.api-key=sk-... \
+export TRACING_MODE=console                             # llm4s.tracing.mode
+export EMBEDDING_MODEL=openai/text-embedding-3-small    # llm4s.embeddings.model
+```
+
+`LLM_MODEL` and the provider API-key variables are **not** among them. See
+[Environment variables llm4s reads](../getting-started/configuration.md#environment-variables-llm4s-reads).
+
+### System Properties
+
+JVM system properties override `application.conf`, key for key:
+
+```bash
+java -Dllm4s.providers.provider=claude \
+     -Dllm4s.providers.openai-main.model=gpt-4o-mini \
      -jar app.jar
 ```
 
@@ -302,7 +333,9 @@ Always check startup results:
 
 ```scala
 val startup = for {
-  config <- Llm4sConfig.provider()
+  config   <- Llm4sConfig.defaultProvider()
+  registry <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   client <- LLMConnect.getClient(config)
 } yield client
 
@@ -364,7 +397,7 @@ response match {
 
 ### "Invalid API Key"
 
-- Verify your `_API_KEY` environment variable is set and correct
+- Verify the variable your provider section binds (`apiKey = ${?OPENAI_API_KEY}`) is set and correct
 - Check the API key has the right permissions on the provider's dashboard
 - Ensure no extra whitespace in the key
 
@@ -376,9 +409,11 @@ response match {
 
 ### "Configuration not found"
 
-- Ensure `LLM_MODEL` is set: `export LLM_MODEL=openai/gpt-4o`
-- For non-OpenAI providers, set the corresponding `_API_KEY` (e.g., `ANTHROPIC_API_KEY`)
-- Check that `.env` file is in the right directory (project root)
+- Ensure `application.conf` (in `src/main/resources`) has a section under `llm4s.providers` and
+  that `llm4s.providers.provider` names it - `LLM_MODEL` is not read
+- Ensure the variable the section's `apiKey` binds is exported in the shell that starts the JVM
+- Every section is validated on load: a section whose key is unset fails even when it is not the
+  default, so remove sections you cannot fill in
 
 ### "Connection timeout"
 

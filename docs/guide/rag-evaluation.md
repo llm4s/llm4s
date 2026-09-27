@@ -149,10 +149,10 @@ The benchmarking harness lets you systematically compare different RAG configura
 # Download test dataset
 ./scripts/download-datasets.sh ragbench
 
-# Set environment variables
-export LLM_MODEL=openai/gpt-4o
+# Configure providers (see the note below), then:
 export OPENAI_API_KEY=sk-...
-export EMBEDDING_MODEL=openai/text-embedding-3-small  # Unified provider/model format
+export LLM4S_PROVIDER=openai-main                     # bound by the samples' application.conf
+export EMBEDDING_MODEL=openai/text-embedding-3-small  # bound by llm4s-core's reference.conf
 
 # Run fusion strategy comparison
 sbt "samples/runMain org.llm4s.samples.rag.BenchmarkExample --suite fusion"
@@ -166,6 +166,27 @@ sbt "samples/runMain org.llm4s.samples.rag.BenchmarkExample --suite embedding"
 # Quick test (5 samples)
 sbt "samples/runMain org.llm4s.samples.rag.BenchmarkExample --quick"
 ```
+
+The samples read `modules/samples/src/main/resources/application.conf`, whose only provider
+section is `ollama-local`. `OPENAI_API_KEY` is read only where a section binds it, so add an
+OpenAI chat section, and the embeddings key binding, to
+`modules/samples/src/main/resources/application.local.conf` (not committed; included by
+`application.conf`):
+
+```hocon
+llm4s {
+  providers {
+    openai-main {
+      provider = "openai"
+      model    = "gpt-4o"
+      apiKey   = ${?OPENAI_API_KEY}
+    }
+  }
+  embeddings.openai.apiKey = ${?OPENAI_API_KEY}   # OpenAI embeddings do not read OPENAI_API_KEY by themselves
+}
+```
+
+See [Running the samples](../getting-started/configuration.md#running-the-samples).
 
 ### Understanding the Output
 

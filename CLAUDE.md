@@ -235,38 +235,59 @@ for the most recent one, `git rebase --signoff main` for a branch of them, then
 `git push --force-with-lease`. Signing as you go is cheaper than either. See
 [CONTRIBUTING.md](CONTRIBUTING.md#developer-certificate-of-origin-dco).
 
-## Environment Variables
+## Configuration and Environment Variables
+
+**Nothing in the library reads `LLM_MODEL` or a provider's API-key variable** (removed with legacy
+single-provider loading in #903). Chat providers are named sections in the application's
+`application.conf`, each binding its own variables with `${?VAR}`; `llm4s.providers.provider`
+names the default that `Llm4sConfig.defaultProvider()` loads:
+
+```hocon
+# src/main/resources/application.conf
+llm4s {
+  providers {
+    provider = "openai-main"          # the default: the name of a section below
+
+    openai-main {
+      provider = "openai"
+      model    = "gpt-4o-mini"
+      apiKey   = ${?OPENAI_API_KEY}
+    }
+  }
+}
+```
+
+- Precedence: `-D` system properties > `application.conf` > each module's `reference.conf`.
+  Environment variables are read only through `${?VAR}`.
+- **Every section is validated on every load**: a section whose key variable is unset, or whose
+  provider module is absent, fails `defaultProvider()` even when it is not the default.
+- Samples: `modules/samples/src/main/resources/application.conf` defaults to `ollama-local` and
+  binds `LLM4S_PROVIDER`, `OLLAMA_MODEL` and `OLLAMA_BASE_URL` - the samples' bindings, not the
+  library's. Add other sections in the git-ignored `application.local.conf` beside it.
+- Things that read `LLM_MODEL` themselves: the chat-tui sample (`ChatTuiConfig`) and the
+  config-policy env check (`EnvCheckPolicies`). The `modules/it` `@Cloud` smoke suites read their
+  API keys directly.
+- `DocumentedProviderConfigSpec` (`modules/openai`) loads the documented config; keep the docs and
+  it in step.
+
+Variables that *are* bound by some module's `reference.conf`:
 
 ```bash
-# Required for LLM
-LLM_MODEL=openai/gpt-4o              # or anthropic/claude-sonnet-4-5-latest, gemini/gemini-2.0-flash
-OPENAI_API_KEY=sk-...                # or ANTHROPIC_API_KEY, GOOGLE_API_KEY
-
-# Optional - Tracing
-TRACING_MODE=langfuse                # langfuse, opentelemetry, console, or none
+# Tracing (llm4s-core)
+TRACING_MODE=langfuse                # langfuse, opentelemetry, console (default), or none
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
-
-# OpenTelemetry
-OTEL_SERVICE_NAME=llm4s-agent
+OTEL_SERVICE_NAME=llm4s-agent        # OTLP headers: llm4s.tracing.opentelemetry.headers, not OTEL_EXPORTER_OTLP_HEADERS
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
-# Embeddings - Unified format (recommended)
-EMBEDDING_MODEL=openai/text-embedding-3-small  # provider/model format, uses default base URL
-OPENAI_API_KEY=sk-...                          # reuses LLM API key
-
-# Embeddings - Voyage (cloud)
-EMBEDDING_MODEL=voyage/voyage-3
-VOYAGE_API_KEY=pa-...
-
-# Embeddings - Ollama (local, no API key needed)
-EMBEDDING_MODEL=ollama/nomic-embed-text        # or mxbai-embed-large, all-minilm
-
-# Optional: Override default base URLs
-# OPENAI_EMBEDDING_BASE_URL=https://custom.openai.com/v1
-# VOYAGE_EMBEDDING_BASE_URL=https://custom.voyage.ai/v1
-# OLLAMA_EMBEDDING_BASE_URL=http://custom-ollama:11434
+# Embeddings (llm4s-core selects; each provider module binds its own block)
+EMBEDDING_MODEL=openai/text-embedding-3-small  # provider/model
+VOYAGE_API_KEY=pa-...                          # llm4s-voyage
+# OpenAI embeddings' key is NOT bound: add llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}
+# OPENAI_EMBEDDING_BASE_URL / VOYAGE_EMBEDDING_BASE_URL / OLLAMA_EMBEDDING_BASE_URL override base URLs
 ```
+
+The full list is in `docs/getting-started/configuration.md#environment-variables-llm4s-reads`.
 
 ## Code Conventions
 
@@ -287,12 +308,12 @@ Try("123".toInt).toResult
 ### Configuration
 
 ```scala
-// GOOD
+// GOOD - the section llm4s.providers.provider names, from application.conf
 val provider: Result[ProviderConfig] = Llm4sConfig.defaultProvider()
-// or a specific named provider from config:
+// or a specific named section:
 val named: Result[ProviderConfig] = Llm4sConfig.provider("openai-main")
 
-// BAD
+// BAD - and a key belongs in the section anyway: apiKey = ${?OPENAI_API_KEY}
 val apiKey = sys.env.get("OPENAI_API_KEY")
 ```
 
@@ -315,7 +336,7 @@ val apiKey = sys.env.get("OPENAI_API_KEY")
 
 ```scala
 for {
-  providerConfig  <- Llm4sConfig.defaultProvider()
+  providerConfig  <- Llm4sConfig.defaultProvider()   // llm4s.providers.<default> in application.conf
   registryService <- Llm4sConfig.modelRegistryService()
   given ModelRegistryService = registryService
   client <- LLMConnect.getClient(providerConfig)

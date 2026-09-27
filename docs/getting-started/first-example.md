@@ -27,18 +27,35 @@ Let's start with the simplest possible LLM4S program - a "Hello World" that asks
 
 Create `HelloLLM.scala`:
 
+It reads the provider from a named section in `src/main/resources/application.conf`:
+
+```hocon
+llm4s {
+  providers {
+    provider = "openai-main"          # the default: the name of a section below
+
+    openai-main {
+      provider = "openai"
+      model    = "gpt-4o-mini"
+      apiKey   = ${?OPENAI_API_KEY}
+    }
+  }
+}
+```
+
+The [Configuration guide](configuration#named-provider-sections) has sections for Anthropic,
+Gemini, Azure and Ollama; the program below does not change when you switch.
+
 ```scala
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{LLMClient, LLMConnect}
-import org.llm4s.llmconnect.model.UserMessage
+import org.llm4s.llmconnect.model.{ Conversation, UserMessage }
+import org.llm4s.model.ModelRegistryService
 
 // 1. Core Logic: Depends only on the injected client, not configuration
 class HelloLLM(client: LLMClient) {
   def sayHello(): Unit = {
-    val result = client.complete(
-      messages = List(UserMessage("What is Scala?")),
-      model = None
-    )
+    val result = client.complete(Conversation(Seq(UserMessage("What is Scala?"))))
 
     result match {
       case Right(completion) =>
@@ -52,7 +69,9 @@ class HelloLLM(client: LLMClient) {
 // 2. Configuration Boundary: The application entry point
 object Main extends App {
   val startup = for {
-    providerConfig <- Llm4sConfig.provider()
+    providerConfig <- Llm4sConfig.defaultProvider()
+    registry       <- Llm4sConfig.modelRegistryService()
+    given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
   } yield new HelloLLM(client).sayHello()
 
@@ -63,8 +82,7 @@ object Main extends App {
 ### Run It
 
 ```bash
-# Make sure your API key is configured
-export LLM_MODEL=openai/gpt-4o
+# The variable the section binds - llm4s reads it only through apiKey = ${?OPENAI_API_KEY}
 export OPENAI_API_KEY=sk-...
 
 sbt run
@@ -87,13 +105,15 @@ Let's break down what's happening:
 ### 1. The Configuration Boundary
 
 ```scala
-providerConfig <- Llm4sConfig.provider()
+providerConfig <- Llm4sConfig.defaultProvider()
+registry       <- Llm4sConfig.modelRegistryService()
+given ModelRegistryService = registry
 client <- LLMConnect.getClient(providerConfig)
 ```
 
 In LLM4S, we follow a strict configuration boundary. The entry point (`Main`) builds the client:
 
-- Loads typed config from env vars / application.conf
+- Loads the typed config of the section `llm4s.providers.provider` names in `application.conf`
 
 - Selects the appropriate provider (OpenAI, Anthropic, etc.)
 
@@ -293,13 +313,19 @@ val response = client.complete(
 
 ### Provider-Specific Settings
 
-```scala
-// In application.conf or environment variables
-llm {
-  model = "openai/gpt-4o"
-  temperature = 0.7
-  max-tokens = 1000
+The model and provider come from the section in `application.conf`; per-request settings such
+as temperature and token limits go in `CompletionOptions`:
+
+```hocon
+openai-main {
+  provider = "openai"
+  model    = "gpt-4o"
+  apiKey   = ${?OPENAI_API_KEY}
 }
+```
+
+```scala
+client.complete(conversation, CompletionOptions(temperature = 0.7, maxTokens = Some(1000)))
 ```
 
 ---
@@ -355,7 +381,9 @@ class ComprehensiveAgent(client: LLMClient) {
 // Application Entry Point
 object ComprehensiveMain extends App {
   val startup = for {
-    providerConfig <- Llm4sConfig.provider()
+    providerConfig <- Llm4sConfig.defaultProvider()
+    registry       <- Llm4sConfig.modelRegistryService()
+    given org.llm4s.model.ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
   } yield new ComprehensiveAgent(client).run()
 
@@ -427,7 +455,7 @@ Don't create a new client for every request:
 // ❌ Bad: Creating new client inside the loop (wasteful and violates boundaries)
 (1 to 10).foreach { i =>
   for {
-    providerConfig <- Llm4sConfig.provider()
+    providerConfig <- Llm4sConfig.defaultProvider()
     badClient <- LLMConnect.getClient(providerConfig)  // Don't do this!
     response <- badClient.complete(
       Conversation(Seq(UserMessage(s"Q$i")))
@@ -498,41 +526,36 @@ results.foreach {
 
 ### 4. Set Appropriate Timeouts
 
-Different operations need different timeouts:
-
-```hocon
-# In application.conf
-llm4s {
-  # Short timeout for quick queries
-  request-timeout = 15 seconds
-
-  # For long-form generation
-  # request-timeout = 60 seconds
-}
-```
-
-Or override per request:
-
-```scala
-// Note: Per-request timeouts are configured via application.conf or provider settings.
-// The complete method uses the configured timeout automatically.
-val response = client.complete(
-  Conversation(Seq(UserMessage("Quick question")))
-)
-```
+Request timeouts are not configurable yet: each client uses an internal default (two minutes
+for a completion and five for a stream in the OpenAI-compatible clients). Configurable timeouts
+are tracked in [#712](https://github.com/llm4s/llm4s/issues/712). Until then, prefer streaming
+for long-form generation (above).
 
 ### 5. Use Cheaper Models for Development
 
-```bash
-# Development: Fast and cheap
-export LLM_MODEL=openai/gpt-4o-mini  # 60x cheaper than gpt-4
+Change the section's `model`, or point `llm4s.providers.provider` at another section (see
+[Switching providers](configuration#switching-providers)):
 
-# Or free with Ollama
-export LLM_MODEL=ollama/llama3.2
+```hocon
+llm4s.providers {
+  provider = "ollama-local"            # development: free, local
 
-# Production: Use when quality matters
-export LLM_MODEL=openai/gpt-4o
+  ollama-local {
+    provider = "ollama"
+    model    = "llama3.2"
+    baseUrl  = "http://localhost:11434"
+  }
+
+  openai-main {                        # production: select with provider = "openai-main"
+    provider = "openai"
+    model    = "gpt-4o-mini"           # much cheaper than gpt-4o
+    apiKey   = ${?OPENAI_API_KEY}
+  }
+}
 ```
+
+Every section is validated on each load, so `OPENAI_API_KEY` must be set even while
+`ollama-local` is the default - or keep the sections in separate per-environment files.
 
 ### 6. Batch Embeddings
 

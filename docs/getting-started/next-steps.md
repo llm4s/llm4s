@@ -315,10 +315,13 @@ Browse **69 working examples** organized by category:
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
+import org.llm4s.model.ModelRegistryService
 
 def askQuestion(question: String): String = {
   val result = for {
-    providerConfig <- Llm4sConfig.provider()
+    providerConfig <- Llm4sConfig.defaultProvider()
+    registry <- Llm4sConfig.modelRegistryService()
+    given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
     response <- client.complete(
       List(
@@ -339,6 +342,7 @@ def askQuestion(question: String): String = {
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi.{ ToolFunction, ToolRegistry }
 
 def getCurrentTime(): String =
@@ -351,7 +355,9 @@ val timeTool = ToolFunction(
 )
 
 val result = for {
-  providerConfig <- Llm4sConfig.provider()
+  providerConfig <- Llm4sConfig.defaultProvider()
+  registry <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   client <- LLMConnect.getClient(providerConfig)
   tools = new ToolRegistry(Seq(timeTool))
   agent = new Agent(client)
@@ -365,10 +371,13 @@ val result = for {
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model.UserMessage
+import org.llm4s.model.ModelRegistryService
 
 def streamChat(message: String): Unit = {
   val result = for {
-    providerConfig <- Llm4sConfig.provider()
+    providerConfig <- Llm4sConfig.defaultProvider()
+    registry <- Llm4sConfig.modelRegistryService()
+    given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
     stream <- client.completeStreaming(
       List(UserMessage(message)),
@@ -412,12 +421,14 @@ val state2 = agent.continueConversation(
 ### Common Issues
 
 **Problem: API key errors**
-- Check environment variables are set: `echo $OPENAI_API_KEY`
-- Verify `.env` file is sourced: `source .env`
+- Check the provider section in `application.conf` binds the key, e.g. `apiKey = ${?OPENAI_API_KEY}` -
+  llm4s reads no API-key variable on its own ([Named provider sections](configuration#named-provider-sections))
+- Check the variable that section names is set in the shell that runs your app: `echo $OPENAI_API_KEY`
 - Check key starts with correct prefix (`sk-` for OpenAI, `sk-ant-` for Anthropic)
 
 **Problem: Model not found**
-- Verify `LLM_MODEL` format: `provider/model-name`
+- Verify `model` in the provider section is the provider's own model name (e.g. `gpt-4o-mini`, no `openai/` prefix)
+- Check `llm4s.providers.provider` names the section you meant
 - Check provider supports that model
 - Try a different model
 

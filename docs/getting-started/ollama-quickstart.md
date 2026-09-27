@@ -138,32 +138,52 @@ ollama list
 
 ## Step 4: Configure LLM4S
 
-### Option A: Environment Variables (Recommended)
+LLM4S reads providers from named sections in your `application.conf`, not from environment
+variables such as `LLM_MODEL` - nothing in the library reads those. See the
+[Configuration Guide](configuration#named-provider-sections) for the full picture.
 
-In your terminal (or add to `.env` file):
+### Add the dependencies
 
-```bash
-# Linux / macOS
-export LLM_MODEL=ollama/mistral
-export OLLAMA_BASE_URL=http://localhost:11434
-
-# Windows PowerShell
-$env:LLM_MODEL = "ollama/mistral"
-$env:OLLAMA_BASE_URL = "http://localhost:11434"
+```scala
+// build.sbt
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-core"   % llm4sVersion,
+  "org.llm4s" %% "llm4s-ollama" % llm4sVersion  // the Ollama provider
+)
 ```
 
-### Option B: Application Config
+`llm4s-ollama` is a module on `main` that has not been published yet: in v0.4.1 and earlier the
+Ollama provider ships inside `llm4s-core`, so `llm4s-core` alone is enough there.
+
+### Add an `ollama-local` section
 
 Create `src/main/resources/application.conf`:
 
 ```hocon
 llm4s {
-  provider = "ollama"
-  model = "mistral"
-  ollama {
-    baseUrl = "http://localhost:11434"
+  providers {
+    provider = "ollama-local"          # the default: the name of a section below
+
+    ollama-local {
+      provider = "ollama"
+      model    = "mistral"
+      baseUrl  = "http://localhost:11434"   # required: Ollama has no default base URL
+    }
   }
 }
+```
+
+No API key is needed. If you want to take the model or server from the environment, bind the
+variables yourself - the names are yours to choose:
+
+```hocon
+    ollama-local {
+      provider = "ollama"
+      model    = "mistral"
+      model    = ${?OLLAMA_MODEL}            # optional override from the environment
+      baseUrl  = "http://localhost:11434"
+      baseUrl  = ${?OLLAMA_BASE_URL}
+    }
 ```
 
 ---
@@ -176,6 +196,7 @@ Create `HelloOllama.scala`:
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
+import org.llm4s.model.ModelRegistryService
 
 object HelloOllama extends App {
   // Create a conversation with system and user messages
@@ -184,10 +205,12 @@ object HelloOllama extends App {
     UserMessage("Explain what Scala is in one sentence.")
   ))
 
-  // Load config and make the request
+  // Load the default provider section and make the request
   val result = for {
-    providerConfig <- Llm4sConfig.provider()
-    client <- LLMConnect.getClient(providerConfig)
+    providerConfig <- Llm4sConfig.defaultProvider()
+    registry       <- Llm4sConfig.modelRegistryService()
+    given ModelRegistryService = registry
+    client     <- LLMConnect.getClient(providerConfig)
     completion <- client.complete(conversation)
   } yield completion
 
@@ -220,18 +243,19 @@ the Java Virtual Machine (JVM).
 
 ## Step 6: Try Different Models
 
-You can easily switch models:
+You can easily switch models by changing `model` in the `ollama-local` section (after
+`ollama pull <model>`):
 
-```bash
-# Try Llama 3.2 (good balance of reasoning and quality)
-export LLM_MODEL=ollama/llama3.2
-
-# Try Phi3 (lightweight,faster, smaller)
-export LLM_MODEL=ollama/phi3
-
-# Try CodeLlama (for coding tasks)
-export LLM_MODEL=ollama/codellama
+```hocon
+    ollama-local {
+      provider = "ollama"
+      model    = "llama3.2"   # or "phi3", "codellama", ...
+      baseUrl  = "http://localhost:11434"
+    }
 ```
+
+If you added the `model = ${?OLLAMA_MODEL}` binding from Step 4, you can switch from the shell
+instead - `export OLLAMA_MODEL=llama3.2` - because your own `application.conf` reads it.
 
 Then run your program again without code changes!
 
@@ -241,14 +265,15 @@ Then run your program again without code changes!
 
 Llama 3.2 is Meta's latest with an impressive 128K context window. Perfect for processing large documents and long conversations.
 
-For the code, use the same Scala example from **Step 5** - simply change the configuration:
+For the code, use the same Scala example from **Step 5** - simply change the model in the
+`ollama-local` section of `application.conf` (run `ollama pull llama3.2` first):
 
-```bash
-# Linux / macOS
-export LLM_MODEL=ollama/llama3.2
-
-# Windows PowerShell
-$env:LLM_MODEL = "ollama/llama3.2"
+```hocon
+    ollama-local {
+      provider = "ollama"
+      model    = "llama3.2"
+      baseUrl  = "http://localhost:11434"
+    }
 ```
 
 Then run:
@@ -266,14 +291,15 @@ sbt run
 
 Phi3 is Microsoft's efficient model, even smaller than Phi. Ideal for ultra-low-latency applications and edge deployment.
 
-For the code, use the same Scala example from **Step 5** - simply change the configuration:
+For the code, use the same Scala example from **Step 5** - simply change the model in the
+`ollama-local` section of `application.conf` (run `ollama pull phi3` first):
 
-```bash
-# Linux / macOS
-export LLM_MODEL=ollama/phi3
-
-# Windows PowerShell
-$env:LLM_MODEL = "ollama/phi3"
+```hocon
+    ollama-local {
+      provider = "ollama"
+      model    = "phi3"
+      baseUrl  = "http://localhost:11434"
+    }
 ```
 
 Then run:
@@ -294,6 +320,7 @@ CodeLlama is purpose-built for code generation and understanding. Create `HelloC
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
+import org.llm4s.model.ModelRegistryService
 
 object HelloCodeLlama extends App {
   // Create a conversation asking for code
@@ -302,10 +329,12 @@ object HelloCodeLlama extends App {
     UserMessage("Write a simple Scala function that reverses a list.")
   ))
 
-  // Load config and make the request
+  // Load the default provider section and make the request
   val result = for {
-    providerConfig <- Llm4sConfig.provider()
-    client <- LLMConnect.getClient(providerConfig)
+    providerConfig <- Llm4sConfig.defaultProvider()
+    registry       <- Llm4sConfig.modelRegistryService()
+    given ModelRegistryService = registry
+    client     <- LLMConnect.getClient(providerConfig)
     completion <- client.complete(conversation)
   } yield completion
 
@@ -321,12 +350,15 @@ object HelloCodeLlama extends App {
 
 ### Configure for CodeLlama
 
-```bash
-# Linux / macOS
-export LLM_MODEL=ollama/codellama
+Set the model in the `ollama-local` section of `application.conf` (run `ollama pull codellama`
+first):
 
-# Windows PowerShell
-$env:LLM_MODEL = "ollama/codellama"
+```hocon
+    ollama-local {
+      provider = "ollama"
+      model    = "codellama"
+      baseUrl  = "http://localhost:11434"
+    }
 ```
 
 ### Run It!
@@ -365,6 +397,7 @@ Get real-time token streaming (like ChatGPT):
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
+import org.llm4s.model.ModelRegistryService
 
 object StreamingOllama extends App {
   val conversation = Conversation(Seq(
@@ -373,8 +406,10 @@ object StreamingOllama extends App {
   ))
 
   val result = for {
-    providerConfig <- Llm4sConfig.provider()
-    client <- LLMConnect.getClient(providerConfig)
+    providerConfig <- Llm4sConfig.defaultProvider()
+    registry       <- Llm4sConfig.modelRegistryService()
+    given ModelRegistryService = registry
+    client     <- LLMConnect.getClient(providerConfig)
     completion <- client.streamComplete(
       conversation,
       CompletionOptions(),
@@ -402,6 +437,7 @@ Ollama supports tool calling (function calling) with compatible models:
 import org.llm4s.agent.Agent
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.model.ModelRegistryService
 import org.llm4s.toolapi._
 import upickle.default._
 
@@ -431,7 +467,9 @@ object OllamaTools extends App {
   val tools = new ToolRegistry(Seq(getWeather))
 
   val result = for {
-    providerConfig <- Llm4sConfig.provider()
+    providerConfig <- Llm4sConfig.defaultProvider()
+    registry       <- Llm4sConfig.modelRegistryService()
+    given ModelRegistryService = registry
     client <- LLMConnect.getClient(providerConfig)
     agent = new Agent(client)
     state <- agent.run("What's the weather in San Francisco?", tools)
@@ -533,11 +571,15 @@ ollama rm llama2
 
 ## Running the Examples
 
-Try the built-in LLM4S Ollama samples:
+Try the built-in LLM4S Ollama samples. The samples' own
+`modules/samples/src/main/resources/application.conf` already defaults to an `ollama-local`
+section (model `llama3:latest`, server `http://localhost:11434`), and binds `OLLAMA_MODEL` and
+`OLLAMA_BASE_URL` to override it - those two variables are that file's bindings, not something
+the library reads. See [Running the samples](configuration#running-the-samples).
 
 ```bash
-# Set environment
-export LLM_MODEL=ollama/mistral
+# Optional: override the samples' ollama-local section
+export OLLAMA_MODEL=mistral
 export OLLAMA_BASE_URL=http://localhost:11434
 
 # Run basic Ollama example
@@ -577,7 +619,7 @@ services:
   llm4s-app:
     build: .
     environment:
-      - LLM_MODEL=ollama/mistral
+      # Read by the app's own application.conf binding: baseUrl = ${?OLLAMA_BASE_URL}
       - OLLAMA_BASE_URL=http://ollama:11434
     depends_on:
       - ollama
@@ -585,6 +627,9 @@ services:
 volumes:
   ollama-data:
 ```
+
+This assumes the app's `ollama-local` section binds the server address, as in Step 4:
+`baseUrl = "http://localhost:11434"` followed by `baseUrl = ${?OLLAMA_BASE_URL}`.
 
 ### Pre-pull Models
 
@@ -622,7 +667,7 @@ docker-compose exec ollama ollama pull llama2
 
 ## Next Steps
 
-- [Configuration Guide](configuration) - Advanced Ollama settings
+- [Configuration Guide](configuration) - Named provider sections and advanced settings
 - [First Example](first-example) - Build more complex agents
 - [Tool Calling](../examples/) - Add custom tools
 - [RAG with Ollama](../guide/vector-store) - Retrieval-augmented generation
@@ -641,16 +686,21 @@ docker-compose exec ollama ollama pull llama2
 {: .note-title }
 > 💡 Pro Tip
 >
-> Use Ollama for development and testing, then switch to cloud providers for production by just changing the `LLM_MODEL` environment variable:
+> Use Ollama for development and testing, then switch to a cloud provider for production by
+> pointing `llm4s.providers.provider` at another section - add the provider's module
+> (e.g. `llm4s-openai`) and a section such as:
 >
-> ```bash
-> # Development
-> export LLM_MODEL=ollama/mistral
->
-> # Production
-> export LLM_MODEL=openai/gpt-4o
-> export OPENAI_API_KEY=sk-...
+> ```hocon
+> openai-main {
+>   provider = "openai"
+>   model    = "gpt-4o"
+>   apiKey   = ${?OPENAI_API_KEY}
+> }
 > ```
+>
+> then set `provider = "openai-main"` (or `-Dllm4s.providers.provider=openai-main`). Keep only
+> sections whose keys are set in that environment: every section is validated on load. See
+> [Switching providers](configuration#switching-providers).
 >
 > Your code stays exactly the same! 🎉
 

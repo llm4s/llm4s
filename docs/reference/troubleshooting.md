@@ -11,16 +11,31 @@ This guide addresses common errors and issues you might encounter when building 
 
 ## Configuration Errors
 
-**Q: I get "ConfigurationError: No provider configured" on startup**
-A: Set `LLM_MODEL` and your API key. Example: `export LLM_MODEL=openai/gpt-4o && export OPENAI_API_KEY=sk-...`
+**Q: I get a "ConfigurationError" about the provider on startup ("not found", "missing required fields", no default selected)**
+A: LLM4S does not read `LLM_MODEL` or provider API-key variables by itself. Define a named provider section in your `application.conf`, bind its key from the environment, and select it as the default:
+
+```hocon
+llm4s {
+  providers {
+    provider = "openai-main"
+    openai-main {
+      provider = "openai"
+      model    = "gpt-4o-mini"
+      apiKey   = ${?OPENAI_API_KEY}
+    }
+  }
+}
+```
+
+Then `export OPENAI_API_KEY=sk-...` and call `Llm4sConfig.defaultProvider()`. A "missing required fields ... apiKey" error means the variable a section binds is unset - for any section, not only the default, since every section is validated on each load. See [Configuration](../getting-started/configuration.md#named-provider-sections).
 
 **Q: My application configuration isn't overriding the defaults**
-A: LLM4S uses PureConfig. Ensure your `application.conf` is in the `src/main/resources` directory and that you are using `Llm4sConfig.provider("openai")` (passing your provider name) instead of the legacy `ConfigReader` to load typed settings.
+A: LLM4S uses PureConfig. Ensure your `application.conf` is in the `src/main/resources` directory (or point at it with `-Dconfig.file=...`), and load providers with `Llm4sConfig.defaultProvider()` or `Llm4sConfig.provider("<section name>")` - the name of a section under `llm4s.providers`, not the provider type. `-D` system properties override `application.conf`.
 
 ## Authentication Errors
 
 **Q: I get "AuthenticationError: 401 Unauthorized"**
-A: Check your API key is correct. OpenAI keys start with `sk-`, Anthropic with `sk-ant-...`. Ensure the environment variable exactly matches what the provider expects.
+A: Check your API key is correct. OpenAI keys start with `sk-`, Anthropic with `sk-ant-...`. Ensure the environment variable you set is the one the section's `apiKey = ${?VAR}` binding names, and that the section's `provider` matches the key's vendor.
 
 ## Scala Version Issues
 
@@ -55,10 +70,10 @@ A: Ensure you are using `StreamingAccumulator` which correctly buffers and assem
 ## Provider-Specific Issues
 
 **Q: Using Azure but getting endpoint not found errors**
-A: Ensure you have set the deployment name correctly in your environment. Example: `export AZURE_DEPLOYMENT_NAME=your-deployment-name` and your base URL matches `https://<resource>.openai.azure.com/` in `AZURE_API_BASE`.
+A: Check the `endpoint` of your `provider = "azure"` section (the deployment endpoint in your Azure OpenAI resource, e.g. `endpoint = ${?AZURE_API_BASE}`) and its `model`. Nothing reads `AZURE_API_BASE` or a deployment-name variable unless your section binds it.
 
 **Q: Ollama returns connection refused**
-A: Ensure your local Ollama daemon is running (`ollama serve`) and the URL is correct. The default is `http://localhost:11434`. Example: `export OLLAMA_BASE_URL=http://localhost:11434`.
+A: Ensure your local Ollama daemon is running (`ollama serve`) and the `baseUrl` of your `provider = "ollama"` section is correct - usually `http://localhost:11434`. Ollama sections require `baseUrl`; bind it with `baseUrl = ${?OLLAMA_BASE_URL}` if you want to set it from the environment.
 
 **Q: Getting "Unsupported modality" error for image requests**
 A: Not all models support image generation or vision. Ensure you are using an image-capable model configuration (e.g., `dall-e-3` or `gpt-4o`) via `ImageGenerationClient`.

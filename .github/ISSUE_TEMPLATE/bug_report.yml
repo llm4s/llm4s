@@ -161,9 +161,9 @@ body:
     id: configuration
     attributes:
       label: Configuration (if relevant)
-      description: Provide any relevant configuration. **Please anonymize API keys and sensitive data.**
-      placeholder: "LLM_MODEL=openai/gpt-4o\nTRACING_MODE=console\n..."
-      render: "bash"
+      description: Provide the relevant `application.conf` sections (e.g. your `llm4s.providers` section) and any environment variables they bind. **Please anonymize API keys and sensitive data.**
+      placeholder: "llm4s.providers {\n  provider = \"openai-main\"\n  openai-main {\n    provider = \"openai\"\n    model = \"gpt-4o-mini\"\n    apiKey = ${?OPENAI_API_KEY}  # value redacted\n  }\n}\nTRACING_MODE=console"
+      render: "hocon"
 
   - type: textarea
     id: additional_context

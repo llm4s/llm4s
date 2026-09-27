@@ -70,12 +70,18 @@ Use **Llm4sConfig** instead of raw environment access:
 ```scala
 import org.llm4s.config.Llm4sConfig
 
-// ✅ Type-safe configuration
-val config = Llm4sConfig.provider()
+// ✅ Type-safe configuration: the default section under llm4s.providers
+val config = Llm4sConfig.defaultProvider()
+// ...or any section by name
+val claude = Llm4sConfig.provider("claude")
 
 // ❌ Raw access
 val apiKey = sys.env("OPENAI_API_KEY")
 ```
+
+The API key reaches `Llm4sConfig` through your own `application.conf`, as
+`apiKey = ${?OPENAI_API_KEY}` inside a named provider section - see
+[Named provider sections](../getting-started/configuration.md#named-provider-sections).
 
 ### 5. Provider Abstraction
 
@@ -94,7 +100,9 @@ val client: LLMClient = ??? // OpenAI, Anthropic, Azure, or Ollama
 import org.llm4s.config.Llm4sConfig
 
 val result = for {
-  providerConfig <- Llm4sConfig.provider()
+  providerConfig <- Llm4sConfig.defaultProvider()
+  registry <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   client <- LLMConnect.getClient(providerConfig)
   response <- client.complete(messages, None)
   parsed <- parseResponse(response)

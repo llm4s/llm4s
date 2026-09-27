@@ -209,9 +209,9 @@ Using local Ollama models instead of cloud providers.
 ollama serve &
 ollama pull llama2
 
-# Run example
-export LLM_MODEL=ollama/llama2
-export OLLAMA_BASE_URL=http://localhost:11434
+# Run example - the samples' default section is ollama-local;
+# OLLAMA_MODEL and OLLAMA_BASE_URL are bound by the samples' application.conf
+export OLLAMA_MODEL=llama2
 sbt "samples/runMain org.llm4s.samples.basic.OllamaExample"
 ```
 
@@ -230,14 +230,14 @@ sbt "samples/runMain org.llm4s.samples.basic.OllamaExample"
 Streaming responses with local Ollama models.
 
 ```bash
-export LLM_MODEL=ollama/llama2
+export OLLAMA_MODEL=llama2   # read by the samples' application.conf
 sbt "samples/runMain org.llm4s.samples.basic.OllamaStreamingExample"
 ```
 
 To enable raw provider exchange logging and write timestamped JSONL files to a specific directory:
 
 ```bash
-export LLM_MODEL=ollama/llama2
+export OLLAMA_MODEL=llama2
 sbt "samples/runMain org.llm4s.samples.basic.OllamaStreamingExample /tmp/my-provider-exchanges"
 ```
 
@@ -850,16 +850,17 @@ sbt "samples/runMain org.llm4s.samples.memory.VectorMemoryExample"
 Complete RAG (Retrieval-Augmented Generation) pipeline demonstrating document Q&A with semantic search.
 
 ```bash
-# With mock embeddings (no API key needed for embeddings)
-export LLM_MODEL=openai/gpt-4o
-export OPENAI_API_KEY=sk-...
+# With mock embeddings (no API key needed for embeddings), answering with
+# the default ollama-local section - or select another, see "Running Examples"
 sbt "samples/runMain org.llm4s.samples.rag.DocumentQAExample"
 
-# With real OpenAI embeddings (unified format)
+# With real OpenAI embeddings: EMBEDDING_MODEL is bound by llm4s-core; the
+# embeddings API key is not, so bind it too (or add
+# llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY} to application.local.conf)
 export EMBEDDING_MODEL=openai/text-embedding-3-small
-export LLM_MODEL=openai/gpt-4o
 export OPENAI_API_KEY=sk-...
-sbt "samples/runMain org.llm4s.samples.rag.DocumentQAExample"
+sbt -Dllm4s.embeddings.openai.apiKey="$OPENAI_API_KEY" \
+  "samples/runMain org.llm4s.samples.rag.DocumentQAExample"
 ```
 
 **What it demonstrates:**
@@ -1148,13 +1149,47 @@ sbt "samples/runMain org.llm4s.samples.actions.SummarizationExample"
 sbt "samples/runMain <fully-qualified-class-name>"
 ```
 
-### With Environment Variables
+### Choosing a Provider
+
+The samples load their provider with `Llm4sConfig.defaultProvider()`, from
+[`modules/samples/src/main/resources/application.conf`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/resources/application.conf).
+Nothing reads `LLM_MODEL` or `OPENAI_API_KEY` on its own. Out of the box the default is the
+`ollama-local` section, which `OLLAMA_MODEL` and `OLLAMA_BASE_URL` override:
 
 ```bash
-export LLM_MODEL=openai/gpt-4o
-export OPENAI_API_KEY=sk-...
+export OLLAMA_MODEL=llama3.2
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
+
+To use a cloud provider, add a section to
+`modules/samples/src/main/resources/application.local.conf` (git-ignored, and included by the
+samples' `application.conf`):
+
+```hocon
+llm4s.providers {
+  openai-main {
+    provider = "openai"
+    model    = "gpt-4o"
+    apiKey   = ${?OPENAI_API_KEY}
+  }
+}
+```
+
+and select it with `LLM4S_PROVIDER`, which the samples' `application.conf` binds to
+`llm4s.providers.provider`:
+
+```bash
+export OPENAI_API_KEY=sk-...
+export LLM4S_PROVIDER=openai-main
+sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
+```
+
+Every section in the file is validated whenever one is loaded, so only add sections whose keys
+you have set. See [Configuration](../getting-started/configuration.md#running-the-samples) for more.
+
+The chat-tui sample is the exception: `ChatTuiConfig` reads `LLM_MODEL=<provider>/<model>` and
+the matching API-key variable itself, and falls back to `Llm4sConfig.defaultProvider()` when
+`LLM_MODEL` is unset.
 
 ### Browse Source
 

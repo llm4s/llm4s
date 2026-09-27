@@ -29,61 +29,94 @@ LLM4S follows a configuration boundary principle: all configuration loading happ
 
 ### Never Commit Secrets
 
-API keys belong in environment variables or a secrets manager—never in source control.
+API keys belong in environment variables or a secrets manager—never in source control. LLM4S does
+not read provider variables such as `OPENAI_API_KEY` or `LLM_MODEL` by itself: your
+`application.conf` names the variable each secret comes from with a `${?VAR}` substitution, and the
+deployment sets that variable.
 
 ```bash
-# .env (add to .gitignore)
-LLM_MODEL=openai/gpt-4o
+# .env (add to .gitignore) - only the variables your application.conf binds
 OPENAI_API_KEY=<your-openai-key>
 ANTHROPIC_API_KEY=<your-anthropic-key>
 ```
 
 ### Configuration Hierarchy
 
-LLM4S resolves configuration in this order (highest to lowest precedence):
+LLM4S reads configuration through PureConfig's default source, in this order (highest to lowest
+precedence):
 
-1. **System properties** (`-Dllm4s.llm.model=openai/gpt-4o`)
-2. **Environment variables** (`LLM_MODEL`, `OPENAI_API_KEY`)
-3. **application.conf** (HOCON in `src/main/resources/`)
-4. **reference.conf** (library defaults)
+1. **System properties** (`-Dllm4s.providers.provider=claude`)
+2. **application.conf** (HOCON in `src/main/resources/`, or the file named by `-Dconfig.file` /
+   `-Dconfig.resource`)
+3. **reference.conf** (the defaults shipped in each llm4s module)
+
+Environment variables are not a layer of their own: one is read only where a `${?VAR}` substitution
+binds it - in your `application.conf`, or in a module's `reference.conf` (tracing, embeddings and
+tools bind theirs there; see
+[the variables llm4s reads](getting-started/configuration.md#environment-variables-llm4s-reads)).
 
 ### Production application.conf
 
-Create `src/main/resources/application.conf` for production defaults, using environment variable substitution for secrets:
+Create `src/main/resources/application.conf` with a named section per provider, binding each secret
+from the environment:
 
 ```hocon
 llm4s {
-  llm {
-    model = ${?LLM_MODEL}
-  }
+  providers {
+    provider = "openai-main"          # the default: the name of a section below
 
-  openai {
-    api-key = ${?OPENAI_API_KEY}
-    base-url = ${?OPENAI_BASE_URL}
-    organization = ${?OPENAI_ORGANIZATION}
-  }
+    openai-main {
+      provider = "openai"
+      model    = "gpt-4o"
+      apiKey   = ${?OPENAI_API_KEY}
+    }
 
-  anthropic {
-    api-key = ${?ANTHROPIC_API_KEY}
-    base-url = ${?ANTHROPIC_BASE_URL}
-  }
-
-  azure {
-    api-key = ${?AZURE_API_KEY}
-    endpoint = ${?AZURE_API_BASE}
-    api-version = ${?AZURE_API_VERSION}
-  }
-
-  tracing {
-    mode = ${?TRACING_MODE}
-    langfuse {
-      public-key = ${?LANGFUSE_PUBLIC_KEY}
-      secret-key = ${?LANGFUSE_SECRET_KEY}
-      url = ${?LANGFUSE_URL}
+    claude {
+      provider = "anthropic"
+      model    = "claude-sonnet-4-20250514"
+      apiKey   = ${?ANTHROPIC_API_KEY}
     }
   }
+
+  # Tracing already binds TRACING_MODE, LANGFUSE_* and OTEL_SERVICE_NAME /
+  # OTEL_EXPORTER_OTLP_ENDPOINT in llm4s-core's reference.conf. OTLP exporter
+  # headers come from this map, not from OTEL_EXPORTER_OTLP_HEADERS:
+  # tracing.opentelemetry.headers { Authorization = ${?OTEL_AUTH_HEADER} }
 }
 ```
+
+Each provider comes from its own module (`llm4s-openai`, `llm4s-anthropic`, ...); add the ones your
+sections name. On 0.4.1 and earlier they all ship inside `llm4s-core`.
+
+{: .warning }
+**Every section is validated on every load.** `Llm4sConfig.defaultProvider()` checks all sections
+under `llm4s.providers`, not only the default. A section whose required `apiKey` resolves to nothing
+because its variable is unset - or whose provider module is not on the classpath - fails the load
+even when it is not the one you asked for. Keep only the sections each environment can fill in.
+
+### Per-Environment Configuration
+
+Pick the provider per environment without changing code:
+
+- **Override the default** with a system property: `-Dllm4s.providers.provider=claude`.
+- **Bind the default yourself** to a variable of your choosing:
+
+  ```hocon
+  llm4s.providers {
+    provider = "openai-main"
+    provider = ${?LLM4S_PROVIDER}     # your binding; any name works
+  }
+  ```
+
+- **Ship one file per environment** and select it at startup, so each holds only the sections that
+  environment has keys for:
+
+  ```bash
+  java -Dconfig.resource=prod.conf -jar app.jar        # src/main/resources/prod.conf
+  java -Dconfig.file=/etc/myapp/app.conf -jar app.jar  # a file outside the jar
+  ```
+
+- **Load a section by name** where one application uses several: `Llm4sConfig.provider("claude")`.
 
 ### Configuration Boundary Pattern
 
@@ -92,10 +125,13 @@ LLM4S enforces a strict configuration boundary. Core code never reads configurat
 ```scala
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
+import org.llm4s.model.ModelRegistryService
 
 // At the application edge (main, controller, etc.)
 val result = for {
-  providerConfig <- Llm4sConfig.provider()
+  providerConfig <- Llm4sConfig.defaultProvider()
+  registry       <- Llm4sConfig.modelRegistryService()
+  given ModelRegistryService = registry
   tracingConfig  <- Llm4sConfig.tracing()
   client         <- LLMConnect.getClient(providerConfig)
 } yield (client, tracingConfig)
@@ -110,7 +146,9 @@ This pattern makes testing easier and keeps configuration concerns at the edges.
 
 ### Secrets in Kubernetes
 
-For Kubernetes deployments, use Secrets and reference them in your pod spec:
+For Kubernetes deployments, use Secrets and reference them in your pod spec. The variable names are
+the ones your `application.conf` binds (`apiKey = ${?OPENAI_API_KEY}`); `TRACING_MODE` and
+`LANGFUSE_*` are bound by llm4s-core's `reference.conf`:
 
 ```yaml
 apiVersion: v1
@@ -133,8 +171,10 @@ spec:
             - secretRef:
                 name: llm4s-secrets
           env:
-            - name: LLM_MODEL
-              value: "openai/gpt-4o"
+            # Selects a section of application.conf through the app's own
+            # `provider = ${?LLM4S_PROVIDER}` binding (see above)
+            - name: LLM4S_PROVIDER
+              value: "openai-main"
             - name: TRACING_MODE
               value: "langfuse"
 ```
@@ -229,14 +269,20 @@ client match {
 `LLMClient` holds HTTP connections and thread pools. Create it once at startup and close it on shutdown:
 
 ```scala
+import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.{LLMClient, LLMConnect}
+import org.llm4s.model.ModelRegistryService
 
 class Application {
   private var client: Option[LLMClient] = None
 
   def start(): Unit = {
-    client = Llm4sConfig.provider()
-      .flatMap(LLMConnect.getClient) match {
+    client = (for {
+      providerConfig <- Llm4sConfig.defaultProvider()
+      registry       <- Llm4sConfig.modelRegistryService()
+      given ModelRegistryService = registry
+      c <- LLMConnect.getClient(providerConfig)
+    } yield c) match {
         case Right(c) => Some(c)
         case Left(_)  => None
       }
@@ -427,11 +473,20 @@ Suitable for experiments, small teams, or low-traffic applications:
 └─────────────────────────────────────┘
 ```
 
+```hocon
+# application.conf
+llm4s.providers {
+  provider = "ollama-local"
+  ollama-local {
+    provider = "ollama"
+    model    = "llama3.2"
+    baseUrl  = "http://localhost:11434"   # required for Ollama
+  }
+}
+```
+
 ```bash
-# .env
-LLM_MODEL=ollama/llama3.2
-OLLAMA_BASE_URL=http://localhost:11434
-TRACING_MODE=console
+TRACING_MODE=console   # bound by llm4s-core's reference.conf; console is also the default
 ```
 
 ### Kubernetes (Production)

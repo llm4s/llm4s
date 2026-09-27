@@ -202,16 +202,22 @@ ollama serve
 
 ### Test Configuration
 
+Put a named provider section in your test resources and select it as the default, with
+`llm4s-ollama` as a test dependency (in v0.4.1 and earlier the Ollama provider is inside
+`llm4s-core`). See [Named provider sections](configuration#named-provider-sections).
+
 ```hocon
 # src/test/resources/application.conf
 llm4s {
-  provider {
-    model = "ollama/llama3.2"
-    ollama {
-      base-url = "http://localhost:11434"
+  providers {
+    provider = "ollama-test"
+
+    ollama-test {
+      provider = "ollama"
+      model    = "llama3.2"
+      baseUrl  = "http://localhost:11434"   # required for Ollama
     }
   }
-  request-timeout = 30 seconds
 }
 ```
 
@@ -221,6 +227,7 @@ llm4s {
 import org.llm4s.config.Llm4sConfig
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
+import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -243,7 +250,9 @@ class LLMIntegrationSpec extends AnyFlatSpec with Matchers {
     assume(ollamaAvailable, "Ollama server not available")
 
     val result = for {
-      config <- Llm4sConfig.provider()
+      config <- Llm4sConfig.defaultProvider()
+      registry <- Llm4sConfig.modelRegistryService()
+      given ModelRegistryService = registry
       client <- LLMConnect.getClient(config)
       response <- client.complete(
         Conversation(Seq(UserMessage("Say 'hello' and nothing else")))
@@ -263,7 +272,9 @@ class LLMIntegrationSpec extends AnyFlatSpec with Matchers {
 
     var chunks = List.empty[StreamedChunk]
     val result = for {
-      config <- Llm4sConfig.provider()
+      config <- Llm4sConfig.defaultProvider()
+      registry <- Llm4sConfig.modelRegistryService()
+      given ModelRegistryService = registry
       client <- LLMConnect.getClient(config)
       completion <- client.streamComplete(
         Conversation(Seq(UserMessage("Count: 1, 2, 3")))
@@ -541,9 +552,9 @@ jobs:
         run: sbt "testOnly *UnitSpec"
       
       - name: Run integration tests (with Ollama)
+        # The provider comes from src/test/resources/application.conf (the ollama-test section
+        # above); no environment variable selects it.
         run: sbt "testOnly *IntegrationSpec"
-        env:
-          LLM_MODEL: ollama/llama3.2
       
       # Skip expensive tests in CI
       - name: Run full test suite

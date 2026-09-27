@@ -632,6 +632,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **The docs taught a configuration route that no longer exists.** Since
+  [#903](https://github.com/llm4s/llm4s/pull/903) (0.3.2) nothing in llm4s reads `LLM_MODEL` or a
+  provider's API-key variable, yet the README, CLAUDE.md, every getting-started page and most
+  samples still told users to set them, so a first-time user following the README got a
+  configuration error ([#1132](https://github.com/llm4s/llm4s/issues/1132)). They now teach named
+  provider sections in `application.conf` (`apiKey = ${?OPENAI_API_KEY}`, selected by
+  `llm4s.providers.provider`), list the environment variables that some `reference.conf` really
+  binds, and say where a tool reads `LLM_MODEL` itself (the chat-tui sample, the config-policy env
+  check). `DocumentedProviderConfigSpec` loads the documented configuration. See the
+  [migration note](docs/reference/migration.md#from-llm_model-to-named-provider-sections).
 - **`complete` on `OpenAICompatibleClient` could wait for ever.** It sent its request with no
   timeout - as the old `DeepSeekClient`, `ZaiClient` and `OpenRouterClient` had
   ([#912](https://github.com/llm4s/llm4s/issues/912)) - so an endpoint that accepted the
