@@ -233,8 +233,9 @@ llm4s {
 ```
 
 The samples in this repository already have an `application.conf` whose default is a local Ollama
-section (`ollama-local`, overridable with `OLLAMA_MODEL` and `OLLAMA_BASE_URL`). To run them
-against a cloud provider, put a section like the one above in
+section (`ollama-local`, model `llama3:latest`, overridable with `OLLAMA_MODEL` and
+`OLLAMA_BASE_URL`). Run `ollama pull llama3` once, or set `OLLAMA_MODEL` to a model you already
+have (`ollama list`). To run them against a cloud provider, put a section like the one above in
 `modules/samples/src/main/resources/application.local.conf` (ignored by git) and select it:
 
 ```bash

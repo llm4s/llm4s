@@ -64,6 +64,7 @@ from the environment:
 llm4s {
   providers {
     provider = "openai-main"          # the default: the name of a section below
+    provider = ${?LLM4S_PROVIDER}     # optional override from the environment (your binding)
 
     openai-main {
       provider = "openai"
@@ -92,7 +93,10 @@ sections name. On 0.4.1 and earlier they all ship inside `llm4s-core`.
 **Every section is validated on every load.** `Llm4sConfig.defaultProvider()` checks all sections
 under `llm4s.providers`, not only the default. A section whose required `apiKey` resolves to nothing
 because its variable is unset - or whose provider module is not on the classpath - fails the load
-even when it is not the one you asked for. Keep only the sections each environment can fill in.
+even when it is not the one you asked for. The file above therefore needs **both**
+`OPENAI_API_KEY` and `ANTHROPIC_API_KEY` wherever it is deployed, even with `openai-main` as the
+default. Keep only the sections each environment can fill in (see
+[the troubleshooting note](getting-started/configuration.md#problem-missing-required-fields-apikey)).
 
 ### Per-Environment Configuration
 
@@ -148,7 +152,12 @@ This pattern makes testing easier and keeps configuration concerns at the edges.
 
 For Kubernetes deployments, use Secrets and reference them in your pod spec. The variable names are
 the ones your `application.conf` binds (`apiKey = ${?OPENAI_API_KEY}`); `TRACING_MODE` and
-`LANGFUSE_*` are bound by llm4s-core's `reference.conf`:
+`LANGFUSE_*` are bound by llm4s-core's `reference.conf`. Supply the key of **every** section in the
+deployed `application.conf`, not only the default's: with the file above, both
+`OPENAI_API_KEY` and `ANTHROPIC_API_KEY`, or `defaultProvider()` fails on the `claude` section
+([why](getting-started/configuration.md#problem-missing-required-fields-apikey)). If the deployment
+never uses Claude, ship a config without that section instead (see
+[Per-Environment Configuration](#per-environment-configuration)).
 
 ```yaml
 apiVersion: v1
@@ -158,6 +167,8 @@ metadata:
 type: Opaque
 stringData:
   OPENAI_API_KEY: <your-openai-key>
+  ANTHROPIC_API_KEY: <your-anthropic-key>   # the claude section is validated too
+  LANGFUSE_PUBLIC_KEY: <your-langfuse-public-key>
   LANGFUSE_SECRET_KEY: <your-langfuse-secret>
 ---
 apiVersion: apps/v1
@@ -171,8 +182,8 @@ spec:
             - secretRef:
                 name: llm4s-secrets
           env:
-            # Selects a section of application.conf through the app's own
-            # `provider = ${?LLM4S_PROVIDER}` binding (see above)
+            # Selects a section through the `provider = ${?LLM4S_PROVIDER}`
+            # binding in the application.conf above
             - name: LLM4S_PROVIDER
               value: "openai-main"
             - name: TRACING_MODE

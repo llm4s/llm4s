@@ -261,7 +261,8 @@ llm4s {
   Environment variables are read only through `${?VAR}`.
 - **Every section is validated on every load**: a section whose key variable is unset, or whose
   provider module is absent, fails `defaultProvider()` even when it is not the default.
-- Samples: `modules/samples/src/main/resources/application.conf` defaults to `ollama-local` and
+- Samples: `modules/samples/src/main/resources/application.conf` defaults to `ollama-local`
+  (model `llama3:latest` - `ollama pull llama3` first, or set `OLLAMA_MODEL`) and
   binds `LLM4S_PROVIDER`, `OLLAMA_MODEL` and `OLLAMA_BASE_URL` - the samples' bindings, not the
   library's. Add other sections in the git-ignored `application.local.conf` beside it.
 - Things that read `LLM_MODEL` themselves: the chat-tui sample (`ChatTuiConfig`) and the

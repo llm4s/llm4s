@@ -63,10 +63,16 @@ sbt "core/testOnly *PIIDetectorSpec"
 
 ### 6. How to run a sample
 The samples read `modules/samples/src/main/resources/application.conf`, whose default provider
-is a local Ollama section (`ollama-local`). With Ollama running, no setup is needed:
+is a local Ollama section (`ollama-local`) using the model `llama3:latest`. With Ollama running,
+pull that model once and run a sample:
 ```bash
+ollama pull llama3
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
+To use a model you already have instead, name it with `OLLAMA_MODEL` (the samples'
+`application.conf` binds it; `ollama list` shows what is installed), e.g.
+`export OLLAMA_MODEL=llama3.2`. `OLLAMA_BASE_URL` points at a server other than
+`http://localhost:11434`.
 To use a cloud provider, add a named section to
 `modules/samples/src/main/resources/application.local.conf` (ignored by git, included by the
 samples' `application.conf`) and select it with `LLM4S_PROVIDER`, which the samples'

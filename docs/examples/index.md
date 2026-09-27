@@ -1154,10 +1154,12 @@ sbt "samples/runMain <fully-qualified-class-name>"
 The samples load their provider with `Llm4sConfig.defaultProvider()`, from
 [`modules/samples/src/main/resources/application.conf`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/resources/application.conf).
 Nothing reads `LLM_MODEL` or `OPENAI_API_KEY` on its own. Out of the box the default is the
-`ollama-local` section, which `OLLAMA_MODEL` and `OLLAMA_BASE_URL` override:
+`ollama-local` section, using the model `llama3:latest`; `OLLAMA_MODEL` and `OLLAMA_BASE_URL`
+override it. Pull the default model once, or name one you already have (`ollama list`):
 
 ```bash
-export OLLAMA_MODEL=llama3.2
+ollama pull llama3                 # the samples' default model
+# or: export OLLAMA_MODEL=llama3.2 # a model already installed
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 

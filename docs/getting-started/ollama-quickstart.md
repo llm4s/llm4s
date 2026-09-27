@@ -577,8 +577,14 @@ section (model `llama3:latest`, server `http://localhost:11434`), and binds `OLL
 `OLLAMA_BASE_URL` to override it - those two variables are that file's bindings, not something
 the library reads. See [Running the samples](configuration#running-the-samples).
 
+The default model has to be pulled first; to use a model you already have instead, name it
+with `OLLAMA_MODEL` (`ollama list` shows what is installed):
+
 ```bash
-# Optional: override the samples' ollama-local section
+# Either pull the samples' default model once...
+ollama pull llama3
+
+# ...or override the samples' ollama-local section
 export OLLAMA_MODEL=mistral
 export OLLAMA_BASE_URL=http://localhost:11434
 

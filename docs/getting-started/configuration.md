@@ -231,6 +231,9 @@ defines one section, `ollama-local`, as the default, and binds three variables o
 These are the samples' bindings, not the library's: your own application reads them only if
 its `application.conf` binds them.
 
+With the default section, the model must be in your Ollama install: run `ollama pull llama3`
+once, or name a model you already have (`ollama list`) with `export OLLAMA_MODEL=<model>`.
+
 To run a sample against another provider, add a section to
 `modules/samples/src/main/resources/application.local.conf` - git-ignored and included by the
 samples' `application.conf` - and select it:

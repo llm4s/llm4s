@@ -80,7 +80,8 @@ val claude  = Llm4sConfig.provider("claude")  // any section, by name
 
 Every section under `llm4s.providers` is validated whenever a provider is loaded, so a section
 whose required `apiKey` variable is unset - or whose provider module is not on the classpath -
-fails the load even when it is not the default. Keep only the sections you can fill in. See
+fails the load even when it is not the default: the file above loads only when **both**
+`OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are set. Keep only the sections you can fill in. See
 [Named provider sections](../getting-started/configuration.md#named-provider-sections) and
 [Switching providers](../getting-started/configuration.md#switching-providers) for the full story.
 
@@ -568,6 +569,9 @@ llm4s {
   }
 }
 ```
+
+Both sections are shown together for brevity; every section is validated on each load, so this
+file needs both `OPENROUTER_API_KEY` and `ZAI_API_KEY` set. Keep only the one you use.
 
 OpenRouter maps `CompletionOptions.reasoning` onto the underlying model: a thinking budget for
 Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest.
