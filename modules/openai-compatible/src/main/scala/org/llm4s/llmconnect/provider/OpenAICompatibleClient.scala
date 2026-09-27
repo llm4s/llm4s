@@ -168,10 +168,12 @@ class OpenAICompatibleClient(
 
   private def renderRequest(conversation: Conversation, options: CompletionOptions, stream: Boolean): Result[String] =
     // An empty `messages` array is rejected by every chat-completions endpoint; saying so here
-    // costs no round trip and names the problem.
+    // costs no round trip and names the problem. The check is on the messages that will be
+    // sent, not the conversation: a dialect that drops empty assistant turns (Mistral) can
+    // reduce a non-empty conversation to nothing.
     Either
       .cond(
-        conversation.messages.nonEmpty,
+        sendableMessages(conversation).nonEmpty,
         (),
         ValidationError("conversation", s"${settings.displayName} requires at least one message")
       )
@@ -205,16 +207,24 @@ class OpenAICompatibleClient(
     }.toResult
 
   /**
-   * Builds the request body for `conversation`, without the `stream` flag.
-   * Scoped to the provider package so specs can inspect it.
+   * The messages of `conversation` that go into a request: all of them, except an assistant
+   * turn with neither text nor tool calls when the dialect does not send those
+   * ([[OpenAICompatibleDialect.sendEmptyAssistantTurns]]). Both the request body and the
+   * empty-conversation check use this, so they cannot disagree.
    */
-  protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
-    val sendable = conversation.messages.filterNot {
+  private def sendableMessages(conversation: Conversation): Seq[Message] =
+    conversation.messages.filterNot {
       case AssistantMessage(content, toolCalls) =>
         content.forall(_.isEmpty) && toolCalls.isEmpty && !dialect.sendEmptyAssistantTurns
       case _ => false
     }
-    val messages = sendable.map {
+
+  /**
+   * Builds the request body for `conversation`, without the `stream` flag.
+   * Scoped to the provider package so specs can inspect it.
+   */
+  protected[provider] def createRequestBody(conversation: Conversation, options: CompletionOptions): ujson.Obj = {
+    val messages = sendableMessages(conversation).map {
       case UserMessage(content) =>
         ujson.Obj("role" -> "user", "content" -> dialect.encodeContent(content))
       case SystemMessage(content) =>
