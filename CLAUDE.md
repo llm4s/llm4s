@@ -259,8 +259,10 @@ llm4s {
 
 - Precedence: `-D` system properties > `application.conf` > each module's `reference.conf`.
   Environment variables are read only through `${?VAR}`.
-- **Every section is validated on every load**: a section whose key variable is unset, or whose
-  provider module is absent, fails `defaultProvider()` even when it is not the default.
+- **Only the section being loaded is validated** (`ProviderSections.validated`): a section whose
+  key variable is unset, or whose provider module is absent, fails only a load of that section.
+  `Llm4sConfig.providers()` is the exception - it returns every section, so validates them all;
+  `providerConfigs()` reports each section's error separately.
 - Samples: `modules/samples/src/main/resources/application.conf` defaults to `ollama-local`
   (model `llama3:latest` - `ollama pull llama3` first, or set `OLLAMA_MODEL`) and
   binds `LLM4S_PROVIDER`, `OLLAMA_MODEL` and `OLLAMA_BASE_URL` - the samples' bindings, not the

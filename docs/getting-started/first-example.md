@@ -554,8 +554,8 @@ llm4s.providers {
 }
 ```
 
-Every section is validated on each load, so `OPENAI_API_KEY` must be set even while
-`ollama-local` is the default - or keep the sections in separate per-environment files.
+Only the section being loaded is validated, so `OPENAI_API_KEY` need not be set while
+`ollama-local` is the default - only where `openai-main` is selected.
 
 ### 6. Batch Embeddings
 

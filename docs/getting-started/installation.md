@@ -536,8 +536,8 @@ Response: LLM4S is working!
 1. Check the section binds the key: `apiKey = ${?OPENAI_API_KEY}`
 2. Check the variable is set in the shell that starts the JVM: `echo $OPENAI_API_KEY`
    (if you use a `.env` file, `source .env` first)
-3. Check every other section too - all of them are validated on each load, so an unused
-   section with an unset key fails as well
+3. Check the error names the section you meant to load - only that section is validated, so
+   if it names another, `llm4s.providers.provider` points somewhere you did not expect
 
 ### "Configured provider '...' was not found" or an unknown provider id
 

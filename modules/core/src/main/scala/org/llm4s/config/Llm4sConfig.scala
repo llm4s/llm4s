@@ -102,10 +102,15 @@ object Llm4sConfig {
   def providerConfigs()(using
     ProviderRegistry
   ): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
+    providerConfigs(ConfigSource.default)
+
+  private[config] def providerConfigs(source: ConfigSource)(using
+    ProviderRegistry
+  ): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
     for
-      service <- modelRegistryService()
+      service <- modelRegistryService(source)
       given ContextWindowResolver = ContextWindowResolver(service)
-      result <- org.llm4s.config.NamedProviderLoader.loadProviderConfigs(ConfigSource.default)
+      result <- org.llm4s.config.NamedProviderLoader.loadProviderConfigs(source)
     yield result
 
   def providerConfigs(
@@ -128,6 +133,11 @@ object Llm4sConfig {
 
   /**
    * Loads the full validated named-providers configuration from `llm4s.providers`.
+   *
+   * Every section is validated, so this fails if any one of them is invalid - a `${?VAR}` key
+   * left unset, a provider whose module is not on the classpath. Resolving one provider with
+   * [[provider(name)*]] or [[defaultProvider()*]] validates only that provider's section, and
+   * [[providerConfigs()*]] reports each section's problem separately.
    */
   def providers()(using ProviderRegistry): Result[ProvidersConfig] =
     org.llm4s.config.ProvidersConfigLoader.load(ConfigSource.default)
@@ -137,30 +147,33 @@ object Llm4sConfig {
 
   /**
    * Loads the configured default provider name from `llm4s.providers.provider`.
+   *
+   * Fails if no default is set or no section has that name. No section is validated.
    */
-  def defaultProviderName()(using ProviderRegistry): Result[ProviderName] =
-    providers().flatMap(_.defaultProviderName)
+  def defaultProviderName(): Result[ProviderName] =
+    defaultProviderName(ConfigSource.default)
 
-  private[config] def defaultProviderName(source: ConfigSource)(using ProviderRegistry): Result[ProviderName] =
-    providers(source).flatMap(_.defaultProviderName)
+  private[config] def defaultProviderName(source: ConfigSource): Result[ProviderName] =
+    org.llm4s.config.ProvidersConfigLoader.loadSections(source).flatMap(_.defaultProviderName)
 
   /**
    * Loads the configured default named provider as a runtime [[ProviderConfig]].
+   *
+   * Only the default section is validated: another section's problem does not fail this.
    */
   def defaultProvider()(using ProviderRegistry): Result[ProviderConfig] =
     defaultProvider(ConfigSource.default)
 
-  // The providers block is loaded (and validated, which logs its warnings) once, and both the
-  // default name and its section are read from that one result. Resolving the name with
-  // `defaultProviderName` and then the section with `NamedProviderLoader.load` validated the
-  // block twice, so every deprecated-alias and unknown-key warning printed twice.
+  // The providers block is read once, and both the default name and its section come from that
+  // one result. Only the default section is validated (#1132), so only its deprecated-alias and
+  // unknown-key warnings are logged, and a problem in any other section does not fail this.
   private[config] def defaultProvider(source: ConfigSource)(using ProviderRegistry): Result[ProviderConfig] =
     for
       service <- modelRegistryService(source)
       given ContextWindowResolver = ContextWindowResolver(service)
-      loaded <- providers(source)
-      name   <- loaded.defaultProviderName
-      config <- org.llm4s.config.NamedProviderLoader.select(loaded, name.asName)
+      sections <- org.llm4s.config.ProvidersConfigLoader.loadSections(source)
+      name     <- sections.defaultProviderName
+      config   <- org.llm4s.config.NamedProviderLoader.select(sections, name.asName)
     yield config
 
   /**
@@ -177,9 +190,9 @@ object Llm4sConfig {
     httpClient: Llm4sHttpClient
   )(using ProviderRegistry): Result[List[DiscoveredModel]] =
     for
-      loaded      <- providers(source)
-      defaultName <- loaded.defaultProviderName
-      models      <- listModels(defaultName.asName, loaded, httpClient)
+      sections    <- org.llm4s.config.ProvidersConfigLoader.loadSections(source)
+      defaultName <- sections.defaultProviderName
+      models      <- listModels(defaultName.asName, sections, httpClient)
     yield models
 
   /**
@@ -193,17 +206,15 @@ object Llm4sConfig {
     source: ConfigSource,
     httpClient: Llm4sHttpClient
   )(using ProviderRegistry): Result[List[DiscoveredModel]] =
-    providers(source).flatMap(listModels(name, _, httpClient))
+    org.llm4s.config.ProvidersConfigLoader.loadSections(source).flatMap(listModels(name, _, httpClient))
 
   private def listModels(
     name: String,
-    loaded: ProvidersConfig,
+    sections: ProviderSections,
     httpClient: Llm4sHttpClient
   )(using ProviderRegistry): Result[List[DiscoveredModel]] =
     for
-      namedProvider <- loaded.namedProviders
-        .get(ProviderName(name))
-        .toRight(org.llm4s.error.ConfigurationError(s"Configured provider '$name' was not found"))
+      namedProvider <- sections.validated(ProviderName(name))
       descriptor <- summon[ProviderRegistry].resolve(
         namedProvider.provider,
         Some(s"llm4s.providers.$name.provider")

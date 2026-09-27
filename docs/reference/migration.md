@@ -37,9 +37,13 @@ llm4s {
 
 Two things to know:
 
-- **Every section is validated on each load.** A section whose required `apiKey` is unset, or whose
-  provider module is not on the classpath, fails `defaultProvider()` even when it is not the
-  default. Keep only the sections each environment can fill in.
+- **Only the section you load is validated** (since
+  [#1132](https://github.com/llm4s/llm4s/issues/1132)'s follow-up; not in a release yet). A
+  section whose required `apiKey` is unset, or whose provider module is not on the classpath,
+  fails `provider("<that section>")` - and `defaultProvider()` when it is the default - but not
+  a load of any other section. Up to 0.4.1 every section was validated on every load, so each
+  environment had to fill in every section or ship a config without it. `Llm4sConfig.providers()`,
+  which returns every section, still validates them all.
 - **OpenAI embeddings do not see `OPENAI_API_KEY` either.** With
   `EMBEDDING_MODEL=openai/<model>` (which *is* bound, by llm4s-core's `reference.conf`), add
   `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}`.

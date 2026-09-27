@@ -89,14 +89,11 @@ llm4s {
 Each provider comes from its own module (`llm4s-openai`, `llm4s-anthropic`, ...); add the ones your
 sections name. On 0.4.1 and earlier they all ship inside `llm4s-core`.
 
-{: .warning }
-**Every section is validated on every load.** `Llm4sConfig.defaultProvider()` checks all sections
-under `llm4s.providers`, not only the default. A section whose required `apiKey` resolves to nothing
-because its variable is unset - or whose provider module is not on the classpath - fails the load
-even when it is not the one you asked for. The file above therefore needs **both**
-`OPENAI_API_KEY` and `ANTHROPIC_API_KEY` wherever it is deployed, even with `openai-main` as the
-default. Keep only the sections each environment can fill in (see
-[the troubleshooting note](getting-started/configuration.md#problem-missing-required-fields-apikey)).
+Only the section you load is validated. `Llm4sConfig.defaultProvider()` checks the default section
+and `Llm4sConfig.provider("claude")` checks `claude`; a section whose `apiKey` variable is unset, or
+whose provider module is not on the classpath, fails only when it is the one asked for. The file
+above can therefore be deployed with just `OPENAI_API_KEY` set while `openai-main` is the default.
+(Up to 0.4.1 every section was validated on every load, so it needed both keys.)
 
 ### Per-Environment Configuration
 
@@ -112,8 +109,8 @@ Pick the provider per environment without changing code:
   }
   ```
 
-- **Ship one file per environment** and select it at startup, so each holds only the sections that
-  environment has keys for:
+- **Ship one file per environment** and select it at startup, if you prefer each environment's
+  file to hold only the sections it uses:
 
   ```bash
   java -Dconfig.resource=prod.conf -jar app.jar        # src/main/resources/prod.conf
@@ -152,12 +149,9 @@ This pattern makes testing easier and keeps configuration concerns at the edges.
 
 For Kubernetes deployments, use Secrets and reference them in your pod spec. The variable names are
 the ones your `application.conf` binds (`apiKey = ${?OPENAI_API_KEY}`); `TRACING_MODE` and
-`LANGFUSE_*` are bound by llm4s-core's `reference.conf`. Supply the key of **every** section in the
-deployed `application.conf`, not only the default's: with the file above, both
-`OPENAI_API_KEY` and `ANTHROPIC_API_KEY`, or `defaultProvider()` fails on the `claude` section
-([why](getting-started/configuration.md#problem-missing-required-fields-apikey)). If the deployment
-never uses Claude, ship a config without that section instead (see
-[Per-Environment Configuration](#per-environment-configuration)).
+`LANGFUSE_*` are bound by llm4s-core's `reference.conf`. Supply the key of each section the
+deployment loads: with the file above and `openai-main` as the default, `OPENAI_API_KEY`, plus
+`ANTHROPIC_API_KEY` if it also calls `Llm4sConfig.provider("claude")`.
 
 ```yaml
 apiVersion: v1

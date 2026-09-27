@@ -70,7 +70,8 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
         case Right(cfg)  => fail(s"Expected the fixture provider's own error, got $cfg")
     }
 
-    "fail when a sibling named provider is invalid even if the requested provider is valid" in {
+    // This used to fail the whole config (#1132); ProviderSectionIsolationSpec covers it in full.
+    "load the requested provider even when a sibling named provider is invalid" in {
       val hocon =
         """
           |llm4s {
@@ -91,13 +92,17 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
       val result = Llm4sConfig.provider(ConfigSource.string(hocon), "fixturechat-primary")
 
       result match
+        case Right(fixture: FixtureChatConfig) => fixture.apiKey shouldBe "named-fixture-key"
+        case other => fail(s"Expected the valid provider despite its invalid sibling, got $other")
+
+      Llm4sConfig.provider(ConfigSource.string(hocon), "broken-fixturechat") match
         case Left(err) =>
           err.message should include(
             "Provider 'broken-fixturechat' (provider = fixturechat) is missing required fields"
           )
           err.message should include("- apiKey: set it in llm4s.conf under providers.broken-fixturechat.apiKey")
         case Right(cfg) =>
-          fail(s"Expected invalid sibling named provider to fail whole config, got config: $cfg")
+          fail(s"Expected the invalid provider itself to fail, got config: $cfg")
     }
 
     "load the full validated providers config" in {

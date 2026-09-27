@@ -704,9 +704,9 @@ docker-compose exec ollama ollama pull llama2
 > }
 > ```
 >
-> then set `provider = "openai-main"` (or `-Dllm4s.providers.provider=openai-main`). Keep only
-> sections whose keys are set in that environment: every section is validated on load. See
-> [Switching providers](configuration#switching-providers).
+> then set `provider = "openai-main"` (or `-Dllm4s.providers.provider=openai-main`). Only the
+> selected section is validated, so `OPENAI_API_KEY` is needed only where `openai-main` is used.
+> See [Switching providers](configuration#switching-providers).
 >
 > Your code stays exactly the same! 🎉
 

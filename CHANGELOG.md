@@ -667,6 +667,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binds, and say where a tool reads `LLM_MODEL` itself (the chat-tui sample, the config-policy env
   check). `DocumentedProviderConfigSpec` loads the documented configuration. See the
   [migration note](docs/reference/migration.md#from-llm_model-to-named-provider-sections).
+- **One bad provider section broke every provider.** Every section under `llm4s.providers` was
+  validated on every load, so a section whose `${?VAR}` API key was unset, whose provider module
+  was not on the classpath, or which had a key of the wrong type failed `defaultProvider()`,
+  `provider(name)`, `defaultProviderName()` and `listModels` for every section: a config holding
+  `openai-main` and `anthropic-main` could not load either with only `OPENAI_API_KEY` set. Only
+  the section being loaded is validated now, and a section that cannot even be read fails only
+  its own lookups; the error still names the section. `providerConfigs()` reports each section's
+  problem in its error map instead of failing whole. `providers()`, which returns every section,
+  still validates them all, and a providers block that is not an object - or a default naming no
+  section - still fails every lookup. As a consequence only the loaded section's
+  deprecated-alias and unknown-key warnings are logged. Source break: `defaultProviderName()`
+  no longer takes a `ProviderRegistry`, since reading a name needs none; drop an explicit
+  `(using registry)` argument ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
 - **Every provider-config warning was logged twice** by `Llm4sConfig.defaultProvider`,
   `providerFrom` and the default-provider `listModels`: they read the default provider's name and
   then its section through two separate loads of `llm4s.providers`, and each load validated the

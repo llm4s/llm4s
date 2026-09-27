@@ -78,10 +78,10 @@ val default = Llm4sConfig.defaultProvider()   // openai-main
 val claude  = Llm4sConfig.provider("claude")  // any section, by name
 ```
 
-Every section under `llm4s.providers` is validated whenever a provider is loaded, so a section
-whose required `apiKey` variable is unset - or whose provider module is not on the classpath -
-fails the load even when it is not the default: the file above loads only when **both**
-`OPENAI_API_KEY` and `ANTHROPIC_API_KEY` are set. Keep only the sections you can fill in. See
+Only the section being loaded is validated, so a section whose required `apiKey` variable is
+unset - or whose provider module is not on the classpath - fails only when it is loaded: with
+the file above and just `OPENAI_API_KEY` set, `defaultProvider()` succeeds and
+`provider("claude")` fails with an error naming `claude`'s `apiKey`. See
 [Named provider sections](../getting-started/configuration.md#named-provider-sections) and
 [Switching providers](../getting-started/configuration.md#switching-providers) for the full story.
 
@@ -570,8 +570,8 @@ llm4s {
 }
 ```
 
-Both sections are shown together for brevity; every section is validated on each load, so this
-file needs both `OPENROUTER_API_KEY` and `ZAI_API_KEY` set. Keep only the one you use.
+Both sections are shown together for brevity. Only the section you load is validated, so only
+its key - `OPENROUTER_API_KEY` or `ZAI_API_KEY` - needs to be set.
 
 OpenRouter maps `CompletionOptions.reasoning` onto the underlying model: a thinking budget for
 Claude models, `reasoning_effort` for OpenAI o-series models, nothing for the rest.
@@ -1466,8 +1466,9 @@ for {
 } yield primary.complete(conversation).orElse(fallback.complete(conversation))
 ```
 
-Every section must be loadable - its required keys bound - because all of them are validated
-whenever one is loaded. See [Switching providers](../getting-started/configuration.md#switching-providers).
+Each section is validated when it is loaded, so here both must have their required keys bound;
+a problem in either surfaces as the `Left` of this `for`. See
+[Switching providers](../getting-started/configuration.md#switching-providers).
 
 This enables:
 - **Fallback logic** - Use OpenAI, fall back to Anthropic

@@ -1186,8 +1186,8 @@ export LLM4S_PROVIDER=openai-main
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
-Every section in the file is validated whenever one is loaded, so only add sections whose keys
-you have set. See [Configuration](../getting-started/configuration.md#running-the-samples) for more.
+Only the section being loaded is validated, so a section whose key you have not set does no
+harm until you select it. See [Configuration](../getting-started/configuration.md#running-the-samples) for more.
 
 The chat-tui sample is the exception: `ChatTuiConfig` reads `LLM_MODEL=<provider>/<model>` and
 the matching API-key variable itself, and falls back to `Llm4sConfig.defaultProvider()` when

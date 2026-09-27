@@ -123,7 +123,8 @@ Other `Llm4sConfig` calls read the same sections:
 ```scala
 Llm4sConfig.provider("openai-main")   // any section, by name
 Llm4sConfig.defaultProviderName()     // the value of llm4s.providers.provider
-Llm4sConfig.providers()               // every section, validated
+Llm4sConfig.providers()               // every section, validated - fails if any one is invalid
+Llm4sConfig.providerConfigs()         // every section, each loaded or failed on its own
 Llm4sConfig.listModels()              // model discovery for the default section
 Llm4sConfig.listModels("openai-main") // ... or for a named one
 ```
@@ -181,11 +182,14 @@ llm4s {
 }
 ```
 
-**Every section is validated whenever any provider is loaded.** A section whose `apiKey`
-variable is unset, or whose provider module is not on the classpath, makes
-`defaultProvider()` fail even when it is not the default. Keep only the sections you can fill
-in every environment the file is used in - the example above loads only when
-`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `AZURE_API_KEY` and `AZURE_API_BASE` are all set.
+**Only the section you load is validated.** A section whose `apiKey` variable is unset, or
+whose provider module is not on the classpath, fails when it is loaded - by
+`provider("<name>")`, or by `defaultProvider()` when it is the default - and not otherwise.
+With the example above and `ANTHROPIC_API_KEY` alone set, `defaultProvider()` loads `claude`
+while `provider("gemini-main")` fails with a `ConfigurationError` naming `gemini-main`'s
+`apiKey`. The exception is `Llm4sConfig.providers()`, which returns every section and so
+validates them all; `Llm4sConfig.providerConfigs()` instead reports each section's error
+separately. (Up to 0.4.1 every section was validated on every load.)
 
 ---
 
@@ -212,8 +216,9 @@ provider, point `llm4s.providers.provider` at another section:
 
 For per-environment setups (local Ollama in development, a cloud provider in production), keep
 one file per environment - `application.conf` plus `prod.conf` that starts with
-`include "application.conf"` - and pick one with `-Dconfig.resource=prod.conf`. That also keeps
-each file's sections fillable, per the validation rule above.
+`include "application.conf"` - and pick one with `-Dconfig.resource=prod.conf`. This is a
+matter of taste, not a requirement: a section an environment has no key for does no harm
+there unless it is loaded.
 
 ---
 
@@ -596,8 +601,8 @@ in [#903](https://github.com/llm4s/llm4s/issues/903).
 ## Environment-specific configuration
 
 Keep the provider structure in HOCON and inject secrets from the environment. One
-`application.conf` can serve every environment when each section's variables are set in each,
-or you can keep one file per environment:
+`application.conf` can serve every environment, since only the selected section's variables need
+to be set, or you can keep one file per environment:
 
 ```hocon
 # src/main/resources/application.conf - development
@@ -729,9 +734,12 @@ ConfigurationError: Provider 'openai-main' (provider = openai) is missing requir
 1. The section has no `apiKey` line, or binds a variable that is not set in this process
 2. You set `OPENAI_API_KEY` (or `LLM_MODEL`) expecting llm4s to read it - it reads only the
    variables your `application.conf` binds
-3. The failing section is not the default one: **every** section is validated, so an unused
-   section with an unset key fails too
-4. `.env` file not loaded in the shell that starts the JVM
+3. `.env` file not loaded in the shell that starts the JVM
+
+The error names the section it is about, and only a section being loaded is validated. If it
+names a section you did not ask for, check `llm4s.providers.provider` (and any
+`-Dllm4s.providers.provider` override): that is the section `defaultProvider()` loads. The one
+call that validates every section is `Llm4sConfig.providers()`.
 
 **Debug steps:**
 ```bash

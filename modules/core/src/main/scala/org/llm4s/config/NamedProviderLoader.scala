@@ -7,7 +7,12 @@ import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.*
 import pureconfig.ConfigSource
 
-/** Loads and resolves a named provider's `ProviderConfig` from a `ConfigSource`. */
+/**
+ * Loads and resolves a named provider's `ProviderConfig` from a `ConfigSource`.
+ *
+ * Only the section being resolved is validated (#1132): another section's missing API key,
+ * unregistered provider or unreadable key fails lookups of that section and nothing else.
+ */
 private[config] object NamedProviderLoader:
 
   /**
@@ -23,20 +28,20 @@ private[config] object NamedProviderLoader:
   ): Result[ProviderConfig] =
     if providerName.trim.isEmpty then
       Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
-    else ProvidersConfigLoader.load(source).flatMap(select(_, providerName))
+    else ProvidersConfigLoader.loadSections(source).flatMap(select(_, providerName))
 
   /**
-   * Builds the `ProviderConfig` for a single named provider from an already-loaded providers block.
+   * Builds the `ProviderConfig` for a single named provider from an already-read providers block,
+   * validating that section and no other.
    *
    * Callers that need the block for something else as well - the default provider's name, say -
-   * load it once and pass it here, rather than calling [[load]] and so validating it a second
-   * time: every validation logs the block's warnings, so a second pass prints each one twice.
+   * read it once and pass it here, rather than calling [[load]] and so reading it a second time.
    *
-   *  @param providers    the validated providers block
+   *  @param sections     the providers block, as read
    *  @param providerName the name of the provider entry to look up
    *  @return `Right(ProviderConfig)` on success, or `Left` with a `ConfigurationError`
    */
-  def select(providers: ProvidersConfig, providerName: String)(using
+  def select(sections: ProviderSections, providerName: String)(using
     ContextWindowResolver,
     ProviderRegistry
   ): Result[ProviderConfig] =
@@ -44,14 +49,16 @@ private[config] object NamedProviderLoader:
     if trimmed.isEmpty then Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
     else
       for
-        normalized <- providers.namedProviders
-          .get(ProviderName(trimmed))
-          .toRight(ConfigurationError(s"Configured provider '$trimmed' was not found"))
-        config <- buildConfigFromNamedConfig(trimmed, normalized)
+        normalized <- sections.validated(ProviderName(trimmed))
+        config     <- buildConfigFromNamedConfig(trimmed, normalized)
       yield config
 
   /**
    * Loads all named provider configs from the given config source, returning errors and successes separately.
+   *
+   * Each section is read, validated and built on its own, so one that fails at any of those
+   * steps is reported in the error map and does not stop the others loading. Only a providers
+   * block that cannot be read at all is a `Left`.
    *
    *  @param source the PureConfig source to read from
    *  @return `Right` of a pair: failed entries mapped to their errors, and successful entries mapped to their configs
@@ -62,11 +69,15 @@ private[config] object NamedProviderLoader:
     ContextWindowResolver,
     ProviderRegistry
   ): Result[(Map[ProviderName, LLMError], Map[ProviderName, ProviderConfig])] =
-    for
-      providers <- ProvidersConfigLoader.load(source)
-      namedProviders = providers.namedProviders
-      r              = getProviderConfigs(namedProviders)
-    yield r
+    ProvidersConfigLoader.loadSections(source).map { sections =>
+      val results = sections.sections.keys.toList.map { name =>
+        name -> sections.validated(name).flatMap(buildConfigFromNamedConfig(name.asName, _))
+      }
+      (
+        results.collect { case (name, Left(error)) => name -> error }.toMap,
+        results.collect { case (name, Right(config)) => name -> config }.toMap
+      )
+    }
 
   /**
    * Converts a map of validated named provider configs into separate error and success maps.

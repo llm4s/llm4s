@@ -4,7 +4,7 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.spi.ProviderConfigSpec
 import org.llm4s.types.Result
 import org.llm4s.config.ProvidersConfigModel.{ ProviderName, RawNamedProviderSection, RawProvidersConfig }
-import pureconfig.error.{ ConfigReaderFailures, UserValidationFailed }
+import pureconfig.error.{ ConfigReaderFailures, ConvertFailure, UserValidationFailed }
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 
 import scala.jdk.CollectionConverters.*
@@ -69,54 +69,91 @@ private[config] object RawProvidersConfigLoader:
       yield builtins.copy(extras = extras)
     }
 
-  private given rawProvidersConfigReader: PureConfigReader[RawProvidersConfig] =
+  /** The block as read, each section's read failure kept to that section. */
+  final private case class RawSections(
+    selectedProvider: Option[ProviderName],
+    sections: Map[ProviderName, Either[ConfigReaderFailures, RawNamedProviderSection]]
+  )
+
+  /**
+   * Reads each named section on its own, so a section that cannot be read - a key of the wrong
+   * type, a value that is not an object - fails only that section (#1132). Only the block's own
+   * shape (`llm4s.providers` not an object, `llm4s.providers.provider` not a string) fails the
+   * whole read.
+   */
+  private given rawSectionsReader: PureConfigReader[RawSections] =
     PureConfigReader.fromCursor { cursor =>
       cursor.asObjectCursor.flatMap { objCursor =>
-        def readOptionalString(key: String): Either[ConfigReaderFailures, Option[String]] =
-          val keyCursor = objCursor.atKeyOrUndefined(key)
-          if keyCursor.isUndefined then Right(None)
-          else keyCursor.asString.map(value => Option(value.trim).filter(_.nonEmpty))
+        val selectedKey = objCursor.atKeyOrUndefined("provider")
+        val selectedProvider =
+          if selectedKey.isUndefined then Right(None)
+          else selectedKey.asString.map(value => Option(value.trim).filter(_.nonEmpty).map(ProviderName.apply))
 
-        val selectedProviderEither =
-          readOptionalString("provider").map(_.map(ProviderName.apply))
-
-        val namedProvidersEither =
+        val sections =
           objCursor.objValue
             .keySet()
             .asScala
             .toList
             .filterNot(_ == "provider")
-            .foldLeft[Either[ConfigReaderFailures, Map[ProviderName, RawNamedProviderSection]]](Right(Map.empty)) {
-              case (accEither, key) =>
-                for
-                  acc       <- accEither
-                  keyCursor <- objCursor.atKey(key)
-                  entry     <- namedProviderSectionReader.from(keyCursor)
-                yield acc.updated(ProviderName(key), entry)
-            }
+            .map(key => ProviderName(key) -> objCursor.atKey(key).flatMap(namedProviderSectionReader.from))
+            .toMap
 
-        for
-          selectedProvider <- selectedProviderEither
-          namedProviders   <- namedProvidersEither
-        yield RawProvidersConfig(
-          selectedProvider = selectedProvider,
-          namedProviders = namedProviders,
-        )
+        selectedProvider.map(RawSections(_, sections))
       }
     }
 
   /**
    * Reads the `llm4s.providers` config block and returns an unvalidated `RawProvidersConfig`.
    *
+   * Fails if any section cannot be read. Resolving a single section goes through
+   * [[loadSections]] instead, which confines a section's read failure to that section.
+   *
    *  @param source the PureConfig source to read from
    *  @return `Right(RawProvidersConfig)` on success, or `Left` with a `ConfigurationError`
    */
   def load(source: ConfigSource): Result[RawProvidersConfig] =
-    source
-      .at("llm4s.providers")
-      .load[RawProvidersConfig]
-      .left
-      .map { failures =>
-        val msg = failures.toList.map(_.description).mkString("; ")
-        ConfigurationError(s"Failed to load raw providers config via PureConfig: $msg")
+    read(source).flatMap { raw =>
+      raw.sections.values.collect { case Left(failures) => failures }.reduceOption(_ ++ _) match
+        case Some(failures) => Left(loadError(failures))
+        case None =>
+          Right(
+            RawProvidersConfig(
+              selectedProvider = raw.selectedProvider,
+              namedProviders = raw.sections.collect { case (name, Right(section)) => name -> section }
+            )
+          )
+    }
+
+  /**
+   * Reads the `llm4s.providers` config block, keeping each section's read failure to that section.
+   *
+   *  @param source the PureConfig source to read from
+   *  @return `Right` with each section read or failed on its own, or `Left` when the block itself is unreadable
+   */
+  def loadSections(source: ConfigSource): Result[ProviderSections] =
+    read(source).map { raw =>
+      ProviderSections(
+        selectedProvider = raw.selectedProvider,
+        sections = raw.sections.map { case (name, section) =>
+          name -> section.left.map { failures =>
+            ConfigurationError(s"Failed to read llm4s.providers.${name.asName}: ${describe(failures)}")
+          }
+        }
+      )
+    }
+
+  private def read(source: ConfigSource): Result[RawSections] =
+    source.at("llm4s.providers").load[RawSections].left.map(loadError)
+
+  private def loadError(failures: ConfigReaderFailures): ConfigurationError =
+    ConfigurationError(s"Failed to load raw providers config via PureConfig: ${describe(failures)}")
+
+  // A failure's description alone ("Expected type NUMBER. Found STRING instead.") does not say
+  // which key it is about, so the path is shown when there is one.
+  private def describe(failures: ConfigReaderFailures): String =
+    failures.toList
+      .map {
+        case failure: ConvertFailure if failure.path.nonEmpty => s"${failure.path}: ${failure.description}"
+        case failure                                          => failure.description
       }
+      .mkString("; ")
