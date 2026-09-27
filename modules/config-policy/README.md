@@ -25,12 +25,23 @@ explicitly, and pin the endpoints and models it may use:
 ```scala
 val policy = ConfigPolicy.prodSafeDefaults
   .withAllowedProviders("openai", "anthropic", "azure", "gemini", "deepseek", "openai-compatible")
-  .withAllowedModelPatterns("openai-compatible/llama-3.3-70b-versatile")
-  .withRequiredBaseUrlPattern(CatalogEnvironment.Prod, "https://api\\.groq\\.com/.*")
+  .withAllowedModelPatterns(
+    "^openai/gpt-4o(-mini)?$", // ...and the other preset patterns you still need
+    "^openai-compatible/openai/gpt-oss-120b$"
+  )
+  .withRequiredBaseUrlPattern(
+    CatalogEnvironment.Prod,
+    "^https://(api\\.openai\\.com/v1|api\\.groq\\.com/openai/v1)$"
+  )
 ```
 
 Note that `withAllowedProviders` and `withAllowedModelPatterns` replace the preset's lists rather
-than adding to them, so repeat the entries you want to keep.
+than adding to them, so repeat the entries you want to keep. Patterns are unanchored regular
+expressions matched against `<provider>/<model>`, so anchor them. The base-URL pattern is one
+per environment and is checked against every provider's config in that environment, not only
+`openai-compatible`'s, so it must name every endpoint you use. Both presets cap `contextWindow` at
+128000. Per-provider recipes are in the
+[providers guide](../../docs/guide/providers.md#openai-compatible-endpoints).
 
 ## Run locally
 
