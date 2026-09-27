@@ -41,15 +41,17 @@ object ItTiers {
     // annotations, and sbt's own loader must not shadow either of them.
     val loader = new URLClassLoader(classpath.map(_.toURI.toURL).toArray, ClassLoader.getPlatformClassLoader)
     val rows =
-      try suites.sorted.map { suite =>
-        val tiers = loader
-          .loadClass(suite)
-          .getAnnotations
-          .map(_.annotationType.getName)
-          .filter(all.contains)
-          .toSeq
-        suite -> tiers
-      } finally loader.close()
+      try
+        suites.sorted.map { suite =>
+          val tiers = loader
+            .loadClass(suite)
+            .getAnnotations
+            .map(_.annotationType.getName)
+            .filter(all.contains)
+            .toSeq
+          suite -> tiers
+        }
+      finally loader.close()
 
     if (rows.isEmpty)
       throw new MessageOnlyException("No integration suites were discovered in modules/it - is the module compiling?")

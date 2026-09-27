@@ -15,12 +15,12 @@ useReadableConsoleGit
 
 inThisBuild(
   List(
-    scalaVersion       := scala3,
-    organization       := "org.llm4s",
-    organizationName   := "llm4s",
-    versionScheme      := Some("early-semver"),
-    homepage := Some(url("https://github.com/llm4s/")),
-    licenses := List("MIT" -> url("https://mit-license.org/")),
+    scalaVersion     := scala3,
+    organization     := "org.llm4s",
+    organizationName := "llm4s",
+    versionScheme    := Some("early-semver"),
+    homepage         := Some(url("https://github.com/llm4s/")),
+    licenses         := List("MIT" -> url("https://mit-license.org/")),
     developers := List(
       Developer(
         "rorygraves",
@@ -59,8 +59,8 @@ inThisBuild(
     // `coverageFloor(n)` or `coverageDisabled` (see project/Dependencies.scala -> Coverage).
     // This build-level default is the "no decision made" marker that `coveragePolicyCheck`
     // fails on, so a newly carved module cannot silently inherit somebody else's threshold.
-    ThisBuild / coveragePolicy           := Coverage.Policy.Undeclared,
-    ThisBuild / coverageHighlighting     := true,
+    ThisBuild / coveragePolicy       := Coverage.Policy.Undeclared,
+    ThisBuild / coverageHighlighting := true,
     ThisBuild / coverageExcludedPackages := Seq(
       "org\\.llm4s\\.runner\\..*",
       "org\\.llm4s\\.samples\\..*",
@@ -119,12 +119,12 @@ lazy val commonSettings = Seq(
   Test / scalacOptions    := scalacOptionsForVersion(scalaVersion.value),
   // Suppress ScalaDoc warnings from third-party libraries (e.g., ScalaTest)
   Compile / doc / scalacOptions ++= Seq("-Wconf:cat=scaladoc:silent"),
-  semanticdbEnabled       := true,
-  Test / scalafix / unmanagedSources := Seq.empty,
+  semanticdbEnabled                      := true,
+  Test / scalafix / unmanagedSources     := Seq.empty,
   Compile / packageDoc / publishArtifact := !isSnapshot.value,
   // Disable test Scaladoc generation during publish (not needed, saves memory in CI)
   Test / packageDoc / publishArtifact := false,
-  Test / doc / sources := Seq.empty,
+  Test / doc / sources                := Seq.empty,
   libraryDependencies ++= Seq(
     Deps.cats,
     Deps.upickle,
@@ -132,8 +132,8 @@ lazy val commonSettings = Seq(
     Deps.log4jToSlf4j,
     Deps.monocleCore,
     Deps.monocleMacro,
-    Deps.scalatest % Test,
-    Deps.scalamock % Test,
+    Deps.scalatest               % Test,
+    Deps.scalamock               % Test,
     Deps.scalatestplusScalacheck % Test,
     Deps.fansi,
     Deps.config,
@@ -256,7 +256,7 @@ lazy val media = (project in file("modules/media"))
     // Measured 100.00% statement coverage (`sbt coverage media/test media/coverageReport`).
     // A dependency-free vocabulary with no I/O has no excuse for less. Never lower it.
     coverageFloor(100),
-    Test / fork := true,
+    Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -285,7 +285,8 @@ lazy val core = (project in file("modules/core"))
     coverageFloor(70),
     Test / fork := true,
     Test / javaOptions ++= Seq(
-      "-Xmx2g", "-Xms512m",
+      "-Xmx2g",
+      "-Xms512m",
       "-XX:+UseG1GC",
       "-XX:+TieredCompilation",
       "-XX:TieredStopAtLevel=1"
@@ -309,10 +310,12 @@ lazy val core = (project in file("modules/core"))
     },
     Test / testOptions += Tests.Argument(
       TestFrameworks.ScalaTest,
-      "-l", "org.llm4s.tags.OllamaRequired",
-      "-l", "org.llm4s.tags.CloudSmoke"
+      "-l",
+      "org.llm4s.tags.OllamaRequired",
+      "-l",
+      "org.llm4s.tags.CloudSmoke"
     ),
-    Compile / mainClass := None,
+    Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
       Deps.jtokkit,
@@ -362,7 +365,8 @@ lazy val rag = (project in file("modules/rag"))
     coverageFloor(65),
     Test / fork := true,
     Test / javaOptions ++= Seq(
-      "-Xmx2g", "-Xms512m",
+      "-Xmx2g",
+      "-Xms512m",
       "-XX:+UseG1GC",
       "-XX:+TieredCompilation",
       "-XX:TieredStopAtLevel=1"
@@ -406,7 +410,7 @@ lazy val memory = (project in file("modules/memory"))
     // on the code as carved out of core. Floor is the measured value rounded down to the
     // nearest 5. Never lower it.
     coverageFloor(80),
-    Test / fork := true,
+    Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -429,7 +433,7 @@ lazy val memoryPostgres = (project in file("modules/memory-postgres"))
     // the real signal is `modules/it`'s `PostgresMemoryStoreSpec`, which runs on every PR
     // against a pgvector service container (#1149) and is not counted here.
     coverageFloor(60),
-    Test / fork := true,
+    Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -455,7 +459,7 @@ lazy val mcp = (project in file("modules/mcp"))
     // code as carved out of core. Floor is the measured value rounded down to the nearest 5.
     // Never lower it.
     coverageFloor(70),
-    Test / fork := true,
+    Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -496,7 +500,7 @@ lazy val speech = (project in file("modules/speech"))
     // the code as carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it.
     coverageFloor(80),
-    Test / fork := true,
+    Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -519,7 +523,7 @@ lazy val image = (project in file("modules/image"))
     // the code as carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it. The two `@Local` vision suites in `modules/it` are not counted here.
     coverageFloor(65),
-    Test / fork := true,
+    Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -552,7 +556,7 @@ lazy val ollama = (project in file("modules/ollama"))
     // the code as carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it. The `@Ollama` suite in `modules/it` is not counted here.
     coverageFloor(75),
-    Test / fork := true,
+    Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -579,7 +583,7 @@ lazy val gemini = (project in file("modules/gemini"))
     // the code as carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it. The `@Cloud` Gemini smoke suite in `modules/it` is not counted here.
     coverageFloor(85),
-    Test / fork := true,
+    Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -603,7 +607,7 @@ lazy val anthropic = (project in file("modules/anthropic"))
     // on the code as carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it. The `@Cloud` Anthropic smoke suite in `modules/it` is not counted here.
     coverageFloor(80),
-    Test / fork := true,
+    Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -632,7 +636,7 @@ lazy val openaiCompatible = (project in file("modules/openai-compatible"))
     // rounded down to the nearest 5. Never lower it. The `@Cloud` DeepSeek, OpenRouter and Cohere
     // smoke suites in `modules/it` are not counted here.
     coverageFloor(90),
-    Test / fork := true,
+    Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -656,7 +660,7 @@ lazy val voyage = (project in file("modules/providers/voyage"))
     // on the code as carved out of core. Floor is the measured value rounded down to the nearest
     // 5. Never lower it.
     coverageFloor(85),
-    Test / fork := true,
+    Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -688,7 +692,7 @@ lazy val openai = (project in file("modules/openai"))
     // the nearest 5. Never lower it. `OpenAIEmbeddingProvider`'s HTTP client is still the thin
     // spot. The `@Cloud` OpenAI smoke suite in `modules/it` is not counted here.
     coverageFloor(70),
-    Test / fork := true,
+    Test / fork                     := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
@@ -761,7 +765,23 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
   .settings(WorkspaceRunnerDocker.settings)
 
 lazy val samples = (project in file("modules//samples"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, voyage, knowledgegraphNeo4j)
+  .dependsOn(
+    core,
+    rag,
+    knowledgegraph,
+    memory,
+    memoryPostgres,
+    mcp,
+    image,
+    speech,
+    ollama,
+    gemini,
+    anthropic,
+    openai,
+    openaiCompatible,
+    voyage,
+    knowledgegraphNeo4j
+  )
   .settings(
     name := "llm4s-samples",
     commonSettings,
@@ -789,8 +809,8 @@ lazy val configPolicy = (project in file("modules/config-policy"))
     // Env-var-based engine CLI (EnvCheckPolicies) calls sys.exit, so its runMain
     // is forked. Keep the forked working directory at the repo root so the
     // catalog engine's relative --config paths (CheckPolicies) still resolve.
-    run / fork  := true,
-    Test / fork := true,
+    run / fork          := true,
+    Test / fork         := true,
     run / baseDirectory := (LocalRootProject / baseDirectory).value,
     // Both engines compile here; Deps.config is also available transitively via core.
     libraryDependencies += Deps.config,
@@ -828,9 +848,9 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
 lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
   .dependsOn(core, knowledgegraph)
   .settings(
-    name             := "llm4s-knowledgegraph-neo4j",
+    name := "llm4s-knowledgegraph-neo4j",
     commonSettings,
-    Test / fork      := true,
+    Test / fork := true,
     libraryDependencies ++= Seq(
       Deps.neo4jDriver,
       Deps.scalatest % Test
@@ -853,7 +873,25 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
 // the plain `okhttp:5.x` artifact is an empty stub for Maven/sbt consumers (the classes are in
 // `okhttp-jvm`), so a dependencyOverrides bump of `okhttp` to 5.x would drop the classes.
 lazy val it = (project in file("modules/it"))
-  .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, voyage, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
+  .dependsOn(
+    core,
+    rag,
+    knowledgegraph,
+    memory,
+    memoryPostgres,
+    mcp,
+    image,
+    speech,
+    ollama,
+    gemini,
+    anthropic,
+    openai,
+    openaiCompatible,
+    voyage,
+    knowledgegraphNeo4j,
+    workspaceClient,
+    traceOpentelemetry
+  )
   .settings(
     name := "llm4s-it",
     commonSettings,
@@ -905,9 +943,29 @@ lazy val it = (project in file("modules/it"))
 // A module is listed here if and only if it is published. When a slice adds one, add it in
 // the same commit, or its API silently vanishes from the site.
 lazy val docs = (project in file("modules/docs"))
-  .dependsOn(media, core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, voyage, workspaceShared, workspaceClient, traceOpentelemetry, knowledgegraphNeo4j)
+  .dependsOn(
+    media,
+    core,
+    rag,
+    knowledgegraph,
+    memory,
+    memoryPostgres,
+    mcp,
+    image,
+    speech,
+    ollama,
+    gemini,
+    anthropic,
+    openai,
+    openaiCompatible,
+    voyage,
+    workspaceShared,
+    workspaceClient,
+    traceOpentelemetry,
+    knowledgegraphNeo4j
+  )
   .settings(
-    name           := "llm4s-docs",
+    name := "llm4s-docs",
     commonSettings,
     publish / skip := true,
     // Not measured: no sources of its own - it exists only to host the aggregate `doc` task.
@@ -941,7 +999,7 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
   .dependsOn(core, rag)
   .enablePlugins(JmhPlugin)
   .settings(
-    name           := "llm4s-benchmarks",
+    name := "llm4s-benchmarks",
     commonSettings,
     publish / skip := true,
     // Measured 100.00% statement/branch coverage (`sbt coverage benchmarks/test

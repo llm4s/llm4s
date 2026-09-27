@@ -86,8 +86,9 @@ jobs:
       
       - uses: sbt/setup-sbt@v1
       
+      # scalafmtCheckAll covers sources only; scalafmtSbtCheck covers build.sbt and project/*.scala.
       - name: Check formatting
-        run: sbt scalafmtCheckAll
+        run: sbt scalafmtCheckAll scalafmtSbtCheck
 
       - name: Run Scalafix
         run: sbt scalafixAll
