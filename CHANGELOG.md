@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A contributing guide for OpenAI-compatible providers**:
+  [CONTRIBUTING.md](CONTRIBUTING.md#adding-an-openai-compatible-provider-a-dialect) now covers
+  checking the generic `openai-compatible` provider first, the `OpenAICompatibleDialect` hooks
+  and their defaults, a worked example (Cohere), the config, descriptor and
+  `Llm4sOpenAICompatibleModule` registration, the tests and `@Cloud` smoke spec to write, and the
+  docs to update ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
 - **`llm4s-media`, a shared vocabulary for multimodal code** - landed as part of
   [#1130](https://github.com/llm4s/llm4s/issues/1130), ahead of `llm4s-image` and
   `llm4s-speech` so those carves are pure file moves. `org.llm4s.media.MediaType` (MIME string,

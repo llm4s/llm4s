@@ -579,10 +579,11 @@ What it does **not** do:
 A provider that needs any of these gets its own **dialect in `llm4s-openai-compatible`**: an
 `OpenAICompatibleDialect` for how it departs from the standard format (reasoning parameters,
 where its thinking is, extra response decoding) and a `ProviderDescriptor` to register it, as
-DeepSeek, Z.ai, OpenRouter, Mistral and Cohere have. See
-[Adding a provider](../reference/migration.md#adding-a-provider) for the descriptor, and the
-[contributing guide](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md) for how to open
-the pull request.
+DeepSeek, Z.ai, OpenRouter, Mistral and Cohere have.
+[Adding an OpenAI-compatible provider](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#adding-an-openai-compatible-provider-a-dialect)
+in the contributing guide walks through the hooks, a worked example, registration, the tests to
+write and the docs to update; see also
+[Adding a provider](../reference/migration.md#adding-a-provider) for the descriptor.
 
 ### Hosted APIs
 
