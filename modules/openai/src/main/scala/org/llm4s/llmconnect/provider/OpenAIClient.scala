@@ -15,6 +15,7 @@ import com.openai.models.chat.completions.{
   ChatCompletionMessage,
   ChatCompletionMessageFunctionToolCall,
   ChatCompletionMessageParam,
+  ChatCompletionStreamOptions,
   ChatCompletionSystemMessageParam,
   ChatCompletionToolMessageParam,
   ChatCompletionUserMessageParam
@@ -67,10 +68,23 @@ private[provider] trait OpenAIClientTransport {
  * Until [[https://github.com/llm4s/llm4s/issues/1132 #1132]] this client ran on Microsoft's
  * `com.azure:azure-ai-openai` SDK, which Microsoft has deprecated in favour of `openai-java`.
  *
- * == Extended Thinking / Reasoning Support ==
+ * == Reasoning ==
  *
- * This client does not yet send `reasoning_effort`. For OpenAI o-series models with reasoning,
- * use `OpenRouterClient` (in `llm4s-openai-compatible`), which does.
+ * `CompletionOptions.reasoning` is sent as `reasoning_effort` (`Low`, `Medium` and `High` as
+ * `low`, `medium` and `high`; `None` sends nothing, leaving the model's default) to OpenAI
+ * reasoning models - the o-series and the gpt-5 family, as the model registry flags them - and
+ * never to other models, which reject it. On Azure a deployment name the registry cannot
+ * resolve gets it whenever it is asked for. Reasoning models get `max_completion_tokens` rather
+ * than `max_tokens`, and no `temperature`, `top_p` or penalties. The reasoning tokens a
+ * response reports (`completion_tokens_details.reasoning_tokens`) become
+ * `TokenUsage.thinkingTokens`, streamed or not; they are part of `completionTokens`, not added
+ * to it. See [[OpenAIReasoning]].
+ *
+ * == Streamed usage ==
+ *
+ * Streaming requests set `stream_options.include_usage`, so the service reports token usage on
+ * a final chunk with no choices, and a streamed `Completion` carries `usage` and
+ * `estimatedCost` (Azure from api-version `2024-09-01-preview` on).
  *
  * For Anthropic Claude models with extended thinking, use `AnthropicClient` (in `llm4s-anthropic`), which has
  * full support for the `thinking` parameter with `budget_tokens`.
@@ -155,7 +169,12 @@ class OpenAIClient private[provider] (
         org.llm4s.model.RequestTransformer.default(registryService)
       )
       transformedConversation = conversation.copy(messages = transformed.messages)
-      params   <- buildParams(transformedConversation, transformed.options, transformed.requiresMaxCompletionTokens)
+      params <- buildParams(
+        transformedConversation,
+        transformed.options,
+        transformed.requiresMaxCompletionTokens,
+        streaming = false
+      )
       response <- call("completion")(transport.createChatCompletion(params))
       completion = convertFromOpenAIFormat(response)
       _ = recordExchange(
@@ -188,8 +207,13 @@ class OpenAIClient private[provider] (
       )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
-        buildParams(transformedConversation, transformed.options, transformed.requiresMaxCompletionTokens)
-          .map(params => (transformed, params))
+        // A faked stream is an ordinary completion call, which must not carry `stream_options`.
+        buildParams(
+          transformedConversation,
+          transformed.options,
+          transformed.requiresMaxCompletionTokens,
+          streaming = !transformed.requiresFakeStreaming
+        ).map(params => (transformed, params))
       }
       .tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
       .flatMap { (transformed, params) =>
@@ -243,12 +267,13 @@ class OpenAIClient private[provider] (
     val accumulator = StreamingAccumulator.create()
     val toolCalls   = new StreamToolCalls
     val rawStream   = StringBuilder()
+    var usage       = Option.empty[TokenUsage]
 
     val attempt = call("native streaming") {
       Using.resource(transport.createChatCompletionStream(params)) { response =>
         response.stream().forEach { chunk =>
           rawStream.append(serialize(chunk)).append('\n')
-          processStreamingChunk(chunk, toolCalls, accumulator, onChunk)
+          processStreamingChunk(chunk, toolCalls, accumulator, onChunk).foreach(u => usage = Some(u))
         }
       }
     }
@@ -257,9 +282,12 @@ class OpenAIClient private[provider] (
       attempt.flatMap(_ =>
         // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
         // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
+        // The usage is the service's own report, which carries the reasoning and cached-token
+        // breakdown and the service's total; the accumulator only knows the two counts.
         accumulator.toCompletion.map { c =>
-          val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
-          c.copy(model = model, toolCalls = c.message.toolCalls.toList, estimatedCost = cost)
+          val finalUsage = usage.orElse(c.usage)
+          val cost       = finalUsage.flatMap(u => CostEstimator.estimate(model, u))
+          c.copy(model = model, toolCalls = c.message.toolCalls.toList, usage = finalUsage, estimatedCost = cost)
         }
       )
     }(
@@ -284,16 +312,16 @@ class OpenAIClient private[provider] (
       .tapLeft(error => recordExchange(startedAt, requestBody, failureResponse, Left(error)))
 
   /**
-   * Processes one streamed chunk: emits its content and tool-call deltas, and records any
+   * Processes one streamed chunk: emits its content and tool-call deltas, and returns any
    * token usage it carries. A chunk with no choices (Azure's prompt-filter chunk, or the
-   * usage-only final chunk) emits nothing.
+   * usage-only final chunk that `stream_options.include_usage` asks for) emits nothing.
    */
   private def processStreamingChunk(
     chunk: ChatCompletionChunk,
     toolCalls: StreamToolCalls,
     accumulator: StreamingAccumulator,
     onChunk: StreamedChunk => Unit
-  ): Unit = {
+  ): Option[TokenUsage] = {
     known(chunk._choices()).flatMap(_.asScala.headOption).foreach { choice =>
       val delta        = known(choice._delta())
       val calls        = delta.map(d => streamingToolCalls(d, toolCalls)).getOrElse(Seq.empty)
@@ -304,11 +332,10 @@ class OpenAIClient private[provider] (
       emitStreamingChunks(chunkId, contentOpt, calls, finishReason, accumulator, onChunk)
     }
 
-    known(chunk._usage()).foreach { usage =>
-      accumulator.updateTokens(
-        known(usage._promptTokens()).fold(0)(_.intValue),
-        known(usage._completionTokens()).fold(0)(_.intValue)
-      )
+    known(chunk._usage()).map { usage =>
+      val tokens = toTokenUsage(usage)
+      accumulator.updateTokens(tokens.promptTokens, tokens.completionTokens)
+      tokens
     }
   }
 
@@ -394,32 +421,76 @@ class OpenAIClient private[provider] (
   override def getReserveCompletion(): Int = config.reserveCompletion
 
   /**
+   * Whether this client's model is an OpenAI reasoning model, decided once: the registry
+   * answers from static metadata, so the answer cannot change between calls.
+   */
+  private lazy val reasoningSupport: OpenAIReasoning.Support = OpenAIReasoning.support(model, registryService)
+
+  /**
+   * The `reasoning_effort` to send for `options`, if any.
+   *
+   * Sent for a reasoning model when a level other than `ReasoningEffort.None` is asked for, and
+   * never for a model known not to reason, which OpenAI would reject. On Azure, `model` is a
+   * deployment name, which may say nothing about the model behind it: a deployment the registry
+   * cannot resolve gets the parameter whenever reasoning is asked for, since asking is the only
+   * sign the caller has a reasoning model deployed.
+   */
+  private def reasoningEffortFor(options: CompletionOptions): Option[com.openai.models.ReasoningEffort] =
+    options.reasoning.flatMap(OpenAIReasoning.toSdk).filter { _ =>
+      reasoningSupport match {
+        case OpenAIReasoning.Support.Reasoning    => true
+        case OpenAIReasoning.Support.NonReasoning => false
+        case OpenAIReasoning.Support.Unknown      => config.isInstanceOf[AzureConfig]
+      }
+    }
+
+  /**
    * Builds the chat-completions request from conversation and completion options.
    *
-   * Applies temperature, token limits, penalties, tools and response format. Shared between
-   * complete() and streamComplete().
+   * Applies temperature, token limits, penalties, reasoning effort, tools and response format.
+   * Shared between complete() and streamComplete().
+   *
+   * For a reasoning model - one the registry flags as such, or an Azure deployment sent a
+   * reasoning effort - the request follows OpenAI's reasoning-model rules: the token limit goes
+   * in `max_completion_tokens` (`max_tokens` is rejected), and `temperature`, `top_p` and the
+   * penalties are left out, since those models reject any non-default value.
    *
    * @param useMaxCompletionTokens if true, use max_completion_tokens instead of max_tokens
+   * @param streaming if true, ask for token usage on the stream's final chunk
    */
   private def buildParams(
     conversation: Conversation,
     options: CompletionOptions,
-    useMaxCompletionTokens: Boolean
+    useMaxCompletionTokens: Boolean,
+    streaming: Boolean
   ): Result[ChatCompletionCreateParams] =
     Try {
+      val effort         = reasoningEffortFor(options)
+      val reasoningModel = reasoningSupport == OpenAIReasoning.Support.Reasoning || effort.isDefined
+
       val builder = ChatCompletionCreateParams
         .builder()
         .model(model)
         .messages(convertToOpenAIMessages(conversation).asJava)
-        .temperature(options.temperature.doubleValue())
-        .presencePenalty(options.presencePenalty.doubleValue())
-        .frequencyPenalty(options.frequencyPenalty.doubleValue())
-        .topP(options.topP.doubleValue())
+
+      if (reasoningModel && OpenAIReasoning.restrictsSampling(model))
+        logger.debug(s"$displayName model $model is a reasoning model: not sending temperature, top_p or penalties")
+      else
+        builder
+          .temperature(options.temperature.doubleValue())
+          .presencePenalty(options.presencePenalty.doubleValue())
+          .frequencyPenalty(options.frequencyPenalty.doubleValue())
+          .topP(options.topP.doubleValue())
+
+      effort.foreach(e => builder.reasoningEffort(e))
 
       options.maxTokens.foreach { mt =>
-        if (useMaxCompletionTokens) builder.maxCompletionTokens(mt.toLong)
+        if (useMaxCompletionTokens || reasoningModel) builder.maxCompletionTokens(mt.toLong)
         else OpenAIClient.setMaxTokens(builder, mt.toLong)
       }
+
+      if (streaming && OpenAIClient.acceptsStreamUsage(config))
+        builder.streamOptions(ChatCompletionStreamOptions.builder().includeUsage(true).build())
 
       if (options.tools.nonEmpty) OpenAIToolHelper.addToolsToParams(new ToolRegistry(options.tools), builder)
 
@@ -623,6 +694,25 @@ object OpenAIClient {
     case other                                        => other.toLLMError
   }
 
+  /**
+   * Whether a streaming request may carry `stream_options.include_usage`, which makes the service
+   * send token usage on a final chunk with no choices.
+   *
+   * OpenAI and OpenAI-compatible endpoints take it. Azure OpenAI takes it from api-version
+   * `2024-09-01-preview` on, which includes the GA `2024-10-21`, the default
+   * `2025-01-01-preview` and the unified v1 API; an older, date-versioned `apiVersion` rejects
+   * the unknown parameter, so it is not sent there and a stream reports no usage, as before.
+   */
+  private[provider] def acceptsStreamUsage(config: ProviderConfig): Boolean = config match {
+    case azure: AzureConfig =>
+      val wire = OpenAIClientTransport.azureApiVersionWire(azure.apiVersion)
+      !wire.matches("\\d{4}-\\d{2}-\\d{2}.*") || wire.take(10) >= OpenAIClient.FirstAzureStreamUsageVersion
+    case _ => true
+  }
+
+  /** The first Azure OpenAI api-version to accept `stream_options`. */
+  private val FirstAzureStreamUsageVersion = "2024-09-01"
+
   /** `max_tokens` is deprecated by OpenAI for o-series models, but it is what older models and Azure deployments take. */
   @nowarn("cat=deprecation")
   private def setMaxTokens(builder: ChatCompletionCreateParams.Builder, maxTokens: Long): Unit =
@@ -746,11 +836,13 @@ private[provider] object OpenAIClientTransport {
    * uses), or the wire value itself (`2025-01-01-preview`, the form the docs show). Both map to
    * the same version.
    */
-  private[provider] def azureServiceVersion(apiVersion: String): AzureOpenAIServiceVersion = {
+  private[provider] def azureServiceVersion(apiVersion: String): AzureOpenAIServiceVersion =
+    AzureOpenAIServiceVersion.fromString(azureApiVersionWire(apiVersion))
+
+  /** The wire form of an `apiVersion` setting given in either form (see [[azureServiceVersion]]). */
+  private[provider] def azureApiVersionWire(apiVersion: String): String = {
     val trimmed = apiVersion.trim
-    val wire =
-      if (trimmed.matches("(?i)v\\d{4}_\\d{2}_\\d{2}(_[a-z]+)?")) trimmed.drop(1).replace('_', '-').toLowerCase
-      else trimmed
-    AzureOpenAIServiceVersion.fromString(wire)
+    if (trimmed.matches("(?i)v\\d{4}_\\d{2}_\\d{2}(_[a-z]+)?")) trimmed.drop(1).replace('_', '-').toLowerCase
+    else trimmed
   }
 }

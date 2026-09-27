@@ -96,6 +96,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   since the provider can point at any endpoint - production allows it explicitly. See the
   [migration guide](docs/reference/migration.md#slice-5-llm4s-openai-compatible).
 
+- **`llm4s-openai` sends `reasoning_effort`, and asks for token usage on streams**
+  ([#1132](https://github.com/llm4s/llm4s/issues/1132), follow-ups to #1209).
+  `OpenAIClient` now sends `CompletionOptions.reasoning` as `reasoning_effort` (`Low`, `Medium`,
+  `High` as `low`, `medium`, `high`; `None` sends nothing) to OpenAI reasoning models - the
+  o-series and the gpt-5 family, as the model registry's `supports_reasoning` flag says, with
+  OpenAI's naming as the fallback for models newer than the bundled metadata - and never to
+  other models, which reject it. Before, the setting was ignored. A reasoning model's request
+  now also sends `maxTokens` as `max_completion_tokens` (core's transformer already did this for
+  `o1`, `o3` and `gpt-5`; it now covers `o4-mini` and anything else flagged) and leaves out
+  `temperature`, `top_p` and the penalties, which those models reject: a gpt-5 request with the
+  default options was failing on `temperature`. On Azure, a deployment name the registry cannot
+  resolve gets `reasoning_effort` whenever a reasoning effort is asked for. Streaming requests
+  set `stream_options.include_usage` (Azure from api-version `2024-09-01-preview` on), so
+  OpenAI's streams report usage and an estimated cost, which they had not, since OpenAI sends
+  none unless asked. Streamed usage now also carries reasoning and cached tokens and the
+  service's own total. See the [providers guide](docs/guide/providers.md#reasoning-models).
+
 - **`llm4s-openai` moves from Microsoft's deprecated Azure OpenAI SDK to OpenAI's official Java
   SDK** ([#1132](https://github.com/llm4s/llm4s/issues/1132)). `OpenAIClient` now runs on
   `com.openai:openai-java` 4.69.3 for all three providers it serves - OpenAI, Azure OpenAI and

@@ -130,9 +130,46 @@ llm4s {
 ### Available Models
 
 - **Latest:** `gpt-4o`, `gpt-4o-mini`
-- **Reasoning:** `o1-preview`, `o1-mini`
+- **Reasoning:** the gpt-5 family (`gpt-5`, `gpt-5-mini`, `gpt-5.1`, ...) and the o-series (`o3`, `o4-mini`)
 - **Turbo:** `gpt-4-turbo`
 - **Legacy:** `gpt-3.5-turbo`
+
+### Reasoning models
+
+`CompletionOptions.reasoning` is sent as `reasoning_effort` to OpenAI's reasoning models:
+
+```scala
+client.complete(conversation, CompletionOptions().withReasoning(ReasoningEffort.High))
+```
+
+| `ReasoningEffort` | `reasoning_effort` |
+|---|---|
+| `Low` / `Medium` / `High` | `low` / `medium` / `high` |
+| `None` | not sent: the model's own default applies |
+
+Which models are reasoning models comes from the model registry's `supports_reasoning` flag
+(the same metadata llm4s uses for context windows and costs), so the o-series and the gpt-5
+family get it, and `gpt-4o`, `gpt-4.1` and older models never do: OpenAI rejects the parameter
+for them, so for those models `reasoning` is ignored, as `CompletionOptions` documents. A model
+newer than the bundled metadata is recognised by its name (`o<n>...`, `gpt-5` onwards,
+`gpt-oss`). For Requesty, a routed id such as `openai/o4-mini` resolves the same way; a
+non-OpenAI model behind Requesty is not sent `reasoning_effort`.
+
+Requests to a reasoning model also follow OpenAI's rules for them: `maxTokens` is sent as
+`max_completion_tokens` (which counts reasoning tokens too) rather than `max_tokens`, and
+`temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are not sent, since those models
+reject non-default values. (`gpt-oss` models keep their sampling parameters.)
+
+The reasoning tokens a response reports (`completion_tokens_details.reasoning_tokens`) are
+returned as `TokenUsage.thinkingTokens`, for streamed and non-streamed calls. They are part of
+`completionTokens`, not in addition to it. OpenAI's chat-completions API does not return the
+reasoning text itself, so `Completion.thinking` stays empty.
+
+### Streaming and token usage
+
+Streaming requests set `stream_options.include_usage`, so OpenAI reports token usage on a final
+chunk with no choices, and a streamed `Completion` carries `usage` and `estimatedCost` like a
+non-streamed one. The final chunk produces no `StreamedChunk`.
 
 ### Costs
 
@@ -336,6 +373,26 @@ Same as OpenAI (via Azure deployment). Choose models when deploying:
 - `gpt-4o`
 - `gpt-4-turbo`
 - `gpt-35-turbo`
+
+### Reasoning deployments
+
+`reasoning_effort` works as for [OpenAI](#reasoning-models), with one difference: the model
+llm4s sees is the **deployment name**, which need not name the model behind it. So:
+
+- a deployment named after a model the registry knows (`o4-mini`, `gpt-5-mini`, `gpt-4o`) is
+  treated as that model;
+- any other deployment (`prod-reasoner`) gets `reasoning_effort` whenever you ask for a
+  reasoning effort, since asking is the only sign it is a reasoning model. The request then
+  also follows the reasoning-model rules: `max_completion_tokens`, and no sampling parameters.
+  Asking for reasoning on such a deployment that is not a reasoning model gets an error from
+  Azure; leave `reasoning` unset (or `ReasoningEffort.None`) for it.
+
+### Streamed token usage
+
+Streamed completions report token usage when `apiVersion` is `2024-09-01-preview` or later
+(including the default `2025-01-01-preview`, the GA `2024-10-21` and the unified v1 API): only
+those versions accept `stream_options`, so it is not sent for older ones, such as the
+`2024-02-15-preview` shown above, and their streams report no usage.
 
 ### Costs
 
