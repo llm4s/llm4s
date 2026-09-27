@@ -13,7 +13,34 @@ import scala.annotation.tailrec
 import scala.util.{ Try, Using }
 
 /**
- * Example demonstrating how to use workspace tools with different LLM models
+ * Example demonstrating how to use workspace tools with different LLM models.
+ *
+ * It runs the same prompt with the default named provider section (`llm4s.providers.provider`),
+ * then with each named section given as an argument - by default `openai-main` and
+ * `anthropic-main` - loaded with `Llm4sConfig.provider(name)`. A section that is not configured
+ * is skipped with its error. Add the sections to the samples' git-ignored
+ * `application.local.conf` (docs/getting-started/configuration.md#running-the-samples):
+ *
+ * {{{
+ * llm4s.providers {
+ *   openai-main {
+ *     provider = "openai"
+ *     model    = "gpt-4o"
+ *     apiKey   = ${?OPENAI_API_KEY}
+ *   }
+ *   anthropic-main {
+ *     provider = "anthropic"
+ *     model    = "claude-sonnet-4-20250514"
+ *     apiKey   = ${?ANTHROPIC_API_KEY}
+ *   }
+ * }
+ * }}}
+ *
+ * Needs Docker and the workspace runner image (see `WorkspaceConfigSupport`). To run:
+ * {{{
+ * sbt "workspaceSamples/runMain org.llm4s.samples.toolapi.WorkspaceToolExample"
+ * sbt "workspaceSamples/runMain org.llm4s.samples.toolapi.WorkspaceToolExample openai-main"
+ * }}}
  */
 object WorkspaceToolExample {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -32,9 +59,11 @@ object WorkspaceToolExample {
   implicit val executeResultRW: ReadWriter[ExecuteResult] = macroRW
   implicit val commandResultRW: ReadWriter[CommandResult] = macroRW
 
+  /** Named provider sections run after the default one when no section names are given as arguments. */
+  val DefaultComparisonSections: Seq[String] = Seq("openai-main", "anthropic-main")
+
   def main(args: Array[String]): Unit = {
-    val gpt4oModelName  = "gpt-4o"
-    val sonnetModelName = "claude-3-7-sonnet-latest"
+    val comparisonSections = if (args.nonEmpty) args.toSeq else DefaultComparisonSections
 
     // Typed workspace settings
     val ws =
@@ -94,50 +123,26 @@ object WorkspaceToolExample {
                   logger.warn(s"Active provider client setup skipped: ${err.formatted}")
               }
 
-              // Test with GPT-4o by temporarily overriding llm4s.llm.model
-              logger.info(s"Testing with OpenAI's $gpt4oModelName...")
-              val openaiClientRes = {
-                val key      = "llm4s.llm.model"
-                val original = Option(System.getProperty(key))
-                System.setProperty(key, s"openai/$gpt4oModelName")
-                val res = registryServiceRes.flatMap { registryService =>
+              // Then run with each named section asked for - by default an OpenAI and an Anthropic one
+              comparisonSections.foreach { sectionName =>
+                logger.info(s"Testing with named provider section '$sectionName'...")
+                val clientRes = registryServiceRes.flatMap { registryService =>
                   given org.llm4s.model.ModelRegistryService = registryService
-                  Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
+                  Llm4sConfig.provider(sectionName).flatMap { provCfg =>
+                    logger.info(s"Section '$sectionName': ${provCfg.providerId.asString} / ${provCfg.model}")
+                    LLMConnect.getClient(provCfg)
+                  }
                 }
-                original match {
-                  case Some(v) => System.setProperty(key, v)
-                  case None    => System.clearProperty(key)
+                clientRes match {
+                  case Right(client) =>
+                    testLLMWithTools(client, toolRegistry, prompt)
+                  case Left(err) =>
+                    logger.error(s"Section '$sectionName' skipped: ${err.formatted}")
+                    logger.info(
+                      s"Add a '$sectionName' section under llm4s.providers in the samples' application.local.conf - " +
+                        "see docs/getting-started/configuration.md#running-the-samples"
+                    )
                 }
-                res
-              }
-              openaiClientRes match {
-                case Right(openaiClient) =>
-                  testLLMWithTools(openaiClient, toolRegistry, prompt)
-                case Left(err) =>
-                  logger.error(s"OpenAI client setup failed: ${err.formatted}")
-              }
-
-              // Test with Claude by temporarily overriding llm4s.llm.model
-              logger.info(s"Testing with Anthropic's $sonnetModelName...")
-              val anthropicClientRes = {
-                val key      = "llm4s.llm.model"
-                val original = Option(System.getProperty(key))
-                System.setProperty(key, s"anthropic/$sonnetModelName")
-                val res = registryServiceRes.flatMap { registryService =>
-                  given org.llm4s.model.ModelRegistryService = registryService
-                  Llm4sConfig.defaultProvider().flatMap(LLMConnect.getClient)
-                }
-                original match {
-                  case Some(v) => System.setProperty(key, v)
-                  case None    => System.clearProperty(key)
-                }
-                res
-              }
-              anthropicClientRes match {
-                case Right(anthropicClient) =>
-                  testLLMWithTools(anthropicClient, toolRegistry, prompt)
-                case Left(err) =>
-                  logger.error(s"Anthropic client setup failed: ${err.formatted}")
               }
           }
         } else {

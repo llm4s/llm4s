@@ -1,6 +1,7 @@
 package org.llm4s.samples.dashboard.providersetup
 
-import org.llm4s.config.{ DiscoveredModel, ProvidersConfigModel }
+import org.llm4s.config.DiscoveredModel
+import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.types.ProviderModelTypes.ProviderName
@@ -151,8 +152,9 @@ object ProviderSetupModel:
   final case class DemoAppConfigs(
     docs: Vector[ProviderDoc],
     demoCfg: ProviderSetupDemoConfig,
-    providersCfg: ProvidersConfigModel.ProvidersConfig,
+    defaultProviderName: ProviderName,
     providerConfigs: Map[ProviderName, ProviderConfig],
+    providerErrors: Map[ProviderName, LLMError],
     defaultProvider: ProviderConfig,
     discoveredModels: Map[ProviderName, List[DiscoveredModel]],
     exchangeLogging: ProviderExchangeLogging

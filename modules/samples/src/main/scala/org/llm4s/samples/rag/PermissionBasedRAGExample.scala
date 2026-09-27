@@ -24,8 +24,9 @@ import scala.util.chaining.*
  *
  * Prerequisites:
  * - PostgreSQL with pgvector extension
- * - OpenAI embeddings: `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` in the
- *   samples' `application.local.conf` (docs/getting-started/configuration.md#running-the-samples)
+ * - EMBEDDING_MODEL in `provider/model` form, e.g. `ollama/nomic-embed-text` (local, no key) or
+ *   `openai/text-embedding-3-small`, whose key is `llm4s.embeddings.openai.apiKey` - see
+ *   docs/getting-started/configuration.md#embeddings-configuration
  *
  * Usage:
  *   # Start PostgreSQL with pgvector
@@ -34,7 +35,7 @@ import scala.util.chaining.*
  *     pgvector/pgvector:pg16
  *
  *   # Run the example
- *   export OPENAI_API_KEY=sk-...
+ *   export EMBEDDING_MODEL=ollama/nomic-embed-text
  *   export PGVECTOR_HOST=localhost
  *   export PGVECTOR_PORT=5432
  *   export PGVECTOR_DATABASE=postgres
@@ -107,11 +108,15 @@ object PermissionBasedRAGExample extends App {
   logger.info("--- Part 2: Permission-Aware RAG API ---")
 
   logger.info("""
-    |// Configure RAG with a SearchIndex for permissions
-    |val config = RAG.builder()
-    |  .withEmbeddings("openai")
-    |  .withSearchIndex(searchIndex)
-    |  .build()
+    |// Configure RAG with a SearchIndex for permissions; the embedding
+    |// provider and its config come from EMBEDDING_MODEL
+    |val rag = for {
+    |  (provider, embeddingCfg) <- Llm4sConfig.embeddings()
+    |  rag <- RAG.builder()
+    |    .withEmbeddings(provider, embeddingCfg.model)
+    |    .withSearchIndex(searchIndex)
+    |    .build(_ => Right(embeddingCfg))
+    |} yield rag
     |
     |// Create collections with access control
     |searchIndex.collections.create(CollectionConfig(
@@ -256,21 +261,27 @@ object PermissionBasedRAGExample extends App {
               // Build RAG with SearchIndex
               logger.info("--- Building RAG with Permission Support ---")
 
-              val ragResult = Llm4sConfig.modelRegistryService().flatMap { service =>
-                RAG.build(
+              // The embedding provider and model come from EMBEDDING_MODEL (provider/model), and the
+              // provider's own section under llm4s.embeddings.<provider> is handed to RAG.build.
+              val ragResult = for {
+                service       <- Llm4sConfig.modelRegistryService()
+                embeddingPair <- Llm4sConfig.embeddings()
+                (providerName, embeddingCfg) = embeddingPair
+                rag <- RAG.build(
                   RAG
                     .builder()
-                    .withEmbeddings("openai")
+                    .withEmbeddings(providerName, embeddingCfg.model)
                     .withSearchIndex(searchIndex)
-                    .withTopK(5)
+                    .withTopK(5),
+                  _ => Right(embeddingCfg)
                 )(using service)
-              }
+              } yield rag
 
               ragResult match {
                 case Left(error) =>
                   logger.info("Could not build RAG: {}", error.message)
                   logger.info(
-                    "Make sure OpenAI embeddings are configured - see docs/getting-started/configuration.md#running-the-samples"
+                    "Set EMBEDDING_MODEL, e.g. ollama/nomic-embed-text or openai/text-embedding-3-small - see docs/getting-started/configuration.md#embeddings-configuration"
                   )
 
                 case Right(rag) =>

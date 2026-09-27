@@ -1,6 +1,7 @@
 package org.llm4s.samples.dashboard.providersetup
 
-import org.llm4s.config.{ DiscoveredModel, ProvidersConfigModel }
+import org.llm4s.config.DiscoveredModel
+import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.ProviderConfig
 import org.llm4s.samples.dashboard.providersetup.ProviderSetupMessages.*
@@ -35,8 +36,9 @@ object ProviderSetupDemoApp:
 
   def App(
     demoCfg: ProviderSetupDemoConfig,
-    providersCfg: ProvidersConfigModel.ProvidersConfig,
+    defaultProviderName: ProviderName,
     providerConfigs: Map[ProviderName, ProviderConfig],
+    providerErrors: Map[ProviderName, LLMError],
     defaultProvider: ProviderConfig,
     discoveredModels: Map[ProviderName, List[DiscoveredModel]],
     exchangeLogging: ProviderExchangeLogging
@@ -56,8 +58,9 @@ object ProviderSetupDemoApp:
             DemoAppConfigs(
               docs,
               demoCfg,
-              providersCfg,
+              defaultProviderName,
               providerConfigs,
+              providerErrors,
               defaultProvider,
               discoveredModels,
               exchangeLogging
@@ -82,7 +85,12 @@ object ProviderSetupDemoApp:
             ),
             demoStreamingEnabled = demoCfg.streamingEnabled,
             statusLine = "Selected Overview.",
-            configStatus = ProviderSetupRuntime.detectConfigStatus(providersCfg, discoveredModels),
+            configStatus = ProviderSetupRuntime.detectConfigStatus(
+              defaultProviderName,
+              providerConfigs,
+              providerErrors,
+              discoveredModels
+            ),
             sessionInputs = Map.empty,
             compare = CompareState(
               selections = Vector.empty,
@@ -100,7 +108,12 @@ object ProviderSetupDemoApp:
               ticks = 0L
             )
           ),
-          ProviderSetupRuntime.refreshStatusCmd(providersCfg, discoveredModels)
+          ProviderSetupRuntime.refreshStatusCmd(
+            defaultProviderName,
+            providerConfigs,
+            providerErrors,
+            discoveredModels
+          )
         )
 
       override def update(model: Model, msg: Msg, ctx: RuntimeCtx[Msg]): Tui[Model, Msg] =

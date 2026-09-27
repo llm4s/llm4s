@@ -23,8 +23,9 @@ import scala.util.chaining._
  *
  * Environment variables:
  * - AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (or use IAM roles)
- * - OpenAI embeddings: `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` in the
- *   samples' `application.local.conf` (docs/getting-started/configuration.md#running-the-samples)
+ * - EMBEDDING_MODEL in `provider/model` form, e.g. `ollama/nomic-embed-text` (local, no key) or
+ *   `openai/text-embedding-3-small`, whose key is `llm4s.embeddings.openai.apiKey` - see
+ *   docs/getting-started/configuration.md#embeddings-configuration
  */
 object S3LoaderExample {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -49,20 +50,26 @@ object S3LoaderExample {
     logger.info("  LocalStack: {}", useLocalStack)
 
     // Create RAG pipeline using the builder API
-    val ragResult = Llm4sConfig.modelRegistryService().flatMap { service =>
-      RAG.build(
+    // The embedding provider and model come from EMBEDDING_MODEL (provider/model), and the
+    // provider's own section under llm4s.embeddings.<provider> is handed to RAG.build.
+    val ragResult = for {
+      service       <- Llm4sConfig.modelRegistryService()
+      embeddingPair <- Llm4sConfig.embeddings()
+      (providerName, embeddingCfg) = embeddingPair
+      rag <- RAG.build(
         RAG
           .builder()
-          .withEmbeddings("openai")
+          .withEmbeddings(providerName, embeddingCfg.model),
+        _ => Right(embeddingCfg)
       )(using service)
-    }
+    } yield rag
 
     ragResult match {
       case Left(err) =>
         logger.error("Failed to create RAG pipeline: {}", err.message)
         logger.error("Error: {}", err.message)
         logger.error(
-          "Make sure OpenAI embeddings are configured - see docs/getting-started/configuration.md#running-the-samples"
+          "Set EMBEDDING_MODEL, e.g. ollama/nomic-embed-text or openai/text-embedding-3-small - see docs/getting-started/configuration.md#embeddings-configuration"
         )
         ()
 

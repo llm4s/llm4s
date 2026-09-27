@@ -1,6 +1,8 @@
 package org.llm4s.samples.basic
 
 import org.llm4s.config.Llm4sConfig
+import org.llm4s.config.ProvidersConfigModel.ProviderName
+import org.llm4s.error.ConfigurationError
 import org.slf4j.LoggerFactory
 
 /**
@@ -10,32 +12,45 @@ import org.slf4j.LoggerFactory
  * This example currently targets `ollama-local`, because Ollama is the first
  * provider with model discovery support.
  *
+ * Sections are loaded with `Llm4sConfig.providerConfigs()`, which loads each section on its
+ * own, so a broken section elsewhere in the config - an unset `${?VAR}` key, say - does not
+ * stop this one from being listed. The broken sections' errors are logged, not hidden.
+ *
  * To run:
  *   sbt "samples/runMain org.llm4s.samples.basic.NamedProviderModelListingExample"
  */
 object NamedProviderModelListingExample:
   def main(args: Array[String]): Unit =
-    val providerName = "ollama-local"
+    val providerName = ProviderName("ollama-local")
     val logger       = LoggerFactory.getLogger("org.llm4s.samples.basic.NamedProviderModelListingExample")
 
     val result = for
-      providers <- Llm4sConfig.providers()
-      namedConfig <- providers.namedProviders
-        .get(org.llm4s.config.ProvidersConfigModel.ProviderName(providerName))
-        .toRight(org.llm4s.error.ConfigurationError(s"Configured provider '$providerName' was not found"))
-      models <- Llm4sConfig.listModels(providerName)
-    yield (namedConfig, models)
+      loaded <- Llm4sConfig.providerConfigs()
+      (errors, configs) = loaded
+      _ = errors.toSeq
+        .sortBy(_._1.asName)
+        .foreach((name, err) => logger.warn("Section '{}' did not load: {}", name.asName, err.formatted))
+      config <- configs
+        .get(providerName)
+        .toRight(
+          errors.getOrElse(
+            providerName,
+            ConfigurationError(s"Configured provider '${providerName.asName}' was not found")
+          )
+        )
+      models <- Llm4sConfig.listModels(providerName.asName)
+    yield (config, models)
 
     result.fold(
       err =>
-        logger.error("Failed to list models for named provider '{}': {}", providerName, err.formatted)
+        logger.error("Failed to list models for named provider '{}': {}", providerName.asName, err.formatted)
         logger.info("Check the named provider entry in application.local.conf and whether the provider is reachable.")
       ,
       { case (config, models) =>
         logger.info("=== Named Provider Model Listing Example ===")
-        logger.info("Provider name: {}", providerName)
-        logger.info("Provider kind: {}", config.provider.toString.toLowerCase)
-        logger.info("Configured model: {}", config.model.asString)
+        logger.info("Provider name: {}", providerName.asName)
+        logger.info("Provider kind: {}", config.providerId.asString)
+        logger.info("Configured model: {}", config.model)
         logger.info("Discovered {} models", models.size)
 
         models.foreach: model =>

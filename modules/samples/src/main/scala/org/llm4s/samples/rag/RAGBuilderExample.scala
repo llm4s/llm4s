@@ -20,13 +20,12 @@ import scala.util.chaining._
  * - Preset configurations (default, production, development)
  *
  * Usage:
- *   # OpenAI embeddings: add llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY} to the
- *   # samples' application.local.conf (docs/getting-started/configuration.md#running-the-samples)
- *   export OPENAI_API_KEY=sk-...
- *   sbt "samples/runMain org.llm4s.samples.rag.RAGBuilderExample"
- *
- *   # With answer generation: also an `openai-main` section (apiKey = ${?OPENAI_API_KEY})
- *   export LLM4S_PROVIDER=openai-main
+ *   # Examples 1-5 only print configuration and need nothing set. Example 6 builds a real
+ *   # pipeline from the default chat section (ollama-local in the samples) and an embedding
+ *   # model in provider/model form. For OpenAI embeddings (openai/text-embedding-3-small),
+ *   # add llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY} to the samples'
+ *   # application.local.conf (docs/getting-started/configuration.md#embeddings-configuration)
+ *   export EMBEDDING_MODEL=ollama/nomic-embed-text
  *   sbt "samples/runMain org.llm4s.samples.rag.RAGBuilderExample"
  */
 object RAGBuilderExample extends App {
@@ -146,15 +145,20 @@ object RAGBuilderExample extends App {
   if (hasLLM) {
     logger.info("LLM configured - building RAG with answer generation...")
 
+    // The embedding provider and model come from EMBEDDING_MODEL (provider/model), and the
+    // provider's own section under llm4s.embeddings.<provider> is handed to RAG.build.
     val result = for {
-      llmClient <- llmResult
-      service   <- Llm4sConfig.modelRegistryService()
+      llmClient     <- llmResult
+      service       <- Llm4sConfig.modelRegistryService()
+      embeddingPair <- Llm4sConfig.embeddings()
+      (providerName, embeddingCfg) = embeddingPair
       rag <- RAG.build(
         RAG
           .builder()
-          .withEmbeddings("openai")
+          .withEmbeddings(providerName, embeddingCfg.model)
           .withTopK(3)
-          .withLLM(llmClient)
+          .withLLM(llmClient),
+        _ => Right(embeddingCfg)
       )(using service)
     } yield {
       logger.info("RAG pipeline created successfully!")

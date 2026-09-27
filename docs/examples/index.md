@@ -938,6 +938,8 @@ Load and ingest documents from AWS S3 buckets with full PDF/DOCX support.
 # First, set AWS credentials
 export AWS_ACCESS_KEY_ID=your-key
 export AWS_SECRET_ACCESS_KEY=your-secret
+# and an embedding model, as provider/model
+export EMBEDDING_MODEL=ollama/nomic-embed-text
 
 sbt "samples/runMain org.llm4s.samples.rag.S3LoaderExample"
 ```

@@ -1,7 +1,7 @@
 package org.llm4s.samples.dashboard.providersetup
 
-import org.llm4s.config.{ DiscoveredModel, ProvidersConfigModel }
-import org.llm4s.error.ValidationError
+import org.llm4s.config.DiscoveredModel
+import org.llm4s.error.{ LLMError, ValidationError }
 import org.llm4s.llmconnect.config.*
 import org.llm4s.llmconnect.model.{ AssistantMessage, Conversation, SystemMessage, UserMessage }
 import org.llm4s.llmconnect.{ LLMClient, LLMConnect, LlmClientOptions, ProviderExchangeLogging }
@@ -24,16 +24,24 @@ private[providersetup] object ProviderSetupRuntime:
   private def contextWindowResolver(using ModelRegistryService): ContextWindowResolver =
     ContextWindowResolver(summon[ModelRegistryService])
 
+  /**
+   * Summarises the named provider sections for the Status and Default tabs.
+   *
+   * Sections that failed to load are reported in the detail line with their errors, rather than
+   * silently dropped: a section with an unset `${?VAR}` key is the commonest setup mistake.
+   */
   def detectConfigStatus(
-    providersCfg: ProvidersConfigModel.ProvidersConfig,
+    defaultProviderName: ProviderName,
+    providerConfigs: Map[ProviderName, ProviderConfig],
+    providerErrors: Map[ProviderName, LLMError],
     discoveredModels: Map[ProviderName, List[DiscoveredModel]]
   ): ConfigStatus =
-    val defaultName = providersCfg.defaultProviderName.toOption.map(_.asName)
+    val defaultName = defaultProviderName.asName
     val configuredProviders =
-      providersCfg.namedProviders.toVector
+      providerConfigs.toVector
         .sortBy(_._1.asName)
         .map { case (name, cfg) =>
-          val listedModels = discoveredModels(name)
+          val listedModels = discoveredModels.getOrElse(name, List.empty)
           val (models, detail) = (
             listedModels.map(_.name.asString).toVector.sorted,
             s"Discovered ${listedModels.size} model(s)."
@@ -41,15 +49,23 @@ private[providersetup] object ProviderSetupRuntime:
 
           ConfiguredProvider(
             name = name.asName,
-            providerId = cfg.provider.asString,
-            modelName = cfg.model.asString,
+            providerId = cfg.providerId.asString,
+            modelName = cfg.model,
             discoveredModels = models,
             discoveryDetail = detail,
-            isDefault = defaultName.contains(name.asName)
+            isDefault = defaultName == name.asName
           )
         }
 
     val selectedDefault = configuredProviders.find(_.isDefault).orElse(configuredProviders.headOption)
+
+    val failedDetail =
+      if providerErrors.isEmpty then ""
+      else
+        providerErrors.toSeq
+          .sortBy(_._1.asName)
+          .map((name, err) => s"${name.asName}: ${err.formatted}")
+          .mkString(s" ${providerErrors.size} section(s) failed to load - ", "; ", ".")
 
     ConfigStatus(
       headline = selectedDefault
@@ -57,7 +73,7 @@ private[providersetup] object ProviderSetupRuntime:
         .getOrElse("configured: named providers"),
       detail = selectedDefault
         .map(p => s"Loaded ${configuredProviders.size} named provider(s). Default: ${p.name}.")
-        .getOrElse(s"Loaded ${configuredProviders.size} named provider(s)."),
+        .getOrElse(s"Loaded ${configuredProviders.size} named provider(s).") + failedDetail,
       providerId = selectedDefault.map(_.providerId),
       modelName = selectedDefault.map(_.modelName),
       providerName = selectedDefault.map(_.name),
@@ -65,14 +81,16 @@ private[providersetup] object ProviderSetupRuntime:
     )
 
   def refreshStatusCmd(
-    providersCfg: ProvidersConfigModel.ProvidersConfig,
+    defaultProviderName: ProviderName,
+    providerConfigs: Map[ProviderName, ProviderConfig],
+    providerErrors: Map[ProviderName, LLMError],
     discoveredModels: Map[ProviderName, List[DiscoveredModel]]
   ): Cmd[Msg] =
     Cmd.FCmd(
       task = Future {
         Msg.Global(
           GlobalMsg.StatusRefreshed(
-            configStatus = detectConfigStatus(providersCfg, discoveredModels)
+            configStatus = detectConfigStatus(defaultProviderName, providerConfigs, providerErrors, discoveredModels)
           )
         )
       },

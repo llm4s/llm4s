@@ -38,7 +38,9 @@ private[providersetup] object ProviderSetupGlobalUpdate:
           Tui(
             model.copy(statusLine = "Reloading llm4s provider status..."),
             ProviderSetupRuntime.refreshStatusCmd(
-              model.demoAppConfigs.providersCfg,
+              model.demoAppConfigs.defaultProviderName,
+              model.demoAppConfigs.providerConfigs,
+              model.demoAppConfigs.providerErrors,
               model.demoAppConfigs.discoveredModels
             )
           )

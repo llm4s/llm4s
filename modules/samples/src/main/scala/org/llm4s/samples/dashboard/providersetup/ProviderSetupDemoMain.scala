@@ -8,6 +8,11 @@ import termflow.tui.TuiRuntime
 /**
  * First-run provider onboarding sample for llm4s + termflow.
  *
+ * Sections are loaded with `Llm4sConfig.providerConfigs()`, which loads each named section on
+ * its own: a section that fails - an unset `${?VAR}` key, a provider whose module is not on the
+ * classpath - is reported with its error on stderr and in the Status tab, and the others are
+ * still usable. Only the default section has to load.
+ *
  * Run with:
  * `sbt "samples/runMain org.llm4s.samples.dashboard.providersetup.ProviderSetupDemoMain"`
  */
@@ -18,38 +23,36 @@ def ProviderSetupDemoMain(): Unit =
       demoCfg         <- ProviderSetupDemoConfig.load()
       registryService <- Llm4sConfig.modelRegistryService()
       given org.llm4s.model.ModelRegistryService = registryService
-      providersCfg    <- Llm4sConfig.providers()
-      defaultProvider <- providersCfg.defaultProviderName
-      _ <- providersCfg.namedProviders
-        .get(defaultProvider)
+      loaded <- Llm4sConfig.providerConfigs()
+      (errors, configs) = loaded
+      _ = errors.toSeq
+        .sortBy(_._1.asName)
+        .foreach((name, err) => System.err.println(s"Provider section '${name.asName}' did not load: ${err.formatted}"))
+      defaultName <- Llm4sConfig.defaultProviderName()
+      defaultProvider <- configs
+        .get(defaultName)
         .toRight(
-          ConfigurationError(s"Default provider ${defaultProvider.asName} not found")
-        )
-      (errors, configs) = Llm4sConfig.providerConfigs(providersCfg.namedProviders)
-      pc <-
-        if (errors.nonEmpty)
-          Left(
-            ConfigurationError(
-              s"no provider config found for ${errors.map((k, v) => s"${k.asName}:${v.formatted}}").mkString(System.lineSeparator())}"
-            )
+          errors.getOrElse(
+            defaultName,
+            ConfigurationError(s"Default provider ${defaultName.asName} not found")
           )
-        else Right(configs)
+        )
 
-      discoveredModels: Map[ProviderName, List[DiscoveredModel]] = providersCfg.namedProviders.toList.map {
-        case (name, _) =>
-          Llm4sConfig.listModels(name.asName) match
-            case Right(list) =>
-              (name, list)
-            case _ =>
-              (name, List.empty[DiscoveredModel])
+      discoveredModels: Map[ProviderName, List[DiscoveredModel]] = configs.keys.toList.map { name =>
+        Llm4sConfig.listModels(name.asName) match
+          case Right(list) =>
+            (name, list)
+          case _ =>
+            (name, List.empty[DiscoveredModel])
       }.toMap
       exchangeLogging <- Llm4sConfig.exchangeLogging()
       _ = TuiRuntime.run(
         ProviderSetupDemoApp.App(
           demoCfg,
-          providersCfg,
-          pc,
-          configs(defaultProvider),
+          defaultName,
+          configs,
+          errors,
+          defaultProvider,
           discoveredModels,
           exchangeLogging
         )
