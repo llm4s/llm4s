@@ -616,6 +616,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   document it, and OpenRouter always streams usage. For an endpoint that rejects the field,
   `OpenAICompatibleConfig` has `streamUsage` (default `true`); a `streamUsage` key in the named
   section waits on provider-specific keys ([#1215](https://github.com/llm4s/llm4s/issues/1215)).
+- **A Requesty config reported `providerId` = `openai`**, because `OpenAIConfig` inferred its id
+  from the base URL, which is neither OpenAI's nor OpenRouter's. `OpenAIConfig` gains a trailing
+  `explicitProviderId: Option[ProviderId] = None` (and `fromValues` a defaulted `providerId`),
+  which the Requesty and OpenRouter descriptors set: a `provider = "requesty"` section now
+  reports `requesty` - in `llm4s-config-policy` too, whose `allowedProviders` and model patterns
+  must name it - and a `provider = "openrouter"` section with a proxy `baseUrl` is no longer
+  routed to OpenAI. `None` infers the id from the base URL as before. See the
+  [migration note](docs/reference/migration.md#requesty-configs-report-requesty).
 - **`EMBEDDING_MODEL=ollama/nomic-embed-text` failed `Llm4sConfig.textEmbeddingModel()`** with
   `Unknown model 'nomic-embed-text' for provider 'ollama'`. The configuration is documented in
   the README and `CLAUDE.md`, but the central dimension table covered only `openai`, `voyage`

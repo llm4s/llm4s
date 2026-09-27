@@ -217,8 +217,9 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
   }
 
   // Each provider's errors, metrics and exchange log carry its own name, not "openai" (#1209
-  // review): Azure's from `AzureConfig.providerId`, Requesty's from its descriptor, because a
-  // Requesty `OpenAIConfig` reports `providerId` = `openai` from its base URL.
+  // review): Azure's from `AzureConfig.providerId`, Requesty's from its descriptor, so even a
+  // Requesty `OpenAIConfig` built by hand, whose `providerId` is inferred as `openai`, is labelled
+  // `requesty`.
 
   private def unauthorized =
     """{"error":{"message":"Access denied","type":"invalid_request_error","code":"401"}}"""

@@ -28,6 +28,9 @@ import org.llm4s.util.Redaction
  *                      [[org.llm4s.llmconnect.LLMConnect]].
  * @param contextWindow Model's total token capacity (prompt + completion combined).
  * @param reserveCompletion Tokens held back from prompt history for the completion.
+ * @param explicitProviderId the provider this config belongs to, when a descriptor says so:
+ *                      `requesty` for Requesty and `openrouter` for OpenRouter. `None` - what a
+ *                      config built by hand gets - infers it from `baseUrl`; see [[providerId]].
  */
 case class OpenAIConfig(
   apiKey: String,
@@ -35,25 +38,31 @@ case class OpenAIConfig(
   organization: Option[String],
   baseUrl: String,
   contextWindow: Int,
-  reserveCompletion: Int
+  reserveCompletion: Int,
+  explicitProviderId: Option[ProviderId] = None
 ) extends ProviderConfig:
   /**
-   * `openai`, or `openrouter` when `baseUrl` points at OpenRouter.
+   * The provider this config belongs to: [[explicitProviderId]] when set, otherwise `openai`,
+   * or `openrouter` when `baseUrl` points at OpenRouter.
    *
-   * OpenRouter reuses this config but has its own client, and the base URL is
-   * the only thing distinguishing the two. Deriving the id here keeps that
-   * knowledge with the config rather than in a special case inside
-   * [[org.llm4s.llmconnect.LLMConnect]], which is how routing worked before the
-   * provider registry (#1131).
+   * OpenAI, OpenRouter and Requesty all use this config, and `LLMConnect` routes a config to a
+   * client by this id. The Requesty and OpenRouter descriptors set it explicitly, so a Requesty
+   * config reports `requesty` - it used to report `openai`, because its base URL is neither
+   * OpenAI's nor OpenRouter's - and an OpenRouter section with a proxy `baseUrl` still reaches
+   * OpenRouter. The inference from `baseUrl` remains for a config built by hand and for
+   * `provider = "openai"`, so an OpenAI section pointed at `openrouter.ai` reaches OpenRouter as
+   * it did before the provider registry (#1131).
    */
   override def providerId: ProviderId =
-    if baseUrl.contains("openrouter.ai") then ProviderId("openrouter") else ProviderId("openai")
+    explicitProviderId.getOrElse(
+      if baseUrl.contains("openrouter.ai") then ProviderId("openrouter") else ProviderId("openai")
+    )
 
   override def endpointUrl: Option[String]            = Some(baseUrl)
   override def withModel(model: String): OpenAIConfig = copy(model = model)
   override def toString: String =
     s"OpenAIConfig(apiKey=${Redaction.secret(apiKey)}, model=$model, organization=$organization, baseUrl=$baseUrl, " +
-      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion)"
+      s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, providerId=${providerId.asString})"
 
 object OpenAIConfig {
   private val standardReserve = 4096
@@ -83,12 +92,15 @@ object OpenAIConfig {
    * @param organization Optional OpenAI organisation ID.
    * @param baseUrl      API base URL; must be non-empty. Pass a URL containing
    *                     `"openrouter.ai"` to route through OpenRouter.
+   * @param providerId   the provider the config belongs to, e.g. `ProviderId("requesty")`;
+   *                     `None` infers it from `baseUrl`, as [[OpenAIConfig.providerId]] describes.
    */
   def fromValues(
     modelName: String,
     apiKey: String,
     organization: Option[String],
-    baseUrl: String
+    baseUrl: String,
+    providerId: Option[ProviderId] = None
   )(using resolver: ContextWindowResolver): Result[OpenAIConfig] =
     for {
       _ <- ProviderConfig.nonEmpty("OpenAI", "apiKey", apiKey)
@@ -107,7 +119,8 @@ object OpenAIConfig {
         organization = organization,
         baseUrl = baseUrl,
         contextWindow = cw,
-        reserveCompletion = rc
+        reserveCompletion = rc,
+        explicitProviderId = providerId
       )
     }
 }

@@ -153,7 +153,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
       Llm4sConfig.provider(ConfigSource.string(hocon), "requesty-main") match
         case Right(requesty: OpenAIConfig) =>
           requesty.baseUrl shouldBe RequestyProvider.DEFAULT_BASE_URL
-          requesty.providerId shouldBe ProviderId("openai")
+          requesty.providerId shouldBe ProviderId("requesty")
         case other =>
           fail(s"Expected OpenAIConfig, got $other")
     }

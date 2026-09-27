@@ -51,10 +51,10 @@ class CheckPoliciesProvidersSpec extends AnyWordSpec with Matchers {
     }
 
     "resolve a requesty config" in {
-      // Requesty builds an OpenAIConfig, whose providerId is derived from the base URL and so
-      // reads `openai`; resolving at all is what this checks.
+      // Requesty builds an OpenAIConfig, which used to infer its providerId from the base URL
+      // and so report `openai`; the descriptor now sets it (#1132).
       providerIdFor("""provider = "requesty", model = "openai/gpt-4o-mini", apiKey = "test-key"""") shouldBe
-        Right(ProviderId("openai"))
+        Right(ProviderId("requesty"))
     }
 
     "resolve a deepseek config" in {

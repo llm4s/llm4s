@@ -587,8 +587,9 @@ object OpenAIClient {
 
   /**
    * A client for an OpenAI-compatible `config` that labels its metrics, exchange log and errors
-   * with `provider` rather than `openai`. Requesty builds its client through this: its config is
-   * an [[OpenAIConfig]], whose `providerId` is derived from the base URL and so reads `openai`.
+   * with `provider` rather than the config's `providerId`. Requesty builds its client through
+   * this, so an [[OpenAIConfig]] built by hand - whose `providerId` is inferred from the base URL
+   * and reads `openai` - is still labelled `requesty`.
    */
   private[provider] def forProvider(
     config: OpenAIConfig,
