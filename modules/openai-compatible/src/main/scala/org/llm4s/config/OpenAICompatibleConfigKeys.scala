@@ -36,4 +36,22 @@ object OpenAICompatibleConfigKeys {
 
   /** Overrides the Mistral API root. Defaults to `"https://api.mistral.ai"`. This was `ConfigKeys.MISTRAL_BASE_URL`. */
   val MISTRAL_BASE_URL = "MISTRAL_BASE_URL"
+
+  // ---- Generic openai-compatible -----------------------------------------
+
+  /**
+   * Base URL of a generic OpenAI-compatible endpoint, for `LLM_MODEL=openai-compatible/<model>`
+   * wherever that shorthand is read - the chat-tui sample and the config-policy env check.
+   * Required there: the generic provider has no default endpoint.
+   *
+   * `Llm4sConfig` does not read it, as it reads no provider's variables: a named section binds
+   * its own, e.g. `baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}`.
+   */
+  val OPENAI_COMPATIBLE_BASE_URL = "OPENAI_COMPATIBLE_BASE_URL"
+
+  /**
+   * API key for a generic OpenAI-compatible endpoint, alongside [[OPENAI_COMPATIBLE_BASE_URL]].
+   * Optional: with none, no `Authorization` header is sent.
+   */
+  val OPENAI_COMPATIBLE_API_KEY = "OPENAI_COMPATIBLE_API_KEY"
 }

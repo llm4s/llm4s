@@ -722,9 +722,10 @@ lazy val workspaceClient = (project in file("modules/workspace/workspaceClient")
     // core's list. Nothing in this module imports com.anthropic or com.azure; they were
     // removed with the `anthropic` carve (#1132) so the Anthropic SDK leaves this module's
     // published POM as well as core's. Since the `openai` carve, Azure no longer reaches it
-    // transitively through core either.
+    // transitively through core either. jtokkit went the same way in the slice 5 hygiene
+    // follow-up: nothing here imports com.knuddels.jtokkit (token counting is core's
+    // `org.llm4s.context.tokens`, which brings jtokkit with it through `dependsOn(core)`).
     libraryDependencies ++= Seq(
-      Deps.jtokkit,
       Deps.websocket,
       Deps.scalatest % Test,
       Deps.scalamock % Test,
@@ -744,11 +745,13 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
     name := "llm4s-workspace-runner",
     commonSettings,
     Compile / mainClass := Some("org.llm4s.runner.RunnerMain"),
+    // The Postgres driver and HikariCP used to be declared here as well. The runner has no
+    // database code - nothing imports java.sql, org.postgresql or com.zaxxer - so they only
+    // added a JDBC driver and a connection pool to the workspace-runner Docker image. Removed
+    // in the slice 5 hygiene follow-up (#1132).
     libraryDependencies ++= Seq(
       Deps.cask,
-      Deps.postgres,
-      Deps.config,
-      Deps.hikariCP
+      Deps.config
     ),
     publish / skip := true,
     // Not measured: Docker entry point, excluded via ThisBuild / coverageExcludedPackages
@@ -837,6 +840,18 @@ lazy val knowledgegraphNeo4j = (project in file("modules/knowledgegraph-neo4j"))
     coverageFloor(80)
   )
 
+// Two OkHttp majors share this classpath, and it is left that way on purpose (#1132).
+// `anthropic-java` and `openai-java` bring `com.squareup.okhttp3:okhttp:4.12.0`; OpenTelemetry's
+// exporter brings `com.squareup.okhttp3:okhttp-jvm:5.x`. The artifact names differ, so nothing
+// evicts either, but both jars hold package `okhttp3` (253 identical class names): the first
+// jar on the classpath - 4.12.0 today - supplies the shared classes, and 5.x supplies only the
+// classes 4.x lacks. The Anthropic and OpenAI clients (complete and stream) and the OTLP gRPC
+// and HTTP exporters were all checked against local servers in this JVM, on this mixed
+// classpath and with 4.x excluded; both work. Excluding 4.x here would test the SDKs against
+// an OkHttp that `llm4s-anthropic` / `llm4s-openai` users do not get, and would hide the mix
+// that users combining a provider module with `llm4s-observability-otel` do get. Note that
+// the plain `okhttp:5.x` artifact is an empty stub for Maven/sbt consumers (the classes are in
+// `okhttp-jvm`), so a dependencyOverrides bump of `okhttp` to 5.x would drop the classes.
 lazy val it = (project in file("modules/it"))
   .dependsOn(core, rag, knowledgegraph, memory, memoryPostgres, mcp, image, speech, ollama, gemini, anthropic, openai, openaiCompatible, voyage, knowledgegraphNeo4j, workspaceClient, traceOpentelemetry)
   .settings(

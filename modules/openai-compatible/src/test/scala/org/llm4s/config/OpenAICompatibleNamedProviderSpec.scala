@@ -187,7 +187,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
       |    groq-main {
       |      provider = "openai-compatible"
       |      baseUrl = "https://api.groq.com/openai/v1"
-      |      model = "llama-3.3-70b-versatile"
+      |      model = "openai/gpt-oss-120b"
       |      apiKey = "gsk-test"
       |      contextWindow = 131072
       |      reserveCompletion = 8192
@@ -225,6 +225,7 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
     "load the key, context window, reserve and headers a section sets" in {
       Llm4sConfig.provider(ConfigSource.string(hocon), "groq-main") match
         case Right(cfg: OpenAICompatibleConfig) =>
+          cfg.model shouldBe "openai/gpt-oss-120b"
           cfg.apiKey shouldBe Some("gsk-test")
           cfg.contextWindow shouldBe 131072
           cfg.reserveCompletion shouldBe 8192

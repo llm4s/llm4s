@@ -1,5 +1,58 @@
 # Migration Guide
 
+## Slice 5 follow-ups: `llm4s-openai-compatible`
+
+Fixes to the shared OpenAI-compatible client after its carve
+([#1132](https://github.com/llm4s/llm4s/issues/1132)). Nothing here needs a code change unless
+you depend on the old behaviour.
+
+### `complete` times out after two minutes
+
+`OpenAICompatibleClient.complete` - DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and the generic
+`openai-compatible` provider - sent its request with no timeout, so an endpoint that never
+answered hung the caller. It now fails after two minutes (`OpenAICompatibleClient.RequestTimeout`),
+the value the old Mistral and Cohere clients used; streaming keeps five minutes. Neither is
+configurable yet ([#712](https://github.com/llm4s/llm4s/issues/712)): a slow local model with a
+long prompt should stream.
+
+### Streaming requests send `stream_options`
+
+A streaming request from the generic provider and DeepSeek now carries
+`"stream_options": {"include_usage": true}`, so servers that follow OpenAI - vLLM, Ollama's
+`/v1`, Perplexity's Router - report token usage on streams. Z.ai, OpenRouter, Mistral and Cohere
+do not send it. An endpoint that rejects unknown fields fails the stream with a 400 or 422; build
+its config with `OpenAICompatibleConfig.fromValues(..., streamUsage = false)`. A dialect you wrote
+yourself inherits `streamUsageOption = true`; override it to `false` if the provider rejects the
+field.
+
+### Requesty configs report `requesty`
+
+A config loaded from a `provider = "requesty"` section reported `providerId` = `openai`, because
+`OpenAIConfig` inferred its id from the base URL. `OpenAIConfig` now carries the id its descriptor
+sets, in a new trailing field `explicitProviderId: Option[ProviderId] = None`
+(`OpenAIConfig.fromValues` has a matching defaulted `providerId` parameter), so it reports
+`requesty`; `provider = "openrouter"` sets `openrouter` the same way, so an OpenRouter section
+with a proxy `baseUrl` still reaches OpenRouter. With `None` - a config built by hand, or
+`provider = "openai"` - the id is inferred from the base URL as before.
+
+What you may notice:
+
+- **`llm4s-config-policy`** sees `requesty`: an `allowedProviders` list must name `requesty`
+  rather than rely on `openai`, and model patterns match `requesty/<model>`.
+- `LLMConnect.getClient(config)` on a Requesty config now dispatches to the `requesty`
+  descriptor, which needs `llm4s-openai` - as the `openai` one did.
+- `OpenAIConfig.toString` shows `providerId`; a pattern match destructuring all six fields must
+  add a seventh.
+
+### `OPENAI_COMPATIBLE_BASE_URL` and `OPENAI_COMPATIBLE_API_KEY`
+
+These are now the conventional variables for a generic endpoint, named by
+`OpenAICompatibleConfigKeys`. `Llm4sConfig` does not read them - it reads no provider's variables
+and no `LLM_MODEL` - so bind them in a section (`baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}`). The
+chat-tui sample accepts `LLM_MODEL=openai-compatible/<model>` with them, and the config-policy
+env check reads `OPENAI_COMPATIBLE_BASE_URL` as that provider's endpoint instead of
+`OPENAI_BASE_URL`.
+
 ## Slice 5: Mistral, Cohere and Voyage leave core; core ships no provider
 
 The last provider clients leave `llm4s-core` ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
@@ -296,9 +349,11 @@ own build: `llm4s-openai` no longer brings it.
    nothing.
 6. **Azure and Requesty are labelled as themselves.** Their errors (`AuthenticationError.provider`
    and the error context), metrics and provider-exchange log now say `azure` and `requesty`;
-   every one said `openai` before. Requesty takes its label from its descriptor: a Requesty
-   `OpenAIConfig` still reports `providerId` = `openai`, derived from its base URL, so an
-   `OpenAIClient(config)` you build yourself from one is labelled `openai`.
+   every one said `openai` before. Requesty takes its label from its descriptor. A Requesty
+   config loaded from a `provider = "requesty"` section also reports `providerId` = `requesty`
+   since a later fix (see [above](#requesty-configs-report-requesty)); only an `OpenAIConfig`
+   you build by hand with Requesty's base URL still infers `openai` from it - pass
+   `providerId = Some(ProviderId("requesty"))` to `OpenAIConfig.fromValues` for that.
 7. **Several streamed tool calls come back in the order the stream named them**, in
    `Completion.toolCalls` and on the message. `llm4s-core`'s `StreamingAccumulator` kept them in
    an unordered map, so they could come back in hash order; this applies to every client that

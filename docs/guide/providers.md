@@ -531,10 +531,10 @@ set it only where the vendor publishes one.
 
 ### Selecting it, and environment variables
 
-The generic provider has no environment variables of its own: there is no
-`OPENAI_COMPATIBLE_API_KEY`, and no `LLM_MODEL=openai-compatible/<model>` shorthand. Every value
-lives in the named section, and you bind environment variables to it with HOCON substitutions,
-under names you choose. The recipes use each vendor's own documented variable name, such as
+`Llm4sConfig` resolves providers from named sections only - for every provider, not just this
+one - and reads no provider's environment variables and no `LLM_MODEL`. Every value lives in the
+named section, and you bind environment variables to it with HOCON substitutions, under names
+you choose. The recipes use each vendor's own documented variable name, such as
 `GROQ_API_KEY`:
 
 ```hocon
@@ -560,6 +560,33 @@ llm4s {
 when the config loads, because the key is optional: the request goes out without an
 `Authorization` header and fails with a 401 (see [Troubleshooting](#troubleshooting-openai-compatible-endpoints)).
 
+For an endpoint chosen entirely from the environment, the conventional names are
+`OPENAI_COMPATIBLE_BASE_URL` (required: the generic provider has no default endpoint) and
+`OPENAI_COMPATIBLE_API_KEY` (optional), which `OpenAICompatibleConfigKeys` names:
+
+```hocon
+llm4s.providers {
+  provider = "compatible-env"
+  compatible-env {
+    provider = "openai-compatible"
+    baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}
+    model = ${?OPENAI_COMPATIBLE_MODEL}
+    apiKey = ${?OPENAI_COMPATIBLE_API_KEY}
+  }
+}
+```
+
+With `OPENAI_COMPATIBLE_BASE_URL` or the model variable unset, that section fails to load, so
+keep it in the `application.conf` of deployments that set them.
+
+The `LLM_MODEL=openai-compatible/<model>` shorthand is read, as `LLM_MODEL=deepseek/<model>` and
+the other providers' are, by the tools that read `LLM_MODEL` themselves: the chat-tui sample,
+which then takes the endpoint from `OPENAI_COMPATIBLE_BASE_URL` and the key from
+`OPENAI_COMPATIBLE_API_KEY`, and the config-policy env check, which checks
+`OPENAI_COMPATIBLE_BASE_URL` rather than `OPENAI_BASE_URL` as the endpoint. Only the first `/`
+separates the provider, so `LLM_MODEL=openai-compatible/openai/gpt-oss-120b` names Groq's
+`openai/gpt-oss-120b`.
+
 Then load it by name, or as the default:
 
 ```scala
@@ -572,9 +599,28 @@ val dflt: Result[ProviderConfig]  = Llm4sConfig.defaultProvider()
 It sends the plain chat-completions format and reads the plain reply: text, **streaming**,
 **tool calling** (streamed and not), `response_format` for JSON output, and token usage. Every
 request carries `temperature` and `top_p`; `max_tokens` is sent when set, and
-`presence_penalty` and `frequency_penalty` only when non-zero. It never sends `stop`,
-`tool_choice` or `stream_options`. Whether a feature works also depends on the endpoint and the
+`presence_penalty` and `frequency_penalty` only when non-zero. It never sends `stop` or
+`tool_choice`. Whether a feature works also depends on the endpoint and the
 model: tool calling on a local server usually needs a server flag, as the recipes note.
+
+**Streamed token usage.** A streaming request asks for usage with
+`"stream_options": {"include_usage": true}`, which is how OpenAI - and servers that follow it,
+such as vLLM, Ollama's `/v1` and Perplexity's Router - are told to report it; usage is read from
+whichever event carries it, including a final event with empty `choices`. An endpoint that
+rejects unknown fields may refuse the request with a 400 or 422 naming `stream_options`. Turn it
+off by building the config with `streamUsage = false`:
+
+```scala
+OpenAICompatibleConfig.fromValues(model = "my-model", baseUrl = "https://llm.example/v1", streamUsage = false)
+```
+
+A `streamUsage` key in the named section is not read yet: provider-specific keys wait on
+[#1215](https://github.com/llm4s/llm4s/issues/1215).
+
+A non-streaming request fails with a timeout after **two minutes** without a response, and a
+streaming one after five minutes without one. Both are fixed for now; configurable timeouts are
+[#712](https://github.com/llm4s/llm4s/issues/712). A slow local model answering a long prompt
+can take longer than two minutes: stream it instead.
 
 What it does **not** do:
 
@@ -585,19 +631,16 @@ What it does **not** do:
 - **No provider-specific fields.** Anything outside the standard reply - citations, search
   results, annotations - is dropped; `Completion` has no field for it.
 - **Text only.** Messages are sent as text.
-- **Streamed usage only if the server volunteers it.** OpenAI's own behaviour is to report
-  token usage on a stream only when asked with `stream_options.include_usage`, which this path
-  never sends. Servers that follow it stream no usage; servers that always send it (Fireworks
-  documents that it does) have it read.
 - **No cost estimate** unless the model name is one llm4s's model registry knows.
 
 A provider that needs any of these gets its own **dialect in `llm4s-openai-compatible`**: an
 `OpenAICompatibleDialect` for how it departs from the standard format (reasoning parameters,
 where its thinking is, extra response decoding) and a `ProviderDescriptor` to register it, as
-DeepSeek, Z.ai, OpenRouter, Mistral and Cohere have. See
-[Adding a provider](../reference/migration.md#adding-a-provider) for the descriptor, and the
-[contributing guide](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md) for how to open
-the pull request.
+DeepSeek, Z.ai, OpenRouter, Mistral and Cohere have.
+[Adding an OpenAI-compatible provider](https://github.com/llm4s/llm4s/blob/main/CONTRIBUTING.md#adding-an-openai-compatible-provider-a-dialect)
+in the contributing guide walks through the hooks, a worked example, registration, the tests to
+write and the docs to update; see also
+[Adding a provider](../reference/migration.md#adding-a-provider) for the descriptor.
 
 ### Hosted APIs
 
@@ -735,8 +778,8 @@ perplexity-router {
 }
 ```
 
-The Router reports token usage on a stream only when asked with `stream_options`, so streamed
-completions carry no usage.
+The Router reports token usage on a stream only when asked with `stream_options`, which the
+generic provider sends, so streamed completions carry usage.
 
 #### OrcaRouter
 
@@ -947,9 +990,16 @@ does not, and without one it sends no `Authorization` header at all. A 401 from 
 means it was started with a key (`--api-key` for vLLM and `llama-server`, "Require
 Authentication" in LM Studio), and `apiKey` must then match it.
 
-**Missing `baseUrl`.** A section without one fails to load with
-`baseUrl: set OPENAI_COMPATIBLE_BASE_URL`. No such variable is read: set `baseUrl` in the
-section, from a variable of your choosing if you like (`baseUrl = ${?MY_BASE_URL}`).
+**Missing `baseUrl`.** A section without one fails to load with an error naming `baseUrl`.
+`Llm4sConfig` reads no variable for it by itself: set `baseUrl` in the section, from a variable
+if you like - `baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}` binds the conventional one. If the
+section binds a variable and still fails this way, the variable is not set in the process that
+runs your app.
+
+**Streaming fails with a 400 or 422 naming `stream_options`, while `complete` works.** The
+endpoint rejects fields it does not know. Build the config with `streamUsage = false` (see
+[streamed token usage](#what-the-generic-path-does-and-does-not-do)); the stream then carries
+usage only if the server sends it unasked.
 
 **Replies cut short, or context errors.** `contextWindow` defaults to 8192. Set it to the
 model's real window, or the server's configured context for a local server.
