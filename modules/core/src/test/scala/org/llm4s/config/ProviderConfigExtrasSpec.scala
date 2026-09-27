@@ -5,6 +5,7 @@ import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.core.read.ListAppender
 import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.error.ConfigurationError
+import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor, ProviderRegistry }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -416,4 +417,55 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
     message should include("provider-specific key")
     message should include("region")
     message should include("must be a string, number or boolean")
+  }
+
+  /** Runs `body` with the section validator's logger captured, returning its WARN messages. */
+  private def loggedWarnings[A](body: => A): (A, List[String]) =
+    val logger   = LoggerFactory.getLogger(NamedProviderSectionValidator.getClass).asInstanceOf[LogbackLogger]
+    val appender = new ListAppender[ILoggingEvent]()
+    val previous = logger.getLevel
+    appender.start()
+    logger.addAppender(appender)
+    logger.setLevel(Level.WARN)
+    val result = body
+    logger.detachAppender(appender)
+    logger.setLevel(previous)
+    (result, appender.list.asScala.toList.filter(_.getLevel == Level.WARN).map(_.getFormattedMessage))
+
+  // The default provider's name and its section used to be read by two separate loads of the
+  // providers block, each validating it and logging its warnings, so every warning printed twice.
+  private def warningHocon: String =
+    """
+      |llm4s.providers {
+      |  provider = "my-regional"
+      |  my-regional {
+      |    provider     = "regional"
+      |    model        = "m"
+      |    apiKey       = "k"
+      |    organization = "eu-west-1"
+      |    regoin       = "typo"
+      |  }
+      |}
+      |""".stripMargin
+
+  "Llm4sConfig.providerFrom" should "log each warning of the providers block exactly once" in {
+    val (result, warnings) = loggedWarnings(Llm4sConfig.providerFrom(ConfigSource.string(warningHocon)))
+
+    result match
+      case Right(config: FixtureChatConfig) => config.baseUrl shouldBe "https://eu-west-1.regional.invalid"
+      case other                            => fail(s"Expected FixtureChatConfig, got $other")
+
+    warnings should have size 2
+    warnings.count(_.contains("llm4s.providers.my-regional.organization is deprecated")) shouldBe 1
+    warnings.count(_.contains("unknown key(s) regoin")) shouldBe 1
+  }
+
+  "Llm4sConfig.listModels" should "load the providers block once for the default provider" in {
+    val httpClient = new MockHttpClient(HttpResponse(200, """{ "data": [] }""", Map.empty))
+    val (result, warnings) =
+      loggedWarnings(Llm4sConfig.listModels(ConfigSource.string(warningHocon), httpClient))
+
+    // RegionalProvider has no model lister, so this fails after the block has been loaded.
+    error(result) should include("Model discovery is not supported yet for provider 'regional'")
+    warnings should have size 2
   }

@@ -21,11 +21,29 @@ private[config] object NamedProviderLoader:
     ContextWindowResolver,
     ProviderRegistry
   ): Result[ProviderConfig] =
+    if providerName.trim.isEmpty then
+      Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
+    else ProvidersConfigLoader.load(source).flatMap(select(_, providerName))
+
+  /**
+   * Builds the `ProviderConfig` for a single named provider from an already-loaded providers block.
+   *
+   * Callers that need the block for something else as well - the default provider's name, say -
+   * load it once and pass it here, rather than calling [[load]] and so validating it a second
+   * time: every validation logs the block's warnings, so a second pass prints each one twice.
+   *
+   *  @param providers    the validated providers block
+   *  @param providerName the name of the provider entry to look up
+   *  @return `Right(ProviderConfig)` on success, or `Left` with a `ConfigurationError`
+   */
+  def select(providers: ProvidersConfig, providerName: String)(using
+    ContextWindowResolver,
+    ProviderRegistry
+  ): Result[ProviderConfig] =
     val trimmed = providerName.trim
     if trimmed.isEmpty then Left(ConfigurationError("Named provider selection requires a non-empty provider name"))
     else
       for
-        providers <- ProvidersConfigLoader.load(source)
         normalized <- providers.namedProviders
           .get(ProviderName(trimmed))
           .toRight(ConfigurationError(s"Configured provider '$trimmed' was not found"))
