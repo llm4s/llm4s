@@ -31,7 +31,8 @@ import org.llm4s.util.Redaction
  * @param streamUsage       whether a streaming request asks for token usage with
  *                          `"stream_options": {"include_usage": true}`. Servers that follow
  *                          OpenAI (vLLM, Ollama's `/v1`) stream no usage without it; turn it
- *                          off for an endpoint that rejects the field.
+ *                          off for an endpoint that rejects the field. A named section sets it
+ *                          with the `streamUsage` key.
  */
 final case class OpenAICompatibleConfig(
   model: String,

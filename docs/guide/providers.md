@@ -523,6 +523,7 @@ Each named section is one endpoint, so several can sit side by side. The
 | `contextWindow` | no | The model's context window. Default 8192, which is deliberately small: set the real value |
 | `reserveCompletion` | no | Tokens held back for the reply. Default 2048, or a quarter of a smaller window |
 | `headers` | no | Extra headers sent on every request; values are redacted when the config is printed |
+| `streamUsage` | no | Whether a streaming request asks for token usage with `stream_options.include_usage`. Default `true`; set `false` for an endpoint that rejects the field (see [streamed token usage](#what-the-generic-path-does-and-does-not-do)) |
 
 `baseUrl` is everything before `/chat/completions` in the vendor's endpoint URL. For most vendors
 that is the host plus `/v1`, but some add a prefix - Groq's is `/openai/v1`, Fireworks'
@@ -609,14 +610,20 @@ model: tool calling on a local server usually needs a server flag, as the recipe
 such as vLLM, Ollama's `/v1` and Perplexity's Router - are told to report it; usage is read from
 whichever event carries it, including a final event with empty `choices`. An endpoint that
 rejects unknown fields may refuse the request with a 400 or 422 naming `stream_options`. Turn it
-off by building the config with `streamUsage = false`:
+off with `streamUsage = false` in the section (it takes `true` or `false`, and HOCON's
+`yes`/`no`/`on`/`off`; anything else is a config error naming the key and section):
 
-```scala
-OpenAICompatibleConfig.fromValues(model = "my-model", baseUrl = "https://llm.example/v1", streamUsage = false)
+```hocon
+strict-gateway {
+  provider = "openai-compatible"
+  baseUrl = "https://llm.example/v1"
+  model = "my-model"
+  streamUsage = false
+}
 ```
 
-A `streamUsage` key in the named section is not read yet: provider-specific keys wait on
-[#1215](https://github.com/llm4s/llm4s/issues/1215).
+or, building the config in code, with
+`OpenAICompatibleConfig.fromValues(..., streamUsage = false)`.
 
 A non-streaming request fails with a timeout after **two minutes** without a response, and a
 streaming one after five minutes without one. Both are fixed for now; configurable timeouts are
@@ -1000,7 +1007,7 @@ section binds a variable and still fails this way, the variable is not set in th
 runs your app.
 
 **Streaming fails with a 400 or 422 naming `stream_options`, while `complete` works.** The
-endpoint rejects fields it does not know. Build the config with `streamUsage = false` (see
+endpoint rejects fields it does not know. Set `streamUsage = false` in the section (see
 [streamed token usage](#what-the-generic-path-does-and-does-not-do)); the stream then carries
 usage only if the server sends it unasked.
 

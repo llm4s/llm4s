@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must carry `project` in `extras`. An extra key whose value is an object or list is now a load
   error. See the
   [migration note](docs/reference/migration.md#named-providers-provider-specific-keys-vertex-ai-project-and-location).
+- **`streamUsage` in a generic `openai-compatible` section.** `OpenAICompatibleConfig.streamUsage`
+  can now be set from config: `streamUsage = false` in the named section stops a streaming
+  request sending `stream_options.include_usage`, for an endpoint that rejects the field. It is a
+  provider-specific key declared by `OpenAICompatibleProvider` (default `true`); `true`/`false`
+  and HOCON's `yes`/`no`/`on`/`off` are accepted, and any other value fails with an error naming
+  the key and section. Before this, the key was reported as unknown and ignored
+  ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
 - **A contributing guide for OpenAI-compatible providers**:
   [CONTRIBUTING.md](CONTRIBUTING.md#adding-an-openai-compatible-provider-a-dialect) now covers
   checking the generic `openai-compatible` provider first, the `OpenAICompatibleDialect` hooks
@@ -632,6 +639,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Every provider-config warning was logged twice** by `Llm4sConfig.defaultProvider`,
+  `providerFrom` and the default-provider `listModels`: they read the default provider's name and
+  then its section through two separate loads of `llm4s.providers`, and each load validated the
+  whole block, logging its deprecated-alias and unknown-key warnings again. The block is now
+  loaded once and both are read from that result. Results are unchanged
+  ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
 - **`complete` on `OpenAICompatibleClient` could wait for ever.** It sent its request with no
   timeout - as the old `DeepSeekClient`, `ZaiClient` and `OpenRouterClient` had
   ([#912](https://github.com/llm4s/llm4s/issues/912)) - so an endpoint that accepted the
@@ -647,8 +660,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OpenAICompatibleDialect.streamUsageOption` (default `true`). Z.ai, OpenRouter, Mistral and
   Cohere answer `false`: Mistral rejects unknown fields with a 422, Z.ai and Cohere do not
   document it, and OpenRouter always streams usage. For an endpoint that rejects the field,
-  `OpenAICompatibleConfig` has `streamUsage` (default `true`); a `streamUsage` key in the named
-  section waits on provider-specific keys ([#1215](https://github.com/llm4s/llm4s/issues/1215)).
+  `OpenAICompatibleConfig` has `streamUsage` (default `true`), settable from a named section
+  (see Added).
 - **A Requesty config reported `providerId` = `openai`**, because `OpenAIConfig` inferred its id
   from the base URL, which is neither OpenAI's nor OpenRouter's. `OpenAIConfig` gains a trailing
   `explicitProviderId: Option[ProviderId] = None` (and `fromValues` a defaulted `providerId`),
