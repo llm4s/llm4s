@@ -172,18 +172,20 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
       result.value.mode shouldBe TracingMode.Langfuse
     }
 
-    "default to NoOp for unknown mode values" in {
+    "read a mode core has no case for as Named, for a backend outside core (D2, #1133)" in {
       val hocon =
         """
           |llm4s {
-          |  tracing { mode = "unknown-mode" }
+          |  tracing { mode = "Unknown-Mode" }
           |}
           |""".stripMargin
 
       val result = TracingConfigLoader.load(ConfigSource.string(hocon))
 
       result.isRight shouldBe true
-      result.value.mode shouldBe TracingMode.NoOp
+      result.value.mode shouldBe TracingMode.Named("unknown-mode")
+      // With no backend registered for it, building the tracer still degrades to NoOp.
+      org.llm4s.trace.Tracing.create(result.value) shouldBe a[org.llm4s.trace.NoOpTracing]
     }
 
     "handle empty mode string by using default" in {

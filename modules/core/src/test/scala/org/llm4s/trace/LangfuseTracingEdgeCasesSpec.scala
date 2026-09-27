@@ -248,7 +248,8 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   }
 
   // =========================================================================
-  // traceAgentState - with conversation messages (hierarchical trace)
+  // AgentStateUpdated carrying the conversation (hierarchical trace).
+  // This was traceAgentState(AgentState) until D5 (#1133) made it an ordinary event.
   // =========================================================================
 
   it should "create hierarchical trace for agent state with messages" in {
@@ -268,7 +269,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
       logs = Vector("log1")
     )
 
-    val result = tracing.traceAgentState(state)
+    val result = tracing.traceEvent(state.toTraceEvent)
 
     result.isRight shouldBe true
     mock.postCallCount shouldBe 1
@@ -282,6 +283,9 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     batch(0)("type").str shouldBe "trace-create"
     batch(0)("body")("input").str shouldBe "Hello"
     batch(0)("body")("output").str shouldBe "Hi there!"
+    batch(0)("body")("metadata")("status").str shouldBe AgentStatus.Complete.toString
+    batch(0)("body")("metadata")("message_count").num shouldBe 3
+    batch(0)("body")("metadata")("log_count").num shouldBe 1
 
     // Child spans
     batch(1)("type").str shouldBe "span-create"
@@ -294,7 +298,7 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     batch(3)("body")("name").str should include("LLM Generation")
   }
 
-  it should "return Right without sending batch for empty conversation" in {
+  it should "send the summary trace when the state event carries no messages" in {
     val mock    = new MockHttpClient(HttpResponse(200, ""))
     val tracing = makeTracing(mock)
 
@@ -304,10 +308,27 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
       status = AgentStatus.InProgress
     )
 
-    val result = tracing.traceAgentState(state)
+    val result = tracing.traceEvent(state.toTraceEvent)
 
     result.isRight shouldBe true
-    mock.postCallCount shouldBe 0 // No batch sent for empty conversation
+    mock.postCallCount shouldBe 1
+    val batch = ujson.read(mock.lastBody.get)("batch").arr
+    batch should have size 1
+    batch(0)("body")("metadata")("message_count").num shouldBe 0
+  }
+
+  it should "report a failed export of the conversation trace" in {
+    val mock    = new MockHttpClient(HttpResponse(500, "boom"))
+    val tracing = makeTracing(mock)
+
+    val event = TraceEvent.AgentStateUpdated(
+      status = "Complete",
+      messageCount = 1,
+      logCount = 0,
+      messages = Seq(UserMessage("Hello"))
+    )
+
+    tracing.traceEvent(event).isLeft shouldBe true
   }
 
   // =========================================================================

@@ -1,0 +1,2 @@
+# A tracing backend that llm4s-core knows nothing about.
+org.llm4s.trace.spi.fixtures.FixtureTracingBackend

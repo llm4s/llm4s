@@ -381,18 +381,20 @@ TRACING_MODE=none
 ### Basic Usage
 
 ```scala
-import org.llm4s.trace.{ EnhancedTracing, Tracing }
+import org.llm4s.config.Llm4sConfig
+import org.llm4s.trace.{ ConsoleTracing, Tracing }
 
-// Create tracer from environment (Result), fallback to console tracer
-val tracer: Tracing = EnhancedTracing
-  .createFromEnv()
-  .fold(_ => Tracing.createFromEnhanced(new org.llm4s.trace.EnhancedConsoleTracing()), Tracing.createFromEnhanced)
+// Build the tracer llm4s.tracing.mode selects; fall back to the console tracer
+val tracer: Tracing = Llm4sConfig
+  .tracing()
+  .flatMap(Tracing.fromSettings)
+  .fold(_ => new ConsoleTracing(), identity)
 
 // Trace events, completions, and token usage
 tracer.traceEvent("Starting LLM operation")
 tracer.traceCompletion(completion, completion.model) // prefer the model reported by the API
 tracer.traceTokenUsage(tokenUsage, completion.model, "chat-completion")
-tracer.traceAgentState(agentState)
+tracer.traceEvent(agentState.toTraceEvent)           // agent state is an ordinary TraceEvent
 ```
 
 ### Usage using starter kit `llm4s.g8`
@@ -445,8 +447,8 @@ Preferred typed entry points (PureConfig-backed via `Llm4sConfig`):
   - `LLMConnect.getClient(config: ProviderConfig): Result[LLMClient]` – builds a client from a typed config (with a `given ModelRegistryService` from `Llm4sConfig.modelRegistryService()`).
 - Tracing:
   - `Llm4sConfig.tracing(): Result[TracingSettings]` – returns typed tracing settings.
-  - `EnhancedTracing.create(settings: TracingSettings): EnhancedTracing` – builds an enhanced tracer from typed settings.
-  - `Tracing.create(settings: TracingSettings): Tracing` – builds a legacy `Tracing` from typed settings.
+  - `Tracing.fromSettings(settings: TracingSettings): Result[Tracing]` – builds the tracer the mode selects; a missing backend is an error.
+  - `Tracing.create(settings: TracingSettings): Tracing` – the same, falling back to `NoOpTracing` with an error logged.
 - Embeddings:
   - `Llm4sConfig.embeddings(): Result[(String, EmbeddingProviderConfig)]` – returns `(provider, config)` with validation.
   - `EmbeddingClient.from(provider: String, cfg: EmbeddingProviderConfig): Result[EmbeddingClient]` – builds an embeddings client from typed config.
@@ -455,8 +457,7 @@ Recommended usage patterns:
 
 - Model name for display: `Llm4sConfig.defaultProvider().map(_.model)` or prefer `completion.model` from API responses.
 - Tracing:
-  - For enhanced tracing: `Llm4sConfig.tracing().map(EnhancedTracing.create)`.
-  - For legacy `Tracing`: `Llm4sConfig.tracing().map(Tracing.create)`.
+  - `Llm4sConfig.tracing().flatMap(Tracing.fromSettings)`, or `.map(Tracing.create)` to fall back to no tracing.
 - Workspace (samples): `WorkspaceConfigSupport.load()` to get `workspaceDir`, `imageName`, `hostPort`, `traceLogPath`.
 - Embeddings sample (samples): `EmbeddingUiSettings.loadFromEnv`, `EmbeddingTargets.loadFromEnv`, `EmbeddingQuery.loadFromEnv` (sample helpers backed by `Llm4sConfig`).
 
@@ -473,7 +474,7 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
 - Tracing configuration
   - Keys: `llm4s.tracing.mode` | `TRACING_MODE`, `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION`
   - Type: `TracingSettings`
-  - Loader: `Llm4sConfig.tracing()` → then `EnhancedTracing.create` or `Tracing.create`
+  - Loader: `Llm4sConfig.tracing()` → then `Tracing.fromSettings` or `Tracing.create`
 
 - Workspace settings (samples)
   - Keys: `llm4s.workspace.dir` | `WORKSPACE_DIR`, `llm4s.workspace.image` | `WORKSPACE_IMAGE`, `llm4s.workspace.port` | `WORKSPACE_PORT`, `llm4s.workspace.traceLogPath` | `WORKSPACE_TRACE_LOG`
@@ -505,12 +506,13 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
 
 Tracing
 
-- Configure mode via `llm4s.tracing.mode` (default: `console`). Supported: `langfuse`, `console`, `noop`.
+- Configure mode via `llm4s.tracing.mode` (default: `console`). Supported: `langfuse`, `opentelemetry`
+  (with `llm4s-observability-otel`), `console`, `noop`, and any mode a `TracingBackend` on the classpath registers.
 - Override with env: `TRACING_MODE=langfuse` (or system property `-Dllm4s.tracing.mode=langfuse`).
 - Build tracers:
-  - Typed: `Llm4sConfig.tracing().map(EnhancedTracing.create)` → `Result[EnhancedTracing]`
-  - Legacy bridge: `Llm4sConfig.tracing().map(Tracing.create)`
-  - Low-level: `LangfuseTracing.fromEnv()` → `Result[LangfuseTracing]`
+  - Checked: `Llm4sConfig.tracing().flatMap(Tracing.fromSettings)` → `Result[Tracing]`
+  - Falling back to no tracing: `Llm4sConfig.tracing().map(Tracing.create)`
+  - Low-level: `LangfuseTracing.from(langfuseConfig)`
 
 Example (no application.conf required):
 

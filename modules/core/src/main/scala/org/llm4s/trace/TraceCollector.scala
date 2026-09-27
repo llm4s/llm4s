@@ -1,6 +1,5 @@
 package org.llm4s.trace
 
-import org.llm4s.agent.AgentState
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.trace.model._
 import org.llm4s.trace.store.TraceStore
@@ -32,19 +31,6 @@ class TraceCollectorTracing[F[_]](
 
   override def traceEvent(event: TraceEvent): Result[Unit] =
     lift(store.saveSpan(eventToSpan(event)))
-
-  override def traceAgentState(state: AgentState): Result[Unit] =
-    lift(
-      store.saveSpan(
-        Span
-          .start(traceId, "agent-state-update", SpanKind.AgentCall)
-          .withAttribute("status", SpanValue.StringValue(state.status.toString))
-          .withAttribute("message_count", SpanValue.LongValue(state.conversation.messages.length.toLong))
-          .withAttribute("log_count", SpanValue.LongValue(state.logs.length.toLong))
-          .end()
-          .withStatus(SpanStatus.Ok)
-      )
-    )
 
   override def traceToolCall(toolName: String, input: String, output: String): Result[Unit] =
     lift(
@@ -199,7 +185,7 @@ class TraceCollectorTracing[F[_]](
           )
         )
 
-      case TraceEvent.AgentStateUpdated(status, messageCount, logCount, ts) =>
+      case TraceEvent.AgentStateUpdated(status, messageCount, logCount, _, ts) =>
         Span(
           spanId = spanId,
           traceId = traceId,

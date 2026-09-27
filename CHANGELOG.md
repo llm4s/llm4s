@@ -62,6 +62,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **Tracing backends are discovered, and agent state is a `TraceEvent`** - the tracing extension
+  point, landed ahead of the slice 6 carve as slice 4 did for providers
+  ([#1133](https://github.com/llm4s/llm4s/issues/1133), decisions D2 and D5).
+  `Tracing.create` builds `NoOp` and `Console` itself and dispatches every other mode to an
+  `org.llm4s.trace.spi.TracingBackend` found through
+  `META-INF/services/org.llm4s.trace.spi.TracingBackend`. `llm4s-observability-otel` registers
+  `OpenTelemetryTracingBackend`, replacing the `Class.forName` reflection core used to load it;
+  Langfuse is registered by core until it is carved. `TracingMode` gains `Named(name)`, so a
+  third-party backend is selected by `TRACING_MODE=<name>` with no edit to core, and
+  `Tracing.fromSettings` returns a missing or failing backend as an error where `Tracing.create`
+  logs it and falls back to `NoOpTracing`. `TracingBackends.of` / `withBackend` register a backend
+  explicitly.
+
+  Source breaks: `Tracing.traceAgentState(AgentState)` is removed - trace
+  `state.toTraceEvent` (a `TraceEvent.AgentStateUpdated`, which gains a `messages` field before
+  `timestamp`) through `traceEvent`; `TracingMode` gains the `Named` case and a `name` member; and
+  `TracingMode.fromString` returns `Named` rather than `NoOp` for an unrecognised value. See the
+  [migration note](docs/reference/migration.md#slice-6-tracing-backends-are-discovered-and-agent-state-is-a-traceevent).
 - **Mistral, Cohere and Voyage leave `llm4s-core`, which now ships no provider** - the end of
   core's provider clients in slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
   Mistral and Cohere become dialects in `llm4s-openai-compatible`: Mistral over its OpenAI-format

@@ -1,7 +1,6 @@
 // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.trace
 
-import org.llm4s.agent.AgentState
 import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.http.Llm4sHttpClient
@@ -153,7 +152,14 @@ class LangfuseTracing(
     }
   }
 
-  def traceEvent(event: TraceEvent): Result[Unit] = {
+  def traceEvent(event: TraceEvent): Result[Unit] = event match {
+    // An agent state snapshot that carries its conversation becomes one trace with a child
+    // span per message. This was traceAgentState(AgentState) until D5 (#1133).
+    case e: TraceEvent.AgentStateUpdated if e.messages.nonEmpty => traceConversation(e)
+    case other                                                  => traceSingleEvent(other)
+  }
+
+  private def traceSingleEvent(event: TraceEvent): Result[Unit] = {
     val traceId     = uuid
     val now         = nowIso
     val batchEvents = scala.collection.mutable.ArrayBuffer[ujson.Obj]()
@@ -501,93 +507,89 @@ class LangfuseTracing(
     sendBatch(batchEvents.toSeq)
   }
 
-  def traceAgentState(state: AgentState): Result[Unit] = {
+  private def traceConversation(state: TraceEvent.AgentStateUpdated): Result[Unit] = {
     // Send hierarchical structure: one main trace with child spans for each message
-    if (state.conversation.messages.nonEmpty) {
-      val batchEvents = scala.collection.mutable.ArrayBuffer[ujson.Obj]()
-      val traceId     = uuid
-      val sessionId   = s"session-${System.currentTimeMillis()}"
+    val batchEvents = scala.collection.mutable.ArrayBuffer[ujson.Obj]()
+    val traceId     = uuid
+    val sessionId   = s"session-${System.currentTimeMillis()}"
 
-      // Get the first user message and last assistant message for main trace input/output
-      val firstUserMessage = state.conversation.messages.find(_.isInstanceOf[org.llm4s.llmconnect.model.UserMessage])
-      val lastAssistantMessage =
-        state.conversation.messages.findLast(_.isInstanceOf[org.llm4s.llmconnect.model.AssistantMessage])
+    // Get the first user message and last assistant message for main trace input/output
+    val firstUserMessage = state.messages.find(_.isInstanceOf[org.llm4s.llmconnect.model.UserMessage])
+    val lastAssistantMessage =
+      state.messages.findLast(_.isInstanceOf[org.llm4s.llmconnect.model.AssistantMessage])
 
-      // 1. Create the main trace with exact input/output like old system
-      val mainTrace = ujson.Obj(
-        "id"        -> traceId,
-        "timestamp" -> nowIso,
-        "type"      -> "trace-create",
-        "body" -> ujson.Obj(
-          "id"          -> traceId,
-          "timestamp"   -> nowIso,
-          "environment" -> environment,
-          "release"     -> release,
-          "version"     -> version,
-          "public"      -> true,
-          "name"        -> "LLM4S Agent Run",
-          "input"       -> ujson.Str(firstUserMessage.map(_.content).getOrElse("No user input")),
-          "output"      -> ujson.Str(lastAssistantMessage.map(_.content).getOrElse("No response")),
-          "userId"      -> "llm4s-user",
-          "sessionId"   -> sessionId,
-          "metadata" -> ujson.Obj(
-            "framework"     -> "llm4s",
-            "status"        -> state.status.toString,
-            "message_count" -> state.conversation.messages.length,
-            "log_count"     -> state.logs.length
-          ),
-          "tags" -> ujson.Arr("llm4s", "agent", "conversation")
-        )
+    // 1. Create the main trace with exact input/output like old system
+    val mainTrace = ujson.Obj(
+      "id"        -> traceId,
+      "timestamp" -> nowIso,
+      "type"      -> "trace-create",
+      "body" -> ujson.Obj(
+        "id"          -> traceId,
+        "timestamp"   -> nowIso,
+        "environment" -> environment,
+        "release"     -> release,
+        "version"     -> version,
+        "public"      -> true,
+        "name"        -> "LLM4S Agent Run",
+        "input"       -> ujson.Str(firstUserMessage.map(_.content).getOrElse("No user input")),
+        "output"      -> ujson.Str(lastAssistantMessage.map(_.content).getOrElse("No response")),
+        "userId"      -> "llm4s-user",
+        "sessionId"   -> sessionId,
+        "metadata" -> ujson.Obj(
+          "framework"     -> "llm4s",
+          "status"        -> state.status,
+          "message_count" -> state.messageCount,
+          "log_count"     -> state.logCount
+        ),
+        "tags" -> ujson.Arr("llm4s", "agent", "conversation")
       )
-      batchEvents += mainTrace
+    )
+    batchEvents += mainTrace
 
-      // 2. Create child spans for each message
-      state.conversation.messages.zipWithIndex.foreach { case (message, index) =>
-        val messageName = message match {
-          case _: org.llm4s.llmconnect.model.SystemMessage    => "System Message"
-          case _: org.llm4s.llmconnect.model.UserMessage      => "User Input"
-          case _: org.llm4s.llmconnect.model.AssistantMessage => "LLM Generation"
-          case _                                              => message.getClass.getSimpleName
-        }
-
-        val childSpan = ujson.Obj(
-          "id"        -> uuid,
-          "timestamp" -> nowIso,
-          "type"      -> "span-create",
-          "body" -> ujson.Obj(
-            "id"        -> uuid,
-            "timestamp" -> nowIso,
-            "traceId"   -> traceId,
-            "name"      -> s"$messageName $index",
-            "input" -> ujson.Obj(
-              "content" -> message.content,
-              "role"    -> message.getClass.getSimpleName.replace("Message", "").toLowerCase
-            ),
-            "output" -> (message match {
-              case _: org.llm4s.llmconnect.model.AssistantMessage =>
-                ujson.Obj(
-                  "content" -> message.content,
-                  "role"    -> "assistant"
-                )
-              case _ =>
-                ujson.Null
-            }),
-            "metadata" -> ujson.Obj(
-              "framework"     -> "llm4s",
-              "message_index" -> index,
-              "message_type"  -> message.getClass.getSimpleName,
-              "parent_trace"  -> traceId
-            ),
-            "tags" -> ujson.Arr("llm4s", "agent", "conversation", "message")
-          )
-        )
-        batchEvents += childSpan
+    // 2. Create child spans for each message
+    state.messages.zipWithIndex.foreach { case (message, index) =>
+      val messageName = message match {
+        case _: org.llm4s.llmconnect.model.SystemMessage    => "System Message"
+        case _: org.llm4s.llmconnect.model.UserMessage      => "User Input"
+        case _: org.llm4s.llmconnect.model.AssistantMessage => "LLM Generation"
+        case _                                              => message.getClass.getSimpleName
       }
 
-      sendBatch(batchEvents.toSeq)
+      val childSpan = ujson.Obj(
+        "id"        -> uuid,
+        "timestamp" -> nowIso,
+        "type"      -> "span-create",
+        "body" -> ujson.Obj(
+          "id"        -> uuid,
+          "timestamp" -> nowIso,
+          "traceId"   -> traceId,
+          "name"      -> s"$messageName $index",
+          "input" -> ujson.Obj(
+            "content" -> message.content,
+            "role"    -> message.getClass.getSimpleName.replace("Message", "").toLowerCase
+          ),
+          "output" -> (message match {
+            case _: org.llm4s.llmconnect.model.AssistantMessage =>
+              ujson.Obj(
+                "content" -> message.content,
+                "role"    -> "assistant"
+              )
+            case _ =>
+              ujson.Null
+          }),
+          "metadata" -> ujson.Obj(
+            "framework"     -> "llm4s",
+            "message_index" -> index,
+            "message_type"  -> message.getClass.getSimpleName,
+            "parent_trace"  -> traceId
+          ),
+          "tags" -> ujson.Arr("llm4s", "agent", "conversation", "message")
+        )
+      )
+      batchEvents += childSpan
     }
 
-    Right(())
+    sendBatch(batchEvents.toSeq)
   }
 
   def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {

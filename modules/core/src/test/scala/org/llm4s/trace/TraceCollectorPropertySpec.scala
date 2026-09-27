@@ -112,7 +112,7 @@ class TraceCollectorPropertySpec
       msgs   <- Gen.choose(0, 100)
       logs   <- Gen.choose(0, 100)
       ts     <- genInstant
-    } yield TraceEvent.AgentStateUpdated(status, msgs, logs, ts)
+    } yield TraceEvent.AgentStateUpdated(status, msgs, logs, timestamp = ts)
 
   val genEmbeddingUsageRecorded: Gen[TraceEvent] =
     for {

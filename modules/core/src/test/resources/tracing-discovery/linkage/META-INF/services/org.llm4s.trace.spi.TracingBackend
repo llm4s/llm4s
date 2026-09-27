@@ -1,0 +1,4 @@
+# A backend whose mode throws a LinkageError - what a jar built against another llm4s does.
+# It sits ahead of a working backend: neither it nor the working one may take out the scan.
+org.llm4s.trace.spi.fixtures.LinkageErrorTracingBackend
+org.llm4s.trace.spi.fixtures.FixtureTracingBackend

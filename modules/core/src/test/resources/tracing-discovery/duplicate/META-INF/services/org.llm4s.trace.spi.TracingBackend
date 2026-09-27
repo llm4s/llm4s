@@ -1,0 +1,3 @@
+# Two backends claiming the same mode: the later one wins, as with providers.
+org.llm4s.trace.spi.fixtures.FixtureTracingBackend
+org.llm4s.trace.spi.fixtures.OtherFixtureTracingBackend

@@ -52,7 +52,7 @@ object BasicLLMCallingWithTrace {
               status = AgentStatus.Complete,
               logs = Seq(s"Completion ID=${completion.id}")
             )
-            tracer.traceAgentState(agentState)
+            tracer.traceEvent(agentState.toTraceEvent)
 
             // Trace tool calls if present
             completion.message.toolCalls.foreach { tc =>

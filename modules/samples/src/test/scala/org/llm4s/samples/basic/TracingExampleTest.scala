@@ -125,7 +125,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
       logs = Vector("Log entry 1", "Log entry 2")
     )
 
-    val result = tracer.traceAgentState(agentState)
+    val result = tracer.traceEvent(agentState.toTraceEvent)
     result shouldBe a[Right[_, Unit]]
   }
 

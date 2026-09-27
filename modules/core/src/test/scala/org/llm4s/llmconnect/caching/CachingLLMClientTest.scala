@@ -9,7 +9,6 @@ import org.llm4s.llmconnect.provider.EmbeddingProvider
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.Result
 import org.llm4s.trace.{ TraceEvent, Tracing }
-import org.llm4s.agent.AgentState
 import org.llm4s.llmconnect.model.TokenUsage
 
 import java.time.{ Clock, Instant, ZoneId }
@@ -26,7 +25,6 @@ class CachingLLMClientTest extends AnyFunSuite with Matchers {
       events += event
       Right(())
     }
-    override def traceAgentState(state: AgentState): Result[Unit]                                   = Right(())
     override def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
     override def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
     override def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())

@@ -126,6 +126,38 @@ This requires the `llm4s-observability-otel` module:
 libraryDependencies += "org.llm4s" %% "llm4s-observability-otel" % llm4sVersion
 ```
 
+The module registers itself for `opentelemetry` through a `META-INF/services` entry, so the
+dependency is all it takes.
+
+### Adding a Tracing Backend
+
+A backend is a `TracingBackend` - the extension point `llm4s-observability-otel` uses - so adding
+one needs no change to llm4s:
+
+```scala
+import org.llm4s.llmconnect.config.TracingSettings
+import org.llm4s.trace.{ Tracing, TracingMode }
+import org.llm4s.trace.spi.TracingBackend
+import org.llm4s.types.Result
+
+// A class with a public no-arg constructor - not an object: ServiceLoader instantiates it
+final class DatadogTracingBackend extends TracingBackend:
+  val mode: TracingMode = TracingMode.Named("datadog")
+  def create(settings: TracingSettings): Result[Tracing] = Right(new DatadogTracing())
+```
+
+Declare it in `src/main/resources/META-INF/services/org.llm4s.trace.spi.TracingBackend`:
+
+```
+com.example.DatadogTracingBackend
+```
+
+`TRACING_MODE=datadog` then selects it. `Tracing.fromSettings(settings)` returns a
+`ConfigurationError` when no backend serves the configured mode, and the backend's own error when
+`create` fails; `Tracing.create(settings)` logs either and falls back to `NoOpTracing`. Where
+services files do not survive packaging (some shaded jars), register the backend explicitly:
+`Tracing.fromSettings(settings, TracingBackends.of(new DatadogTracingBackend))`.
+
 ---
 
 ## In-Process Trace Collection
@@ -337,6 +369,9 @@ tracing.traceEvent(TraceEvent.CustomEvent("cache_hit", ujson.Obj("key" -> "query
 
 // Trace token usage explicitly
 tracing.traceTokenUsage(usage, model = "gpt-4o", operation = "completion")
+
+// Trace an agent state snapshot (the agent does this after each step)
+tracing.traceEvent(agentState.toTraceEvent)
 
 // Trace costs
 tracing.traceCost(

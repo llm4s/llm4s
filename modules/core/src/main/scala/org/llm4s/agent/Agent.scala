@@ -537,7 +537,7 @@ class Agent(client: LLMClient) {
               }
 
               context.traceLogPath.foreach(path => AgentTraceFormatter.writeTraceLog(newState, path))
-              safeTrace(context.tracing)(_.traceAgentState(newState))
+              safeTrace(context.tracing)(_.traceEvent(newState.toTraceEvent))
 
               runUntilCompletion(newState, nextSteps, iteration + 1)
 

@@ -1,0 +1,2 @@
+# A backend whose create throws: selecting it must give an error, not an exception.
+org.llm4s.trace.spi.fixtures.ThrowingTracingBackend

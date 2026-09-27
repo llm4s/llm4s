@@ -37,13 +37,7 @@ object TracingUtil {
 
   /** Trace agent state updates */
   def traceAgentStateUpdate(tracing: Tracing, agentState: AgentState): Unit =
-    tracing.traceEvent(
-      TraceEvent.AgentStateUpdated(
-        status = agentState.status.toString,
-        messageCount = agentState.conversation.messages.length,
-        logCount = agentState.logs.length
-      )
-    )
+    tracing.traceEvent(agentState.toTraceEvent)
 
   /** Trace successful tool execution with detailed results */
   def traceToolExecution(

@@ -1,5 +1,84 @@
 # Migration Guide
 
+## Slice 6: tracing backends are discovered, and agent state is a `TraceEvent`
+
+The first slice 6 change ([#1133](https://github.com/llm4s/llm4s/issues/1133)) lands the extension
+point for tracing before Langfuse and Prometheus are carved out of `llm4s-core`, as slice 4 did for
+providers. Nothing moves module yet, and nothing in a release has it; `0.4.1` and earlier behave as
+before.
+
+### `Tracing.traceAgentState(AgentState)` is removed
+
+`Tracing` no longer mentions `AgentState`, so the tracing contract does not depend on the agent
+runtime. Agent state is traced as an ordinary event, `TraceEvent.AgentStateUpdated`, which
+`AgentState#toTraceEvent` builds:
+
+```scala
+// before
+tracing.traceAgentState(state)
+
+// after
+tracing.traceEvent(state.toTraceEvent)
+```
+
+`AgentStateUpdated` gained a `messages: Seq[Message]` field (default empty) before `timestamp`,
+carrying the conversation, so that Langfuse still records a trace with one span per message. It is
+not part of `toJson`. The agent emits the event exactly where it called `traceAgentState`.
+
+A custom `Tracing` implementation drops its `traceAgentState` override; anything it did there
+belongs in `traceEvent`'s `AgentStateUpdated` case.
+
+### `Tracing.create` finds backends on the classpath
+
+`Tracing.create(settings)` keeps its signature. It builds `NoOp` and `Console` itself and hands
+every other mode to an `org.llm4s.trace.spi.TracingBackend` registered in
+`META-INF/services/org.llm4s.trace.spi.TracingBackend`:
+
+- **OpenTelemetry**: `llm4s-observability-otel` registers `OpenTelemetryTracingBackend`. The
+  `Class.forName` reflection core used to find it is gone. Adding the dependency is all it takes,
+  as before.
+- **Langfuse**: registered by core's own services entry until it is carved into
+  `llm4s-observability`.
+- **Anything else**: implement `TracingBackend` (a `class` with a public no-arg constructor, not an
+  `object`) with `mode = TracingMode.Named("yourmode")`, declare it in the services file, and
+  `TRACING_MODE=yourmode` selects it.
+
+`Tracing.create` still never fails: a missing or broken backend logs an error and gives
+`NoOpTracing`. The new **`Tracing.fromSettings(settings): Result[Tracing]`** returns that as a
+`ConfigurationError` (or the backend's own error) instead, and
+`Tracing.fromSettings(settings, TracingBackends.of(...))` registers a backend explicitly, for a
+shaded jar whose services files did not survive.
+
+### `TracingMode` is open
+
+`TracingMode` gained a `Named(name)` case and a `name` member. `TracingMode.fromString` returns
+`Named` for a value it does not recognise, lower-cased, where it used to return `NoOp` with a
+warning; a blank value is still `NoOp`. The end result of an unknown `TRACING_MODE` is unchanged -
+`Tracing.create` gives `NoOpTracing` - but the log line is now an error that lists the modes that
+are available.
+
+### Behaviour changes
+
+1. **An `AgentStateUpdated` with no messages is exported to Langfuse** as a summary trace. The old
+   `traceAgentState` sent nothing for an empty conversation.
+2. **Langfuse reports a failed export of the conversation trace** as a `Left`; `traceAgentState`
+   always returned `Right(())`. The agent swallows tracing errors either way.
+3. **OpenTelemetry names the agent state span `Agent State Updated`** - the span `traceEvent`
+   already produced - rather than `Agent State Snapshot`, with the same attributes.
+4. **An OpenTelemetry SDK that fails to start** is reported by `Tracing.fromSettings` and gives
+   `NoOpTracing` from `Tracing.create`, rather than a tracer whose every call failed.
+
+### Source breaks
+
+1. **`Tracing.traceAgentState` is removed** - use `traceEvent(state.toTraceEvent)`.
+2. **`TraceEvent.AgentStateUpdated` has a fifth field**, `messages`, before `timestamp`. A
+   positional `AgentStateUpdated(status, messages, logs, timestamp)` must name the timestamp
+   (`timestamp = ...`), and a pattern `AgentStateUpdated(a, b, c, ts)` needs one more binder.
+3. **`TracingMode` has a new case**, `Named`, so an exhaustive `match` over it needs one more
+   branch, and **a new abstract member, `name`**, for anything extending the sealed trait (nothing
+   outside core can).
+4. **`TracingMode.fromString` returns `Named(...)`, not `NoOp`, for an unrecognised value.**
+
 ## From `LLM_MODEL` to named provider sections
 
 Since [#903](https://github.com/llm4s/llm4s/pull/903) (in 0.3.2) removed legacy single-provider

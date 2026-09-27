@@ -59,7 +59,11 @@ case class OpenTelemetryConfig(
  * connection details.  Only the sub-config matching the active mode is used —
  * e.g. when `mode = TracingMode.Langfuse`, `openTelemetry` is ignored.
  *
- * @param mode          selects the tracing backend (`Langfuse`, `OpenTelemetry`, `Console`, or `NoOp`)
+ * A backend registered through [[org.llm4s.trace.spi.TracingBackend]] receives
+ * the whole of these settings from `Tracing.fromSettings`.
+ *
+ * @param mode          selects the tracing backend (`Langfuse`, `OpenTelemetry`, `Console`, `NoOp`,
+ *                      or `Named` for a backend outside core)
  * @param langfuse      Langfuse connection details; only used when `mode = TracingMode.Langfuse`
  * @param openTelemetry OpenTelemetry collector details; only used when `mode = TracingMode.OpenTelemetry`
  */

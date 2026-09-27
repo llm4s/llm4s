@@ -32,6 +32,6 @@ object LangfuseSampleTraceRunner {
       .tracing()
       .map(Tracing.create)
       .fold(_ => new ConsoleTracing(), identity)
-    tracer.traceAgentState(fakeState)
+    tracer.traceEvent(fakeState.toTraceEvent)
   }
 }

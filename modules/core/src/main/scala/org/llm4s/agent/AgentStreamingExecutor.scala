@@ -250,7 +250,7 @@ final private[agent] class AgentStreamingExecutor(
                 onEvent(AgentEvent.agentCompleted(finalState, currentStep + 1, totalDuration))
 
                 context.traceLogPath.foreach(path => AgentTraceFormatter.writeTraceLog(finalState, path))
-                safeTrace(context.tracing)(_.traceAgentState(finalState))
+                safeTrace(context.tracing)(_.traceEvent(finalState.toTraceEvent))
                 Right(finalState)
 
               case toolCalls =>
@@ -551,7 +551,7 @@ final private[agent] class AgentStreamingExecutor(
               val shouldDecrement = newState.status == AgentStatus.WaitingForTools
               val updatedSteps    = if (shouldDecrement) stepsRemaining.map(_ - 1) else stepsRemaining
               context.traceLogPath.foreach(path => AgentTraceFormatter.writeTraceLog(newState, path))
-              safeTrace(context.tracing)(_.traceAgentState(newState))
+              safeTrace(context.tracing)(_.traceEvent(newState.toTraceEvent))
               runUntilCompletion(newState, updatedSteps, iteration + 1)
 
             case Left(error) =>

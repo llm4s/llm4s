@@ -1,6 +1,6 @@
 package org.llm4s.trace
 
-import org.llm4s.llmconnect.model.{ EmbeddingUsage, TokenUsage }
+import org.llm4s.llmconnect.model.{ EmbeddingUsage, Message, TokenUsage }
 
 import java.time.Instant
 import java.util.UUID
@@ -119,10 +119,27 @@ object TraceEvent {
     )
   }
 
+  /**
+   * A snapshot of an agent run, emitted after each step.
+   *
+   * This replaced `Tracing.traceAgentState(AgentState)` (D5, #1133), which tied
+   * the tracing contract to the agent runtime. The agent builds it with
+   * `AgentState#toTraceEvent`; it carries plain values and conversation
+   * [[org.llm4s.llmconnect.model.Message]]s, never `AgentState` itself.
+   *
+   * @param status       the agent status, as `AgentStatus#toString`
+   * @param messageCount the number of messages in the conversation
+   * @param logCount     the number of agent log entries
+   * @param messages     the conversation at this point, for backends that record it
+   *                     (Langfuse turns it into one span per message). Empty when the
+   *                     emitter has only the counts. Not included in [[toJson]], which
+   *                     stays a flat summary.
+   */
   case class AgentStateUpdated(
     status: String,
     messageCount: Int,
     logCount: Int,
+    messages: Seq[Message] = Seq.empty,
     timestamp: Instant = Instant.now()
   ) extends TraceEvent {
     def eventType: String = "agent_state_updated"

@@ -1,7 +1,6 @@
 package org.llm4s.trace
 
 import org.llm4s.error.UnknownError
-import org.llm4s.agent.AgentState
 import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
 import org.llm4s.types.Result
 import scala.util.Try
@@ -192,15 +191,6 @@ class ConsoleTracing extends Tracing {
           println()
       }
     }.toEither.left.map(error => UnknownError(error.getMessage, error))
-
-  def traceAgentState(state: AgentState): Result[Unit] = {
-    val event = TraceEvent.AgentStateUpdated(
-      status = state.status.toString,
-      messageCount = state.conversation.messages.length,
-      logCount = state.logs.length
-    )
-    traceEvent(event)
-  }
 
   def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
     val event = TraceEvent.ToolExecuted(toolName, input, output, 0, true)

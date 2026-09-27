@@ -83,8 +83,7 @@ class ToolProcessorSpec extends AnyFlatSpec with Matchers {
   private class RecordingTracing extends Tracing {
     var toolCalls: Vector[(String, String, String)] = Vector.empty
 
-    override def traceEvent(event: TraceEvent): Result[Unit]      = Right(())
-    override def traceAgentState(state: AgentState): Result[Unit] = Right(())
+    override def traceEvent(event: TraceEvent): Result[Unit] = Right(())
     override def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
       toolCalls = toolCalls :+ ((toolName, input, output))
       Right(())

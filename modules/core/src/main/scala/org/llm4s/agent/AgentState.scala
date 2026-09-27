@@ -2,6 +2,7 @@ package org.llm4s.agent
 
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
+import org.llm4s.trace.TraceEvent
 import upickle.default.{ ReadWriter => RW, readwriter }
 
 /**
@@ -59,6 +60,21 @@ case class AgentState(
    */
   def toApiConversation: Conversation =
     Conversation(systemMessage.toSeq ++ conversation.messages)
+
+  /**
+   * This state as a trace event, for `tracing.traceEvent(state.toTraceEvent)`.
+   *
+   * Replaces `Tracing.traceAgentState(AgentState)` (D5, #1133): the tracing
+   * contract takes plain values and conversation messages, so it does not depend
+   * on the agent runtime.
+   */
+  def toTraceEvent: TraceEvent.AgentStateUpdated =
+    TraceEvent.AgentStateUpdated(
+      status = status.toString,
+      messageCount = conversation.messages.length,
+      logCount = logs.length,
+      messages = conversation.messages
+    )
 
   /**
    * Prints a detailed dump of the agent execution state for debugging

@@ -12,7 +12,7 @@ import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
  * from a PureConfig [[pureconfig.ConfigSource]].
  *
  * Reads `llm4s.tracing.mode` to select the tracing backend (`langfuse`,
- * `opentelemetry`, `console`, or `none`), then populates the corresponding
+ * `opentelemetry`, `console`, `none`, or another backend's own mode), then populates the corresponding
  * backend configuration (Langfuse keys/URL, OpenTelemetry endpoint, etc.).
  * When variables are absent, sensible defaults are applied (e.g. console
  * mode, localhost OTLP endpoint).

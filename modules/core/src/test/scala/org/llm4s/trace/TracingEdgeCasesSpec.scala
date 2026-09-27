@@ -81,17 +81,18 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   // CompositeTracing - delegating methods
   // =========================================================================
 
-  "CompositeTracing" should "delegate traceAgentState to all tracers" in {
+  "CompositeTracing" should "fan an agent state event out to all tracers" in {
     val events1  = mutable.Buffer.empty[TraceEvent]
     val events2  = mutable.Buffer.empty[TraceEvent]
     val combined = TracingComposer.combine(new RecordingTracing(events1), new RecordingTracing(events2))
 
     val state = createAgentState()
-    combined.traceAgentState(state) shouldBe Right(())
+    combined.traceEvent(state.toTraceEvent) shouldBe Right(())
 
     events1 should have size 1
     events2 should have size 1
     events1.head shouldBe a[TraceEvent.AgentStateUpdated]
+    events1.head.asInstanceOf[TraceEvent.AgentStateUpdated].messages shouldBe state.conversation.messages
   }
 
   it should "delegate traceToolCall to all tracers" in {
@@ -159,13 +160,13 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   // FilteredTracing - delegate methods
   // =========================================================================
 
-  "FilteredTracing" should "delegate traceAgentState to underlying" in {
+  "FilteredTracing" should "apply its predicate to agent state events like any other" in {
     val events   = mutable.Buffer.empty[TraceEvent]
     val tracer   = new RecordingTracing(events)
-    val filtered = TracingComposer.filter(tracer)(_ => true)
+    val filtered = TracingComposer.filter(tracer)(_.eventType != "agent_state_updated")
 
-    filtered.traceAgentState(createAgentState()) shouldBe Right(())
-    events should have size 1
+    filtered.traceEvent(createAgentState().toTraceEvent) shouldBe Right(())
+    events shouldBe empty
   }
 
   it should "delegate traceCompletion to underlying" in {
@@ -199,13 +200,17 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   // TransformedTracing - delegate methods
   // =========================================================================
 
-  "TransformedTracing" should "delegate traceAgentState to underlying" in {
-    val events      = mutable.Buffer.empty[TraceEvent]
-    val tracer      = new RecordingTracing(events)
-    val transformed = TracingComposer.transform(tracer)(identity)
+  "TransformedTracing" should "transform agent state events like any other" in {
+    val events = mutable.Buffer.empty[TraceEvent]
+    val tracer = new RecordingTracing(events)
+    val transformed = TracingComposer.transform(tracer) {
+      case e: TraceEvent.AgentStateUpdated => e.copy(messages = Seq.empty)
+      case other                           => other
+    }
 
-    transformed.traceAgentState(createAgentState()) shouldBe Right(())
+    transformed.traceEvent(createAgentState().toTraceEvent) shouldBe Right(())
     events should have size 1
+    events.head.asInstanceOf[TraceEvent.AgentStateUpdated].messages shouldBe empty
   }
 
   it should "delegate traceToolCall to underlying" in {
@@ -315,14 +320,6 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   /** Recording tracer for test assertions */
   private class RecordingTracing(events: mutable.Buffer[TraceEvent]) extends Tracing {
     def traceEvent(event: TraceEvent): Result[Unit] = { events += event; Right(()) }
-    def traceAgentState(state: AgentState): Result[Unit] = {
-      events += TraceEvent.AgentStateUpdated(
-        state.status.toString,
-        state.conversation.messages.length,
-        state.logs.length
-      )
-      Right(())
-    }
     def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
       events += TraceEvent.ToolExecuted(toolName, input, output, 0L, true)
       Right(())

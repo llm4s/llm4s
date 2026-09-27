@@ -24,7 +24,6 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     var completions: Vector[Completion]                   = Vector.empty
     var tokenUsages: Vector[(TokenUsage, String, String)] = Vector.empty
     var toolCalls: Vector[(String, String, String)]       = Vector.empty
-    var states: Vector[AgentState]                        = Vector.empty
     var errors: Vector[(Throwable, String)]               = Vector.empty
     var events: Vector[TraceEvent]                        = Vector.empty
 
@@ -33,10 +32,9 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
       Right(())
     }
 
-    override def traceAgentState(state: AgentState): Result[Unit] = {
-      states = states :+ state
-      Right(())
-    }
+    // Agent state arrives as an ordinary event since traceAgentState was removed (D5, #1133).
+    def states: Vector[TraceEvent.AgentStateUpdated] =
+      events.collect { case e: TraceEvent.AgentStateUpdated => e }
 
     override def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
       toolCalls = toolCalls :+ ((toolName, input, output))
@@ -64,9 +62,6 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     override def traceEvent(event: TraceEvent): Result[Unit] =
       Left(ValidationError.invalid("tracing", "test failure"))
 
-    override def traceAgentState(state: AgentState): Result[Unit] =
-      Left(ValidationError.invalid("tracing", "test failure"))
-
     override def traceToolCall(toolName: String, input: String, output: String): Result[Unit] =
       Left(ValidationError.invalid("tracing", "test failure"))
 
@@ -84,8 +79,6 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
   private class CompletionErrorOnlyTracing extends Tracing {
     override def traceEvent(event: TraceEvent): Result[Unit] = Right(())
 
-    override def traceAgentState(state: AgentState): Result[Unit] = Right(())
-
     override def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Right(())
 
     override def traceError(error: Throwable, context: String): Result[Unit] = Right(())
@@ -99,8 +92,6 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
   /** Tracer where completion tracing fails with an UnknownError wrapping a Throwable. */
   private class ThrowableCompletionTracing extends Tracing {
     override def traceEvent(event: TraceEvent): Result[Unit] = Right(())
-
-    override def traceAgentState(state: AgentState): Result[Unit] = Right(())
 
     override def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Right(())
 
@@ -207,6 +198,12 @@ class AgentTracingSpec extends AnyFlatSpec with Matchers {
     tracing.completions should have size 1
     tracing.tokenUsages should have size 1
     tracing.states.nonEmpty shouldBe true
+
+    // The event carries what a backend needs to rebuild the run, without AgentState itself.
+    val last = tracing.states.last
+    last.status shouldBe AgentStatus.Complete.toString
+    (last.messages.map(_.content) should contain).allOf("test query", "Hello, world!")
+    last.messageCount shouldBe last.messages.size
   }
 
   it should "trace tool executions when tools are called" in {

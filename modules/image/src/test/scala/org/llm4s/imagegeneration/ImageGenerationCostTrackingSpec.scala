@@ -2,7 +2,6 @@ package org.llm4s.imagegeneration
 
 import org.llm4s.metrics._
 import org.llm4s.trace.{ TraceEvent, Tracing }
-import org.llm4s.agent.AgentState
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.types.Result
 import io.prometheus.metrics.model.registry.PrometheusRegistry
@@ -72,7 +71,6 @@ class ImageGenerationCostTrackingSpec extends AnyFlatSpec with Matchers {
       events = events :+ event
       Right(())
     }
-    override def traceAgentState(state: AgentState): Result[Unit]                                   = Right(())
     override def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
     override def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
     override def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())

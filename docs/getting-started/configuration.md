@@ -547,16 +547,30 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
 ```scala
 import org.llm4s.config.Llm4sConfig
-import org.llm4s.trace.Tracing
+import org.llm4s.trace.{ TraceEvent, Tracing }
 
-// Build the tracer that llm4s.tracing.mode selects
+// Build the tracer that llm4s.tracing.mode selects. fromSettings fails if the mode's
+// backend - here llm4s-observability-otel - is not on the classpath; Tracing.create
+// would log that and fall back to NoOpTracing instead.
 val result = for {
-  tracer <- Llm4sConfig.tracing().map(Tracing.create)
-  _      <- tracer.traceEvent(TraceEvent.AgentInitialized("query", List("tool1")))
-  _      <- tracer.traceTokenUsage(usage, "gpt-4o", "completion")
-  _       = tracer.shutdown() // always shut down to flush pending spans
+  settings <- Llm4sConfig.tracing()
+  tracer   <- Tracing.fromSettings(settings)
+  _        <- tracer.traceEvent(TraceEvent.AgentInitialized("query", Vector("tool1")))
+  _        <- tracer.traceTokenUsage(usage, "gpt-4o", "completion")
+  _         = tracer.shutdown() // always shut down to flush pending spans
 } yield ()
 ```
+
+### Other tracing backends
+
+`console` and `none` are built into `llm4s-core`; every other mode is served by a
+`org.llm4s.trace.spi.TracingBackend` that a module registers in
+`META-INF/services/org.llm4s.trace.spi.TracingBackend` - `opentelemetry` by
+`llm4s-observability-otel`, for instance. A mode llm4s has no name for, such as
+`TRACING_MODE=datadog`, is read as `TracingMode.Named("datadog")` and goes to whichever backend
+declares that mode. With no such backend, `Tracing.create` logs an error listing the available
+modes and traces nothing. See the
+[observability guide](../guide/observability/index.md#adding-a-tracing-backend) to write one.
 
 ### Disable Tracing
 
@@ -574,7 +588,7 @@ also set in `application.conf` or with `-D`.
 
 | Variable | Config key | Bound by |
 |---|---|---|
-| `TRACING_MODE` | `llm4s.tracing.mode` (`langfuse`, `opentelemetry`, `console` - the default - or `none`) | `llm4s-core` |
+| `TRACING_MODE` | `llm4s.tracing.mode` (`langfuse`, `opentelemetry`, `console` - the default - `none`, or the mode of any `TracingBackend` on the classpath) | `llm4s-core` |
 | `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION` | `llm4s.tracing.langfuse.*` | `llm4s-core` |
 | `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `llm4s.tracing.opentelemetry.serviceName`, `.endpoint` | `llm4s-core` |
 | `EMBEDDING_MODEL` (or legacy `EMBEDDING_PROVIDER`) | `llm4s.embeddings.model` (`.provider`) | `llm4s-core` |

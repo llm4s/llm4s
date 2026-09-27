@@ -1,9 +1,13 @@
-// scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordCatch
 package org.llm4s.trace
 
-import org.llm4s.agent.AgentState
+import org.llm4s.error.{ ConfigurationError, UnknownError }
+import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.llmconnect.model.{ Completion, EmbeddingUsage, TokenUsage }
+import org.llm4s.trace.spi.{ TracingBackend, TracingBackends }
 import org.llm4s.types.Result
+
+import java.util.Locale
+import scala.util.control.NonFatal
 
 /**
  * Type-safe tracing interface for observability and debugging.
@@ -34,6 +38,12 @@ import org.llm4s.types.Result
  * } yield ()
  * }}}
  *
+ * == Agent state ==
+ *
+ * There is no `traceAgentState(AgentState)`: agent state is traced as an ordinary
+ * [[TraceEvent.AgentStateUpdated]], built with `AgentState#toTraceEvent`, so the
+ * tracing contract does not depend on the agent runtime (D5, #1133).
+ *
  * == Composition ==
  *
  * Tracers can be composed using [[TracingComposer]]:
@@ -48,7 +58,6 @@ import org.llm4s.types.Result
  */
 trait Tracing {
   def traceEvent(event: TraceEvent): Result[Unit]
-  def traceAgentState(state: AgentState): Result[Unit]
   def traceToolCall(toolName: String, input: String, output: String): Result[Unit]
   def traceError(error: Throwable, context: String = ""): Result[Unit]
   def traceCompletion(completion: Completion, model: String): Result[Unit]
@@ -207,15 +216,6 @@ private class CompositeTracing(tracers: Vector[Tracing]) extends Tracing {
     if (errors.size == results.size) Left(errors.head) else Right(())
   }
 
-  def traceAgentState(state: AgentState): Result[Unit] = {
-    val event = TraceEvent.AgentStateUpdated(
-      status = state.status.toString,
-      messageCount = state.conversation.messages.length,
-      logCount = state.logs.length
-    )
-    traceEvent(event)
-  }
-
   def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
     val event = TraceEvent.ToolExecuted(toolName, input, output, 0, true)
     traceEvent(event)
@@ -248,7 +248,6 @@ private class FilteredTracing(underlying: Tracing, predicate: TraceEvent => Bool
   def traceEvent(event: TraceEvent): Result[Unit] =
     if (predicate(event)) underlying.traceEvent(event) else Right(())
 
-  def traceAgentState(state: AgentState): Result[Unit] = underlying.traceAgentState(state)
   def traceToolCall(toolName: String, input: String, output: String): Result[Unit] =
     underlying.traceToolCall(toolName, input, output)
   def traceError(error: Throwable, context: String): Result[Unit] = underlying.traceError(error, context)
@@ -264,7 +263,6 @@ private class TransformedTracing(underlying: Tracing, transform: TraceEvent => T
   def traceEvent(event: TraceEvent): Result[Unit] =
     underlying.traceEvent(transform(event))
 
-  def traceAgentState(state: AgentState): Result[Unit] = underlying.traceAgentState(state)
   def traceToolCall(toolName: String, input: String, output: String): Result[Unit] =
     underlying.traceToolCall(toolName, input, output)
   def traceError(error: Throwable, context: String): Result[Unit] = underlying.traceError(error, context)
@@ -277,51 +275,75 @@ private class TransformedTracing(underlying: Tracing, transform: TraceEvent => T
 }
 
 /**
- * Enumerates the available tracing backends.
+ * Selects a tracing backend.
  *
- * Instances are created by [[Tracing.create]] based on the `TracingSettings`
- * provided at startup.  The `TRACING_MODE` environment variable is the
- * standard way to select a mode; see `Llm4sConfig` for loading details.
+ * `NoOp` and `Console` are built by core itself. Every other mode is served by a
+ * [[org.llm4s.trace.spi.TracingBackend]] found on the classpath: `Langfuse` by core's
+ * own until it is carved into `llm4s-observability`, `OpenTelemetry` by
+ * `llm4s-observability-otel`, and a backend core knows nothing about by
+ * [[TracingMode.Named]] (D2, #1133).
+ *
+ * The `TRACING_MODE` environment variable (`llm4s.tracing.mode`) is the standard
+ * way to select a mode; see `Llm4sConfig.tracing`.
  */
-sealed trait TracingMode extends Product with Serializable
+sealed trait TracingMode extends Product with Serializable {
+
+  /** The canonical config value for this mode, as [[TracingMode.fromString]] reads it. */
+  def name: String
+}
 
 object TracingMode {
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
-  case object Langfuse      extends TracingMode
-  case object Console       extends TracingMode
-  case object OpenTelemetry extends TracingMode
-  case object NoOp          extends TracingMode
+  case object Langfuse      extends TracingMode { val name = "langfuse"      }
+  case object Console       extends TracingMode { val name = "console"       }
+  case object OpenTelemetry extends TracingMode { val name = "opentelemetry" }
+  case object NoOp          extends TracingMode { val name = "noop"          }
+
+  /**
+   * A mode served by a [[org.llm4s.trace.spi.TracingBackend]] that core has no case for.
+   *
+   * This is what makes the set of modes open: a third-party backend declares
+   * `TracingMode.Named("datadog")` and `TRACING_MODE=datadog` selects it, with no
+   * edit to core. Matching against a backend is case-insensitive.
+   *
+   * @param name the mode's config value; [[fromString]] produces it lower-cased
+   */
+  final case class Named(name: String) extends TracingMode
 
   /**
    * Parses a mode string into a `TracingMode`, case-insensitively.
    *
    * Accepts `"langfuse"`, `"console"`, `"print"`, `"opentelemetry"`, `"otel"`,
-   * `"noop"`, and `"none"`.  Any other value logs a warning and returns `NoOp`
-   * rather than throwing.
+   * `"noop"`, and `"none"`. Any other non-blank value becomes [[Named]], lower-cased,
+   * for a backend outside core to claim; whether one does is decided when the
+   * tracer is built, by `Tracing.fromSettings`. A blank value logs a warning and
+   * returns `NoOp`.
    *
    * @param mode mode string, typically the value of the `TRACING_MODE` environment variable
-   * @return the matching `TracingMode`, or `NoOp` for unrecognised values
+   * @return the matching `TracingMode`
    */
-  def fromString(mode: String): TracingMode = mode.toLowerCase match {
+  def fromString(mode: String): TracingMode = mode.trim.toLowerCase(Locale.ROOT) match {
     case "langfuse"               => Langfuse
     case "console" | "print"      => Console
     case "opentelemetry" | "otel" => OpenTelemetry
     case "noop" | "none"          => NoOp
-    case other =>
-      logger.warn(s"Unknown tracing mode '$other', falling back to NoOp")
+    case "" =>
+      logger.warn("Blank tracing mode, falling back to NoOp")
       NoOp
+    case other => Named(other)
   }
 }
 
 /**
  * Factory for creating [[Tracing]] instances.
  *
- * Creates the appropriate tracing implementation based on configuration settings.
- *
  * {{{
- * // From TracingSettings
+ * // From TracingSettings: falls back to NoOp, with an error logged, if the backend is missing
  * val tracing = Tracing.create(settings)
+ *
+ * // The same, but a missing or failing backend is an error the caller sees
+ * val checked: Result[Tracing] = Tracing.fromSettings(settings)
  *
  * // Direct instantiation
  * val console = new ConsoleTracing()
@@ -329,50 +351,95 @@ object TracingMode {
  * }}}
  *
  * @see [[TracingMode]] for available modes
+ * @see [[org.llm4s.trace.spi.TracingBackend]] for adding a backend
  */
 object Tracing {
+
+  private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
   /**
    * Create a tracing instance from configuration settings.
    *
+   * Never fails: when the configured backend is not on the classpath, or cannot
+   * start, this logs the reason at error level and returns a [[NoOpTracing]], so a
+   * tracing problem cannot stop the application. Use [[fromSettings]] to see the
+   * error instead.
+   *
    * @param settings Tracing configuration including mode and backend-specific options
-   * @return Configured tracing instance
+   * @return Configured tracing instance, or `NoOpTracing`
    */
-  def create(settings: org.llm4s.llmconnect.config.TracingSettings): Tracing = settings.mode match {
-    case TracingMode.Langfuse =>
-      val lf = settings.langfuse
-      new LangfuseTracing(
-        lf.url,
-        lf.publicKey.getOrElse(""),
-        lf.secretKey.getOrElse(""),
-        lf.env,
-        lf.release,
-        lf.version
-      )
-    case TracingMode.Console => new ConsoleTracing()
-    case TracingMode.OpenTelemetry =>
-      val ot = settings.openTelemetry
-      try {
-        val clazz = Class.forName("org.llm4s.trace.OpenTelemetryTracing")
-        val ctor  = clazz.getConstructor(classOf[String], classOf[String], classOf[Map[String, String]])
-        ctor.newInstance(ot.serviceName, ot.endpoint, ot.headers).asInstanceOf[Tracing]
-      } catch {
-        case _: ClassNotFoundException | _: NoClassDefFoundError =>
-          val logger = org.slf4j.LoggerFactory.getLogger(getClass)
-          logger.error(
-            "OpenTelemetry tracing configured but 'trace-opentelemetry' module not found on classpath. " +
-              "Please add 'org.llm4s' %% 'llm4s-trace-opentelemetry' dependency. Falling back to NoOpTracing."
-          )
-          new NoOpTracing()
-        case e: Throwable if Option(e.getClass.getSimpleName).contains("InvocationTargetException") =>
-          val logger = org.slf4j.LoggerFactory.getLogger(getClass)
-          logger.error("OpenTelemetry tracing initialization failed", e.getCause)
-          new NoOpTracing()
-        case e: Throwable =>
-          val logger = org.slf4j.LoggerFactory.getLogger(getClass)
-          logger.error("Failed to initialize OpenTelemetry tracing. Falling back to NoOpTracing.", e)
-          new NoOpTracing()
-      }
-    case TracingMode.NoOp => new NoOpTracing()
+  def create(settings: TracingSettings): Tracing =
+    fromSettings(settings) match {
+      case Right(tracing) => tracing
+      case Left(error) =>
+        logger.error(s"${error.message} Falling back to NoOpTracing.")
+        new NoOpTracing()
+    }
+
+  /**
+   * Builds the tracer `settings` select, reporting a missing or failing backend as an error.
+   *
+   * `NoOp` and `Console` are built directly. Any other mode is dispatched to the
+   * [[org.llm4s.trace.spi.TracingBackend]] discovered for it on the classpath.
+   *
+   * @return the tracer, or a [[org.llm4s.error.ConfigurationError]] when no backend
+   *         is registered for the mode, or the backend's own error when it cannot start
+   */
+  def fromSettings(settings: TracingSettings): Result[Tracing] =
+    resolve(settings, TracingBackends.discover())
+
+  /**
+   * As [[fromSettings(settings:*]], dispatching to `backends` rather than to what
+   * is discovered - for an explicitly registered backend, or a shaded jar whose
+   * services files did not survive.
+   */
+  def fromSettings(settings: TracingSettings, backends: TracingBackends): Result[Tracing] =
+    resolve(settings, backends)
+
+  // `backends` is by-name so NoOp and Console never pay for a classpath scan.
+  private def resolve(settings: TracingSettings, backends: => TracingBackends): Result[Tracing] =
+    canonical(settings.mode) match {
+      case TracingMode.NoOp    => Right(new NoOpTracing())
+      case TracingMode.Console => Right(new ConsoleTracing())
+      case mode =>
+        val available = backends
+        available.find(mode) match {
+          case Some(backend) => createWith(backend, settings)
+          case None          => Left(missingBackend(mode, available))
+        }
+    }
+
+  // A hand-built `Named("console")` means the built-in mode, as `fromString("console")` does.
+  private def canonical(mode: TracingMode): TracingMode = mode match {
+    case TracingMode.Named(name) => TracingMode.fromString(name)
+    case other                   => other
+  }
+
+  // scalafix:off DisableSyntax.NoKeywordCatch
+  private def createWith(backend: TracingBackend, settings: TracingSettings): Result[Tracing] =
+    try backend.create(settings)
+    catch {
+      // A LinkageError here is a backend jar built against another llm4s, or missing its own
+      // dependency; either way it is this backend's failure, not the application's.
+      case error: LinkageError =>
+        Left(UnknownError(s"Tracing backend ${backend.getClass.getName} failed to start: $error", error))
+      case NonFatal(error) =>
+        Left(UnknownError(s"Tracing backend ${backend.getClass.getName} failed to start: $error", error))
+    }
+  // scalafix:on DisableSyntax.NoKeywordCatch
+
+  private def missingBackend(mode: TracingMode, backends: TracingBackends): ConfigurationError = {
+    val hint = mode match {
+      case TracingMode.OpenTelemetry => " Add the 'org.llm4s' %% 'llm4s-observability-otel' dependency."
+      case _                         => ""
+    }
+    val registered = backends.modes.map(_.name) ++ Seq(TracingMode.Console.name, TracingMode.NoOp.name)
+    val failures =
+      if (backends.failures.isEmpty) ""
+      else s" Discovery reported: ${backends.failures.mkString("; ")}."
+    ConfigurationError(
+      s"Tracing mode '${mode.name}' is configured but no TracingBackend for it is on the classpath.$hint " +
+        s"Available modes: ${registered.mkString(", ")}.$failures"
+    )
   }
 }

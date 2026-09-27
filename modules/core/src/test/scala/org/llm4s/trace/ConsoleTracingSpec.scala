@@ -58,7 +58,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
       status = AgentStatus.InProgress
     )
 
-    noException should be thrownBy tracing.traceAgentState(state)
+    noException should be thrownBy tracing.traceEvent(state.toTraceEvent)
   }
 
   it should "trace agent state with full configuration" in {
@@ -77,7 +77,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
       logs = Vector("[assistant] Generated response", "[tool] Executed tool")
     )
 
-    noException should be thrownBy tracing.traceAgentState(state)
+    noException should be thrownBy tracing.traceEvent(state.toTraceEvent)
   }
 
   it should "trace agent state with system message" in {
@@ -93,7 +93,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
       status = AgentStatus.InProgress
     )
 
-    noException should be thrownBy tracing.traceAgentState(state)
+    noException should be thrownBy tracing.traceEvent(state.toTraceEvent)
   }
 
   it should "trace agent state with assistant tool calls" in {
@@ -111,7 +111,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
       status = AgentStatus.Complete
     )
 
-    noException should be thrownBy tracing.traceAgentState(state)
+    noException should be thrownBy tracing.traceEvent(state.toTraceEvent)
   }
 
   it should "trace agent state with various log types" in {
@@ -129,7 +129,7 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
       )
     )
 
-    noException should be thrownBy tracing.traceAgentState(state)
+    noException should be thrownBy tracing.traceEvent(state.toTraceEvent)
   }
 
   // ==========================================================================

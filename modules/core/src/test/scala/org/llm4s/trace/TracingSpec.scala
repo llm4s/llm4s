@@ -37,10 +37,27 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     TracingMode.fromString("NONE") shouldBe TracingMode.NoOp
   }
 
-  it should "default to NoOp for unknown modes" in {
-    TracingMode.fromString("unknown") shouldBe TracingMode.NoOp
+  it should "parse a mode it does not know as Named, so a backend outside core can claim it (D2, #1133)" in {
+    TracingMode.fromString("datadog") shouldBe TracingMode.Named("datadog")
+    TracingMode.fromString("  DataDog ") shouldBe TracingMode.Named("datadog")
+  }
+
+  it should "default to NoOp for a blank mode" in {
     TracingMode.fromString("") shouldBe TracingMode.NoOp
-    TracingMode.fromString("invalid") shouldBe TracingMode.NoOp
+    TracingMode.fromString("   ") shouldBe TracingMode.NoOp
+  }
+
+  "TracingMode.name" should "be the canonical config value of each mode" in {
+    TracingMode.Langfuse.name shouldBe "langfuse"
+    TracingMode.Console.name shouldBe "console"
+    TracingMode.OpenTelemetry.name shouldBe "opentelemetry"
+    TracingMode.NoOp.name shouldBe "noop"
+    TracingMode.Named("datadog").name shouldBe "datadog"
+  }
+
+  it should "round-trip through fromString" in {
+    Seq(TracingMode.Langfuse, TracingMode.Console, TracingMode.OpenTelemetry, TracingMode.NoOp, TracingMode.Named("x"))
+      .foreach(mode => TracingMode.fromString(mode.name) shouldBe mode)
   }
 
   // ============ NoOpTracing ============
@@ -49,7 +66,7 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     val tracing = new NoOpTracing()
 
     tracing.traceEvent(TraceEvent.CustomEvent("test", ujson.Obj())) shouldBe Right(())
-    tracing.traceAgentState(createTestAgentState()) shouldBe Right(())
+    tracing.traceEvent(createTestAgentState().toTraceEvent) shouldBe Right(())
     tracing.traceToolCall("tool", "input", "output") shouldBe Right(())
     tracing.traceError(new RuntimeException("test")) shouldBe Right(())
     tracing.traceCompletion(createTestCompletion(), "gpt-4") shouldBe Right(())
@@ -80,7 +97,7 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     val tracing = new ConsoleTracing()
     val state   = createTestAgentState()
 
-    tracing.traceAgentState(state).isRight shouldBe true
+    tracing.traceEvent(state.toTraceEvent).isRight shouldBe true
   }
 
   it should "handle completion tracing" in {
@@ -318,15 +335,6 @@ class TracingSpec extends AnyFlatSpec with Matchers {
       Right(())
     }
 
-    def traceAgentState(state: AgentState): Result[Unit] = {
-      events += TraceEvent.AgentStateUpdated(
-        state.status.toString,
-        state.conversation.messages.length,
-        state.logs.length
-      )
-      Right(())
-    }
-
     def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {
       events += TraceEvent.ToolExecuted(toolName, input, output, 0L, true)
       Right(())
@@ -358,7 +366,6 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     import org.llm4s.error.SimpleError
 
     def traceEvent(event: TraceEvent): Result[Unit]                                  = Left(SimpleError("Always fails"))
-    def traceAgentState(state: AgentState): Result[Unit]                             = Left(SimpleError("Always fails"))
     def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Left(SimpleError("Always fails"))
     def traceError(error: Throwable, context: String): Result[Unit]                  = Left(SimpleError("Always fails"))
     def traceCompletion(completion: Completion, model: String): Result[Unit]         = Left(SimpleError("Always fails"))

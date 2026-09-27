@@ -1,6 +1,6 @@
 package org.llm4s.trace
 
-import org.llm4s.llmconnect.model.{ EmbeddingUsage, TokenUsage }
+import org.llm4s.llmconnect.model.{ AssistantMessage, EmbeddingUsage, TokenUsage, UserMessage }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -152,7 +152,7 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
   // ============ AgentStateUpdated ============
 
   "TraceEvent.AgentStateUpdated" should "have correct event type" in {
-    val event = TraceEvent.AgentStateUpdated("running", 5, 10, fixedTimestamp)
+    val event = TraceEvent.AgentStateUpdated("running", 5, 10, timestamp = fixedTimestamp)
 
     event.eventType shouldBe "agent_state_updated"
     event.status shouldBe "running"
@@ -161,7 +161,7 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "serialize to JSON correctly" in {
-    val event = TraceEvent.AgentStateUpdated("completed", 10, 20, fixedTimestamp)
+    val event = TraceEvent.AgentStateUpdated("completed", 10, 20, timestamp = fixedTimestamp)
 
     val json = event.toJson
 
@@ -169,6 +169,14 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
     json("status").str shouldBe "completed"
     json("message_count").num shouldBe 10
     json("log_count").num shouldBe 20
+  }
+
+  it should "carry the conversation for backends, but keep it out of the flat JSON summary" in {
+    val messages = Seq(UserMessage("hi"), AssistantMessage(Some("hello"), Seq.empty))
+    val event    = TraceEvent.AgentStateUpdated("completed", 2, 0, messages, fixedTimestamp)
+
+    event.messages shouldBe messages
+    event.toJson.obj.keySet shouldBe Set("event_type", "timestamp", "status", "message_count", "log_count")
   }
 
   // ============ CustomEvent ============
@@ -329,7 +337,7 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
       TraceEvent.ToolExecuted("t", "i", "o", 0L, true, fixedTimestamp),
       TraceEvent.ErrorOccurred(new Exception(), "", fixedTimestamp),
       TraceEvent.TokenUsageRecorded(TokenUsage(0, 0, 0), "m", "o", fixedTimestamp),
-      TraceEvent.AgentStateUpdated("s", 0, 0, fixedTimestamp),
+      TraceEvent.AgentStateUpdated("s", 0, 0, timestamp = fixedTimestamp),
       TraceEvent.CustomEvent("n", ujson.Obj(), fixedTimestamp),
       TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(0, 0), "m", "o", 0, fixedTimestamp),
       TraceEvent.CostRecorded(0.0, "m", "o", 0, "t", fixedTimestamp),

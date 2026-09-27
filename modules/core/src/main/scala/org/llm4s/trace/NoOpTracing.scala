@@ -1,6 +1,5 @@
 package org.llm4s.trace
 
-import org.llm4s.agent.AgentState
 import org.llm4s.llmconnect.model.{ TokenUsage, Completion }
 import org.llm4s.types.Result
 
@@ -33,9 +32,6 @@ class NoOpTracing extends Tracing {
 
   /** Always returns `Right(())` without side effects. */
   def traceEvent(event: TraceEvent): Result[Unit] = Right(())
-
-  /** Always returns `Right(())` without side effects. */
-  def traceAgentState(state: AgentState): Result[Unit] = Right(())
 
   /** Always returns `Right(())` without side effects. */
   def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = Right(())

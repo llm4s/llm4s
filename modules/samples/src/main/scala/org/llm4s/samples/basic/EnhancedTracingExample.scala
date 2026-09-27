@@ -74,7 +74,7 @@ object EnhancedTracingExample {
           status = AgentStatus.Complete,
           logs = Seq(s"Completion id=${completion.id}", s"Model=${completion.model}")
         )
-        tracer.traceAgentState(agentState)
+        tracer.traceEvent(agentState.toTraceEvent)
 
       case Left(error) =>
         // Trace error and log it

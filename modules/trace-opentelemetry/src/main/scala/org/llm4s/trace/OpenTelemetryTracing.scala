@@ -10,7 +10,6 @@ import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.resources.Resource
 import io.opentelemetry.sdk.trace.SdkTracerProvider
 import io.opentelemetry.sdk.trace.`export`.BatchSpanProcessor
-import org.llm4s.agent.AgentState
 import org.llm4s.error.UnknownError
 import org.llm4s.llmconnect.config.OpenTelemetryConfig
 import org.llm4s.llmconnect.model.Completion
@@ -69,6 +68,9 @@ class OpenTelemetryTracing(
   }
 
   private val tracer: Option[Tracer] = initializationResult.map(_._2).toOption
+
+  /** Why the SDK could not start, if it could not; `OpenTelemetryTracingBackend` reports it. */
+  private[trace] def initializationFailure: Option[Throwable] = initializationResult.left.toOption
 
   override def shutdown(): Unit =
     initializationResult.foreach { case (sdk, _) =>
@@ -286,22 +288,6 @@ class OpenTelemetryTracing(
           builder.build()
         )
     }
-  }
-
-  override def traceAgentState(state: AgentState): Result[Unit] = {
-    val spanBuilder = tracer.map(
-      _.spanBuilder("Agent State Snapshot")
-        .setAttribute("status", state.status.toString)
-        .setAttribute("message_count", state.conversation.messages.length.toLong)
-        .setAttribute("log_count", state.logs.length.toLong)
-        .setSpanKind(SpanKind.INTERNAL)
-    )
-
-    spanBuilder.foreach { sb =>
-      val span = sb.startSpan()
-      span.end()
-    }
-    Right(())
   }
 
   override def traceToolCall(toolName: String, input: String, output: String): Result[Unit] = {

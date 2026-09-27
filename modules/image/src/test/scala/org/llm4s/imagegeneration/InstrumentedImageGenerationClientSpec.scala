@@ -1,6 +1,5 @@
 package org.llm4s.imagegeneration
 
-import org.llm4s.agent.AgentState
 import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.media.MediaType
 import org.llm4s.metrics.{ ErrorKind, MetricsCollector, Outcome }
@@ -60,7 +59,6 @@ class InstrumentedImageGenerationClientSpec extends AnyFunSuite with Matchers {
       events += event
       Right(())
     }
-    override def traceAgentState(state: AgentState): Result[Unit]                                   = Right(())
     override def traceToolCall(toolName: String, input: String, output: String): Result[Unit]       = Right(())
     override def traceError(error: Throwable, context: String): Result[Unit]                        = Right(())
     override def traceCompletion(completion: Completion, model: String): Result[Unit]               = Right(())
