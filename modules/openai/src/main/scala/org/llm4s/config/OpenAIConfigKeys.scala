@@ -17,9 +17,10 @@ object OpenAIConfigKeys {
   /**
    * OpenAI API key (`sk-...`), by convention.
    *
-   * No `reference.conf` binds it: a named section reads it only through its own
-   * `apiKey = ${?OPENAI_API_KEY}`, and OpenAI embeddings only through
-   * `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` (or `llm4s.openai.apiKey`).
+   * A named chat section reads it only through its own `apiKey = ${?OPENAI_API_KEY}`:
+   * chat config is keyed by an instance name the library cannot know, so no
+   * `reference.conf` can bind it there. OpenAI embeddings are keyed by provider id,
+   * and this module's `reference.conf` binds `llm4s.embeddings.openai.apiKey` to it.
    */
   val OPENAI_API_KEY = "OPENAI_API_KEY"
 

@@ -1,7 +1,7 @@
 package org.llm4s.config
 
 // scalafix:off DisableSyntax.NoConfigFactory
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{ ConfigFactory, ConfigResolveOptions }
 // scalafix:on DisableSyntax.NoConfigFactory
 import org.llm4s.llmconnect.EmbeddingClient
 import org.llm4s.llmconnect.config.{ EmbeddingProviderConfig, ModelDimensionRegistry }
@@ -13,8 +13,10 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import pureconfig.ConfigSource
 
+import scala.jdk.CollectionConverters.*
+
 /**
- * OpenAI as an embedding provider: configuration, the key it shares with the chat client,
+ * OpenAI as an embedding provider: configuration, its API key binding,
  * client construction and model dimensions.
  *
  * Gathered from the core specs that exercised it - `Llm4sConfigEmbeddingsSpec`,
@@ -54,8 +56,7 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         "llm4s.embeddings.provider"       -> "openai",
         "llm4s.embeddings.openai.baseUrl" -> "https://example.com/v1",
         "llm4s.embeddings.openai.model"   -> "text-embedding-3-small",
-        // API key is shared with core OpenAI config keys
-        "llm4s.openai.apiKey" -> "sk-test"
+        "llm4s.embeddings.openai.apiKey"  -> "sk-test"
       )
       withProps(props) {
         val (provider, cfg): (String, EmbeddingProviderConfig) =
@@ -72,7 +73,7 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       val props = Map(
         "llm4s.embeddings.model" -> "openai/text-embedding-3-small",
         // No explicit baseUrl - should use default
-        "llm4s.openai.apiKey" -> "sk-test"
+        "llm4s.embeddings.openai.apiKey" -> "sk-test"
       )
       withProps(props) {
         val (provider, cfg): (String, EmbeddingProviderConfig) =
@@ -89,7 +90,7 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       val props = Map(
         "llm4s.embeddings.model"          -> "openai/text-embedding-3-small",
         "llm4s.embeddings.openai.baseUrl" -> "https://custom.openai.com/v1",
-        "llm4s.openai.apiKey"             -> "sk-test"
+        "llm4s.embeddings.openai.apiKey"  -> "sk-test"
       )
       withProps(props) {
         val (provider, cfg): (String, EmbeddingProviderConfig) =
@@ -106,8 +107,7 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         "llm4s.embeddings.provider"       -> "openai",
         "llm4s.embeddings.openai.baseUrl" -> "https://example.com/v1",
         "llm4s.embeddings.openai.model"   -> "text-embedding-3-small",
-        // API key is shared with core OpenAI config keys
-        "llm4s.openai.apiKey" -> "sk-test"
+        "llm4s.embeddings.openai.apiKey"  -> "sk-test"
       )
       withProps(props) {
         val (provider, cfg) =
@@ -127,8 +127,7 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         "llm4s.embeddings.provider"       -> "openai",
         "llm4s.embeddings.openai.baseUrl" -> "https://example.com/v1",
         "llm4s.embeddings.openai.model"   -> "text-embedding-3-small",
-        // API key is shared with core OpenAI config keys
-        "llm4s.openai.apiKey" -> "sk-test"
+        "llm4s.embeddings.openai.apiKey"  -> "sk-test"
       )
 
       withProps(props) {
@@ -145,40 +144,60 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
     }
   }
 
-  "a credential the provider keeps outside its own section" should {
+  "the OpenAI embeddings API key" should {
 
-    "be resolved from the path its descriptor declares" in {
-      // OpenAI's shape: no apiKey under llm4s.embeddings.openai, read from the chat key.
-      val (_, config) = load(
-        """llm4s {
-          |  openai { apiKey = "sk-shared" }
-          |  embeddings { model = "openai/text-embedding-3-small" }
-          |}""".stripMargin
-      ).value
+    // Every reference.conf on the classpath plus `hocon`, resolved against `env` as if it were
+    // the process environment and only that, so a machine with OPENAI_API_KEY set does not
+    // change the outcome.
+    def withReference(hocon: String, env: Map[String, String]): ConfigSource =
+      ConfigSource.fromConfig(
+        ConfigFactory
+          .parseString(hocon)
+          .withFallback(ConfigFactory.parseResourcesAnySyntax("reference"))
+          .withFallback(ConfigFactory.parseMap(env.asJava))
+          .resolve(ConfigResolveOptions.defaults().setUseSystemEnvironment(false))
+      )
 
-      config.apiKey shouldBe "sk-shared"
+    val selectOpenAI = "llm4s.embeddings.model = \"openai/text-embedding-3-small\""
+
+    "come from OPENAI_API_KEY, which this module's reference.conf binds (#1132)" in {
+      // As llm4s-voyage binds VOYAGE_API_KEY: embedding config is keyed by provider id, so the
+      // module can bind the key. Until #1132 nothing did, though the error named the variable.
+      val (provider, config) =
+        EmbeddingsConfigLoader
+          .loadProvider(withReference(selectOpenAI, Map("OPENAI_API_KEY" -> "sk-from-env")))
+          .value
+
+      provider shouldBe "openai"
+      config.apiKey shouldBe "sk-from-env"
     }
 
-    "lose to an explicit key in the provider's own section" in {
-      val (_, config) = load(
-        """llm4s {
-          |  openai { apiKey = "sk-shared" }
-          |  embeddings {
-          |    model = "openai/text-embedding-3-small"
-          |    openai { apiKey = "sk-embeddings-only" }
-          |  }
-          |}""".stripMargin
-      ).value
+    "lose to a key set in the section itself" in {
+      val hocon = selectOpenAI + "\nllm4s.embeddings.openai.apiKey = \"sk-embeddings-only\""
+      val (_, config) =
+        EmbeddingsConfigLoader.loadProvider(withReference(hocon, Map("OPENAI_API_KEY" -> "sk-from-env"))).value
 
       config.apiKey shouldBe "sk-embeddings-only"
     }
 
-    "be reported against the path it is actually set at" in {
-      val error = load("""llm4s { embeddings { model = "openai/text-embedding-3-small" } }""").left.value.message
+    "not fall back to llm4s.openai.apiKey, which nothing else reads (#1132)" in {
+      // The single-provider chat key that went with #903; only this fallback still read it.
+      val error = load(
+        """llm4s {
+          |  openai { apiKey = "sk-legacy" }
+          |  embeddings { model = "openai/text-embedding-3-small" }
+          |}""".stripMargin
+      ).left.value.message
 
-      error should include("llm4s.openai.apiKey")
-      // Not the embeddings section, where setting it would do nothing.
-      (error should not).include("llm4s.embeddings.openai.apiKey")
+      error should include("Missing openai embeddings apiKey")
+    }
+
+    "be reported against the section key and the variable bound to it" in {
+      val error = EmbeddingsConfigLoader.loadProvider(withReference(selectOpenAI, Map.empty)).left.value.message
+
+      error should include("llm4s.embeddings.openai.apiKey")
+      error should include("OPENAI_API_KEY")
+      (error should not).include("llm4s.openai.apiKey")
     }
   }
 

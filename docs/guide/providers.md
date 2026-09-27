@@ -1080,7 +1080,7 @@ means it was started with a key (`--api-key` for vLLM and `llama-server`, "Requi
 Authentication" in LM Studio), and `apiKey` must then match it.
 
 **Missing `baseUrl`.** A section without one fails to load with
-`baseUrl: set it in llm4s.conf under providers.<name>.baseUrl (e.g. http://localhost:8000/v1; to
+`baseUrl: set it in application.conf under llm4s.providers.<name>.baseUrl (e.g. http://localhost:8000/v1; to
 read it from OPENAI_COMPATIBLE_BASE_URL, add baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL} to the section)`.
 `Llm4sConfig` reads no variable for it by itself: set `baseUrl` in the section, from a variable
 if you like - `baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}` binds the conventional one. If the

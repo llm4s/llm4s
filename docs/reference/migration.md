@@ -130,9 +130,13 @@ Two things to know:
   a load of any other section. Up to 0.4.1 every section was validated on every load, so each
   environment had to fill in every section or ship a config without it. `Llm4sConfig.providers()`,
   which returns every section, still validates them all.
-- **OpenAI embeddings do not see `OPENAI_API_KEY` either.** With
-  `EMBEDDING_MODEL=openai/<model>` (which *is* bound, by llm4s-core's `reference.conf`), add
-  `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}`.
+- **OpenAI embeddings are the exception, since #1132's follow-up.** Their config is keyed by
+  provider id rather than a section name of yours, so `llm4s-openai`'s `reference.conf` binds
+  `llm4s.embeddings.openai.apiKey` to `OPENAI_API_KEY`; `EMBEDDING_MODEL=openai/<model>` and that
+  variable are enough. From 0.3.2 to 0.4.1 nothing bound it, and the docs said to add
+  `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` yourself - harmless to keep. The key no
+  longer falls back to `llm4s.openai.apiKey`, the pre-#903 chat key that nothing else read: if you
+  set that, set `llm4s.embeddings.openai.apiKey` instead.
 
 Variables that `reference.conf` files do bind - `TRACING_MODE`, `LANGFUSE_*`, `OTEL_SERVICE_NAME`,
 `OTEL_EXPORTER_OTLP_ENDPOINT`, `EMBEDDING_MODEL`, `VOYAGE_API_KEY` and others - still work; see
@@ -173,7 +177,7 @@ The old spellings still work for now, as deprecated aliases: each one logs a war
 section and the key to rename it to, and will stop working in a later release. Setting both
 `project` and a *different* `endpoint` (or `location` and a different `organization`) is an
 error rather than a guess. A missing project is now reported as
-`- project: the GCP project ID that owns your Vertex AI resources (set it in llm4s.conf under providers.<name>.project)`.
+`- project: the GCP project ID that owns your Vertex AI resources (set it in application.conf under llm4s.providers.<name>.project)`.
 
 ### Unknown keys are reported
 
@@ -186,7 +190,7 @@ up. An extra key whose value is an object or list is an error, since none takes 
 
 A section missing a required `baseUrl` used to say `set <PROVIDER>_BASE_URL`, for example
 `set OLLAMA_BASE_URL`, though nothing read such a variable for a named section. It now says
-where to set the key - `baseUrl: set it in llm4s.conf under providers.<name>.baseUrl (e.g. ...)`.
+where to set the key - `baseUrl: set it in application.conf under llm4s.providers.<name>.baseUrl (e.g. ...)`.
 Where the provider has a conventional variable (`ProviderConfigSpec.baseUrlEnv`), the message
 shows the binding that makes it read, since a named section reads none by itself:
 `openai-compatible` adds `to read it from OPENAI_COMPATIBLE_BASE_URL, add baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL} to the section`.
@@ -668,6 +672,9 @@ Every configuration key and environment variable: `llm4s.providers.<name>` with
 `provider = "openai"`, `"azure"` or `"requesty"` and their `apiKey`, `baseUrl`, `organization`,
 `endpoint` and `apiVersion`; `llm4s.embeddings.openai.*`, `OPENAI_EMBEDDING_BASE_URL` and
 `OPENAI_EMBEDDING_MODEL`; and `llm4s.openai.apiKey` as the key OpenAI embeddings share with chat.
+(A later change dropped that `llm4s.openai.apiKey` fallback and bound
+`llm4s.embeddings.openai.apiKey` to `OPENAI_API_KEY` instead - see
+[From `LLM_MODEL` to named provider sections](#from-llm_model-to-named-provider-sections).)
 
 ## Slice 5: `llm4s-anthropic`
 
@@ -1110,19 +1117,24 @@ llm4s.embeddings."acme.embeddings" { apiKey = ${?ACME_API_KEY} }
 
 ### A key that lives somewhere else
 
-OpenAI's embedding endpoint takes the same key as its chat client, so `llm4s.embeddings.openai`
-has never carried one. The descriptor declares where to look instead of the loader special-casing
-it, and that declaration is also what makes the error name the place the key is really set:
+A provider whose key is kept outside its own `llm4s.embeddings.<id>` section declares where to
+look instead of the loader special-casing it, and that declaration is also what makes the error
+name the place the key is really set:
 
 ```scala
 override val configSpec = EmbeddingConfigSpec(
   requiresApiKey = true,
-  apiKeyPath     = Some("llm4s.openai.apiKey"),
+  apiKeyPath     = Some("llm4s.acme.apiKey"),
+  apiKeyEnv      = Some("ACME_API_KEY"),
   …
 )
 ```
 
-> Missing openai embeddings apiKey (llm4s.openai.apiKey / OPENAI_API_KEY)
+> Missing acme embeddings apiKey (llm4s.acme.apiKey / ACME_API_KEY)
+
+OpenAI was the case this was written for, reading `llm4s.openai.apiKey`; it no longer uses it
+(its key is `llm4s.embeddings.openai.apiKey`, bound to `OPENAI_API_KEY`), and no provider in this
+repository does.
 
 `apiKeyPath` is a *declaration*, not a read: `EmbeddingsConfigLoader` resolves it and hands
 the value back in the section before calling `buildConfig`. The provider owns the knowledge of

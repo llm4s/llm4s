@@ -79,10 +79,10 @@ trait EmbeddingProviderDescriptor:
    * client needs.
    *
    * The default implementation resolves model, base URL and API key against
-   * [[configSpec]], which is all any of the project's own providers needs - including
-   * OpenAI, whose key comes from the chat client's `llm4s.openai.apiKey` and
-   * which says so with `apiKeyPath` rather than by overriding this. Override it
-   * only for a provider whose config genuinely cannot be expressed that way.
+   * [[configSpec]], which is all any of the project's own providers needs; a key kept
+   * outside the provider's own section is declared with `apiKeyPath` rather than by
+   * overriding this. Override it only for a provider whose config genuinely cannot be
+   * expressed that way.
    *
    * @param section       the `llm4s.embeddings.<id>` section, already parsed, with any
    *                      [[EmbeddingConfigSpec.apiKeyPath]] already resolved into its

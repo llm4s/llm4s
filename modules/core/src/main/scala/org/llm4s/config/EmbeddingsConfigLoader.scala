@@ -184,8 +184,7 @@ private[config] object EmbeddingsConfigLoader {
    *
    * A descriptor declares ''where'' with `EmbeddingConfigSpec.apiKeyPath`; the read itself
    * happens here, because `org.llm4s.config` is the only package allowed to touch raw
-   * configuration - everywhere else consumes typed settings handed to it. OpenAI is the
-   * case: its embeddings use the chat client's `llm4s.openai.apiKey`.
+   * configuration - everywhere else consumes typed settings handed to it.
    */
   private def withSharedApiKey(
     section: EmbeddingProviderSection,

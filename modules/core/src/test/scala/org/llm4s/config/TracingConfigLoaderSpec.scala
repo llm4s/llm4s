@@ -1,10 +1,15 @@
 package org.llm4s.config
 
+// scalafix:off DisableSyntax.NoConfigFactory
+import com.typesafe.config.{ ConfigFactory, ConfigResolveOptions }
+// scalafix:on DisableSyntax.NoConfigFactory
 import org.llm4s.trace.TracingMode
 import pureconfig.ConfigSource
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.EitherValues
+
+import scala.jdk.CollectionConverters.*
 
 /**
  * Comprehensive unit tests for TracingConfigLoader validation and parsing.
@@ -413,6 +418,55 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
 
       shown should include("apiKey -> ***")
       (shown should not).include("dd-secret")
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // OpenTelemetry headers
+  // --------------------------------------------------------------------------
+
+  "TracingConfigLoader OpenTelemetry headers" should {
+
+    // Every reference.conf on the classpath plus `hocon`, resolved against `env` as if it were
+    // the process environment and only that.
+    def withReference(hocon: String, env: Map[String, String]): ConfigSource =
+      ConfigSource.fromConfig(
+        ConfigFactory
+          .parseString(hocon)
+          .withFallback(ConfigFactory.parseResourcesAnySyntax("reference"))
+          .withFallback(ConfigFactory.parseMap(env.asJava))
+          .resolve(ConfigResolveOptions.defaults().setUseSystemEnvironment(false))
+      )
+
+    "load the headers map from llm4s.tracing.opentelemetry.headers" in {
+      val hocon =
+        """
+          |llm4s.tracing.opentelemetry.headers {
+          |  Authorization = ${?OTEL_AUTH_HEADER}
+          |  X-Team = "search"
+          |}
+          |""".stripMargin
+
+      val settings =
+        TracingConfigLoader.load(withReference(hocon, Map("OTEL_AUTH_HEADER" -> "Bearer t"))).value
+
+      settings.openTelemetry.headers shouldBe Map("Authorization" -> "Bearer t", "X-Team" -> "search")
+    }
+
+    "not read OTEL_EXPORTER_OTLP_HEADERS, as reference.conf says" in {
+      // reference.conf binds the service name and endpoint to the standard OTel variables,
+      // but not the headers one: a comma-separated string cannot fill a map.
+      val env = Map(
+        "OTEL_SERVICE_NAME"           -> "svc-from-env",
+        "OTEL_EXPORTER_OTLP_ENDPOINT" -> "http://collector:4317",
+        "OTEL_EXPORTER_OTLP_HEADERS"  -> "Authorization=Bearer t"
+      )
+
+      val otel = TracingConfigLoader.load(withReference("", env)).value.openTelemetry
+
+      otel.serviceName shouldBe "svc-from-env"
+      otel.endpoint shouldBe "http://collector:4317"
+      otel.headers shouldBe empty
     }
   }
 }

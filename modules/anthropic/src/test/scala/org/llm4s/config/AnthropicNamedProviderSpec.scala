@@ -57,7 +57,9 @@ class AnthropicNamedProviderSpec extends AnyWordSpec with Matchers:
       ) match
         case Left(err) =>
           err.message should include("Provider 'broken-anthropic' (provider = anthropic) is missing required fields")
-          err.message should include("- apiKey: set it in llm4s.conf under providers.broken-anthropic.apiKey")
+          err.message should include(
+            "- apiKey: set it in application.conf under llm4s.providers.broken-anthropic.apiKey"
+          )
         case Right(cfg) =>
           fail(s"Expected a missing-apiKey failure, got config: $cfg")
     }

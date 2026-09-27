@@ -153,7 +153,7 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
 
     message should include("Provider 'my-regional' (provider = regional) is missing required fields")
     message should include(
-      "- region: the cloud region hosting the model, e.g. eu-west-1 (set it in llm4s.conf under providers.my-regional.region)"
+      "- region: the cloud region hosting the model, e.g. eu-west-1 (set it in application.conf under llm4s.providers.my-regional.region)"
     )
   }
 
@@ -329,11 +329,11 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
     val message = error(validated(section(provider = "envbound", apiKey = None), EnvBoundProvider, "my-env"))
 
     message should include(
-      "- baseUrl: set it in llm4s.conf under providers.my-env.baseUrl (e.g. http://localhost:9000; to read it " +
+      "- baseUrl: set it in application.conf under llm4s.providers.my-env.baseUrl (e.g. http://localhost:9000; to read it " +
         "from ENVBOUND_BASE_URL, add baseUrl = ${?ENVBOUND_BASE_URL} to the section)"
     )
     message should include(
-      "- space: the deployment space id (set it in llm4s.conf under providers.my-env.space; to read it from " +
+      "- space: the deployment space id (set it in application.conf under llm4s.providers.my-env.space; to read it from " +
         "ENVBOUND_SPACE, add space = ${?ENVBOUND_SPACE} to the section)"
     )
     // Named sections read no variable unbound, so it is never "set X" on its own.
@@ -354,7 +354,7 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
     val message = error(validated(section(provider = "noenv"), NoEnv, "my-noenv"))
 
     message should include(
-      "- baseUrl: set it in llm4s.conf under providers.my-noenv.baseUrl (e.g. https://api.example.com/)"
+      "- baseUrl: set it in application.conf under llm4s.providers.my-noenv.baseUrl (e.g. https://api.example.com/)"
     )
     (message should not).include("NOENV_BASE_URL")
     (message should not).include("or set")

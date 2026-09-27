@@ -55,8 +55,19 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
 
     message should include("Provider 'my-fixture' (provider = fixturechat) is missing required fields")
     message should include(
-      "- apiKey: set it in llm4s.conf under providers.my-fixture.apiKey (optionally from an env var, e.g. apiKey = ${?FIXTURECHAT_API_KEY})"
+      "- apiKey: set it in application.conf under llm4s.providers.my-fixture.apiKey (optionally from an env var, e.g. apiKey = ${?FIXTURECHAT_API_KEY})"
     )
+  }
+
+  it should "name a file llm4s loads, and the section's full path" in {
+    // Typesafe Config loads application.conf (and reference.conf); nothing loads llm4s.conf,
+    // and the section lives under llm4s.providers, not a top-level providers block.
+    val message =
+      errorFrom(validate("my-fixture", FixtureChatProvider, section("fixturechat", "fixture-model")))
+
+    (message should not).include("llm4s.conf")
+    (message should not).include(" providers.my-fixture")
+    message should include("application.conf under llm4s.providers.my-fixture.apiKey")
   }
 
   it should "not demand a baseUrl, because the descriptor supplies a default" in {
@@ -89,7 +100,7 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
 
     message should include("Provider 'my-custom' (provider = customcloud) is missing required fields")
     message should include(
-      "- baseUrl: set it in llm4s.conf under providers.my-custom.baseUrl (e.g. https://api.example.com/)"
+      "- baseUrl: set it in application.conf under llm4s.providers.my-custom.baseUrl (e.g. https://api.example.com/)"
     )
     // Nothing reads CUSTOMCLOUD_BASE_URL, so it is not suggested (#1215).
     (message should not).include("CUSTOMCLOUD_BASE_URL")

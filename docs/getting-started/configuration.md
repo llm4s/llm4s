@@ -32,8 +32,10 @@ with this precedence (highest first):
 Environment variables are **not** a layer of their own. llm4s reads one only where a `${?VAR}`
 substitution names it: in a module's `reference.conf` (tracing, embeddings, tools - see
 [Environment variables llm4s reads](#environment-variables-llm4s-reads)), or in your own
-`application.conf`. In particular, nothing reads `LLM_MODEL` or a provider's API-key variable
-such as `OPENAI_API_KEY` unless your `application.conf` binds it.
+`application.conf`. In particular, nothing reads `LLM_MODEL`, and no chat provider reads its
+API-key variable such as `OPENAI_API_KEY` unless your `application.conf` binds it. (Embedding
+providers are different: their config is keyed by provider id, so their modules bind their keys -
+see [Embeddings](#embeddings-configuration).)
 
 `${?VAR}` means "the value of `VAR` if it is set, otherwise leave the key unset". A second line
 for the same key overrides the first only when the variable is set, which gives you a default
@@ -115,7 +117,7 @@ val result = for {
 ```
 
 If `OPENAI_API_KEY` is unset, `defaultProvider()` returns a `ConfigurationError` naming the key:
-`apiKey: set it ... under providers.openai-main.apiKey (optionally from an env var, e.g. apiKey = ${?OPENAI_API_KEY})`.
+`apiKey: set it in application.conf under llm4s.providers.openai-main.apiKey (optionally from an env var, e.g. apiKey = ${?OPENAI_API_KEY})`.
 This exact configuration is exercised by `DocumentedProviderConfigSpec` in `modules/openai`.
 
 Other `Llm4sConfig` calls read the same sections:
@@ -281,21 +283,21 @@ the provider and model with `llm4s.embeddings.model` in `provider/model-name` fo
 EMBEDDING_MODEL=voyage/voyage-3
 VOYAGE_API_KEY=pa-...
 
+# OpenAI embeddings (llm4s-openai binds OPENAI_API_KEY)
+EMBEDDING_MODEL=openai/text-embedding-3-small
+OPENAI_API_KEY=sk-...
+
 # Ollama embeddings (local, no API key needed)
 EMBEDDING_MODEL=ollama/nomic-embed-text
 ```
 
-OpenAI embeddings need one line of your own. Their key is read from
-`llm4s.embeddings.openai.apiKey` (falling back to `llm4s.openai.apiKey`), and no
-`reference.conf` binds either to `OPENAI_API_KEY` - it is not shared with a chat provider
-section. Bind it in `application.conf`:
-
-```hocon
-llm4s.embeddings {
-  model         = "openai/text-embedding-3-small"   # or leave it to EMBEDDING_MODEL
-  openai.apiKey = ${?OPENAI_API_KEY}
-}
-```
+Unlike a chat section, whose name is yours and so cannot be bound by a library, an embedding
+provider's block is keyed by its provider id, so each module's `reference.conf` binds its own
+variables. The OpenAI key is `llm4s.embeddings.openai.apiKey`, bound to `OPENAI_API_KEY`; set
+that key in `application.conf` to use a different variable or value. It is independent of any
+chat provider section, even one that also reads `OPENAI_API_KEY`. (From 0.3.2 to 0.4.1 nothing
+bound it, and the key fell back to `llm4s.openai.apiKey`, which nothing else read; that fallback
+is gone - see the [migration notes](../reference/migration.md).)
 
 Each embedding provider comes from its module: `openai` from `llm4s-openai`, `voyage` from
 `llm4s-voyage` and `ollama` from `llm4s-ollama` (in `0.4.1` and earlier, `openai` and `voyage` are
@@ -346,7 +348,7 @@ The legacy format using `EMBEDDING_PROVIDER` is still supported for backward com
 EMBEDDING_PROVIDER=openai
 OPENAI_EMBEDDING_BASE_URL=https://api.openai.com/v1
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-# plus llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY} in application.conf (see above)
+OPENAI_API_KEY=sk-...   # bound to llm4s.embeddings.openai.apiKey by llm4s-openai
 
 # Voyage AI
 EMBEDDING_PROVIDER=voyage
@@ -597,7 +599,7 @@ also set in `application.conf` or with `-D`.
 | `LLM4S_MODEL_REGISTRY_RESOURCE`, `LLM4S_MODEL_REGISTRY_FILE`, `LLM4S_MODEL_REGISTRY_URL` | `llm4s.modelRegistry.*` | `llm4s-core` |
 | `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT`, `WORKSPACE_TRACE_LOG` | `llm4s.workspace.*` | `llm4s-core` |
 | `BRAVE_SEARCH_API_KEY`, `EXA_API_KEY` and the other `BRAVE_*`, `EXA_*` variables, `DUCK_DUCK_GO_SEARCH_API_URL` | `llm4s.tools.*` | `llm4s-core` |
-| `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL` | `llm4s.embeddings.openai.*` | `llm4s-openai` |
+| `OPENAI_API_KEY`, `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL` | `llm4s.embeddings.openai.*` (embeddings only - not a chat section) | `llm4s-openai` |
 | `VOYAGE_API_KEY`, `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL` | `llm4s.embeddings.voyage.*` | `llm4s-voyage` |
 | `OLLAMA_EMBEDDING_BASE_URL`, `OLLAMA_EMBEDDING_MODEL` | `llm4s.embeddings.ollama.*` | `llm4s-ollama` |
 | `RERANK_PROVIDER`, `COHERE_API_KEY`, `COHERE_RERANK_BASE_URL`, `COHERE_RERANK_MODEL` | `llm4s.rerank.*` (the reranker only, not the Cohere chat provider) | `llm4s-rag` |
@@ -606,8 +608,8 @@ also set in `application.conf` or with `-D`.
 **Not read by llm4s** unless your `application.conf` binds them: `LLM_MODEL`, `LLM4S_PROVIDER`,
 every chat provider's key and endpoint variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
 `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `AZURE_API_KEY`, `AZURE_API_BASE`, `DEEPSEEK_API_KEY`,
-`OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, ...), `OPENAI_API_KEY` for OpenAI embeddings, and
-`OTEL_EXPORTER_OTLP_HEADERS`. `LLM_MODEL` was removed with legacy single-provider loading
+`OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, ...) - `OPENAI_API_KEY` is read for OpenAI embeddings
+only - and `OTEL_EXPORTER_OTLP_HEADERS`. `LLM_MODEL` was removed with legacy single-provider loading
 in [#903](https://github.com/llm4s/llm4s/issues/903).
 
 ---
@@ -741,7 +743,7 @@ object ValidateConfig extends App {
 **Symptoms:**
 ```
 ConfigurationError: Provider 'openai-main' (provider = openai) is missing required fields:
-  - apiKey: set it in llm4s.conf under providers.openai-main.apiKey (optionally from an env var, e.g. apiKey = ${?OPENAI_API_KEY})
+  - apiKey: set it in application.conf under llm4s.providers.openai-main.apiKey (optionally from an env var, e.g. apiKey = ${?OPENAI_API_KEY})
 ```
 
 **Root causes:**

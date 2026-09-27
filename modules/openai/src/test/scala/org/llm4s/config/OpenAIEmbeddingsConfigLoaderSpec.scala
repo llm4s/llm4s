@@ -7,11 +7,12 @@ import org.scalatest.EitherValues
 
 /**
  * OpenAI embeddings through `EmbeddingsConfigLoader`: the unified and legacy formats, the
- * default base URL, and the key that OpenAI embeddings share with the chat client.
+ * default base URL, and the API key in `llm4s.embeddings.openai`.
  *
  * Moved from core's `EmbeddingsConfigLoaderSpec` with the provider (#1132). `openai`
  * resolves through `ProviderRegistry.default`, so these also prove this module's
- * services entry and `reference.conf` block are found.
+ * services entry is found. The `reference.conf` binding of `OPENAI_API_KEY` is covered
+ * by `OpenAIEmbeddingsSpec`; these sources carry no `reference.conf`.
  */
 class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValues {
 
@@ -24,9 +25,9 @@ class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with Ei
           |  llm { model = "openai/gpt-4o" }
           |  embeddings {
           |    model = "openai/text-embedding-3-small"
-          |  }
-          |  openai {
-          |    apiKey = "sk-test-embedding"
+          |    openai {
+          |      apiKey = "sk-test-embedding"
+          |    }
           |  }
           |}
           |""".stripMargin
@@ -50,10 +51,8 @@ class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with Ei
           |    model = "openai/text-embedding-3-large"
           |    openai {
           |      baseUrl = "https://custom-openai.proxy.com/v1"
+          |      apiKey = "sk-test"
           |    }
-          |  }
-          |  openai {
-          |    apiKey = "sk-test"
           |  }
           |}
           |""".stripMargin
@@ -74,10 +73,8 @@ class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with Ei
           |    provider = "openai"
           |    openai {
           |      model = "text-embedding-ada-002"
+          |      apiKey = "sk-legacy-test"
           |    }
-          |  }
-          |  openai {
-          |    apiKey = "sk-legacy-test"
           |  }
           |}
           |""".stripMargin
@@ -110,10 +107,9 @@ class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with Ei
       result.isLeft shouldBe true
       val error = result.left.value
       error.message should include("apiKey")
-      // OpenAI embeddings reuse the chat key, so the error must point there and not at
-      // llm4s.embeddings.openai.apiKey, where the user would set it in vain.
-      error.message should include("llm4s.openai.apiKey")
-      error.message should include("OPENAI_API_KEY")
+      // The key is read from the embeddings section, which llm4s-openai binds to
+      // OPENAI_API_KEY; the error names both.
+      error.message should include("llm4s.embeddings.openai.apiKey")
       error.message should include("OPENAI_API_KEY")
     }
 
@@ -125,10 +121,8 @@ class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with Ei
           |    provider = "openai"
           |    openai {
           |      baseUrl = "https://api.openai.com/v1"
+          |      apiKey = "sk-test"
           |    }
-          |  }
-          |  openai {
-          |    apiKey = "sk-test"
           |  }
           |}
           |""".stripMargin
@@ -148,9 +142,7 @@ class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with Ei
           |  llm { model = "openai/gpt-4o" }
           |  embeddings {
           |    model = "openai/text-embedding-3-small"
-          |  }
-          |  openai {
-          |    apiKey = "sk-test"
+          |    openai.apiKey = "sk-test"
           |  }
           |}
           |""".stripMargin

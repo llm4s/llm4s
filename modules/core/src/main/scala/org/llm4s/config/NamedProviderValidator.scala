@@ -115,12 +115,12 @@ private[llm4s] object NamedProviderSectionValidator:
       // `ProviderId` is already the canonical lowercase spelling, so the example variable is its
       // upper-casing, with anything an environment variable name cannot hold made `_`.
       val envPrefix = id.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9_]", "_")
-      missing += s"  - apiKey: set it in llm4s.conf under providers.$name.apiKey (optionally from an env var, e.g. apiKey = $${?${envPrefix}_API_KEY})"
+      missing += s"  - apiKey: set it in application.conf under llm4s.providers.$name.apiKey (optionally from an env var, e.g. apiKey = $${?${envPrefix}_API_KEY})"
 
     if spec.requiresBaseUrl && normalized.baseUrl.isEmpty then
       // Name an environment variable only when the provider says one is actually read (#1215). This
       // used to tell every provider's users to "set <PROVIDER>_BASE_URL", and nothing read any of them.
-      missing += s"  - baseUrl: set it in llm4s.conf under providers.$name.baseUrl (${spec.baseUrlExample}" +
+      missing += s"  - baseUrl: set it in application.conf under llm4s.providers.$name.baseUrl (${spec.baseUrlExample}" +
         envHint("baseUrl", spec.baseUrlEnv) + ")"
 
     if spec.requiresEndpoint && normalized.endpoint.isEmpty then missing += s"  - endpoint: ${spec.endpointDescription}"
@@ -201,7 +201,7 @@ private[llm4s] object NamedProviderSectionValidator:
                   KeyOutcome(
                     None,
                     problems = Seq(
-                      s"  - ${key.name}: ${key.description} (set it in llm4s.conf under providers.$name.${key.name}" +
+                      s"  - ${key.name}: ${key.description} (set it in application.conf under llm4s.providers.$name.${key.name}" +
                         s"${envHint(key.name, key.env)})"
                     )
                   )

@@ -854,13 +854,11 @@ Complete RAG (Retrieval-Augmented Generation) pipeline demonstrating document Q&
 # the default ollama-local section - or select another, see "Running Examples"
 sbt "samples/runMain org.llm4s.samples.rag.DocumentQAExample"
 
-# With real OpenAI embeddings: EMBEDDING_MODEL is bound by llm4s-core; the
-# embeddings API key is not, so bind it too (or add
-# llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY} to application.local.conf)
+# With real OpenAI embeddings: EMBEDDING_MODEL is bound by llm4s-core and the
+# embeddings API key, OPENAI_API_KEY, by llm4s-openai
 export EMBEDDING_MODEL=openai/text-embedding-3-small
 export OPENAI_API_KEY=sk-...
-sbt -Dllm4s.embeddings.openai.apiKey="$OPENAI_API_KEY" \
-  "samples/runMain org.llm4s.samples.rag.DocumentQAExample"
+sbt "samples/runMain org.llm4s.samples.rag.DocumentQAExample"
 ```
 
 **What it demonstrates:**

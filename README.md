@@ -492,8 +492,8 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
   - Type: `(String, EmbeddingProviderConfig)`
   - Loader: `Llm4sConfig.embeddings()`
   - Provider-specific keys:
-    - **OpenAI**: `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL`; the key is not bound - add
-      `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` to `application.conf`
+    - **OpenAI**: `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL`, `OPENAI_API_KEY` (bound to
+      `llm4s.embeddings.openai.apiKey`; a chat section still binds its own)
     - **Voyage**: `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL`, `VOYAGE_API_KEY`
     - **Ollama** (local): `OLLAMA_EMBEDDING_BASE_URL` (default: `http://localhost:11434`), `OLLAMA_EMBEDDING_MODEL`
 

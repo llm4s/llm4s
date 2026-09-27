@@ -73,7 +73,7 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
       ) match
         case Left(err) =>
           err.message should include("Provider 'broken-gemini' (provider = gemini) is missing required fields")
-          err.message should include("- apiKey: set it in llm4s.conf under providers.broken-gemini.apiKey")
+          err.message should include("- apiKey: set it in application.conf under llm4s.providers.broken-gemini.apiKey")
         case Right(cfg) =>
           fail(s"Expected a missing-apiKey failure, got config: $cfg")
     }
@@ -202,7 +202,7 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           err.message should include("Provider 'vertex-missing' (provider = vertexai) is missing required fields")
           err.message should include(
             "- project: the GCP project ID that owns your Vertex AI resources " +
-              "(set it in llm4s.conf under providers.vertex-missing.project)"
+              "(set it in application.conf under llm4s.providers.vertex-missing.project)"
           )
         case Right(cfg) =>
           fail(s"Expected a missing-project failure, got config: $cfg")
