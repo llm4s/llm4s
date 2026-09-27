@@ -40,6 +40,20 @@ class EnvCheckPoliciesSpec extends AnyFunSpec with Matchers {
       snapshot.baseUrl shouldBe Some("https://api.openai.com")
     }
 
+    it("should read an openai-compatible endpoint from OPENAI_COMPATIBLE_BASE_URL") {
+      val env = Map(
+        "LLM_MODEL"                  -> "openai-compatible/openai/gpt-oss-120b",
+        "OPENAI_BASE_URL"            -> "https://api.openai.com/v1",
+        "OPENAI_COMPATIBLE_BASE_URL" -> "https://api.groq.com/openai/v1"
+      )
+      EnvCheckPolicies.snapshotFromEnv(env.get).baseUrl shouldBe Some("https://api.groq.com/openai/v1")
+      EnvCheckPolicies
+        .snapshotFromEnv((env - "LLM_MODEL" + ("LLM_PROVIDER" -> "OpenAI-Compatible")).get)
+        .baseUrl shouldBe Some("https://api.groq.com/openai/v1")
+      EnvCheckPolicies.snapshotFromEnv((env + ("LLM_MODEL" -> "openai/gpt-4o")).get).baseUrl shouldBe
+        Some("https://api.openai.com/v1")
+    }
+
     it("should handle missing optional fields") {
       val snapshot = EnvCheckPolicies.snapshotFromEnv(_ => None)
       snapshot.provider shouldBe None

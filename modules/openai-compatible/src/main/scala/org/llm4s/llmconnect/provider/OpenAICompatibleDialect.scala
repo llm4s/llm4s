@@ -19,14 +19,15 @@ import scala.util.Try
  *    `content` ([[alwaysSendAssistantContent]]) or is sent at all
  *    ([[sendEmptyAssistantTurns]]); the tool-call ids the provider
  *    accepts ([[encodeToolCallId]]); the `response_format` shape
- *    ([[encodeResponseFormat]]); and any reasoning fields ([[addReasoning]]).
+ *    ([[encodeResponseFormat]]); whether a stream asks for usage
+ *    ([[streamUsageOption]]); and any reasoning fields ([[addReasoning]]).
  *  - '''Response:''' how `content` is read back ([[decodeContent]]); where the
  *    model's thinking is ([[thinking]]); where its reasoning-token count is
  *    ([[reasoningTokens]]); and how a non-streaming `tool_calls` array is
  *    parsed ([[parseToolCalls]]).
  *
  * The generic `openai-compatible` provider uses [[OpenAICompatibleDialect.standard]],
- * which overrides nothing but headers. DeepSeek, Z.ai, OpenRouter, Mistral and Cohere
+ * which overrides only headers and streamed usage, both from config. DeepSeek, Z.ai, OpenRouter, Mistral and Cohere
  * each override two to six members. A new OpenAI-compatible provider whose
  * differences fit these members is a dialect and a descriptor, not a client;
  * one whose differences do not should extend this trait rather than fork
@@ -83,6 +84,18 @@ trait OpenAICompatibleDialect:
     ResponseFormatMapper.toOpenAIResponseFormat(format)
 
   /**
+   * Whether a streaming request asks for token usage with
+   * `"stream_options": {"include_usage": true}`. Standard: `true`.
+   *
+   * OpenAI streams usage only when asked this way, and servers that follow it - vLLM, Ollama's
+   * `/v1`, Perplexity Router - stream none otherwise. A provider that rejects the field (Mistral
+   * answers an unknown field with a 422), does not document it, or always reports usage without
+   * it answers `false`. Usage is read from whichever event carries it either way, including a
+   * final event with empty `choices`.
+   */
+  def streamUsageOption: Boolean = true
+
+  /**
    * Adds provider-specific reasoning fields to a request body, given the
    * configured model and the caller's options. Standard: adds nothing, so
    * `CompletionOptions.reasoning` is ignored.
@@ -122,12 +135,14 @@ object OpenAICompatibleDialect:
 
   /**
    * The plain OpenAI chat-completions format, sending `extraHeaders` on every
-   * request. This is the whole of the generic `openai-compatible` provider's
-   * dialect: its headers come from config.
+   * request and asking for streamed usage when `streamUsage` is set. This is the
+   * whole of the generic `openai-compatible` provider's dialect: both come from
+   * config.
    */
-  def standard(extraHeaders: Seq[(String, String)] = Seq.empty): OpenAICompatibleDialect =
+  def standard(extraHeaders: Seq[(String, String)] = Seq.empty, streamUsage: Boolean = true): OpenAICompatibleDialect =
     new OpenAICompatibleDialect:
       override val headers: Seq[(String, String)] = extraHeaders
+      override val streamUsageOption: Boolean     = streamUsage
 
   /**
    * Parses a `tool_calls` array without failing: a missing `id` or `name`

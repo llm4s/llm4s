@@ -24,8 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Vertex AI moves to `project` (required) and `location` (default `us-central1`); `endpoint` and
   `organization` still work as deprecated aliases, with a warning, for a release. The
   missing-`baseUrl` message no longer tells users to "set `<PROVIDER>_BASE_URL`", a variable
-  nothing read: it names the config key, and an environment variable only when the descriptor
-  declares one it reads (`ProviderConfigSpec.baseUrlEnv`).
+  nothing read: it names the config key, and - when the descriptor declares a conventional
+  variable (`ProviderConfigSpec.baseUrlEnv`, `ProviderConfigKey.env`) - the binding that reads it,
+  e.g. `add baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL} to the section` for `openai-compatible`.
 
   Source breaks: `RawNamedProviderSection` and `NamedProviderConfig` gained a defaulted trailing
   `extras` parameter (exhaustive pattern matches need one more field); `ProviderConfigSpec` gained
@@ -34,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must carry `project` in `extras`. An extra key whose value is an object or list is now a load
   error. See the
   [migration note](docs/reference/migration.md#named-providers-provider-specific-keys-vertex-ai-project-and-location).
+- **A contributing guide for OpenAI-compatible providers**:
+  [CONTRIBUTING.md](CONTRIBUTING.md#adding-an-openai-compatible-provider-a-dialect) now covers
+  checking the generic `openai-compatible` provider first, the `OpenAICompatibleDialect` hooks
+  and their defaults, a worked example (Cohere), the config, descriptor and
+  `Llm4sOpenAICompatibleModule` registration, the tests and `@Cloud` smoke spec to write, and the
+  docs to update ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
 - **`llm4s-media`, a shared vocabulary for multimodal code** - landed as part of
   [#1130](https://github.com/llm4s/llm4s/issues/1130), ahead of `llm4s-image` and
   `llm4s-speech` so those carves are pure file moves. `org.llm4s.media.MediaType` (MIME string,
@@ -625,6 +632,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`complete` on `OpenAICompatibleClient` could wait for ever.** It sent its request with no
+  timeout - as the old `DeepSeekClient`, `ZaiClient` and `OpenRouterClient` had
+  ([#912](https://github.com/llm4s/llm4s/issues/912)) - so an endpoint that accepted the
+  connection and never answered hung the caller. Every provider on the shared client (DeepSeek,
+  Z.ai, OpenRouter, Mistral, Cohere and the generic `openai-compatible`) now times out after two
+  minutes, what the old Mistral and Cohere clients used; streaming keeps its five minutes.
+  Configurable timeouts remain [#712](https://github.com/llm4s/llm4s/issues/712).
+- **Streamed completions from vLLM, Ollama's `/v1`, Perplexity's Router and other servers that
+  follow OpenAI carried no token usage**: they report it only when asked with
+  `stream_options.include_usage`, which `OpenAICompatibleClient` never sent. A streaming request
+  now sends `"stream_options": {"include_usage": true}` where the provider accepts it - the
+  generic `openai-compatible` provider and DeepSeek - through a new dialect hook,
+  `OpenAICompatibleDialect.streamUsageOption` (default `true`). Z.ai, OpenRouter, Mistral and
+  Cohere answer `false`: Mistral rejects unknown fields with a 422, Z.ai and Cohere do not
+  document it, and OpenRouter always streams usage. For an endpoint that rejects the field,
+  `OpenAICompatibleConfig` has `streamUsage` (default `true`); a `streamUsage` key in the named
+  section waits on provider-specific keys ([#1215](https://github.com/llm4s/llm4s/issues/1215)).
+- **A Requesty config reported `providerId` = `openai`**, because `OpenAIConfig` inferred its id
+  from the base URL, which is neither OpenAI's nor OpenRouter's. `OpenAIConfig` gains a trailing
+  `explicitProviderId: Option[ProviderId] = None` (and `fromValues` a defaulted `providerId`),
+  which the Requesty and OpenRouter descriptors set: a `provider = "requesty"` section now
+  reports `requesty` - in `llm4s-config-policy` too, whose `allowedProviders` and model patterns
+  must name it - and a `provider = "openrouter"` section with a proxy `baseUrl` is no longer
+  routed to OpenAI. `None` infers the id from the base URL as before. See the
+  [migration note](docs/reference/migration.md#requesty-configs-report-requesty).
+- **`OPENAI_COMPATIBLE_BASE_URL` was named but read by nothing.** It and
+  `OPENAI_COMPATIBLE_API_KEY` are now `OpenAICompatibleConfigKeys` constants, the conventional
+  names for binding a generic `openai-compatible` section from the environment. The chat-tui
+  sample reads `LLM_MODEL=openai-compatible/<model>` with them (base URL required, key optional,
+  split on the first `/` so `openai-compatible/openai/gpt-oss-120b` keeps its model id), as it
+  does `deepseek/`, `mistral/` and the rest, and the config-policy env check takes
+  `OPENAI_COMPATIBLE_BASE_URL` as the endpoint for that provider. `Llm4sConfig` still reads no
+  provider's variables and no `LLM_MODEL`: named sections are its only route.
+- The Groq example in `llm4s-openai-compatible`'s `reference.conf` and the
+  `OpenAICompatibleProvider` Scaladoc named `llama-3.3-70b-versatile`, which Groq shut down for
+  free and developer tiers on 2026-08-16; they now use `openai/gpt-oss-120b`, as the providers
+  guide's Groq recipe does.
 - **`EMBEDDING_MODEL=ollama/nomic-embed-text` failed `Llm4sConfig.textEmbeddingModel()`** with
   `Unknown model 'nomic-embed-text' for provider 'ollama'`. The configuration is documented in
   the README and `CLAUDE.md`, but the central dimension table covered only `openai`, `voyage`

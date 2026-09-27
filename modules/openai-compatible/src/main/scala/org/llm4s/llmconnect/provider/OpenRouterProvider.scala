@@ -38,7 +38,7 @@ object OpenRouterProvider extends ProviderDescriptor:
     for
       apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      config  <- OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl)
+      config  <- OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl, Some(id))
     yield config
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using

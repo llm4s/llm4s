@@ -65,6 +65,10 @@ object DeepSeekClient {
  * `DeepSeekClient` ignored `reasoning_content`, so `deepseek-reasoner`'s
  * thinking was dropped ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  * DeepSeek reports reasoning tokens under `completion_tokens_details`.
+ *
+ * Streamed usage is asked for with the standard `stream_options.include_usage`, which
+ * DeepSeek's chat-completion reference documents (it also reports usage on a stream's last
+ * chunk unasked).
  */
 private[llm4s] object DeepSeekDialect extends OpenAICompatibleDialect:
   override val headers: Seq[(String, String)] = Seq("User-Agent" -> "llm4s/1.0")

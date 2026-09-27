@@ -23,7 +23,7 @@ import org.llm4s.types.Result
  *   groq-main {
  *     provider = "openai-compatible"
  *     baseUrl  = "https://api.groq.com/openai/v1"
- *     model    = "llama-3.3-70b-versatile"
+ *     model    = "openai/gpt-oss-120b"
  *     apiKey   = ${?GROQ_API_KEY}
  *     contextWindow = 131072
  *   }

@@ -176,6 +176,157 @@ every tier's CI job sets, an unavailable dependency then fails the build instead
 quietly. Full details in the
 [Testing Guide](docs/reference/testing-guide.md#9-integration-test-tiers-modulesit).
 
+## Adding an OpenAI-compatible provider (a dialect)
+
+`llm4s-openai-compatible` (`modules/openai-compatible`) has one SDK-free client for every
+provider that speaks OpenAI's `/chat/completions` API: `OpenAICompatibleClient`. DeepSeek, Z.ai,
+OpenRouter, Mistral and Cohere are each a few lines on top of it - an `OpenAICompatibleDialect`
+for where the provider departs from the standard format, and a `ProviderDescriptor` to register
+it. Extend it this way; never copy the client. (The module used to hold three ~400-line copies,
+which drifted apart; see [#1132](https://github.com/llm4s/llm4s/issues/1132).)
+
+### 1. Check whether the generic provider already covers it
+
+Many endpoints need no code at all. The generic provider, `provider = "openai-compatible"`, sends
+the standard format to any `baseUrl`, with an optional `apiKey`, extra `headers`, and the model's
+`contextWindow`. Try the endpoint with a named section first - the
+[providers guide](docs/guide/providers.md#openai-compatible-endpoints) has recipes for Groq,
+Together, Fireworks, xAI, vLLM, LM Studio and others. If that works, a recipe in the guide is the
+whole contribution.
+
+Write a dialect only when the provider needs something the generic path
+[does not do](docs/guide/providers.md#what-the-generic-path-does-and-does-not-do): reasoning
+parameters, reading its thinking or reasoning tokens, a different message or `response_format`
+encoding, a different system role, tool-call ids in its own format, or refusing a field the
+standard format sends.
+
+### 2. The dialect hooks
+
+`OpenAICompatibleDialect` is a trait whose every member defaults to the standard format, so a
+dialect overrides only where the provider differs:
+
+| Hook | Default | Override when the provider... |
+|---|---|---|
+| `headers` | none | needs extra headers on every request (OpenRouter's `HTTP-Referer`, a `User-Agent`) |
+| `systemRole` | `"system"` | takes system instructions under another role (Cohere: `"developer"`) |
+| `encodeContent(text)` | a JSON string | wants message text in another shape (Z.ai: an array of text parts) |
+| `alwaysSendAssistantContent` | `false` | needs `content` on an assistant turn that has only tool calls (OpenRouter) |
+| `sendEmptyAssistantTurns` | `true` | rejects an assistant turn with neither text nor tool calls (Mistral) |
+| `encodeToolCallId(id)` | the id unchanged | accepts only its own id format (Mistral: nine alphanumerics); must be deterministic |
+| `encodeResponseFormat(format)` | OpenAI's `json_object` / `json_schema` | has its own structured-output shape (Cohere), or `None` to send none |
+| `streamUsageOption` | `true` | rejects or ignores `stream_options.include_usage` on streams (Mistral, Z.ai, Cohere, OpenRouter) |
+| `addReasoning(body, model, options)` | adds nothing | takes reasoning parameters (OpenRouter's `thinking` / `reasoning_effort`) |
+| `decodeContent(value)` | a JSON string | returns `content` in another shape (Z.ai's parts, Mistral's chunks) |
+| `thinking(obj)` | none | returns the model's reasoning text (DeepSeek's `reasoning_content`) |
+| `reasoningTokens(usage)` | none | reports reasoning tokens in `usage` (DeepSeek's `completion_tokens_details`) |
+| `parseToolCalls(json)` | lenient: missing fields defaulted | needs stricter parsing (OpenRouter) |
+
+Check each against the provider's API reference, and say in the member's Scaladoc which
+document the choice came from - `streamUsageOption` especially, since an unknown field is
+ignored by some providers and a 400 or 422 from others. If a difference fits none of these,
+add a member to the trait, defaulting to today's behaviour, rather than forking the client.
+
+### 3. A worked example: Cohere
+
+Cohere's OpenAI-compatibility API differs in three places, so `CohereClient.scala` holds a
+dialect of three members and a thin client:
+
+```scala
+private[llm4s] object CohereDialect extends OpenAICompatibleDialect:
+  override val systemRole: String = "developer"
+
+  /** Not on the Compatibility API's parameter lists, which do not say what an unknown field does. */
+  override val streamUsageOption: Boolean = false
+
+  override def encodeResponseFormat(format: ResponseFormat): Option[ujson.Value] =
+    format match
+      case ResponseFormat.Json => Some(ujson.Obj("type" -> "json_object"))
+      case ResponseFormat.JsonSchema(schema, _, _) =>
+        Some(ujson.Obj("type" -> "json_object", "schema" -> schema))
+
+class CohereClient(
+  config: CohereConfig,
+  metrics: MetricsCollector = MetricsCollector.noop,
+  exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+)(using ModelRegistryService)
+    extends OpenAICompatibleClient(
+      OpenAICompatibleClient.Settings(
+        providerName = "cohere",   // metrics, exchange log and error label
+        displayName = "Cohere",    // log lines and the "already closed" error
+        model = config.model,
+        baseUrl = config.baseUrl,  // requests go to <baseUrl>/chat/completions
+        apiKey = Some(config.apiKey),
+        contextWindow = config.contextWindow,
+        reserveCompletion = config.reserveCompletion
+      ),
+      CohereDialect,
+      metrics,
+      exchangeLogging
+    )
+```
+
+plus a companion `apply` returning `Result[CohereClient]`. Everything else - the HTTP round trip,
+SSE streaming, tool-call fan-out, token usage, error mapping, exchange logging, timeouts - comes
+from `OpenAICompatibleClient`.
+
+### 4. Config, descriptor and registration
+
+All in `modules/openai-compatible`, keeping the `org.llm4s.*` packages:
+
+- **Config**: `llmconnect/config/<Name>Config.scala`, a `ProviderConfig` case class with a fixed
+  `providerId`, the API key redacted in `toString`, a `DEFAULT_BASE_URL`, and a `fromValues`
+  returning `Result` that resolves the context window through `ContextWindowResolver`
+  (`CohereConfig` is the example). A provider with no config of its own can reuse
+  `OpenAIConfig`, as OpenRouter does - then pass its id to `OpenAIConfig.fromValues(...,
+  providerId = Some(id))`, or the config reports `openai`.
+- **Descriptor**: `llmconnect/provider/<Name>Provider.scala`, an `object` extending
+  `ProviderDescriptor` with its `id`, a `configSpec`
+  (`ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL)` for the usual case),
+  `buildConfig` from the named section and `buildClient` through
+  `ProviderDescriptor.expectConfig`. Give it a `modelLister` if the provider has a `/models`
+  endpoint (`OpenAICompatibleModelListers.scala`).
+- **Registration**: add the descriptor to `chatProviders` in `Llm4sOpenAICompatibleModule`. The
+  module is already declared in `META-INF/services`, so nothing else is needed - and nothing in
+  `llm4s-core` changes.
+- **Example config**: a commented `<name>-main` section in the module's `reference.conf`.
+- **Environment variable names**, if any tool reads them, go in `OpenAICompatibleConfigKeys`.
+
+### 5. Tests
+
+In `modules/openai-compatible/src/test`, with no network:
+
+- **Dialect spec** (`CohereDialectSpec`, `MistralDialectSpec`): each overridden member, through
+  the client's `createRequestBody`, `parseCompletion` and `parseStreamingChunks`.
+- **Client spec** over `LocalProviderTestServer` (`CohereClientSpec`,
+  `CohereClientStreamingSpec`): a completion, a stream with text and tool calls, an error status
+  mapped to its typed error, and the headers and path the request went to.
+- **Closed-state test** (`CohereClientClosedStateTest`): calls after `close()` fail with an
+  error naming the model.
+- **Registration**: add a row to `expectations` in `Llm4sOpenAICompatibleModuleSpec`, which proves
+  discovery and the config-to-client round trip for every descriptor.
+- **Named-provider spec** (`DeepSeekNamedProviderSpec`): a HOCON section loads to your config,
+  with its default base URL.
+- **Streamed usage**: add the dialect to the `streamUsageOption` cases in
+  `OpenAICompatibleStreamedUsageSpec`.
+
+Then a **`@Cloud` smoke spec** in `modules/it/src/test/scala/org/llm4s/llmconnect/smoke/`,
+modelled on `CohereSmokeSpec`: a completion, a stream and a bad key against the live API, gated
+with `Tier.require(apiKey.isDefined, "<NAME>_API_KEY not set")` and run by `sbt testSmoke`.
+[#1213](https://github.com/llm4s/llm4s/issues/1213) tracks the providers that still lack one.
+
+Keep `openaiCompatible`'s coverage at or above its floor in `build.sbt`
+(`sbt coverage openaiCompatible/test openaiCompatible/coverageReport`).
+
+### 6. Docs
+
+- A section for the provider in [`docs/guide/providers.md`](docs/guide/providers.md) - setup, a
+  config example, and what it supports - and the provider in the lists at the top of that guide
+  and in [the installation guide](docs/getting-started/installation.md).
+- The `Llm4sOpenAICompatibleModule` Scaladoc, which lists the module's providers, and the
+  module's line in `CLAUDE.md`'s repository structure.
+- An entry under **Added** in [`CHANGELOG.md`](CHANGELOG.md).
+- If `llm4s-config-policy`'s presets should allow it, their provider lists in `ConfigPolicy`.
+
 ## Build Commands
 
 See [AGENTS.md](AGENTS.md#build-test-and-development-commands) for complete list:

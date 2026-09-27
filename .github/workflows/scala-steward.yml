@@ -1,0 +1,60 @@
+# Automated sbt dependency updates (#1132).
+#
+# Dependabot (.github/dependabot.yml) keeps the GitHub Actions pinned; this keeps the Scala/Java
+# libraries, sbt plugins, sbt itself and the Scala version current. Before it existed nothing
+# watched project/Dependencies.scala, which is how the Anthropic and Azure SDKs drifted.
+# Repo-level policy (grouping, pins, cooldown, sign-off) lives in .scala-steward.conf.
+#
+# Authentication - one-time setup by a maintainer, see the PR that added this file:
+# a GitHub App installed on llm4s/llm4s with Contents: read & write and Pull requests:
+# read & write, and three repository secrets:
+#   SCALA_STEWARD_APP_ID               the App ID
+#   SCALA_STEWARD_APP_INSTALLATION_ID  the installation ID on llm4s/llm4s
+#   SCALA_STEWARD_APP_PRIVATE_KEY      the App's private key (PEM)
+# The default GITHUB_TOKEN is deliberately not used: a pull request opened with it does not
+# trigger `pull_request` workflows, so CI and the DCO check would never run on Steward's PRs.
+# Commits are authored as `<app-slug>[bot]` (<id>+<app-slug>[bot]@users.noreply.github.com),
+# which dco.yml's bot exemption already covers; they are also signed off (signoffCommits).
+name: Scala Steward
+
+on:
+  schedule:
+    # Mondays 05:00 UTC - one batch of update PRs at the start of the week.
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+# The job writes through the App's installation token, not GITHUB_TOKEN.
+permissions:
+  contents: read
+
+concurrency:
+  group: scala-steward
+  cancel-in-progress: false
+
+jobs:
+  scala-steward:
+    name: Scala Steward
+    # Forks have neither the App nor its secrets.
+    if: github.repository == 'llm4s/llm4s'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: 21
+
+      - uses: sbt/setup-sbt@v1
+
+      - name: Launch Scala Steward
+        uses: scala-steward-org/scala-steward-action@v2
+        with:
+          github-app-id: ${{ secrets.SCALA_STEWARD_APP_ID }}
+          github-app-installation-id: ${{ secrets.SCALA_STEWARD_APP_INSTALLATION_ID }}
+          github-app-key: ${{ secrets.SCALA_STEWARD_APP_PRIVATE_KEY }}
+          # Use the App only to authenticate, and update this repository alone rather than
+          # every repository the App happens to be installed on.
+          github-app-auth-only: 'true'
+          github-repository: ${{ github.repository }}
+          # .sbtopts sets the heap (-Xmx2g) this 30-plus-project build needs to load.
+          ignore-opts-files: false

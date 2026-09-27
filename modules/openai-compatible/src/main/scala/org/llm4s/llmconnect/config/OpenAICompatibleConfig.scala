@@ -28,6 +28,10 @@ import org.llm4s.util.Redaction
  * @param reserveCompletion tokens held back from prompt history for the completion.
  * @param headers           extra headers sent on every request, e.g. a gateway's
  *                          own auth header. Values are redacted in `toString`.
+ * @param streamUsage       whether a streaming request asks for token usage with
+ *                          `"stream_options": {"include_usage": true}`. Servers that follow
+ *                          OpenAI (vLLM, Ollama's `/v1`) stream no usage without it; turn it
+ *                          off for an endpoint that rejects the field.
  */
 final case class OpenAICompatibleConfig(
   model: String,
@@ -35,7 +39,8 @@ final case class OpenAICompatibleConfig(
   apiKey: Option[String] = None,
   contextWindow: Int = OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW,
   reserveCompletion: Int = OpenAICompatibleConfig.DEFAULT_RESERVE_COMPLETION,
-  headers: Map[String, String] = Map.empty
+  headers: Map[String, String] = Map.empty,
+  streamUsage: Boolean = true
 ) extends ProviderConfig:
   override def providerId: ProviderId                           = ProviderId(OpenAICompatibleConfig.ProviderIdName)
   override def endpointUrl: Option[String]                      = Some(baseUrl)
@@ -43,7 +48,7 @@ final case class OpenAICompatibleConfig(
   override def toString: String =
     s"OpenAICompatibleConfig(model=$model, baseUrl=$baseUrl, apiKey=${Redaction.secretOpt(apiKey)}, " +
       s"contextWindow=$contextWindow, reserveCompletion=$reserveCompletion, " +
-      s"headers=${headers.keys.map(k => s"$k -> ***").mkString("{", ", ", "}")})"
+      s"headers=${headers.keys.map(k => s"$k -> ***").mkString("{", ", ", "}")}, streamUsage=$streamUsage)"
 
 object OpenAICompatibleConfig {
 
@@ -72,7 +77,8 @@ object OpenAICompatibleConfig {
     apiKey: Option[String] = None,
     contextWindow: Option[Int] = None,
     reserveCompletion: Option[Int] = None,
-    headers: Map[String, String] = Map.empty
+    headers: Map[String, String] = Map.empty,
+    streamUsage: Boolean = true
   ): Result[OpenAICompatibleConfig] =
     val window  = contextWindow.getOrElse(DEFAULT_CONTEXT_WINDOW)
     val reserve = reserveCompletion.getOrElse(math.min(DEFAULT_RESERVE_COMPLETION, window / 4))
@@ -98,6 +104,7 @@ object OpenAICompatibleConfig {
       apiKey = apiKey.map(_.trim).filter(_.nonEmpty),
       contextWindow = window,
       reserveCompletion = reserve,
-      headers = headers
+      headers = headers,
+      streamUsage = streamUsage
     )
 }

@@ -37,7 +37,7 @@ object RequestyProvider extends ProviderDescriptor:
     for
       apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      config  <- OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl)
+      config  <- OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl, Some(id))
     yield config
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
@@ -45,6 +45,7 @@ object RequestyProvider extends ProviderDescriptor:
   ): Result[LLMClient] =
     ProviderDescriptor
       .expectConfig[OpenAIConfig](id, config)
-      // Not `OpenAIClient(config, ...)`: that labels the client with the config's `providerId`,
-      // which for Requesty's `OpenAIConfig` reads `openai` (#1132).
+      // Labelled with this descriptor's id rather than the config's `providerId`, so a config
+      // built by hand - whose id is inferred from its base URL as `openai` - is still `requesty`
+      // here. One built by `buildConfig` carries `requesty` itself (#1132).
       .flatMap(OpenAIClient.forProvider(_, id, options.metrics, options.exchangeLogging))
