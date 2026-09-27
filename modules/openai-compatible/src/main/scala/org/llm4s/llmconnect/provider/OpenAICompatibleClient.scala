@@ -31,9 +31,11 @@ import scala.util.{ Try, Using }
  * providers is an [[OpenAICompatibleDialect]]; everything else is here:
  *
  *  - `complete`: POST `<baseUrl>/chat/completions`, Bearer auth when there is a
- *    key, `HttpErrorMapper` for non-2xx replies, cost estimation;
+ *    key, `HttpErrorMapper` for non-2xx replies, cost estimation, and a
+ *    two-minute timeout ([[OpenAICompatibleClient.RequestTimeout]]);
  *  - `streamComplete`: the same with `"stream": true`, read as server-sent
- *    events until `[DONE]`, each delta fanned out to one chunk per tool call;
+ *    events until `[DONE]`, each delta fanned out to one chunk per tool call,
+ *    with a five-minute timeout ([[OpenAICompatibleClient.StreamTimeout]]);
  *  - request building: role mapping, sampling parameters, tools and
  *    `response_format`;
  *  - one provider exchange recorded per call, success or failure; and the
@@ -66,7 +68,7 @@ class OpenAICompatibleClient(
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
     renderRequest(conversation, options, stream = false).flatMap { requestText =>
-      send(requestText, HttpResponse.BodyHandlers.ofString(), timeout = None)
+      send(requestText, HttpResponse.BodyHandlers.ofString(), requestTimeout)
         .tapLeft(error => recordExchange(startedAt, requestText, None, Left(error)))
         .flatMap { response =>
           val body = response.body()
@@ -91,7 +93,7 @@ class OpenAICompatibleClient(
     renderRequest(conversation, options, stream = true).flatMap { requestText =>
       val rawStream = new StringBuilder
       val result =
-        send(requestText, HttpResponse.BodyHandlers.ofInputStream(), timeout = Some(Duration.ofMinutes(5)))
+        send(requestText, HttpResponse.BodyHandlers.ofInputStream(), streamTimeout)
           .flatMap(response => consumeStream(response.statusCode(), response.body(), rawStream, onChunk))
       recordExchange(startedAt, requestText, Option.when(rawStream.nonEmpty)(rawStream.result()), result)
       result
@@ -190,21 +192,35 @@ class OpenAICompatibleClient(
       }
       .tapLeft(error => recordExchange(Instant.now(), "", None, Left(error)))
 
+  /**
+   * How long `complete` waits for a response before failing with a timeout. It used to wait
+   * forever: `complete` set no timeout, as the old `DeepSeekClient`, `ZaiClient` and
+   * `OpenRouterClient` had not (#912), so an endpoint that accepted the connection and never
+   * answered hung the caller. Scoped to the provider package so specs can shorten it.
+   */
+  protected[provider] def requestTimeout: Duration = OpenAICompatibleClient.RequestTimeout
+
+  /** The timeout `streamComplete` sends with its request. See [[requestTimeout]]. */
+  protected[provider] def streamTimeout: Duration = OpenAICompatibleClient.StreamTimeout
+
+  /** The HTTP request carrying `requestText`. Scoped to the provider package so specs can inspect it. */
+  protected[provider] def buildRequest(requestText: String, timeout: Duration): HttpRequest = {
+    val builder = HttpRequest
+      .newBuilder()
+      .uri(URI.create(endpoint))
+      .header("Content-Type", "application/json")
+      .timeout(timeout)
+    settings.apiKey.foreach(key => builder.header("Authorization", s"Bearer $key"))
+    dialect.headers.foreach((name, value) => builder.header(name, value))
+    builder.POST(HttpRequest.BodyPublishers.ofString(requestText)).build()
+  }
+
   private def send[T](
     requestText: String,
     bodyHandler: HttpResponse.BodyHandler[T],
-    timeout: Option[Duration]
+    timeout: Duration
   ): Result[HttpResponse[T]] =
-    Try {
-      val builder = HttpRequest
-        .newBuilder()
-        .uri(URI.create(endpoint))
-        .header("Content-Type", "application/json")
-      settings.apiKey.foreach(key => builder.header("Authorization", s"Bearer $key"))
-      dialect.headers.foreach((name, value) => builder.header(name, value))
-      timeout.foreach(builder.timeout)
-      httpClient.send(builder.POST(HttpRequest.BodyPublishers.ofString(requestText)).build(), bodyHandler)
-    }.toResult
+    Try(httpClient.send(buildRequest(requestText, timeout), bodyHandler)).toResult
 
   /**
    * The messages of `conversation` that go into a request: all of them, except an assistant
@@ -389,6 +405,17 @@ class OpenAICompatibleClient(
 }
 
 object OpenAICompatibleClient {
+
+  /**
+   * The timeout on `complete`'s request: two minutes, what the old `MistralClient` and
+   * `CohereClient` used, and what `OllamaClient`, `GeminiClient` and `VertexAIClient` use. A
+   * single internal default for now; configurable timeouts are
+   * [[https://github.com/llm4s/llm4s/issues/712 #712]].
+   */
+  val RequestTimeout: Duration = Duration.ofMinutes(2)
+
+  /** The timeout on `streamComplete`'s request: five minutes, as in the clients this one replaced. */
+  val StreamTimeout: Duration = Duration.ofMinutes(5)
 
   /**
    * The tool calls seen so far in one stream, by their `index`.

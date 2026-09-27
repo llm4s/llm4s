@@ -519,6 +519,11 @@ request carries `temperature` and `top_p`; `max_tokens` is sent when set, and
 `tool_choice` or `stream_options`. Whether a feature works also depends on the endpoint and the
 model: tool calling on a local server usually needs a server flag, as the recipes note.
 
+A non-streaming request fails with a timeout after **two minutes** without a response, and a
+streaming one after five minutes without one. Both are fixed for now; configurable timeouts are
+[#712](https://github.com/llm4s/llm4s/issues/712). A slow local model answering a long prompt
+can take longer than two minutes: stream it instead.
+
 What it does **not** do:
 
 - **No reasoning configuration.** `CompletionOptions.reasoning` is ignored; no

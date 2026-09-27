@@ -599,6 +599,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **`complete` on `OpenAICompatibleClient` could wait for ever.** It sent its request with no
+  timeout - as the old `DeepSeekClient`, `ZaiClient` and `OpenRouterClient` had
+  ([#912](https://github.com/llm4s/llm4s/issues/912)) - so an endpoint that accepted the
+  connection and never answered hung the caller. Every provider on the shared client (DeepSeek,
+  Z.ai, OpenRouter, Mistral, Cohere and the generic `openai-compatible`) now times out after two
+  minutes, what the old Mistral and Cohere clients used; streaming keeps its five minutes.
+  Configurable timeouts remain [#712](https://github.com/llm4s/llm4s/issues/712).
 - **`EMBEDDING_MODEL=ollama/nomic-embed-text` failed `Llm4sConfig.textEmbeddingModel()`** with
   `Unknown model 'nomic-embed-text' for provider 'ollama'`. The configuration is documented in
   the README and `CLAUDE.md`, but the central dimension table covered only `openai`, `voyage`
