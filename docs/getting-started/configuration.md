@@ -139,7 +139,7 @@ Llm4sConfig.listModels("openai-main") // ... or for a named one
 | `organization` | OpenAI organisation id |
 | `endpoint`, `apiVersion` | Azure OpenAI: the resource endpoint (required) and API version |
 | `project`, `location` | Vertex AI: the GCP project id (required) and region (default `us-central1`) |
-| `contextWindow`, `reserveCompletion`, `headers` | Generic `openai-compatible` endpoints |
+| `contextWindow`, `reserveCompletion`, `headers`, `streamUsage` | Generic `openai-compatible` endpoints ([details](../guide/providers#openai-compatible-endpoints)) |
 
 Each provider module's `reference.conf` has a commented example section, and the
 [provider guide](../guide/providers) covers each provider in detail.

@@ -153,9 +153,48 @@ because the section binds them.
 ### Available Models
 
 - **Latest:** `gpt-4o`, `gpt-4o-mini`
-- **Reasoning:** `o1-preview`, `o1-mini`
+- **Reasoning:** the gpt-5 family (`gpt-5`, `gpt-5-mini`, `gpt-5.1`, ...) and the o-series (`o3`, `o4-mini`)
 - **Turbo:** `gpt-4-turbo`
 - **Legacy:** `gpt-3.5-turbo`
+
+### Reasoning models
+
+`CompletionOptions.reasoning` is sent as `reasoning_effort` to OpenAI's reasoning models:
+
+```scala
+client.complete(conversation, CompletionOptions().withReasoning(ReasoningEffort.High))
+```
+
+| `ReasoningEffort` | `reasoning_effort` |
+|---|---|
+| `Low` / `Medium` / `High` | `low` / `medium` / `high` |
+| `None` | not sent: the model's own default applies |
+
+Which models are reasoning models comes from the model registry's `supports_reasoning` flag
+(the same metadata llm4s uses for context windows and costs), so the o-series and the gpt-5
+family get it, and `gpt-4o`, `gpt-4.1` and older models never do: OpenAI rejects the parameter
+for them, so for those models `reasoning` is ignored, as `CompletionOptions` documents. A model
+newer than the bundled metadata is recognised by its name (`o<n>...`, `gpt-5` onwards,
+`gpt-oss`). For Requesty, a routed id such as `openai/o4-mini` resolves the same way; a
+non-OpenAI model behind Requesty is not sent `reasoning_effort`. A fine-tuned model is judged by
+the model it was trained from: `ft:o4-mini-2025-04-16:my-org:my-suffix:abc123` is treated as
+`o4-mini`, and a fine-tune of `gpt-4o-mini` as `gpt-4o-mini`.
+
+Requests to a reasoning model also follow OpenAI's rules for them: `maxTokens` is sent as
+`max_completion_tokens` (which counts reasoning tokens too) rather than `max_tokens`, and
+`temperature`, `topP`, `presencePenalty` and `frequencyPenalty` are not sent, since those models
+reject non-default values. (`gpt-oss` models keep their sampling parameters.)
+
+The reasoning tokens a response reports (`completion_tokens_details.reasoning_tokens`) are
+returned as `TokenUsage.thinkingTokens`, for streamed and non-streamed calls. They are part of
+`completionTokens`, not in addition to it. OpenAI's chat-completions API does not return the
+reasoning text itself, so `Completion.thinking` stays empty.
+
+### Streaming and token usage
+
+Streaming requests set `stream_options.include_usage`, so OpenAI reports token usage on a final
+chunk with no choices, and a streamed `Completion` carries `usage` and `estimatedCost` like a
+non-streamed one. The final chunk produces no `StreamedChunk`.
 
 ### Costs
 
@@ -412,6 +451,27 @@ Same as OpenAI (via Azure deployment). Choose models when deploying:
 - `gpt-4-turbo`
 - `gpt-35-turbo`
 
+### Reasoning deployments
+
+`reasoning_effort` works as for [OpenAI](#reasoning-models), with one difference: the model
+llm4s sees is the **deployment name**, which need not name the model behind it. So:
+
+- a deployment named after a model the registry knows (`o4-mini`, `gpt-5-mini`, `gpt-4o`) is
+  treated as that model, and one named after an Azure fine-tuned model
+  (`o4-mini-2025-04-16.ft-...`) as its base model;
+- any other deployment (`prod-reasoner`, or a fine-tune deployed under a name of your own) gets `reasoning_effort` whenever you ask for a
+  reasoning effort, since asking is the only sign it is a reasoning model. The request then
+  also follows the reasoning-model rules: `max_completion_tokens`, and no sampling parameters.
+  Asking for reasoning on such a deployment that is not a reasoning model gets an error from
+  Azure; leave `reasoning` unset (or `ReasoningEffort.None`) for it.
+
+### Streamed token usage
+
+Streamed completions report token usage when `apiVersion` is `2024-09-01-preview` or later
+(including the default `2025-01-01-preview`, the GA `2024-10-21` and the unified v1 API): only
+those versions accept `stream_options`, so it is not sent for older ones, such as
+`2024-02-15-preview`, and their streams report no usage.
+
 ### Costs
 
 Similar to OpenAI but often bundled with enterprise agreements.
@@ -540,6 +600,7 @@ Each named section is one endpoint, so several can sit side by side. The
 | `contextWindow` | no | The model's context window. Default 8192, which is deliberately small: set the real value |
 | `reserveCompletion` | no | Tokens held back for the reply. Default 2048, or a quarter of a smaller window |
 | `headers` | no | Extra headers sent on every request; values are redacted when the config is printed |
+| `streamUsage` | no | Whether a streaming request asks for token usage with `stream_options.include_usage`. Default `true`; set `false` for an endpoint that rejects the field (see [streamed token usage](#what-the-generic-path-does-and-does-not-do)) |
 
 `baseUrl` is everything before `/chat/completions` in the vendor's endpoint URL. For most vendors
 that is the host plus `/v1`, but some add a prefix - Groq's is `/openai/v1`, Fireworks'
@@ -626,14 +687,20 @@ model: tool calling on a local server usually needs a server flag, as the recipe
 such as vLLM, Ollama's `/v1` and Perplexity's Router - are told to report it; usage is read from
 whichever event carries it, including a final event with empty `choices`. An endpoint that
 rejects unknown fields may refuse the request with a 400 or 422 naming `stream_options`. Turn it
-off by building the config with `streamUsage = false`:
+off with `streamUsage = false` in the section (it takes `true` or `false`, and HOCON's
+`yes`/`no`/`on`/`off`; anything else is a config error naming the key and section):
 
-```scala
-OpenAICompatibleConfig.fromValues(model = "my-model", baseUrl = "https://llm.example/v1", streamUsage = false)
+```hocon
+strict-gateway {
+  provider = "openai-compatible"
+  baseUrl = "https://llm.example/v1"
+  model = "my-model"
+  streamUsage = false
+}
 ```
 
-A `streamUsage` key in the named section is not read yet: provider-specific keys wait on
-[#1215](https://github.com/llm4s/llm4s/issues/1215).
+or, building the config in code, with
+`OpenAICompatibleConfig.fromValues(..., streamUsage = false)`.
 
 A non-streaming request fails with a timeout after **two minutes** without a response, and a
 streaming one after five minutes without one. Both are fixed for now; configurable timeouts are
@@ -1017,7 +1084,7 @@ section binds a variable and still fails this way, the variable is not set in th
 runs your app.
 
 **Streaming fails with a 400 or 422 naming `stream_options`, while `complete` works.** The
-endpoint rejects fields it does not know. Build the config with `streamUsage = false` (see
+endpoint rejects fields it does not know. Set `streamUsage = false` in the section (see
 [streamed token usage](#what-the-generic-path-does-and-does-not-do)); the stream then carries
 usage only if the server sends it unasked.
 

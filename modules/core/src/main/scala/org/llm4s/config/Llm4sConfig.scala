@@ -148,19 +148,19 @@ object Llm4sConfig {
    * Loads the configured default named provider as a runtime [[ProviderConfig]].
    */
   def defaultProvider()(using ProviderRegistry): Result[ProviderConfig] =
-    for
-      service <- modelRegistryService()
-      given ContextWindowResolver = ContextWindowResolver(service)
-      name   <- defaultProviderName()
-      config <- org.llm4s.config.NamedProviderLoader.load(ConfigSource.default, name.asName)
-    yield config
+    defaultProvider(ConfigSource.default)
 
+  // The providers block is loaded (and validated, which logs its warnings) once, and both the
+  // default name and its section are read from that one result. Resolving the name with
+  // `defaultProviderName` and then the section with `NamedProviderLoader.load` validated the
+  // block twice, so every deprecated-alias and unknown-key warning printed twice.
   private[config] def defaultProvider(source: ConfigSource)(using ProviderRegistry): Result[ProviderConfig] =
     for
       service <- modelRegistryService(source)
       given ContextWindowResolver = ContextWindowResolver(service)
-      name   <- defaultProviderName(source)
-      config <- org.llm4s.config.NamedProviderLoader.load(source, name.asName)
+      loaded <- providers(source)
+      name   <- loaded.defaultProviderName
+      config <- org.llm4s.config.NamedProviderLoader.select(loaded, name.asName)
     yield config
 
   /**
@@ -177,8 +177,9 @@ object Llm4sConfig {
     httpClient: Llm4sHttpClient
   )(using ProviderRegistry): Result[List[DiscoveredModel]] =
     for
-      defaultName <- defaultProviderName(source)
-      models      <- listModels(defaultName.asName, source, httpClient)
+      loaded      <- providers(source)
+      defaultName <- loaded.defaultProviderName
+      models      <- listModels(defaultName.asName, loaded, httpClient)
     yield models
 
   /**
@@ -192,9 +193,15 @@ object Llm4sConfig {
     source: ConfigSource,
     httpClient: Llm4sHttpClient
   )(using ProviderRegistry): Result[List[DiscoveredModel]] =
+    providers(source).flatMap(listModels(name, _, httpClient))
+
+  private def listModels(
+    name: String,
+    loaded: ProvidersConfig,
+    httpClient: Llm4sHttpClient
+  )(using ProviderRegistry): Result[List[DiscoveredModel]] =
     for
-      providers <- providers(source)
-      namedProvider <- providers.namedProviders
+      namedProvider <- loaded.namedProviders
         .get(ProviderName(name))
         .toRight(org.llm4s.error.ConfigurationError(s"Configured provider '$name' was not found"))
       descriptor <- summon[ProviderRegistry].resolve(

@@ -201,6 +201,24 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
       |        X-Gateway-Token = "secret-token"
       |      }
       |    }
+      |    no-usage {
+      |      provider = "openai-compatible"
+      |      baseUrl = "http://localhost:8000/v1"
+      |      model = "m"
+      |      streamUsage = false
+      |    }
+      |    off-usage {
+      |      provider = "openai-compatible"
+      |      baseUrl = "http://localhost:8000/v1"
+      |      model = "m"
+      |      streamUsage = off
+      |    }
+      |    bad-usage {
+      |      provider = "openai-compatible"
+      |      baseUrl = "http://localhost:8000/v1"
+      |      model = "m"
+      |      streamUsage = "sometimes"
+      |    }
       |    bad-window {
       |      provider = "openai-compatible"
       |      baseUrl = "http://localhost:8000/v1"
@@ -223,8 +241,47 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           cfg.contextWindow shouldBe OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW
           cfg.reserveCompletion shouldBe OpenAICompatibleConfig.DEFAULT_RESERVE_COMPLETION
           cfg.headers shouldBe empty
+          cfg.streamUsage shouldBe true
         case other =>
           fail(s"Expected OpenAICompatibleConfig, got $other")
+    }
+
+    "turn streamed usage off when a section sets streamUsage = false" in {
+      Llm4sConfig.provider(ConfigSource.string(hocon), "no-usage") match
+        case Right(cfg: OpenAICompatibleConfig) => cfg.streamUsage shouldBe false
+        case other                              => fail(s"Expected OpenAICompatibleConfig, got $other")
+    }
+
+    "read streamUsage with HOCON's boolean spellings" in {
+      Llm4sConfig.provider(ConfigSource.string(hocon), "off-usage") match
+        case Right(cfg: OpenAICompatibleConfig) => cfg.streamUsage shouldBe false
+        case other                              => fail(s"Expected OpenAICompatibleConfig, got $other")
+    }
+
+    "reject a streamUsage that is not a boolean, naming the key and the section" in {
+      Llm4sConfig.provider(ConfigSource.string(hocon), "bad-usage") match
+        case Left(err) =>
+          err.message should include("Configured provider 'bad-usage' has an invalid streamUsage")
+          err.message should include("llm4s.providers.bad-usage.streamUsage must be true or false, got 'sometimes'")
+        case other => fail(s"Expected a configuration error, got $other")
+    }
+
+    "round-trip streamUsage from HOCON through the declared key, with no unknown-key warning" in {
+      val section = ProvidersConfigLoader
+        .load(ConfigSource.string(hocon))
+        .fold(e => fail(e.message), identity)
+        .namedProviders
+      section(ProviderName("no-usage")).extra(OpenAICompatibleProvider.StreamUsageKey) shouldBe Some("false")
+      // The declared default fills a section that omits the key.
+      section(ProviderName("local-vllm")).extra(OpenAICompatibleProvider.StreamUsageKey) shouldBe Some("true")
+
+      val raw  = RawProvidersConfigLoader.load(ConfigSource.string(hocon)).fold(e => fail(e.message), identity)
+      val name = ProviderName("no-usage")
+      val warnings = NamedProviderConfigNormalizer
+        .normalize(name, raw.namedProviders(name))
+        .flatMap(NamedProviderSectionValidator.validateWithWarnings(name, OpenAICompatibleProvider, _))
+        .fold(e => fail(e.message), _._2)
+      warnings shouldBe empty
     }
 
     "load the key, context window, reserve and headers a section sets" in {

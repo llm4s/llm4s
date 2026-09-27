@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must carry `project` in `extras`. An extra key whose value is an object or list is now a load
   error. See the
   [migration note](docs/reference/migration.md#named-providers-provider-specific-keys-vertex-ai-project-and-location).
+- **`streamUsage` in a generic `openai-compatible` section.** `OpenAICompatibleConfig.streamUsage`
+  can now be set from config: `streamUsage = false` in the named section stops a streaming
+  request sending `stream_options.include_usage`, for an endpoint that rejects the field. It is a
+  provider-specific key declared by `OpenAICompatibleProvider` (default `true`); `true`/`false`
+  and HOCON's `yes`/`no`/`on`/`off` are accepted, and any other value fails with an error naming
+  the key and section. Before this, the key was reported as unknown and ignored
+  ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
 - **A contributing guide for OpenAI-compatible providers**:
   [CONTRIBUTING.md](CONTRIBUTING.md#adding-an-openai-compatible-provider-a-dialect) now covers
   checking the generic `openai-compatible` provider first, the `OpenAICompatibleDialect` hooks
@@ -128,6 +135,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-config-policy`'s `dev` preset now allows `openai-compatible`; the `prod` preset does not,
   since the provider can point at any endpoint - production allows it explicitly. See the
   [migration guide](docs/reference/migration.md#slice-5-llm4s-openai-compatible).
+
+- **`llm4s-openai` sends `reasoning_effort`, and asks for token usage on streams**
+  ([#1132](https://github.com/llm4s/llm4s/issues/1132), follow-ups to #1209).
+  `OpenAIClient` now sends `CompletionOptions.reasoning` as `reasoning_effort` (`Low`, `Medium`,
+  `High` as `low`, `medium`, `high`; `None` sends nothing) to OpenAI reasoning models - the
+  o-series and the gpt-5 family, as the model registry's `supports_reasoning` flag says, with
+  OpenAI's naming as the fallback for models newer than the bundled metadata - and never to
+  other models, which reject it. Before, the setting was ignored. A reasoning model's request
+  now also sends `maxTokens` as `max_completion_tokens` (core's transformer already did this for
+  `o1`, `o3` and `gpt-5`; it now covers `o4-mini` and anything else flagged) and leaves out
+  `temperature`, `top_p` and the penalties, which those models reject: a gpt-5 request with the
+  default options was failing on `temperature`. A fine-tuned model (`ft:o4-mini-...:org:suffix:id`)
+  is judged by the model it was trained from. On Azure, a deployment name the registry cannot
+  resolve gets `reasoning_effort` whenever a reasoning effort is asked for. Streaming requests
+  set `stream_options.include_usage` (Azure from api-version `2024-09-01-preview` on), so
+  OpenAI's streams report usage and an estimated cost, which they had not, since OpenAI sends
+  none unless asked. Streamed usage now also carries reasoning and cached tokens and the
+  service's own total. See the [providers guide](docs/guide/providers.md#reasoning-models).
 
 - **`llm4s-openai` moves from Microsoft's deprecated Azure OpenAI SDK to OpenAI's official Java
   SDK** ([#1132](https://github.com/llm4s/llm4s/issues/1132)). `OpenAIClient` now runs on
@@ -642,6 +667,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binds, and say where a tool reads `LLM_MODEL` itself (the chat-tui sample, the config-policy env
   check). `DocumentedProviderConfigSpec` loads the documented configuration. See the
   [migration note](docs/reference/migration.md#from-llm_model-to-named-provider-sections).
+- **Every provider-config warning was logged twice** by `Llm4sConfig.defaultProvider`,
+  `providerFrom` and the default-provider `listModels`: they read the default provider's name and
+  then its section through two separate loads of `llm4s.providers`, and each load validated the
+  whole block, logging its deprecated-alias and unknown-key warnings again. The block is now
+  loaded once and both are read from that result. Results are unchanged
+  ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
 - **`complete` on `OpenAICompatibleClient` could wait for ever.** It sent its request with no
   timeout - as the old `DeepSeekClient`, `ZaiClient` and `OpenRouterClient` had
   ([#912](https://github.com/llm4s/llm4s/issues/912)) - so an endpoint that accepted the
@@ -657,8 +688,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `OpenAICompatibleDialect.streamUsageOption` (default `true`). Z.ai, OpenRouter, Mistral and
   Cohere answer `false`: Mistral rejects unknown fields with a 422, Z.ai and Cohere do not
   document it, and OpenRouter always streams usage. For an endpoint that rejects the field,
-  `OpenAICompatibleConfig` has `streamUsage` (default `true`); a `streamUsage` key in the named
-  section waits on provider-specific keys ([#1215](https://github.com/llm4s/llm4s/issues/1215)).
+  `OpenAICompatibleConfig` has `streamUsage` (default `true`), settable from a named section
+  (see Added).
 - **A Requesty config reported `providerId` = `openai`**, because `OpenAIConfig` inferred its id
   from the base URL, which is neither OpenAI's nor OpenRouter's. `OpenAIConfig` gains a trailing
   `explicitProviderId: Option[ProviderId] = None` (and `fromValues` a defaulted `providerId`),

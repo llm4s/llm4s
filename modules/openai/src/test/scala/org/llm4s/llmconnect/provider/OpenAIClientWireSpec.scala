@@ -12,7 +12,7 @@ import org.llm4s.llmconnect.{
   ProviderExchangeSink
 }
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIConfig }
-import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ReasoningEffort, UserMessage }
 import org.llm4s.metrics.MockMetricsCollector
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.testutil.LocalProviderTestServer
@@ -119,12 +119,62 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       client.close()
 
       seen.get().body("stream").bool shouldBe true
+      seen.get().body("stream_options")("include_usage").bool shouldBe true
       seen.get().organization shouldBe None
       val completion = result.value
       completion.id shouldBe "c1"
       completion.toolCalls.map(tc => (tc.id, tc.name, tc.arguments)) shouldBe
         List(("call_1", "get_weather", ujson.Obj("city" -> "Paris")))
       completion.usage.map(_.totalTokens) shouldBe Some(7)
+    }
+  }
+
+  it should "read usage from a final SSE event with no choices" in {
+    val events = Seq(
+      """{"id":"c2","created":0,"model":"gpt-5-mini","choices":[{"index":0,"delta":{"role":"assistant","content":"Hi"}}]}""",
+      """{"id":"c2","created":0,"model":"gpt-5-mini","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":null}""",
+      """{"id":"c2","created":0,"model":"gpt-5-mini","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":30,"total_tokens":39,"completion_tokens_details":{"reasoning_tokens":20}}}"""
+    )
+    val seen = new AtomicReference[Seen]()
+    LocalProviderTestServer.withServer("/") { exchange =>
+      capture(seen, exchange)
+      LocalProviderTestServer.sendSseResponse(
+        exchange,
+        (events.map(e => s"data: $e") :+ "data: [DONE]").mkString("", "\n\n", "\n\n")
+      )
+    } { baseUrl =>
+      val client = OpenAIClient(OpenAIConfig.fromValues("gpt-5-mini", "sk-test", None, baseUrl).value).value
+      val result = client.streamComplete(hello, CompletionOptions().withReasoning(ReasoningEffort.Medium), _ => ())
+      client.close()
+
+      val body = seen.get().body
+      body("reasoning_effort").str shouldBe "medium"
+      body("stream_options")("include_usage").bool shouldBe true
+      body.obj.contains("temperature") shouldBe false
+
+      val completion = result.value
+      completion.content shouldBe "Hi"
+      completion.usage.map(u => (u.promptTokens, u.completionTokens, u.totalTokens, u.thinkingTokens)) shouldBe
+        Some((9, 30, 39, Some(20)))
+    }
+  }
+
+  it should "send reasoning_effort and max_completion_tokens to a reasoning model" in {
+    val seen = new AtomicReference[Seen]()
+    LocalProviderTestServer.withServer("/") { exchange =>
+      capture(seen, exchange)
+      LocalProviderTestServer.sendJsonResponse(exchange, 200, LocalProviderTestServer.openAICompletion("hi", "o4-mini"))
+    } { baseUrl =>
+      val client = OpenAIClient(OpenAIConfig.fromValues("o4-mini", "sk-test", None, baseUrl).value).value
+      client.complete(hello, CompletionOptions(maxTokens = Some(256)).withReasoning(ReasoningEffort.High)).value
+      client.close()
+
+      val body = seen.get().body
+      body("reasoning_effort").str shouldBe "high"
+      body("max_completion_tokens").num shouldBe 256
+      body.obj.contains("max_tokens") shouldBe false
+      body.obj.contains("temperature") shouldBe false
+      body.obj.contains("stream_options") shouldBe false
     }
   }
 
@@ -165,6 +215,33 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       request.query shouldBe Some("api-version=2025-01-01-preview")
       request.apiKey shouldBe Some("azure-key")
       request.authorization shouldBe None
+    }
+  }
+
+  it should "stream from a deployment with reasoning_effort and stream_options on the deployment path" in {
+    val seen = new AtomicReference[Seen]()
+    val events = Seq(
+      """{"id":"a1","created":0,"model":"o4-mini","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}""",
+      """{"id":"a1","created":0,"model":"o4-mini","choices":[],"usage":{"prompt_tokens":5,"completion_tokens":6,"total_tokens":11}}"""
+    )
+    LocalProviderTestServer.withServer("/") { exchange =>
+      capture(seen, exchange)
+      LocalProviderTestServer.sendSseResponse(
+        exchange,
+        (events.map(e => s"data: $e") :+ "data: [DONE]").mkString("", "\n\n", "\n\n")
+      )
+    } { baseUrl =>
+      // "team-reasoner" names no model, so asking for reasoning is what makes the client send it.
+      val config = AzureConfig.fromValues("team-reasoner", baseUrl, "azure-key", AzureConfig.DEFAULT_API_VERSION).value
+      val client = OpenAIClient(config).value
+      val result = client.streamComplete(hello, CompletionOptions().withReasoning(ReasoningEffort.Low), _ => ())
+      client.close()
+
+      val request = seen.get()
+      request.path shouldBe "/openai/deployments/team-reasoner/chat/completions"
+      request.body("reasoning_effort").str shouldBe "low"
+      request.body("stream_options")("include_usage").bool shouldBe true
+      result.value.usage.map(_.totalTokens) shouldBe Some(11)
     }
   }
 
