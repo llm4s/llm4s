@@ -1,23 +1,17 @@
 package org.llm4s.llmconnect.provider
 
 import org.scalatest.EitherValues
-import com.azure.ai.openai.models.{ ChatCompletions, ChatCompletionsOptions }
-import com.azure.json.JsonProviders
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
+import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ completion => completionOf, transport }
 import org.llm4s.model.ModelRegistryService
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-
-import scala.util.Using
 
 final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers with EitherValues {
 
   private given mrs: ModelRegistryService = org.llm4s.model.ModelRegistryTestSupport.defaultService()
   private given ContextWindowResolver     = ContextWindowResolver(mrs)
-
-  private def completionsFromJson(json: String): ChatCompletions =
-    Using.resource(JsonProviders.createReader(json))(ChatCompletions.fromJson)
 
   "OpenAIClient.extractToolCalls" should "extract multiple tool calls with complex arguments" in {
     val model = "gpt-4"
@@ -32,7 +26,7 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers with 
       .value
 
     // Test with multiple tool calls with different argument structures
-    val completions = completionsFromJson(
+    val completions = completionOf(
       """{
         |"id":"chatcmpl-2",
         |"created":0,
@@ -65,17 +59,7 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers with 
         |}""".stripMargin
     )
 
-    val transport = new OpenAIClientTransport {
-      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions = completions
-
-      override def getChatCompletionsStream(
-        model: String,
-        options: ChatCompletionsOptions
-      ): com.azure.core.util.IterableStream[ChatCompletions] =
-        throw new UnsupportedOperationException("not used in this test")
-    }
-
-    val client = OpenAIClient.forTest(model, transport, config)
+    val client = OpenAIClient.forTest(model, transport(complete = _ => completions), config)
 
     val result = client.complete(Conversation(Seq(UserMessage("test"))), CompletionOptions())
 
@@ -109,7 +93,7 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers with 
       .value
 
     // Mix of valid and invalid tool calls
-    val completions = completionsFromJson(
+    val completions = completionOf(
       """{
         |"id":"chatcmpl-3",
         |"created":0,
@@ -142,17 +126,7 @@ final class OpenAIToolCallExtractionSpec extends AnyFlatSpec with Matchers with 
         |}""".stripMargin
     )
 
-    val transport = new OpenAIClientTransport {
-      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions = completions
-
-      override def getChatCompletionsStream(
-        model: String,
-        options: ChatCompletionsOptions
-      ): com.azure.core.util.IterableStream[ChatCompletions] =
-        throw new UnsupportedOperationException("not used in this test")
-    }
-
-    val client = OpenAIClient.forTest(model, transport, config)
+    val client = OpenAIClient.forTest(model, transport(complete = _ => completions), config)
 
     val result = client.complete(Conversation(Seq(UserMessage("test"))), CompletionOptions())
 

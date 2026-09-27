@@ -667,30 +667,32 @@ lazy val voyage = (project in file("modules/providers/voyage"))
   )
 
 // The OpenAI family carves fourth, split by shared client: OpenAI, Azure and Requesty all run
-// on `OpenAIClient` and the Azure OpenAI SDK, so they move together and take the SDK out of
-// core - after this core has no vendor SDK at all. OpenRouter, DeepSeek and Z.ai speak the
-// same wire format without an SDK, so they are `llm4s-openai-compatible` above, which also
-// holds `OpenAIConfig` (OpenRouter builds one). `openai` depends on that module for the config;
-// it adds no SDK. The reverse edge must never exist - it would put the Azure SDK on the
-// classpath of every OpenAI-compatible user.
+// on `OpenAIClient`, so they move together and took the SDK out of core - after this core has
+// no vendor SDK at all. That SDK was Microsoft's `azure-ai-openai`, since deprecated; the
+// client now runs on OpenAI's `openai-java`, which covers Azure too (#1132). OpenRouter,
+// DeepSeek and Z.ai speak the same wire format without an SDK, so they are
+// `llm4s-openai-compatible` above, which also holds `OpenAIConfig` (OpenRouter builds one).
+// `openai` depends on that module for the config; it adds no SDK. The reverse edge must never
+// exist - it would put `openai-java` (with OkHttp, Jackson and kotlin-stdlib) on the classpath
+// of every OpenAI-compatible user.
 
 lazy val openai = (project in file("modules/openai"))
   .dependsOn(core % "compile->compile;test->test", openaiCompatible)
   .settings(
     name := "llm4s-openai",
     commonSettings,
-    // Measured 62.34% statement coverage (`sbt coverage openai/test openai/coverageReport`) on
-    // the code as carved out of core, plus `AzureToolHelperSpec` (the helper had no test while
-    // it sat in core). Floor is the measured value rounded down to the nearest 5. Never lower
-    // it. It is low because `OpenAIClient` (65%) and `OpenAIEmbeddingProvider`'s HTTP client
-    // were thinly tested in core too - the carve moved the gap rather than made it. The
-    // `@Cloud` OpenAI smoke suite in `modules/it` is not counted here.
-    coverageFloor(60),
+    // Measured 73.72% statement coverage (`sbt coverage openai/test openai/coverageReport`)
+    // after the move to `openai-java` (#1132), up from 62.34% at the carve: `OpenAIClient` went
+    // from 65% to 78% with the streamed tool-call specs and `OpenAIClientWireSpec`, which drives
+    // the real SDK transport against a local server. Floor is the measured value rounded down to
+    // the nearest 5. Never lower it. `OpenAIEmbeddingProvider`'s HTTP client is still the thin
+    // spot. The `@Cloud` OpenAI smoke suite in `modules/it` is not counted here.
+    coverageFloor(70),
     Test / fork := true,
     Compile / mainClass             := None,
     Compile / discoveredMainClasses := Seq.empty,
     libraryDependencies ++= Seq(
-      Deps.azureOpenAI,
+      Deps.openaiJava,
       Deps.ujson,
       Deps.scalatest % Test,
       Deps.scalamock % Test

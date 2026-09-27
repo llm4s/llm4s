@@ -2,8 +2,8 @@ package org.llm4s.llmconnect.provider
 
 import org.scalatest.EitherValues
 import ch.qos.logback.classic.{ Level, Logger => LBLogger }
-import com.azure.ai.openai.models.{ ChatCompletions, ChatCompletionsOptions }
-import com.azure.core.util.IterableStream
+import com.openai.core.http.StreamResponse
+import com.openai.models.chat.completions.{ ChatCompletion, ChatCompletionChunk, ChatCompletionCreateParams }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.error.ConfigurationError
@@ -49,18 +49,21 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers with EitherV
     var completeCalls       = 0
     var streamCompleteCalls = 0
 
-    override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions = {
+    var closeCalls = 0
+
+    override def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion = {
       completeCalls += 1
       throw new RuntimeException("stub transport invoked")
     }
 
-    override def getChatCompletionsStream(
-      model: String,
-      options: ChatCompletionsOptions
-    ): IterableStream[ChatCompletions] = {
+    override def createChatCompletionStream(
+      params: ChatCompletionCreateParams
+    ): StreamResponse[ChatCompletionChunk] = {
       streamCompleteCalls += 1
       throw new RuntimeException("stub streaming transport invoked")
     }
+
+    override def close(): Unit = closeCalls += 1
   }
 
   "OpenAIClient" should "return ConfigurationError when complete() is called after close()" in {
@@ -139,6 +142,16 @@ class OpenAIClientClosedStateTest extends AnyFlatSpec with Matchers with EitherV
         // Other errors (like ServiceError from invalid API key) are expected
         succeed
     }
+  }
+
+  it should "close its transport exactly once, however often close() is called" in {
+    val transport = new StubTransport
+    val client    = OpenAIClient.forTest(createTestConfig.model, transport, createTestConfig)
+
+    client.close()
+    client.close()
+
+    transport.closeCalls shouldBe 1
   }
 
   it should "include model name in the closed error message" in {

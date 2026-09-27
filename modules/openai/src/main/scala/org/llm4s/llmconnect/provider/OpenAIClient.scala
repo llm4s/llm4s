@@ -1,104 +1,121 @@
 package org.llm4s.llmconnect.provider
 
-import com.azure.ai.openai.models._
-import com.azure.ai.openai.{ OpenAIClientBuilder, OpenAIServiceVersion, OpenAIClient => AzureOpenAIClient }
-import com.azure.core.credential.{ AzureKeyCredential, KeyCredential }
-import com.azure.core.util.{ BinaryData, IterableStream }
+import com.openai.azure.credential.AzureApiKeyCredential
+import com.openai.azure.{ AzureOpenAIServiceVersion, AzureUrlPathMode }
+import com.openai.client.okhttp.OpenAIOkHttpClient
+import com.openai.client.{ OpenAIClient => SdkClient }
+import com.openai.core.{ JsonField, ObjectMappers }
+import com.openai.core.http.StreamResponse
+import com.openai.errors.{ OpenAIIoException, OpenAIServiceException }
+import com.openai.models.chat.completions.{
+  ChatCompletion,
+  ChatCompletionAssistantMessageParam,
+  ChatCompletionChunk,
+  ChatCompletionCreateParams,
+  ChatCompletionMessage,
+  ChatCompletionMessageFunctionToolCall,
+  ChatCompletionMessageParam,
+  ChatCompletionSystemMessageParam,
+  ChatCompletionToolMessageParam,
+  ChatCompletionUserMessageParam
+}
+import com.openai.models.completions.CompletionUsage
+import com.openai.models.{ ResponseFormatJsonObject, ResponseFormatJsonSchema }
+import org.llm4s.error.LLMError
 import org.llm4s.error.ThrowableOps._
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig, ProviderConfig }
 import org.llm4s.llmconnect.model._
+import org.llm4s.llmconnect.provider.OpenAICompatibleClient.StreamToolCalls
 import org.llm4s.llmconnect.provider.ProviderResultOps.*
 import org.llm4s.llmconnect.streaming._
 import org.llm4s.model.{ ModelRegistryService, TransformationResult }
-import org.llm4s.toolapi.{ AzureToolHelper, ToolRegistry }
+import org.llm4s.toolapi.{ OpenAIToolHelper, ToolRegistry }
+import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.slf4j.{ Logger, LoggerFactory }
 
 import java.time.Instant
+import scala.annotation.nowarn
 import scala.jdk.CollectionConverters._
-import scala.util.Try
+import scala.jdk.OptionConverters._
+import scala.util.{ Try, Using }
 
+/**
+ * The two calls [[OpenAIClient]] makes. The model travels in `params`; for Azure it is the
+ * deployment name, which the SDK puts in the request path.
+ */
 private[provider] trait OpenAIClientTransport {
-  def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions
-  def getChatCompletionsStream(model: String, options: ChatCompletionsOptions): IterableStream[ChatCompletions]
+  def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion
+  def createChatCompletionStream(params: ChatCompletionCreateParams): StreamResponse[ChatCompletionChunk]
+
+  /** Releases the transport's connections and threads. */
+  def close(): Unit = ()
 }
 
 /**
- * LLMClient implementation supporting both OpenAI and Azure OpenAI services.
+ * LLMClient implementation for OpenAI, Azure OpenAI and Requesty, built on OpenAI's official
+ * Java SDK (`com.openai:openai-java`).
  *
- * Provides a unified interface for interacting with OpenAI's API and Azure's OpenAI service.
- * Handles message conversion between llm4s format and OpenAI format, completion requests,
- * streaming responses, and tool calling (function calling) capabilities.
+ * Handles message conversion between llm4s format and the chat-completions format, completion
+ * requests, streaming responses, and tool calling (function calling). OpenAI and Requesty
+ * are reached through an [[org.llm4s.llmconnect.config.OpenAIConfig]]; Azure OpenAI through an
+ * [[org.llm4s.llmconnect.config.AzureConfig]], using the SDK's Azure support (an `api-key`
+ * header, the deployment in the path and an `api-version` query parameter).
  *
- * Uses Azure's OpenAI client library internally, which supports both direct OpenAI and
- * Azure-hosted OpenAI endpoints.
+ * Until [[https://github.com/llm4s/llm4s/issues/1132 #1132]] this client ran on Microsoft's
+ * `com.azure:azure-ai-openai` SDK, which Microsoft has deprecated in favour of `openai-java`.
  *
  * == Extended Thinking / Reasoning Support ==
  *
- * For OpenAI o1/o3/o4 models with reasoning capabilities, use [[OpenRouterClient]] instead,
- * which fully supports the `reasoning_effort` parameter. The Azure SDK used by this client
- * does not yet expose the `reasoning_effort` API parameter.
+ * This client does not yet send `reasoning_effort`. For OpenAI o-series models with reasoning,
+ * use `OpenRouterClient` (in `llm4s-openai-compatible`), which does.
  *
  * For Anthropic Claude models with extended thinking, use `AnthropicClient` (in `llm4s-anthropic`), which has
  * full support for the `thinking` parameter with `budget_tokens`.
  *
- * @param model the model identifier (e.g., "gpt-4", "gpt-3.5-turbo")
- * @param client configured Azure OpenAI client instance
+ * @param model the model identifier (e.g., "gpt-4o"); for Azure, the deployment name
+ * @param transport the SDK calls this client makes
  * @param config provider configuration containing context window and reserve completion settings
  * @param metrics metrics collector for observability (default: noop)
+ * @param provider the provider this client serves - `openai`, `azure` or `requesty` - which labels
+ *                 its metrics, exchange log and errors
  */
 class OpenAIClient private[provider] (
   private val model: String,
   private val transport: OpenAIClientTransport,
   private val config: ProviderConfig,
   protected val metrics: org.llm4s.metrics.MetricsCollector,
-  exchangeLogging: ProviderExchangeLogging
+  exchangeLogging: ProviderExchangeLogging,
+  provider: ProviderId = OpenAIProvider.id
 )(using val registryService: ModelRegistryService)
     extends BaseLifecycleLLMClient {
 
   private lazy val logger: Logger = LoggerFactory.getLogger(getClass)
 
-  protected def clientDescription: String = s"OpenAI client for model $model"
-  protected def providerName: String      = "openai"
+  private val displayName: String = OpenAIClient.displayName(provider)
+
+  protected def clientDescription: String = s"$displayName client for model $model"
+  protected def providerName: String      = provider.asString
   protected def modelName: String         = model
 
   /**
-   * Creates an OpenAI client for direct OpenAI API access.
+   * Creates an OpenAI client for direct OpenAI API access (or Requesty, or any other
+   * OpenAI-compatible base URL).
    *
    * @param config OpenAI configuration with API key and base URL
    * @param metrics metrics collector (default: noop)
    */
-  def this(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) = this(
-    config.model,
-    OpenAIClientTransport.azure(
-      new OpenAIClientBuilder()
-        .credential(new KeyCredential(config.apiKey))
-        .endpoint(config.baseUrl)
-        .buildClient()
-    ),
-    config,
-    metrics,
-    ProviderExchangeLogging.Disabled
-  )
+  def this(config: OpenAIConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) =
+    this(config.model, OpenAIClientTransport.openAI(config), config, metrics, ProviderExchangeLogging.Disabled)
 
   def this(
     config: OpenAIConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService) = this(
-    config.model,
-    OpenAIClientTransport.azure(
-      new OpenAIClientBuilder()
-        .credential(new KeyCredential(config.apiKey))
-        .endpoint(config.baseUrl)
-        .buildClient()
-    ),
-    config,
-    metrics,
-    exchangeLogging
-  )
+  )(using ModelRegistryService) =
+    this(config.model, OpenAIClientTransport.openAI(config), config, metrics, exchangeLogging)
 
   /**
    * Creates an OpenAI client for Azure OpenAI service.
@@ -106,37 +123,22 @@ class OpenAIClient private[provider] (
    * @param config Azure configuration with API key, endpoint, and API version
    * @param metrics metrics collector (default: noop)
    */
-  def this(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) = this(
-    config.model,
-    OpenAIClientTransport.azure(
-      new OpenAIClientBuilder()
-        .credential(new AzureKeyCredential(config.apiKey))
-        .endpoint(config.endpoint)
-        .serviceVersion(OpenAIServiceVersion.valueOf(config.apiVersion))
-        .buildClient()
-    ),
-    config,
-    metrics,
-    ProviderExchangeLogging.Disabled
-  )
+  def this(config: AzureConfig, metrics: org.llm4s.metrics.MetricsCollector)(using ModelRegistryService) =
+    this(
+      config.model,
+      OpenAIClientTransport.azure(config),
+      config,
+      metrics,
+      ProviderExchangeLogging.Disabled,
+      config.providerId
+    )
 
   def this(
     config: AzureConfig,
     metrics: org.llm4s.metrics.MetricsCollector,
     exchangeLogging: ProviderExchangeLogging
-  )(using ModelRegistryService) = this(
-    config.model,
-    OpenAIClientTransport.azure(
-      new OpenAIClientBuilder()
-        .credential(new AzureKeyCredential(config.apiKey))
-        .endpoint(config.endpoint)
-        .serviceVersion(OpenAIServiceVersion.valueOf(config.apiVersion))
-        .buildClient()
-    ),
-    config,
-    metrics,
-    exchangeLogging
-  )
+  )(using ModelRegistryService) =
+    this(config.model, OpenAIClientTransport.azure(config), config, metrics, exchangeLogging, config.providerId)
 
   override def complete(
     conversation: Conversation,
@@ -153,21 +155,13 @@ class OpenAIClient private[provider] (
         org.llm4s.model.RequestTransformer.default(registryService)
       )
       transformedConversation = conversation.copy(messages = transformed.messages)
-      chatOptions = prepareChatOptions(
-        transformedConversation,
-        transformed.options,
-        transformed.requiresMaxCompletionTokens
-      )
-      completions <- Try(transport.getChatCompletions(model, chatOptions)).toEither.left
-        .map { e =>
-          logger.error(s"OpenAI completion failed for model $model", e)
-          e.toLLMError
-        }
-      completion = convertFromOpenAIFormat(completions)
+      params   <- buildParams(transformedConversation, transformed.options, transformed.requiresMaxCompletionTokens)
+      response <- call("completion")(transport.createChatCompletion(params))
+      completion = convertFromOpenAIFormat(response)
       _ = recordExchange(
         startedAt,
-        Some(serializeChatOptions(chatOptions)),
-        Some(serializeCompletions(completions)),
+        Some(serializeParams(params)),
+        Some(serialize(response)),
         Right(completion)
       )
     } yield completion
@@ -182,7 +176,7 @@ class OpenAIClient private[provider] (
   ): Result[Completion] = completeWithMetrics {
     val startedAt = Instant.now()
     // Transform options and messages for model-specific constraints.
-    // Only a transform failure is recorded here: executeFakeStreaming/executeNativeStreaming
+    // Only a failure before the call is recorded here: executeFakeStreaming/executeNativeStreaming
     // already record their own exchange on both success and failure.
     TransformationResult
       .transform(
@@ -192,89 +186,80 @@ class OpenAIClient private[provider] (
         dropUnsupported = true,
         org.llm4s.model.RequestTransformer.default(registryService)
       )
-      .tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
-        val chatOptions =
-          prepareChatOptions(transformedConversation, transformed.options, transformed.requiresMaxCompletionTokens)
-        val requestBody = serializeChatOptions(chatOptions)
-
-        if (transformed.requiresFakeStreaming) {
-          executeFakeStreaming(startedAt, requestBody, chatOptions, onChunk)
-        } else {
-          executeNativeStreaming(startedAt, requestBody, chatOptions, onChunk)
-        }
+        buildParams(transformedConversation, transformed.options, transformed.requiresMaxCompletionTokens)
+          .map(params => (transformed, params))
+      }
+      .tapLeft(error => recordExchange(startedAt, None, None, Left(error)))
+      .flatMap { (transformed, params) =>
+        val requestBody = serializeParams(params)
+        if (transformed.requiresFakeStreaming) executeFakeStreaming(startedAt, requestBody, params, onChunk)
+        else executeNativeStreaming(startedAt, requestBody, params, onChunk)
       }
   }
 
-  override protected def releaseResources(): Unit =
-    logger.debug(s"OpenAI client for model $model closed")
+  override protected def releaseResources(): Unit = {
+    Try(transport.close()).failed.foreach(e => logger.warn(s"Closing the $clientDescription failed", e))
+    logger.debug(s"$clientDescription closed")
+  }
+
+  /** Runs one SDK call, logging and mapping any failure to an [[LLMError]]. */
+  private def call[A](what: String)(body: => A): Result[A] =
+    Try(body).toEither.left.map { e =>
+      logger.error(s"$displayName $what failed for model $model", e)
+      OpenAIClient.mapError(e, providerName)
+    }
 
   /**
    * Handles fake streaming for models that don't support native streaming.
    * Makes a regular completion call and emits the result as chunks.
-   *
-   * @param chatOptions prepared chat options for the API call
-   * @param onChunk callback invoked for each chunk emitted
-   * @return Result containing the completion or an error
    */
   private def executeFakeStreaming(
     startedAt: Instant,
     requestBody: String,
-    chatOptions: ChatCompletionsOptions,
+    params: ChatCompletionCreateParams,
     onChunk: StreamedChunk => Unit
-  ): Result[Completion] = {
-    val attempt = Try(transport.getChatCompletions(model, chatOptions)).toEither.left
-      .map { e =>
-        logger.error(s"OpenAI fake streaming failed for model $model", e)
-        e.toLLMError
-      }
-
-    attempt
-      .flatMap { completions =>
-        val completion = convertFromOpenAIFormat(completions)
+  ): Result[Completion] =
+    call("fake streaming")(transport.createChatCompletion(params))
+      .map { response =>
+        val completion = convertFromOpenAIFormat(response)
         emitCompletionAsChunks(completion, onChunk)
-        recordExchange(startedAt, Some(requestBody), Some(serializeCompletions(completions)), Right(completion))
-        Right(completion)
+        recordExchange(startedAt, Some(requestBody), Some(serialize(response)), Right(completion))
+        completion
       }
       .tapLeft(error => recordExchange(startedAt, Some(requestBody), None, Left(error)))
-  }
 
   /**
    * Handles native streaming for models that support streaming.
    * Processes streaming chunks and accumulates the final completion.
-   *
-   * @param chatOptions prepared chat options for the API call
-   * @param onChunk callback invoked for each chunk emitted
-   * @return Result containing the completion or an error
    */
   private def executeNativeStreaming(
     startedAt: Instant,
     requestBody: String,
-    chatOptions: ChatCompletionsOptions,
+    params: ChatCompletionCreateParams,
     onChunk: StreamedChunk => Unit
   ): Result[Completion] = {
     val accumulator = StreamingAccumulator.create()
+    val toolCalls   = new StreamToolCalls
     val rawStream   = StringBuilder()
 
-    val attempt = Try {
-      val stream = transport.getChatCompletionsStream(model, chatOptions)
-      processStreamingResponse(
-        stream,
-        accumulator,
-        onChunk,
-        chatCompletions => rawStream.append(serializeCompletions(chatCompletions)).append('\n')
-      )
-    }.toEither.left.map { e =>
-      logger.error(s"OpenAI native streaming failed for model $model", e)
-      e.toLLMError
+    val attempt = call("native streaming") {
+      Using.resource(transport.createChatCompletionStream(params)) { response =>
+        response.stream().forEach { chunk =>
+          rawStream.append(serialize(chunk)).append('\n')
+          processStreamingChunk(chunk, toolCalls, accumulator, onChunk)
+        }
+      }
     }
 
     recordingExchange(startedAt, Some(requestBody)) {
       attempt.flatMap(_ =>
+        // `StreamingAccumulator.toCompletion` puts the tool calls on the message only; a
+        // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
         accumulator.toCompletion.map { c =>
           val cost = c.usage.flatMap(u => CostEstimator.estimate(model, u))
-          c.copy(model = model, estimatedCost = cost)
+          c.copy(model = model, toolCalls = c.message.toolCalls.toList, estimatedCost = cost)
         }
       )
     }(
@@ -285,9 +270,7 @@ class OpenAIClient private[provider] (
 
   /**
    * Runs a completion-producing operation and records the provider exchange exactly
-   * once, regardless of whether it succeeds or fails. Isolated so callers with a
-   * uniform request/response shape don't duplicate the call-then-tap pairing that
-   * `recordExchange` requires.
+   * once, regardless of whether it succeeds or fails.
    */
   private def recordingExchange(
     startedAt: Instant,
@@ -301,110 +284,91 @@ class OpenAIClient private[provider] (
       .tapLeft(error => recordExchange(startedAt, requestBody, failureResponse, Left(error)))
 
   /**
-   * Processes streaming response chunks from the OpenAI API.
-   *
-   * @param stream the streaming response from the API
-   * @param accumulator accumulator for building the final completion
-   * @param onChunk callback invoked for each chunk
+   * Processes one streamed chunk: emits its content and tool-call deltas, and records any
+   * token usage it carries. A chunk with no choices (Azure's prompt-filter chunk, or the
+   * usage-only final chunk) emits nothing.
    */
-  private def processStreamingResponse(
-    stream: IterableStream[ChatCompletions],
-    accumulator: StreamingAccumulator,
-    onChunk: StreamedChunk => Unit,
-    onRawChunk: ChatCompletions => Unit
-  ): Unit =
-    stream.forEach { chatCompletions =>
-      onRawChunk(chatCompletions)
-      Option(chatCompletions.getChoices)
-        .filterNot(_.isEmpty)
-        .foreach(_ => processStreamingChoice(chatCompletions, accumulator, onChunk))
-    }
-
-  /**
-   * Processes a single streaming choice and emits chunks.
-   *
-   * @param chatCompletions the chat completions response containing the choice
-   * @param accumulator accumulator for building the final completion
-   * @param onChunk callback invoked for each chunk
-   */
-  private def processStreamingChoice(
-    chatCompletions: ChatCompletions,
+  private def processStreamingChunk(
+    chunk: ChatCompletionChunk,
+    toolCalls: StreamToolCalls,
     accumulator: StreamingAccumulator,
     onChunk: StreamedChunk => Unit
   ): Unit = {
-    val choice       = chatCompletions.getChoices.get(0)
-    val delta        = choice.getDelta
-    val toolCalls    = extractStreamingToolCalls(delta)
-    val contentOpt   = Option(delta.getContent)
-    val finishReason = Option(choice.getFinishReason).map(_.toString)
-    val chunkId      = Option(chatCompletions.getId).getOrElse("")
+    known(chunk._choices()).flatMap(_.asScala.headOption).foreach { choice =>
+      val delta        = known(choice._delta())
+      val calls        = delta.map(d => streamingToolCalls(d, toolCalls)).getOrElse(Seq.empty)
+      val contentOpt   = delta.flatMap(d => known(d._content()))
+      val finishReason = known(choice._finishReason()).map(_.asString())
+      val chunkId      = known(chunk._id()).getOrElse("")
 
-    emitStreamingChunks(chunkId, contentOpt, toolCalls, finishReason, accumulator, onChunk)
+      emitStreamingChunks(chunkId, contentOpt, calls, finishReason, accumulator, onChunk)
+    }
 
-    // Update token usage when streaming completes
-    Option(choice.getFinishReason).foreach { _ =>
-      Option(chatCompletions.getUsage).foreach { usage =>
-        accumulator.updateTokens(usage.getPromptTokens, usage.getCompletionTokens)
-      }
+    known(chunk._usage()).foreach { usage =>
+      accumulator.updateTokens(
+        known(usage._promptTokens()).fold(0)(_.intValue),
+        known(usage._completionTokens()).fold(0)(_.intValue)
+      )
     }
   }
 
   /**
-   * Emits streaming chunks for content and tool calls.
+   * The tool-call deltas in one streamed chunk, each paired with its raw argument fragment.
    *
-   * @param chunkId the chunk identifier
-   * @param contentOpt optional content text
-   * @param toolCalls sequence of tool calls
-   * @param finishReason optional finish reason
-   * @param accumulator accumulator for building the final completion
-   * @param onChunk callback invoked for each chunk
+   * A streamed tool call is split across deltas: the first carries its `id`, `name` and the
+   * start of its arguments; each continuation carries only its `index` and the next fragment,
+   * and calls can be interleaved. Continuations are matched by `index` through
+   * [[OpenAICompatibleClient.StreamToolCalls]], so every chunk names its call. (On the Azure
+   * SDK they were keyed by `id`, which a continuation does not carry, and their arguments were
+   * lost.)
+   */
+  private def streamingToolCalls(
+    delta: ChatCompletionChunk.Choice.Delta,
+    state: StreamToolCalls
+  ): Seq[(ToolCall, String)] =
+    known(delta._toolCalls()).map(_.asScala.toSeq).getOrElse(Seq.empty).zipWithIndex.map { (call, position) =>
+      val function = known(call._function())
+      val raw      = function.flatMap(f => known(f._arguments())).getOrElse("")
+      val (id, name) = state.resolve(
+        index = known(call._index()).map(_.intValue).getOrElse(position),
+        id = known(call._id()).filter(_.nonEmpty),
+        name = function.flatMap(f => known(f._name())).filter(_.nonEmpty)
+      )
+      (ToolCall(id, name, StreamingToolArgumentParser.parse(raw)), raw)
+    }
+
+  /**
+   * Emits streaming chunks for content and tool calls: one per tool call, the first also
+   * carrying the text and finish reason.
+   *
+   * The accumulator gets each argument fragment verbatim, because it concatenates them; the
+   * parsed form handed to `onChunk` cannot be concatenated safely (a fragment that is itself
+   * valid JSON, such as `"Paris"`, parses to the bare string and would lose its quotes).
    */
   private def emitStreamingChunks(
     chunkId: String,
     contentOpt: Option[String],
-    toolCalls: Seq[ToolCall],
+    toolCalls: Seq[(ToolCall, String)],
     finishReason: Option[String],
     accumulator: StreamingAccumulator,
     onChunk: StreamedChunk => Unit
-  ): Unit =
-    if (toolCalls.isEmpty) {
-      val chunk = StreamedChunk(
-        id = chunkId,
-        content = contentOpt,
-        toolCall = None,
-        finishReason = finishReason
-      )
-      accumulator.addChunk(chunk)
+  ): Unit = {
+    def emit(chunk: StreamedChunk, raw: String): Unit = {
+      accumulator.addChunk(chunk.copy(toolCall = chunk.toolCall.map(_.copy(arguments = ujson.Str(raw)))))
       onChunk(chunk)
-    } else {
-      // Emit first tool call with content
-      val firstChunk = StreamedChunk(
-        id = chunkId,
-        content = contentOpt,
-        toolCall = Some(toolCalls.head),
-        finishReason = finishReason
-      )
-      accumulator.addChunk(firstChunk)
-      onChunk(firstChunk)
-
-      // Emit remaining tool calls
-      toolCalls.drop(1).foreach { tc =>
-        val extra = StreamedChunk(
-          id = chunkId,
-          content = None,
-          toolCall = Some(tc),
-          finishReason = None
-        )
-        accumulator.addChunk(extra)
-        onChunk(extra)
-      }
     }
+
+    emit(
+      StreamedChunk(id = chunkId, content = contentOpt, toolCall = toolCalls.headOption.map(_._1), finishReason),
+      toolCalls.headOption.fold("")(_._2)
+    )
+    toolCalls.drop(1).foreach { (tc, raw) =>
+      emit(StreamedChunk(id = chunkId, content = None, toolCall = Some(tc), finishReason = None), raw)
+    }
+  }
 
   /**
    * Emits a completed completion as chunks (for fake streaming).
-   *
-   * @param completion the completion to emit as chunks
-   * @param onChunk callback invoked for each chunk
    */
   private def emitCompletionAsChunks(
     completion: Completion,
@@ -412,37 +376,16 @@ class OpenAIClient private[provider] (
   ): Unit = {
     val contentOpt = if (completion.content.nonEmpty) Some(completion.content) else None
 
-    completion.toolCalls.headOption match {
-      case Some(first) =>
-        // Emit first tool call with content
-        val chunk = StreamedChunk(
-          id = completion.id,
-          content = contentOpt,
-          toolCall = Some(first),
-          finishReason = Some("stop")
-        )
-        onChunk(chunk)
-
-        // Emit remaining tool calls
-        completion.toolCalls.drop(1).foreach { tc =>
-          onChunk(
-            StreamedChunk(
-              id = completion.id,
-              content = None,
-              toolCall = Some(tc),
-              finishReason = None
-            )
-          )
-        }
-
-      case None =>
-        val chunk = StreamedChunk(
-          id = completion.id,
-          content = contentOpt,
-          toolCall = None,
-          finishReason = Some("stop")
-        )
-        onChunk(chunk)
+    onChunk(
+      StreamedChunk(
+        id = completion.id,
+        content = contentOpt,
+        toolCall = completion.toolCalls.headOption,
+        finishReason = Some("stop")
+      )
+    )
+    completion.toolCalls.drop(1).foreach { tc =>
+      onChunk(StreamedChunk(id = completion.id, content = None, toolCall = Some(tc), finishReason = None))
     }
   }
 
@@ -451,175 +394,115 @@ class OpenAIClient private[provider] (
   override def getReserveCompletion(): Int = config.reserveCompletion
 
   /**
-   * Prepares ChatCompletionsOptions from conversation and completion options.
+   * Builds the chat-completions request from conversation and completion options.
    *
-   * Converts llm4s conversation format to OpenAI ChatCompletionsOptions, applying temperature,
-   * token limits, penalties, and tools. Shared between complete() and streamComplete().
+   * Applies temperature, token limits, penalties, tools and response format. Shared between
+   * complete() and streamComplete().
    *
-   * @param conversation llm4s conversation to convert
-   * @param options completion options to apply
    * @param useMaxCompletionTokens if true, use max_completion_tokens instead of max_tokens
-   * @return configured ChatCompletionsOptions ready for API call
    */
-  private def prepareChatOptions(
+  private def buildParams(
     conversation: Conversation,
     options: CompletionOptions,
     useMaxCompletionTokens: Boolean
-  ): ChatCompletionsOptions = {
-    // Convert conversation to Azure format
-    val chatMessages = convertToOpenAIMessages(conversation)
+  ): Result[ChatCompletionCreateParams] =
+    Try {
+      val builder = ChatCompletionCreateParams
+        .builder()
+        .model(model)
+        .messages(convertToOpenAIMessages(conversation).asJava)
+        .temperature(options.temperature.doubleValue())
+        .presencePenalty(options.presencePenalty.doubleValue())
+        .frequencyPenalty(options.frequencyPenalty.doubleValue())
+        .topP(options.topP.doubleValue())
 
-    // Create chat options
-    val chatOptions = new ChatCompletionsOptions(chatMessages)
-
-    // Set options
-    chatOptions.setTemperature(options.temperature.doubleValue())
-    options.maxTokens.foreach { mt =>
-      if (useMaxCompletionTokens)
-        chatOptions.setMaxCompletionTokens(mt)
-      else
-        chatOptions.setMaxTokens(mt)
-    }
-    chatOptions.setPresencePenalty(options.presencePenalty.doubleValue())
-    chatOptions.setFrequencyPenalty(options.frequencyPenalty.doubleValue())
-    chatOptions.setTopP(options.topP.doubleValue())
-
-    // Add tools if specified
-    if (options.tools.nonEmpty) {
-      val toolRegistry = new ToolRegistry(options.tools)
-      AzureToolHelper.addToolsToOptions(toolRegistry, chatOptions)
-    }
-
-    // Add response format (structured output) if specified
-    // OpenAI/Azure: Json -> ChatCompletionsJsonResponseFormat; JsonSchema -> ChatCompletionsJsonSchemaResponseFormat
-    options.responseFormat.foreach {
-      case ResponseFormat.Json =>
-        chatOptions.setResponseFormat(new ChatCompletionsJsonResponseFormat())
-      case js: ResponseFormat.JsonSchema =>
-        val inner = new ChatCompletionsJsonSchemaResponseFormatJsonSchema(js.name)
-        inner.setSchema(BinaryData.fromString(js.schema.render()))
-        inner.setStrict(js.strict)
-        chatOptions.setResponseFormat(new ChatCompletionsJsonSchemaResponseFormat(inner))
-    }
-
-    chatOptions
-  }
-
-  /**
-   * Extracts tool call information from a streaming response delta.
-   *
-   * Parses the first tool call from the delta message, converting function call details
-   * into llm4s ToolCall format. Used during streaming to capture tool calling requests.
-   *
-   * @param delta streaming response message delta from OpenAI
-   * @return Some(ToolCall) if a function tool call is present, None otherwise
-   */
-  private def extractStreamingToolCalls(delta: ChatResponseMessage): Seq[ToolCall] =
-    Option(delta.getToolCalls)
-      .map(
-        _.asScala.toSeq.collect { case ftc: ChatCompletionsFunctionToolCall =>
-          val function = Option(ftc.getFunction)
-          val rawArgs  = function.flatMap(f => Option(f.getArguments)).getOrElse("")
-          ToolCall(
-            id = ftc.getId,
-            name = function.map(_.getName).getOrElse(""),
-            arguments = StreamingToolArgumentParser.parse(rawArgs)
-          )
-        }
-      )
-      .getOrElse(Seq.empty)
-
-  /**
-   * Converts llm4s Conversation to OpenAI ChatRequestMessage format.
-   *
-   * Transforms each message type (User, System, Assistant, Tool) into the corresponding
-   * OpenAI message format. Handles tool calls in assistant messages by converting them
-   * to ChatCompletionsFunctionToolCall objects.
-   *
-   * @param conversation llm4s conversation to convert
-   * @return ArrayList of ChatRequestMessage suitable for OpenAI API
-   */
-// Refactored to use idiomatic Scala collections instead of mutable java.util.ArrayList
-  private def convertToOpenAIMessages(
-    conversation: Conversation
-  ): java.util.ArrayList[ChatRequestMessage] = {
-
-    val scalaMessages =
-      conversation.messages.map {
-        case UserMessage(content) =>
-          new ChatRequestUserMessage(content)
-
-        case SystemMessage(content) =>
-          new ChatRequestSystemMessage(content)
-
-        case AssistantMessage(content, toolCalls) =>
-          val msg = new ChatRequestAssistantMessage(content.getOrElse(""))
-
-          if (toolCalls.nonEmpty) {
-            val openAIToolCalls: java.util.List[ChatCompletionsToolCall] =
-              toolCalls.map { tc =>
-                val function = new FunctionCall(tc.name, tc.arguments.render())
-                new ChatCompletionsFunctionToolCall(tc.id, function): ChatCompletionsToolCall
-              }.asJava
-
-            msg.setToolCalls(openAIToolCalls)
-          }
-
-          msg
-
-        case ToolMessage(content, toolCallId) =>
-          new ChatRequestToolMessage(content, toolCallId)
+      options.maxTokens.foreach { mt =>
+        if (useMaxCompletionTokens) builder.maxCompletionTokens(mt.toLong)
+        else OpenAIClient.setMaxTokens(builder, mt.toLong)
       }
 
-    new java.util.ArrayList(scalaMessages.asJava)
-  }
+      if (options.tools.nonEmpty) OpenAIToolHelper.addToolsToParams(new ToolRegistry(options.tools), builder)
+
+      options.responseFormat.foreach {
+        case ResponseFormat.Json =>
+          builder.responseFormat(ResponseFormatJsonObject.builder().build())
+        case js: ResponseFormat.JsonSchema =>
+          val schema = ObjectMappers
+            .jsonMapper()
+            .readValue(js.schema.render(), classOf[ResponseFormatJsonSchema.JsonSchema.Schema])
+          builder.responseFormat(
+            ResponseFormatJsonSchema
+              .builder()
+              .jsonSchema(
+                ResponseFormatJsonSchema.JsonSchema.builder().name(js.name).schema(schema).strict(js.strict).build()
+              )
+              .build()
+          )
+      }
+
+      builder.build()
+    }.toEither.left.map(_.toLLMError)
 
   /**
-   * Converts OpenAI ChatCompletions response to llm4s Completion format.
-   *
-   * Extracts the first choice from the response and converts it to llm4s format,
-   * including content, tool calls, token usage information, and estimated cost.
-   *
-   * @param completions OpenAI API response
-   * @param model Model identifier for cost estimation
-   * @return llm4s Completion with all response data
+   * Converts an llm4s Conversation to chat-completions request messages.
    */
-  private def convertFromOpenAIFormat(completions: ChatCompletions): Completion = {
-    val choice    = completions.getChoices.get(0)
-    val message   = choice.getMessage
-    val toolCalls = extractToolCalls(message)
-    val content   = Option(message.getContent).getOrElse("")
+  private def convertToOpenAIMessages(conversation: Conversation): Seq[ChatCompletionMessageParam] =
+    conversation.messages.map {
+      case UserMessage(content) =>
+        ChatCompletionMessageParam.ofUser(ChatCompletionUserMessageParam.builder().content(content).build())
+
+      case SystemMessage(content) =>
+        ChatCompletionMessageParam.ofSystem(ChatCompletionSystemMessageParam.builder().content(content).build())
+
+      case AssistantMessage(content, toolCalls) =>
+        val msg = ChatCompletionAssistantMessageParam.builder().content(content.getOrElse(""))
+        toolCalls.foreach { tc =>
+          msg.addToolCall(
+            ChatCompletionMessageFunctionToolCall
+              .builder()
+              .id(tc.id)
+              .function(
+                ChatCompletionMessageFunctionToolCall.Function
+                  .builder()
+                  .name(tc.name)
+                  .arguments(tc.arguments.render())
+                  .build()
+              )
+              .build()
+          )
+        }
+        ChatCompletionMessageParam.ofAssistant(msg.build())
+
+      case ToolMessage(content, toolCallId) =>
+        ChatCompletionMessageParam.ofTool(
+          ChatCompletionToolMessageParam.builder().content(content).toolCallId(toolCallId).build()
+        )
+    }
+
+  /**
+   * Converts a chat-completions response to llm4s Completion format.
+   *
+   * Reads the first choice, including content, tool calls, token usage and estimated cost.
+   * Fields are read leniently: a field the response omits is treated as absent rather than
+   * failing the whole call.
+   */
+  private def convertFromOpenAIFormat(response: ChatCompletion): Completion = {
+    val message   = known(response._choices()).flatMap(_.asScala.headOption).flatMap(c => known(c._message()))
+    val toolCalls = message.map(extractToolCalls).getOrElse(Seq.empty)
+    val content   = message.flatMap(m => known(m._content())).getOrElse("")
     val assistantMessage =
       AssistantMessage(contentOpt = if (content.isEmpty) None else Some(content), toolCalls = toolCalls)
 
-    val usage = Option(completions.getUsage).map { u =>
-      val cachedTokens: Option[Int] =
-        Option(u.getPromptTokensDetails)
-          .flatMap(details => Option(details.getCachedTokens))
-          .map(_.intValue())
-
-      val thinkingTokens: Option[Int] =
-        Option(u.getCompletionTokensDetails)
-          .flatMap(details => Option(details.getReasoningTokens))
-          .map(_.intValue())
-
-      TokenUsage(
-        promptTokens = u.getPromptTokens,
-        completionTokens = u.getCompletionTokens,
-        totalTokens = u.getTotalTokens,
-        thinkingTokens = thinkingTokens,
-        cachedTokens = cachedTokens
-      )
-    }
+    val usage = known(response._usage()).map(toTokenUsage)
 
     // Estimate cost using CostEstimator
     val cost = usage.flatMap(u => CostEstimator.estimate(this.model, u))
 
     Completion(
-      id = completions.getId,
-      created = completions.getCreatedAt.toEpochSecond,
+      id = known(response._id()).getOrElse(""),
+      created = known(response._created()).fold(0L)(_.longValue),
       content = content,
-      model = completions.getModel,
+      model = known(response._model()).getOrElse(model),
       message = assistantMessage,
       toolCalls = toolCalls.toList,
       usage = usage,
@@ -627,30 +510,38 @@ class OpenAIClient private[provider] (
     )
   }
 
+  private def toTokenUsage(u: CompletionUsage): TokenUsage = {
+    val promptTokens     = known(u._promptTokens()).fold(0)(_.intValue)
+    val completionTokens = known(u._completionTokens()).fold(0)(_.intValue)
+    TokenUsage(
+      promptTokens = promptTokens,
+      completionTokens = completionTokens,
+      totalTokens = known(u._totalTokens()).fold(promptTokens + completionTokens)(_.intValue),
+      thinkingTokens = known(u._completionTokensDetails()).flatMap(d => known(d._reasoningTokens())).map(_.intValue),
+      cachedTokens = known(u._promptTokensDetails()).flatMap(d => known(d._cachedTokens())).map(_.intValue)
+    )
+  }
+
   /**
-   * Extracts tool calls from an OpenAI response message.
-   *
-   * Safely parses function tool call arguments as JSON, filtering invalid calls.
-   * Parses arguments only once per tool call to avoid double-evaluation risks.
-   * Returns empty sequence if no tool calls are present.
-   *
-   * @param message OpenAI response message potentially containing tool calls
-   * @return sequence of ToolCall objects, empty if no tool calls present
+   * Extracts function tool calls from a response message, parsing each one's arguments once.
+   * A call whose arguments are not valid JSON is dropped.
    */
-  private def extractToolCalls(message: ChatResponseMessage): Seq[ToolCall] =
-    Option(message.getToolCalls)
-      .map(_.asScala.toSeq.flatMap {
-        case ftc: ChatCompletionsFunctionToolCall =>
-          Try(ujson.read(ftc.getFunction.getArguments)).toOption.map { args =>
-            ToolCall(
-              id = ftc.getId,
-              name = ftc.getFunction.getName,
-              arguments = args
-            )
-          }
-        case _ => None
-      })
+  private def extractToolCalls(message: ChatCompletionMessage): Seq[ToolCall] =
+    known(message._toolCalls())
+      .map(_.asScala.toSeq)
       .getOrElse(Seq.empty)
+      .filter(_.isFunction)
+      .map(_.asFunction())
+      .flatMap { ftc =>
+        val function = known(ftc._function())
+        function.flatMap(f => known(f._arguments())).flatMap(raw => Try(ujson.read(raw)).toOption).map { args =>
+          ToolCall(
+            id = known(ftc._id()).getOrElse(""),
+            name = function.flatMap(f => known(f._name())).getOrElse(""),
+            arguments = args
+          )
+        }
+      }
 
   private def recordExchange(
     startedAt: Instant,
@@ -668,11 +559,12 @@ class OpenAIClient private[provider] (
       result = result
     )
 
-  private def serializeChatOptions(chatOptions: ChatCompletionsOptions): String =
-    BinaryData.fromObject(chatOptions).toString
+  private def known[T](field: JsonField[T]): Option[T] = field.asKnown().toScala
 
-  private def serializeCompletions(completions: ChatCompletions): String =
-    BinaryData.fromObject(completions).toString
+  private def serializeParams(params: ChatCompletionCreateParams): String = serialize(params._body())
+
+  private def serialize(value: AnyRef): String =
+    Try(ObjectMappers.jsonMapper().writeValueAsString(value)).getOrElse("")
 }
 
 /**
@@ -688,9 +580,53 @@ object OpenAIClient {
     transport: OpenAIClientTransport,
     config: ProviderConfig,
     metrics: org.llm4s.metrics.MetricsCollector = org.llm4s.metrics.MetricsCollector.noop,
-    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled
+    exchangeLogging: ProviderExchangeLogging = ProviderExchangeLogging.Disabled,
+    provider: ProviderId = OpenAIProvider.id
   )(using ModelRegistryService): OpenAIClient =
-    new OpenAIClient(model, transport, config, metrics, exchangeLogging)
+    new OpenAIClient(model, transport, config, metrics, exchangeLogging, provider)
+
+  /**
+   * A client for an OpenAI-compatible `config` that labels its metrics, exchange log and errors
+   * with `provider` rather than `openai`. Requesty builds its client through this: its config is
+   * an [[OpenAIConfig]], whose `providerId` is derived from the base URL and so reads `openai`.
+   */
+  private[provider] def forProvider(
+    config: OpenAIConfig,
+    provider: ProviderId,
+    metrics: org.llm4s.metrics.MetricsCollector,
+    exchangeLogging: ProviderExchangeLogging
+  )(using ModelRegistryService): Result[OpenAIClient] =
+    Try(
+      new OpenAIClient(config.model, OpenAIClientTransport.openAI(config), config, metrics, exchangeLogging, provider)
+    ).toResult
+
+  /** How log lines and the "already closed" error name the provider. */
+  private def displayName(provider: ProviderId): String = provider.asString match {
+    case "openai"   => "OpenAI"
+    case "azure"    => "Azure OpenAI"
+    case "requesty" => "Requesty"
+    case other      => other
+  }
+
+  /**
+   * Maps an SDK failure to an [[LLMError]]. An HTTP error from the service keeps its status
+   * code and body, so a 401 becomes an `AuthenticationError`, a 429 a `RateLimitError`, and so
+   * on; an I/O failure is mapped by its cause, so a timeout stays a `NetworkError`.
+   */
+  private[provider] def mapError(e: Throwable, provider: String): LLMError = e match {
+    case service: OpenAIServiceException =>
+      HttpErrorMapper
+        .mapHttpError(service.statusCode(), Try(service.body().toString).getOrElse(""), provider)
+        .left
+        .getOrElse(service.toLLMError)
+    case io: OpenAIIoException if io.getCause != null => io.getCause.toLLMError
+    case other                                        => other.toLLMError
+  }
+
+  /** `max_tokens` is deprecated by OpenAI for o-series models, but it is what older models and Azure deployments take. */
+  @nowarn("cat=deprecation")
+  private def setMaxTokens(builder: ChatCompletionCreateParams.Builder, maxTokens: Long): Unit =
+    builder.maxTokens(maxTokens)
 
   /**
    * Creates an OpenAI client for direct OpenAI API access.
@@ -746,15 +682,75 @@ object OpenAIClient {
 }
 
 private[provider] object OpenAIClientTransport {
-  def azure(client: AzureOpenAIClient): OpenAIClientTransport =
-    new OpenAIClientTransport {
-      override def getChatCompletions(model: String, options: ChatCompletionsOptions): ChatCompletions =
-        client.getChatCompletions(model, options)
 
-      override def getChatCompletionsStream(
-        model: String,
-        options: ChatCompletionsOptions
-      ): IterableStream[ChatCompletions] =
-        client.getChatCompletionsStream(model, options)
+  /** A transport over an `openai-java` client, closing it with the transport. */
+  def sdk(client: SdkClient): OpenAIClientTransport =
+    new OpenAIClientTransport {
+      override def createChatCompletion(params: ChatCompletionCreateParams): ChatCompletion =
+        client.chat().completions().create(params)
+
+      override def createChatCompletionStream(
+        params: ChatCompletionCreateParams
+      ): StreamResponse[ChatCompletionChunk] =
+        client.chat().completions().createStreaming(params)
+
+      override def close(): Unit = client.close()
     }
+
+  /**
+   * OpenAI, Requesty or any OpenAI-compatible base URL: a bearer API key, the configured
+   * organisation, and requests to `<baseUrl>/chat/completions`.
+   */
+  def openAI(config: OpenAIConfig): OpenAIClientTransport =
+    sdk(
+      OpenAIOkHttpClient
+        .builder()
+        .apiKey(config.apiKey)
+        .baseUrl(config.baseUrl)
+        .organization(config.organization.orNull)
+        .build()
+    )
+
+  /**
+   * Azure OpenAI: an `api-key` header, and requests to
+   * `<endpoint>/openai/deployments/<model>/chat/completions?api-version=<apiVersion>`,
+   * where `model` is the deployment name - the URL the Azure SDK built.
+   *
+   * The path mode is set rather than left to the SDK's host-name detection, so an endpoint on
+   * a custom domain (an API Management gateway, a private endpoint) is still treated as Azure,
+   * as it was before.
+   *
+   * An endpoint ending in `/openai/v1` is Azure's newer unified ("v1") API, which takes the
+   * model in the request body and is not versioned by date: there the `api-version` parameter
+   * is sent only when `apiVersion` was set to something other than the default.
+   */
+  def azure(config: AzureConfig): OpenAIClientTransport = {
+    val pathMode = azureUrlPathMode(config.endpoint)
+    val builder = OpenAIOkHttpClient
+      .builder()
+      .baseUrl(config.endpoint)
+      .credential(AzureApiKeyCredential.create(config.apiKey))
+      .azureUrlPathMode(pathMode)
+    if (pathMode == AzureUrlPathMode.LEGACY || config.apiVersion != AzureConfig.DEFAULT_API_VERSION)
+      builder.azureServiceVersion(azureServiceVersion(config.apiVersion))
+    sdk(builder.build())
+  }
+
+  private[provider] def azureUrlPathMode(endpoint: String): AzureUrlPathMode =
+    if (endpoint.trim.stripSuffix("/").endsWith("/openai/v1")) AzureUrlPathMode.UNIFIED
+    else AzureUrlPathMode.LEGACY
+
+  /**
+   * The `api-version` for an `apiVersion` setting, which may be in either of two forms: the
+   * Azure SDK's enum-constant name (`V2025_01_01_PREVIEW`, the form `AzureConfig.DEFAULT_API_VERSION`
+   * uses), or the wire value itself (`2025-01-01-preview`, the form the docs show). Both map to
+   * the same version.
+   */
+  private[provider] def azureServiceVersion(apiVersion: String): AzureOpenAIServiceVersion = {
+    val trimmed = apiVersion.trim
+    val wire =
+      if (trimmed.matches("(?i)v\\d{4}_\\d{2}_\\d{2}(_[a-z]+)?")) trimmed.drop(1).replace('_', '-').toLowerCase
+      else trimmed
+    AzureOpenAIServiceVersion.fromString(wire)
+  }
 }

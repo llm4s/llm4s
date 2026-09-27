@@ -1,5 +1,5 @@
 # llm4s-openai: the OpenAI, Azure OpenAI and Requesty chat clients (which share
-# OpenAIClient and the Azure OpenAI SDK) and the OpenAI embedding provider.
+# OpenAIClient and the openai-java SDK) and the OpenAI embedding provider.
 # Discovered by ProviderRegistry.discover (#1131, #1132).
 #
 # If you bundle llm4s into a fat jar, this file must be CONCATENATED with the

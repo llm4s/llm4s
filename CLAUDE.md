@@ -93,7 +93,7 @@ llm4s/
 │   ├── ollama/                # Ollama chat + embedding provider (published)
 │   ├── gemini/                # Gemini API + Vertex AI chat providers (published)
 │   ├── anthropic/             # Anthropic Claude chat provider + Anthropic SDK (published)
-│   ├── openai/                # OpenAI, Azure, Requesty chat + OpenAI embeddings + Azure SDK (published)
+│   ├── openai/                # OpenAI, Azure, Requesty chat + OpenAI embeddings + openai-java SDK (published)
 │   ├── openai-compatible/     # One SDK-free chat-completions client: DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, generic (published)
 │   ├── providers/             # Community provider modules, one `llm4s-<name>` each (published)
 │   │   └── voyage/            # Voyage AI embedding provider
@@ -131,15 +131,20 @@ carrying both Google providers - the Gemini API and Vertex AI, which only calls 
 the same JSON format and needs no extra dependency. `modules/anthropic` came third and took the
 Anthropic Java SDK with it. `modules/openai` came fourth with the three providers that share
 `OpenAIClient` - OpenAI, Azure and Requesty - plus `OpenAIEmbeddingProvider`, `AzureConfig` and
-`AzureToolHelper`, and took the Azure OpenAI SDK: **core now depends on no vendor SDK
-(`com.anthropic`, `com.azure`, `com.openai`)**, and must not again. `modules/openai-compatible`
+the tool helper, and took the Azure OpenAI SDK: **core now depends on no vendor SDK
+(`com.anthropic`, `com.azure`, `com.openai`)**, and must not again. `OpenAIClient` has since
+moved from Microsoft's deprecated `com.azure:azure-ai-openai` to OpenAI's `com.openai:openai-java`,
+which serves Azure too (`AzureApiKeyCredential`, a forced `AzureUrlPathMode`, `api-version`), so
+`AzureToolHelper` became `OpenAIToolHelper`; tests build SDK objects from JSON through
+`ObjectMappers.jsonMapper()` (`OpenAISdkFixtures`), and read responses leniently through
+`_field().asKnown()`, because the SDK's plain getters throw on a missing field. `modules/openai-compatible`
 came fifth and is a **consolidation, not a pure move**: DeepSeek, Z.ai and OpenRouter had three
 ~400-line copies of one SDK-free chat-completions client, and are now thin subclasses of
 `OpenAICompatibleClient`, each with an `OpenAICompatibleDialect` (headers, content encoding,
 assistant-content policy, reasoning request, content/thinking/reasoning-token decoding,
 tool-call parser - every member defaults to the standard format). The module also holds
 `OpenAIConfig` - `llm4s-openai` depends on it for that, never the reverse, which would put the
-Azure SDK on every OpenAI-compatible user's classpath - and the generic `openai-compatible`
+OpenAI SDK on every OpenAI-compatible user's classpath - and the generic `openai-compatible`
 provider, the standard dialect configured entirely from a named section (`baseUrl`, `model`,
 optional `apiKey`, `contextWindow`, `reserveCompletion`, `headers`; the last three are fields of
 `NamedProviderConfig` that other providers ignore). **A new OpenAI-compatible provider is a
@@ -177,7 +182,7 @@ passing, those move to that provider's spec (`DeepSeekNamedProviderSpec`, now in
 (`ToolRegistry`'s `"openai"`/`"anthropic"`/`"gemini"` cases, model-registry data, config-policy
 allow-lists, secret patterns) stay. `llm4s-rag`'s
 `RAGConfig.default` embeds with `openai`, so `rag` has a **test-only** dependency on `openai`;
-never make it a compile one - that would put the Azure SDK back on every RAG user's classpath.
+never make it a compile one - that would put the OpenAI SDK on every RAG user's classpath.
 
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must

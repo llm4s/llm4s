@@ -295,4 +295,29 @@ class StreamingAccumulatorTest extends AnyFunSuite with Matchers {
     val completion = accumulator.toCompletion(created = 1_700_000_000L)
     completion.toOption.get.created shouldBe 1_700_000_000L
   }
+
+  test("should return tool calls in the order the stream first named them, on the message too") {
+    // Ids chosen so hash order and stream order disagree: before #1132 the partial calls sat in
+    // an unordered map and came back in hash order.
+    val ids         = Seq("call_zeta", "call_alpha", "call_mu", "call_beta", "call_omega", "call_c", "call_q", "call_k")
+    val accumulator = StreamingAccumulator.create()
+
+    // Each call opens with its id, name and first fragment, then all continue interleaved.
+    ids.zipWithIndex.foreach { (id, i) =>
+      accumulator.addChunk(StreamedChunk("msg-1", None, Some(ToolCall(id, s"tool_$i", ujson.Str("{\"n\":"))), None))
+    }
+    ids.reverse.zipWithIndex.foreach { (id, i) =>
+      accumulator.addChunk(
+        StreamedChunk("msg-1", None, Some(ToolCall(id, "", ujson.Str(s"${ids.size - 1 - i}}"))), None)
+      )
+    }
+
+    accumulator.getCurrentToolCalls.map(_.id) shouldBe ids
+    accumulator.getCurrentToolCalls.map(_.name) shouldBe ids.indices.map(i => s"tool_$i")
+    accumulator.getCurrentToolCalls.map(_.arguments("n").num.toInt) shouldBe ids.indices
+
+    val completion = accumulator.toCompletion.toOption.get
+    completion.message.toolCalls.map(_.id) shouldBe ids
+    accumulator.snapshot().toolCalls.map(_.id) shouldBe ids
+  }
 }

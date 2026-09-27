@@ -24,7 +24,7 @@ object Versions {
   val hikariCP = "5.1.0"
   val pureconfig = "0.17.10"
 
-  val azureOpenAI = "1.0.0-beta.16"
+  val openaiJava  = "4.69.3"
   val anthropic   = "2.65.0"
   val jtokkit     = "1.1.0"
   val websocket   = "1.6.0"
@@ -73,7 +73,7 @@ object Deps {
   val pureConfig              = "com.github.pureconfig" %% "pureconfig-core" % Versions.pureconfig
 
 
-  val azureOpenAI = "com.azure"     % "azure-ai-openai" % Versions.azureOpenAI
+  val openaiJava  = "com.openai"    % "openai-java"     % Versions.openaiJava
   val anthropic   = "com.anthropic" % "anthropic-java"  % Versions.anthropic
   val jtokkit     = "com.knuddels"  % "jtokkit"         % Versions.jtokkit
   val websocket   = "org.java-websocket" % "Java-WebSocket" % Versions.websocket

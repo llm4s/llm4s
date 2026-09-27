@@ -21,8 +21,10 @@ class StreamingAccumulator {
   private var completionTokens: Int        = 0
   private var thinkingTokens: Int          = 0
 
-  // For accumulating partial tool calls
-  private val partialToolCalls = mutable.Map[String, PartialToolCall]()
+  // For accumulating partial tool calls, keyed by id. Insertion-ordered, so tool calls come
+  // back in the order the stream first named them - the provider's index order - rather than
+  // in hash order; callers that run tools sequentially depend on it (#1132).
+  private val partialToolCalls = mutable.LinkedHashMap[String, PartialToolCall]()
 
   /**
    * Add a streaming chunk to the accumulator
@@ -88,7 +90,7 @@ class StreamingAccumulator {
     if (thinkingBuilder.isEmpty) None else Some(thinkingBuilder.toString)
 
   /**
-   * Get the current tool calls
+   * Get the current tool calls, in the order each was first seen in the stream
    */
   def getCurrentToolCalls: Seq[ToolCall] = {
     val completed = toolCalls.toSeq

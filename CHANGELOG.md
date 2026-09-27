@@ -96,6 +96,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   since the provider can point at any endpoint - production allows it explicitly. See the
   [migration guide](docs/reference/migration.md#slice-5-llm4s-openai-compatible).
 
+- **`llm4s-openai` moves from Microsoft's deprecated Azure OpenAI SDK to OpenAI's official Java
+  SDK** ([#1132](https://github.com/llm4s/llm4s/issues/1132)). `OpenAIClient` now runs on
+  `com.openai:openai-java` 4.69.3 for all three providers it serves - OpenAI, Azure OpenAI and
+  Requesty - in place of `com.azure:azure-ai-openai` 1.0.0-beta.16, which Microsoft
+  [has deprecated](https://learn.microsoft.com/en-us/java/api/overview/azure/ai-openai-readme?view=azure-java-preview)
+  in favour of `openai-java` (its last release was 2025-03-26). Azure uses the SDK's own Azure
+  support: an `api-key` header, the deployment in the path and `api-version` as a query
+  parameter - the same URL as before, for any endpoint host. `OpenAIClient`'s constructors and
+  `apply` overloads, the three descriptors, `OpenAIConfig` and `AzureConfig` are unchanged, as
+  are every configuration key and environment variable. The module now brings OkHttp, Jackson
+  and the Kotlin standard library instead of the Azure core libraries; `llm4s-core` and
+  `llm4s-openai-compatible` still depend on no vendor SDK.
+
+  Source break: **`AzureToolHelper` is replaced by `OpenAIToolHelper`** (same package,
+  `org.llm4s.toolapi`), because its signatures were Azure SDK types. `addToolsToOptions(registry,
+  options: ChatCompletionsOptions)` becomes `addToolsToParams(registry,
+  builder: ChatCompletionCreateParams.Builder)`, and `convertToolRegistryToAzureTools(registry):
+  java.util.List[ChatCompletionsToolDefinition]` becomes `convertToolRegistryToOpenAITools(registry):
+  java.util.List[ChatCompletionTool]`, both over `com.openai.models.chat.completions` types. No
+  other public signature named an SDK type.
+
+  Fixed: **streamed tool calls lost their arguments.** `OpenAIClient` keyed streamed tool calls
+  by `id`, which only a call's first delta carries, so every continuation fragment was dropped;
+  it now matches continuations by `index`, passes fragments through verbatim, and fills
+  `Completion.toolCalls` on streams as `complete` does. Also fixed, in `llm4s-core`:
+  `StreamingAccumulator` returned several streamed tool calls in hash order (it kept them in an
+  unordered map), so `Completion.toolCalls` and the message's tool calls could come back out of
+  the provider's index order; they now keep the order the stream first named them, for every
+  client that accumulates with it, `OpenAICompatibleClient` included. Behaviour changes: `AzureConfig.apiVersion`
+  accepts the wire form (`2024-10-21`, as the docs show) as well as the old constant name
+  (`V2024_10_21`), where only the latter worked before; an Azure endpoint ending in `/openai/v1`
+  uses Azure's unified v1 API; `OpenAIConfig.organization` is now sent as `OpenAI-Organization`
+  (the Azure SDK ignored it); Azure and Requesty clients label their errors, metrics and
+  exchange log `azure` and `requesty` (every one said `openai`); HTTP errors map by status (401/403 `AuthenticationError`, 429
+  `RateLimitError`, 400 `ValidationError`, otherwise `ServiceError`) rather than by matching the
+  message; streamed token usage is read from whichever chunk carries it; and `close()` releases
+  the HTTP client. See the
+  [migration guide](docs/reference/migration.md#slice-5-llm4s-openai-moves-to-openai-java).
+
 - **`llm4s-openai`: OpenAI, Azure OpenAI and Requesty leave `llm4s-core`, and take the Azure
   OpenAI SDK with it** - the fourth provider module of slice 5
   ([#1132](https://github.com/llm4s/llm4s/issues/1132)). The providers that share `OpenAIClient`
