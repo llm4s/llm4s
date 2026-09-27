@@ -94,6 +94,13 @@ private[llm4s] object MistralDialect extends OpenAICompatibleDialect:
 
   override val sendEmptyAssistantTurns: Boolean = false
 
+  /**
+   * Not sent. `stream_options` is not in Mistral's chat-completions schema, and Mistral rejects
+   * a request carrying a field outside it with a 422 ("Extra inputs are not permitted"). It
+   * reports usage on a stream's last event unasked.
+   */
+  override val streamUsageOption: Boolean = false
+
   override def encodeToolCallId(id: String): String =
     if MistralToolCallId.matches(id) then id
     else {

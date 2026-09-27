@@ -182,7 +182,10 @@ class OpenAICompatibleClient(
       .flatMap { _ =>
         Try {
           val body = createRequestBody(conversation, options)
-          if (stream) body("stream") = true
+          if (stream) {
+            body("stream") = true
+            if (dialect.streamUsageOption) body("stream_options") = ujson.Obj("include_usage" -> true)
+          }
           body.render()
         }.toResult
       }
@@ -327,8 +330,9 @@ class OpenAICompatibleClient(
    * The token usage a streamed event reports, if it reports a usable one.
    *
    * Providers that report usage on a stream do so on its last event - Mistral and DeepSeek
-   * always, OpenAI when asked with `stream_options.include_usage` - and send `"usage": null`
-   * or omit it elsewhere. Unlike [[parseUsage]] on a completion, a malformed report here is
+   * always, OpenAI and servers following it when asked with `stream_options.include_usage`
+   * ([[OpenAICompatibleDialect.streamUsageOption]]) - either on the final delta or on an event
+   * of its own with empty `choices`, and send `"usage": null` or omit it elsewhere. Unlike [[parseUsage]] on a completion, a malformed report here is
    * dropped rather than failing a stream whose text has already been delivered.
    */
   private def streamedUsage(json: ujson.Value): Option[TokenUsage] =
@@ -479,7 +483,8 @@ object OpenAICompatibleClient {
 
   /**
    * A client for a generic OpenAI-compatible endpoint: the standard dialect,
-   * plus `config.headers` on every request.
+   * plus `config.headers` on every request, asking for streamed usage unless
+   * `config.streamUsage` is off.
    */
   def apply(
     config: OpenAICompatibleConfig,
@@ -489,7 +494,7 @@ object OpenAICompatibleClient {
     Try(
       new OpenAICompatibleClient(
         settings(config),
-        OpenAICompatibleDialect.standard(config.headers.toSeq),
+        OpenAICompatibleDialect.standard(config.headers.toSeq, config.streamUsage),
         metrics,
         exchangeLogging
       )

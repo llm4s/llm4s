@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAICompatibleConfig }
-import org.llm4s.llmconnect.model.TokenUsage
+import org.llm4s.llmconnect.model.{ Completion, TokenUsage }
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
@@ -115,5 +115,93 @@ class OpenAICompatibleStreamedUsageSpec extends AnyFlatSpec with Matchers with E
       )
     }
     recorded should have size 1
+  }
+
+  // ==========================================================================
+  // Asking for usage: stream_options.include_usage
+  // ==========================================================================
+
+  /** Runs one streaming call against a local server, returning the request body it sent and the completion. */
+  private def streamOnce(dialect: OpenAICompatibleDialect, sse: String): (ujson.Value, Completion) = {
+    var sent: ujson.Value = ujson.Null
+    var completion        = Option.empty[Completion]
+    withServer("/chat/completions") { exchange =>
+      sent = ujson.read(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8))
+      sendSseResponse(exchange, sse)
+    } { baseUrl =>
+      val c = new OpenAICompatibleClient(
+        OpenAICompatibleClient.settings(OpenAICompatibleConfig("gpt-4o-mini", baseUrl, None)),
+        dialect
+      )
+      completion = Some(c.streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ()).value)
+    }
+    (sent, completion.get)
+  }
+
+  /** What vLLM and OpenAI send when asked: the final delta, then a usage-only event with empty `choices`. */
+  private def usageOnlyFinalEvent: String =
+    Seq(
+      delta("Hel", extra = ""","usage":null"""),
+      delta("lo", "\"stop\"", ""","usage":null"""),
+      """{"id":"s","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}"""
+    ).map(e => s"data: $e").mkString("", "\n\n", "\n\ndata: [DONE]\n\n")
+
+  "a streaming request" should "ask for usage with stream_options.include_usage, and read it from a final event with no choices" in {
+    val (sent, completion) = streamOnce(OpenAICompatibleDialect.Standard, usageOnlyFinalEvent)
+
+    sent("stream") shouldBe ujson.True
+    sent("stream_options") shouldBe ujson.Obj("include_usage" -> true)
+    completion.content shouldBe "Hello"
+    completion.usage shouldBe Some(TokenUsage(7, 2, 9))
+  }
+
+  it should "not send stream_options for a dialect that opts out, and still read usage the server volunteers" in {
+    val (sent, completion) = streamOnce(MistralDialect, usageOnlyFinalEvent)
+
+    sent.obj.contains("stream_options") shouldBe false
+    completion.usage shouldBe Some(TokenUsage(7, 2, 9))
+  }
+
+  "a non-streaming request" should "never carry stream_options" in {
+    val c = new OpenAICompatibleClient(
+      OpenAICompatibleClient.settings(OpenAICompatibleConfig("m", "http://localhost:1/v1", None)),
+      OpenAICompatibleDialect.Standard
+    )
+    c.createRequestBody(Conversation(Seq(UserMessage("hi"))), CompletionOptions())
+      .obj
+      .contains(
+        "stream_options"
+      ) shouldBe false
+  }
+
+  "streamUsageOption" should "be on for the standard dialect and DeepSeek, which document stream_options" in {
+    OpenAICompatibleDialect.Standard.streamUsageOption shouldBe true
+    DeepSeekDialect.streamUsageOption shouldBe true
+  }
+
+  it should "be off for Z.ai, OpenRouter, Mistral and Cohere" in {
+    // Z.ai and Cohere do not document the field; OpenRouter documents it as a no-op, since it
+    // always streams usage; Mistral rejects unknown fields with a 422.
+    ZaiDialect.streamUsageOption shouldBe false
+    OpenRouterDialect.streamUsageOption shouldBe false
+    MistralDialect.streamUsageOption shouldBe false
+    CohereDialect.streamUsageOption shouldBe false
+  }
+
+  it should "follow the generic provider's streamUsage setting, on by default" in {
+    OpenAICompatibleConfig.fromValues("m", "http://localhost:1/v1").value.streamUsage shouldBe true
+    OpenAICompatibleDialect.standard(streamUsage = false).streamUsageOption shouldBe false
+
+    var sent: ujson.Value = ujson.Null
+    withServer("/chat/completions") { exchange =>
+      sent = ujson.read(new String(exchange.getRequestBody.readAllBytes(), StandardCharsets.UTF_8))
+      sendSseResponse(exchange, openAISseBody(Seq("a")))
+    } { baseUrl =>
+      val config = OpenAICompatibleConfig.fromValues("m", baseUrl, streamUsage = false).value
+      OpenAICompatibleClient(config).value
+        .streamComplete(Conversation(Seq(UserMessage("hi"))), CompletionOptions(), _ => ())
+        .value
+    }
+    sent.obj.contains("stream_options") shouldBe false
   }
 }

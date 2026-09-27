@@ -515,9 +515,23 @@ val dflt: Result[ProviderConfig]  = Llm4sConfig.defaultProvider()
 It sends the plain chat-completions format and reads the plain reply: text, **streaming**,
 **tool calling** (streamed and not), `response_format` for JSON output, and token usage. Every
 request carries `temperature` and `top_p`; `max_tokens` is sent when set, and
-`presence_penalty` and `frequency_penalty` only when non-zero. It never sends `stop`,
-`tool_choice` or `stream_options`. Whether a feature works also depends on the endpoint and the
+`presence_penalty` and `frequency_penalty` only when non-zero. It never sends `stop` or
+`tool_choice`. Whether a feature works also depends on the endpoint and the
 model: tool calling on a local server usually needs a server flag, as the recipes note.
+
+**Streamed token usage.** A streaming request asks for usage with
+`"stream_options": {"include_usage": true}`, which is how OpenAI - and servers that follow it,
+such as vLLM, Ollama's `/v1` and Perplexity's Router - are told to report it; usage is read from
+whichever event carries it, including a final event with empty `choices`. An endpoint that
+rejects unknown fields may refuse the request with a 400 or 422 naming `stream_options`. Turn it
+off by building the config with `streamUsage = false`:
+
+```scala
+OpenAICompatibleConfig.fromValues(model = "my-model", baseUrl = "https://llm.example/v1", streamUsage = false)
+```
+
+A `streamUsage` key in the named section is not read yet: provider-specific keys wait on
+[#1215](https://github.com/llm4s/llm4s/issues/1215).
 
 A non-streaming request fails with a timeout after **two minutes** without a response, and a
 streaming one after five minutes without one. Both are fixed for now; configurable timeouts are
@@ -533,10 +547,6 @@ What it does **not** do:
 - **No provider-specific fields.** Anything outside the standard reply - citations, search
   results, annotations - is dropped; `Completion` has no field for it.
 - **Text only.** Messages are sent as text.
-- **Streamed usage only if the server volunteers it.** OpenAI's own behaviour is to report
-  token usage on a stream only when asked with `stream_options.include_usage`, which this path
-  never sends. Servers that follow it stream no usage; servers that always send it (Fireworks
-  documents that it does) have it read.
 - **No cost estimate** unless the model name is one llm4s's model registry knows.
 
 A provider that needs any of these gets its own **dialect in `llm4s-openai-compatible`**: an
@@ -683,8 +693,8 @@ perplexity-router {
 }
 ```
 
-The Router reports token usage on a stream only when asked with `stream_options`, so streamed
-completions carry no usage.
+The Router reports token usage on a stream only when asked with `stream_options`, which the
+generic provider sends, so streamed completions carry usage.
 
 #### OrcaRouter
 
@@ -898,6 +908,11 @@ Authentication" in LM Studio), and `apiKey` must then match it.
 **Missing `baseUrl`.** A section without one fails to load with
 `baseUrl: set OPENAI_COMPATIBLE_BASE_URL`. No such variable is read: set `baseUrl` in the
 section, from a variable of your choosing if you like (`baseUrl = ${?MY_BASE_URL}`).
+
+**Streaming fails with a 400 or 422 naming `stream_options`, while `complete` works.** The
+endpoint rejects fields it does not know. Build the config with `streamUsage = false` (see
+[streamed token usage](#what-the-generic-path-does-and-does-not-do)); the stream then carries
+usage only if the server sends it unasked.
 
 **Replies cut short, or context errors.** `contextWindow` defaults to 8192. Set it to the
 model's real window, or the server's configured context for a local server.

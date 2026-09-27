@@ -115,6 +115,12 @@ private[llm4s] object OpenRouterDialect extends OpenAICompatibleDialect:
   override val alwaysSendAssistantContent: Boolean = true
 
   /**
+   * Not sent. OpenRouter documents `stream_options.include_usage` as deprecated with no effect:
+   * full usage is always included on a stream.
+   */
+  override val streamUsageOption: Boolean = false
+
+  /**
    * Model type is detected by substring matching on the lower-cased model name.
    * Anthropic models receive a `thinking` object; OpenAI o1/o3/o4 models receive
    * `reasoning_effort`; all others are left unchanged (reasoning silently ignored).

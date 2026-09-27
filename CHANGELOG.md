@@ -606,6 +606,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Z.ai, OpenRouter, Mistral, Cohere and the generic `openai-compatible`) now times out after two
   minutes, what the old Mistral and Cohere clients used; streaming keeps its five minutes.
   Configurable timeouts remain [#712](https://github.com/llm4s/llm4s/issues/712).
+- **Streamed completions from vLLM, Ollama's `/v1`, Perplexity's Router and other servers that
+  follow OpenAI carried no token usage**: they report it only when asked with
+  `stream_options.include_usage`, which `OpenAICompatibleClient` never sent. A streaming request
+  now sends `"stream_options": {"include_usage": true}` where the provider accepts it - the
+  generic `openai-compatible` provider and DeepSeek - through a new dialect hook,
+  `OpenAICompatibleDialect.streamUsageOption` (default `true`). Z.ai, OpenRouter, Mistral and
+  Cohere answer `false`: Mistral rejects unknown fields with a 422, Z.ai and Cohere do not
+  document it, and OpenRouter always streams usage. For an endpoint that rejects the field,
+  `OpenAICompatibleConfig` has `streamUsage` (default `true`); a `streamUsage` key in the named
+  section waits on provider-specific keys ([#1215](https://github.com/llm4s/llm4s/issues/1215)).
 - **`EMBEDDING_MODEL=ollama/nomic-embed-text` failed `Llm4sConfig.textEmbeddingModel()`** with
   `Unknown model 'nomic-embed-text' for provider 'ollama'`. The configuration is documented in
   the README and `CLAUDE.md`, but the central dimension table covered only `openai`, `voyage`

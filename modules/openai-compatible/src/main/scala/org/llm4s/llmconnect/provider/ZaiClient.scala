@@ -71,6 +71,12 @@ object ZaiClient {
 private[llm4s] object ZaiDialect extends OpenAICompatibleDialect:
   override val headers: Seq[(String, String)] = Seq("User-Agent" -> "llm4s-coding-assistant/1.0")
 
+  /**
+   * Not sent. Z.ai's chat-completion reference has no `stream_options` parameter; it documents
+   * `usage` as returned when the call ends.
+   */
+  override val streamUsageOption: Boolean = false
+
   override def encodeContent(text: String): ujson.Value =
     ujson.Arr(ujson.Obj("type" -> "text", "text" -> ujson.Str(text)))
 

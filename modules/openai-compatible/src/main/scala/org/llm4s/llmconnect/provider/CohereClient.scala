@@ -83,6 +83,12 @@ private[llm4s] object CohereDialect extends OpenAICompatibleDialect:
 
   override val systemRole: String = "developer"
 
+  /**
+   * Not sent. `stream_options` is on neither the supported nor the unsupported parameter list
+   * of Cohere's Compatibility API documentation, which does not say what an unknown field does.
+   */
+  override val streamUsageOption: Boolean = false
+
   override def encodeResponseFormat(format: ResponseFormat): Option[ujson.Value] =
     format match
       case ResponseFormat.Json => Some(ujson.Obj("type" -> "json_object"))
