@@ -31,8 +31,8 @@ import scala.util.control.NonFatal
  * Ollama's entry in the embedding half of the provider SPI.
  *
  * It shares the `ollama` id with [[OllamaProvider]]'s chat client - the two
- * namespaces are separate - so `EMBEDDING_MODEL=ollama/nomic-embed-text` and
- * `LLM_MODEL=ollama/llama3` name the same provider.
+ * namespaces are separate - so `EMBEDDING_MODEL=ollama/nomic-embed-text` and a
+ * named chat section with `provider = "ollama"` name the same provider.
  */
 object OllamaEmbeddingProvider extends EmbeddingProviderDescriptor {
 

@@ -15,10 +15,15 @@ import pureconfig.ConfigSource
 /**
  * Application-edge configuration loader for LLM4S.
  *
- * Reads all runtime configuration from environment variables and system
- * properties via PureConfig. This is the single authorised entry point for
- * configuration in application and test code — never read `sys.env`,
- * `System.getenv`, or `ConfigFactory.load()` directly.
+ * Reads runtime configuration through PureConfig's default source: JVM system
+ * properties, then `application.conf`, then the `reference.conf` of every llm4s
+ * module on the classpath. Environment variables are read only where a
+ * `${?VAR}` substitution binds them - in a module's `reference.conf` (tracing,
+ * embeddings, tools) or in the application's own `application.conf` (provider
+ * sections). Nothing binds `LLM_MODEL` or a provider's API-key variable
+ * automatically. This is the single authorised entry point for configuration
+ * in application and test code — never read `sys.env`, `System.getenv`, or
+ * `ConfigFactory.load()` directly.
  *
  * == Provider setup ==
  * Define named providers under `llm4s.providers.<name>` and optionally set
@@ -50,8 +55,8 @@ import pureconfig.ConfigSource
  * } yield state
  * }}}
  *
- * @see [[org.llm4s.config.ConfigKeys]] for the full list of recognised
- *      environment variable names.
+ * @see [[org.llm4s.config.ConfigKeys]] for the environment variables core's
+ *      `reference.conf` binds.
  */
 object Llm4sConfig {
 

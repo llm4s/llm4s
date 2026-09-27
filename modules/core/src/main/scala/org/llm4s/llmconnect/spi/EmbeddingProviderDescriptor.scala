@@ -45,8 +45,8 @@ trait EmbeddingProviderDescriptor:
    *
    * Chat and embedding ids live in separate namespaces, so a provider that
    * supplies both — OpenAI, Ollama — uses the same id for each without a
-   * clash. That is what lets `EMBEDDING_MODEL=ollama/nomic-embed-text` and
-   * `LLM_MODEL=ollama/llama3` name the same provider.
+   * clash. That is what lets `EMBEDDING_MODEL=ollama/nomic-embed-text` and a
+   * named chat section with `provider = "ollama"` name the same provider.
    */
   def id: ProviderId
 

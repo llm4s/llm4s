@@ -14,7 +14,13 @@ package org.llm4s.config
 object OpenAIConfigKeys {
   // ---- OpenAI -------------------------------------------------------------
 
-  /** OpenAI API key (`sk-...`). Also used for embeddings when no separate embedding key is set. */
+  /**
+   * OpenAI API key (`sk-...`), by convention.
+   *
+   * No `reference.conf` binds it: a named section reads it only through its own
+   * `apiKey = ${?OPENAI_API_KEY}`, and OpenAI embeddings only through
+   * `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` (or `llm4s.openai.apiKey`).
+   */
   val OPENAI_API_KEY = "OPENAI_API_KEY"
 
   /**

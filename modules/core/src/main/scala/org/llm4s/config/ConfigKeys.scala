@@ -1,15 +1,17 @@
 package org.llm4s.config
 
 /**
- * Canonical environment-variable names recognised by [[Llm4sConfig]].
+ * Canonical environment-variable names bound by `llm4s-core`'s `reference.conf`.
  *
- * All LLM4S configuration is read from environment variables (or JVM system
- * properties with the same name). This object centralises the names to avoid
- * typos and make grep-friendly references possible.
+ * Each is read through a `${?VAR}` substitution under the `llm4s` config tree, so
+ * the config key it feeds can also be set directly in `application.conf` or as a
+ * JVM system property. This object centralises the names to avoid typos and make
+ * grep-friendly references possible.
  *
  * == Quick reference ==
  *
- *  - Provider API keys — required for cloud providers; see per-section comments.
+ *  - Chat providers bind no variable: a named section under `llm4s.providers`
+ *    binds its own, e.g. `apiKey = ${?OPENAI_API_KEY}`. Nothing reads `LLM_MODEL`.
  *  - `TRACING_MODE` — optional; `langfuse`, `opentelemetry`, `console`, or `none`.
  *  - `EMBEDDING_MODEL` — required when using embeddings; format `provider/model`.
  */
