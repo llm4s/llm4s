@@ -14,7 +14,10 @@ import org.slf4j.LoggerFactory
  * This example shows how to combine multiple guardrails using different
  * composition strategies (All, Any, Sequential) to create complex validation logic.
  *
- * Requires: LLM_MODEL and appropriate API key in environment
+ * Runs against the samples' default provider, the `ollama-local` section of
+ * `modules/samples/src/main/resources/application.conf`. For another provider, add a
+ * section to `application.local.conf` beside it and select it with `LLM4S_PROVIDER`
+ * (docs/getting-started/configuration.md#running-the-samples).
  */
 object CompositeGuardrailExample extends App {
   private val logger = LoggerFactory.getLogger(getClass)

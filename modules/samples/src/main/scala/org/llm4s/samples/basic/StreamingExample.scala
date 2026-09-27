@@ -11,13 +11,11 @@ import org.slf4j.LoggerFactory
  *
  * To run this example:
  * ```bash
- * # Set up environment variables (choose one provider)
- * export LLM_MODEL=openai/gpt-4o           # For OpenAI
- * export OPENAI_API_KEY=sk-...             # Your OpenAI API key
- *
- * # OR for Anthropic:
- * export LLM_MODEL=anthropic/claude-3-5-sonnet-latest
- * export ANTHROPIC_API_KEY=sk-ant-...      # Your Anthropic API key
+ * # Default: the `ollama-local` section of modules/samples/src/main/resources/application.conf.
+ * # For OpenAI, add an `openai-main` section with apiKey = ${?OPENAI_API_KEY} to
+ * # application.local.conf (docs/getting-started/configuration.md#running-the-samples), then:
+ * export OPENAI_API_KEY=sk-...
+ * export LLM4S_PROVIDER=openai-main
  *
  * # Run the example
  * sbt "samples/runMain org.llm4s.samples.basic.StreamingExample"

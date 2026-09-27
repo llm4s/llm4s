@@ -16,9 +16,11 @@ import scala.concurrent.ExecutionContext.Implicits.global
  * using `runWithStrategy` with `ToolExecutionStrategy.Parallel` can significantly reduce
  * latency by executing all tools simultaneously.
  *
- * Requirements:
- * - Configure a default named provider (for example `LLM4S_PROVIDER=openai-main`)
- * - Set the appropriate API key (for example `OPENAI_API_KEY`)
+ * Requirements: a provider that supports tool calling.
+ * Runs against the samples' default provider, the `ollama-local` section of
+ * `modules/samples/src/main/resources/application.conf`. For another provider, add a
+ * section to `application.local.conf` beside it and select it with `LLM4S_PROVIDER`
+ * (docs/getting-started/configuration.md#running-the-samples).
  *
  * Run with: sbt "samples/runMain org.llm4s.samples.agent.AsyncToolAgentExample"
  */
@@ -91,9 +93,10 @@ object AsyncToolAgentExample {
       case Left(error) =>
         logger.error("Example failed: {}", error.formatted)
         logger.error("")
-        logger.error("Make sure you have configured:")
-        logger.error("  - a default named provider (e.g., LLM4S_PROVIDER=openai-main)")
-        logger.error("  - OPENAI_API_KEY or the appropriate provider key")
+        logger.error("Make sure you have configured a named provider section (with its API key)")
+        logger.error(
+          "and selected it with LLM4S_PROVIDER - see docs/getting-started/configuration.md#running-the-samples"
+        )
     }
   }
 

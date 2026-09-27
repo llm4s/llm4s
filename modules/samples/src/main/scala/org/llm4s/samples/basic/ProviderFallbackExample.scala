@@ -17,10 +17,13 @@ import org.slf4j.LoggerFactory
  *
  * == Quick Start ==
  *
- * 1. Set `LLM_MODEL` and the corresponding API key for your primary provider:
+ * 1. Choose your primary provider. The samples default to the `ollama-local` section of
+ *    `modules/samples/src/main/resources/application.conf`; for OpenAI, add an
+ *    `openai-main` section with `apiKey = ${?OPENAI_API_KEY}` to `application.local.conf`
+ *    (docs/getting-started/configuration.md#running-the-samples), then:
  *    {{{
- *    export LLM_MODEL=openai/gpt-4o-mini
  *    export OPENAI_API_KEY=sk-...
+ *    export LLM4S_PROVIDER=openai-main
  *    }}}
  *
  *    If the primary provider fails, the example falls back to a local
@@ -38,9 +41,10 @@ import org.slf4j.LoggerFactory
  * configuration or network errors, fallback occurs transparently.
  *
  * == Supported Providers ==
- * - '''OpenAI''': `LLM_MODEL=openai/<model>`, requires `OPENAI_API_KEY`
- * - '''Anthropic''': `LLM_MODEL=anthropic/<model>`, requires `ANTHROPIC_API_KEY`
- * - '''Ollama''': `LLM_MODEL=ollama/<model>`, no API key required (local)
+ * Any named provider section works as the primary, for example:
+ * - '''OpenAI''': `provider = "openai"`, with an `apiKey` (e.g. `${?OPENAI_API_KEY}`)
+ * - '''Anthropic''': `provider = "anthropic"`, with an `apiKey` (e.g. `${?ANTHROPIC_API_KEY}`)
+ * - '''Ollama''': `provider = "ollama"`, with a `baseUrl`; no API key (local)
  */
 
 object ProviderFallbackExample extends App {
@@ -48,7 +52,7 @@ object ProviderFallbackExample extends App {
   val logger = LoggerFactory.getLogger(this.getClass)
 
   // Build a list of candidate providers:
-  //   1. The provider configured via Llm4sConfig (LLM_MODEL env var)
+  //   1. The default named provider configured via Llm4sConfig (llm4s.providers.provider)
   //   2. A local Ollama fallback that requires no API key
   val configuredProvider: List[(String, ProviderConfig)] =
     Llm4sConfig.defaultProvider() match {

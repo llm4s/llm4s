@@ -23,7 +23,8 @@ import scala.util.chaining._
  *
  * Environment variables:
  * - AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (or use IAM roles)
- * - OPENAI_API_KEY (for RAG embeddings)
+ * - OpenAI embeddings: `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` in the
+ *   samples' `application.local.conf` (docs/getting-started/configuration.md#running-the-samples)
  */
 object S3LoaderExample {
   private val logger = LoggerFactory.getLogger(getClass)
@@ -60,8 +61,9 @@ object S3LoaderExample {
       case Left(err) =>
         logger.error("Failed to create RAG pipeline: {}", err.message)
         logger.error("Error: {}", err.message)
-        logger.error("Make sure you have set:")
-        logger.error("  - OPENAI_API_KEY")
+        logger.error(
+          "Make sure OpenAI embeddings are configured - see docs/getting-started/configuration.md#running-the-samples"
+        )
         ()
 
       case Right(rag) =>

@@ -14,10 +14,10 @@ import java.util.Locale
  * Static configuration for the chat-tui demo.
  *
  * Provider resolution prefers an explicit `LLM_MODEL=<provider>/<model>`
- * env var (matches the contract documented in CLAUDE.md), pulling the
- * matching `<PROVIDER>_API_KEY` and optional `<PROVIDER>_BASE_URL`. This
- * keeps the demo usable with the env-var conventions LLM4S users already
- * have set up. When `LLM_MODEL` is unset, falls back to
+ * env var, pulling the matching `<PROVIDER>_API_KEY` and optional
+ * `<PROVIDER>_BASE_URL`. This shorthand is chat-tui's own: the library reads
+ * none of these variables, and configures providers from named sections in
+ * `application.conf` instead. When `LLM_MODEL` is unset, falls back to
  * `Llm4sConfig.defaultProvider()` (which reads the named-providers
  * config in `application.conf`).
  *

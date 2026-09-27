@@ -11,9 +11,9 @@ import scala.concurrent.duration._
 /**
  * Example using [[LLMClientRetry.completeWithRetry]] for completion with automatic retries.
  *
- * Run with Ollama (no API key):
+ * Run with Ollama (no API key) - the samples' default `ollama-local` section:
  * {{{
- *   export LLM_MODEL=ollama/llama2
+ *   export OLLAMA_MODEL=llama2
  *   sbt "samples/runMain org.llm4s.samples.basic.RetryCompletionExample"
  * }}}
  */

@@ -22,10 +22,14 @@ import scala.util.chaining.*
  * ./scripts/download-datasets.sh sample
  *
  * # Run quick benchmark
- * export LLM_MODEL=openai/gpt-4o
+ * # Default: the `ollama-local` section of modules/samples/src/main/resources/application.conf.
+ * # For OpenAI, add an `openai-main` section with apiKey = ${?OPENAI_API_KEY} to
+ * # application.local.conf (docs/getting-started/configuration.md#running-the-samples), then:
  * export OPENAI_API_KEY=sk-...
- * export EMBEDDING_PROVIDER=openai
- * export OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+ * export LLM4S_PROVIDER=openai-main
+ * # OpenAI embeddings also need llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}
+ * # in application.local.conf
+ * export EMBEDDING_MODEL=openai/text-embedding-3-small
  * sbt "samples/runMain org.llm4s.samples.rag.BenchmarkExample"
  *
  * # Or run with --quick flag for faster execution
@@ -92,11 +96,13 @@ object BenchmarkExample {
 
       case Left(error) =>
         logger.error("Failed to initialize: {}", error.message)
-        logger.error("Required environment variables:")
-        logger.error("  LLM_MODEL=openai/gpt-4o (or anthropic/claude-sonnet-4-5-latest)")
-        logger.error("  OPENAI_API_KEY=sk-...")
-        logger.error("  EMBEDDING_PROVIDER=openai")
-        logger.error("  OPENAI_EMBEDDING_MODEL=text-embedding-3-small")
+        logger.error("Required configuration:")
+        logger.error(
+          "  - LLM: Configure a provider section and select it with LLM4S_PROVIDER - see docs/getting-started/configuration.md#running-the-samples"
+        )
+        logger.error(
+          "  - OpenAI embeddings: EMBEDDING_MODEL=openai/text-embedding-3-small, plus llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY} in application.local.conf"
+        )
         sys.exit(1)
     }
   }
@@ -207,11 +213,10 @@ object BenchmarkExample {
       |  # Use custom dataset
       |  sbt "samples/runMain org.llm4s.samples.rag.BenchmarkExample data/my-dataset.jsonl"
       |
-      |Environment Variables:
-      |  LLM_MODEL              LLM model to use (e.g., openai/gpt-4o)
-      |  OPENAI_API_KEY         OpenAI API key
-      |  EMBEDDING_PROVIDER     Embedding provider (openai, voyage, ollama)
-      |  OPENAI_EMBEDDING_MODEL Embedding model name
+      |Configuration (see docs/getting-started/configuration.md#running-the-samples):
+      |  LLM4S_PROVIDER         Named provider section to use (samples' application.conf)
+      |  EMBEDDING_MODEL        Embedding provider/model (e.g., openai/text-embedding-3-small)
+      |  OPENAI_API_KEY         Read only where application.local.conf binds it with ${?OPENAI_API_KEY}
       |
       |Available Benchmark Suites:
       |  - chunkingSuite:  Compare Simple, Sentence, Markdown chunking

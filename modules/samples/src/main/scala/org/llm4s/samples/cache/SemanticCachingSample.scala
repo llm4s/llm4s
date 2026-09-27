@@ -25,7 +25,10 @@ import scala.util.Using
  * 3. Observe cache misses for different queries or expired entries
  *
  * Prerequisites:
- * - Set OPENAI_API_KEY environment variable
+ * - An OpenAI default provider: add an `openai-main` section (`provider = "openai"`,
+ *   `apiKey = ${?OPENAI_API_KEY}`) to the samples' `application.local.conf`, then
+ *   `export OPENAI_API_KEY=sk-...` and `export LLM4S_PROVIDER=openai-main`
+ *   (docs/getting-started/configuration.md#running-the-samples)
  *
  * Run with: sbt "samples/runMain org.llm4s.samples.cache.SemanticCachingSample"
  */
@@ -66,7 +69,11 @@ object SemanticCachingSample extends App {
     Llm4sConfig.defaultProvider().flatMap {
       case cfg: OpenAIConfig => Right(cfg.apiKey)
       case _ =>
-        Left(ConfigurationError("This sample requires an OpenAI provider (set LLM_MODEL=openai/<model>)"))
+        Left(
+          ConfigurationError(
+            "This sample requires an OpenAI default provider (a section with provider = \"openai\", selected with LLM4S_PROVIDER)"
+          )
+        )
     }
 
   private def createBaseClient(

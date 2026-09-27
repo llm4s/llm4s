@@ -29,8 +29,9 @@ object HallucinationDetector {
     (clientResult, exaConfigResult, detectorConfigResult) match {
       case (Left(error), _, _) =>
         logger.error("Failed to create LLM client: {}", error.formatted)
-        logger.error("Make sure LLM_MODEL and appropriate API key are set")
-        logger.error("Example: export LLM_MODEL=openai/gpt-4o")
+        logger.error(
+          "Configure a provider section and select it with LLM4S_PROVIDER - see docs/getting-started/configuration.md#running-the-samples"
+        )
 
       case (_, Left(error), _) =>
         logger.error("Failed to load Exa Search configuration: {}", error.formatted)

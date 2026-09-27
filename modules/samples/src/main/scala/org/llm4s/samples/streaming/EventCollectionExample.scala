@@ -17,7 +17,10 @@ import org.slf4j.LoggerFactory
  *
  * Run with: sbt "samples/runMain org.llm4s.samples.streaming.EventCollectionExample"
  *
- * Note: Requires LLM_MODEL and appropriate API key environment variables.
+ * Runs against the samples' default provider, the `ollama-local` section of
+ * `modules/samples/src/main/resources/application.conf`. For another provider, add a
+ * section to `application.local.conf` beside it and select it with `LLM4S_PROVIDER`
+ * (docs/getting-started/configuration.md#running-the-samples).
  */
 object EventCollectionExample extends App {
   private val logger = LoggerFactory.getLogger(getClass)

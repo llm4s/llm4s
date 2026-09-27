@@ -10,8 +10,8 @@ private[providersetup] object ProviderSetupContent:
       title = "Overview",
       summary = "This sample helps first-time users understand how llm4s expects provider configuration.",
       highlights = List(
-        "llm4s can read config from env vars, application.conf, or Java properties.",
-        "For a first pass, env vars are the simplest and safest path.",
+        "llm4s reads providers from named sections under llm4s.providers in application.conf or -D properties.",
+        "Env vars reach a section only through a ${?VAR} binding in it, e.g. apiKey = ${?OPENAI_API_KEY}.",
         "This app validates the current machine using real llm4s config loading."
       ),
       requiredVars = List("LLM4S_PROVIDER"),
@@ -85,16 +85,16 @@ private[providersetup] object ProviderSetupContent:
       title = "Config Paths",
       summary = "llm4s supports multiple config entry points. Start simple and keep secrets local.",
       highlights = List(
-        "Env vars are the easiest for first-run and demos.",
-        "application.conf is useful when you want durable local defaults.",
-        "Java properties are handy for scripted or IDE-driven launches."
+        "Provider sections live in application.conf; this sample includes a git-ignored application.local.conf.",
+        "Keep secrets in env vars and bind them in the section with ${?VAR}.",
+        "Java properties (-Dllm4s.providers.provider=...) are handy for scripted or IDE-driven launches."
       ),
       requiredVars = List("Same logical keys regardless of config source"),
       optionalVars = List("Use local private files only if you intentionally want persistence"),
       recommendedModels = List("Prefer one known-good model per provider during setup"),
       setupSteps = List(
-        "Start with env vars to remove ambiguity.",
-        "If the workflow stabilizes later, move selected values into local config.",
+        "Add a named provider section to application.local.conf.",
+        "Bind its secrets with ${?VAR} and export those variables.",
         "Keep secrets out of git-tracked files."
       )
     ),
@@ -151,6 +151,7 @@ private[providersetup] object ProviderSetupContent:
       optionalVars = List("OPENAI_BASE_URL", "OPENAI_ORG_ID"),
       recommendedModels = List("openai/gpt-4o-mini", "openai/gpt-4.1-mini"),
       setupSteps = List(
+        "Add an `openai-main` section to application.local.conf: provider = \"openai\", a model, apiKey = ${?OPENAI_API_KEY}.",
         "Create an API key in the OpenAI platform dashboard.",
         "Export `OPENAI_API_KEY` in your shell.",
         "Export `LLM4S_PROVIDER=openai-main`.",
@@ -170,6 +171,7 @@ private[providersetup] object ProviderSetupContent:
       optionalVars = List("AZURE_API_VERSION"),
       recommendedModels = List("azure/gpt-4o-mini", "azure/gpt-4.1-mini"),
       setupSteps = List(
+        "Add an `azure-main` section to application.local.conf: provider = \"azure\", a model, apiKey = ${?AZURE_API_KEY}, endpoint = ${?AZURE_API_BASE}.",
         "Create or reuse an Azure OpenAI resource.",
         "Deploy a model and note the deployment name.",
         "Export the Azure key, base URL, and `LLM4S_PROVIDER`.",
@@ -189,6 +191,7 @@ private[providersetup] object ProviderSetupContent:
       optionalVars = List("ANTHROPIC_BASE_URL"),
       recommendedModels = List("anthropic/claude-3-5-haiku-latest", "anthropic/claude-3-7-sonnet-latest"),
       setupSteps = List(
+        "Add an `anthropic-main` section to application.local.conf: provider = \"anthropic\", a model, apiKey = ${?ANTHROPIC_API_KEY}.",
         "Create an Anthropic API key.",
         "Export `ANTHROPIC_API_KEY`.",
         "Export `LLM4S_PROVIDER=anthropic-main`.",
@@ -208,6 +211,7 @@ private[providersetup] object ProviderSetupContent:
       optionalVars = List("GEMINI_BASE_URL"),
       recommendedModels = List("gemini/gemini-2.0-flash", "gemini/gemini-1.5-pro"),
       setupSteps = List(
+        "Add a `gemini-main` section to application.local.conf: provider = \"gemini\", a model, apiKey = ${?GEMINI_API_KEY}.",
         "Create or retrieve a Gemini API key.",
         "Export `GEMINI_API_KEY`.",
         "Pick one working Gemini named provider in `LLM4S_PROVIDER`.",
@@ -227,6 +231,7 @@ private[providersetup] object ProviderSetupContent:
       optionalVars = List("DEEPSEEK_BASE_URL"),
       recommendedModels = List("deepseek/deepseek-chat", "deepseek/deepseek-reasoner"),
       setupSteps = List(
+        "Add a `deepseek-main` section to application.local.conf: provider = \"deepseek\", a model, apiKey = ${?DEEPSEEK_API_KEY}.",
         "Create a DeepSeek API key.",
         "Export `DEEPSEEK_API_KEY`.",
         "Set `LLM4S_PROVIDER` to a known DeepSeek named provider.",
@@ -246,6 +251,7 @@ private[providersetup] object ProviderSetupContent:
       optionalVars = List("COHERE_BASE_URL"),
       recommendedModels = List("cohere/command-r", "cohere/command-r-plus"),
       setupSteps = List(
+        "Add a `cohere-main` section to application.local.conf: provider = \"cohere\", a model, apiKey = ${?COHERE_API_KEY}.",
         "Create a Cohere API key.",
         "Export `COHERE_API_KEY`.",
         "Set `LLM4S_PROVIDER` to a supported Cohere named provider.",
@@ -265,6 +271,7 @@ private[providersetup] object ProviderSetupContent:
       optionalVars = List("MISTRAL_BASE_URL"),
       recommendedModels = List("mistral/mistral-small-latest", "mistral/open-mistral-nemo"),
       setupSteps = List(
+        "Add a `mistral-main` section to application.local.conf: provider = \"mistral\", a model, apiKey = ${?MISTRAL_API_KEY}.",
         "Create a Mistral API key.",
         "Export `MISTRAL_API_KEY`.",
         "Export a supported Mistral named provider in `LLM4S_PROVIDER`.",
@@ -284,6 +291,7 @@ private[providersetup] object ProviderSetupContent:
       optionalVars = List("ZAI_BASE_URL"),
       recommendedModels = List("zai/glm-4.5-air", "zai/glm-4.5"),
       setupSteps = List(
+        "Add a `zai-main` section to application.local.conf: provider = \"zai\", a model, apiKey = ${?ZAI_API_KEY}.",
         "Create a Z.ai API key.",
         "Export `ZAI_API_KEY`.",
         "Set `LLM4S_PROVIDER` to a supported Z.ai named provider.",

@@ -13,7 +13,10 @@ import org.slf4j.LoggerFactory
  * This example shows how to ensure that agent output is valid JSON,
  * which is useful when requesting structured data from the LLM.
  *
- * Requires: LLM_MODEL and appropriate API key in environment
+ * Runs against the samples' default provider, the `ollama-local` section of
+ * `modules/samples/src/main/resources/application.conf`. For another provider, add a
+ * section to `application.local.conf` beside it and select it with `LLM4S_PROVIDER`
+ * (docs/getting-started/configuration.md#running-the-samples).
  */
 object JSONOutputValidationExample extends App {
   private val logger = LoggerFactory.getLogger(getClass)

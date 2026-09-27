@@ -22,13 +22,12 @@ import org.slf4j.LoggerFactory
  *
  * @example
  * {{{
- * // For OpenAI reasoning models:
- * export LLM_MODEL=openai/o1-preview
+ * // Add a section to the samples' application.local.conf and select it
+ * // (docs/getting-started/configuration.md#running-the-samples) - an OpenAI reasoning model
+ * // (provider = "openai", model = "o1-preview", apiKey = ${?OPENAI_API_KEY}) or Anthropic with
+ * // extended thinking (provider = "anthropic", apiKey = ${?ANTHROPIC_API_KEY}):
  * export OPENAI_API_KEY=sk-...
- *
- * // For Anthropic with extended thinking:
- * export LLM_MODEL=anthropic/claude-3-5-sonnet-latest
- * export ANTHROPIC_API_KEY=sk-ant-...
+ * export LLM4S_PROVIDER=openai-main
  *
  * sbt "samples/runMain org.llm4s.samples.reasoning.ReasoningModesExample"
  * }}}
@@ -55,7 +54,9 @@ object ReasoningModesExample {
     clientResult match {
       case Left(error) =>
         logger.warn("LLM client not configured: {}", error.formatted)
-        logger.info("Set LLM_MODEL and appropriate API key to test with a real model")
+        logger.info(
+          "Configure a provider section and select it with LLM4S_PROVIDER - see docs/getting-started/configuration.md#running-the-samples, to test with a real model"
+        )
 
       case Right(client) =>
         logger.info("LLM client created successfully")

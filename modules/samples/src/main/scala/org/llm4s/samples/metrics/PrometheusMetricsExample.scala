@@ -18,14 +18,13 @@ import org.slf4j.LoggerFactory
  *
  * == Quick Start ==
  *
- * 1. Configure your default named provider:
- *    {{{
- *    export LLM4S_PROVIDER=openai-main
- *    }}}
+ * 1. Add an `openai-main` section (`provider = "openai"`, `apiKey = ${?OPENAI_API_KEY}`)
+ *    to the samples' `application.local.conf` (docs/getting-started/configuration.md#running-the-samples).
  *
- * 2. Set your API key:
+ * 2. Set your API key and select the section:
  *    {{{
  *    export OPENAI_API_KEY=sk-...
+ *    export LLM4S_PROVIDER=openai-main
  *    }}}
  *
  * 3. Run the example:
@@ -125,9 +124,10 @@ object PrometheusMetricsExample {
               logger.error("Configuration error", error)
               println(s"ERROR: ${error.message}")
               println()
-              println("Please set required environment variables:")
-              println("  export LLM4S_PROVIDER=openai-main")
+              println("Add an openai-main section with apiKey = ${?OPENAI_API_KEY} to application.local.conf, then:")
               println("  export OPENAI_API_KEY=sk-...")
+              println("  export LLM4S_PROVIDER=openai-main")
+              println("See docs/getting-started/configuration.md#running-the-samples")
               sys.exit(1)
 
             case Right(config) =>

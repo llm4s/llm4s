@@ -24,7 +24,8 @@ import scala.util.chaining.*
  *
  * Prerequisites:
  * - PostgreSQL with pgvector extension
- * - OPENAI_API_KEY environment variable
+ * - OpenAI embeddings: `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` in the
+ *   samples' `application.local.conf` (docs/getting-started/configuration.md#running-the-samples)
  *
  * Usage:
  *   # Start PostgreSQL with pgvector
@@ -268,7 +269,9 @@ object PermissionBasedRAGExample extends App {
               ragResult match {
                 case Left(error) =>
                   logger.info("Could not build RAG: {}", error.message)
-                  logger.info("Make sure OPENAI_API_KEY is set for embeddings.")
+                  logger.info(
+                    "Make sure OpenAI embeddings are configured - see docs/getting-started/configuration.md#running-the-samples"
+                  )
 
                 case Right(rag) =>
                   logger.info("RAG built with permission support!")

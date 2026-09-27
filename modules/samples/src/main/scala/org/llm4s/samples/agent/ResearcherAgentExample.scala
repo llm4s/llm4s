@@ -23,8 +23,11 @@ import pureconfig.ConfigSource
  *
  * @example
  * {{{
- * export LLM4S_PROVIDER=openai-main
+ * # Default: the `ollama-local` section of modules/samples/src/main/resources/application.conf.
+ * # For OpenAI, add an `openai-main` section with apiKey = ${?OPENAI_API_KEY} to
+ * # application.local.conf (docs/getting-started/configuration.md#running-the-samples), then:
  * export OPENAI_API_KEY=sk-...
+ * export LLM4S_PROVIDER=openai-main
  * export BRAVE_SEARCH_API_KEY=your-brave-api-key
  * sbt "samples/runMain org.llm4s.samples.agent.ResearcherAgentExample"
  * }}}

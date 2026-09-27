@@ -77,8 +77,8 @@ object WorkspaceToolExample {
                 "and search for the word 'test' across all files. " +
                 "Return a summary of what you found."
 
-              // Optional: run with the active provider from configuration (LLM_MODEL) via PureConfig
-              logger.info("Attempting active provider from configuration (llm4s.llm.model / LLM_MODEL)...")
+              // Optional: run with the default named provider from configuration (llm4s.providers.provider)
+              logger.info("Attempting the default provider from configuration (llm4s.providers.provider)...")
               val activeClientRes = registryServiceRes.flatMap { registryService =>
                 given org.llm4s.model.ModelRegistryService = registryService
                 Llm4sConfig.defaultProvider().flatMap { provCfg =>

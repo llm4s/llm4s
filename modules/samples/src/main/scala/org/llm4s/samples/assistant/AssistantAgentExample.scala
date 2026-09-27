@@ -20,7 +20,9 @@ import scala.util.Using
  * - **Interactive terminal commands**
  *
  * ## Prerequisites:
- * - Set environment variables: OPENAI_API_KEY or ANTHROPIC_API_KEY
+ * - A configured provider: an OpenAI or Anthropic section in the samples'
+ *   `application.local.conf`, selected with `LLM4S_PROVIDER`
+ *   (docs/getting-started/configuration.md#running-the-samples)
  * - Node.js installed (required for Playwright MCP server via npx)
  * - Python 3.12+ and email credentials configured in .env file (for email MCP server)
  * - Internet connection (for downloading @playwright/mcp and email dependencies)

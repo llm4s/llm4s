@@ -236,8 +236,10 @@ object CliPlaygroundDemo extends App {
     println(boldColor(AnsiColors.separator('*'), GREEN))
     println()
     println(s"  ${GREEN}Next steps:$RESET")
-    println(s"  ${GRAY}1. Set your provider:  export LLM_MODEL=openai/gpt-4o$RESET")
-    println(s"  ${GRAY}2. Set your API key:   export OPENAI_API_KEY=sk-...$RESET")
+    println(
+      s"  ${GRAY}1. Configure a provider section: docs/getting-started/configuration.md#running-the-samples$RESET"
+    )
+    println(s"  ${GRAY}2. Select it:          export LLM4S_PROVIDER=<section name>$RESET")
     println(s"  ${GRAY}3. Run a real example:$RESET")
     println(s"  ${CYAN}     sbt \"samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample\"$RESET")
     println()

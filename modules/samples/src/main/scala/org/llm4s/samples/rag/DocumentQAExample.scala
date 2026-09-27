@@ -28,17 +28,16 @@ import java.nio.file.{ Files, Path }
  * 6. Generate answers with source citations
  *
  * The demo uses MockEmbeddingService by default (no API key needed for embeddings).
- * For production, configure real embeddings via environment variables.
+ * For production, configure real embeddings with `EMBEDDING_MODEL`.
  *
  * Usage:
- *   # With mock embeddings (requires LLM API key for answer generation only)
- *   export LLM_MODEL=openai/gpt-4o
- *   export OPENAI_API_KEY=sk-...
+ *   # With mock embeddings: answers come from the samples' default provider
+ *   # (`ollama-local`; for another, see docs/getting-started/configuration.md#running-the-samples)
  *   sbt "samples/runMain org.llm4s.samples.rag.DocumentQAExample"
  *
- *   # With real embeddings
- *   export LLM_EMBEDDING_MODEL=openai/text-embedding-3-small
- *   export LLM_MODEL=openai/gpt-4o
+ *   # With real embeddings (OpenAI embeddings also need
+ *   # llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY} in application.local.conf)
+ *   export EMBEDDING_MODEL=openai/text-embedding-3-small
  *   export OPENAI_API_KEY=sk-...
  *   sbt "samples/runMain org.llm4s.samples.rag.DocumentQAExample ./my-docs"
  */
@@ -73,9 +72,9 @@ object DocumentQAExample extends App {
     case Left(error) =>
       logger.error("Error: {}", error.formatted)
       logger.info("Troubleshooting:")
-      logger.info("  - For LLM answers: Set LLM_MODEL and appropriate API key")
-      logger.info("  - Example: export LLM_MODEL=openai/gpt-4o")
-      logger.info("  - Example: export OPENAI_API_KEY=sk-...")
+      logger.info(
+        "  - For LLM answers: Configure a provider section and select it with LLM4S_PROVIDER - see docs/getting-started/configuration.md#running-the-samples"
+      )
       System.exit(1)
   }
 
@@ -88,7 +87,7 @@ object DocumentQAExample extends App {
     // Create temporary database
     val dbPath: Path = Files.createTempFile("llm4s-rag-demo-", ".db")
 
-    // Use real embeddings if LLM_EMBEDDING_MODEL is set, otherwise fall back to mock
+    // Use real embeddings if EMBEDDING_MODEL is set, otherwise fall back to mock
     val embeddingServiceResult: Result[EmbeddingService] =
       Llm4sConfig
         .embeddings()
@@ -102,7 +101,7 @@ object DocumentQAExample extends App {
           Right(realService)
         case Left(_) =>
           logger.info("Using MockEmbeddingService (1536 dimensions)")
-          logger.info("Tip: Set LLM_EMBEDDING_MODEL for real embeddings")
+          logger.info("Tip: Set EMBEDDING_MODEL (e.g. ollama/nomic-embed-text) for real embeddings")
           Right(MockEmbeddingService(dimensions = 1536))
       }
 

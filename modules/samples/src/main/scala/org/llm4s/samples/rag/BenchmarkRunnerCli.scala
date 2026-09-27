@@ -16,7 +16,8 @@ import scala.util.chaining.*
  * sbt '++3.7.1 samples/runMain org.llm4s.samples.rag.BenchmarkRunnerCli <dataset-path> [--quick]'
  * }}}
  *
- * Requires LLM_MODEL and embedding provider configuration via Llm4sConfig.
+ * Requires a default named provider and an embedding provider (`EMBEDDING_MODEL`)
+ * configured via Llm4sConfig - see docs/getting-started/configuration.md#running-the-samples.
  */
 object BenchmarkRunnerCli {
 
@@ -77,7 +78,9 @@ object BenchmarkRunnerCli {
 
       case Left(error) =>
         logger.error("Failed to initialize: {}", error.message)
-        logger.error("Ensure LLM_MODEL and embedding provider environment variables are set.")
+        logger.error(
+          "Ensure a default named provider and EMBEDDING_MODEL are configured - see docs/getting-started/configuration.md#running-the-samples"
+        )
         sys.exit(1)
     }
   }

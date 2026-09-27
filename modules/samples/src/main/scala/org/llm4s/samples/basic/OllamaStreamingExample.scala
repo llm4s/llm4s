@@ -12,9 +12,9 @@ object OllamaStreamingExample {
   private val defaultLogDir = "/tmp/llm4s/provider-exchanges"
 
   def main(args: Array[String]): Unit = {
-    // Works with any configured provider; optimized for local Ollama
-    // Env example:
-    //   export LLM_MODEL=ollama/llama3.1
+    // Works with any configured provider; optimized for local Ollama, the samples' default
+    // `ollama-local` section, which reads these (bound in the samples' application.conf):
+    //   export OLLAMA_MODEL=llama3.1
     //   export OLLAMA_BASE_URL=http://localhost:11434
     val logDir = args.headOption.getOrElse(defaultLogDir)
 

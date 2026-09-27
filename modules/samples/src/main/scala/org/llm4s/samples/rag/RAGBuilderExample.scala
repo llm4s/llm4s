@@ -20,13 +20,13 @@ import scala.util.chaining._
  * - Preset configurations (default, production, development)
  *
  * Usage:
- *   # Minimal (OpenAI embeddings)
+ *   # OpenAI embeddings: add llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY} to the
+ *   # samples' application.local.conf (docs/getting-started/configuration.md#running-the-samples)
  *   export OPENAI_API_KEY=sk-...
  *   sbt "samples/runMain org.llm4s.samples.rag.RAGBuilderExample"
  *
- *   # With answer generation
- *   export LLM_MODEL=openai/gpt-4o
- *   export OPENAI_API_KEY=sk-...
+ *   # With answer generation: also an `openai-main` section (apiKey = ${?OPENAI_API_KEY})
+ *   export LLM4S_PROVIDER=openai-main
  *   sbt "samples/runMain org.llm4s.samples.rag.RAGBuilderExample"
  */
 object RAGBuilderExample extends App {
@@ -184,7 +184,9 @@ object RAGBuilderExample extends App {
     result.left.foreach(error => logger.error("Error: {}", error))
   } else {
     logger.info("LLM not configured - skipping live demo")
-    logger.info("Set LLM_MODEL and OPENAI_API_KEY (or equivalent) to run the full demo")
+    logger.info(
+      "Configure a provider section and select it with LLM4S_PROVIDER - see docs/getting-started/configuration.md#running-the-samples, to run the full demo"
+    )
   }
 
   logger.info("=" * 60)

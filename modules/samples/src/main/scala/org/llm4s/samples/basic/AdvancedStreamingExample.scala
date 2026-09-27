@@ -20,16 +20,14 @@ import scala.collection.mutable
  *
  * To run this example:
  * ```bash
- * # Set up environment variables (choose one provider)
- * export LLM_MODEL=openai/gpt-4o-mini      # For OpenAI (faster model)
- * export OPENAI_API_KEY=sk-...             # Your OpenAI API key
- *
- * # OR for Anthropic:
- * export LLM_MODEL=anthropic/claude-3-5-haiku-latest  # Faster Anthropic model
- * export ANTHROPIC_API_KEY=sk-ant-...      # Your Anthropic API key
+ * # Default: the `ollama-local` section of modules/samples/src/main/resources/application.conf.
+ * # For OpenAI, add an `openai-main` section with apiKey = ${?OPENAI_API_KEY} to
+ * # application.local.conf (docs/getting-started/configuration.md#running-the-samples), then:
+ * export OPENAI_API_KEY=sk-...
+ * export LLM4S_PROVIDER=openai-main
  *
  * # Optional: Enable tracing for additional insights
- * export TRACING_MODE=print                # or "langfuse" with proper keys
+ * export TRACING_MODE=console              # or "langfuse" with proper keys
  *
  * # Run the example
  * sbt "samples/runMain org.llm4s.samples.basic.AdvancedStreamingExample"
