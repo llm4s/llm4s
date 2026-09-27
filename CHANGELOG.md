@@ -112,7 +112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now also sends `maxTokens` as `max_completion_tokens` (core's transformer already did this for
   `o1`, `o3` and `gpt-5`; it now covers `o4-mini` and anything else flagged) and leaves out
   `temperature`, `top_p` and the penalties, which those models reject: a gpt-5 request with the
-  default options was failing on `temperature`. On Azure, a deployment name the registry cannot
+  default options was failing on `temperature`. A fine-tuned model (`ft:o4-mini-...:org:suffix:id`)
+  is judged by the model it was trained from. On Azure, a deployment name the registry cannot
   resolve gets `reasoning_effort` whenever a reasoning effort is asked for. Streaming requests
   set `stream_options.include_usage` (Azure from api-version `2024-09-01-preview` on), so
   OpenAI's streams report usage and an estimated cost, which they had not, since OpenAI sends

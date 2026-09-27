@@ -184,6 +184,68 @@ final class OpenAIClientReasoningSpec extends AnyFlatSpec with Matchers with Eit
     OpenAIReasoning.support("definitely-not-a-model", mrs) shouldBe OpenAIReasoning.Support.Unknown
   }
 
+  // Fine-tunes (#1221 review): the id wraps the base model, which neither the registry nor the
+  // name fallback matched, so a fine-tuned o4-mini was sent sampling parameters and max_tokens.
+
+  it should "judge a fine-tuned model by the model it was trained from" in {
+    OpenAIReasoning.support("ft:o4-mini-2025-04-16:acme:project:9AbC", mrs) shouldBe OpenAIReasoning.Support.Reasoning
+    OpenAIReasoning.support("ft:gpt-5-mini-2025-08-07:acme::9AbC", mrs) shouldBe OpenAIReasoning.Support.Reasoning
+    OpenAIReasoning.support("ft:gpt-4o-mini-2024-07-18:acme:support-bot:9AbC", mrs) shouldBe
+      OpenAIReasoning.Support.NonReasoning
+    // A checkpoint, and a Requesty-style routed fine-tune.
+    OpenAIReasoning.support("ft:o4-mini-2025-04-16:acme:project:9AbC:ckpt-step-200", mrs) shouldBe
+      OpenAIReasoning.Support.Reasoning
+    OpenAIReasoning.support("openai/ft:o4-mini-2025-04-16:acme:project:9AbC", mrs) shouldBe
+      OpenAIReasoning.Support.Reasoning
+    // An Azure fine-tuned model name, and the legacy GPT-3 form.
+    OpenAIReasoning.support("o4-mini-2025-04-16.ft-0e208cf33a6a466994aff31a08aba678", mrs) shouldBe
+      OpenAIReasoning.Support.Reasoning
+    OpenAIReasoning.support("curie:ft-acme-2023-01-01-00-00-00", mrs) should not be OpenAIReasoning.Support.Reasoning
+  }
+
+  it should "fall back to the undated base, then to the base's name, for a fine-tune the registry lacks" in {
+    // A snapshot date the bundled metadata does not list: resolved as `o4-mini`.
+    OpenAIReasoning.support("ft:o4-mini-2031-01-01:acme:x:9AbC", mrs) shouldBe OpenAIReasoning.Support.Reasoning
+    // A base the registry does not know at all: OpenAI's naming decides.
+    OpenAIReasoning.support("ft:gpt-6-astra-2031-01-01:acme:x:9AbC", mrs) shouldBe OpenAIReasoning.Support.Reasoning
+  }
+
+  it should "treat a malformed fine-tune id as unknown" in {
+    Seq("ft:", "ft::acme:x", "ft", "ft:::").foreach { id =>
+      withClue(id)(OpenAIReasoning.support(id, mrs) shouldBe OpenAIReasoning.Support.Unknown)
+    }
+  }
+
+  "OpenAIReasoning.baseModel" should "unwrap each documented fine-tune form and leave anything else alone" in {
+    OpenAIReasoning.baseModel("ft:o4-mini-2025-04-16:acme:project:9AbC") shouldBe "o4-mini-2025-04-16"
+    OpenAIReasoning.baseModel("ft:gpt-4o-mini-2024-07-18:acme::9AbC:ckpt-step-2000") shouldBe "gpt-4o-mini-2024-07-18"
+    OpenAIReasoning.baseModel("davinci:ft-acme:bot-2023-01-01-00-00-00") shouldBe "davinci"
+    OpenAIReasoning.baseModel("gpt-4o-mini-2024-07-18.ft-0e20") shouldBe "gpt-4o-mini-2024-07-18"
+    OpenAIReasoning.baseModel("openai/o4-mini") shouldBe "openai/o4-mini"
+    OpenAIReasoning.baseModel("ft::acme") shouldBe "ft::acme"
+  }
+
+  "OpenAIClient for a fine-tuned reasoning model" should "send reasoning_effort and max_completion_tokens, and no sampling parameters" in {
+    val sent = body(
+      "ft:o4-mini-2025-04-16:acme:project:9AbC",
+      CompletionOptions(maxTokens = Some(64)).withReasoning(ReasoningEffort.Medium)
+    )
+    sent("reasoning_effort").str shouldBe "medium"
+    sent("max_completion_tokens").num shouldBe 64
+    sent.contains("max_tokens") shouldBe false
+    samplingParams.foreach(p => withClue(p)(sent.contains(p) shouldBe false))
+  }
+
+  it should "leave a fine-tuned gpt-4o's request as it was" in {
+    val sent = body(
+      "ft:gpt-4o-mini-2024-07-18:acme:support-bot:9AbC",
+      CompletionOptions(maxTokens = Some(64)).withReasoning(ReasoningEffort.High)
+    )
+    sent.contains("reasoning_effort") shouldBe false
+    sent("temperature").num shouldBe 0.7
+    sent("max_tokens").num shouldBe 64
+  }
+
   "OpenAIReasoning.namedLikeReasoningModel" should "match OpenAI's reasoning-model names only" in {
     Seq("o1", "o3-mini", "o4-mini-2025-04-16", "gpt-5", "gpt-5.6-terra", "gpt-6-astra", "openai/gpt-oss-20b", "O3")
       .foreach(m => withClue(m)(OpenAIReasoning.namedLikeReasoningModel(m) shouldBe true))

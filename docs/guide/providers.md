@@ -153,7 +153,9 @@ family get it, and `gpt-4o`, `gpt-4.1` and older models never do: OpenAI rejects
 for them, so for those models `reasoning` is ignored, as `CompletionOptions` documents. A model
 newer than the bundled metadata is recognised by its name (`o<n>...`, `gpt-5` onwards,
 `gpt-oss`). For Requesty, a routed id such as `openai/o4-mini` resolves the same way; a
-non-OpenAI model behind Requesty is not sent `reasoning_effort`.
+non-OpenAI model behind Requesty is not sent `reasoning_effort`. A fine-tuned model is judged by
+the model it was trained from: `ft:o4-mini-2025-04-16:my-org:my-suffix:abc123` is treated as
+`o4-mini`, and a fine-tune of `gpt-4o-mini` as `gpt-4o-mini`.
 
 Requests to a reasoning model also follow OpenAI's rules for them: `maxTokens` is sent as
 `max_completion_tokens` (which counts reasoning tokens too) rather than `max_tokens`, and
@@ -380,8 +382,9 @@ Same as OpenAI (via Azure deployment). Choose models when deploying:
 llm4s sees is the **deployment name**, which need not name the model behind it. So:
 
 - a deployment named after a model the registry knows (`o4-mini`, `gpt-5-mini`, `gpt-4o`) is
-  treated as that model;
-- any other deployment (`prod-reasoner`) gets `reasoning_effort` whenever you ask for a
+  treated as that model, and one named after an Azure fine-tuned model
+  (`o4-mini-2025-04-16.ft-...`) as its base model;
+- any other deployment (`prod-reasoner`, or a fine-tune deployed under a name of your own) gets `reasoning_effort` whenever you ask for a
   reasoning effort, since asking is the only sign it is a reasoning model. The request then
   also follows the reasoning-model rules: `max_completion_tokens`, and no sampling parameters.
   Asking for reasoning on such a deployment that is not a reasoning model gets an error from
