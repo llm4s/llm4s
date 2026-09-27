@@ -474,10 +474,10 @@ set it only where the vendor publishes one.
 
 ### Selecting it, and environment variables
 
-The generic provider has no environment variables of its own: there is no
-`OPENAI_COMPATIBLE_API_KEY`, and no `LLM_MODEL=openai-compatible/<model>` shorthand. Every value
-lives in the named section, and you bind environment variables to it with HOCON substitutions,
-under names you choose. The recipes use each vendor's own documented variable name, such as
+`Llm4sConfig` resolves providers from named sections only - for every provider, not just this
+one - and reads no provider's environment variables and no `LLM_MODEL`. Every value lives in the
+named section, and you bind environment variables to it with HOCON substitutions, under names
+you choose. The recipes use each vendor's own documented variable name, such as
 `GROQ_API_KEY`:
 
 ```hocon
@@ -502,6 +502,33 @@ llm4s {
 `${?VAR}` leaves the key unset when the variable is missing. For `apiKey` that is not an error
 when the config loads, because the key is optional: the request goes out without an
 `Authorization` header and fails with a 401 (see [Troubleshooting](#troubleshooting-openai-compatible-endpoints)).
+
+For an endpoint chosen entirely from the environment, the conventional names are
+`OPENAI_COMPATIBLE_BASE_URL` (required: the generic provider has no default endpoint) and
+`OPENAI_COMPATIBLE_API_KEY` (optional), which `OpenAICompatibleConfigKeys` names:
+
+```hocon
+llm4s.providers {
+  provider = "compatible-env"
+  compatible-env {
+    provider = "openai-compatible"
+    baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}
+    model = ${?OPENAI_COMPATIBLE_MODEL}
+    apiKey = ${?OPENAI_COMPATIBLE_API_KEY}
+  }
+}
+```
+
+With `OPENAI_COMPATIBLE_BASE_URL` or the model variable unset, that section fails to load, so
+keep it in the `application.conf` of deployments that set them.
+
+The `LLM_MODEL=openai-compatible/<model>` shorthand is read, as `LLM_MODEL=deepseek/<model>` and
+the other providers' are, by the tools that read `LLM_MODEL` themselves: the chat-tui sample,
+which then takes the endpoint from `OPENAI_COMPATIBLE_BASE_URL` and the key from
+`OPENAI_COMPATIBLE_API_KEY`, and the config-policy env check, which checks
+`OPENAI_COMPATIBLE_BASE_URL` rather than `OPENAI_BASE_URL` as the endpoint. Only the first `/`
+separates the provider, so `LLM_MODEL=openai-compatible/openai/gpt-oss-120b` names Groq's
+`openai/gpt-oss-120b`.
 
 Then load it by name, or as the default:
 
@@ -905,9 +932,11 @@ does not, and without one it sends no `Authorization` header at all. A 401 from 
 means it was started with a key (`--api-key` for vLLM and `llama-server`, "Require
 Authentication" in LM Studio), and `apiKey` must then match it.
 
-**Missing `baseUrl`.** A section without one fails to load with
-`baseUrl: set OPENAI_COMPATIBLE_BASE_URL`. No such variable is read: set `baseUrl` in the
-section, from a variable of your choosing if you like (`baseUrl = ${?MY_BASE_URL}`).
+**Missing `baseUrl`.** A section without one fails to load with an error naming `baseUrl`.
+`Llm4sConfig` reads no variable for it by itself: set `baseUrl` in the section, from a variable
+if you like - `baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}` binds the conventional one. If the
+section binds a variable and still fails this way, the variable is not set in the process that
+runs your app.
 
 **Streaming fails with a 400 or 422 naming `stream_options`, while `complete` works.** The
 endpoint rejects fields it does not know. Build the config with `streamUsage = false` (see

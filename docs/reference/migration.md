@@ -44,6 +44,15 @@ What you may notice:
 - `OpenAIConfig.toString` shows `providerId`; a pattern match destructuring all six fields must
   add a seventh.
 
+### `OPENAI_COMPATIBLE_BASE_URL` and `OPENAI_COMPATIBLE_API_KEY`
+
+These are now the conventional variables for a generic endpoint, named by
+`OpenAICompatibleConfigKeys`. `Llm4sConfig` does not read them - it reads no provider's variables
+and no `LLM_MODEL` - so bind them in a section (`baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}`). The
+chat-tui sample accepts `LLM_MODEL=openai-compatible/<model>` with them, and the config-policy
+env check reads `OPENAI_COMPATIBLE_BASE_URL` as that provider's endpoint instead of
+`OPENAI_BASE_URL`.
+
 ## Slice 5: Mistral, Cohere and Voyage leave core; core ships no provider
 
 The last provider clients leave `llm4s-core` ([#1132](https://github.com/llm4s/llm4s/issues/1132)).

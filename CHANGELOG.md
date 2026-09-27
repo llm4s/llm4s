@@ -624,6 +624,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must name it - and a `provider = "openrouter"` section with a proxy `baseUrl` is no longer
   routed to OpenAI. `None` infers the id from the base URL as before. See the
   [migration note](docs/reference/migration.md#requesty-configs-report-requesty).
+- **`OPENAI_COMPATIBLE_BASE_URL` was named but read by nothing.** It and
+  `OPENAI_COMPATIBLE_API_KEY` are now `OpenAICompatibleConfigKeys` constants, the conventional
+  names for binding a generic `openai-compatible` section from the environment. The chat-tui
+  sample reads `LLM_MODEL=openai-compatible/<model>` with them (base URL required, key optional,
+  split on the first `/` so `openai-compatible/openai/gpt-oss-120b` keeps its model id), as it
+  does `deepseek/`, `mistral/` and the rest, and the config-policy env check takes
+  `OPENAI_COMPATIBLE_BASE_URL` as the endpoint for that provider. `Llm4sConfig` still reads no
+  provider's variables and no `LLM_MODEL`: named sections are its only route.
 - The Groq example in `llm4s-openai-compatible`'s `reference.conf` and the
   `OpenAICompatibleProvider` Scaladoc named `llama-3.3-70b-versatile`, which Groq shut down for
   free and developer tiers on 2026-08-16; they now use `openai/gpt-oss-120b`, as the providers

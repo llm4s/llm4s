@@ -1,6 +1,6 @@
 package org.llm4s.samples.chat.tui
 
-import org.llm4s.config.Llm4sConfig
+import org.llm4s.config.{ Llm4sConfig, OpenAICompatibleConfigKeys }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.*
 import org.llm4s.llmconnect.provider.{ OpenAIProvider, OpenRouterProvider, RequestyProvider }
@@ -79,10 +79,15 @@ object ChatTuiConfig:
   /**
    * Parse `LLM_MODEL=<provider>/<model>` and construct a `ProviderConfig`
    * directly from env vars. The model portion may itself contain `/`
-   * (e.g. OpenRouter's `meta-llama/llama-3-...`), so we split on the
+   * (e.g. OpenRouter's `meta-llama/llama-3-...`, or Groq's
+   * `openai/gpt-oss-120b` behind `openai-compatible/`), so we split on the
    * first `/` only.
+   *
+   * @param env where variables are read; the real environment and `.env` file by default.
    */
-  private def fromLlmModel(spec: String)(using ContextWindowResolver): Result[ProviderConfig] =
+  private[tui] def fromLlmModel(spec: String, env: String => Option[String] = ChatTuiEnv.get)(using
+    ContextWindowResolver
+  ): Result[ProviderConfig] =
     spec.indexOf('/') match {
       case -1 =>
         Left(ConfigurationError(s"LLM_MODEL must be 'provider/model'; got: $spec"))
@@ -93,46 +98,57 @@ object ChatTuiConfig:
         val model    = spec.substring(i + 1).trim
         if provider.isEmpty || model.isEmpty then
           Left(ConfigurationError(s"LLM_MODEL must be 'provider/model'; got: $spec"))
-        else buildProvider(provider, model)
+        else buildProvider(provider, model, env)
     }
 
-  private def buildProvider(provider: String, model: String)(using ContextWindowResolver): Result[ProviderConfig] =
+  private def buildProvider(provider: String, model: String, env: String => Option[String])(using
+    ContextWindowResolver
+  ): Result[ProviderConfig] = {
+    def requireKey(name: String): Result[String] =
+      env(name).map(_.trim).filter(_.nonEmpty) match {
+        case Some(v) => Right(v)
+        case None    => Left(ConfigurationError(s"$name is required when LLM_MODEL is set"))
+      }
+    def getOrElse(name: String, default: => String): String =
+      env(name).map(_.trim).filter(_.nonEmpty).getOrElse(default)
+    def get(name: String): Option[String] = env(name).map(_.trim).filter(_.nonEmpty)
+
     provider match {
       case "openai" =>
         requireKey("OPENAI_API_KEY").flatMap { apiKey =>
-          val baseUrl = ChatTuiEnv.getOrElse("OPENAI_BASE_URL", OpenAIProvider.DEFAULT_BASE_URL)
-          val org     = ChatTuiEnv.get("OPENAI_ORGANIZATION").filter(_.nonEmpty)
+          val baseUrl = getOrElse("OPENAI_BASE_URL", OpenAIProvider.DEFAULT_BASE_URL)
+          val org     = get("OPENAI_ORGANIZATION").filter(_.nonEmpty)
           OpenAIConfig.fromValues(model, apiKey, org, baseUrl)
         }
 
       case "openrouter" =>
         requireKey("OPENROUTER_API_KEY").flatMap { apiKey =>
-          val baseUrl = ChatTuiEnv.getOrElse("OPENAI_BASE_URL", OpenRouterProvider.DEFAULT_BASE_URL)
+          val baseUrl = getOrElse("OPENAI_BASE_URL", OpenRouterProvider.DEFAULT_BASE_URL)
           OpenAIConfig.fromValues(model, apiKey, None, baseUrl)
         }
 
       case "requesty" =>
         requireKey("REQUESTY_API_KEY").flatMap { apiKey =>
-          val baseUrl = ChatTuiEnv.getOrElse("OPENAI_BASE_URL", RequestyProvider.DEFAULT_BASE_URL)
+          val baseUrl = getOrElse("OPENAI_BASE_URL", RequestyProvider.DEFAULT_BASE_URL)
           OpenAIConfig.fromValues(model, apiKey, None, baseUrl)
         }
 
       case "anthropic" =>
         requireKey("ANTHROPIC_API_KEY").flatMap { apiKey =>
-          val baseUrl = ChatTuiEnv.getOrElse("ANTHROPIC_BASE_URL", AnthropicConfig.DEFAULT_BASE_URL)
+          val baseUrl = getOrElse("ANTHROPIC_BASE_URL", AnthropicConfig.DEFAULT_BASE_URL)
           AnthropicConfig.fromValues(model, apiKey, baseUrl)
         }
 
       case "ollama" =>
-        val baseUrl = ChatTuiEnv.getOrElse("OLLAMA_BASE_URL", "http://localhost:11434")
+        val baseUrl = getOrElse("OLLAMA_BASE_URL", "http://localhost:11434")
         OllamaConfig.fromValues(model, baseUrl)
 
       case "gemini" =>
         // Gemini accepts either GOOGLE_API_KEY or GEMINI_API_KEY.
-        val key = ChatTuiEnv.get("GEMINI_API_KEY").orElse(ChatTuiEnv.get("GOOGLE_API_KEY")).filter(_.nonEmpty)
+        val key = get("GEMINI_API_KEY").orElse(get("GOOGLE_API_KEY")).filter(_.nonEmpty)
         key match {
           case Some(apiKey) =>
-            val baseUrl = ChatTuiEnv.getOrElse("GEMINI_BASE_URL", GeminiConfig.DEFAULT_BASE_URL)
+            val baseUrl = getOrElse("GEMINI_BASE_URL", GeminiConfig.DEFAULT_BASE_URL)
             GeminiConfig.fromValues(model, apiKey, baseUrl)
           case None =>
             Left(ConfigurationError("LLM_MODEL=gemini/... requires GOOGLE_API_KEY or GEMINI_API_KEY"))
@@ -140,43 +156,50 @@ object ChatTuiConfig:
 
       case "zai" =>
         requireKey("ZAI_API_KEY").flatMap { apiKey =>
-          val baseUrl = ChatTuiEnv.getOrElse("ZAI_BASE_URL", ZaiConfig.DEFAULT_BASE_URL)
+          val baseUrl = getOrElse("ZAI_BASE_URL", ZaiConfig.DEFAULT_BASE_URL)
           ZaiConfig.fromValues(model, apiKey, baseUrl)
         }
 
       case "deepseek" =>
         requireKey("DEEPSEEK_API_KEY").flatMap { apiKey =>
-          val baseUrl = ChatTuiEnv.getOrElse("DEEPSEEK_BASE_URL", DeepSeekConfig.DEFAULT_BASE_URL)
+          val baseUrl = getOrElse("DEEPSEEK_BASE_URL", DeepSeekConfig.DEFAULT_BASE_URL)
           DeepSeekConfig.fromValues(model, apiKey, baseUrl)
         }
 
       case "mistral" =>
         requireKey("MISTRAL_API_KEY").flatMap { apiKey =>
-          val baseUrl = ChatTuiEnv.getOrElse("MISTRAL_BASE_URL", MistralConfig.DEFAULT_BASE_URL)
+          val baseUrl = getOrElse("MISTRAL_BASE_URL", MistralConfig.DEFAULT_BASE_URL)
           MistralConfig.fromValues(model, apiKey, baseUrl)
         }
 
       case "cohere" =>
         requireKey("COHERE_API_KEY").flatMap { apiKey =>
-          val baseUrl = ChatTuiEnv.getOrElse("COHERE_BASE_URL", CohereConfig.DEFAULT_BASE_URL)
+          val baseUrl = getOrElse("COHERE_BASE_URL", CohereConfig.DEFAULT_BASE_URL)
           CohereConfig.fromValues(model, apiKey, baseUrl)
+        }
+
+      case OpenAICompatibleConfig.ProviderIdName =>
+        // Any OpenAI-compatible endpoint: it has no default, so the base URL is required, and
+        // the key is optional because local servers take none.
+        requireKey(OpenAICompatibleConfigKeys.OPENAI_COMPATIBLE_BASE_URL).flatMap { baseUrl =>
+          OpenAICompatibleConfig.fromValues(
+            model = model,
+            baseUrl = baseUrl,
+            apiKey = get(OpenAICompatibleConfigKeys.OPENAI_COMPATIBLE_API_KEY)
+          )
         }
 
       case other =>
         Left(
           ConfigurationError(
             s"LLM_MODEL provider '$other' is not supported by chat-tui. " +
-              "Use openai|anthropic|ollama|gemini|zai|deepseek|openrouter|requesty|mistral|cohere or unset LLM_MODEL " +
+              "Use openai|anthropic|ollama|gemini|zai|deepseek|openrouter|requesty|mistral|cohere|openai-compatible " +
+              "or unset LLM_MODEL " +
               "to fall back to the named-providers config."
           )
         )
     }
-
-  private def requireKey(name: String): Result[String] =
-    ChatTuiEnv.get(name).map(_.trim).filter(_.nonEmpty) match {
-      case Some(v) => Right(v)
-      case None    => Left(ConfigurationError(s"$name is required when LLM_MODEL is set"))
-    }
+  }
 
   /**
    * Best-effort canonical "provider/model" label for the active provider.
