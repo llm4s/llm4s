@@ -63,8 +63,15 @@ are available.
    `traceAgentState` sent nothing for an empty conversation.
 2. **Langfuse reports a failed export of the conversation trace** as a `Left`; `traceAgentState`
    always returned `Right(())`. The agent swallows tracing errors either way.
-3. **OpenTelemetry names the agent state span `Agent State Updated`** - the span `traceEvent`
-   already produced - rather than `Agent State Snapshot`, with the same attributes.
+3. **The agent state span takes the event's name.** Agent runs used to reach a tracer through
+   `traceAgentState`, whose span name differed from the one `traceEvent` gave the same event; they
+   now go through `traceEvent`, so the attributes are unchanged but the name is not. Update any
+   dashboard or query keyed on the old name:
+
+   | Backend | Old name (agent runs) | New name |
+   |---|---|---|
+   | OpenTelemetry | `Agent State Snapshot` | `Agent State Updated` |
+   | `TraceCollectorTracing` | `agent-state-update` | `agent_state_updated` |
 4. **An OpenTelemetry SDK that fails to start** is reported by `Tracing.fromSettings` and gives
    `NoOpTracing` from `Tracing.create`, rather than a tracer whose every call failed.
 

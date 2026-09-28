@@ -3,11 +3,11 @@ package org.llm4s.trace
 import cats.Id
 import org.llm4s.trace.model.{ SpanKind, SpanStatus }
 import org.llm4s.trace.store.InMemoryTraceStore
-import org.scalatest.BeforeAndAfterEach
+import org.scalatest.{ BeforeAndAfterEach, LoneElement }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
+class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach with LoneElement {
 
   private var store: InMemoryTraceStore            = _
   private var collector: TraceCollectorTracing[Id] = _
@@ -129,6 +129,18 @@ class TraceCollectorTracingSpec extends AnyFlatSpec with Matchers with BeforeAnd
     val spans = store.getSpans(collector.traceId)
     spans should have size 2
     spans.foreach(_.kind shouldBe SpanKind.AgentCall)
+  }
+
+  // Agent runs used to reach the store through `traceAgentState`, which named this span
+  // `agent-state-update`. They now arrive as an event and take its event type, like every other span.
+  it should "name the agent state span after its event type and keep the old attributes" in {
+    collector.traceEvent(TraceEvent.AgentStateUpdated("Complete", 5, 1)) shouldBe Right(())
+
+    val span = store.getSpans(collector.traceId).loneElement
+    span.name shouldBe "agent_state_updated"
+    span.attributes("status").asString shouldBe Some("Complete")
+    span.attributes("message_count").asLong shouldBe Some(5L)
+    span.attributes("log_count").asLong shouldBe Some(1L)
   }
 
   it should "convert CustomEvent and CostRecorded to Internal spans" in {

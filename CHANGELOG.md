@@ -78,7 +78,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Source breaks: `Tracing.traceAgentState(AgentState)` is removed - trace
   `state.toTraceEvent` (a `TraceEvent.AgentStateUpdated`, which gains a `messages` field before
   `timestamp`) through `traceEvent`; `TracingMode` gains the `Named` case and a `name` member; and
-  `TracingMode.fromString` returns `Named` rather than `NoOp` for an unrecognised value. See the
+  `TracingMode.fromString` returns `Named` rather than `NoOp` for an unrecognised value. The span
+  an agent run records for its state is renamed in OpenTelemetry (`Agent State Snapshot` becomes
+  `Agent State Updated`) and `TraceCollectorTracing` (`agent-state-update` becomes
+  `agent_state_updated`). See the
   [migration note](docs/reference/migration.md#slice-6-tracing-backends-are-discovered-and-agent-state-is-a-traceevent).
 - **Mistral, Cohere and Voyage leave `llm4s-core`, which now ships no provider** - the end of
   core's provider clients in slice 5 ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
