@@ -116,7 +116,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Behaviour: an application with no SLF4J backend of its own gets SLF4J's no-op logger and its
   one-line "no providers were found" warning instead of logback's default console output; add
-  `"ch.qos.logback" % "logback-classic"` (or any SLF4J 2 backend) to keep log output. See the
+  `"ch.qos.logback" % "logback-classic" % "1.5.34"` (or any SLF4J 2 backend) to keep log output. See the
   [migration note](docs/reference/migration.md#llm4s-no-longer-brings-a-logging-backend).
 - **`llm4s-observability-prometheus`: Prometheus leaves `llm4s-core`** - the second slice 6 carve
   ([#1133](https://github.com/llm4s/llm4s/issues/1133), decisions D3 and D4). `PrometheusMetrics`,

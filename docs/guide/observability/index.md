@@ -36,7 +36,7 @@ LLM4S provides tracing infrastructure through multiple backends. Production moni
 
 ## Logging in Production
 
-LLM4S logs through the SLF4J API and does not bring a logging backend: add one to your application, such as `"ch.qos.logback" % "logback-classic"`. Without one, SLF4J logs nothing and prints a single warning. Configure the backend for structured JSON output in production environments.
+LLM4S logs through the SLF4J API and does not bring a logging backend: add one to your application, such as `libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.5.34"`. Without one, SLF4J logs nothing and prints a single warning. Configure the backend for structured JSON output in production environments.
 
 ### Logback Configuration
 
