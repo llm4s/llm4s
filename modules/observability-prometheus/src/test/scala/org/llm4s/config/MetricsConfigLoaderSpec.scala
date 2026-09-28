@@ -1,5 +1,7 @@
 package org.llm4s.config
 
+import org.llm4s.metrics.{ MetricsCollector, PrometheusMetrics }
+import org.llm4s.testutil.ReferenceConfig
 import org.scalatest.funsuite.AnyFunSuite
 import pureconfig.ConfigSource
 import com.typesafe.config.ConfigFactory
@@ -52,5 +54,27 @@ class MetricsConfigLoaderSpec extends AnyFunSuite {
 
     // Should fail when config is missing (no llm4s.metrics section)
     assert(result.isLeft)
+  }
+
+  // The llm4s.metrics block moved into this module's reference.conf with the loader (#1133);
+  // before, core had no such block and these defaults were hard-coded in the loader.
+
+  test("reference.conf leaves metrics off, so an application that sets nothing gets noop") {
+    val result = MetricsConfigLoader.load(ReferenceConfig.withEnv("", Map.empty))
+
+    assert(result == Right((MetricsCollector.noop, None)))
+  }
+
+  test("reference.conf defaults the Prometheus backend on once metrics are enabled") {
+    val result = MetricsConfigLoader.load(
+      ReferenceConfig.withEnv("llm4s.metrics { enabled = true, prometheus.port = 0 }", Map.empty)
+    )
+
+    assert(result.isRight)
+    result.foreach { case (collector, endpoint) =>
+      assert(collector.isInstanceOf[PrometheusMetrics])
+      assert(endpoint.isDefined)
+      endpoint.foreach(_.stop())
+    }
   }
 }

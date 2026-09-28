@@ -33,6 +33,53 @@ uses it to tell a document it could not read from one that has gone from the sou
 - `DocumentLoaders.successesOnly` still drops per-document failures, so a sync through it
   still deletes a document whose read failed.
 
+## Slice 6: `llm4s-observability-prometheus` - Prometheus leaves core
+
+The second slice 6 carve ([#1133](https://github.com/llm4s/llm4s/issues/1133), decisions D3 and
+D4) moves the Prometheus metrics backend into a new module, **`llm4s-observability-prometheus`**,
+which carries the Prometheus client and HTTP server. With it gone, `llm4s-core` declares no
+observability dependency. Package names are unchanged, so no import changes:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-observability-prometheus" % "<version>"
+```
+
+| Moved to `llm4s-observability-prometheus` | Package |
+|---|---|
+| `PrometheusMetrics`, `PrometheusEndpoint` | `org.llm4s.metrics` |
+| `MetricsConfigLoader` (was `private[config]`, now public) | `org.llm4s.config` |
+
+**What stays in `llm4s-core`** is the metrics contract: `MetricsCollector` (with `noop` and
+`compose`), `Outcome` and `ErrorKind`. Every provider client, `ReliableClient` and the metrics and
+rate-limiting middleware take a `MetricsCollector`, so none of them needs the new module; only the
+code that builds a `PrometheusMetrics` does. It is kept apart from `llm4s-observability` so that
+Prometheus does not reach every `llm4s-rag` user through that module.
+
+### Configuration is unchanged
+
+The keys and their defaults are the same - `llm4s.metrics.enabled` (`false`),
+`llm4s.metrics.prometheus.enabled` (`true`) and `llm4s.metrics.prometheus.port` (`9090`). They used
+to be hard-coded in `MetricsConfigLoader`, because core's `reference.conf` had no `llm4s.metrics`
+block; that block now ships in the module's `reference.conf`, beside the code that reads it.
+
+### Source break: `Llm4sConfig.metrics()` is removed
+
+It returned a `PrometheusEndpoint`, so it could not stay in a core without Prometheus (D3).
+`MetricsConfigLoader` replaces it, with the same result type:
+
+```scala
+import org.llm4s.config.MetricsConfigLoader
+
+// before
+val (metrics, endpoint) = Llm4sConfig.metrics().toOption.get
+
+// after
+val (metrics, endpoint) = MetricsConfigLoader.default().toOption.get
+```
+
+`MetricsConfigLoader.load(source)` reads from a `ConfigSource` of your own. Its `source` parameter
+no longer defaults to `ConfigSource.default`; call `default()` for that.
+
 ## A failed listing fails the sync
 
 [#1231](https://github.com/llm4s/llm4s/pull/1231); not in a release yet.

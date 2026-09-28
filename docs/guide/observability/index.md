@@ -643,7 +643,7 @@ Before deploying, verify monitoring coverage:
 
 Current monitoring limitations in LLM4S:
 
-- **No built-in Prometheus metrics** - Use `InMemoryTraceStore` to read span data and push counters/histograms to your Prometheus client, or implement a custom `TraceStore` that writes directly to a metrics registry
+- **Prometheus metrics cover LLM and image-generation calls, not traces** - `PrometheusMetrics` (`llm4s-observability-prometheus`) records requests, tokens, cost, errors and latency through `MetricsCollector`; for span-level data, read `InMemoryTraceStore` and push to your Prometheus client, or implement a custom `TraceStore` that writes directly to a metrics registry
 - **No automatic cost aggregation** - Langfuse provides this via its dashboard; for in-process aggregation, sum `cost_usd` attributes from `SpanKind.Rag` and `SpanKind.LlmCall` spans in `InMemoryTraceStore`
 - **No real-time streaming metrics** - Streaming completions are traced on completion, not in-flight
 - **Guardrail metrics require custom tracing** - Add `traceEvent` calls in guardrail implementations; the resulting spans are then queryable via `InMemoryTraceStore`

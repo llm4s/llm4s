@@ -8,15 +8,17 @@ import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 import org.slf4j.LoggerFactory
 
 /**
- * Loader for metrics configuration.
+ * Loads the Prometheus metrics backend from `llm4s.metrics`: a
+ * [[org.llm4s.metrics.MetricsCollector]], plus the [[org.llm4s.metrics.PrometheusEndpoint]]
+ * serving it when one was started.
  *
- * Reads configuration from llm4s.metrics section and constructs
- * a MetricsCollector with optional Prometheus HTTP endpoint.
+ * This replaces `Llm4sConfig.metrics()`, which left core with Prometheus (#1133):
+ * `MetricsConfigLoader.default()` is the same call against the same keys.
  *
- * Configuration keys:
- * - llm4s.metrics.enabled: Enable metrics collection (default: false)
- * - llm4s.metrics.prometheus.enabled: Enable Prometheus backend (default: true when metrics enabled)
- * - llm4s.metrics.prometheus.port: HTTP endpoint port (default: 9090)
+ * Configuration keys, with their defaults in this module's `reference.conf`:
+ * - `llm4s.metrics.enabled`: enable metrics collection (default: false)
+ * - `llm4s.metrics.prometheus.enabled`: use the Prometheus backend when metrics are enabled (default: true)
+ * - `llm4s.metrics.prometheus.port`: port for the `/metrics` HTTP endpoint (default: 9090)
  *
  * Example application.conf:
  * {{{
@@ -31,10 +33,11 @@ import org.slf4j.LoggerFactory
  * }
  * }}}
  *
- * This loader is the ONLY place where metrics configuration should be read.
- * All other code should receive MetricsCollector via dependency injection.
+ * When enabled, loading starts the HTTP endpoint; stop it with `PrometheusEndpoint.stop()`.
+ * Other code should receive the `MetricsCollector` by dependency injection rather than read
+ * these keys itself.
  */
-private[config] object MetricsConfigLoader {
+object MetricsConfigLoader {
 
   private val logger = LoggerFactory.getLogger(getClass)
 
@@ -62,12 +65,10 @@ private[config] object MetricsConfigLoader {
   /**
    * Load metrics configuration and construct collector with optional endpoint.
    *
-   * @param source Configuration source (default: ConfigSource.default)
+   * @param source Configuration source; it must contain an `llm4s` block
    * @return Result containing (MetricsCollector, Option[PrometheusEndpoint])
    */
-  def load(
-    source: ConfigSource = ConfigSource.default
-  ): Result[(MetricsCollector, Option[PrometheusEndpoint])] = {
+  def load(source: ConfigSource): Result[(MetricsCollector, Option[PrometheusEndpoint])] = {
     val rootEither = source.at("llm4s").load[MetricsRoot]
 
     rootEither.left
@@ -77,6 +78,10 @@ private[config] object MetricsConfigLoader {
       }
       .flatMap(buildMetrics)
   }
+
+  /** [[load]] against the current environment: system properties, `application.conf` and every `reference.conf`. */
+  def default(): Result[(MetricsCollector, Option[PrometheusEndpoint])] =
+    load(ConfigSource.default)
 
   private def buildMetrics(
     root: MetricsRoot

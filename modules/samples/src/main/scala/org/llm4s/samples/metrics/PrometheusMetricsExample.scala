@@ -1,7 +1,7 @@
 // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
 package org.llm4s.samples.metrics
 
-import org.llm4s.config.Llm4sConfig
+import org.llm4s.config.{ Llm4sConfig, MetricsConfigLoader }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.model._
 // import org.llm4s.metrics.{ MetricsCollector, PrometheusEndpoint }
@@ -18,8 +18,9 @@ import org.slf4j.LoggerFactory
  *
  * == Quick Start ==
  *
- * 1. Add an `openai-main` section (`provider = "openai"` and a model)
- *    to the samples' `application.local.conf` (docs/getting-started/configuration.md#running-the-samples).
+ * 1. Add `llm4s.metrics.enabled = true` and an `openai-main` section (`provider = "openai"`
+ *    and a model) to the samples' `application.local.conf`
+ *    (docs/getting-started/configuration.md#running-the-samples).
  *
  * 2. Set your API key and select the section:
  *    {{{
@@ -59,7 +60,7 @@ import org.slf4j.LoggerFactory
  *
  * '''Option 1: From Configuration (recommended)'''
  * {{{
- * val (metrics, endpointOpt) = Llm4sConfig.metrics().toOption.get
+ * val (metrics, endpointOpt) = MetricsConfigLoader.default().toOption.get
  * val client = LLMConnect.getClient(config, metrics).toOption.get
  * // ... make LLM calls ...
  * endpointOpt.foreach(_.stop())
@@ -93,7 +94,7 @@ object PrometheusMetricsExample {
 
     // Load metrics configuration
     println("Loading metrics configuration...")
-    val metricsConfigResult = Llm4sConfig.metrics()
+    val metricsConfigResult = MetricsConfigLoader.default()
 
     metricsConfigResult match {
       case Left(error) =>

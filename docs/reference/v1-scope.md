@@ -22,7 +22,7 @@ What has actually moved so far, in the build but not yet in a release:
 | [3](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` | in the build, unpublished |
 | [4](https://github.com/llm4s/llm4s/issues/1131) | none - the provider registration SPI (`ProviderDescriptor`, discovered through `META-INF/services`) that slice 5's modules register through | in the build, unpublished |
 | [5](https://github.com/llm4s/llm4s/issues/1132) | `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (with Mistral and Cohere), `llm4s-voyage` - `llm4s-core` now holds no provider client | in the build, unpublished |
-| [6](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability` (Langfuse, the trace collector, `CostTracker`); `OpenTelemetryConfig` joins the existing `llm4s-observability-otel`. The tracing contract stays in `llm4s-core`; Prometheus is still in core until its own carve | in the build, unpublished |
+| [6](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability` (Langfuse, the trace collector, `CostTracker`); `OpenTelemetryConfig` joins the existing `llm4s-observability-otel`; `llm4s-observability-prometheus` (Prometheus). The tracing and metrics contracts stay in `llm4s-core`, which declares no observability dependency | in the build, unpublished |
 
 The latest release tag is `v0.4.1`, which is still a single `llm4s-core` (0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). The first release to publish separate module artifacts will be **0.5.0**, after slice 6; it is also the MiMa baseline.
 
@@ -64,7 +64,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `metrics` — the contract: `MetricsCollector` | `llm4s-core` | Frozen at 1.0 |
 | `trace` — Langfuse (`LangfuseTracing`, its batch sender and `TracingBackend`), `TraceCollectorTracing`, `trace/model`, `trace/store`; `metrics` — `CostTracker` — **carved** | `llm4s-observability` | Beta |
 | `trace` — OpenTelemetry (`OpenTelemetryTracing`, `OpenTelemetryConfig`) — **carved** | `llm4s-observability-otel` (`modules/trace-opentelemetry`) | Beta |
-| `metrics` — Prometheus (`PrometheusMetrics`, `PrometheusEndpoint`) | `llm4s-observability-prometheus` | Beta |
+| `metrics` — Prometheus (`PrometheusMetrics`, `PrometheusEndpoint`, `MetricsConfigLoader`) — **carved** | `llm4s-observability-prometheus` | Beta |
 | `llmconnect/provider` — OpenAI, Azure and Requesty (the providers sharing `OpenAIClient`) — **carved** | `llm4s-openai` | Frozen at 1.0 |
 | `llmconnect/provider` — OpenRouter, DeepSeek, Z.ai and the generic `openai-compatible` provider, on one SDK-free `OpenAICompatibleClient` — **carved** | `llm4s-openai-compatible` | Frozen at 1.0 |
 | `llmconnect/provider` — Anthropic — **carved** | `llm4s-anthropic` | Frozen at 1.0 |

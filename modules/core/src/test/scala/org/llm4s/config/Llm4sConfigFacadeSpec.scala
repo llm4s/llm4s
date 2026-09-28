@@ -3,7 +3,6 @@ package org.llm4s.config
 // scalafix:off DisableSyntax.NoConfigFactory
 import com.typesafe.config.ConfigFactory
 // scalafix:on DisableSyntax.NoConfigFactory
-import org.llm4s.metrics.MetricsCollector
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -33,29 +32,6 @@ class Llm4sConfigFacadeSpec extends AnyWordSpec with Matchers {
       ConfigFactory.invalidateCaches()
     }
     // scalafix:on DisableSyntax.NoTryCatch
-  }
-
-  // --------------------------------------------------------------------------
-  // Metrics
-  // --------------------------------------------------------------------------
-
-  "Llm4sConfig.metrics" should {
-
-    "load disabled metrics by default" in {
-      // No metrics config set → defaults to disabled
-      val metricsKeys = Set(
-        "llm4s.metrics.enabled",
-        "llm4s.metrics.prometheus.enabled",
-        "llm4s.metrics.prometheus.port"
-      )
-      withProps(Map.empty, metricsKeys) {
-        val result = Llm4sConfig.metrics()
-        result.isRight shouldBe true
-        val (collector, endpoint) = result.getOrElse(fail("expected Right"))
-        collector shouldBe MetricsCollector.noop
-        endpoint shouldBe None
-      }
-    }
   }
 
   // --------------------------------------------------------------------------

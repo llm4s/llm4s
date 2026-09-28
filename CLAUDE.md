@@ -31,7 +31,7 @@ Slice order — each is an issue with its own scope and gotchas:
 | 3 ✅ | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` |
 | 4 ✅ | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
 | 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (incl. Mistral, Cohere), `llm4s-voyage`; core holds no client |
-| 6 🚧 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `TracingBackend` SPI; `llm4s-observability` (Langfuse, trace collector/model/store, `CostTracker`); next `llm4s-observability-prometheus`; then 0.5.0 + MiMa |
+| 6 🚧 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `TracingBackend` SPI; `llm4s-observability` (Langfuse, trace collector/model/store, `CostTracker`); `llm4s-observability-prometheus`; then 0.5.0 + MiMa |
 
 **Invariants for every carve:**
 
@@ -98,6 +98,7 @@ llm4s/
 │   ├── providers/             # Community provider modules, one `llm4s-<name>` each (published)
 │   │   └── voyage/            # Voyage AI embedding provider
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
+│   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)
 │   ├── samples/               # Usage examples
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI
@@ -202,9 +203,14 @@ extras)` - and **registers no backend and reads no backend's keys**: `TracingCon
 `TracingMode` case object, a backend config field on `TracingSettings`, or a backend's
 `reference.conf` block back to core; a backend module ships its own block, services entry and
 `<Name>TracingBackendSpec` (discovery, explicit registration, a config round trip).
-`llm4s-rag` depends on `llm4s-observability` for `RAGASLangfuseObserver`. Prometheus
-(`PrometheusMetrics`, `PrometheusEndpoint`, `Llm4sConfig.metrics()`) is still in core until the
-`llm4s-observability-prometheus` carve.
+`llm4s-rag` depends on `llm4s-observability` for `RAGASLangfuseObserver`.
+`modules/observability-prometheus` (`llm4s-observability-prometheus`) took `PrometheusMetrics`,
+`PrometheusEndpoint`, `MetricsConfigLoader` (public now; it replaces the removed
+`Llm4sConfig.metrics()`) and the `llm4s.metrics` `reference.conf` block, with the Prometheus client
+and HTTP server, so **core declares no observability dependency** and keeps only the
+`MetricsCollector` contract. It is separate from `llm4s-observability` so that `rag` does not pass
+Prometheus on; `image` has it as a **test-only** dependency, for `ImageGenerationCostTrackingSpec` -
+never make it a compile one.
 
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must

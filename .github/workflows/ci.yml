@@ -194,6 +194,7 @@ jobs:
           openaiCompatible/test openaiCompatible/coverageReport
           voyage/test voyage/coverageReport
           observability/test observability/coverageReport
+          observabilityPrometheus/test observabilityPrometheus/coverageReport
           traceOpentelemetry/test traceOpentelemetry/coverageReport
           coverageAggregate
 
@@ -356,6 +357,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/observability/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: observability
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload observability-prometheus coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/observability-prometheus/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: observability-prometheus
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

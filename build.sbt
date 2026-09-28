@@ -191,6 +191,7 @@ lazy val llm4s = (project in file("."))
     workspaceClient,
     workspaceSamples,
     observability,
+    observabilityPrometheus,
     traceOpentelemetry,
     knowledgegraphNeo4j,
     benchmarks,
@@ -269,8 +270,10 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
-    // Measured 73.59% statement coverage after the `observability` carve took Langfuse, the trace
-    // collector and `CostTracker` (94.52% covered) out (#1133); 74.65% with every provider client
+    // Measured 74.09% statement coverage after the `observability-prometheus` carve took
+    // `PrometheusMetrics`, `PrometheusEndpoint` and `MetricsConfigLoader` (70.56% covered) out
+    // (#1133); 73.59% after the `observability` carve took Langfuse, the trace
+    // collector and `CostTracker` (94.52% covered) out; 74.65% with every provider client
     // gone - Mistral, Cohere and Voyage were the last (`sbt coverage core/test core/coverageReport`); it was 75.32% after
     // `openai-compatible`, 75.57% after `openai`, 75.15% after `anthropic`, 75.27% after `gemini`, 75.86%
     // after `ollama`, 74.33% with slice 3 complete, 74.89% after `image`, 74.05% after `mcp`,
@@ -325,9 +328,7 @@ lazy val core = (project in file("modules/core"))
       Deps.scalamock % Test,
       Deps.ujson,
       Deps.commonsIO,
-      Deps.config,
-      Deps.prometheusCore,
-      Deps.prometheusHttp
+      Deps.config
     )
   )
 
@@ -519,7 +520,10 @@ lazy val speech = (project in file("modules/speech"))
   )
 
 lazy val image = (project in file("modules/image"))
-  .dependsOn(media, core)
+  // `observabilityPrometheus % Test` is for `ImageGenerationCostTrackingSpec`, which reads the
+  // image metrics back out of a real `PrometheusMetrics` registry. Test scope only: the
+  // published `llm4s-image` depends on the `MetricsCollector` contract, not on Prometheus.
+  .dependsOn(media, core, observabilityPrometheus % Test)
   .settings(
     name := "llm4s-image",
     commonSettings,
@@ -786,7 +790,8 @@ lazy val samples = (project in file("modules//samples"))
     openaiCompatible,
     voyage,
     knowledgegraphNeo4j,
-    observability
+    observability,
+    observabilityPrometheus
   )
   .settings(
     name := "llm4s-samples",
@@ -861,6 +866,33 @@ lazy val observability = (project in file("modules/observability"))
     Compile / discoveredMainClasses := Seq.empty
   )
 
+// `llm4s-observability-prometheus` is the one integration that brings a third-party dependency
+// of its own - the Prometheus client and its HTTP server - which is why it is not part of
+// `llm4s-observability` (D4): `rag` depends on that module, and would otherwise pass Prometheus
+// on to every RAG user. It holds `PrometheusMetrics`, `PrometheusEndpoint` and
+// `MetricsConfigLoader`, which replaces `Llm4sConfig.metrics()` (D3), and the `llm4s.metrics`
+// block whose defaults used to be hard-coded in that loader. With it gone, core declares no
+// observability dependency; `MetricsCollector` stays there as the contract.
+//
+// Test depends on core's tests for `ReferenceConfig`, which proves the `llm4s.metrics` block.
+lazy val observabilityPrometheus = (project in file("modules/observability-prometheus"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    name := "llm4s-observability-prometheus",
+    commonSettings,
+    // Measured 70.56% statement coverage (`sbt coverage observabilityPrometheus/test
+    // observabilityPrometheus/coverageReport`) on the code as carved out of core. Floor is the
+    // measured value rounded down to the nearest 5. Never lower it.
+    coverageFloor(70),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.prometheusCore,
+      Deps.prometheusHttp
+    )
+  )
+
 lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
   // Test depends on core's tests for `ReferenceConfig`, which proves this module's
   // `reference.conf` binds `OTEL_*` under `llm4s.tracing.opentelemetry` (#1133).
@@ -930,6 +962,7 @@ lazy val it = (project in file("modules/it"))
     knowledgegraphNeo4j,
     workspaceClient,
     observability,
+    observabilityPrometheus,
     traceOpentelemetry
   )
   .settings(
@@ -1002,6 +1035,7 @@ lazy val docs = (project in file("modules/docs"))
     workspaceShared,
     workspaceClient,
     observability,
+    observabilityPrometheus,
     traceOpentelemetry,
     knowledgegraphNeo4j
   )
@@ -1030,6 +1064,7 @@ lazy val docs = (project in file("modules/docs"))
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (observability / Compile / sources).value ++
+        (observabilityPrometheus / Compile / sources).value ++
         (traceOpentelemetry / Compile / sources).value ++
         (knowledgegraphNeo4j / Compile / sources).value
     },

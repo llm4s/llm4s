@@ -173,7 +173,7 @@ object MetricsCollector {
   /**
    * Combine multiple collectors into one that fans out every call to all of them.
    *
-   * Useful for running a `CostTracker` (in `llm4s-observability`) alongside [[PrometheusMetrics]]:
+   * Useful for running a `CostTracker` (in `llm4s-observability`) alongside `PrometheusMetrics` (in `llm4s-observability-prometheus`):
    * {{{
    * val combined = MetricsCollector.compose(prometheusMetrics, costTracker)
    * val client = LLMConnect.getClient(config, combined)

@@ -104,6 +104,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`llm4s-observability-prometheus`: Prometheus leaves `llm4s-core`** - the second slice 6 carve
+  ([#1133](https://github.com/llm4s/llm4s/issues/1133), decisions D3 and D4). `PrometheusMetrics`,
+  `PrometheusEndpoint` and `MetricsConfigLoader` move, package names unchanged, to a new module that
+  carries the Prometheus client and HTTP server, so `llm4s-core` now declares no observability
+  dependency. It is a module of its own rather than part of `llm4s-observability` so Prometheus does
+  not reach every `llm4s-rag` user. Core keeps the `MetricsCollector` contract (with `Outcome`,
+  `ErrorKind`, `noop` and `compose`), which every client and middleware takes. The `llm4s.metrics`
+  block, whose defaults were hard-coded in the loader because core had none, is now in the module's
+  `reference.conf`: keys and defaults are unchanged (`enabled = false`, `prometheus.enabled = true`,
+  `prometheus.port = 9090`).
+
+  Source break (pre-MiMa): `Llm4sConfig.metrics()` is removed - it returned a `PrometheusEndpoint`,
+  so it could not stay in core. `MetricsConfigLoader`, previously `private[config]`, is public and
+  replaces it with the same result type: `MetricsConfigLoader.default()` (or `load(source)`). See the
+  [migration note](docs/reference/migration.md#slice-6-llm4s-observability-prometheus---prometheus-leaves-core).
 - **`llm4s-observability`: Langfuse, the trace collector and `CostTracker` leave `llm4s-core`** -
   the slice 6 carve ([#1133](https://github.com/llm4s/llm4s/issues/1133),
   [#1126](https://github.com/llm4s/llm4s/issues/1126)). The new module holds `LangfuseTracing`,
