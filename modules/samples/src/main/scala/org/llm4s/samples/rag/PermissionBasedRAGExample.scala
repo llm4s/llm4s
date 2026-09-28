@@ -24,7 +24,8 @@ import scala.util.chaining.*
  *
  * Prerequisites:
  * - PostgreSQL with pgvector extension
- * - OpenAI embeddings: OPENAI_API_KEY (bound to `llm4s.embeddings.openai.apiKey` by llm4s-openai)
+ * - OpenAI embeddings: `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` in the
+ *   samples' `application.local.conf` (docs/getting-started/configuration.md#running-the-samples)
  *
  * Usage:
  *   # Start PostgreSQL with pgvector

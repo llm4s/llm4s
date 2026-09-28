@@ -11,7 +11,7 @@ import org.scalatest.EitherValues
  *
  * Moved from core's `EmbeddingsConfigLoaderSpec` with the provider (#1132). `openai`
  * resolves through `ProviderRegistry.default`, so these also prove this module's
- * services entry is found. The `reference.conf` binding of `OPENAI_API_KEY` is covered
+ * services entry is found. That no `reference.conf` binds `OPENAI_API_KEY` is covered
  * by `OpenAIEmbeddingsSpec`; these sources carry no `reference.conf`.
  */
 class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValues {
@@ -107,10 +107,10 @@ class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with Ei
       result.isLeft shouldBe true
       val error = result.left.value
       error.message should include("apiKey")
-      // The key is read from the embeddings section, which llm4s-openai binds to
-      // OPENAI_API_KEY; the error names both.
+      // The key is read from the embeddings section and nowhere else. Nothing binds
+      // OPENAI_API_KEY to it, so the error does not name the variable.
       error.message should include("llm4s.embeddings.openai.apiKey")
-      error.message should include("OPENAI_API_KEY")
+      (error.message should not).include("OPENAI_API_KEY")
     }
 
     "fail with clear error when OpenAI embeddings model is missing in legacy mode" in {

@@ -130,13 +130,11 @@ Two things to know:
   a load of any other section. Up to 0.4.1 every section was validated on every load, so each
   environment had to fill in every section or ship a config without it. `Llm4sConfig.providers()`,
   which returns every section, still validates them all.
-- **OpenAI embeddings are the exception, since #1132's follow-up.** Their config is keyed by
-  provider id rather than a section name of yours, so `llm4s-openai`'s `reference.conf` binds
-  `llm4s.embeddings.openai.apiKey` to `OPENAI_API_KEY`; `EMBEDDING_MODEL=openai/<model>` and that
-  variable are enough. From 0.3.2 to 0.4.1 nothing bound it, and the docs said to add
-  `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` yourself - harmless to keep. The key no
-  longer falls back to `llm4s.openai.apiKey`, the pre-#903 chat key that nothing else read: if you
-  set that, set `llm4s.embeddings.openai.apiKey` instead.
+- **OpenAI embeddings do not see `OPENAI_API_KEY` either.** With
+  `EMBEDDING_MODEL=openai/<model>` (which *is* bound, by llm4s-core's `reference.conf`), add
+  `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}`. Since #1132's follow-up the key no longer
+  falls back to `llm4s.openai.apiKey`, the pre-#903 chat key that nothing else read: if you set
+  that, set `llm4s.embeddings.openai.apiKey` instead.
 
 Variables that `reference.conf` files do bind - `TRACING_MODE`, `LANGFUSE_*`, `OTEL_SERVICE_NAME`,
 `OTEL_EXPORTER_OTLP_ENDPOINT`, `EMBEDDING_MODEL`, `VOYAGE_API_KEY` and others - still work; see
@@ -672,8 +670,8 @@ Every configuration key and environment variable: `llm4s.providers.<name>` with
 `provider = "openai"`, `"azure"` or `"requesty"` and their `apiKey`, `baseUrl`, `organization`,
 `endpoint` and `apiVersion`; `llm4s.embeddings.openai.*`, `OPENAI_EMBEDDING_BASE_URL` and
 `OPENAI_EMBEDDING_MODEL`; and `llm4s.openai.apiKey` as the key OpenAI embeddings share with chat.
-(A later change dropped that `llm4s.openai.apiKey` fallback and bound
-`llm4s.embeddings.openai.apiKey` to `OPENAI_API_KEY` instead - see
+(A later change dropped that `llm4s.openai.apiKey` fallback: the key is
+`llm4s.embeddings.openai.apiKey` alone - see
 [From `LLM_MODEL` to named provider sections](#from-llm_model-to-named-provider-sections).)
 
 ## Slice 5: `llm4s-anthropic`
@@ -1133,8 +1131,7 @@ override val configSpec = EmbeddingConfigSpec(
 > Missing acme embeddings apiKey (llm4s.acme.apiKey / ACME_API_KEY)
 
 OpenAI was the case this was written for, reading `llm4s.openai.apiKey`; it no longer uses it
-(its key is `llm4s.embeddings.openai.apiKey`, bound to `OPENAI_API_KEY`), and no provider in this
-repository does.
+(its key is its own `llm4s.embeddings.openai.apiKey`), and no provider in this repository does.
 
 `apiKeyPath` is a *declaration*, not a read: `EmbeddingsConfigLoader` resolves it and hands
 the value back in the section before calling `buildConfig`. The provider owns the knowledge of

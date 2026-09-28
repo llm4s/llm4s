@@ -168,8 +168,8 @@ sbt "samples/runMain org.llm4s.samples.rag.BenchmarkExample --quick"
 ```
 
 The samples read `modules/samples/src/main/resources/application.conf`, whose only provider
-section is `ollama-local`. A chat section reads `OPENAI_API_KEY` only where it binds it, so add
-an OpenAI chat section to
+section is `ollama-local`. `OPENAI_API_KEY` is read only where a section binds it, so add an
+OpenAI chat section, and the embeddings key binding, to
 `modules/samples/src/main/resources/application.local.conf` (not committed; included by
 `application.conf`):
 
@@ -182,8 +182,7 @@ llm4s {
       apiKey   = ${?OPENAI_API_KEY}
     }
   }
-  # OpenAI embeddings need nothing here: llm4s-openai binds llm4s.embeddings.openai.apiKey
-  # to OPENAI_API_KEY itself
+  embeddings.openai.apiKey = ${?OPENAI_API_KEY}   # OpenAI embeddings do not read OPENAI_API_KEY by themselves
 }
 ```
 

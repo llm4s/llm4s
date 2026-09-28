@@ -286,7 +286,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 # Embeddings (llm4s-core selects; each provider module binds its own block)
 EMBEDDING_MODEL=openai/text-embedding-3-small  # provider/model
 VOYAGE_API_KEY=pa-...                          # llm4s-voyage
-OPENAI_API_KEY=sk-...                          # llm4s-openai, llm4s.embeddings.openai.apiKey only - chat sections bind their own
+# OpenAI embeddings' key is NOT bound: add llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}
 # OPENAI_EMBEDDING_BASE_URL / VOYAGE_EMBEDDING_BASE_URL / OLLAMA_EMBEDDING_BASE_URL override base URLs
 ```
 

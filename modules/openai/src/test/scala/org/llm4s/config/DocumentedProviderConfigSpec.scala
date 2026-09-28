@@ -139,24 +139,21 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
 
   "The documented OpenAI embeddings config" should {
 
-    // OpenAI embeddings read `llm4s.embeddings.openai.apiKey`, which llm4s-openai's
-    // reference.conf binds to OPENAI_API_KEY (#1132), so the docs need only select the model.
-    // These resolve against every reference.conf on the classpath, as a real app does.
-    val embeddings = "llm4s.embeddings.model = \"openai/text-embedding-3-small\""
+    // OpenAI embeddings read `llm4s.embeddings.openai.apiKey`. No reference.conf binds it to
+    // OPENAI_API_KEY - llm4s reads no provider API-key variable on its own - so the docs tell
+    // users to bind it themselves.
+    val embeddings =
+      """
+        |llm4s {
+        |  embeddings {
+        |    model = "openai/text-embedding-3-small"
+        |    openai.apiKey = ${?OPENAI_API_KEY}
+        |  }
+        |}
+        |""".stripMargin
 
-    def withReferenceAndEnv(hocon: String, env: Map[String, String]): ConfigSource =
-      ConfigSource.fromConfig(
-        ConfigFactory
-          .parseString(hocon)
-          .withFallback(ConfigFactory.parseResourcesAnySyntax("reference"))
-          .withFallback(ConfigFactory.parseMap(env.asJava))
-          .resolve(ConfigResolveOptions.defaults().setUseSystemEnvironment(false))
-      )
-
-    "take the API key from OPENAI_API_KEY with no binding of the user's own" in {
-      EmbeddingsConfigLoader.loadProvider(
-        withReferenceAndEnv(embeddings, Map("OPENAI_API_KEY" -> "sk-from-env"))
-      ) match
+    "take the API key from OPENAI_API_KEY once the section binds it" in {
+      EmbeddingsConfigLoader.loadProvider(withEnv(embeddings, Map("OPENAI_API_KEY" -> "sk-from-env"))) match
         case Right((provider, cfg)) =>
           provider shouldBe "openai"
           cfg.model shouldBe "text-embedding-3-small"
@@ -165,16 +162,10 @@ class DocumentedProviderConfigSpec extends AnyWordSpec with Matchers:
           fail(s"Expected an openai embedding config, got $other")
     }
 
-    "still accept the explicit binding earlier docs taught" in {
-      val explicit = embeddings + "\nllm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}"
+    "not see OPENAI_API_KEY when nothing binds it" in {
+      val unbound = "llm4s.embeddings.model = \"openai/text-embedding-3-small\""
       EmbeddingsConfigLoader
-        .loadProvider(withReferenceAndEnv(explicit, Map("OPENAI_API_KEY" -> "sk-from-env")))
-        .map(_._2.apiKey) shouldBe Right("sk-from-env")
-    }
-
-    "fail naming OPENAI_API_KEY when it is unset" in {
-      EmbeddingsConfigLoader.loadProvider(withReferenceAndEnv(embeddings, Map.empty)) match
-        case Left(err) => err.message should include("OPENAI_API_KEY")
-        case other     => fail(s"Expected a missing-key error, got $other")
+        .loadProvider(withEnv(unbound, Map("OPENAI_API_KEY" -> "sk-from-env")))
+        .isLeft shouldBe true
     }
   }

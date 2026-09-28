@@ -703,20 +703,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deprecated-alias and unknown-key warnings are logged. Source break: `defaultProviderName()`
   no longer takes a `ProviderRegistry`, since reading a name needs none; drop an explicit
   `(using registry)` argument ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
-- **OpenAI embeddings ignored `OPENAI_API_KEY`, though their error named it.** The key was read
-  from `llm4s.embeddings.openai.apiKey`, falling back to `llm4s.openai.apiKey` - the
+- **OpenAI embeddings' missing-key error named `OPENAI_API_KEY` and a key nothing reads.** The
+  key was read from `llm4s.embeddings.openai.apiKey`, falling back to `llm4s.openai.apiKey` - the
   single-provider chat key nothing has read or bound since
-  [#903](https://github.com/llm4s/llm4s/pull/903) - and nothing bound either, so
-  `EMBEDDING_MODEL=openai/...` with `OPENAI_API_KEY` set failed with "Missing openai embeddings
-  apiKey (llm4s.openai.apiKey / OPENAI_API_KEY)". `llm4s-openai`'s `reference.conf` now binds
-  `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}`, as `llm4s-voyage` binds `VOYAGE_API_KEY`:
-  embedding config is keyed by provider id, so a module can bind it, where a chat section's
-  instance name cannot be known. Chat sections are unchanged and still bind their own key. The
-  `llm4s.openai.apiKey` fallback is removed, and the error names
-  `llm4s.embeddings.openai.apiKey / OPENAI_API_KEY`. Behaviour change: a config that set only
-  `llm4s.openai.apiKey` must set `llm4s.embeddings.openai.apiKey` instead; one that set both it
-  and `OPENAI_API_KEY` to different values now uses the variable. An explicit
-  `llm4s.embeddings.openai.apiKey` in `application.conf` still wins
+  [#903](https://github.com/llm4s/llm4s/pull/903) - and the error said "Missing openai
+  embeddings apiKey (llm4s.openai.apiKey / OPENAI_API_KEY)", though llm4s reads no provider
+  API-key variable on its own. The fallback is removed, and the error names only
+  `llm4s.embeddings.openai.apiKey`, which the application binds with
+  `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` as before. Behaviour change: a config
+  that set only `llm4s.openai.apiKey` must set `llm4s.embeddings.openai.apiKey` instead
   ([#1132](https://github.com/llm4s/llm4s/issues/1132)).
 - **The missing-field error pointed at `llm4s.conf`**, a file nothing loads, and at
   `providers.<name>` rather than the section's real path. A named section missing a required

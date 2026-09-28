@@ -50,7 +50,8 @@ final case class EmbeddingProviderSection(
  * @param apiKeyPath     absolute config path this provider's key is read from when its own
  *                       section carries none, e.g. a credential shared with another client of
  *                       the same vendor, so users set it once. None of the project's own
- *                       providers uses it: OpenAI's key is bound in its own section. This is a ''declaration'', not a read: `org.llm4s.config` resolves it
+ *                       providers uses it: OpenAI's key is its own section's `apiKey`. This
+ *                       is a ''declaration'', not a read: `org.llm4s.config` resolves it
  *                       and hands the result back in the section, because reading configuration
  *                       outside that package is what the configuration boundary forbids.
  *                       Declaring it is also what makes the "missing key" error name the place

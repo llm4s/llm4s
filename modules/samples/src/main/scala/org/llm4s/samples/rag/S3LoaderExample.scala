@@ -23,7 +23,8 @@ import scala.util.chaining._
  *
  * Environment variables:
  * - AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (or use IAM roles)
- * - OpenAI embeddings: OPENAI_API_KEY (bound to `llm4s.embeddings.openai.apiKey` by llm4s-openai)
+ * - OpenAI embeddings: `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` in the
+ *   samples' `application.local.conf` (docs/getting-started/configuration.md#running-the-samples)
  */
 object S3LoaderExample {
   private val logger = LoggerFactory.getLogger(getClass)

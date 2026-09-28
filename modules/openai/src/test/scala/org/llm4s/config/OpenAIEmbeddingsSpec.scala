@@ -16,7 +16,7 @@ import pureconfig.ConfigSource
 import scala.jdk.CollectionConverters.*
 
 /**
- * OpenAI as an embedding provider: configuration, its API key binding,
+ * OpenAI as an embedding provider: configuration, its API key,
  * client construction and model dimensions.
  *
  * Gathered from the core specs that exercised it - `Llm4sConfigEmbeddingsSpec`,
@@ -160,24 +160,23 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
 
     val selectOpenAI = "llm4s.embeddings.model = \"openai/text-embedding-3-small\""
 
-    "come from OPENAI_API_KEY, which this module's reference.conf binds (#1132)" in {
-      // As llm4s-voyage binds VOYAGE_API_KEY: embedding config is keyed by provider id, so the
-      // module can bind the key. Until #1132 nothing did, though the error named the variable.
+    "not be read from OPENAI_API_KEY by llm4s itself" in {
+      // llm4s reads no provider API-key variable on its own: with only the reference.conf files
+      // on the classpath, a set OPENAI_API_KEY leaves the key missing.
+      EmbeddingsConfigLoader
+        .loadProvider(withReference(selectOpenAI, Map("OPENAI_API_KEY" -> "sk-from-env")))
+        .left
+        .value
+        .message should include("Missing openai embeddings apiKey")
+    }
+
+    "come from OPENAI_API_KEY once the application binds it" in {
+      val hocon = selectOpenAI + "\nllm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}"
       val (provider, config) =
-        EmbeddingsConfigLoader
-          .loadProvider(withReference(selectOpenAI, Map("OPENAI_API_KEY" -> "sk-from-env")))
-          .value
+        EmbeddingsConfigLoader.loadProvider(withReference(hocon, Map("OPENAI_API_KEY" -> "sk-from-env"))).value
 
       provider shouldBe "openai"
       config.apiKey shouldBe "sk-from-env"
-    }
-
-    "lose to a key set in the section itself" in {
-      val hocon = selectOpenAI + "\nllm4s.embeddings.openai.apiKey = \"sk-embeddings-only\""
-      val (_, config) =
-        EmbeddingsConfigLoader.loadProvider(withReference(hocon, Map("OPENAI_API_KEY" -> "sk-from-env"))).value
-
-      config.apiKey shouldBe "sk-embeddings-only"
     }
 
     "not fall back to llm4s.openai.apiKey, which nothing else reads (#1132)" in {
@@ -192,11 +191,12 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       error should include("Missing openai embeddings apiKey")
     }
 
-    "be reported against the section key and the variable bound to it" in {
+    "be reported against the section key alone" in {
       val error = EmbeddingsConfigLoader.loadProvider(withReference(selectOpenAI, Map.empty)).left.value.message
 
       error should include("llm4s.embeddings.openai.apiKey")
-      error should include("OPENAI_API_KEY")
+      // Neither the variable, which nothing binds, nor the removed fallback path.
+      (error should not).include("OPENAI_API_KEY")
       (error should not).include("llm4s.openai.apiKey")
     }
   }
