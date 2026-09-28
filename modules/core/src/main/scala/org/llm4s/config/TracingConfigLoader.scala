@@ -5,7 +5,10 @@ import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ LangfuseConfig, TracingSettings }
 import org.llm4s.trace.TracingMode
 import org.llm4s.types.Result
+import com.typesafe.config.{ ConfigObject, ConfigRenderOptions, ConfigUtil, ConfigValue, ConfigValueType }
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
+
+import scala.jdk.CollectionConverters._
 
 /**
  * Internal loader that builds [[org.llm4s.llmconnect.config.TracingSettings]]
@@ -13,7 +16,9 @@ import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
  *
  * Reads `llm4s.tracing.mode` to select the tracing backend (`langfuse`,
  * `opentelemetry`, `console`, `none`, or another backend's own mode), then populates the corresponding
- * backend configuration (Langfuse keys/URL, OpenTelemetry endpoint, etc.).
+ * backend configuration (Langfuse keys/URL, OpenTelemetry endpoint, etc.), and
+ * copies the selected mode's own block, `llm4s.tracing.<mode>`, into
+ * `TracingSettings.extras` for a backend outside core.
  * When variables are absent, sensible defaults are applied (e.g. console
  * mode, localhost OTLP endpoint).
  *
@@ -79,7 +84,27 @@ private[config] object TracingConfigLoader {
         ConfigurationError(s"Failed to load llm4s tracing config via PureConfig: $msg")
       }
       .map(buildTracingSettings)
+      .map(settings => settings.copy(extras = modeExtras(source, settings.mode)))
   }
+
+  /**
+   * The selected mode's own block, `llm4s.tracing.<mode>`, flattened to strings: what a
+   * [[org.llm4s.trace.spi.TracingBackend]] outside core reads its settings from. Only the
+   * selected mode's block is read, so a malformed block for another backend never matters.
+   */
+  private def modeExtras(source: ConfigSource, mode: TracingMode): Map[String, String] = {
+    // Quoted, so a mode name containing a dot is one key rather than a nested path.
+    val path = ConfigUtil.joinPath("llm4s", "tracing", mode.name)
+    source.at(path).value() match {
+      case Right(block: ConfigObject) =>
+        block.toConfig.entrySet().asScala.map(e => e.getKey -> render(e.getValue)).toMap
+      case _ => Map.empty
+    }
+  }
+
+  private def render(value: ConfigValue): String =
+    if (value.valueType == ConfigValueType.STRING) value.unwrapped.toString
+    else value.render(ConfigRenderOptions.concise())
 
   private def buildTracingSettings(root: TracingRoot): TracingSettings = {
     val tracing = root.tracing.getOrElse(TracingSection(None, None, None))

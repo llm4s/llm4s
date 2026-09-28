@@ -812,12 +812,12 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
   .settings(
     name := "llm4s-observability-otel",
     commonSettings,
-    // Measured 0.00% statement coverage (`sbt coverage traceOpentelemetry/test
-    // traceOpentelemetry/coverageReport`): the module has no in-module tests at all, its
-    // only suite is modules/it/.../OpenTelemetryTracingSpec, which needs a live collector.
-    // Floor is the measured value rounded down to the nearest 5, i.e. 0 - measurement stays
-    // ON so the number is visible, and the floor ratchets up as soon as unit tests land here.
-    coverageFloor(0),
+    // Measured 29.20% statement coverage (`sbt coverage traceOpentelemetry/test
+    // traceOpentelemetry/coverageReport`) from its one in-module suite,
+    // OpenTelemetryTracingBackendSpec (#1133), which covers the backend's registration and
+    // startup; span export is exercised by modules/it/.../OpenTelemetryTracingSpec, which
+    // this number does not include. Floor is the measured value rounded down to the nearest 5.
+    coverageFloor(25),
     libraryDependencies ++= Seq(
       Deps.opentelemetryApi,
       Deps.opentelemetrySdk,

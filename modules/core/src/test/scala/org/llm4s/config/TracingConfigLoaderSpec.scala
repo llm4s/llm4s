@@ -351,4 +351,68 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
       result.left.value.message should include("PureConfig")
     }
   }
+
+  // --------------------------------------------------------------------------
+  // A backend's own block: TracingSettings.extras
+  // --------------------------------------------------------------------------
+
+  "TracingConfigLoader extras" should {
+
+    "carry the selected mode's block, flattened to strings" in {
+      val hocon =
+        """
+          |llm4s.tracing {
+          |  mode = "datadog"
+          |  datadog {
+          |    site     = "datadoghq.eu"
+          |    apiKey   = "dd-secret"
+          |    sampling = 0.5
+          |    tags { team = "ml" }
+          |    hosts    = ["a", "b"]
+          |  }
+          |}
+          |""".stripMargin
+
+      val settings = TracingConfigLoader.load(ConfigSource.string(hocon)).value
+
+      settings.mode shouldBe TracingMode.Named("datadog")
+      settings.extras shouldBe Map(
+        "site"      -> "datadoghq.eu",
+        "apiKey"    -> "dd-secret",
+        "sampling"  -> "0.5",
+        "tags.team" -> "ml",
+        "hosts"     -> """["a","b"]"""
+      )
+    }
+
+    "read only the selected mode's block" in {
+      val hocon =
+        """
+          |llm4s.tracing {
+          |  mode = "datadog"
+          |  datadog { site = "datadoghq.eu" }
+          |  honeycomb { dataset = "other" }
+          |}
+          |""".stripMargin
+
+      TracingConfigLoader.load(ConfigSource.string(hocon)).value.extras shouldBe Map("site" -> "datadoghq.eu")
+    }
+
+    "be empty when the selected mode has no block, or its key is not an object" in {
+      val noBlock = "llm4s.tracing.mode = \"datadog\""
+      val scalar  = "llm4s.tracing { mode = \"datadog\", datadog = \"on\" }"
+
+      TracingConfigLoader.load(ConfigSource.string(noBlock)).value.extras shouldBe empty
+      TracingConfigLoader.load(ConfigSource.string(scalar)).value.extras shouldBe empty
+      TracingConfigLoader.load(ConfigSource.string("llm4s {}")).value.extras shouldBe empty
+    }
+
+    "redact the extras values in toString" in {
+      val hocon = "llm4s.tracing { mode = \"datadog\", datadog.apiKey = \"dd-secret\" }"
+      val shown = TracingConfigLoader.load(ConfigSource.string(hocon)).value.toString
+
+      shown should include("apiKey -> ***")
+      (shown should not).include("dd-secret")
+    }
+  }
 }

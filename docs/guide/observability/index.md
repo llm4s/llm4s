@@ -135,6 +135,7 @@ A backend is a `TracingBackend` - the extension point `llm4s-observability-otel`
 one needs no change to llm4s:
 
 ```scala
+import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.trace.{ Tracing, TracingMode }
 import org.llm4s.trace.spi.TracingBackend
@@ -143,7 +144,23 @@ import org.llm4s.types.Result
 // A class with a public no-arg constructor - not an object: ServiceLoader instantiates it
 final class DatadogTracingBackend extends TracingBackend:
   val mode: TracingMode = TracingMode.Named("datadog")
-  def create(settings: TracingSettings): Result[Tracing] = Right(new DatadogTracing())
+  def create(settings: TracingSettings): Result[Tracing] =
+    settings.extras.get("apiKey") match
+      case Some(key) => Right(new DatadogTracing(key, settings.extras.getOrElse("site", "datadoghq.com")))
+      case None      => Left(ConfigurationError("llm4s.tracing.datadog.apiKey is not set"))
+```
+
+The backend's settings live under `llm4s.tracing.<mode>`, and it reads them from
+`settings.extras`: that block for the selected mode, flattened to strings keyed by path within it
+(`site`, `tags.team`). Only the selected mode's block is read. Ship the defaults and variable
+bindings in the backend module's own `reference.conf`, which HOCON merges with the application's:
+
+```hocon
+llm4s.tracing.datadog {
+  site   = "datadoghq.com"
+  site   = ${?DD_SITE}
+  apiKey = ${?DD_API_KEY}
+}
 ```
 
 Declare it in `src/main/resources/META-INF/services/org.llm4s.trace.spi.TracingBackend`:

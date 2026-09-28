@@ -73,7 +73,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   third-party backend is selected by `TRACING_MODE=<name>` with no edit to core, and
   `Tracing.fromSettings` returns a missing or failing backend as an error where `Tracing.create`
   logs it and falls back to `NoOpTracing`. `TracingBackends.of` / `withBackend` register a backend
-  explicitly.
+  explicitly. A backend reads its own settings from `TracingSettings.extras`: the block
+  `llm4s.tracing.<mode>` for the selected mode, flattened to strings, with defaults in the
+  backend module's `reference.conf` - as provider descriptors read `NamedProviderConfig.extras`.
 
   Source breaks: `Tracing.traceAgentState(AgentState)` is removed - trace
   `state.toTraceEvent` (a `TraceEvent.AgentStateUpdated`, which gains a `messages` field before

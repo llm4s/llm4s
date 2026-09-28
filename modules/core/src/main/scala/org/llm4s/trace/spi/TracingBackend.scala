@@ -19,8 +19,15 @@ import org.llm4s.types.Result
  * {{{
  * class DatadogTracingBackend extends TracingBackend:
  *   val mode: TracingMode = TracingMode.Named("datadog")
- *   def create(settings: TracingSettings): Result[Tracing] = Right(new DatadogTracing(...))
+ *   def create(settings: TracingSettings): Result[Tracing] =
+ *     settings.extras.get("apiKey").toRight(ConfigurationError("llm4s.tracing.datadog.apiKey is not set"))
+ *       .map(new DatadogTracing(_))
  * }}}
+ *
+ * A backend's settings live under `llm4s.tracing.<mode>` and reach it as
+ * `settings.extras`: that block for the selected mode, flattened to strings.
+ * Ship their defaults and `${?VAR}` bindings in the backend module's own
+ * `reference.conf`.
  *
  * Declare the class in `META-INF/services/org.llm4s.trace.spi.TracingBackend`
  * and `TRACING_MODE=datadog` selects it. A backend can also be registered

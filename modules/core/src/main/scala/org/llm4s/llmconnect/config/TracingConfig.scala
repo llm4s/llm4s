@@ -60,15 +60,28 @@ case class OpenTelemetryConfig(
  * e.g. when `mode = TracingMode.Langfuse`, `openTelemetry` is ignored.
  *
  * A backend registered through [[org.llm4s.trace.spi.TracingBackend]] receives
- * the whole of these settings from `Tracing.fromSettings`.
+ * the whole of these settings from `Tracing.fromSettings`. A backend outside core
+ * reads its own keys from `extras`: the block `llm4s.tracing.<mode>` for the
+ * selected mode, whose defaults the backend's module ships in its own
+ * `reference.conf` - the arrangement provider descriptors have with
+ * `NamedProviderConfig.extras`.
+ *
+ * `toString` redacts the `extras` values, which may be credentials.
  *
  * @param mode          selects the tracing backend (`Langfuse`, `OpenTelemetry`, `Console`, `NoOp`,
  *                      or `Named` for a backend outside core)
  * @param langfuse      Langfuse connection details; only used when `mode = TracingMode.Langfuse`
  * @param openTelemetry OpenTelemetry collector details; only used when `mode = TracingMode.OpenTelemetry`
+ * @param extras        every value under `llm4s.tracing.<mode>` for the selected mode, as a string,
+ *                      keyed by its path within that block (`site`, `tags.team`); a list or object
+ *                      value is rendered as HOCON. Empty when the block is absent.
  */
 case class TracingSettings(
   mode: TracingMode,
   langfuse: LangfuseConfig,
-  openTelemetry: OpenTelemetryConfig = OpenTelemetryConfig()
-)
+  openTelemetry: OpenTelemetryConfig = OpenTelemetryConfig(),
+  extras: Map[String, String] = Map.empty
+) {
+  override def toString: String =
+    s"TracingSettings($mode,$langfuse,$openTelemetry,${extras.keys.map(k => s"$k -> ***").mkString("Map(", ", ", ")")})"
+}
