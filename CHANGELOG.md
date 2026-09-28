@@ -104,6 +104,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **llm4s artifacts no longer choose your logging backend** - found by the slice 6 spine audit
+  ([#1133](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5878475544)). Every published
+  module declared `logback-classic` and the `log4j-to-slf4j` bridge at compile scope, so depending
+  on llm4s put logback on the classpath - a second backend for an application on log4j2, and a
+  conflict with `log4j-core`. They now declare only `slf4j-api` (2.0.17); logback and the bridge
+  are test-scoped, and added only to the unpublished samples, workspace runner, config-policy CLI
+  and benchmarks. Also removed: `monocle-core` and `monocle-macro`, declared on every module and
+  imported by none, and `commons-io`, declared by `llm4s-core` and no longer used by it. `fansi` is
+  declared by `llm4s-core` alone, for `assistant`, instead of by every module.
+
+  Behaviour: an application with no SLF4J backend of its own gets SLF4J's no-op logger and its
+  one-line "no providers were found" warning instead of logback's default console output; add
+  `"ch.qos.logback" % "logback-classic"` (or any SLF4J 2 backend) to keep log output. See the
+  [migration note](docs/reference/migration.md#llm4s-no-longer-brings-a-logging-backend).
 - **`llm4s-observability-prometheus`: Prometheus leaves `llm4s-core`** - the second slice 6 carve
   ([#1133](https://github.com/llm4s/llm4s/issues/1133), decisions D3 and D4). `PrometheusMetrics`,
   `PrometheusEndpoint` and `MetricsConfigLoader` move, package names unchanged, to a new module that

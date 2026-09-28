@@ -8,8 +8,8 @@ object Versions {
   val cats                    = "2.13.0"
   val upickle                 = "4.4.3"
   val logback                 = "1.5.34"
+  val slf4j                   = "2.0.17"
   val log4j                   = "2.26.0"
-  val monocle                 = "3.3.0"
   val termflow                = "0.4.0"
   val scalatest               = "3.2.20"
   val scalamock               = "7.5.5"
@@ -29,7 +29,6 @@ object Versions {
   val websocket  = "1.6.0"
   val ujson      = "4.4.3"
   val pdfbox     = "3.0.7"
-  val commonsIO  = "2.22.0"
   val tika       = "3.3.1"
   val poi        = "5.5.1"
   val jsoup      = "1.22.2"
@@ -58,9 +57,8 @@ object Deps {
   val upickle                 = "com.lihaoyi"             %% "upickle"         % Versions.upickle
   val logback                 = "ch.qos.logback"           % "logback-classic" % Versions.logback
   val log4jToSlf4j            = "org.apache.logging.log4j" % "log4j-to-slf4j"  % Versions.log4j
+  val slf4jApi                = "org.slf4j"                % "slf4j-api"       % Versions.slf4j
   val termflow                = "org.llm4s"               %% "termflow"        % Versions.termflow
-  val monocleCore             = "dev.optics"              %% "monocle-core"    % Versions.monocle
-  val monocleMacro            = "dev.optics"              %% "monocle-macro"   % Versions.monocle
   val scalatest               = "org.scalatest"           %% "scalatest"       % Versions.scalatest
   val scalamock               = "org.scalamock"           %% "scalamock"       % Versions.scalamock
   val scalatestplusScalacheck = "org.scalatestplus"       %% "scalacheck-1-18" % Versions.scalatestplusScalacheck
@@ -77,7 +75,6 @@ object Deps {
   val websocket  = "org.java-websocket" % "Java-WebSocket" % Versions.websocket
   val ujson      = "com.lihaoyi"       %% "ujson"          % Versions.ujson
   val pdfbox     = "org.apache.pdfbox"  % "pdfbox"         % Versions.pdfbox
-  val commonsIO  = "commons-io"         % "commons-io"     % Versions.commonsIO
   val tika       = "org.apache.tika"    % "tika-core"      % Versions.tika
   val poi        = "org.apache.poi"     % "poi-ooxml"      % Versions.poi
   val jsoup      = "org.jsoup"          % "jsoup"          % Versions.jsoup

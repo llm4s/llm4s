@@ -125,21 +125,30 @@ lazy val commonSettings = Seq(
   // Disable test Scaladoc generation during publish (not needed, saves memory in CI)
   Test / packageDoc / publishArtifact := false,
   Test / doc / sources                := Seq.empty,
+  // Published modules log through `slf4j-api` only. Choosing a logging backend is the
+  // application's decision: `logback-classic` and the `log4j-to-slf4j` bridge used to be compile
+  // dependencies here, so every llm4s artifact put them on its users' classpath - a second
+  // backend for an application on log4j2, and a conflict with `log4j-core` (#1133). They are
+  // test-scoped here, for test output and the specs that attach a logback appender, and
+  // `appLogging` adds them to the unpublished applications. `monocle` (imported nowhere) and
+  // `fansi` (only core's `assistant` uses it) were dropped from this list at the same time.
   libraryDependencies ++= Seq(
     Deps.cats,
     Deps.upickle,
-    Deps.logback,
-    Deps.log4jToSlf4j,
-    Deps.monocleCore,
-    Deps.monocleMacro,
+    Deps.slf4jApi,
     Deps.scalatest               % Test,
     Deps.scalamock               % Test,
     Deps.scalatestplusScalacheck % Test,
-    Deps.fansi,
+    Deps.logback                 % Test,
+    Deps.log4jToSlf4j            % Test,
     Deps.config,
     Deps.pureConfig
   )
 )
+
+// The logging backend for the projects that are applications rather than libraries - samples,
+// the workspace runner, the config-policy CLI and the benchmarks. None of them is published.
+lazy val appLogging = libraryDependencies ++= Seq(Deps.logback, Deps.log4jToSlf4j)
 
 // `Deps.postgres`, `Deps.sqlite` and `Deps.hikariCP` used to live in `commonSettings`, which
 // put a JDBC driver and a connection pool on every module's classpath - including modules
@@ -327,7 +336,8 @@ lazy val core = (project in file("modules/core"))
       Deps.scalatest % Test,
       Deps.scalamock % Test,
       Deps.ujson,
-      Deps.commonsIO,
+      // For `assistant.ConsoleInterface`, the only user of fansi.
+      Deps.fansi,
       Deps.config
     )
   )
@@ -537,8 +547,7 @@ lazy val image = (project in file("modules/image"))
     libraryDependencies ++= Seq(
       Deps.ujson,
       Deps.scalatest % Test,
-      Deps.scalamock % Test,
-      Deps.logback   % Test
+      Deps.scalamock % Test
     )
   )
 
@@ -766,6 +775,7 @@ lazy val workspaceRunner = (project in file("modules/workspace/workspaceRunner")
       Deps.cask,
       Deps.config
     ),
+    appLogging,
     publish / skip := true,
     // Not measured: Docker entry point, excluded via ThisBuild / coverageExcludedPackages
     // (org.llm4s.runner.*) and exercised only by containerised integration tests.
@@ -800,7 +810,8 @@ lazy val samples = (project in file("modules//samples"))
     // Not measured: unpublished example code, excluded via ThisBuild / coverageExcludedPackages
     // (org.llm4s.samples.*). Samples are compile-checked, not covered.
     coverageDisabled,
-    libraryDependencies += Deps.termflow
+    libraryDependencies += Deps.termflow,
+    appLogging
   )
 
 lazy val configPolicy = (project in file("modules/config-policy"))
@@ -825,6 +836,7 @@ lazy val configPolicy = (project in file("modules/config-policy"))
     run / baseDirectory := (LocalRootProject / baseDirectory).value,
     // Both engines compile here; Deps.config is also available transitively via core.
     libraryDependencies += Deps.config,
+    appLogging,
     Compile / mainClass := Some("org.llm4s.configpolicy.CheckPolicies")
   )
 
@@ -1085,6 +1097,7 @@ lazy val benchmarks = (project in file("modules/benchmarks"))
     // 100, which encodes exactly that policy - a new benchmark must be added to the smoke
     // test. (Codecov ignores modules/benchmarks; this is a build-side gate only.)
     coverageFloor(100),
+    appLogging,
     libraryDependencies ++= Seq(
       Deps.scalatest % Test
     )

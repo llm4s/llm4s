@@ -1,5 +1,28 @@
 # Migration Guide
 
+## llm4s no longer brings a logging backend
+
+Not in a release yet; found by the slice 6 spine audit
+([#1133](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5878475544)).
+
+Every llm4s module used to declare `logback-classic` and `log4j-to-slf4j` as compile
+dependencies, so they reached your classpath with llm4s. Libraries should leave that choice to the
+application, and the published modules now declare only `slf4j-api`.
+
+- **If you already configure logging** (your own logback, log4j2 via `log4j-slf4j2-impl`, or
+  another SLF4J 2 backend), nothing changes - except that llm4s no longer adds a second backend
+  or a bridge that clashes with `log4j-core`.
+- **If you relied on the logback llm4s brought**, declare it yourself; without a backend, SLF4J
+  logs nothing and prints one "no SLF4J providers were found" warning:
+
+  ```scala
+  libraryDependencies += "ch.qos.logback" % "logback-classic" % "1.5.34"
+  ```
+
+- **If you used Monocle, commons-io or fansi through llm4s**, declare them yourself: Monocle and
+  commons-io are no longer dependencies of any llm4s module, and fansi comes only with
+  `llm4s-core`.
+
 ## A failed read no longer deletes or clears indexed documents
 
 Follow-up to [#1236](https://github.com/llm4s/llm4s/pull/1236); not in a release yet.
