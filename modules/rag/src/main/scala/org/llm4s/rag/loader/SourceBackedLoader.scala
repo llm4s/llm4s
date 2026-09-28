@@ -45,7 +45,8 @@ final case class SourceBackedLoader(
         case Right(ref) =>
           loadDocument(ref)
         case Left(err) =>
-          Iterator(LoadResult.failure("list-error", err))
+          // A listing error is not one failed document: what the source holds is unknown.
+          Iterator(LoadResult.listingFailure(source.description, err))
       }
     }
 

@@ -276,8 +276,8 @@ class DocumentLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
     val results = loader.load().toList
 
     (results should have).length(1)
-    results.head shouldBe a[LoadResult.Failure]
-    results.head.asInstanceOf[LoadResult.Failure].error.message should include("not found")
+    results.head shouldBe a[LoadResult.ListingFailure]
+    results.head.asInstanceOf[LoadResult.ListingFailure].error.message should include("not found")
   }
 
   it should "fail when path is a file" in {
@@ -285,8 +285,8 @@ class DocumentLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
     val results = loader.load().toList
 
     (results should have).length(1)
-    results.head shouldBe a[LoadResult.Failure]
-    results.head.asInstanceOf[LoadResult.Failure].error.message should include("Not a directory")
+    results.head shouldBe a[LoadResult.ListingFailure]
+    results.head.asInstanceOf[LoadResult.ListingFailure].error.message should include("Not a directory")
   }
 
   it should "load files from directory" in {

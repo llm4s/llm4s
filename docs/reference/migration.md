@@ -1,5 +1,32 @@
 # Migration Guide
 
+## A failed listing fails the sync
+
+[#1231](https://github.com/llm4s/llm4s/pull/1231); not in a release yet.
+
+A document loader that cannot enumerate its documents - an S3 listing with no credentials, a
+missing bucket or access denied, a `DirectoryLoader` path that does not exist - now yields the
+new `LoadResult.ListingFailure(source, error)` instead of a `LoadResult.Failure`. `RAG.sync`,
+`ingest` and `refresh`, and their async forms, return its error as the `Left`. Previously
+`sync` returned `Right` with 0 documents and then deleted every document it had indexed from
+that source, because it had seen none of them.
+
+- **Code that matches on `LoadResult` needs a `ListingFailure` case**; an exhaustive match
+  without one warns, and fails the build under `-Werror`.
+- **`RAG.ingest` no longer counts a listing error as one failed document** in `LoadStats`: it
+  returns it as the `Left`, whether or not `failFast` is set. Code that read
+  `stats.errors` for `"list-error"` should handle the `Left` instead.
+- **`SourceBackedLoader` names the source**, not `"list-error"`: the `ListingFailure`'s
+  `source` is the `DocumentSource`'s `description`, e.g. `S3(s3://bucket/prefix)`.
+- A `sync` that fails part-way through a listing (a later S3 page) keeps the documents it
+  synced before the failure and deletes nothing; re-running it once the source is reachable
+  completes the sync. `refresh` clears the index before reading the loader, so a listing
+  failure leaves it empty - but now says so.
+
+A `DocumentSource` reports a listing error by yielding a `Left` from `listDocuments()`, as
+before; `SourceBackedLoader` does the rest. A custom `DocumentLoader` whose enumeration fails
+should return `LoadResult.listingFailure(source, error)`.
+
 ## Vendor credentials: a shared API key per provider
 
 [#1132](https://github.com/llm4s/llm4s/issues/1132), part of the modularisation programme

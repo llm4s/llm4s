@@ -722,6 +722,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **An S3 listing that failed was reported as a successful sync of 0 documents, and could wipe
+  the index** ([#1231](https://github.com/llm4s/llm4s/pull/1231)). With no AWS credentials, a
+  missing bucket or access denied, `S3DocumentSource` returned the listing error, but
+  `SourceBackedLoader` turned it into an ordinary per-document `LoadResult.Failure("list-error",
+  ...)`, which `RAG.sync` skipped like any other failure - so `sync` returned
+  `Right(SyncStats(0, 0, 0, 0))`, and then, having seen no documents, deleted every document it
+  had previously indexed from that source. A new `LoadResult.ListingFailure(source, error)` now
+  marks "the loader could not enumerate its documents", distinct from one document failing to
+  read or extract. `SourceBackedLoader` emits it for any source's listing error, including one
+  on a later S3 page, and `DirectoryLoader` for a missing directory or a path that is not one.
+  `RAG.sync` stops at it, returns its error as the `Left` and deletes nothing; `RAG.ingest` and
+  `RAG.refresh` return it as the `Left` whatever `failFast` says, as do `ingestAsync`,
+  `syncAsync` and `refreshAsync`. An empty bucket still syncs with 0 documents, and a single
+  unreadable object is still skipped. `S3LoaderExample` now reports the failure and stops,
+  instead of querying an empty index. See the
+  [migration note](docs/reference/migration.md#a-failed-listing-fails-the-sync).
 - **The docs taught a configuration route that no longer exists.** Since
   [#903](https://github.com/llm4s/llm4s/pull/903) (0.3.2) nothing in llm4s reads `LLM_MODEL` or a
   provider's API-key variable, yet the README, CLAUDE.md, every getting-started page and most

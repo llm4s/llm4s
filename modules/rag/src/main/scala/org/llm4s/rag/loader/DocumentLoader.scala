@@ -112,6 +112,27 @@ object LoadResult {
   }
 
   /**
+   * The loader could not enumerate its documents: an S3 listing that failed (no credentials,
+   * missing bucket, access denied), a directory that does not exist.
+   *
+   * Unlike [[Failure]], this is not about one document. The set of documents the loader would
+   * have produced is unknown, so it cannot be counted as one failed document among successes:
+   * `RAG.ingest`, `RAG.sync` and `RAG.refresh` (and their async forms) return its error as a
+   * `Left`, and `sync` deletes nothing, rather than treat every indexed document as gone.
+   * A listing that fails part-way through (a later S3 page) is reported the same way, after
+   * the documents that were listed before it.
+   *
+   * @param source The source that could not be listed (e.g. `S3(s3://bucket/prefix)`, a path)
+   * @param error The error that occurred
+   */
+  final case class ListingFailure(
+    source: String,
+    error: LLMError
+  ) extends LoadResult {
+    def isSuccess: Boolean = false
+  }
+
+  /**
    * Document was intentionally skipped.
    *
    * @param source Identifier for the skipped source
@@ -129,6 +150,8 @@ object LoadResult {
   def success(doc: Document): LoadResult                   = Success(doc)
   def failure(source: String, error: LLMError): LoadResult = Failure(source, error)
   def skipped(source: String, reason: String): LoadResult  = Skipped(source, reason)
+
+  def listingFailure(source: String, error: LLMError): LoadResult = ListingFailure(source, error)
 }
 
 /**
@@ -175,6 +198,9 @@ object LoadStats {
       case LoadResult.Success(_) =>
         successful += 1
       case LoadResult.Failure(source, error, _) =>
+        failed += 1
+        errors += ((source, error))
+      case LoadResult.ListingFailure(source, error) =>
         failed += 1
         errors += ((source, error))
       case LoadResult.Skipped(_, _) =>

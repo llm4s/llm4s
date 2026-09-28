@@ -965,8 +965,21 @@ rag.sync(loader) match {
   case Right(stats) =>
     println(s"Added: ${stats.added}, Updated: ${stats.updated}")
   case Left(err) =>
+    // The bucket could not be listed: no credentials, missing bucket, access denied.
+    // Nothing was deleted from the index.
     println(s"Error: ${err.message}")
 }
+```
+
+A listing that fails - on the first page or a later one - is a `Left`, never a successful sync
+of 0 documents; an empty bucket is `Right` with 0. With no AWS credentials the example ends with:
+
+```text
+Sync failed: Failed to list S3 objects from s3://my-documents/docs/: Unable to load credentials from any of the providers in the chain ...
+Common issues:
+  - Check AWS credentials are configured
+  ...
+Skipping the example query: the index was not synced.
 ```
 
 [View source →](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/scala/org/llm4s/samples/rag/S3LoaderExample.scala)

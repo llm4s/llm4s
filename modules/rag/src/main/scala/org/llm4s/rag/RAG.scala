@@ -207,6 +207,10 @@ final class RAG private (
   /**
    * Ingest documents from a DocumentLoader.
    *
+   * A document that fails to load or ingest is counted in the returned [[LoadStats]] (or, with
+   * `failFast`, returned as the `Left`). A [[LoadResult.ListingFailure]] - the loader could not
+   * enumerate its documents at all - is always returned as the `Left`.
+   *
    * @param loader The document loader to ingest from
    * @return Loading statistics with success/failure counts
    */
@@ -217,11 +221,11 @@ final class RAG private (
       failed: Int = 0,
       skipped: Int = 0,
       errors: Seq[(String, org.llm4s.error.LLMError)] = Seq.empty,
-      failFastError: Option[org.llm4s.error.LLMError] = None
+      abortError: Option[org.llm4s.error.LLMError] = None
     )
 
     val finalState = loader.load().foldLeft(State()) { (state, result) =>
-      if (state.failFastError.isDefined) {
+      if (state.abortError.isDefined) {
         state // Already failed, skip remaining
       } else {
         val newTotal = state.totalAttempted + 1
@@ -240,7 +244,7 @@ final class RAG private (
                     errors = state.errors :+ (doc.id, error)
                   )
                   if (config.loadingConfig.failFast) {
-                    newState.copy(failFastError = Some(error))
+                    newState.copy(abortError = Some(error))
                   } else {
                     newState
                   }
@@ -254,18 +258,23 @@ final class RAG private (
               errors = state.errors :+ (source, error)
             )
             if (config.loadingConfig.failFast) {
-              newState.copy(failFastError = Some(error))
+              newState.copy(abortError = Some(error))
             } else {
               newState
             }
 
           case LoadResult.Skipped(_, _) =>
             state.copy(totalAttempted = newTotal, skipped = state.skipped + 1)
+
+          case LoadResult.ListingFailure(_, error) =>
+            // Not one failed document: what the loader holds is unknown, so ingest fails
+            // whatever `failFast` says, rather than report success over a partial listing.
+            state.copy(abortError = Some(error))
         }
       }
     }
 
-    finalState.failFastError match {
+    finalState.abortError match {
       case Some(error) => Left(error)
       case None =>
         Right(
@@ -289,18 +298,28 @@ final class RAG private (
    * - Deleted documents (removed from source)
    * - Unchanged documents (skipped)
    *
+   * If the loader reports a [[LoadResult.ListingFailure]] - it could not enumerate its
+   * documents, e.g. an S3 listing with no credentials or a missing bucket - sync stops there
+   * and returns that error, and deletes nothing: an unlistable source is not an empty one.
+   * Documents synced before the failure (earlier S3 pages) stay synced.
+   *
    * @param loader The document loader to sync with
-   * @return Sync statistics
+   * @return Sync statistics, or the listing error
    */
   def sync(loader: DocumentLoader): Result[SyncStats] = {
-    var added     = 0
-    var updated   = 0
-    var deleted   = 0
-    var unchanged = 0
-    val seenIds   = scala.collection.mutable.Set[String]()
+    var added                          = 0
+    var updated                        = 0
+    var deleted                        = 0
+    var unchanged                      = 0
+    val seenIds                        = scala.collection.mutable.Set[String]()
+    var listingError: Option[LLMError] = None
+    val results                        = loader.load()
 
-    // Process all documents from loader
-    loader.load().foreach {
+    // Process documents from the loader, stopping at a listing failure
+    while (listingError.isEmpty && results.hasNext) results.next() match {
+      case LoadResult.ListingFailure(_, error) =>
+        listingError = Some(error)
+
       case LoadResult.Success(doc) =>
         if (config.loadingConfig.skipEmptyDocuments && doc.content.trim.isEmpty) {
           // Skip empty
@@ -343,21 +362,28 @@ final class RAG private (
       // Skip failed/skipped documents
     }
 
-    // Handle deletions - documents in registry but not in loader
-    registry.allDocumentIds() match {
-      case Right(registeredIds) =>
-        val deletedIds = registeredIds -- seenIds
-        deletedIds.foreach { id =>
-          deleteDocumentChunks(id)
-          registry.unregister(id)
-          deleted += 1
+    listingError match {
+      case Some(error) =>
+        // seenIds is incomplete, so the deletion pass would remove documents that still exist
+        Left(error)
+
+      case None =>
+        // Handle deletions - documents in registry but not in loader
+        registry.allDocumentIds() match {
+          case Right(registeredIds) =>
+            val deletedIds = registeredIds -- seenIds
+            deletedIds.foreach { id =>
+              deleteDocumentChunks(id)
+              registry.unregister(id)
+              deleted += 1
+            }
+
+          case Left(_) =>
+          // Registry error - skip deletion check
         }
 
-      case Left(_) =>
-      // Registry error - skip deletion check
+        Right(SyncStats(added, updated, deleted, unchanged))
     }
-
-    Right(SyncStats(added, updated, deleted, unchanged))
   }
 
   /**
@@ -365,6 +391,9 @@ final class RAG private (
    *
    * Clears the registry and re-ingests all documents.
    * Use this when you want to ensure a clean slate.
+   *
+   * The index is cleared before the loader is read, so a [[LoadResult.ListingFailure]] leaves
+   * it empty; the listing error is returned as the `Left`, not reported as 0 documents added.
    *
    * @param loader The document loader to refresh from
    * @return Sync statistics (all as "added")
@@ -411,13 +440,28 @@ final class RAG private (
    * Processes documents in batches with configurable parallelism.
    * Uses the parallelism and batchSize settings from LoadingConfig.
    *
+   * As with [[ingest]], a [[LoadResult.ListingFailure]] is returned as the `Left`; as the
+   * results are collected first, nothing is ingested in that case.
+   *
    * @param loader The document loader to ingest from
    * @param ec Execution context for async operations
    * @return Future with loading statistics
    */
   def ingestAsync(loader: DocumentLoader)(implicit ec: ExecutionContext): Future[Result[LoadStats]] = {
     // Collect all results to enable parallel processing
-    val results   = loader.load().toSeq
+    val results = loader.load().toSeq
+    firstListingError(results) match {
+      case Some(error) => Future.successful(Left(error))
+      case None        => ingestResultsAsync(results)
+    }
+  }
+
+  private def firstListingError(results: Seq[LoadResult]): Option[LLMError] =
+    results.collectFirst { case LoadResult.ListingFailure(_, error) => error }
+
+  private def ingestResultsAsync(
+    results: Seq[LoadResult]
+  )(implicit ec: ExecutionContext): Future[Result[LoadStats]] = {
     val batchSize = config.loadingConfig.batchSize
 
     // Process each result asynchronously
@@ -435,6 +479,8 @@ final class RAG private (
                 }
               }
             case LoadResult.Failure(source, error, _) =>
+              ("failed", Some((source, error)))
+            case LoadResult.ListingFailure(source, error) => // ingestAsync returns these as the Left first
               ("failed", Some((source, error)))
             case LoadResult.Skipped(_, _) =>
               ("skipped", None)
@@ -493,13 +539,22 @@ final class RAG private (
    * Performs change detection in parallel, but applies updates sequentially
    * to avoid conflicts in the vector store.
    *
+   * As with [[sync]], a [[LoadResult.ListingFailure]] is returned as the `Left`; as the
+   * results are collected first, nothing is added, updated or deleted in that case.
+   *
    * @param loader The document loader to sync with
    * @param ec Execution context for async operations
    * @return Future with sync statistics
    */
   def syncAsync(loader: DocumentLoader)(implicit ec: ExecutionContext): Future[Result[SyncStats]] = {
-    // Collect all successful documents
-    val docs      = loader.load().collect { case LoadResult.Success(d) => d }.toSeq
+    val results = loader.load().toSeq
+    firstListingError(results) match {
+      case Some(error) => Future.successful(Left(error))
+      case None        => syncDocumentsAsync(results.collect { case LoadResult.Success(d) => d })
+    }
+  }
+
+  private def syncDocumentsAsync(docs: Seq[Document])(implicit ec: ExecutionContext): Future[Result[SyncStats]] = {
     val batchSize = config.loadingConfig.batchSize
 
     // Get registered IDs for deletion detection

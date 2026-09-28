@@ -85,10 +85,34 @@ final case class S3DocumentSource(
     builder.build()
   }
 
-  override def listDocuments(): Iterator[Result[DocumentRef]] = {
+  override def listDocuments(): Iterator[Result[DocumentRef]] = listDocumentsWith(client)
+
+  override def readDocument(ref: DocumentRef): Result[RawDocument] = readDocumentWith(client, ref)
+
+  override def readDocumentStream(ref: DocumentRef): Result[InputStream] = readDocumentStreamWith(client, ref)
+
+  override def getVersionInfo(ref: DocumentRef): Result[DocumentVersion] = getVersionInfoWith(client, ref)
+
+  /**
+   * This source's behaviour against a caller-supplied client, so tests can exercise listing,
+   * paging and failure handling against a fake `S3Client` instead of AWS.
+   */
+  private[s3] def usingClient(s3: S3Client): SyncableSource = {
+    val self = this
+    new SyncableSource {
+      override def listDocuments(): Iterator[Result[DocumentRef]]            = self.listDocumentsWith(s3)
+      override def readDocument(ref: DocumentRef): Result[RawDocument]       = self.readDocumentWith(s3, ref)
+      override def readDocumentStream(ref: DocumentRef): Result[InputStream] = self.readDocumentStreamWith(s3, ref)
+      override def getVersionInfo(ref: DocumentRef): Result[DocumentVersion] = self.getVersionInfoWith(s3, ref)
+      override def description: String                                       = self.description
+      override def estimatedCount: Option[Int]                               = self.estimatedCount
+    }
+  }
+
+  private def listDocumentsWith(s3: S3Client): Iterator[Result[DocumentRef]] = {
     logger.info(s"Listing documents from s3://$bucket/$prefix")
 
-    new S3ObjectIterator(client, bucket, prefix, extensions)
+    new S3ObjectIterator(s3, bucket, prefix, extensions)
       .map {
         case Right(s3Object) =>
           val key = s3Object.key()
@@ -100,7 +124,7 @@ final case class S3DocumentSource(
       }
   }
 
-  override def readDocument(ref: DocumentRef): Result[RawDocument] = {
+  private def readDocumentWith(s3: S3Client, ref: DocumentRef): Result[RawDocument] = {
     logger.debug(s"Reading document: ${ref.path}")
 
     Try {
@@ -110,7 +134,7 @@ final case class S3DocumentSource(
         .key(ref.path)
         .build()
 
-      val response: ResponseInputStream[GetObjectResponse] = client.getObject(request)
+      val response: ResponseInputStream[GetObjectResponse] = s3.getObject(request)
       try {
         val bytes = response.readAllBytes()
         RawDocument(ref, bytes)
@@ -125,7 +149,7 @@ final case class S3DocumentSource(
     }
   }
 
-  override def readDocumentStream(ref: DocumentRef): Result[InputStream] =
+  private def readDocumentStreamWith(s3: S3Client, ref: DocumentRef): Result[InputStream] =
     Try {
       val request = GetObjectRequest
         .builder()
@@ -133,7 +157,7 @@ final case class S3DocumentSource(
         .key(ref.path)
         .build()
 
-      client.getObject(request): InputStream
+      s3.getObject(request): InputStream
     } match {
       case Success(stream) => Right(stream)
       case Failure(ex) =>
@@ -141,7 +165,7 @@ final case class S3DocumentSource(
         Left(NetworkError(s"Failed to open S3 stream for ${ref.path}: ${ex.getMessage}", Some(ex), "s3"))
     }
 
-  override def getVersionInfo(ref: DocumentRef): Result[DocumentVersion] =
+  private def getVersionInfoWith(s3: S3Client, ref: DocumentRef): Result[DocumentVersion] =
     ref.toVersion match {
       case Some(version) => Right(version)
       case None          =>
@@ -155,7 +179,7 @@ final case class S3DocumentSource(
             .key(ref.path)
             .build()
 
-          val response = client.headObject(request)
+          val response = s3.headObject(request)
           DocumentVersion(
             contentHash = response.eTag().replace("\"", ""),
             timestamp = Option(response.lastModified()).map(_.toEpochMilli),
@@ -270,8 +294,10 @@ object S3DocumentSource {
 /**
  * Iterator over S3 objects with automatic pagination.
  *
- * Returns Result[S3Object] to handle S3 API failures gracefully instead of
- * throwing exceptions that would abort the entire load/sync operation.
+ * Returns Result[S3Object] rather than throwing. A failed ListObjectsV2 call - on the first
+ * page or a later one - ends the iteration with a single `Left`, after any objects from
+ * earlier pages; an empty bucket yields nothing at all. The two must stay distinguishable:
+ * a sync that took a failed listing for an empty bucket would delete every indexed document.
  */
 private class S3ObjectIterator(
   client: S3Client,
@@ -338,8 +364,10 @@ private class S3ObjectIterator(
         hasMore = response.isTruncated
 
       case Failure(ex) =>
-        // Log the error and store it to return as a Left on next iteration
-        logger.error(s"Failed to list S3 objects from s3://$bucket/$prefix: ${ex.getMessage}", ex)
+        // Store the error to return as a Left on the next iteration. The caller receives it
+        // (SourceBackedLoader turns it into a LoadResult.ListingFailure, which fails RAG.sync),
+        // so log it briefly here; the exception travels as the error's cause.
+        logger.warn(s"Failed to list S3 objects from s3://$bucket/$prefix: ${ex.getMessage}")
         pendingError = Some(
           NetworkError(
             s"Failed to list S3 objects from s3://$bucket/$prefix: ${ex.getMessage}",

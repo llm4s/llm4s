@@ -115,9 +115,10 @@ object DocumentLoaderExample extends App {
 
   val results = textLoader.load().toList
   val summary = results.groupBy {
-    case _: LoadResult.Success => "success"
-    case _: LoadResult.Failure => "failure"
-    case _: LoadResult.Skipped => "skipped"
+    case _: LoadResult.Success        => "success"
+    case _: LoadResult.Failure        => "failure"
+    case _: LoadResult.ListingFailure => "listing-failure"
+    case _: LoadResult.Skipped        => "skipped"
   }
 
   logger.info("   Results: {}", summary.map { case (k, v) => s"$k=${v.size}" }.mkString(", "))

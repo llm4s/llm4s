@@ -104,7 +104,8 @@ object S3LoaderExample {
                   })
     .tap(l => logger.info("Loader created: {}", l.description))
 
-    // Sync documents from S3
+    // Sync documents from S3. A bucket that cannot be listed (no credentials, missing bucket,
+    // access denied) is a Left - never a successful sync of 0 documents - and deletes nothing.
     logger.info("--- Syncing documents from S3 ---")
     rag.sync(loader) match {
       case Right(stats) =>
@@ -120,6 +121,7 @@ object S3LoaderExample {
         } else {
           logger.info("No changes detected since last sync.")
         }
+        runQuery(rag)
 
       case Left(err) =>
         logger.error("Sync failed: {}", err.message)
@@ -127,9 +129,15 @@ object S3LoaderExample {
         logger.error("  - Check AWS credentials are configured")
         logger.error("  - Verify the bucket exists and is accessible")
         logger.error("  - Check network connectivity to S3")
+        logger.error("Skipping the example query: the index was not synced.")
     }
 
-    // Example query (if RAG has documents)
+    logger.info("=" * 60)
+    logger.info("Example complete")
+    logger.info("=" * 60)
+  }
+
+  private def runQuery(rag: RAG): Unit = {
     logger.info("--- Example Query ---")
     rag.query("What topics are covered in the documents?", Some(3)) match {
       case Right(results) if results.nonEmpty =>
@@ -143,10 +151,6 @@ object S3LoaderExample {
       case Left(err) =>
         logger.error("Query failed: {}", err.message)
     }
-
-    logger.info("=" * 60)
-    logger.info("Example complete")
-    logger.info("=" * 60)
   }
 }
 

@@ -221,6 +221,21 @@ class RAGSyncAndBytesSpec extends AnyFlatSpec with Matchers {
     } finally rag.close()
   }
 
+  it should "fail, and delete nothing, when the loader cannot list its documents" in {
+    val rag = createMockRAG().toOption.get
+    try {
+      rag.sync(TextLoader(Seq(Document(id = "doc-1", content = "Content one.")))).map(_.added) shouldBe Right(1)
+
+      val result = rag.sync(DirectoryLoader("/nonexistent/llm4s-sync-dir"))
+      result.isLeft shouldBe true
+      result.left.toOption.get.message should include("Directory not found")
+
+      // doc-1 was not deleted by the failed sync
+      val again = rag.sync(TextLoader(Seq(Document(id = "doc-1", content = "Content one."))))
+      again shouldBe Right(SyncStats(added = 0, updated = 0, deleted = 0, unchanged = 1))
+    } finally rag.close()
+  }
+
   it should "handle mixed operations" in {
     val rag = createMockRAG().toOption.get
     try {

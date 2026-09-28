@@ -30,7 +30,7 @@ final case class DirectoryLoader(
 
     if (!dir.exists()) {
       return Iterator(
-        LoadResult.failure(
+        LoadResult.listingFailure(
           path.toString,
           ProcessingError("load", s"Directory not found: $path")
         )
@@ -39,7 +39,7 @@ final case class DirectoryLoader(
 
     if (!dir.isDirectory) {
       return Iterator(
-        LoadResult.failure(
+        LoadResult.listingFailure(
           path.toString,
           ProcessingError("load", s"Not a directory: $path")
         )
