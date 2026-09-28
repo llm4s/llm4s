@@ -236,6 +236,28 @@ class RAGSyncAndBytesSpec extends AnyFlatSpec with Matchers {
     } finally rag.close()
   }
 
+  it should "fail, and delete nothing, when the failing loader is wrapped in successesOnly or drop" in {
+    // successesOnly and drop filter results; a ListingFailure must survive both, or a failed
+    // listing looks like an empty source and the deletion pass wipes the index (#1236 review).
+    val wrappers = Seq[(String, DocumentLoader => DocumentLoader)](
+      "successesOnly" -> (l => DocumentLoaders.successesOnly(l)),
+      "drop(1)"       -> (l => DocumentLoaders.drop(l, 1))
+    )
+    wrappers.foreach { case (name, wrap) =>
+      withClue(s"$name: ") {
+        val rag = createMockRAG().toOption.get
+        try {
+          rag.sync(TextLoader(Seq(Document(id = "doc-1", content = "Content one.")))).map(_.added) shouldBe Right(1)
+
+          rag.sync(wrap(DirectoryLoader("/nonexistent/llm4s-sync-dir"))).isLeft shouldBe true
+
+          rag.sync(TextLoader(Seq(Document(id = "doc-1", content = "Content one.")))) shouldBe
+            Right(SyncStats(added = 0, updated = 0, deleted = 0, unchanged = 1))
+        } finally rag.close()
+      }
+    }
+  }
+
   it should "handle mixed operations" in {
     val rag = createMockRAG().toOption.get
     try {

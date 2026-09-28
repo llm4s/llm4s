@@ -114,6 +114,48 @@ class DocumentLoadersCombinatorsSpec extends AnyFlatSpec with Matchers {
     results shouldBe Seq("a", "b")
   }
 
+  it should "keep a ListingFailure, so a failed listing still reaches sync" in {
+    val listingFailure = LoadResult.listingFailure("S3(s3://b/p)", org.llm4s.error.NetworkError("denied", None, "s3"))
+    val loader = new DocumentLoader {
+      override def load(): Iterator[LoadResult] = Iterator(
+        LoadResult.success(simpleDoc("a", "listed before the failure")),
+        LoadResult.failure("bad", org.llm4s.error.ProcessingError("test", "err")),
+        listingFailure
+      )
+      override def description: String = "failing loader"
+    }
+
+    DocumentLoaders.successesOnly(loader).load().toSeq shouldBe Seq(
+      LoadResult.success(simpleDoc("a", "listed before the failure")),
+      listingFailure
+    )
+  }
+
+  "DocumentLoaders.drop" should "drop documents but never a ListingFailure" in {
+    val listingFailure =
+      LoadResult.listingFailure("dir", org.llm4s.error.ProcessingError("list", "Directory not found"))
+    val failingFirst = new DocumentLoader {
+      override def load(): Iterator[LoadResult] = Iterator(listingFailure)
+      override def description: String          = "fails before listing anything"
+    }
+    val failingLater = new DocumentLoader {
+      override def load(): Iterator[LoadResult] = Iterator(
+        LoadResult.success(simpleDoc("a", "one")),
+        LoadResult.success(simpleDoc("b", "two")),
+        listingFailure,
+        LoadResult.success(simpleDoc("c", "three"))
+      )
+      override def description: String = "fails part-way"
+    }
+
+    DocumentLoaders.drop(failingFirst, 1).load().toSeq shouldBe Seq(listingFailure)
+    DocumentLoaders.drop(failingLater, 1).load().toSeq shouldBe Seq(
+      LoadResult.success(simpleDoc("b", "two")),
+      listingFailure,
+      LoadResult.success(simpleDoc("c", "three"))
+    )
+  }
+
   // ==========================================================================
   // empty
   // ==========================================================================

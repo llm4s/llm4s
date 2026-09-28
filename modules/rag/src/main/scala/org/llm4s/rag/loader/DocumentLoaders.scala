@@ -50,11 +50,18 @@ object DocumentLoaders {
     }
 
   /**
-   * Create a loader that filters out failures/skips.
+   * Create a loader that filters out per-document failures and skips.
+   *
+   * A [[LoadResult.ListingFailure]] is kept: it says the set of documents is unknown, not that
+   * one document failed, and `RAG.sync` relies on seeing it - without it a failed listing looks
+   * like an empty source, and sync would delete everything it indexed from there.
    */
   def successesOnly(loader: DocumentLoader): DocumentLoader =
     new DocumentLoader {
-      def load(): Iterator[LoadResult] = loader.load().filter(_.isSuccess)
+      def load(): Iterator[LoadResult] = loader.load().filter {
+        case _: LoadResult.ListingFailure => true
+        case result                       => result.isSuccess
+      }
 
       def description: String = s"SuccessesOnly(${loader.description})"
     }
@@ -124,7 +131,19 @@ object DocumentLoaders {
    */
   def drop(loader: DocumentLoader, n: Int): DocumentLoader =
     new DocumentLoader {
-      def load(): Iterator[LoadResult]         = loader.load().drop(n)
+      // Drops the first `n` documents, never a ListingFailure: it is usually the first result,
+      // and dropping it would make a failed listing look empty to `RAG.sync` (see successesOnly).
+      def load(): Iterator[LoadResult] =
+        loader
+          .load()
+          .scanLeft((0, Option.empty[LoadResult])) { case ((dropped, _), result) =>
+            result match {
+              case failure: LoadResult.ListingFailure => (dropped, Some(failure))
+              case _ if dropped < n                   => (dropped + 1, None)
+              case _                                  => (dropped, Some(result))
+            }
+          }
+          .flatMap(_._2)
       override def estimatedCount: Option[Int] = loader.estimatedCount.map(c => math.max(0, c - n))
       def description: String                  = s"Drop($n, ${loader.description})"
     }
