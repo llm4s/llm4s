@@ -29,7 +29,7 @@ class PgVectorTableSchemaSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "add created_at to an existing table before indexing it" in {
-    val add   = indexOf("ADD COLUMN created_at TIMESTAMPTZ DEFAULT NOW()")
+    val add   = indexOf("ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()")
     val index = indexOf("idx_my_vectors_created ON my_vectors(created_at)")
     add should be < index
   }
@@ -39,6 +39,8 @@ class PgVectorTableSchemaSpec extends AnyFlatSpec with Matchers {
     add should include("to_regclass('my_vectors')")
     add should include("a.attname = 'created_at'")
     add should include("IF NOT FOUND THEN")
+    // The catalog check can race between replicas; the ALTER itself must also be idempotent.
+    add should include("ALTER TABLE my_vectors ADD COLUMN IF NOT EXISTS created_at")
 
     val relax = PgVectorTableSchema.dropContentNotNull("my_vectors")
     relax should include("a.attname = 'content'")

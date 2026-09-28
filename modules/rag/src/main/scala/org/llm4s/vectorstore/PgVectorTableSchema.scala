@@ -20,7 +20,10 @@ package org.llm4s.vectorstore
  * set it.
  *
  * Each upgrade step checks the catalog first, so opening an already-current table takes no
- * `ACCESS EXCLUSIVE` lock. The table name is interpolated into SQL, so callers must validate it
+ * `ACCESS EXCLUSIVE` lock. The check alone does not make it safe for replicas initialising at the
+ * same time: both can see `created_at` missing before either takes the lock. So the `ALTER` is
+ * itself idempotent - `ADD COLUMN IF NOT EXISTS` is re-checked once the lock is held, and the loser
+ * of the race skips with a notice - and `DROP NOT NULL` on a nullable column is a no-op. The table name is interpolated into SQL, so callers must validate it
  * with `SqlIdentifier.validate` first.
  */
 private[llm4s] object PgVectorTableSchema {
@@ -52,7 +55,7 @@ private[llm4s] object PgVectorTableSchema {
       tableName,
       "created_at",
       "NOT FOUND",
-      s"ALTER TABLE $tableName ADD COLUMN created_at TIMESTAMPTZ DEFAULT NOW()"
+      s"ALTER TABLE $tableName ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()"
     )
 
   private[vectorstore] def dropContentNotNull(tableName: String): String =

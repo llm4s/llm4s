@@ -9,13 +9,16 @@ import org.llm4s.model.ModelRegistryService
 import org.llm4s.rag.{ RAG, RAGConfig }
 import org.llm4s.rag.permissions._
 import org.llm4s.types.Result
-import org.llm4s.vectorstore.{ PgVectorStore, VectorRecord }
+import org.llm4s.vectorstore.{ PgVectorStore, PgVectorTableSchema, VectorRecord }
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.sql.{ Connection, DriverManager }
 import scala.collection.mutable
+import scala.concurrent.{ Await, Future }
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.duration.*
 import scala.util.{ Try, Using }
 
 /**
@@ -164,6 +167,51 @@ class PgSharedVectorTableSpec extends AnyFlatSpec with Matchers with BeforeAndAf
     // And the permission side still accepts the upgraded table.
     newIndex(url, table).initializeSchema() shouldBe Right(())
   }
+
+  "The created_at upgrade" should "succeed for an initialiser that loses the race to add the column" in {
+    val url   = requirePg()
+    val table = tableName("race")
+    val addCreatedAt = PgVectorTableSchema
+      .statements(table)
+      .find(_.contains("ADD COLUMN IF NOT EXISTS created_at"))
+      .getOrElse(fail("no created_at upgrade statement"))
+
+    Using.resource(connect(url)) { setup =>
+      Using.resource(setup.createStatement()) { stmt =>
+        stmt.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        stmt.execute(s"CREATE TABLE $table (id TEXT PRIMARY KEY, content TEXT NOT NULL, embedding vector)")
+      }
+    }
+
+    // Replica A adds the column and holds the table lock, uncommitted. Replica B's catalog check
+    // cannot see A's column, so B goes on to the ALTER and waits for the lock. When A commits, B's
+    // ALTER runs against a table that now has the column: an unguarded ADD COLUMN failed here.
+    Using.resource(connect(url)) { a =>
+      a.setAutoCommit(false)
+      Using.resource(a.createStatement())(_.execute(addCreatedAt))
+
+      val b =
+        Future(Using.resource(connect(url))(conn => Using.resource(conn.createStatement())(_.execute(addCreatedAt))))
+
+      val deadline = System.nanoTime() + 10.seconds.toNanos
+      while (!waitingOnLock(url, table) && System.nanoTime() < deadline) Thread.sleep(50)
+      withClue("replica B never waited on replica A's lock: ")(waitingOnLock(url, table) shouldBe true)
+
+      a.commit()
+      Try(Await.result(b, 10.seconds)).toEither.left.map(_.getMessage) shouldBe Right(false)
+    }
+    columnNames(url, table) should contain("created_at")
+  }
+
+  private def waitingOnLock(url: String, table: String): Boolean =
+    Using.resource(connect(url)) { conn =>
+      Using.resource(
+        conn.prepareStatement("SELECT count(*) FROM pg_locks WHERE NOT granted AND relation = to_regclass(?)")
+      ) { stmt =>
+        stmt.setString(1, table)
+        Using.resource(stmt.executeQuery())(rs => rs.next() && rs.getInt(1) > 0)
+      }
+    }
 
   "PgSearchIndex and PgVectorStore" should "share one table whichever creates it first" in {
     val url   = requirePg()
