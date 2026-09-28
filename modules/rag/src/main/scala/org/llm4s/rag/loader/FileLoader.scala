@@ -28,6 +28,9 @@ final case class FileLoader(
   def load(): Iterator[LoadResult] = {
     val file = path.toFile
 
+    // A missing path, or one that is not a file, names no document (so RAG.sync skips its
+    // deletion pass for the run, the safe default); a file that exists but cannot be extracted
+    // names the document it is indexed as, so sync keeps that document's indexed version.
     if (!file.exists()) {
       Iterator(
         LoadResult.failure(
@@ -52,7 +55,8 @@ final case class FileLoader(
       case Left(error) =>
         LoadResult.failure(
           file.getAbsolutePath,
-          ProcessingError("extract", error.message)
+          ProcessingError("extract", error.message),
+          documentId = file.getAbsolutePath // the id loadFile gives the document on success
         )
 
       case Right(document) =>

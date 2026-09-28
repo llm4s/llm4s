@@ -28,19 +28,21 @@ final case class UrlLoader(
   retryCount: Int = 2
 ) extends DocumentLoader {
 
+  // Every failure names its document (the URL is the id): the URL is still in the list, so
+  // RAG.sync keeps its indexed version until it is taken out of the list.
   def load(): Iterator[LoadResult] = urls.iterator.map(loadUrl)
 
   private def loadUrl(urlString: String): LoadResult =
     // SSRF Protection: Validate URL before making request
     NetworkSecurity.validateUrl(urlString) match {
-      case Left(error) => LoadResult.failure(urlString, error)
+      case Left(error) => LoadResult.failure(urlString, error, documentId = urlString)
       case Right(_)    => loadUrlUnsafe(urlString)
     }
 
   private def loadUrlUnsafe(urlString: String): LoadResult =
     openConnection(urlString, maxRedirects = 5) match {
       case Left(error) =>
-        LoadResult.failure(urlString, error)
+        LoadResult.failure(urlString, error, documentId = urlString)
 
       case Right(conn) =>
         val docResult = scala.util.Try {
@@ -77,7 +79,7 @@ final case class UrlLoader(
         docResult match {
           case scala.util.Failure(error) =>
             conn.disconnect()
-            LoadResult.failure(urlString, NetworkError(error.getMessage, None, "http"))
+            LoadResult.failure(urlString, NetworkError(error.getMessage, None, "http"), documentId = urlString)
           case scala.util.Success(doc) =>
             LoadResult.success(doc)
         }

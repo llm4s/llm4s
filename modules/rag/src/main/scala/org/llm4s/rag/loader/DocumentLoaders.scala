@@ -55,6 +55,10 @@ object DocumentLoaders {
    * A [[LoadResult.ListingFailure]] is kept: it says the set of documents is unknown, not that
    * one document failed, and `RAG.sync` relies on seeing it - without it a failed listing looks
    * like an empty source, and sync would delete everything it indexed from there.
+   *
+   * Per-document [[LoadResult.Failure]]s are dropped, and with them what `RAG.sync` needs to
+   * keep a document whose read failed: syncing through this combinator deletes such a document
+   * as if it were gone from the source. Sync the unwrapped loader to keep it.
    */
   def successesOnly(loader: DocumentLoader): DocumentLoader =
     new DocumentLoader {

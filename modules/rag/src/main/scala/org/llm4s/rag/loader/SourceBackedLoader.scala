@@ -78,17 +78,21 @@ final case class SourceBackedLoader(
               LoadResult.Failure(
                 source = ref.path,
                 error = ProcessingError("extraction", s"Failed to extract text from ${ref.filename}: ${err.message}"),
-                recoverable = false
+                recoverable = false,
+                documentId = Some(ref.id)
               )
             )
         }
 
+      // Both failures name the document: it is still listed, so RAG.sync keeps its indexed
+      // version rather than treat it as gone.
       case Left(err) =>
         Iterator(
           LoadResult.Failure(
             source = ref.path,
             error = err,
-            recoverable = true // Read failures may be transient
+            recoverable = true, // Read failures may be transient
+            documentId = Some(ref.id)
           )
         )
     }

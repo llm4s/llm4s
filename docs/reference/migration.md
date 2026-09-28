@@ -1,5 +1,38 @@
 # Migration Guide
 
+## A failed read no longer deletes or clears indexed documents
+
+Follow-up to [#1236](https://github.com/llm4s/llm4s/pull/1236); not in a release yet.
+
+`LoadResult.Failure` gains a fourth field, `documentId: Option[String] = None`: the id the
+failed document is (or would be) indexed under. `source` stays the path, key or URL. `RAG.sync`
+uses it to tell a document it could not read from one that has gone from the source.
+
+- **A pattern match on `LoadResult.Failure` needs a fourth argument**:
+  `case LoadResult.Failure(source, error, recoverable)` becomes
+  `case LoadResult.Failure(source, error, recoverable, documentId)` (or `_`). Constructor calls,
+  `LoadResult.failure(source, error)`, `.source`, `.error` and `.recoverable` are unchanged;
+  `LoadResult.failure(source, error, documentId = id)` is new.
+- **`sync` keeps a document whose read fails.** A `Failure` with a `documentId` keeps that
+  document's indexed version: it is not deleted, and not counted in `SyncStats`. Previously
+  sync deleted it, because it had not been "seen". `SourceBackedLoader` (S3 and every other
+  `DocumentSource`) and `UrlLoader` name the document on every per-document failure,
+  `FileLoader` when extraction fails. Read failures are logged at WARN.
+- **A `Failure` with no `documentId` makes `sync` skip its deletion pass** for that run, as it
+  cannot tell which unlisted document failed. Adds and updates still apply. `WebCrawlerLoader`
+  leaves it out on purpose (the pages below a failed page went uncrawled), as does `FileLoader`
+  for a missing path. **A custom `DocumentLoader` should set `documentId`** on per-document
+  failures when it knows the id, or its failures will now hold back deletions.
+- **`refresh` reads the whole loader before it clears anything.** A `ListingFailure` - at any
+  point, including a later S3 page - or, under `failFast`, any `Failure` returns the error and
+  leaves the index and registry untouched. Previously the index was cleared first and left
+  empty or half-rebuilt. The cost is memory: `refresh` and `refreshAsync` now hold every loaded
+  document's extracted text in memory before clearing; use `sync`, which streams, for a
+  source too large for that. Without `failFast`, a document that fails to read is still left
+  out of the rebuilt index.
+- `DocumentLoaders.successesOnly` still drops per-document failures, so a sync through it
+  still deletes a document whose read failed.
+
 ## A failed listing fails the sync
 
 [#1231](https://github.com/llm4s/llm4s/pull/1231); not in a release yet.
@@ -20,8 +53,9 @@ that source, because it had seen none of them.
   `source` is the `DocumentSource`'s `description`, e.g. `S3(s3://bucket/prefix)`.
 - A `sync` that fails part-way through a listing (a later S3 page) keeps the documents it
   synced before the failure and deletes nothing; re-running it once the source is reachable
-  completes the sync. `refresh` clears the index before reading the loader, so a listing
-  failure leaves it empty - but now says so.
+  completes the sync. `refresh` cleared the index before reading the loader, so a listing
+  failure left it empty - but said so; it now leaves the index untouched (see
+  [above](#a-failed-read-no-longer-deletes-or-clears-indexed-documents)).
 
 A `DocumentSource` reports a listing error by yielding a `Left` from `listDocuments()`, as
 before; `SourceBackedLoader` does the rest. A custom `DocumentLoader` whose enumeration fails

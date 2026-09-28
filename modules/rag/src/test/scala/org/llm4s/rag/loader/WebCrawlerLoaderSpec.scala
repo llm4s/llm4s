@@ -160,10 +160,19 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
     result shouldBe a[LoadResult.Failure]
 
     result match {
-      case LoadResult.Failure(_, error, _) =>
+      case LoadResult.Failure(_, error, _, _) =>
         error.message should include("blocked range")
       case _ => fail("Expected a failure for blocked URL")
     }
+  }
+
+  it should "not name the document a failed fetch is about, as the pages below it went uncrawled" in {
+    // An unnamed failure makes RAG.sync skip its deletion pass, instead of deleting the pages
+    // this crawl never reached because their parent failed.
+    val config = CrawlerConfig.singlePage.withRobotsTxt(false)
+    val loader = WebCrawlerLoader(Seq("http://169.254.169.254/latest/meta-data/"), config)
+
+    loader.load().next().asInstanceOf[LoadResult.Failure].documentId shouldBe None
   }
 
   // ==========================================================================

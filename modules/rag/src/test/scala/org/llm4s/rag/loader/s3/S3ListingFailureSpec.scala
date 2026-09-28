@@ -194,6 +194,30 @@ class S3ListingFailureSpec extends AnyFlatSpec with Matchers {
       rag.sync(loaderFor(client)).map(_.added) shouldBe Right(1)
     }
 
+  it should "keep a previously indexed object whose read fails, and still delete a removed one" in
+    withRag { rag =>
+      val bodies = Map("docs/a.txt" -> "Alpha.", "docs/b.txt" -> "Beta.", "docs/c.txt" -> "Gamma.")
+      rag.sync(loaderFor(new FakeS3Client(Seq(Right(page(bodies.keys.toSeq))), bodies))).map(_.added) shouldBe Right(3)
+
+      // b is still listed but GetObject fails (a transient read error); c is gone from the bucket.
+      val flaky = new FakeS3Client(Seq(Right(page(Seq("docs/a.txt", "docs/b.txt")))), bodies - "docs/b.txt")
+      rag.sync(loaderFor(flaky)) shouldBe Right(SyncStats(added = 0, updated = 0, deleted = 1, unchanged = 1))
+
+      // b survived the failed read: it comes back unchanged, not re-added
+      val healthy = new FakeS3Client(Seq(Right(page(Seq("docs/a.txt", "docs/b.txt")))), bodies)
+      rag.sync(loaderFor(healthy)) shouldBe Right(SyncStats(added = 0, updated = 0, deleted = 0, unchanged = 2))
+    }
+
+  "SourceBackedLoader over S3" should "name the document a failed read is about" in {
+    val client  = new FakeS3Client(Seq(Right(page(Seq("docs/b.txt")))), Map.empty)
+    val results = loaderFor(client).load().toList
+
+    results should have size 1
+    val failure = results.head.asInstanceOf[LoadResult.Failure]
+    failure.source shouldBe "docs/b.txt"
+    failure.documentId shouldBe Some("s3://docs-bucket/docs/b.txt")
+  }
+
   // ========== The other loader entry points ==========
 
   "RAG.ingest over S3" should "fail when the listing fails" in

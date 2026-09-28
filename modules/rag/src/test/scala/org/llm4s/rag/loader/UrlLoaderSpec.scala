@@ -16,10 +16,16 @@ class UrlLoaderSpec extends AnyFlatSpec with Matchers {
     result shouldBe a[LoadResult.Failure]
 
     result match {
-      case LoadResult.Failure(_, error, _) =>
+      case LoadResult.Failure(_, error, _, _) =>
         error.message should include("blocked range")
       case _ => fail("Expected a failure for blocked URL")
     }
+  }
+
+  it should "name the document a failed load is about, so RAG.sync keeps it" in {
+    val url = "http://169.254.169.254/latest/meta-data/"
+
+    UrlLoader(url).load().next().asInstanceOf[LoadResult.Failure].documentId shouldBe Some(url)
   }
 
   it should "reject localhost URLs" in {

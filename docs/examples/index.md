@@ -972,7 +972,9 @@ rag.sync(loader) match {
 ```
 
 A listing that fails - on the first page or a later one - is a `Left`, never a successful sync
-of 0 documents; an empty bucket is `Right` with 0. With no AWS credentials the example ends with:
+of 0 documents; an empty bucket is `Right` with 0. An object that is listed but cannot be read
+(a transient `GetObject` error) keeps its indexed version rather than being deleted as gone.
+With no AWS credentials the example ends with:
 
 ```text
 Sync failed: Failed to list S3 objects from s3://my-documents/docs/: Unable to load credentials from any of the providers in the chain ...

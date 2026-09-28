@@ -153,6 +153,9 @@ final case class WebCrawlerLoader(
       // Fetch the page
       fetchPage(fetchUrl) match {
         case Left(error) =>
+          // Deliberately no documentId: the links on this page were never followed, so the
+          // pages below it are missing from this crawl too. Leaving it unnamed makes RAG.sync
+          // skip its deletion pass, rather than delete those pages as gone.
           LoadResult.failure(fetchUrl, error)
 
         case Right((html, contentType, headers)) =>

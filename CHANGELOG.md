@@ -766,6 +766,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read is treated as accepted with a warning, so tracing does not fail on an unexpected shape
   (found in review of [#1239](https://github.com/llm4s/llm4s/pull/1239)).
 
+- **`RAG.refresh` emptied the index when its loader failed, and `RAG.sync` deleted documents it
+  could not read** (follow-up to [#1236](https://github.com/llm4s/llm4s/pull/1236)).
+  `refresh` and `refreshAsync` cleared the index before reading the loader, so a listing
+  failure left it empty, and one on a later S3 page left it half-rebuilt. They now read the
+  whole loader first and return a `ListingFailure` - or, under `failFast`, any read failure - as
+  the `Left` with the index and registry untouched; the price is that `refresh` holds every
+  loaded document in memory before clearing (`sync` still streams). `sync` and `syncAsync`
+  deleted a previously indexed document whose read failed (a transient S3 `GetObject` error,
+  a failed extraction), because it never reached the set of documents seen.
+  `LoadResult.Failure` gains `documentId: Option[String] = None`; `SourceBackedLoader`,
+  `UrlLoader` and `FileLoader` (on extraction failure) set it, and sync keeps that document's
+  indexed version, uncounted in `SyncStats`. A failure without one - a `WebCrawlerLoader` page,
+  whose unfollowed links hide other pages, or a custom loader's - makes sync skip its deletion
+  pass for that run. Read failures are logged at WARN. `syncAsync` also no longer deletes a
+  listed document whose registry lookup failed. A match on `LoadResult.Failure` needs a fourth
+  argument; see the
+  [migration note](docs/reference/migration.md#a-failed-read-no-longer-deletes-or-clears-indexed-documents).
 - **An S3 listing that failed was reported as a successful sync of 0 documents, and could wipe
   the index** ([#1231](https://github.com/llm4s/llm4s/pull/1231)). With no AWS credentials, a
   missing bucket or access denied, `S3DocumentSource` returned the listing error, but

@@ -99,14 +99,24 @@ object LoadResult {
   /**
    * Failed to load document.
    *
+   * `documentId` tells `RAG.sync` which indexed document the failure is about, since `source`
+   * is a path or key and not the id [[Document]]s are indexed under. A loader sets it when the
+   * failure concerns exactly one document that the source still lists - an S3 object whose read
+   * or extraction failed - and `sync` then keeps that document as indexed: not deleted, not
+   * counted as changed. It leaves it `None` when it cannot name the document, or when the failure
+   * may hide others (a crawled page whose links were never followed); `sync` then cannot tell
+   * which unlisted documents are really gone, and skips its deletion pass for that run.
+   *
    * @param source Identifier for the failed source (path, URL, etc.)
    * @param error The error that occurred
    * @param recoverable Whether the error is potentially recoverable (e.g., timeout)
+   * @param documentId The id the document is (or would be) indexed under, when the loader knows it
    */
   final case class Failure(
     source: String,
     error: LLMError,
-    recoverable: Boolean = false
+    recoverable: Boolean = false,
+    documentId: Option[String] = None
   ) extends LoadResult {
     def isSuccess: Boolean = false
   }
@@ -118,7 +128,8 @@ object LoadResult {
    * Unlike [[Failure]], this is not about one document. The set of documents the loader would
    * have produced is unknown, so it cannot be counted as one failed document among successes:
    * `RAG.ingest`, `RAG.sync` and `RAG.refresh` (and their async forms) return its error as a
-   * `Left`, and `sync` deletes nothing, rather than treat every indexed document as gone.
+   * `Left`; `sync` deletes nothing, rather than treat every indexed document as gone, and
+   * `refresh` leaves the index as it was.
    * A listing that fails part-way through (a later S3 page) is reported the same way, after
    * the documents that were listed before it.
    *
@@ -150,6 +161,10 @@ object LoadResult {
   def success(doc: Document): LoadResult                   = Success(doc)
   def failure(source: String, error: LLMError): LoadResult = Failure(source, error)
   def skipped(source: String, reason: String): LoadResult  = Skipped(source, reason)
+
+  /** A failed read of the document indexed as `documentId`; see [[Failure]]. */
+  def failure(source: String, error: LLMError, documentId: String): LoadResult =
+    Failure(source, error, documentId = Some(documentId))
 
   def listingFailure(source: String, error: LLMError): LoadResult = ListingFailure(source, error)
 }
@@ -197,7 +212,7 @@ object LoadStats {
     results.foreach {
       case LoadResult.Success(_) =>
         successful += 1
-      case LoadResult.Failure(source, error, _) =>
+      case LoadResult.Failure(source, error, _, _) =>
         failed += 1
         errors += ((source, error))
       case LoadResult.ListingFailure(source, error) =>

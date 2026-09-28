@@ -18,6 +18,8 @@ import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.vectorstore.*
 
+import org.slf4j.LoggerFactory
+
 import java.io.{ Closeable, File }
 import java.nio.file.Path
 import scala.concurrent.{ ExecutionContext, Future }
@@ -214,7 +216,9 @@ final class RAG private (
    * @param loader The document loader to ingest from
    * @return Loading statistics with success/failure counts
    */
-  def ingest(loader: DocumentLoader): Result[LoadStats] = {
+  def ingest(loader: DocumentLoader): Result[LoadStats] = ingestResults(loader.load())
+
+  private def ingestResults(results: Iterator[LoadResult]): Result[LoadStats] = {
     case class State(
       totalAttempted: Int = 0,
       successful: Int = 0,
@@ -224,7 +228,7 @@ final class RAG private (
       abortError: Option[org.llm4s.error.LLMError] = None
     )
 
-    val finalState = loader.load().foldLeft(State()) { (state, result) =>
+    val finalState = results.foldLeft(State()) { (state, result) =>
       if (state.abortError.isDefined) {
         state // Already failed, skip remaining
       } else {
@@ -251,7 +255,7 @@ final class RAG private (
               }
             }
 
-          case LoadResult.Failure(source, error, _) =>
+          case LoadResult.Failure(source, error, _, _) =>
             val newState = state.copy(
               totalAttempted = newTotal,
               failed = state.failed + 1,
@@ -298,10 +302,23 @@ final class RAG private (
    * - Deleted documents (removed from source)
    * - Unchanged documents (skipped)
    *
-   * If the loader reports a [[LoadResult.ListingFailure]] - it could not enumerate its
-   * documents, e.g. an S3 listing with no credentials or a missing bucket - sync stops there
-   * and returns that error, and deletes nothing: an unlistable source is not an empty one.
-   * Documents synced before the failure (earlier S3 pages) stay synced.
+   * Sync streams the loader, holding one document at a time plus the ids it has seen. Its
+   * deletion pass removes only documents the source no longer lists, never ones it could not
+   * read:
+   *
+   *  - If the loader reports a [[LoadResult.ListingFailure]] - it could not enumerate its
+   *    documents, e.g. an S3 listing with no credentials or a missing bucket - sync stops there
+   *    and returns that error, and deletes nothing: an unlistable source is not an empty one.
+   *    Documents synced before the failure (earlier S3 pages) stay synced.
+   *  - A document that is listed but whose read fails - a [[LoadResult.Failure]] with a
+   *    `documentId`, e.g. a transient S3 `GetObject` error or a failed extraction - keeps its
+   *    indexed version. It is not deleted, and not counted in the returned [[SyncStats]]: it was
+   *    neither verified unchanged nor updated. The next sync that reads it picks up any change.
+   *  - A [[LoadResult.Failure]] with no `documentId` could be any document, so sync cannot tell
+   *    which unlisted documents are really gone: it skips the deletion pass for that run, and
+   *    logs a warning. Adds and updates still apply.
+   *
+   * Read failures are logged at WARN.
    *
    * @param loader The document loader to sync with
    * @return Sync statistics, or the listing error
@@ -309,9 +326,9 @@ final class RAG private (
   def sync(loader: DocumentLoader): Result[SyncStats] = {
     var added                          = 0
     var updated                        = 0
-    var deleted                        = 0
     var unchanged                      = 0
     val seenIds                        = scala.collection.mutable.Set[String]()
+    val readFailures                   = Vector.newBuilder[LoadResult.Failure]
     var listingError: Option[LLMError] = None
     val results                        = loader.load()
 
@@ -358,8 +375,12 @@ final class RAG private (
           }
         }
 
-      case LoadResult.Failure(_, _, _) | LoadResult.Skipped(_, _) =>
-      // Skip failed/skipped documents
+      case failure: LoadResult.Failure =>
+        // Listed but unreadable: not ingested, and not deleted by the deletion pass
+        readFailures += failure
+
+      case LoadResult.Skipped(_, _) =>
+      // Skip skipped documents
     }
 
     listingError match {
@@ -368,42 +389,113 @@ final class RAG private (
         Left(error)
 
       case None =>
-        // Handle deletions - documents in registry but not in loader
-        registry.allDocumentIds() match {
-          case Right(registeredIds) =>
-            val deletedIds = registeredIds -- seenIds
-            deletedIds.foreach { id =>
-              deleteDocumentChunks(id)
-              registry.unregister(id)
-              deleted += 1
-            }
-
-          case Left(_) =>
-          // Registry error - skip deletion check
-        }
-
+        val deleted = deleteUnlisted(seenIds.toSet, readFailures.result(), "sync")
         Right(SyncStats(added, updated, deleted, unchanged))
+    }
+  }
+
+  /**
+   * The deletion pass shared by [[sync]] and [[syncAsync]]: remove each registered document the
+   * loader did not list. A document whose read failed counts as listed. A read failure that does
+   * not name its document could be any unlisted one, so then nothing is deleted.
+   *
+   * @return the number of documents deleted
+   */
+  private def deleteUnlisted(seenIds: Set[String], readFailures: Seq[LoadResult.Failure], operation: String): Int = {
+    val (named, unnamed) = readFailures.partition(_.documentId.isDefined)
+    val keptIds          = named.flatMap(_.documentId).toSet
+
+    if (named.nonEmpty) {
+      RAG.logger.warn(
+        s"$operation: ${named.size} listed document(s) could not be read, and keep their indexed version: " +
+          RAG.describeFailures(named)
+      )
+    }
+
+    if (unnamed.nonEmpty) {
+      RAG.logger.warn(
+        s"$operation: skipping the deletion pass: ${unnamed.size} read failure(s) do not name their document, " +
+          s"so any unlisted document could be one of them: ${RAG.describeFailures(unnamed)}"
+      )
+      0
+    } else {
+      registry.allDocumentIds() match {
+        case Right(registeredIds) =>
+          val deletedIds = registeredIds -- seenIds -- keptIds
+          deletedIds.foreach { id =>
+            deleteDocumentChunks(id)
+            registry.unregister(id)
+          }
+          deletedIds.size
+
+        case Left(_) =>
+          // Registry error - skip deletion check
+          0
+      }
     }
   }
 
   /**
    * Full refresh - re-process all documents.
    *
-   * Clears the registry and re-ingests all documents.
-   * Use this when you want to ensure a clean slate.
+   * Clears the registry and the index, then re-ingests every document from the loader. Use this
+   * when you want to ensure a clean slate.
    *
-   * The index is cleared before the loader is read, so a [[LoadResult.ListingFailure]] leaves
-   * it empty; the listing error is returned as the `Left`, not reported as 0 documents added.
+   * '''The index is cleared only after the loader has been read in full.''' If the loader
+   * reports a [[LoadResult.ListingFailure]] (at any point, including a later S3 page), or - with
+   * `failFast` - any [[LoadResult.Failure]], refresh returns that error as the `Left` and leaves
+   * the existing index and registry untouched. Without `failFast`, a document that fails to read
+   * is left out of the rebuilt index, as a clean slate implies, and logged at WARN; use [[sync]]
+   * to keep a document's indexed version while its source is unreadable.
+   *
+   * '''Memory:''' to give that guarantee, refresh holds every loaded [[Document]] - its extracted
+   * text and metadata, not the raw bytes - in memory before it clears anything. For a source too
+   * large for that, use [[sync]], which streams one document at a time.
+   *
+   * The guarantee covers reading the loader, not ingesting: an embedding or store error after the
+   * index is cleared counts that document as failed (or, with `failFast`, is returned as the
+   * `Left`), and the index then holds what was ingested before it.
    *
    * @param loader The document loader to refresh from
-   * @return Sync statistics (all as "added")
+   * @return Sync statistics (all as "added"), or the loader's error with the index untouched
    */
   def refresh(loader: DocumentLoader): Result[SyncStats] =
     for {
-      _     <- registry.clear()
-      _     <- clear()
-      stats <- ingest(loader)
+      results <- readForRefresh(loader)
+      _       <- registry.clear()
+      _       <- clear()
+      stats   <- ingestResults(results.iterator)
     } yield SyncStats(added = stats.successful, updated = 0, deleted = 0, unchanged = 0)
+
+  /**
+   * Read the whole loader before [[refresh]] clears anything, stopping at the first result that
+   * must abort the refresh: a listing failure, or any read failure under `failFast`.
+   */
+  private def readForRefresh(loader: DocumentLoader): Result[Vector[LoadResult]] = {
+    val results                 = loader.load()
+    val read                    = Vector.newBuilder[LoadResult]
+    var abort: Option[LLMError] = None
+
+    while (abort.isEmpty && results.hasNext) results.next() match {
+      case LoadResult.ListingFailure(_, error)                          => abort = Some(error)
+      case failure: LoadResult.Failure if config.loadingConfig.failFast => abort = Some(failure.error)
+      case result                                                       => read += result
+    }
+
+    abort match {
+      case Some(error) => Left(error)
+      case None =>
+        val loaded   = read.result()
+        val failures = loaded.collect { case failure: LoadResult.Failure => failure }
+        if (failures.nonEmpty) {
+          RAG.logger.warn(
+            s"refresh: ${failures.size} document(s) could not be read, and will not be in the rebuilt index: " +
+              RAG.describeFailures(failures)
+          )
+        }
+        Right(loaded)
+    }
+  }
 
   /**
    * Delete a specific document and its chunks.
@@ -478,7 +570,7 @@ final class RAG private (
                   case Left(error) => ("failed", Some((doc.id, error)))
                 }
               }
-            case LoadResult.Failure(source, error, _) =>
+            case LoadResult.Failure(source, error, _, _) =>
               ("failed", Some((source, error)))
             case LoadResult.ListingFailure(source, error) => // ingestAsync returns these as the Left first
               ("failed", Some((source, error)))
@@ -540,7 +632,10 @@ final class RAG private (
    * to avoid conflicts in the vector store.
    *
    * As with [[sync]], a [[LoadResult.ListingFailure]] is returned as the `Left`; as the
-   * results are collected first, nothing is added, updated or deleted in that case.
+   * results are collected first, nothing is added, updated or deleted in that case. A document
+   * whose read fails keeps its indexed version, and a read failure that does not name its
+   * document skips the deletion pass, as in [[sync]]. Unlike [[sync]], it holds every loaded
+   * document in memory.
    *
    * @param loader The document loader to sync with
    * @param ec Execution context for async operations
@@ -550,21 +645,26 @@ final class RAG private (
     val results = loader.load().toSeq
     firstListingError(results) match {
       case Some(error) => Future.successful(Left(error))
-      case None        => syncDocumentsAsync(results.collect { case LoadResult.Success(d) => d })
+      case None =>
+        syncDocumentsAsync(
+          results.collect { case LoadResult.Success(d) => d },
+          results.collect { case failure: LoadResult.Failure => failure }
+        )
     }
   }
 
-  private def syncDocumentsAsync(docs: Seq[Document])(implicit ec: ExecutionContext): Future[Result[SyncStats]] = {
+  private def syncDocumentsAsync(
+    docs: Seq[Document],
+    readFailures: Seq[LoadResult.Failure]
+  )(implicit ec: ExecutionContext): Future[Result[SyncStats]] = {
     val batchSize = config.loadingConfig.batchSize
-
-    // Get registered IDs for deletion detection
-    val registeredIds = registry.allDocumentIds().getOrElse(Set.empty)
 
     // Sealed trait for change detection results
     sealed trait ChangeType
     case object NewDoc       extends ChangeType
     case object UpdatedDoc   extends ChangeType
     case object UnchangedDoc extends ChangeType
+    case object KeptDoc      extends ChangeType // listed, but its version could not be checked
     case class ProcessDoc(doc: Document, change: ChangeType)
 
     // Parallel change detection using Futures
@@ -582,7 +682,8 @@ final class RAG private (
             case Right(Some(_)) =>
               Some(ProcessDoc(doc, UnchangedDoc))
             case Left(_) =>
-              None
+              // Registry error: as in sync, the document was listed, so it is not deleted
+              Some(ProcessDoc(doc, KeptDoc))
           }
         }
       }.recover { case _ =>
@@ -634,38 +735,29 @@ final class RAG private (
           case ProcessDoc(doc, UnchangedDoc) =>
             seenIds += doc.id
             unchanged += 1
+
+          case ProcessDoc(doc, KeptDoc) =>
+            seenIds += doc.id
         }
 
-        // Handle deletions
-        val deletedIds = registeredIds -- seenIds
-        var deleted    = 0
-        deletedIds.foreach { id =>
-          deleteDocumentChunks(id)
-          registry.unregister(id)
-          deleted += 1
-        }
-
+        val deleted = deleteUnlisted(seenIds.toSet, readFailures, "syncAsync")
         Right(SyncStats(added, updated, deleted, unchanged))
       }
   }
 
   /**
-   * Async full refresh.
+   * Async full refresh: [[refresh]], run on `ec`.
    *
-   * Clears all data and re-ingests from the loader with parallel processing.
+   * It gives the same guarantee: the loader is read in full before the index is cleared, so a
+   * [[LoadResult.ListingFailure]] (or, with `failFast`, any read failure) is returned as the
+   * `Left` with the index untouched - and it holds every loaded document in memory to do so.
    *
    * @param loader The document loader to refresh from
    * @param ec Execution context for async operations
    * @return Future with sync statistics
    */
   def refreshAsync(loader: DocumentLoader)(implicit ec: ExecutionContext): Future[Result[SyncStats]] =
-    Future {
-      for {
-        _     <- registry.clear()
-        _     <- clear()
-        stats <- ingest(loader)
-      } yield SyncStats(added = stats.successful, updated = 0, deleted = 0, unchanged = 0)
-    }.recover { case ex => Left(org.llm4s.error.ThrowableOps.RichThrowable(ex).toLLMError) }
+    Future(refresh(loader)).recover { case ex => Left(org.llm4s.error.ThrowableOps.RichThrowable(ex).toLLMError) }
 
   private def ingestDocument(doc: Document): Result[Int] = {
     // Choose chunker based on hints if configured
@@ -1206,6 +1298,15 @@ Answer:"""
 }
 
 object RAG {
+
+  private val logger = LoggerFactory.getLogger(classOf[RAG])
+
+  /** The first few failures, as `source: message`, for a log line. */
+  private def describeFailures(failures: Seq[LoadResult.Failure]): String = {
+    val shown = failures.take(5).map(f => s"${f.source}: ${f.error.message}")
+    val more  = if (failures.size > 5) Seq(s"... and ${failures.size - 5} more") else Seq.empty
+    (shown ++ more).mkString("; ")
+  }
 
   private val missingEmbeddingProviderConfig: String => Result[EmbeddingProviderConfig] = provider =>
     Left(

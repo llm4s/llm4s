@@ -170,6 +170,15 @@ class DocumentLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAl
     (results should have).length(1)
     results.head shouldBe a[LoadResult.Failure]
     results.head.asInstanceOf[LoadResult.Failure].error.message should include("not found")
+    // A missing path names no document: RAG.sync then skips its deletion pass, the safe default
+    results.head.asInstanceOf[LoadResult.Failure].documentId shouldBe None
+  }
+
+  "LoadResult.failure" should "carry the document id when given one" in {
+    val error = org.llm4s.error.ProcessingError("t", "e")
+    LoadResult.failure("docs/a.txt", error, documentId = "s3://bucket/docs/a.txt") shouldBe
+      LoadResult.Failure("docs/a.txt", error, recoverable = false, documentId = Some("s3://bucket/docs/a.txt"))
+    LoadResult.failure("docs/a.txt", error) shouldBe LoadResult.Failure("docs/a.txt", error)
   }
 
   it should "fail when path is a directory" in {
