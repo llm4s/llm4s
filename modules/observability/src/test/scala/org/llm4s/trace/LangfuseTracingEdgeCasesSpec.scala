@@ -97,6 +97,10 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     event("body")("name").str should include("Token Usage")
     event("body")("metadata")("model").str shouldBe "gpt-4"
     event("body")("metadata")("operation").str shouldBe "completion"
+    // The counts themselves, as Langfuse shows them (from #1035 by @kannupriyakalra)
+    event("body")("output")("prompt_tokens").num shouldBe 100
+    event("body")("output")("completion_tokens").num shouldBe 50
+    event("body")("output")("total_tokens").num shouldBe 150
   }
 
   // =========================================================================
@@ -296,6 +300,36 @@ class LangfuseTracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
     batch(3)("type").str shouldBe "span-create"
     batch(3)("body")("name").str should include("LLM Generation")
+  }
+
+  it should "attach every message span to the conversation's trace, tool calls included" in {
+    // From #1035 by @kannupriyakalra: the spans are only one trace in Langfuse if they share its id.
+    val mock    = new MockHttpClient(HttpResponse(200, ""))
+    val tracing = makeTracing(mock)
+    val call    = ToolCall("call-1", "calculator", ujson.Obj("a" -> 1, "b" -> 2))
+
+    val state = AgentState(
+      conversation = Conversation(
+        Seq(UserMessage("1 + 2?"), AssistantMessage(None, Seq(call)), ToolMessage("3", "call-1"), AssistantMessage("3"))
+      ),
+      tools = ToolRegistry.empty,
+      status = AgentStatus.Complete
+    )
+
+    tracing.traceEvent(state.toTraceEvent) shouldBe Right(())
+
+    val batch   = ujson.read(mock.lastBody.get)("batch").arr
+    val traceId = batch(0)("body")("id").str
+    val spans   = batch.tail
+    spans should have size 4
+    spans.foreach { span =>
+      span("body")("traceId").str shouldBe traceId
+      span("body")("metadata")("parent_trace").str shouldBe traceId
+    }
+    spans.map(_("body")("metadata")("message_type").str) shouldBe
+      Seq("UserMessage", "AssistantMessage", "ToolMessage", "AssistantMessage")
+    // Every span is its own observation: distinct envelope and body ids.
+    (spans.map(_("id").str) ++ spans.map(_("body")("id").str)).distinct should have size 8
   }
 
   it should "send the summary trace when the state event carries no messages" in {
