@@ -14,7 +14,17 @@ This module provides a lightweight governance layer for LLM4S prompt/model confi
 | Preset | Allowed providers |
 |---|---|
 | `dev` / `dev-sandbox` (`ConfigPolicy.devSandbox`) | `openai`, `anthropic`, `ollama`, `gemini`, `deepseek`, `openai-compatible` |
-| `prod` / `prod-safe` (`ConfigPolicy.prodSafeDefaults`) | `openai`, `anthropic`, `azure`, `gemini`, `deepseek`, with pinned model patterns |
+| `prod` / `prod-safe` (`ConfigPolicy.prodSafeDefaults`) | `openai`, `anthropic`, `azure`, `gemini`, `deepseek`, with pinned model patterns; every chat section must set its own `apiKey` |
+
+## Explicit keys in prod
+
+A chat section with no `apiKey` of its own uses its vendor's shared
+`llm4s.credentials.<provider>.apiKey` (bound to `OPENAI_API_KEY` and the like by each provider
+module). The `prod` preset's `ownApiKey` rule (`ConfigPolicy.withOwnApiKeyRequired`) flags every
+such section - not only the default - for providers that require a key, so a section meant for a
+second account cannot silently bill the default one. `CheckPolicies` reads each section's key
+source with `Llm4sConfig.apiKeySourcesFrom` and applies `ConfigPolicyEngine.checkApiKeySources`.
+The `dev` preset does not enable it.
 
 The generic `openai-compatible` provider (from `llm4s-openai-compatible`) can point at any
 endpoint, so the dev preset allows it - that is how local servers such as vLLM, LM Studio and
@@ -57,7 +67,8 @@ sbt "configPolicy/runMain org.llm4s.configpolicy.CheckPolicies --env=dev --confi
 
 `CheckPolicies` evaluates the named provider sections under `llm4s.providers` (see the
 [configuration guide](../../docs/getting-started/configuration.md#named-provider-sections)); any
-environment variables it sees are the ones those sections bind with `${?VAR}`.
+environment variables it sees are the ones those sections bind with `${?VAR}`, plus the vendor
+key variables the provider modules bind under `llm4s.credentials`.
 
 For ad-hoc checks without a config file there is the separate env engine, `EnvCheckPolicies`,
 which reads `LLM_PROVIDER`, `LLM_MODEL`, `LLM_MAX_TOKENS`, `LLM_REASONING_BUDGET`, `LLM_REGION`

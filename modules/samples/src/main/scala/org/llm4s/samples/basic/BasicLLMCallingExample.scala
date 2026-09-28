@@ -25,7 +25,6 @@ import org.slf4j.LoggerFactory
  *        openai-main {
  *          provider = "openai"
  *          model = "gpt-4o"
- *          apiKey = ${?OPENAI_API_KEY}
  *        }
  *      }
  *    }

@@ -107,10 +107,9 @@ class OpenAIEmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with Ei
       result.isLeft shouldBe true
       val error = result.left.value
       error.message should include("apiKey")
-      // The key is read from the embeddings section and nowhere else. Nothing binds
-      // OPENAI_API_KEY to it, so the error does not name the variable.
-      error.message should include("llm4s.embeddings.openai.apiKey")
-      (error.message should not).include("OPENAI_API_KEY")
+      // The key is the embeddings block's own, else OpenAI's shared llm4s.credentials.openai.apiKey,
+      // which this module binds to OPENAI_API_KEY: the error names both places.
+      error.message should include("set OPENAI_API_KEY, or set apiKey under llm4s.embeddings.openai")
     }
 
     "fail with clear error when OpenAI embeddings model is missing in legacy mode" in {

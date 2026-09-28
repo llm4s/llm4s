@@ -237,10 +237,15 @@ for the most recent one, `git rebase --signoff main` for a branch of them, then
 
 ## Configuration and Environment Variables
 
-**Nothing in the library reads `LLM_MODEL` or a provider's API-key variable** (removed with legacy
-single-provider loading in #903). Chat providers are named sections in the application's
-`application.conf`, each binding its own variables with `${?VAR}`; `llm4s.providers.provider`
-names the default that `Llm4sConfig.defaultProvider()` loads:
+**Nothing in the library reads `LLM_MODEL`** (removed with legacy single-provider loading in #903).
+Chat providers are named sections in the application's `application.conf`;
+`llm4s.providers.provider` names the default that `Llm4sConfig.defaultProvider()` loads.
+**Credentials belong to a vendor, keyed by provider id; clients belong to a use.** A client's key
+is its own `apiKey` (chat section `llm4s.providers.<name>`, embeddings block
+`llm4s.embeddings.<id>`, reranker `llm4s.rerank.cohere`), else `llm4s.credentials.<id>.apiKey`,
+which each provider module's own `reference.conf` binds to the vendor's conventional variable,
+else an error naming both. So with `OPENAI_API_KEY` set a section needs only `provider` and
+`model`:
 
 ```hocon
 # src/main/resources/application.conf
@@ -251,7 +256,6 @@ llm4s {
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"
-      apiKey   = ${?OPENAI_API_KEY}
     }
   }
 }
@@ -259,8 +263,16 @@ llm4s {
 
 - Precedence: `-D` system properties > `application.conf` > each module's `reference.conf`.
   Environment variables are read only through `${?VAR}`.
-- **Only the section being loaded is validated** (`ProviderSections.validated`): a section whose
-  key variable is unset, or whose provider module is absent, fails only a load of that section.
+- The fallback is generic, by canonical provider id (aliases such as `google` use `gemini`'s),
+  inside `org.llm4s.config` (`SharedCredentials`); the reranker's is `RerankerConfigLoader` in
+  `llm4s-rag`. A provider module declares the variable(s) it binds as `apiKeyEnv` on its
+  `ProviderConfigSpec` / `EmbeddingConfigSpec`, used only in the missing-key message; never
+  hard-code a variable name in core. `credentials` holds `apiKey` only. The source path is
+  logged at INFO, never the value. No block for `openai-compatible` (no vendor), `ollama` (no
+  key) or `vertexai` (OAuth2). A section for a second account sets its own `apiKey`; the
+  config-policy `prod` preset flags sections that do not (`ownApiKey`).
+- **Only the section being loaded is validated** (`ProviderSections.validated`): a section with
+  no key available, or whose provider module is absent, fails only a load of that section.
   `Llm4sConfig.providers()` is the exception - it returns every section, so validates them all;
   `providerConfigs()` reports each section's error separately.
 - Samples: `modules/samples/src/main/resources/application.conf` defaults to `ollama-local`
@@ -283,10 +295,16 @@ LANGFUSE_SECRET_KEY=sk-lf-...
 OTEL_SERVICE_NAME=llm4s-agent        # OTLP headers: llm4s.tracing.opentelemetry.headers, not OTEL_EXPORTER_OTLP_HEADERS
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
+# Vendor keys -> llm4s.credentials.<id>.apiKey (chat sections, embeddings and the reranker share them)
+OPENAI_API_KEY=sk-...                # llm4s-openai (openai); also REQUESTY_API_KEY, AZURE_OPENAI_API_KEY
+ANTHROPIC_API_KEY=sk-ant-...         # llm4s-anthropic
+GOOGLE_API_KEY=...                   # llm4s-gemini (gemini); GEMINI_API_KEY when GOOGLE_API_KEY is unset
+DEEPSEEK_API_KEY=...                 # llm4s-openai-compatible; also ZAI_API_KEY, OPENROUTER_API_KEY, MISTRAL_API_KEY
+COHERE_API_KEY=...                   # llm4s-openai-compatible and llm4s-rag (Cohere chat + reranker)
+VOYAGE_API_KEY=pa-...                # llm4s-voyage
+
 # Embeddings (llm4s-core selects; each provider module binds its own block)
 EMBEDDING_MODEL=openai/text-embedding-3-small  # provider/model
-VOYAGE_API_KEY=pa-...                          # llm4s-voyage
-# OpenAI embeddings' key is NOT bound: add llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}
 # OPENAI_EMBEDDING_BASE_URL / VOYAGE_EMBEDDING_BASE_URL / OLLAMA_EMBEDDING_BASE_URL override base URLs
 ```
 
@@ -316,7 +334,7 @@ val provider: Result[ProviderConfig] = Llm4sConfig.defaultProvider()
 // or a specific named section:
 val named: Result[ProviderConfig] = Llm4sConfig.provider("openai-main")
 
-// BAD - and a key belongs in the section anyway: apiKey = ${?OPENAI_API_KEY}
+// BAD - llm4s-openai already binds OPENAI_API_KEY to llm4s.credentials.openai.apiKey
 val apiKey = sys.env.get("OPENAI_API_KEY")
 ```
 

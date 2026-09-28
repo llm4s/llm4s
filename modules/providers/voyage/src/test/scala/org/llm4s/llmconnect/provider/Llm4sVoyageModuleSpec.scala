@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.config.{ CredentialsRoundTrip, VoyageConfigKeys }
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.scalatest.matchers.should.Matchers
@@ -38,5 +39,21 @@ class Llm4sVoyageModuleSpec extends AnyWordSpec with Matchers:
     "be registrable explicitly where discovery cannot run" in {
       ProviderRegistry.ofModules(new Llm4sVoyageModule).resolveEmbedding(ProviderId("voyage")) shouldBe
         Right(VoyageAIEmbeddingProvider)
+    }
+  }
+
+  "the llm4s-voyage reference.conf" should {
+
+    given ProviderRegistry = ProviderRegistry.default
+
+    "bind VOYAGE_API_KEY to llm4s.credentials.voyage.apiKey" in {
+      VoyageAIEmbeddingProvider.configSpec.apiKeyEnv shouldBe Seq(VoyageConfigKeys.VOYAGE_API_KEY)
+      CredentialsRoundTrip.embeddingBindings(VoyageAIEmbeddingProvider, "voyage-3") shouldBe
+        Map("VOYAGE_API_KEY" -> Right("key-from-VOYAGE_API_KEY"))
+    }
+
+    "give the voyageai alias the voyage key" in {
+      CredentialsRoundTrip.embeddingsKey("voyageai", "voyage-3", Map("VOYAGE_API_KEY" -> "pa-shared")) shouldBe
+        Right("pa-shared")
     }
   }

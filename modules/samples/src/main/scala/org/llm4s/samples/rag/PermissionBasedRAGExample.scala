@@ -25,7 +25,7 @@ import scala.util.chaining.*
  * Prerequisites:
  * - PostgreSQL with pgvector extension
  * - EMBEDDING_MODEL in `provider/model` form, e.g. `ollama/nomic-embed-text` (local, no key) or
- *   `openai/text-embedding-3-small`, whose key is `llm4s.embeddings.openai.apiKey` - see
+ *   `openai/text-embedding-3-small`, whose key comes from `OPENAI_API_KEY` - see
  *   docs/getting-started/configuration.md#embeddings-configuration
  *
  * Usage:

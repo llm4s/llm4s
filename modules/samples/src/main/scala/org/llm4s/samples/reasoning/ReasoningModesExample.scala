@@ -24,8 +24,8 @@ import org.slf4j.LoggerFactory
  * {{{
  * // Add a section to the samples' application.local.conf and select it
  * // (docs/getting-started/configuration.md#running-the-samples) - an OpenAI reasoning model
- * // (provider = "openai", model = "o1-preview", apiKey = ${?OPENAI_API_KEY}) or Anthropic with
- * // extended thinking (provider = "anthropic", apiKey = ${?ANTHROPIC_API_KEY}):
+ * // (provider = "openai", model = "o1-preview") or Anthropic with
+ * // extended thinking (provider = "anthropic", keyed by ANTHROPIC_API_KEY):
  * export OPENAI_API_KEY=sk-...
  * export LLM4S_PROVIDER=openai-main
  *

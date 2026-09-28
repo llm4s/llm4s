@@ -10,7 +10,10 @@ package org.llm4s.config
  */
 object AnthropicConfigKeys {
 
-  /** Anthropic API key (`sk-ant-...`). */
+  /**
+   * Anthropic API key (`sk-ant-...`), the variable Anthropic's own SDKs read. `llm4s-anthropic`'s
+   * `reference.conf` binds it to the shared `llm4s.credentials.anthropic.apiKey`.
+   */
   val ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
 
   /** Overrides the Anthropic API base URL. Defaults to `"https://api.anthropic.com"`. */

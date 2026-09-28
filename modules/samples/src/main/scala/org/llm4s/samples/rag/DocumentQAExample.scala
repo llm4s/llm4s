@@ -35,8 +35,7 @@ import java.nio.file.{ Files, Path }
  *   # (`ollama-local`; for another, see docs/getting-started/configuration.md#running-the-samples)
  *   sbt "samples/runMain org.llm4s.samples.rag.DocumentQAExample"
  *
- *   # With real embeddings (OpenAI embeddings also need
- *   # llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY} in application.local.conf)
+ *   # With real embeddings (OpenAI embeddings read OPENAI_API_KEY)
  *   export EMBEDDING_MODEL=openai/text-embedding-3-small
  *   export OPENAI_API_KEY=sk-...
  *   sbt "samples/runMain org.llm4s.samples.rag.DocumentQAExample ./my-docs"

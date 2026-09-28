@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.config.{ CredentialsRoundTrip, OpenAICompatibleConfigKeys }
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.config.ContextWindowResolver
@@ -128,5 +129,35 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
       // Z.ai and Cohere had no lister in core either.
       ZaiProvider.modelLister shouldBe None
       CohereProvider.modelLister shouldBe None
+    }
+  }
+
+  "the llm4s-openai-compatible reference.conf" should {
+
+    given ProviderRegistry = ProviderRegistry.default
+
+    "bind each vendor's variable to its shared llm4s.credentials key" in {
+      val expected = Map(
+        DeepSeekProvider   -> OpenAICompatibleConfigKeys.DEEPSEEK_API_KEY,
+        ZaiProvider        -> OpenAICompatibleConfigKeys.ZAI_API_KEY,
+        OpenRouterProvider -> OpenAICompatibleConfigKeys.OPENROUTER_API_KEY,
+        MistralProvider    -> OpenAICompatibleConfigKeys.MISTRAL_API_KEY,
+        CohereProvider     -> OpenAICompatibleConfigKeys.COHERE_API_KEY
+      )
+      expected.foreach { (descriptor, variable) =>
+        withClue(s"${descriptor.id.asString}: ") {
+          descriptor.configSpec.apiKeyEnv shouldBe Seq(variable)
+          CredentialsRoundTrip.chatBindings(descriptor) shouldBe Map(variable -> Right(Some(s"key-from-$variable")))
+        }
+      }
+    }
+
+    "bind nothing for the generic openai-compatible provider, which has no vendor" in {
+      OpenAICompatibleProvider.configSpec.apiKeyEnv shouldBe empty
+      CredentialsRoundTrip.chatSectionKey(
+        "openai-compatible",
+        Map("OPENAI_COMPATIBLE_API_KEY" -> "k", "OPENAI_API_KEY" -> "k"),
+        """baseUrl = "http://localhost:8000/v1""""
+      ) shouldBe Right(None)
     }
   }

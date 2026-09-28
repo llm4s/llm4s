@@ -854,13 +854,11 @@ Complete RAG (Retrieval-Augmented Generation) pipeline demonstrating document Q&
 # the default ollama-local section - or select another, see "Running Examples"
 sbt "samples/runMain org.llm4s.samples.rag.DocumentQAExample"
 
-# With real OpenAI embeddings: EMBEDDING_MODEL is bound by llm4s-core; the
-# embeddings API key is not, so bind it too (or add
-# llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY} to application.local.conf)
+# With real OpenAI embeddings: EMBEDDING_MODEL is bound by llm4s-core, and
+# OPENAI_API_KEY by llm4s-openai (the key OpenAI chat sections use too)
 export EMBEDDING_MODEL=openai/text-embedding-3-small
 export OPENAI_API_KEY=sk-...
-sbt -Dllm4s.embeddings.openai.apiKey="$OPENAI_API_KEY" \
-  "samples/runMain org.llm4s.samples.rag.DocumentQAExample"
+sbt "samples/runMain org.llm4s.samples.rag.DocumentQAExample"
 ```
 
 **What it demonstrates:**
@@ -1155,7 +1153,7 @@ sbt "samples/runMain <fully-qualified-class-name>"
 
 The samples load their provider with `Llm4sConfig.defaultProvider()`, from
 [`modules/samples/src/main/resources/application.conf`](https://github.com/llm4s/llm4s/blob/main/modules/samples/src/main/resources/application.conf).
-Nothing reads `LLM_MODEL` or `OPENAI_API_KEY` on its own. Out of the box the default is the
+Nothing reads `LLM_MODEL`. Out of the box the default is the
 `ollama-local` section, using the model `llama3:latest`; `OLLAMA_MODEL` and `OLLAMA_BASE_URL`
 override it. Pull the default model once, or name one you already have (`ollama list`):
 
@@ -1174,13 +1172,13 @@ llm4s.providers {
   openai-main {
     provider = "openai"
     model    = "gpt-4o"
-    apiKey   = ${?OPENAI_API_KEY}
   }
 }
 ```
 
 and select it with `LLM4S_PROVIDER`, which the samples' `application.conf` binds to
-`llm4s.providers.provider`:
+`llm4s.providers.provider`. The section needs no `apiKey`: `llm4s-openai` binds `OPENAI_API_KEY`
+to OpenAI's shared key.
 
 ```bash
 export OPENAI_API_KEY=sk-...

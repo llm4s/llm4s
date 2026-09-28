@@ -421,9 +421,9 @@ val state2 = agent.continueConversation(
 ### Common Issues
 
 **Problem: API key errors**
-- Check the provider section in `application.conf` binds the key, e.g. `apiKey = ${?OPENAI_API_KEY}` -
-  llm4s reads no API-key variable on its own ([Named provider sections](configuration#named-provider-sections))
-- Check the variable that section names is set in the shell that runs your app: `echo $OPENAI_API_KEY`
+- Check the vendor's variable is set in the shell that runs your app: `echo $OPENAI_API_KEY` - a
+  section without an `apiKey` of its own uses it ([API keys](configuration#api-keys))
+- If the section sets its own `apiKey = ${?SOME_VAR}`, that wins: check `SOME_VAR` instead
 - Check key starts with correct prefix (`sk-` for OpenAI, `sk-ant-` for Anthropic)
 
 **Problem: Model not found**

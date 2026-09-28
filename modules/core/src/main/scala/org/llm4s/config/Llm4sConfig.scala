@@ -19,9 +19,9 @@ import pureconfig.ConfigSource
  * properties, then `application.conf`, then the `reference.conf` of every llm4s
  * module on the classpath. Environment variables are read only where a
  * `${?VAR}` substitution binds them - in a module's `reference.conf` (tracing,
- * embeddings, tools) or in the application's own `application.conf` (provider
- * sections). Nothing binds `LLM_MODEL` or a provider's API-key variable
- * automatically. This is the single authorised entry point for configuration
+ * embeddings, tools, and each provider module's vendor key) or in the
+ * application's own `application.conf`. Nothing reads `LLM_MODEL`.
+ * This is the single authorised entry point for configuration
  * in application and test code — never read `sys.env`, `System.getenv`, or
  * `ConfigFactory.load()` directly.
  *
@@ -30,6 +30,16 @@ import pureconfig.ConfigSource
  * `llm4s.providers.provider` to choose the default provider. Then call
  * [[defaultProvider]] or resolve a named provider directly with
  * [[provider(name)*]].
+ *
+ * == API keys ==
+ * A client's key is its own `apiKey` when it sets one - in its chat section
+ * `llm4s.providers.<name>`, embeddings block `llm4s.embeddings.<id>` or reranker
+ * block - and otherwise its vendor's shared `llm4s.credentials.<providerId>.apiKey`.
+ * Each provider module binds that shared key to the vendor's conventional variable
+ * (`llm4s-openai` binds `OPENAI_API_KEY`), so with the variable set a section needs
+ * only `provider` and `model`. A section for a second account sets its own
+ * `apiKey = ${?OTHER_VAR}`. Where each key came from is logged at INFO - the path,
+ * never the value - and [[apiKeySources()*]] reports it for a policy check.
  *
  * Then call [[defaultProvider]] to obtain a
  * [[org.llm4s.llmconnect.config.ProviderConfig]] ready for
@@ -237,6 +247,22 @@ object Llm4sConfig {
    */
   def providerFrom(source: ConfigSource)(using ProviderRegistry): Result[ProviderConfig] =
     defaultProvider(source)
+
+  /**
+   * Where each named chat section's API key comes from: its own `apiKey`, or its vendor's
+   * shared `llm4s.credentials.<providerId>.apiKey`.
+   *
+   * A section with no key of its own silently uses the shared one - convenient for the default
+   * account, and a billing mistake for a section meant for a second account that forgot its
+   * key. The config-policy `prod` preset uses this to require explicit keys. Only sections whose
+   * provider requires a key are listed; no section is validated.
+   */
+  def apiKeySources()(using ProviderRegistry): Result[Map[ProviderName, ApiKeySource]] =
+    apiKeySourcesFrom(ConfigSource.default)
+
+  /** [[apiKeySources()*]] for a custom PureConfig source, as [[providerFrom]] is for the default provider. */
+  def apiKeySourcesFrom(source: ConfigSource)(using ProviderRegistry): Result[Map[ProviderName, ApiKeySource]] =
+    org.llm4s.config.ProvidersConfigLoader.loadSections(source).map(_.apiKeySources)
 
   /**
    * Loads tracing configuration from the current environment.

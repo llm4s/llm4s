@@ -40,7 +40,7 @@ class AzureSectionValidationSpec extends AnyFlatSpec with Matchers {
 
     message should include("Provider 'my-azure' (provider = azure) is missing required fields")
     message should include(
-      "- apiKey: set it in application.conf under llm4s.providers.my-azure.apiKey (optionally from an env var, e.g. apiKey = ${?AZURE_API_KEY})"
+      "- apiKey: set AZURE_OPENAI_API_KEY, or set apiKey under llm4s.providers.my-azure in application.conf"
     )
     message should include("- endpoint: the model endpoint/deployment name in your Azure OpenAI resource")
   }

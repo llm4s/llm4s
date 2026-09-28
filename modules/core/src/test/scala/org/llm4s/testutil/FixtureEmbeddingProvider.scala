@@ -47,7 +47,7 @@ object FixtureEmbeddingProvider extends EmbeddingProviderDescriptor:
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
     defaultBaseUrl = Some(DefaultBaseUrl),
-    apiKeyEnv = Some(ApiKeyEnv),
+    apiKeyEnv = Seq(ApiKeyEnv),
     modelEnv = Some(ModelEnv)
   )
 

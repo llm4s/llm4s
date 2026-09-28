@@ -710,7 +710,7 @@ object ProductionExample {
 
     // Create reliable client using Llm4sConfig to load provider configuration
     // (the default named section in application.conf, e.g. provider = "openai"
-    // with apiKey = ${?OPENAI_API_KEY} - see getting-started/configuration)
+    // whose key comes from OPENAI_API_KEY - see getting-started/configuration)
     val clientResult = for {
       providerConfig <- Llm4sConfig.defaultProvider()
       baseClient     <- LLMConnect.getClient(providerConfig, metrics)

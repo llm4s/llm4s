@@ -23,8 +23,8 @@ import scala.util.chaining._
  *   # Examples 1-5 only print configuration and need nothing set. Example 6 builds a real
  *   # pipeline from the default chat section (ollama-local in the samples) and an embedding
  *   # model in provider/model form. For OpenAI embeddings (openai/text-embedding-3-small),
- *   # add llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY} to the samples'
- *   # application.local.conf (docs/getting-started/configuration.md#embeddings-configuration)
+ *   # export OPENAI_API_KEY; nothing else is needed
+ *   # (docs/getting-started/configuration.md#embeddings-configuration)
  *   export EMBEDDING_MODEL=ollama/nomic-embed-text
  *   sbt "samples/runMain org.llm4s.samples.rag.RAGBuilderExample"
  */

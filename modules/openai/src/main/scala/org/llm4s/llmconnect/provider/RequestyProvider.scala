@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.config.{ ProviderModelLister, RequestyModelLister }
+import org.llm4s.config.{ OpenAIConfigKeys, ProviderModelLister, RequestyModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -26,8 +26,9 @@ object RequestyProvider extends ProviderDescriptor:
    */
   val DEFAULT_BASE_URL: String = "https://router.requesty.ai/v1"
 
+  /** The key falls back to `llm4s.credentials.requesty.apiKey`, bound to `REQUESTY_API_KEY`. */
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL)
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(OpenAIConfigKeys.REQUESTY_API_KEY))
 
   override val modelLister: Option[ProviderModelLister] = Some(RequestyModelLister)
 

@@ -6,8 +6,6 @@ import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, Provide
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
-import java.util.Locale
-
 /**
  * Checks a named provider section against the requirements its provider declares.
  *
@@ -70,7 +68,7 @@ private[llm4s] object NamedProviderSectionValidator:
         case Some(error) => Left(error)
         case None =>
           val extras   = resolveExtras(name, id, spec, normalized)
-          val problems = missingBuiltins(name, id, spec, normalized) ++ extras.problems
+          val problems = missingBuiltins(name, descriptor, normalized) ++ extras.problems
 
           if problems.nonEmpty then
             Left(
@@ -103,19 +101,17 @@ private[llm4s] object NamedProviderSectionValidator:
 
   private def missingBuiltins(
     name: String,
-    id: String,
-    spec: ProviderConfigSpec,
+    descriptor: ProviderDescriptor,
     normalized: NamedProviderConfig
   ): Seq[String] =
+    val spec    = descriptor.configSpec
     val missing = Seq.newBuilder[String]
 
     if spec.requiresApiKey && normalized.apiKey.isEmpty then
-      // Named providers resolve from HOCON, not an automatic <PROVIDER>_API_KEY binding, so lead with the
-      // conf path (the real fix) and show how to bind an env var explicitly via a HOCON substitution.
-      // `ProviderId` is already the canonical lowercase spelling, so the example variable is its
-      // upper-casing, with anything an environment variable name cannot hold made `_`.
-      val envPrefix = id.toUpperCase(Locale.ROOT).replaceAll("[^A-Z0-9_]", "_")
-      missing += s"  - apiKey: set it in application.conf under llm4s.providers.$name.apiKey (optionally from an env var, e.g. apiKey = $${?${envPrefix}_API_KEY})"
+      // By now the section has already fallen back to the vendor's shared key, so both places are
+      // empty. Name the variable the provider's module binds to that shared key - declared by the
+      // provider, never guessed from its id - and the section's own key, for a second account.
+      missing += s"  - apiKey: ${SharedCredentials.missingKeyHint(spec.apiKeyEnv, descriptor.id, s"llm4s.providers.$name")}"
 
     if spec.requiresBaseUrl && normalized.baseUrl.isEmpty then
       // Name an environment variable only when the provider says one is actually read (#1215). This
@@ -233,19 +229,33 @@ private[llm4s] object NamedProviderConfigValidator:
    * Validates a raw provider section by normalising it and checking it against the
    * registered provider it names.
    *
+   *  A section that sets no `apiKey` takes its vendor's shared `llm4s.credentials.<id>.apiKey`
+   *  from `credentials`, and where the key came from is logged at INFO - the path, never the
+   *  value.
+   *
    *  @param providerName the logical name of the provider entry, used in error messages
    *  @param section      the raw unvalidated provider section
+   *  @param credentials  the `llm4s.credentials` block; empty by default, so a section validated
+   *                      on its own uses only its own key
    *  @return `Right(NamedProviderConfig)` on success, or `Left` with a `ConfigurationError`
    */
   def validate(
     providerName: ProviderName,
-    section: RawNamedProviderSection
+    section: RawNamedProviderSection,
+    credentials: SharedCredentials = SharedCredentials.empty
   )(using registry: ProviderRegistry): Result[NamedProviderConfig] =
+    val sectionPath = s"llm4s.providers.${providerName.asName}"
     for
       normalized <- NamedProviderConfigNormalizer.normalize(providerName, section)
-      descriptor <- registry.resolve(
-        normalized.provider,
-        Some(s"llm4s.providers.${providerName.asName}.provider")
+      descriptor <- registry.resolve(normalized.provider, Some(s"$sectionPath.provider"))
+      // `normalized.provider` is already canonical - an alias such as `google` has become
+      // `gemini` - so an aliased section finds its vendor's shared key.
+      resolved <- credentials.resolve(normalized.apiKey.map(_.asKey), s"$sectionPath.apiKey", normalized.provider)
+      validated <- NamedProviderSectionValidator.validate(
+        providerName,
+        descriptor,
+        normalized.copy(apiKey = resolved.map(key => ApiKey(key.value)))
       )
-      validated <- NamedProviderSectionValidator.validate(providerName, descriptor, normalized)
-    yield validated
+    yield
+      resolved.foreach(SharedCredentials.logSource(sectionPath, _))
+      validated

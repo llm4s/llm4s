@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ MistralModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, MistralConfig, ProviderConfig }
@@ -20,7 +21,10 @@ object MistralProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("mistral")
 
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(MistralConfig.DEFAULT_BASE_URL)
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(
+      MistralConfig.DEFAULT_BASE_URL,
+      Seq(OpenAICompatibleConfigKeys.MISTRAL_API_KEY)
+    )
 
   override val modelLister: Option[ProviderModelLister] = Some(MistralModelLister)
 

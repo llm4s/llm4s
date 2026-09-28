@@ -129,8 +129,8 @@ Rank   Config                         RAGAS      Status
 ./scripts/download-datasets.sh ragbench
 
 # Set environment variables
-export LLM_MODEL=openai/gpt-4o
-export OPENAI_API_KEY=sk-...
+export LLM4S_PROVIDER=openai-main   # an openai section in the samples' application.local.conf
+export OPENAI_API_KEY=sk-...        # used by that section and by OpenAI embeddings
 export EMBEDDING_MODEL=openai/text-embedding-3-small  # Unified provider/model format
 ```
 

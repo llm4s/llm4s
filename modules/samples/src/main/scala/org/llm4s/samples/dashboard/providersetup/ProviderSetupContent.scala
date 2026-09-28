@@ -11,7 +11,7 @@ private[providersetup] object ProviderSetupContent:
       summary = "This sample helps first-time users understand how llm4s expects provider configuration.",
       highlights = List(
         "llm4s reads providers from named sections under llm4s.providers in application.conf or -D properties.",
-        "Env vars reach a section only through a ${?VAR} binding in it, e.g. apiKey = ${?OPENAI_API_KEY}.",
+        "A section with no apiKey uses its vendor's variable (OPENAI_API_KEY, ...), bound by the provider module; its own apiKey = ${?VAR} wins.",
         "This app validates the current machine using real llm4s config loading."
       ),
       requiredVars = List(
@@ -20,7 +20,7 @@ private[providersetup] object ProviderSetupContent:
       optionalVars = List(
         "LLM4S_PROVIDER=<name> - which section is the default (bound to llm4s.providers.provider in the samples' application.conf)",
         "OLLAMA_MODEL, OLLAMA_BASE_URL - the ollama-local section's model and baseUrl (bound in the samples' application.conf)",
-        "A key variable such as OPENAI_API_KEY - read only through apiKey = ${?OPENAI_API_KEY} in a section you add",
+        "A vendor key variable such as OPENAI_API_KEY - used by any section of that provider that sets no apiKey of its own",
         "-Dllm4s.providers.provider=<name> - choose the default for one run"
       ),
       recommendedModels = List("ollama/llama3:latest", "openai/gpt-4o-mini"),
@@ -163,7 +163,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       requiredVars = List(
         "An openai-main section (provider = \"openai\") in application.local.conf",
-        "OPENAI_API_KEY=<your-api-key> - read through apiKey = ${?OPENAI_API_KEY} in that section"
+        "OPENAI_API_KEY=<your-api-key> - llm4s-openai binds it to llm4s.credentials.openai.apiKey, which the section uses"
       ),
       optionalVars = List(
         "LLM4S_PROVIDER=openai-main - make it the default",
@@ -171,7 +171,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       recommendedModels = List("openai/gpt-4o-mini", "openai/gpt-4.1-mini"),
       setupSteps = List(
-        "Add an `openai-main` section to application.local.conf: provider = \"openai\", a model, apiKey = ${?OPENAI_API_KEY}.",
+        "Add an `openai-main` section to application.local.conf: provider = \"openai\" and a model; no apiKey line needed.",
         "Create an API key in the OpenAI platform dashboard.",
         "Export `OPENAI_API_KEY` in your shell.",
         "Export `LLM4S_PROVIDER=openai-main`.",
@@ -189,7 +189,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       requiredVars = List(
         "An azure-main section (provider = \"azure\") in application.local.conf",
-        "AZURE_API_KEY=<your-api-key> - read through apiKey = ${?AZURE_API_KEY} in that section",
+        "AZURE_OPENAI_API_KEY=<your-api-key> - llm4s-openai binds it to llm4s.credentials.azure.apiKey, which the section uses",
         "AZURE_API_BASE=<endpoint> - read through endpoint = ${?AZURE_API_BASE} in that section"
       ),
       optionalVars = List(
@@ -198,7 +198,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       recommendedModels = List("azure/gpt-4o-mini", "azure/gpt-4.1-mini"),
       setupSteps = List(
-        "Add an `azure-main` section to application.local.conf: provider = \"azure\", a model, apiKey = ${?AZURE_API_KEY}, endpoint = ${?AZURE_API_BASE}.",
+        "Add an `azure-main` section to application.local.conf: provider = \"azure\", a model, endpoint = ${?AZURE_API_BASE}.",
         "Create or reuse an Azure OpenAI resource.",
         "Deploy a model and note the deployment name.",
         "Export the Azure key, base URL, and `LLM4S_PROVIDER`.",
@@ -216,7 +216,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       requiredVars = List(
         "An anthropic-main section (provider = \"anthropic\") in application.local.conf",
-        "ANTHROPIC_API_KEY=<your-api-key> - read through apiKey = ${?ANTHROPIC_API_KEY} in that section"
+        "ANTHROPIC_API_KEY=<your-api-key> - llm4s-anthropic binds it to llm4s.credentials.anthropic.apiKey, which the section uses"
       ),
       optionalVars = List(
         "LLM4S_PROVIDER=anthropic-main - make it the default",
@@ -224,7 +224,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       recommendedModels = List("anthropic/claude-3-5-haiku-latest", "anthropic/claude-3-7-sonnet-latest"),
       setupSteps = List(
-        "Add an `anthropic-main` section to application.local.conf: provider = \"anthropic\", a model, apiKey = ${?ANTHROPIC_API_KEY}.",
+        "Add an `anthropic-main` section to application.local.conf: provider = \"anthropic\" and a model; no apiKey line needed.",
         "Create an Anthropic API key.",
         "Export `ANTHROPIC_API_KEY`.",
         "Export `LLM4S_PROVIDER=anthropic-main`.",
@@ -242,7 +242,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       requiredVars = List(
         "A gemini-main section (provider = \"gemini\") in application.local.conf",
-        "GEMINI_API_KEY=<your-api-key> - read through apiKey = ${?GEMINI_API_KEY} in that section"
+        "GEMINI_API_KEY=<your-api-key> - llm4s-gemini binds it to llm4s.credentials.gemini.apiKey, which the section uses (GOOGLE_API_KEY also works, and wins when both are set)"
       ),
       optionalVars = List(
         "LLM4S_PROVIDER=gemini-main - make it the default",
@@ -250,7 +250,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       recommendedModels = List("gemini/gemini-2.0-flash", "gemini/gemini-1.5-pro"),
       setupSteps = List(
-        "Add a `gemini-main` section to application.local.conf: provider = \"gemini\", a model, apiKey = ${?GEMINI_API_KEY}.",
+        "Add a `gemini-main` section to application.local.conf: provider = \"gemini\" and a model; no apiKey line needed.",
         "Create or retrieve a Gemini API key.",
         "Export `GEMINI_API_KEY`.",
         "Pick one working Gemini named provider in `LLM4S_PROVIDER`.",
@@ -268,7 +268,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       requiredVars = List(
         "A deepseek-main section (provider = \"deepseek\") in application.local.conf",
-        "DEEPSEEK_API_KEY=<your-api-key> - read through apiKey = ${?DEEPSEEK_API_KEY} in that section"
+        "DEEPSEEK_API_KEY=<your-api-key> - llm4s-openai-compatible binds it to llm4s.credentials.deepseek.apiKey, which the section uses"
       ),
       optionalVars = List(
         "LLM4S_PROVIDER=deepseek-main - make it the default",
@@ -276,7 +276,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       recommendedModels = List("deepseek/deepseek-chat", "deepseek/deepseek-reasoner"),
       setupSteps = List(
-        "Add a `deepseek-main` section to application.local.conf: provider = \"deepseek\", a model, apiKey = ${?DEEPSEEK_API_KEY}.",
+        "Add a `deepseek-main` section to application.local.conf: provider = \"deepseek\" and a model; no apiKey line needed.",
         "Create a DeepSeek API key.",
         "Export `DEEPSEEK_API_KEY`.",
         "Set `LLM4S_PROVIDER` to a known DeepSeek named provider.",
@@ -294,7 +294,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       requiredVars = List(
         "A cohere-main section (provider = \"cohere\") in application.local.conf",
-        "COHERE_API_KEY=<your-api-key> - read through apiKey = ${?COHERE_API_KEY} in that section"
+        "COHERE_API_KEY=<your-api-key> - llm4s-openai-compatible binds it to llm4s.credentials.cohere.apiKey, which the section uses"
       ),
       optionalVars = List(
         "LLM4S_PROVIDER=cohere-main - make it the default",
@@ -302,7 +302,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       recommendedModels = List("cohere/command-r", "cohere/command-r-plus"),
       setupSteps = List(
-        "Add a `cohere-main` section to application.local.conf: provider = \"cohere\", a model, apiKey = ${?COHERE_API_KEY}.",
+        "Add a `cohere-main` section to application.local.conf: provider = \"cohere\" and a model; no apiKey line needed.",
         "Create a Cohere API key.",
         "Export `COHERE_API_KEY`.",
         "Set `LLM4S_PROVIDER` to a supported Cohere named provider.",
@@ -320,7 +320,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       requiredVars = List(
         "A mistral-main section (provider = \"mistral\") in application.local.conf",
-        "MISTRAL_API_KEY=<your-api-key> - read through apiKey = ${?MISTRAL_API_KEY} in that section"
+        "MISTRAL_API_KEY=<your-api-key> - llm4s-openai-compatible binds it to llm4s.credentials.mistral.apiKey, which the section uses"
       ),
       optionalVars = List(
         "LLM4S_PROVIDER=mistral-main - make it the default",
@@ -328,7 +328,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       recommendedModels = List("mistral/mistral-small-latest", "mistral/open-mistral-nemo"),
       setupSteps = List(
-        "Add a `mistral-main` section to application.local.conf: provider = \"mistral\", a model, apiKey = ${?MISTRAL_API_KEY}.",
+        "Add a `mistral-main` section to application.local.conf: provider = \"mistral\" and a model; no apiKey line needed.",
         "Create a Mistral API key.",
         "Export `MISTRAL_API_KEY`.",
         "Export a supported Mistral named provider in `LLM4S_PROVIDER`.",
@@ -346,7 +346,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       requiredVars = List(
         "A zai-main section (provider = \"zai\") in application.local.conf",
-        "ZAI_API_KEY=<your-api-key> - read through apiKey = ${?ZAI_API_KEY} in that section"
+        "ZAI_API_KEY=<your-api-key> - llm4s-openai-compatible binds it to llm4s.credentials.zai.apiKey, which the section uses"
       ),
       optionalVars = List(
         "LLM4S_PROVIDER=zai-main - make it the default",
@@ -354,7 +354,7 @@ private[providersetup] object ProviderSetupContent:
       ),
       recommendedModels = List("zai/glm-4.5-air", "zai/glm-4.5"),
       setupSteps = List(
-        "Add a `zai-main` section to application.local.conf: provider = \"zai\", a model, apiKey = ${?ZAI_API_KEY}.",
+        "Add a `zai-main` section to application.local.conf: provider = \"zai\" and a model; no apiKey line needed.",
         "Create a Z.ai API key.",
         "Export `ZAI_API_KEY`.",
         "Set `LLM4S_PROVIDER` to a supported Z.ai named provider.",

@@ -22,6 +22,12 @@ import org.llm4s.types.Result
  * registered, and `EmbeddingClient.from` can reach it with nothing in
  * `llm4s-core` edited.
  *
+ * The module's `reference.conf` binds the vendor's variable to the shared key, which a
+ * section without an `apiKey` of its own falls back to:
+ * {{{
+ * llm4s.credentials.jina.apiKey = ${?JINA_API_KEY}
+ * }}}
+ *
  * @example
  * {{{
  * object JinaEmbeddings extends EmbeddingProviderDescriptor:
@@ -30,7 +36,7 @@ import org.llm4s.types.Result
  *   override val configSpec = EmbeddingConfigSpec(
  *     requiresApiKey = true,
  *     defaultBaseUrl = Some("https://api.jina.ai/v1"),
- *     apiKeyEnv      = Some("JINA_API_KEY")
+ *     apiKeyEnv      = Seq("JINA_API_KEY")   // what llm4s.credentials.jina.apiKey binds
  *   )
  *
  *   def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
@@ -79,14 +85,12 @@ trait EmbeddingProviderDescriptor:
    * client needs.
    *
    * The default implementation resolves model, base URL and API key against
-   * [[configSpec]], which is all any of the project's own providers needs; a key kept
-   * outside the provider's own section is declared with `apiKeyPath` rather than by
-   * overriding this. Override it only for a provider whose config genuinely cannot be
-   * expressed that way.
+   * [[configSpec]], which is all any of the project's own providers needs. Override it only
+   * for a provider whose config genuinely cannot be expressed that way.
    *
-   * @param section       the `llm4s.embeddings.<id>` section, already parsed, with any
-   *                      [[EmbeddingConfigSpec.apiKeyPath]] already resolved into its
-   *                      `apiKey`. Empty rather than absent when the user configured
+   * @param section       the `llm4s.embeddings.<id>` section, already parsed, its `apiKey`
+   *                      already falling back to the shared `llm4s.credentials.<id>.apiKey`
+   *                      when it sets none. Empty rather than absent when the user configured
    *                      nothing. Everything this method needs arrives typed, in here:
    *                      a descriptor never reads configuration itself.
    * @param modelOverride the `<model>` half of `EMBEDDING_MODEL=<id>/<model>`, when the

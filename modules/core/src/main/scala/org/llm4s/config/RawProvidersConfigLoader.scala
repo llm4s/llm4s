@@ -125,7 +125,8 @@ private[config] object RawProvidersConfigLoader:
     }
 
   /**
-   * Reads the `llm4s.providers` config block, keeping each section's read failure to that section.
+   * Reads the `llm4s.providers` config block, keeping each section's read failure to that section,
+   * together with the `llm4s.credentials` block its sections fall back to for an API key.
    *
    *  @param source the PureConfig source to read from
    *  @return `Right` with each section read or failed on its own, or `Left` when the block itself is unreadable
@@ -138,7 +139,8 @@ private[config] object RawProvidersConfigLoader:
           name -> section.left.map { failures =>
             ConfigurationError(s"Failed to read llm4s.providers.${name.asName}: ${describe(failures)}")
           }
-        }
+        },
+        credentials = SharedCredentials.read(source)
       )
     }
 

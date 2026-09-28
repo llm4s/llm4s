@@ -24,7 +24,7 @@ import scala.util.chaining._
  * Environment variables:
  * - AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (or use IAM roles)
  * - EMBEDDING_MODEL in `provider/model` form, e.g. `ollama/nomic-embed-text` (local, no key) or
- *   `openai/text-embedding-3-small`, whose key is `llm4s.embeddings.openai.apiKey` - see
+ *   `openai/text-embedding-3-small`, whose key comes from `OPENAI_API_KEY` - see
  *   docs/getting-started/configuration.md#embeddings-configuration
  */
 object S3LoaderExample {

@@ -214,9 +214,10 @@ sbt buildAll
 
 You will need an API key for at least one cloud provider, or a local Ollama installation for local models.
 
-llm4s reads providers from named sections under `llm4s.providers` in `application.conf`; it does
-not read `LLM_MODEL` or provider API-key variables by itself. A section binds the variable it
-needs with `${?VAR}`:
+llm4s reads providers from named sections under `llm4s.providers` in `application.conf`. Each
+provider module binds its vendor's API-key variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...)
+to a shared key, so with the variable set a section needs only `provider` and `model` - a section
+for a second account sets its own `apiKey = ${?OTHER_VAR}`. Nothing reads `LLM_MODEL`:
 
 ```hocon
 llm4s {
@@ -226,7 +227,6 @@ llm4s {
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"
-      apiKey   = ${?OPENAI_API_KEY}
     }
   }
 }
@@ -245,8 +245,10 @@ export LLM4S_PROVIDER=openai-main   # bound by the samples' application.conf
 
 Anthropic, Gemini, Azure, OpenRouter, Z.ai, DeepSeek, Mistral, Cohere and generic OpenAI-compatible
 endpoints work the same way with `provider = "anthropic"`, `"gemini"`, `"azure"`, `"openrouter"`,
-`"zai"`, `"deepseek"`, `"mistral"`, `"cohere"` or `"openai-compatible"`; each provider module's
-`reference.conf` has an example section. See the
+`"zai"`, `"deepseek"`, `"mistral"`, `"cohere"` or `"openai-compatible"`, and the vendor's own
+key variable (`ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`/`GEMINI_API_KEY`, `AZURE_OPENAI_API_KEY`, ...);
+each provider module's `reference.conf` has an example section. See the
+[API keys table](docs/getting-started/configuration.md#api-keys), the
 [configuration guide](docs/getting-started/configuration.md#named-provider-sections) for all of them
 and [running the samples](docs/getting-started/configuration.md#running-the-samples) for the
 samples' own bindings.
@@ -436,8 +438,8 @@ llm4s exposes a single configuration flow with sensible precedence:
 
 - Precedence: `-D` system properties > `application.conf` (if your app provides it) > `reference.conf` defaults.
 - Environment variables are read only where a `${?ENV}` substitution binds them: in a module's `reference.conf`
-  (tracing, embeddings, tools) or in your own `application.conf` (provider sections). No `.env` reader is required,
-  and nothing reads `LLM_MODEL`.
+  (tracing, embeddings, tools, and each provider module's vendor key under `llm4s.credentials`) or in your own
+  `application.conf`. No `.env` reader is required, and nothing reads `LLM_MODEL`.
 
 Preferred typed entry points (PureConfig-backed via `Llm4sConfig`):
 
@@ -492,15 +494,16 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
   - Type: `(String, EmbeddingProviderConfig)`
   - Loader: `Llm4sConfig.embeddings()`
   - Provider-specific keys:
-    - **OpenAI**: `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL`; the key is not bound - add
-      `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` to `application.conf`
+    - **OpenAI**: `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL`, and `OPENAI_API_KEY` - the same key
+      OpenAI chat sections use
     - **Voyage**: `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL`, `VOYAGE_API_KEY`
     - **Ollama** (local): `OLLAMA_EMBEDDING_BASE_URL` (default: `http://localhost:11434`), `OLLAMA_EMBEDDING_MODEL`
 
 - Provider API keys and endpoints
   - Keys: `apiKey`, `baseUrl`, `organization`, `endpoint`, `apiVersion`, `project`, `location` inside each
-    `llm4s.providers.<name>` section. Variables such as `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` are read only
-    when the section binds them, e.g. `apiKey = ${?OPENAI_API_KEY}`
+    `llm4s.providers.<name>` section. A section without `apiKey` uses its vendor's shared
+    `llm4s.credentials.<provider>.apiKey`, which the provider module binds to `OPENAI_API_KEY`,
+    `ANTHROPIC_API_KEY` and so on; a section's own `apiKey` wins
   - Type: concrete `ProviderConfig` (e.g., `OpenAIConfig`, `AnthropicConfig`, `AzureConfig`, `OllamaConfig`, `GeminiConfig`, `DeepSeekConfig`, `CohereConfig`)
   - Loader: `Llm4sConfig.defaultProvider()` or `Llm4sConfig.provider("name")`
 
@@ -520,8 +523,8 @@ Example (no application.conf required):
 sbt -Dllm4s.providers.provider=openai-main -Dllm4s.providers.openai-main.provider=openai -Dllm4s.providers.openai-main.model=gpt-4o -Dllm4s.providers.openai-main.apiKey=sk-... "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
 
-Or with an `openai-main` section in `modules/samples/src/main/resources/application.local.conf`
-(`apiKey = ${?OPENAI_API_KEY}`) and the samples' `LLM4S_PROVIDER` binding:
+Or with an `openai-main` section (`provider = "openai"` and a `model`) in
+`modules/samples/src/main/resources/application.local.conf` and the samples' `LLM4S_PROVIDER` binding:
 
 ```
 export LLM4S_PROVIDER=openai-main

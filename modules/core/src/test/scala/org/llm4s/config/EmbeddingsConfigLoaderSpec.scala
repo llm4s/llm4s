@@ -180,8 +180,7 @@ class EmbeddingsConfigLoaderSpec extends AnyWordSpec with Matchers with EitherVa
       result.isLeft shouldBe true
       val error = result.left.value
       error.message should include("Missing fixtureembedding embeddings apiKey")
-      error.message should include("llm4s.embeddings.fixtureembedding.apiKey")
-      error.message should include("FIXTURE_EMBEDDING_API_KEY")
+      error.message should include("set apiKey under llm4s.embeddings.fixtureembedding in application.conf")
       error.message should include("FIXTURE_EMBEDDING_API_KEY")
     }
 

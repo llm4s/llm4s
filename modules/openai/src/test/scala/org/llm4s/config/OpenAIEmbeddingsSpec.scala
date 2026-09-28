@@ -160,23 +160,23 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
 
     val selectOpenAI = "llm4s.embeddings.model = \"openai/text-embedding-3-small\""
 
-    "not be read from OPENAI_API_KEY by llm4s itself" in {
-      // llm4s reads no provider API-key variable on its own: with only the reference.conf files
-      // on the classpath, a set OPENAI_API_KEY leaves the key missing.
-      EmbeddingsConfigLoader
-        .loadProvider(withReference(selectOpenAI, Map("OPENAI_API_KEY" -> "sk-from-env")))
-        .left
-        .value
-        .message should include("Missing openai embeddings apiKey")
-    }
-
-    "come from OPENAI_API_KEY once the application binds it" in {
-      val hocon = selectOpenAI + "\nllm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}"
+    "come from OPENAI_API_KEY through llm4s.credentials.openai.apiKey, with nothing in application.conf" in {
+      // This module's reference.conf binds OPENAI_API_KEY to OpenAI's shared key, which the
+      // embeddings block falls back to when it sets no apiKey of its own.
       val (provider, config) =
-        EmbeddingsConfigLoader.loadProvider(withReference(hocon, Map("OPENAI_API_KEY" -> "sk-from-env"))).value
+        EmbeddingsConfigLoader.loadProvider(withReference(selectOpenAI, Map("OPENAI_API_KEY" -> "sk-from-env"))).value
 
       provider shouldBe "openai"
       config.apiKey shouldBe "sk-from-env"
+    }
+
+    "come from the block's own apiKey over OPENAI_API_KEY" in {
+      val hocon = selectOpenAI + "\nllm4s.embeddings.openai.apiKey = \"sk-embeddings\""
+      EmbeddingsConfigLoader
+        .loadProvider(withReference(hocon, Map("OPENAI_API_KEY" -> "sk-from-env")))
+        .value
+        ._2
+        .apiKey shouldBe "sk-embeddings"
     }
 
     "not fall back to llm4s.openai.apiKey, which nothing else reads (#1132)" in {
@@ -191,12 +191,12 @@ class OpenAIEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
       error should include("Missing openai embeddings apiKey")
     }
 
-    "be reported against the section key alone" in {
+    "be reported against the variable and the block" in {
       val error = EmbeddingsConfigLoader.loadProvider(withReference(selectOpenAI, Map.empty)).left.value.message
 
-      error should include("llm4s.embeddings.openai.apiKey")
-      // Neither the variable, which nothing binds, nor the removed fallback path.
-      (error should not).include("OPENAI_API_KEY")
+      error shouldBe "Missing openai embeddings apiKey: set OPENAI_API_KEY, or set apiKey under " +
+        "llm4s.embeddings.openai in application.conf"
+      // Not the removed legacy chat path.
       (error should not).include("llm4s.openai.apiKey")
     }
   }

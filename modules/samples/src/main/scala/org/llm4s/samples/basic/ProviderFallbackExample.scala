@@ -19,7 +19,7 @@ import org.slf4j.LoggerFactory
  *
  * 1. Choose your primary provider. The samples default to the `ollama-local` section of
  *    `modules/samples/src/main/resources/application.conf`; for OpenAI, add an
- *    `openai-main` section with `apiKey = ${?OPENAI_API_KEY}` to `application.local.conf`
+ *    `openai-main` section (`provider = "openai"` and a model) to `application.local.conf`
  *    (docs/getting-started/configuration.md#running-the-samples), then:
  *    {{{
  *    export OPENAI_API_KEY=sk-...

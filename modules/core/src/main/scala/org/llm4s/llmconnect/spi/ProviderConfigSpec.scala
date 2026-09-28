@@ -98,6 +98,20 @@ object ProviderConfigKey:
  *                             binding that reads it (`baseUrl = ${?VAR}`); `None` means no
  *                             variable is suggested.
  * @param extras               the provider-specific keys this section accepts.
+ * @param apiKeyEnv            the variables the provider's module binds to its vendor's shared key,
+ *                             `llm4s.credentials.<id>.apiKey`, highest precedence first - e.g.
+ *                             `Seq("OPENAI_API_KEY")`, or Gemini's `Seq("GOOGLE_API_KEY",
+ *                             "GEMINI_API_KEY")`. Named in the missing-`apiKey` error. This is a
+ *                             declaration for the message only: the binding itself is a line in
+ *                             the module's `reference.conf`, and the module's round-trip spec
+ *                             proves the two agree. Empty when the module binds no variable; the
+ *                             error then names `llm4s.credentials.<id>.apiKey` itself.
+ *
+ * == The API key ==
+ * A section's key is its own `apiKey` when it sets one, and otherwise the vendor's shared
+ * `llm4s.credentials.<id>.apiKey` - keyed by provider id, which a `reference.conf` ''can''
+ * know, unlike the instance name. So with `OPENAI_API_KEY` set, a section needs only
+ * `provider` and `model`; a section for a second account sets `apiKey` itself.
  */
 final case class ProviderConfigSpec(
   requiresApiKey: Boolean = false,
@@ -107,7 +121,8 @@ final case class ProviderConfigSpec(
   baseUrlExample: String = "e.g. https://api.example.com/",
   endpointDescription: String = "the provider endpoint",
   baseUrlEnv: Option[String] = None,
-  extras: Seq[ProviderConfigKey] = Seq.empty
+  extras: Seq[ProviderConfigKey] = Seq.empty,
+  apiKeyEnv: Seq[String] = Seq.empty
 ):
 
   /** The declared provider-specific key called `name`, if any. */
@@ -143,6 +158,9 @@ object ProviderConfigSpec:
   /**
    * The common shape: an API key, and a base URL that defaults to the
    * provider's public endpoint.
+   *
+   * @param apiKeyEnv the variables the module binds to `llm4s.credentials.<id>.apiKey`; see
+   *                  [[ProviderConfigSpec.apiKeyEnv]].
    */
-  def apiKeyAndDefaultBaseUrl(defaultBaseUrl: String): ProviderConfigSpec =
-    ProviderConfigSpec(requiresApiKey = true, defaultBaseUrl = Some(defaultBaseUrl))
+  def apiKeyAndDefaultBaseUrl(defaultBaseUrl: String, apiKeyEnv: Seq[String] = Seq.empty): ProviderConfigSpec =
+    ProviderConfigSpec(requiresApiKey = true, defaultBaseUrl = Some(defaultBaseUrl), apiKeyEnv = apiKeyEnv)

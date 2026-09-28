@@ -142,7 +142,7 @@ If you reference source paths directly (e.g. in IDE imports or custom scripts) u
 
 No environment variable was renamed in 0.x, but one set stopped being read. The unified `EMBEDDING_MODEL` format (`provider/model-name`) was *added* in 0.2.8 as the recommended form, and is still bound by llm4s-core's `reference.conf`.
 
-Since 0.3.2 ([#903](https://github.com/llm4s/llm4s/pull/903)) llm4s no longer reads `LLM_MODEL` or a provider's own variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OLLAMA_BASE_URL`, ...) by itself. Chat providers are configured as named sections under `llm4s.providers` in your `application.conf`, each binding the variables it needs with `${?VAR}` - for example `apiKey = ${?OPENAI_API_KEY}`. See [From `LLM_MODEL` to named provider sections](../reference/migration.md#from-llm_model-to-named-provider-sections).
+Since 0.3.2 ([#903](https://github.com/llm4s/llm4s/pull/903)) llm4s no longer reads `LLM_MODEL`. Chat providers are configured as named sections under `llm4s.providers` in your `application.conf`. Each provider module binds its vendor's API-key variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...) to a shared `llm4s.credentials.<provider>.apiKey`, which a section without its own `apiKey` uses ([#1132](https://github.com/llm4s/llm4s/issues/1132)); other variables, such as `OLLAMA_BASE_URL`, are read only where a section binds them with `${?VAR}`. See [From `LLM_MODEL` to named provider sections](../reference/migration.md#from-llm_model-to-named-provider-sections).
 
 ---
 

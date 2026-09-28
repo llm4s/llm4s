@@ -8,6 +8,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Vendor credentials: `llm4s.credentials.<provider>.apiKey`**
+  ([#1132](https://github.com/llm4s/llm4s/issues/1132), [#1126](https://github.com/llm4s/llm4s/issues/1126)).
+  Credentials belong to a vendor, keyed by provider id; clients belong to a use. Each provider
+  module's `reference.conf` binds its vendor's conventional variable to a shared key -
+  `OPENAI_API_KEY`, `AZURE_OPENAI_API_KEY`, `REQUESTY_API_KEY` (`llm4s-openai`),
+  `ANTHROPIC_API_KEY` (`llm4s-anthropic`), `GOOGLE_API_KEY` then `GEMINI_API_KEY` (`llm4s-gemini`),
+  `DEEPSEEK_API_KEY`, `ZAI_API_KEY`, `OPENROUTER_API_KEY`, `MISTRAL_API_KEY`, `COHERE_API_KEY`
+  (`llm4s-openai-compatible`; `COHERE_API_KEY` also `llm4s-rag`) and `VOYAGE_API_KEY`
+  (`llm4s-voyage`); none for `openai-compatible`, `ollama` or `vertexai`. A client's own `apiKey`
+  (chat section, `llm4s.embeddings.<id>`, `llm4s.rerank.cohere`) wins; otherwise it uses the
+  shared key of its canonical provider id (so `provider = "google"` uses `gemini`'s); otherwise
+  the missing-key error names both, e.g. `apiKey: set OPENAI_API_KEY, or set apiKey under
+  llm4s.providers.openai-main in application.conf`. The key's source path is logged at INFO,
+  never its value. Additive for users: with `OPENAI_API_KEY` set, a chat section needs only
+  `provider` and `model`, and OpenAI embeddings need no `llm4s.embeddings.openai.apiKey` line -
+  configs that failed for want of one now load. Keys only: `baseUrl`, `endpoint`, `model` and
+  `apiVersion` are never defaulted from the block.
+
+  Moved bindings: Voyage's `VOYAGE_API_KEY` from `llm4s.embeddings.voyage.apiKey`, and the Cohere
+  reranker's `COHERE_API_KEY` from `llm4s.rerank.cohere.apiKey`, to `llm4s.credentials.voyage` /
+  `.cohere` - one `COHERE_API_KEY` now serves Cohere chat and the reranker. An explicit key at the
+  old paths still wins. Renamed variable: Azure's key is bound as `AZURE_OPENAI_API_KEY`, the
+  openai SDK's name; `AZURE_API_KEY` is not read (keep `apiKey = ${?AZURE_API_KEY}` in the section
+  to go on using it).
+
+  Also new: `org.llm4s.config.RerankerConfigLoader` (`load(source)` / `default()`) in `llm4s-rag`,
+  the first code to read `llm4s.rerank` - its `reference.conf` bound the keys, but nothing read
+  them; `Llm4sConfig.apiKeySources()` / `apiKeySourcesFrom(source)` and `ApiKeySource`
+  (`Section` / `Credentials`), reporting where each chat section's key comes from;
+  `ProviderConfigSpec.apiKeyEnv`; `GeminiConfigKeys`, `OpenAIConfigKeys.REQUESTY_API_KEY` and
+  `OpenAICompatibleConfigKeys.OPENROUTER_API_KEY` / `ZAI_API_KEY` / `COHERE_API_KEY`; and the
+  config-policy rule `ownApiKey` (`ConfigPolicy.withOwnApiKeyRequired`,
+  `ConfigPolicyEngine.checkApiKeySources`), enabled in the `prod` preset only, which fails any chat
+  section of a key-requiring provider that sets no `apiKey` of its own - so a section meant for a
+  second account cannot silently bill the default one.
+
+  Source breaks (pre-MiMa): `EmbeddingConfigSpec.apiKeyPath` and its resolution are removed - the
+  shared credentials key replaces it; `EmbeddingConfigSpec.apiKeyEnv` is a `Seq[String]` (was
+  `Option[String]`); `ProviderConfigSpec` gained a defaulted trailing `apiKeyEnv`;
+  `OpenAIConfigKeys.AZURE_API_KEY` is now `AZURE_OPENAI_API_KEY`; the chat and embeddings
+  missing-key messages changed. See the
+  [migration note](docs/reference/migration.md#vendor-credentials-a-shared-api-key-per-provider).
 - **Provider-specific config keys for named providers** - a descriptor declares keys of its own
   in `ProviderConfigSpec.extras` (`ProviderConfigKey`: name, description, `required`, `default`,
   `env`, `deprecatedAliases`), and reads them from the new `NamedProviderConfig.extras` (or

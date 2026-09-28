@@ -14,6 +14,8 @@ import org.llm4s.types.Result
  * A section names the GCP `project` (required) and `location` (default
  * `us-central1`), both provider-specific keys, and may set `apiKey` to a path to a
  * service-account credential file - Vertex authenticates with OAuth2, not an API key.
+ * With no `apiKey` it uses Application Default Credentials. It therefore has no
+ * `llm4s.credentials.vertexai` block: there is no vendor API key to share.
  *
  * {{{
  * vertex-main {

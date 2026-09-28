@@ -29,13 +29,18 @@ LLM4S follows a configuration boundary principle: all configuration loading happ
 
 ### Never Commit Secrets
 
-API keys belong in environment variables or a secrets manager—never in source control. LLM4S does
-not read provider variables such as `OPENAI_API_KEY` or `LLM_MODEL` by itself: your
-`application.conf` names the variable each secret comes from with a `${?VAR}` substitution, and the
-deployment sets that variable.
+API keys belong in environment variables or a secrets manager—never in source control. A section's
+key is its own `apiKey` when it sets one, and otherwise its vendor's shared
+`llm4s.credentials.<provider>.apiKey`, which each provider module binds to the vendor's variable
+(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...; see [API keys](getting-started/configuration.md#api-keys)).
+That default is convenient in development. **In production, give every section its own `apiKey`**:
+a section meant for a second account whose key is missing would otherwise fall back to the shared
+key and silently bill the default account. llm4s logs at INFO which path each key came from
+(`llm4s.providers.openai-main: API key from llm4s.providers.openai-main.apiKey`), never the value.
+Nothing reads `LLM_MODEL`.
 
 ```bash
-# .env (add to .gitignore) - only the variables your application.conf binds
+# .env (add to .gitignore)
 OPENAI_API_KEY=<your-openai-key>
 ANTHROPIC_API_KEY=<your-anthropic-key>
 ```
@@ -51,14 +56,14 @@ precedence):
 3. **reference.conf** (the defaults shipped in each llm4s module)
 
 Environment variables are not a layer of their own: one is read only where a `${?VAR}` substitution
-binds it - in your `application.conf`, or in a module's `reference.conf` (tracing, embeddings and
-tools bind theirs there; see
+binds it - in your `application.conf`, or in a module's `reference.conf` (tracing, embeddings,
+tools and each provider's vendor key bind theirs there; see
 [the variables llm4s reads](getting-started/configuration.md#environment-variables-llm4s-reads)).
 
 ### Production application.conf
 
-Create `src/main/resources/application.conf` with a named section per provider, binding each secret
-from the environment:
+Create `src/main/resources/application.conf` with a named section per provider, each binding its
+own key explicitly, so which account a section bills is written down:
 
 ```hocon
 llm4s {
@@ -69,7 +74,7 @@ llm4s {
     openai-main {
       provider = "openai"
       model    = "gpt-4o"
-      apiKey   = ${?OPENAI_API_KEY}
+      apiKey   = ${?OPENAI_API_KEY}      # explicit: this section bills the OPENAI_API_KEY account
     }
 
     claude {
@@ -90,10 +95,28 @@ Each provider comes from its own module (`llm4s-openai`, `llm4s-anthropic`, ...)
 sections name. On 0.4.1 and earlier they all ship inside `llm4s-core`.
 
 Only the section you load is validated. `Llm4sConfig.defaultProvider()` checks the default section
-and `Llm4sConfig.provider("claude")` checks `claude`; a section whose `apiKey` variable is unset, or
+and `Llm4sConfig.provider("claude")` checks `claude`; a section with no key available, or
 whose provider module is not on the classpath, fails only when it is the one asked for. The file
 above can therefore be deployed with just `OPENAI_API_KEY` set while `openai-main` is the default.
 (Up to 0.4.1 every section was validated on every load, so it needed both keys.)
+
+### Check for inherited keys with the config policy
+
+`llm4s-config-policy`'s `prod` preset (`ConfigPolicy.prodSafeDefaults`) includes the rule
+`ownApiKey`: every named chat section whose provider needs a key must set its own `apiKey`. A
+section that does not - and would therefore use the vendor's shared key - fails the check, whether
+or not the shared variable is set where the check runs:
+
+```text
+ - [ownApiKey] llm4s.providers.openai-batch sets no apiKey, so it would use the shared llm4s.credentials.openai.apiKey; set llm4s.providers.openai-batch.apiKey to the key for the account it should bill
+```
+
+Run it in CI against your production config:
+`sbt "configPolicy/runMain org.llm4s.configpolicy.CheckPolicies --env=prod --config prod.conf"`.
+The rule is off in the `dev` preset; enable it in a custom policy with
+`withOwnApiKeyRequired(CatalogEnvironment.Prod)`. `Llm4sConfig.apiKeySources()` reports the same
+information - `ApiKeySource.Section` or `ApiKeySource.Credentials` per section - for checks of your
+own.
 
 ### Per-Environment Configuration
 
@@ -148,7 +171,8 @@ This pattern makes testing easier and keeps configuration concerns at the edges.
 ### Secrets in Kubernetes
 
 For Kubernetes deployments, use Secrets and reference them in your pod spec. The variable names are
-the ones your `application.conf` binds (`apiKey = ${?OPENAI_API_KEY}`); `TRACING_MODE` and
+the ones your sections bind (`apiKey = ${?OPENAI_API_KEY}`) - or, for a section without its own
+`apiKey`, the vendor's variable its provider module binds; `TRACING_MODE` and
 `LANGFUSE_*` are bound by llm4s-core's `reference.conf`. Supply the key of each section the
 deployment loads: with the file above and `openai-main` as the default, `OPENAI_API_KEY`, plus
 `ANTHROPIC_API_KEY` if it also calls `Llm4sConfig.provider("claude")`.

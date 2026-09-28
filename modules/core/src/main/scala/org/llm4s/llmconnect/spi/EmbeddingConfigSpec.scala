@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.spi
 
 import com.typesafe.config.ConfigUtil
+import org.llm4s.config.SharedCredentials
 import org.llm4s.error.ConfigurationError
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
@@ -42,31 +43,32 @@ final case class EmbeddingProviderSection(
  * `EmbeddingsConfigLoader` said `DefaultOllamaEmbeddingBaseUrl` - and nothing
  * kept them in step.
  *
+ * == The API key ==
+ * The key is the section's own `apiKey` when it sets one, and otherwise the vendor's shared
+ * key, `llm4s.credentials.<id>.apiKey`, which the module's `reference.conf` binds to the
+ * vendor's variable (`llm4s.credentials.openai.apiKey = ${?OPENAI_API_KEY}`). The same shared
+ * key serves the vendor's chat sections, so one variable configures both. `org.llm4s.config`
+ * resolves that fallback before calling the descriptor; nothing here reads configuration.
+ *
  * @param requiresApiKey the provider cannot work without a key; a missing one is an error.
  * @param defaultBaseUrl base URL used when the section omits one.
  * @param defaultModel   model used when neither `EMBEDDING_MODEL` nor the section names one.
  * @param defaultApiKey  stand-in for a provider that takes a key but does not need a real
  *                       one - Ollama running locally.
- * @param apiKeyPath     absolute config path this provider's key is read from when its own
- *                       section carries none, e.g. a credential shared with another client of
- *                       the same vendor, so users set it once. None of the project's own
- *                       providers uses it: OpenAI's key is its own section's `apiKey`. This
- *                       is a ''declaration'', not a read: `org.llm4s.config` resolves it
- *                       and hands the result back in the section, because reading configuration
- *                       outside that package is what the configuration boundary forbids.
- *                       Declaring it is also what makes the "missing key" error name the place
- *                       the key would actually be set.
- * @param apiKeyEnv      the environment variable this provider's key conventionally comes
- *                       from, named in the error when it is missing.
- * @param modelEnv       likewise for the model.
+ * @param apiKeyEnv      the variables the module's `reference.conf` binds to
+ *                       `llm4s.credentials.<id>.apiKey`, highest precedence first, named in the
+ *                       error when the key is missing. A declaration for the message only:
+ *                       the binding itself is the `reference.conf` line, and each module's
+ *                       round-trip spec proves the two agree. Empty when nothing binds the
+ *                       shared key, and the error then names the shared path instead.
+ * @param modelEnv       the variable the module binds to the model, named likewise.
  */
 final case class EmbeddingConfigSpec(
   requiresApiKey: Boolean = false,
   defaultBaseUrl: Option[String] = None,
   defaultModel: Option[String] = None,
   defaultApiKey: Option[String] = None,
-  apiKeyPath: Option[String] = None,
-  apiKeyEnv: Option[String] = None,
+  apiKeyEnv: Seq[String] = Seq.empty,
   modelEnv: Option[String] = None
 )
 
@@ -125,9 +127,9 @@ object EmbeddingConfigSpec:
   /**
    * Resolves the API key: the section first, then the spec's stand-in.
    *
-   * The section's `apiKey` already accounts for [[EmbeddingConfigSpec.apiKeyPath]]:
-   * the loader resolves that path and fills it in before calling the descriptor,
-   * so no configuration is read from here.
+   * The section's `apiKey` already accounts for the shared `llm4s.credentials.<id>.apiKey`:
+   * the loader falls back to it and fills it in before calling the descriptor, so no
+   * configuration is read from here.
    *
    * A provider whose spec neither requires a key nor supplies a default gets
    * the empty string, which is what a local provider that ignores the field
@@ -142,12 +144,13 @@ object EmbeddingConfigSpec:
       .orElse(spec.defaultApiKey) match
       case Some(key)                    => Right(key)
       case None if !spec.requiresApiKey => Right("")
-      case None                         =>
-        // Name the path the key is actually read from, which for a provider with an
-        // `apiKeyPath` is not its own section.
-        val path = spec.apiKeyPath.getOrElse(fieldPath(id, "apiKey"))
-        val env  = spec.apiKeyEnv.fold("")(name => s" / $name")
-        Left(ConfigurationError(s"Missing ${id.asString} embeddings apiKey ($path$env)"))
+      case None =>
+        Left(
+          ConfigurationError(
+            s"Missing ${id.asString} embeddings apiKey: " +
+              SharedCredentials.missingKeyHint(spec.apiKeyEnv, id, sectionPath(id))
+          )
+        )
 
   private def nonEmpty(value: Option[String]): Option[String] =
     value.map(_.trim).filter(_.nonEmpty)

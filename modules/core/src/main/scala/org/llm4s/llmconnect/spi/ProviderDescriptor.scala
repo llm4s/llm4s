@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.spi
 
-import org.llm4s.config.{ ProviderModelLister, ProvidersConfigModel }
+import org.llm4s.config.{ ProviderModelLister, ProvidersConfigModel, SharedCredentials }
 import org.llm4s.error.ConfigurationError
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -141,9 +141,20 @@ object ProviderDescriptor:
   ): Result[String] =
     requireField(providerName, key, section.extra(key), s"llm4s.providers.<name>.$key")
 
-  /** Reads the `apiKey` that a `requiresApiKey` [[ProviderConfigSpec]] guarantees is present. */
+  /**
+   * Reads the `apiKey` that a `requiresApiKey` [[ProviderConfigSpec]] guarantees is present.
+   *
+   * Validation has already filled it in from the vendor's shared
+   * `llm4s.credentials.<id>.apiKey` when the section set none, so this fails only for a
+   * section that did not come through validation - one built in code.
+   */
   def requireApiKey(providerName: String, section: ProvidersConfigModel.NamedProviderConfig): Result[String] =
-    requireField(providerName, "api key", section.apiKey.map(_.asKey), "llm4s.providers.<name>.apiKey")
+    requireField(
+      providerName,
+      "api key",
+      section.apiKey.map(_.asKey),
+      s"llm4s.providers.$providerName.apiKey, or ${SharedCredentials.apiKeyPath(section.provider)}"
+    )
 
   /**
    * The section's `baseUrl`, falling back to the spec's `defaultBaseUrl`.

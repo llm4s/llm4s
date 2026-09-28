@@ -38,7 +38,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       requiresApiKey = true,
       defaultBaseUrl = Some("https://fixture.example/v1"),
       defaultModel = Some("fixture-default-model"),
-      apiKeyEnv = Some("FIXTURE_API_KEY")
+      apiKeyEnv = Seq("FIXTURE_API_KEY")
     )
 
     def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
@@ -59,28 +59,10 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
   }
 
-  /**
-   * A provider whose key lives outside its own section - OpenAI's shape, whose embeddings
-   * reuse the chat client's key. OpenAI itself is checked in `llm4s-openai` (#1132).
-   */
-  private object SharedKeyFixtureEmbeddings extends EmbeddingProviderDescriptor {
-    val id: ProviderId = ProviderId("sharedkeyfixture")
-
-    override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
-      requiresApiKey = true,
-      defaultBaseUrl = Some("https://sharedkey.example/v1"),
-      apiKeyPath = Some("llm4s.sharedkeyfixture.apiKey")
-    )
-
-    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
-      Left(org.llm4s.error.ConfigurationError("fixture builds no provider"))
-  }
-
   private given ProviderRegistry =
     ProviderRegistry.default
       .withEmbeddingProvider(FixtureEmbeddings)
       .withEmbeddingProvider(KeylessFixtureEmbeddings)
-      .withEmbeddingProvider(SharedKeyFixtureEmbeddings)
 
   private def load(hocon: String): Result[(String, EmbeddingProviderConfig)] =
     EmbeddingsConfigLoader.loadProvider(ConfigSource.string(hocon))
@@ -156,7 +138,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       error should include("Missing fixturecloud embeddings apiKey")
       // The error names both the config path and the environment variable the descriptor
       // declared - neither of which core could have known.
-      error should include("llm4s.embeddings.fixturecloud.apiKey")
+      error should include("apiKey under llm4s.embeddings.fixturecloud")
       error should include("FIXTURE_API_KEY")
     }
   }
@@ -176,7 +158,7 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
       // The configuration boundary: `org.llm4s.config` reads raw config, everything else
       // consumes typed settings handed to it. `buildConfig` takes no config source and no
       // lookup, so a descriptor cannot reach for a key even if it wanted to - which is why
-      // `apiKeyPath` is a declaration the loader acts on rather than a read.
+      // the shared `llm4s.credentials.<id>.apiKey` fallback happens in the loader.
       val config = FixtureEmbeddings
         .buildConfig(EmbeddingProviderSection(apiKey = Some("fk-direct")), Some("m"))
         .value
@@ -186,43 +168,6 @@ class EmbeddingProviderSpiSpec extends AnyWordSpec with Matchers with EitherValu
         model = "m",
         apiKey = "fk-direct"
       )
-    }
-  }
-
-  "a credential the provider keeps outside its own section" should {
-
-    "be resolved from the path its descriptor declares" in {
-      // OpenAI's shape: no apiKey under its embeddings section, read from the chat key.
-      val (_, config) = load(
-        """llm4s {
-          |  sharedkeyfixture { apiKey = "sk-shared" }
-          |  embeddings { model = "sharedkeyfixture/fixture-small" }
-          |}""".stripMargin
-      ).value
-
-      config.apiKey shouldBe "sk-shared"
-    }
-
-    "lose to an explicit key in the provider's own section" in {
-      val (_, config) = load(
-        """llm4s {
-          |  sharedkeyfixture { apiKey = "sk-shared" }
-          |  embeddings {
-          |    model = "sharedkeyfixture/fixture-small"
-          |    sharedkeyfixture { apiKey = "sk-embeddings-only" }
-          |  }
-          |}""".stripMargin
-      ).value
-
-      config.apiKey shouldBe "sk-embeddings-only"
-    }
-
-    "be reported against the path it is actually set at" in {
-      val error = load("""llm4s { embeddings { model = "sharedkeyfixture/fixture-small" } }""").left.value.message
-
-      error should include("llm4s.sharedkeyfixture.apiKey")
-      // Not the embeddings section, where setting it would do nothing.
-      (error should not).include("llm4s.embeddings.sharedkeyfixture.apiKey")
     }
   }
 

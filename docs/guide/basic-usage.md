@@ -82,22 +82,22 @@ llm4s {
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"
-      apiKey   = ${?OPENAI_API_KEY}
     }
   }
 }
 ```
 
-and export the variable the section binds:
+and export the vendor's key, which `llm4s-openai` binds for any OpenAI section without an
+`apiKey` of its own:
 
 ```bash
 export OPENAI_API_KEY=sk-proj-...
 ```
 
-For Anthropic, use a section with `provider = "anthropic"` and `apiKey = ${?ANTHROPIC_API_KEY}`
-and name it in `provider`. llm4s reads no `LLM_MODEL` and no API-key variable by itself - only
-what your `application.conf` binds. See
-[Named provider sections](../getting-started/configuration.md#named-provider-sections).
+For Anthropic, use a section with `provider = "anthropic"`, export `ANTHROPIC_API_KEY`, and name
+the section in `provider`. llm4s reads no `LLM_MODEL`. See
+[Named provider sections](../getting-started/configuration.md#named-provider-sections) and
+[API keys](../getting-started/configuration.md#api-keys).
 
 ### Multi-Provider Pattern
 
@@ -289,7 +289,6 @@ llm4s {
     openai-main {
       provider = "openai"
       model    = "gpt-4o"
-      apiKey   = ${?OPENAI_API_KEY}
     }
   }
 }
@@ -302,15 +301,16 @@ export OPENAI_API_KEY=sk-...
 ### Environment Variables
 
 llm4s reads an environment variable only where a `${?VAR}` binding names it - in your own
-`application.conf`, as above, or in a module's `reference.conf`. A few settings are bound for you,
+`application.conf`, or in a module's `reference.conf`. A few settings are bound for you,
 for example:
 
 ```bash
+export OPENAI_API_KEY=sk-...                            # llm4s.credentials.openai.apiKey
 export TRACING_MODE=console                             # llm4s.tracing.mode
 export EMBEDDING_MODEL=openai/text-embedding-3-small    # llm4s.embeddings.model
 ```
 
-`LLM_MODEL` and the provider API-key variables are **not** among them. See
+`LLM_MODEL` is **not** among them. See
 [Environment variables llm4s reads](../getting-started/configuration.md#environment-variables-llm4s-reads).
 
 ### System Properties
@@ -397,7 +397,7 @@ response match {
 
 ### "Invalid API Key"
 
-- Verify the variable your provider section binds (`apiKey = ${?OPENAI_API_KEY}`) is set and correct
+- Verify `OPENAI_API_KEY` (or the variable the section's own `apiKey` binds, which wins) is set and correct
 - Check the API key has the right permissions on the provider's dashboard
 - Ensure no extra whitespace in the key
 
@@ -411,7 +411,8 @@ response match {
 
 - Ensure `application.conf` (in `src/main/resources`) has a section under `llm4s.providers` and
   that `llm4s.providers.provider` names it - `LLM_MODEL` is not read
-- Ensure the variable the section's `apiKey` binds is exported in the shell that starts the JVM
+- Ensure the vendor's variable (or the one the section's own `apiKey` binds) is exported in the
+  shell that starts the JVM
 - Check the error names the section you meant to load: `defaultProvider()` loads the one
   `llm4s.providers.provider` names, and only that section is validated
 

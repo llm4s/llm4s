@@ -1,5 +1,7 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.config.CredentialsRoundTrip
+import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver }
@@ -142,5 +144,43 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers:
       }
       OpenAIProvider.modelLister shouldBe defined
       RequestyProvider.modelLister shouldBe defined
+    }
+  }
+
+  "the llm4s-openai reference.conf" should {
+
+    // Discovery, as a user gets it: the module's own reference.conf and services entry.
+    given ProviderRegistry = ProviderRegistry.default
+
+    "bind each vendor's variable to its shared llm4s.credentials key" in {
+      OpenAIProvider.configSpec.apiKeyEnv shouldBe Seq(OpenAIConfigKeys.OPENAI_API_KEY)
+      RequestyProvider.configSpec.apiKeyEnv shouldBe Seq(OpenAIConfigKeys.REQUESTY_API_KEY)
+      AzureProvider.configSpec.apiKeyEnv shouldBe Seq(OpenAIConfigKeys.AZURE_OPENAI_API_KEY)
+
+      val azureEndpoint = """endpoint = "https://test-resource.openai.azure.com""""
+      val bindings =
+        CredentialsRoundTrip.chatBindings(OpenAIProvider) ++
+          CredentialsRoundTrip.chatBindings(RequestyProvider) ++
+          CredentialsRoundTrip.chatBindings(AzureProvider, azureEndpoint)
+
+      bindings.keySet shouldBe Set("OPENAI_API_KEY", "REQUESTY_API_KEY", "AZURE_OPENAI_API_KEY")
+      bindings.foreach((variable, key) => withClue(s"$variable: ")(key shouldBe Right(Some(s"key-from-$variable"))))
+    }
+
+    "keep each vendor's key to its own provider" in {
+      // Requesty is OpenAI-compatible, but OPENAI_API_KEY is OpenAI's key, not Requesty's.
+      CredentialsRoundTrip.chatSectionKey("requesty", Map("OPENAI_API_KEY" -> "sk-openai")).isLeft shouldBe true
+    }
+
+    "no longer bind AZURE_API_KEY, which no SDK reads" in {
+      CredentialsRoundTrip
+        .chatSectionKey("azure", Map("AZURE_API_KEY" -> "k"), """endpoint = "https://x.openai.azure.com"""")
+        .isLeft shouldBe true
+    }
+
+    "give OpenAI embeddings the same OPENAI_API_KEY" in {
+      OpenAIEmbeddingProvider.configSpec.apiKeyEnv shouldBe Seq(OpenAIConfigKeys.OPENAI_API_KEY)
+      CredentialsRoundTrip.embeddingBindings(OpenAIEmbeddingProvider, "text-embedding-3-small") shouldBe
+        Map("OPENAI_API_KEY" -> Right("key-from-OPENAI_API_KEY"))
     }
   }

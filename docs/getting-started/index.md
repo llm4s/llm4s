@@ -25,8 +25,7 @@ The fastest way to get started:
 # 1. Use the starter template
 sbt new llm4s/llm4s.g8
 
-# 2. Set the API key - the template's application.conf binds it
-#    in its openai-main section with apiKey = ${?OPENAI_API_KEY}
+# 2. Set the API key - llm4s-openai reads it for the template's openai-main section
 export OPENAI_API_KEY=sk-...
 
 # 3. Run your first program

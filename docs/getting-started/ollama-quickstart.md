@@ -700,7 +700,6 @@ docker-compose exec ollama ollama pull llama2
 > openai-main {
 >   provider = "openai"
 >   model    = "gpt-4o"
->   apiKey   = ${?OPENAI_API_KEY}
 > }
 > ```
 >

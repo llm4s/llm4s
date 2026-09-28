@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.config.{ GeminiModelLister, ProviderModelLister }
+import org.llm4s.config.{ GeminiConfigKeys, GeminiModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, GeminiConfig, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -16,8 +16,15 @@ object GeminiProvider extends ProviderDescriptor:
   /** `provider = "google"` has always been accepted for Gemini. */
   override val aliases: Set[String] = Set("google")
 
+  /**
+   * The key falls back to `llm4s.credentials.gemini.apiKey` - for `provider = "google"` too,
+   * which is this provider under an alias - bound to `GOOGLE_API_KEY`, else `GEMINI_API_KEY`.
+   */
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(GeminiConfig.DEFAULT_BASE_URL)
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(
+      GeminiConfig.DEFAULT_BASE_URL,
+      Seq(GeminiConfigKeys.GOOGLE_API_KEY, GeminiConfigKeys.GEMINI_API_KEY)
+    )
 
   override val modelLister: Option[ProviderModelLister] = Some(GeminiModelLister)
 

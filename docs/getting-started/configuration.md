@@ -30,10 +30,12 @@ with this precedence (highest first):
 3. **`reference.conf`** - the defaults shipped in each llm4s module on the classpath
 
 Environment variables are **not** a layer of their own. llm4s reads one only where a `${?VAR}`
-substitution names it: in a module's `reference.conf` (tracing, embeddings, tools - see
+substitution names it: in a module's `reference.conf` (tracing, embeddings, tools, and each
+provider module's vendor API key - see
 [Environment variables llm4s reads](#environment-variables-llm4s-reads)), or in your own
-`application.conf`. In particular, nothing reads `LLM_MODEL` or a provider's API-key variable
-such as `OPENAI_API_KEY` unless your `application.conf` binds it.
+`application.conf`. Each provider module binds its vendor's conventional key variable -
+`llm4s-openai` binds `OPENAI_API_KEY`, `llm4s-anthropic` binds `ANTHROPIC_API_KEY` - to a shared
+key under `llm4s.credentials` (see [API keys](#api-keys)). Nothing reads `LLM_MODEL`.
 
 `${?VAR}` means "the value of `VAR` if it is set, otherwise leave the key unset". A second line
 for the same key overrides the first only when the variable is set, which gives you a default
@@ -83,19 +85,20 @@ llm4s {
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"
-      apiKey   = ${?OPENAI_API_KEY}
     }
   }
 }
 ```
 
-**3. Set the variable your section binds:**
+**3. Set your vendor's API-key variable:**
 
 ```bash
 export OPENAI_API_KEY=sk-...
 ```
 
-The variable name is yours to choose: `apiKey = ${?MY_TEAM_OPENAI_KEY}` works just as well.
+The section needs no `apiKey` line: `llm4s-openai` binds `OPENAI_API_KEY` to OpenAI's shared
+key, `llm4s.credentials.openai.apiKey`, and a section without a key of its own uses that one.
+See [API keys](#api-keys) for a second account or a variable of your own.
 
 **4. Load it at the edge of your application:**
 
@@ -114,8 +117,9 @@ val result = for {
 } yield response.content
 ```
 
-If `OPENAI_API_KEY` is unset, `defaultProvider()` returns a `ConfigurationError` naming the key:
-`apiKey: set it in application.conf under llm4s.providers.openai-main.apiKey (optionally from an env var, e.g. apiKey = ${?OPENAI_API_KEY})`.
+If `OPENAI_API_KEY` is unset, `defaultProvider()` returns a `ConfigurationError` naming both
+places a key can come from:
+`apiKey: set OPENAI_API_KEY, or set apiKey under llm4s.providers.openai-main in application.conf`.
 This exact configuration is exercised by `DocumentedProviderConfigSpec` in `modules/openai`.
 
 Other `Llm4sConfig` calls read the same sections:
@@ -129,13 +133,69 @@ Llm4sConfig.listModels()              // model discovery for the default section
 Llm4sConfig.listModels("openai-main") // ... or for a named one
 ```
 
+### API keys
+
+Credentials belong to a vendor; sections belong to a use. A client's key is, in order:
+
+1. its own `apiKey` - in its chat section `llm4s.providers.<name>`, its embeddings block
+   `llm4s.embeddings.<provider>` or the reranker block `llm4s.rerank.cohere`;
+2. otherwise its vendor's shared key, `llm4s.credentials.<provider>.apiKey`, which the provider
+   module binds to the vendor's conventional variable;
+3. otherwise a `ConfigurationError` naming both.
+
+An alias resolves to its canonical provider's key: a `provider = "google"` section uses
+`llm4s.credentials.gemini`. When a key is resolved, llm4s logs at INFO where it came from - for
+example `llm4s.providers.openai-main: API key from llm4s.credentials.openai.apiKey` - and never
+the value.
+
+| Provider id | Shared key bound to | Module |
+|---|---|---|
+| `openai` | `OPENAI_API_KEY` | `llm4s-openai` |
+| `azure` | `AZURE_OPENAI_API_KEY` | `llm4s-openai` |
+| `requesty` | `REQUESTY_API_KEY` | `llm4s-openai` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `llm4s-anthropic` |
+| `gemini` (alias `google`) | `GOOGLE_API_KEY`, else `GEMINI_API_KEY` | `llm4s-gemini` |
+| `deepseek` | `DEEPSEEK_API_KEY` | `llm4s-openai-compatible` |
+| `zai` | `ZAI_API_KEY` | `llm4s-openai-compatible` |
+| `openrouter` | `OPENROUTER_API_KEY` | `llm4s-openai-compatible` |
+| `mistral` | `MISTRAL_API_KEY` | `llm4s-openai-compatible` |
+| `cohere` | `COHERE_API_KEY` (chat and reranker) | `llm4s-openai-compatible`, `llm4s-rag` |
+| `voyage` | `VOYAGE_API_KEY` | `llm4s-voyage` |
+
+`ollama` takes no key, the generic `openai-compatible` provider has no vendor, and `vertexai`
+authenticates with OAuth2 (Application Default Credentials, or a service-account file named by
+its `apiKey`), so none of them has a shared key.
+
+A section for a **second account** sets its own key, which wins over the shared one:
+
+```hocon
+llm4s.providers {
+  openai-main {                          # uses OPENAI_API_KEY
+    provider = "openai"
+    model    = "gpt-4o-mini"
+  }
+
+  openai-batch {                         # billed to another account
+    provider = "openai"
+    model    = "gpt-4o-mini"
+    apiKey   = ${?OPENAI_BATCH_API_KEY}
+  }
+}
+```
+
+The same form reads a variable of your own choosing - `apiKey = ${?MY_TEAM_OPENAI_KEY}`. Note that
+if `OPENAI_BATCH_API_KEY` is unset, `openai-batch` falls back to the shared `OPENAI_API_KEY`
+and bills the default account. In production, give every section its own `apiKey`; the
+config-policy `prod` preset flags any section that does not (see
+[Production deployment](../PRODUCTION_DEPLOYMENT)).
+
 ### Section keys
 
 | Key | Meaning |
 |---|---|
 | `provider` | Required. The provider id, e.g. `openai`, `anthropic`, `ollama` (table above) |
 | `model` | Required. The model name as the provider spells it, e.g. `gpt-4o-mini` |
-| `apiKey` | The API key; required by every cloud provider |
+| `apiKey` | The API key; required by every cloud provider. Optional in the section when the vendor's shared key is set ([API keys](#api-keys)) |
 | `baseUrl` | Overrides the provider's default endpoint; **required** for `ollama` and `openai-compatible` |
 | `organization` | OpenAI organisation id |
 | `endpoint`, `apiVersion` | Azure OpenAI: the resource endpoint (required) and API version |
@@ -152,22 +212,19 @@ llm4s {
   providers {
     provider = "claude"
 
-    claude {
+    claude {                              # key from ANTHROPIC_API_KEY
       provider = "anthropic"
       model    = "claude-sonnet-4-20250514"
-      apiKey   = ${?ANTHROPIC_API_KEY}
     }
 
-    gemini-main {
+    gemini-main {                         # key from GOOGLE_API_KEY or GEMINI_API_KEY
       provider = "gemini"
       model    = "gemini-2.0-flash"
-      apiKey   = ${?GEMINI_API_KEY}
     }
 
-    azure-main {
+    azure-main {                          # key from AZURE_OPENAI_API_KEY
       provider   = "azure"
       model      = "gpt-4o"
-      apiKey     = ${?AZURE_API_KEY}
       endpoint   = ${?AZURE_API_BASE}      # https://<resource>.openai.azure.com
       apiVersion = ${?AZURE_API_VERSION}   # optional
     }
@@ -182,12 +239,12 @@ llm4s {
 }
 ```
 
-**Only the section you load is validated.** A section whose `apiKey` variable is unset, or
+**Only the section you load is validated.** A section with no key available, or
 whose provider module is not on the classpath, fails when it is loaded - by
 `provider("<name>")`, or by `defaultProvider()` when it is the default - and not otherwise.
 With the example above and `ANTHROPIC_API_KEY` alone set, `defaultProvider()` loads `claude`
-while `provider("gemini-main")` fails with a `ConfigurationError` naming `gemini-main`'s
-`apiKey`. The exception is `Llm4sConfig.providers()`, which returns every section and so
+while `provider("gemini-main")` fails with a `ConfigurationError` naming `GOOGLE_API_KEY`,
+`GEMINI_API_KEY` and `gemini-main`'s `apiKey`. The exception is `Llm4sConfig.providers()`, which returns every section and so
 validates them all; `Llm4sConfig.providerConfigs()` instead reports each section's error
 separately. (Up to 0.4.1 every section was validated on every load.)
 
@@ -249,7 +306,6 @@ llm4s.providers {
   openai-main {
     provider = "openai"
     model    = "gpt-4o-mini"
-    apiKey   = ${?OPENAI_API_KEY}
   }
 }
 ```
@@ -277,7 +333,11 @@ the provider and model with `llm4s.embeddings.model` in `provider/model-name` fo
 `reference.conf` binds to `EMBEDDING_MODEL`:
 
 ```bash
-# Voyage AI embeddings (llm4s-voyage binds VOYAGE_API_KEY)
+# OpenAI embeddings (the same OPENAI_API_KEY the chat sections use)
+EMBEDDING_MODEL=openai/text-embedding-3-small
+OPENAI_API_KEY=sk-...
+
+# Voyage AI embeddings
 EMBEDDING_MODEL=voyage/voyage-3
 VOYAGE_API_KEY=pa-...
 
@@ -285,15 +345,13 @@ VOYAGE_API_KEY=pa-...
 EMBEDDING_MODEL=ollama/nomic-embed-text
 ```
 
-OpenAI embeddings need one line of your own. Their key is read from
-`llm4s.embeddings.openai.apiKey`, and no `reference.conf` binds it to `OPENAI_API_KEY` - it is
-not shared with a chat provider section. Bind it in `application.conf`:
+The key follows the same [order](#api-keys) as a chat section's: `llm4s.embeddings.<provider>.apiKey`
+if you set it, otherwise the vendor's shared `llm4s.credentials.<provider>.apiKey`. So one
+`OPENAI_API_KEY` serves both OpenAI chat and OpenAI embeddings. To bill embeddings to another
+account, give the block its own key:
 
 ```hocon
-llm4s.embeddings {
-  model         = "openai/text-embedding-3-small"   # or leave it to EMBEDDING_MODEL
-  openai.apiKey = ${?OPENAI_API_KEY}
-}
+llm4s.embeddings.openai.apiKey = ${?OPENAI_EMBEDDINGS_API_KEY}
 ```
 
 Each embedding provider comes from its module: `openai` from `llm4s-openai`, `voyage` from
@@ -345,7 +403,7 @@ The legacy format using `EMBEDDING_PROVIDER` is still supported for backward com
 EMBEDDING_PROVIDER=openai
 OPENAI_EMBEDDING_BASE_URL=https://api.openai.com/v1
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-# plus llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY} in application.conf (see above)
+OPENAI_API_KEY=sk-...
 
 # Voyage AI
 EMBEDDING_PROVIDER=voyage
@@ -596,18 +654,27 @@ also set in `application.conf` or with `-D`.
 | `LLM4S_MODEL_REGISTRY_RESOURCE`, `LLM4S_MODEL_REGISTRY_FILE`, `LLM4S_MODEL_REGISTRY_URL` | `llm4s.modelRegistry.*` | `llm4s-core` |
 | `WORKSPACE_DIR`, `WORKSPACE_IMAGE`, `WORKSPACE_PORT`, `WORKSPACE_TRACE_LOG` | `llm4s.workspace.*` | `llm4s-core` |
 | `BRAVE_SEARCH_API_KEY`, `EXA_API_KEY` and the other `BRAVE_*`, `EXA_*` variables, `DUCK_DUCK_GO_SEARCH_API_URL` | `llm4s.tools.*` | `llm4s-core` |
+| `OPENAI_API_KEY` | `llm4s.credentials.openai.apiKey` (OpenAI chat sections and embeddings) | `llm4s-openai` |
+| `AZURE_OPENAI_API_KEY` | `llm4s.credentials.azure.apiKey` | `llm4s-openai` |
+| `REQUESTY_API_KEY` | `llm4s.credentials.requesty.apiKey` | `llm4s-openai` |
+| `ANTHROPIC_API_KEY` | `llm4s.credentials.anthropic.apiKey` | `llm4s-anthropic` |
+| `GOOGLE_API_KEY`, else `GEMINI_API_KEY` | `llm4s.credentials.gemini.apiKey` | `llm4s-gemini` |
+| `DEEPSEEK_API_KEY`, `ZAI_API_KEY`, `OPENROUTER_API_KEY`, `MISTRAL_API_KEY` | `llm4s.credentials.<provider>.apiKey` | `llm4s-openai-compatible` |
+| `COHERE_API_KEY` | `llm4s.credentials.cohere.apiKey` (Cohere chat and the Cohere reranker) | `llm4s-openai-compatible`, `llm4s-rag` |
+| `VOYAGE_API_KEY` | `llm4s.credentials.voyage.apiKey` | `llm4s-voyage` |
 | `OPENAI_EMBEDDING_BASE_URL`, `OPENAI_EMBEDDING_MODEL` | `llm4s.embeddings.openai.*` | `llm4s-openai` |
-| `VOYAGE_API_KEY`, `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL` | `llm4s.embeddings.voyage.*` | `llm4s-voyage` |
+| `VOYAGE_EMBEDDING_BASE_URL`, `VOYAGE_EMBEDDING_MODEL` | `llm4s.embeddings.voyage.*` | `llm4s-voyage` |
 | `OLLAMA_EMBEDDING_BASE_URL`, `OLLAMA_EMBEDDING_MODEL` | `llm4s.embeddings.ollama.*` | `llm4s-ollama` |
-| `RERANK_PROVIDER`, `COHERE_API_KEY`, `COHERE_RERANK_BASE_URL`, `COHERE_RERANK_MODEL` | `llm4s.rerank.*` (the reranker only, not the Cohere chat provider) | `llm4s-rag` |
+| `RERANK_PROVIDER`, `COHERE_RERANK_BASE_URL`, `COHERE_RERANK_MODEL` | `llm4s.rerank.*`, read by `RerankerConfigLoader` | `llm4s-rag` |
 | `PGVECTOR_HOST`, `PGVECTOR_PORT`, `PGVECTOR_DATABASE`, `PGVECTOR_USER`, `PGVECTOR_PASSWORD`, `PGVECTOR_TABLE`, ... | `llm4s.rag.permissions.pg.*` | `llm4s-rag` |
 
 **Not read by llm4s** unless your `application.conf` binds them: `LLM_MODEL`, `LLM4S_PROVIDER`,
-every chat provider's key and endpoint variable (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-`GEMINI_API_KEY`, `GOOGLE_API_KEY`, `AZURE_API_KEY`, `AZURE_API_BASE`, `DEEPSEEK_API_KEY`,
-`OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, ...), `OPENAI_API_KEY` for OpenAI embeddings, and
-`OTEL_EXPORTER_OTLP_HEADERS`. `LLM_MODEL` was removed with legacy single-provider loading
-in [#903](https://github.com/llm4s/llm4s/issues/903).
+every chat provider's endpoint and model variable (`AZURE_API_BASE`, `AZURE_API_VERSION`,
+`OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, ...), `AZURE_API_KEY` (the Azure key is
+`AZURE_OPENAI_API_KEY`, the openai SDK's name), `CO_API_KEY`, anything for the generic
+`openai-compatible` provider, and `OTEL_EXPORTER_OTLP_HEADERS`. A shared key sets only `apiKey`:
+`baseUrl`, `endpoint`, `model` and `apiVersion` always come from the section. `LLM_MODEL` was
+removed with legacy single-provider loading in [#903](https://github.com/llm4s/llm4s/issues/903).
 
 ---
 
@@ -643,7 +710,7 @@ llm4s {
     claude {
       provider = "anthropic"
       model    = "claude-sonnet-4-20250514"
-      apiKey   = ${?ANTHROPIC_API_KEY}
+      apiKey   = ${?ANTHROPIC_API_KEY}   # explicit in production: which account this bills
     }
   }
   tracing.mode = "langfuse"            # LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY from the environment
@@ -663,7 +730,8 @@ validated, in production.
 
 ### ✅ DO
 
-1. **Keep secrets in environment variables**, bound with `apiKey = ${?VAR}` in `application.conf`
+1. **Keep secrets in environment variables** - the vendor's own variable (`OPENAI_API_KEY`), or
+   one you bind with `apiKey = ${?VAR}` in a section; in production, give each section its own
 2. **Keep structure in `application.conf`**: provider sections, models, defaults
 3. **Add `.env` files to `.gitignore`** if you use them to export variables
 4. **Use different configs** for dev/staging/prod
@@ -740,14 +808,16 @@ object ValidateConfig extends App {
 **Symptoms:**
 ```
 ConfigurationError: Provider 'openai-main' (provider = openai) is missing required fields:
-  - apiKey: set it in application.conf under llm4s.providers.openai-main.apiKey (optionally from an env var, e.g. apiKey = ${?OPENAI_API_KEY})
+  - apiKey: set OPENAI_API_KEY, or set apiKey under llm4s.providers.openai-main in application.conf
 ```
 
 **Root causes:**
-1. The section has no `apiKey` line, or binds a variable that is not set in this process
-2. You set `OPENAI_API_KEY` (or `LLM_MODEL`) expecting llm4s to read it - it reads only the
-   variables your `application.conf` binds
-3. `.env` file not loaded in the shell that starts the JVM
+1. Neither the vendor's variable (`OPENAI_API_KEY`) nor a section `apiKey` is set in this process
+2. The provider's module is missing, so nothing binds its variable (see the table in
+   [Named provider sections](#named-provider-sections))
+3. The section binds its own variable (`apiKey = ${?OTHER_VAR}`) that is unset, and the
+   vendor's variable is unset too
+4. `.env` file not loaded in the shell that starts the JVM
 
 The error names the section it is about, and only a section being loaded is validated. If it
 names a section you did not ask for, check `llm4s.providers.provider` (and any
@@ -756,10 +826,10 @@ call that validates every section is `Llm4sConfig.providers()`.
 
 **Debug steps:**
 ```bash
-# Is the variable your section binds set in this shell?
+# Is the vendor's variable set in this shell?
 echo $OPENAI_API_KEY
 
-# Does your application.conf bind it? (look for apiKey = ${?OPENAI_API_KEY})
+# Does the section set a key of its own? (an apiKey line wins over OPENAI_API_KEY)
 grep -n apiKey src/main/resources/application.conf
 ```
 
@@ -813,7 +883,9 @@ import org.llm4s.error.AuthenticationError
 Left(AuthenticationError("Invalid API key"))
 ```
 
-**Root cause:** the section's `apiKey` binds a variable holding another provider's key.
+**Root cause:** the section's own `apiKey` binds a variable holding another provider's key, or
+the vendor's variable holds the wrong key. The INFO line `llm4s.providers.<name>: API key from
+<path>` says which place the key came from.
 
 ```hocon
 # ❌ Wrong: an OpenAI section reading the Anthropic key
@@ -860,7 +932,6 @@ def retryWithBackoff[A](op: => Result[A], maxRetries: Int = 3): Result[A] = {
 openai-main {
   provider = "openai"
   model    = "gpt-4o-mini"   # development; gpt-4o in production
-  apiKey   = ${?OPENAI_API_KEY}
 }
 ```
 

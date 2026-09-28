@@ -81,7 +81,6 @@ samples' `application.conf`) and select it with `LLM4S_PROVIDER`, which the samp
 llm4s.providers.openai-main {
   provider = "openai"
   model    = "gpt-4o-mini"
-  apiKey   = ${?OPENAI_API_KEY}
 }
 ```
 ```bash
@@ -89,8 +88,10 @@ export OPENAI_API_KEY=sk-...
 export LLM4S_PROVIDER=openai-main
 sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"
 ```
-llm4s itself reads neither `LLM_MODEL` nor provider API-key variables; see
-[Running the samples](docs/getting-started/configuration.md#running-the-samples).
+The section needs no `apiKey`: `llm4s-openai` binds `OPENAI_API_KEY` to OpenAI's shared key,
+`llm4s.credentials.openai.apiKey`, which a section without a key of its own uses. llm4s reads no
+`LLM_MODEL`; see [Running the samples](docs/getting-started/configuration.md#running-the-samples)
+and [API keys](docs/getting-started/configuration.md#api-keys).
 
 ### 7. Where to ask for help
 - **Discord:** [Join the community](https://discord.gg/4uvTPn6qww)
@@ -170,8 +171,10 @@ key without breaking configs, with a warning (an alias may be a former extra key
 field with a string form, as in `ProviderConfigSpec.BuiltinAliasKeys`); undeclared keys are
 dropped with a warning. Values are strings - parse and reject a malformed one in `buildConfig`.
 Set `env` (or `baseUrlEnv`) to the key's conventional environment variable, if it has one: a
-named section reads no variable by itself, so the missing-key error shows the `key = ${?VAR}`
-binding that would read it, never a bare "set VAR".
+section's extra keys and `baseUrl` read no variable by themselves, so the missing-key error shows
+the `key = ${?VAR}` binding that would read it, never a bare "set VAR". The API key is different:
+it falls back to the vendor's shared `llm4s.credentials.<id>.apiKey`, which the module binds in
+its `reference.conf`, and `apiKeyEnv` names that variable in the error.
 
 ## Testing
 
@@ -308,15 +311,20 @@ All in `modules/openai-compatible`, keeping the `org.llm4s.*` packages:
   providerId = Some(id))`, or the config reports `openai`.
 - **Descriptor**: `llmconnect/provider/<Name>Provider.scala`, an `object` extending
   `ProviderDescriptor` with its `id`, a `configSpec`
-  (`ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL)` for the usual case),
+  (`ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(<NAME>_API_KEY))` for the
+  usual case - `apiKeyEnv` names the vendor's variable in the missing-key error),
   `buildConfig` from the named section and `buildClient` through
   `ProviderDescriptor.expectConfig`. Give it a `modelLister` if the provider has a `/models`
   endpoint (`OpenAICompatibleModelListers.scala`).
 - **Registration**: add the descriptor to `chatProviders` in `Llm4sOpenAICompatibleModule`. The
   module is already declared in `META-INF/services`, so nothing else is needed - and nothing in
   `llm4s-core` changes.
-- **Example config**: a commented `<name>-main` section in the module's `reference.conf`.
-- **Environment variable names**, if any tool reads them, go in `OpenAICompatibleConfigKeys`.
+- **Shared key**: `llm4s.credentials.<id>.apiKey = ${?<NAME>_API_KEY}` in the module's
+  `reference.conf`, using the variable the vendor's own SDK or docs use. Keys only - never
+  `baseUrl` or `model`. The module's round-trip spec proves the binding and `apiKeyEnv` agree.
+- **Example config**: a commented `<name>-main` section in the module's `reference.conf` - just
+  `provider` and `model` - plus, if useful, one with its own `apiKey` for a second account.
+- **Environment variable names** go in `OpenAICompatibleConfigKeys`.
 
 ### 5. Tests
 

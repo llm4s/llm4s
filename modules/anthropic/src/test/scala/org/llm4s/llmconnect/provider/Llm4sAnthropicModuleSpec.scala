@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.config.{ AnthropicConfigKeys, CredentialsRoundTrip }
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ContextWindowResolver }
@@ -93,5 +94,24 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers:
     "declare streaming and a model lister" in {
       AnthropicProvider.features.streaming shouldBe true
       AnthropicProvider.modelLister shouldBe defined
+    }
+  }
+
+  "the llm4s-anthropic reference.conf" should {
+
+    given ProviderRegistry = ProviderRegistry.default
+
+    "bind ANTHROPIC_API_KEY to llm4s.credentials.anthropic.apiKey" in {
+      AnthropicProvider.configSpec.apiKeyEnv shouldBe Seq(AnthropicConfigKeys.ANTHROPIC_API_KEY)
+      CredentialsRoundTrip.chatBindings(AnthropicProvider) shouldBe
+        Map("ANTHROPIC_API_KEY" -> Right(Some("key-from-ANTHROPIC_API_KEY")))
+    }
+
+    "let a section's own key win over ANTHROPIC_API_KEY" in {
+      CredentialsRoundTrip.chatSectionKey(
+        "anthropic",
+        Map("ANTHROPIC_API_KEY" -> "sk-shared", "ANTHROPIC_TEAM_API_KEY" -> "sk-team"),
+        "apiKey = ${?ANTHROPIC_TEAM_API_KEY}"
+      ) shouldBe Right(Some("sk-team"))
     }
   }

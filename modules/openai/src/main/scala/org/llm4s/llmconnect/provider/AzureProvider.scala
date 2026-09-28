@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
@@ -17,10 +18,12 @@ import org.llm4s.types.Result
 object AzureProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("azure")
 
+  /** The key falls back to `llm4s.credentials.azure.apiKey`, bound to `AZURE_OPENAI_API_KEY`. */
   val configSpec: ProviderConfigSpec = ProviderConfigSpec(
     requiresApiKey = true,
     requiresEndpoint = true,
-    endpointDescription = "the model endpoint/deployment name in your Azure OpenAI resource"
+    endpointDescription = "the model endpoint/deployment name in your Azure OpenAI resource",
+    apiKeyEnv = Seq(OpenAIConfigKeys.AZURE_OPENAI_API_KEY)
   )
 
   def buildConfig(providerName: String, section: NamedProviderConfig)(using

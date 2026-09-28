@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ OpenRouterModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, OpenAIConfig, ProviderConfig }
@@ -28,7 +29,7 @@ object OpenRouterProvider extends ProviderDescriptor:
   val DEFAULT_BASE_URL: String = "https://openrouter.ai/api/v1"
 
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL)
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(OpenAICompatibleConfigKeys.OPENROUTER_API_KEY))
 
   override val modelLister: Option[ProviderModelLister] = Some(OpenRouterModelLister)
 

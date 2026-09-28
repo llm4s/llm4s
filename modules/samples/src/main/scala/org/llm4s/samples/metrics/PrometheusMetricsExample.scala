@@ -18,7 +18,7 @@ import org.slf4j.LoggerFactory
  *
  * == Quick Start ==
  *
- * 1. Add an `openai-main` section (`provider = "openai"`, `apiKey = ${?OPENAI_API_KEY}`)
+ * 1. Add an `openai-main` section (`provider = "openai"` and a model)
  *    to the samples' `application.local.conf` (docs/getting-started/configuration.md#running-the-samples).
  *
  * 2. Set your API key and select the section:
@@ -124,7 +124,7 @@ object PrometheusMetricsExample {
               logger.error("Configuration error", error)
               println(s"ERROR: ${error.message}")
               println()
-              println("Add an openai-main section with apiKey = ${?OPENAI_API_KEY} to application.local.conf, then:")
+              println("Add an openai-main section (provider = \"openai\" and a model) to application.local.conf, then:")
               println("  export OPENAI_API_KEY=sk-...")
               println("  export LLM4S_PROVIDER=openai-main")
               println("See docs/getting-started/configuration.md#running-the-samples")

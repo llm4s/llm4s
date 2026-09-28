@@ -681,14 +681,28 @@ response.foreach { r =>
 
 ### Configuration
 
-These variables are bound by `llm4s-rag`'s `reference.conf` , so exporting them sets the
-`llm4s.rerank` keys. `COHERE_API_KEY` here is the reranker's key only; a Cohere chat provider reads
-its key from its own named section.
+Load the reranker from configuration at the edge of your application with
+`RerankerConfigLoader` (in `llm4s-rag`), and hand it to `RAG.build`:
+
+```scala
+import org.llm4s.config.RerankerConfigLoader
+
+for {
+  reranker <- RerankerConfigLoader.default()   // Option[RerankProviderConfig]; None when disabled
+  rag      <- RAG.build(config, resolveProvider, resolveRerankerConfig = () => Right(reranker))
+} yield rag
+```
+
+It reads `llm4s.rerank`. The Cohere key is `llm4s.rerank.cohere.apiKey` when set, and otherwise
+Cohere's shared `llm4s.credentials.cohere.apiKey`, bound to `COHERE_API_KEY` - the key a Cohere
+chat section uses too, so one variable serves both. Set `llm4s.rerank.cohere.apiKey` only to bill
+reranking to another account. (Before `RerankerConfigLoader`, nothing read `llm4s.rerank`,
+although `reference.conf` bound it.)
 
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
 | `RERANK_PROVIDER` | Provider: cohere, none | none |
-| `COHERE_API_KEY` | Cohere API key | - |
+| `COHERE_API_KEY` | Cohere API key, shared with Cohere chat (`llm4s.credentials.cohere.apiKey`) | - |
 | `COHERE_RERANK_MODEL` | Model name | rerank-english-v3.0 |
 | `COHERE_RERANK_BASE_URL` | API base URL | https://api.cohere.com |
 

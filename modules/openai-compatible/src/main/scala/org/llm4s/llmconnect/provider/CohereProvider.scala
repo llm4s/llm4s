@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.{ CohereConfig, ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
@@ -19,7 +20,10 @@ object CohereProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("cohere")
 
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(CohereConfig.DEFAULT_BASE_URL)
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(
+      CohereConfig.DEFAULT_BASE_URL,
+      Seq(OpenAICompatibleConfigKeys.COHERE_API_KEY)
+    )
 
   def buildConfig(providerName: String, section: NamedProviderConfig)(using
     ContextWindowResolver

@@ -15,11 +15,11 @@ object OpenAIConfigKeys {
   // ---- OpenAI -------------------------------------------------------------
 
   /**
-   * OpenAI API key (`sk-...`), by convention.
+   * OpenAI API key (`sk-...`), the variable OpenAI's own SDKs read.
    *
-   * No `reference.conf` binds it: a named section reads it only through its own
-   * `apiKey = ${?OPENAI_API_KEY}`, and OpenAI embeddings only through
-   * `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` in the application's config.
+   * `llm4s-openai`'s `reference.conf` binds it to the shared
+   * `llm4s.credentials.openai.apiKey`, which every OpenAI chat section and the OpenAI
+   * embeddings block use when they set no `apiKey` of their own.
    */
   val OPENAI_API_KEY = "OPENAI_API_KEY"
 
@@ -48,13 +48,25 @@ object OpenAIConfigKeys {
    */
   val REQUESTY_BASE_URL = OPENAI_BASE_URL // alias via base URL
 
+  /**
+   * Requesty API key, as Requesty's quickstart names it. Bound to the shared
+   * `llm4s.credentials.requesty.apiKey`.
+   */
+  val REQUESTY_API_KEY = "REQUESTY_API_KEY"
+
   // ---- Azure OpenAI -------------------------------------------------------
 
   /** Azure OpenAI deployment endpoint URL, e.g. `"https://my-resource.openai.azure.com/..."`. */
   val AZURE_API_BASE = "AZURE_API_BASE"
 
-  /** Azure API key for the deployment. */
-  val AZURE_API_KEY = "AZURE_API_KEY"
+  /**
+   * Azure OpenAI API key, the variable the openai SDK's `AzureOpenAI` client reads. Bound to
+   * the shared `llm4s.credentials.azure.apiKey`.
+   *
+   * This replaced `AZURE_API_KEY`, which older llm4s docs suggested binding by hand and which
+   * no SDK reads.
+   */
+  val AZURE_OPENAI_API_KEY = "AZURE_OPENAI_API_KEY"
 
   /** Azure OpenAI API version string, e.g. `"2025-01-01-preview"`. */
   val AZURE_API_VERSION = "AZURE_API_VERSION"

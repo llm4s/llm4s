@@ -1,6 +1,7 @@
 // scalafix:off DisableSyntax.NoKeywordCatch
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.llmconnect.config.EmbeddingProviderConfig
 import org.llm4s.llmconnect.spi.{ EmbeddingConfigSpec, EmbeddingProviderDescriptor }
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -45,20 +46,15 @@ object OpenAIEmbeddingProvider extends EmbeddingProviderDescriptor {
   val id: ProviderId = ProviderId("openai")
 
   /**
-   * The key is `llm4s.embeddings.openai.apiKey`. Nothing binds it: llm4s reads no
-   * provider API-key variable on its own, so the application adds
-   * `llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}` to its `application.conf`.
-   * No `apiKeyEnv` is declared, so the "missing key" error names only the key.
-   *
-   * There is no fallback to `llm4s.openai.apiKey` any more (#1132). That was the
-   * single-provider chat key, and nothing has read or bound it since named
-   * provider sections replaced it (#903), so "sharing the chat client's key"
-   * meant reading a path only this fallback still knew about.
+   * The key is `llm4s.embeddings.openai.apiKey` when that is set, and otherwise OpenAI's
+   * shared `llm4s.credentials.openai.apiKey`, which this module's `reference.conf` binds to
+   * `OPENAI_API_KEY` - the same key the OpenAI chat sections use, so one variable serves both.
    */
   override val configSpec: EmbeddingConfigSpec = EmbeddingConfigSpec(
     requiresApiKey = true,
     defaultBaseUrl = Some("https://api.openai.com/v1"),
-    modelEnv = Some("OPENAI_EMBEDDING_MODEL")
+    apiKeyEnv = Seq(OpenAIConfigKeys.OPENAI_API_KEY),
+    modelEnv = Some(OpenAIConfigKeys.OPENAI_EMBEDDING_MODEL)
   )
 
   override val modelDimensions: Map[String, Int] = Map(

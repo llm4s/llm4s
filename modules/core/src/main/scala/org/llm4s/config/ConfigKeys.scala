@@ -10,8 +10,10 @@ package org.llm4s.config
  *
  * == Quick reference ==
  *
- *  - Chat providers bind no variable: a named section under `llm4s.providers`
- *    binds its own, e.g. `apiKey = ${?OPENAI_API_KEY}`. Nothing reads `LLM_MODEL`.
+ *  - Chat providers: a named section under `llm4s.providers` sets no key of its
+ *    own by default; it uses its vendor's `llm4s.credentials.<id>.apiKey`, which
+ *    the provider's module binds to the vendor's variable (`llm4s-openai` binds
+ *    `OPENAI_API_KEY`, see `OpenAIConfigKeys`). Nothing reads `LLM_MODEL`.
  *  - `TRACING_MODE` — optional; `langfuse`, `opentelemetry`, `console`, or `none`.
  *  - `EMBEDDING_MODEL` — required when using embeddings; format `provider/model`.
  */

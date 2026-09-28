@@ -18,12 +18,11 @@ import org.slf4j.LoggerFactory
  * Run with:
  * {{{
  * # Default: the `ollama-local` section of modules/samples/src/main/resources/application.conf.
- * # For OpenAI, add an `openai-main` section with apiKey = ${?OPENAI_API_KEY} to
+ * # For OpenAI, add an `openai-main` section (provider = "openai" and a model) to
  * # application.local.conf (docs/getting-started/configuration.md#running-the-samples), then:
  * export OPENAI_API_KEY=sk-...
  * export LLM4S_PROVIDER=openai-main
- * # OpenAI embeddings also need llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}
- * # in application.local.conf
+ * # OpenAI embeddings read the same OPENAI_API_KEY
  * export EMBEDDING_MODEL=openai/text-embedding-3-small
  * sbt "samples/runMain org.llm4s.samples.rag.RAGASEvaluationExample"
  * }}}

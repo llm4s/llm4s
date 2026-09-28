@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.config.CredentialsRoundTrip
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.config.ContextWindowResolver
@@ -87,5 +88,17 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers:
     "declare streaming and a model lister" in {
       OllamaProvider.features.streaming shouldBe true
       OllamaProvider.modelLister shouldBe defined
+    }
+  }
+
+  "the llm4s-ollama reference.conf" should {
+
+    given ProviderRegistry = ProviderRegistry.default
+
+    "bind no key, since Ollama takes none" in {
+      OllamaProvider.configSpec.apiKeyEnv shouldBe empty
+      OllamaEmbeddingProvider.configSpec.apiKeyEnv shouldBe empty
+      CredentialsRoundTrip.chatSectionKey("ollama", Map.empty, """baseUrl = "http://localhost:11434"""") shouldBe
+        Right(None)
     }
   }

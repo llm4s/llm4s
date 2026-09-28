@@ -116,7 +116,9 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
       Llm4sConfig.provider(config(unsetApiKey), "bad-one") match
         case Left(err) =>
           err.message should include("Provider 'bad-one' (provider = fixturechat) is missing required fields")
-          err.message should include("- apiKey: set it in application.conf under llm4s.providers.bad-one.apiKey")
+          err.message should include(
+            "- apiKey: set llm4s.credentials.fixturechat.apiKey, or set apiKey under llm4s.providers.bad-one"
+          )
         case Right(cfg) => fail(s"Expected a missing apiKey error, got $cfg")
     }
 

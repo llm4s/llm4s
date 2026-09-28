@@ -37,7 +37,6 @@ llm4s {
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"
-      apiKey   = ${?OPENAI_API_KEY}
     }
   }
 }
@@ -82,7 +81,7 @@ object Main extends App {
 ### Run It
 
 ```bash
-# The variable the section binds - llm4s reads it only through apiKey = ${?OPENAI_API_KEY}
+# llm4s-openai binds OPENAI_API_KEY to OpenAI's shared key, which the section uses
 export OPENAI_API_KEY=sk-...
 
 sbt run
@@ -320,7 +319,6 @@ as temperature and token limits go in `CompletionOptions`:
 openai-main {
   provider = "openai"
   model    = "gpt-4o"
-  apiKey   = ${?OPENAI_API_KEY}
 }
 ```
 
@@ -549,7 +547,6 @@ llm4s.providers {
   openai-main {                        # production: select with provider = "openai-main"
     provider = "openai"
     model    = "gpt-4o-mini"           # much cheaper than gpt-4o
-    apiKey   = ${?OPENAI_API_KEY}
   }
 }
 ```

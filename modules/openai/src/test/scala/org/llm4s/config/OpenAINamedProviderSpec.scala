@@ -85,7 +85,9 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
         )
       ) match
         case Left(err) =>
-          err.message should include("- apiKey: set it in application.conf under llm4s.providers.openai-main.apiKey")
+          err.message should include(
+            "- apiKey: set OPENAI_API_KEY, or set apiKey under llm4s.providers.openai-main in application.conf"
+          )
         case Right(cfg) =>
           fail(s"Expected missing OpenAI apiKey failure, got config: $cfg")
     }

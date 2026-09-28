@@ -11,8 +11,6 @@ import org.llm4s.llmconnect.spi.{
 import org.llm4s.types.Result
 import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 
-import scala.util.Try
-
 /**
  * Internal PureConfig-based loader for embeddings provider configuration.
  *
@@ -127,9 +125,13 @@ private[config] object EmbeddingsConfigLoader {
       selected   <- selection
       descriptor <- resolve(selected, registry)
       id = descriptor.id.asString
-      section <- readSection(source, descriptor).map(withSharedApiKey(_, descriptor, source))
-      config  <- descriptor.buildConfig(section, selected.modelOverride)
-    } yield id -> config
+      section  <- readSection(source, descriptor)
+      resolved <- resolveApiKey(section, descriptor, source)
+      config   <- descriptor.buildConfig(section.copy(apiKey = resolved.map(_.value)), selected.modelOverride)
+    } yield {
+      resolved.foreach(SharedCredentials.logSource(EmbeddingConfigSpec.sectionPath(descriptor.id), _))
+      id -> config
+    }
   }
 
   private val UnifiedModelPath   = "llm4s.embeddings.model"
@@ -180,28 +182,22 @@ private[config] object EmbeddingsConfigLoader {
   }
 
   /**
-   * Fills in a credential the provider keeps outside its own section.
+   * The section's own key, or else the vendor's shared `llm4s.credentials.<id>.apiKey`.
    *
-   * A descriptor declares ''where'' with `EmbeddingConfigSpec.apiKeyPath`; the read itself
-   * happens here, because `org.llm4s.config` is the only package allowed to touch raw
-   * configuration - everywhere else consumes typed settings handed to it.
+   * The read happens here, not in the descriptor, because `org.llm4s.config` is the only
+   * package allowed to touch raw configuration - everywhere else consumes typed settings
+   * handed to it. The id is the descriptor's canonical one, so `EMBEDDING_MODEL=voyageai/...`
+   * finds `llm4s.credentials.voyage`.
    */
-  private def withSharedApiKey(
+  private def resolveApiKey(
     section: EmbeddingProviderSection,
     descriptor: EmbeddingProviderDescriptor,
     source: ConfigSource
-  ): EmbeddingProviderSection =
-    if (trimmed(section.apiKey).isDefined) section
-    else section.copy(apiKey = descriptor.configSpec.apiKeyPath.flatMap(readString(source, _)))
-
-  /**
-   * The string at an absolute config path, or `None`.
-   *
-   * A declared fallback that is absent, blank, or not a string must not fail the load -
-   * the descriptor's own "missing key" error is the better report, and it names the path.
-   */
-  private def readString(source: ConfigSource, path: String): Option[String] =
-    Try(source.at(path).load[String].toOption).toOption.flatten.map(_.trim).filter(_.nonEmpty)
+  ): Result[Option[SharedCredentials.Resolved]] =
+    // An unreadable credentials entry fails only a section that falls back to it.
+    SharedCredentials
+      .read(source)
+      .resolve(section.apiKey, EmbeddingConfigSpec.fieldPath(descriptor.id, "apiKey"), descriptor.id)
 
   private def trimmed(value: Option[String]): Option[String] =
     value.map(_.trim).filter(_.nonEmpty)

@@ -13,9 +13,14 @@ object CheckPolicies {
     val policy      = ConfigPolicy.preset(envName).getOrElse(ConfigPolicy.prodSafeDefaults)
     val source      = configOpt.map(ConfigSource.file).getOrElse(ConfigSource.default)
 
-    Llm4sConfig.providerFrom(source) match {
-      case Right(providerConfig) =>
-        val violations = ConfigPolicyEngine.check(providerConfig, policy, environment)
+    val checked = for {
+      providerConfig <- Llm4sConfig.providerFrom(source)
+      keySources     <- Llm4sConfig.apiKeySourcesFrom(source)
+    } yield ConfigPolicyEngine.check(providerConfig, policy, environment) ++
+      ConfigPolicyEngine.checkApiKeySources(keySources, policy, environment)
+
+    checked match {
+      case Right(violations) =>
         if (violations.isEmpty) {
           println(s"Config policy check passed for env=$envName")
           sys.exit(0)

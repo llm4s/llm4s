@@ -79,9 +79,8 @@ class VoyageEmbeddingsSpec extends AnyWordSpec with Matchers with EitherValues {
         """llm4s { embeddings { model = "voyage/voyage-3", voyage { baseUrl = "https://api.voyageai.com/v1" } } }"""
       ).left.value
 
-      error.message should include("Missing voyage embeddings apiKey")
-      error.message should include("llm4s.embeddings.voyage.apiKey")
-      error.message should include(VoyageConfigKeys.VOYAGE_API_KEY)
+      error.message shouldBe s"Missing voyage embeddings apiKey: set ${VoyageConfigKeys.VOYAGE_API_KEY}, or set " +
+        "apiKey under llm4s.embeddings.voyage in application.conf"
     }
 
     "fail with clear error when Voyage model is missing in legacy mode" in {

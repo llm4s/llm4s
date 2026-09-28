@@ -295,7 +295,7 @@ for {
 
 ### Anthropic with Custom Budget
 
-> **Superseded:** configuration no longer reads `LLM_MODEL` or provider API-key variables; see [Configuration](../getting-started/configuration.md#named-provider-sections).
+> **Superseded:** configuration no longer reads `LLM_MODEL`; providers are named sections, whose keys come from each vendor's variable (`OPENAI_API_KEY`, ...) through `llm4s.credentials`; see [Configuration](../getting-started/configuration.md#named-provider-sections).
 
 ```scala
 // For Claude models, explicitly set thinking budget
@@ -403,7 +403,7 @@ modules/core/src/test/scala/org/llm4s/llmconnect/
 
 ## Samples
 
-> **Superseded:** configuration no longer reads `LLM_MODEL` or provider API-key variables; see [Configuration](../getting-started/configuration.md#named-provider-sections).
+> **Superseded:** configuration no longer reads `LLM_MODEL`; providers are named sections, whose keys come from each vendor's variable (`OPENAI_API_KEY`, ...) through `llm4s.credentials`; see [Configuration](../getting-started/configuration.md#named-provider-sections).
 
 Two sample applications demonstrate reasoning modes:
 

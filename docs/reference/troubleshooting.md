@@ -12,7 +12,7 @@ This guide addresses common errors and issues you might encounter when building 
 ## Configuration Errors
 
 **Q: I get a "ConfigurationError" about the provider on startup ("not found", "missing required fields", no default selected)**
-A: LLM4S does not read `LLM_MODEL` or provider API-key variables by itself. Define a named provider section in your `application.conf`, bind its key from the environment, and select it as the default:
+A: LLM4S does not read `LLM_MODEL`. Define a named provider section in your `application.conf` and select it as the default; its key comes from the vendor's variable, which the provider module binds:
 
 ```hocon
 llm4s {
@@ -21,13 +21,12 @@ llm4s {
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"
-      apiKey   = ${?OPENAI_API_KEY}
     }
   }
 }
 ```
 
-Then `export OPENAI_API_KEY=sk-...` and call `Llm4sConfig.defaultProvider()`. A "missing required fields ... apiKey" error means the variable the named section binds is unset; only the section being loaded is validated, so check the error names the section you meant. See [Configuration](../getting-started/configuration.md#named-provider-sections).
+Then `export OPENAI_API_KEY=sk-...` and call `Llm4sConfig.defaultProvider()`. A "missing required fields ... apiKey" error means neither the vendor's variable (`OPENAI_API_KEY`) nor the section's own `apiKey` is set - or the provider module that binds the variable is missing; only the section being loaded is validated, so check the error names the section you meant. See [Configuration](../getting-started/configuration.md#named-provider-sections).
 
 **Q: My application configuration isn't overriding the defaults**
 A: LLM4S uses PureConfig. Ensure your `application.conf` is in the `src/main/resources` directory (or point at it with `-Dconfig.file=...`), and load providers with `Llm4sConfig.defaultProvider()` or `Llm4sConfig.provider("<section name>")` - the name of a section under `llm4s.providers`, not the provider type. `-D` system properties override `application.conf`.

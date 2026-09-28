@@ -25,8 +25,8 @@ import scala.util.Using
  * 3. Observe cache misses for different queries or expired entries
  *
  * Prerequisites:
- * - An OpenAI default provider: add an `openai-main` section (`provider = "openai"`,
- *   `apiKey = ${?OPENAI_API_KEY}`) to the samples' `application.local.conf`, then
+ * - An OpenAI default provider: add an `openai-main` section (`provider = "openai"`
+ *   and a model) to the samples' `application.local.conf`, then
  *   `export OPENAI_API_KEY=sk-...` and `export LLM4S_PROVIDER=openai-main`
  *   (docs/getting-started/configuration.md#running-the-samples)
  *

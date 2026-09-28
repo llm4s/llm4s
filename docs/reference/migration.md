@@ -1,5 +1,128 @@
 # Migration Guide
 
+## Vendor credentials: a shared API key per provider
+
+[#1132](https://github.com/llm4s/llm4s/issues/1132), part of the modularisation programme
+([#1126](https://github.com/llm4s/llm4s/issues/1126)); not in a release yet. `0.4.1` and earlier
+behave as before.
+
+**Credentials belong to a vendor, keyed by provider id; clients belong to a use.** Each provider
+module now binds its vendor's conventional API-key variable to a shared key,
+`llm4s.credentials.<provider>.apiKey`, in its own `reference.conf`. A client - a chat section, an
+embeddings block, the Cohere reranker - that sets no `apiKey` of its own uses it. So with
+`OPENAI_API_KEY` set, a chat section needs only `provider` and `model`, and OpenAI embeddings need
+no extra line.
+
+This is additive: configs that set `apiKey` keep working unchanged, because a client's own key
+always wins. Configs that failed for want of an `apiKey` line now load.
+
+### Resolution order
+
+For a client of provider *P*:
+
+1. its own `apiKey`: `llm4s.providers.<name>.apiKey`, `llm4s.embeddings.<P>.apiKey`, or
+   `llm4s.rerank.cohere.apiKey`;
+2. otherwise `llm4s.credentials.<P>.apiKey`, where *P* is the canonical id - a
+   `provider = "google"` section uses `llm4s.credentials.gemini`;
+3. otherwise a `ConfigurationError` naming both places:
+   `apiKey: set OPENAI_API_KEY, or set apiKey under llm4s.providers.openai-main in application.conf`.
+
+The credentials block holds `apiKey` only: `baseUrl`, `endpoint`, `model` and `apiVersion` are
+never defaulted from it. Where each key came from is logged at INFO - for example
+`llm4s.providers.openai-main: API key from llm4s.credentials.openai.apiKey` - and the value never
+is.
+
+```hocon
+# before
+openai-main {
+  provider = "openai"
+  model    = "gpt-4o-mini"
+  apiKey   = ${?OPENAI_API_KEY}
+}
+llm4s.embeddings.openai.apiKey = ${?OPENAI_API_KEY}
+
+# after - with OPENAI_API_KEY exported
+openai-main {
+  provider = "openai"
+  model    = "gpt-4o-mini"
+}
+```
+
+The old lines still work and may stay. A section for a **second account** keeps its own key:
+`apiKey = ${?OPENAI_BATCH_API_KEY}`. If that variable is unset, the section now falls back to the
+shared key instead of failing - see [Explicit keys in production](#explicit-keys-in-production).
+
+### Variables bound
+
+| Provider id | Variable | Module |
+|---|---|---|
+| `openai` | `OPENAI_API_KEY` | `llm4s-openai` |
+| `azure` | `AZURE_OPENAI_API_KEY` | `llm4s-openai` |
+| `requesty` | `REQUESTY_API_KEY` | `llm4s-openai` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `llm4s-anthropic` |
+| `gemini` | `GOOGLE_API_KEY`, else `GEMINI_API_KEY` (Google's SDK precedence) | `llm4s-gemini` |
+| `deepseek`, `zai`, `openrouter`, `mistral` | `DEEPSEEK_API_KEY`, `ZAI_API_KEY`, `OPENROUTER_API_KEY`, `MISTRAL_API_KEY` | `llm4s-openai-compatible` |
+| `cohere` | `COHERE_API_KEY` | `llm4s-openai-compatible` and `llm4s-rag` |
+| `voyage` | `VOYAGE_API_KEY` | `llm4s-voyage` |
+
+None for `openai-compatible` (it has no vendor), `ollama` (no key) or `vertexai` (OAuth2:
+Application Default Credentials, or a service-account file named by `apiKey`).
+
+### Moved bindings
+
+- **Voyage**: `llm4s.embeddings.voyage.apiKey = ${?VOYAGE_API_KEY}` became
+  `llm4s.credentials.voyage.apiKey = ${?VOYAGE_API_KEY}`. `VOYAGE_API_KEY` works as before, and an
+  explicit `llm4s.embeddings.voyage.apiKey` still wins.
+- **Cohere reranker**: `llm4s.rerank.cohere.apiKey = ${?COHERE_API_KEY}` became
+  `llm4s.credentials.cohere.apiKey = ${?COHERE_API_KEY}`, shared with the Cohere chat provider, so
+  one `COHERE_API_KEY` serves both. An explicit `llm4s.rerank.cohere.apiKey` still wins.
+- **Azure**: if you exported `AZURE_API_KEY` for a section without its own `apiKey`, rename it
+  to `AZURE_OPENAI_API_KEY` - the openai SDK's name, and the one now bound - or keep an
+  `apiKey = ${?AZURE_API_KEY}` line in the section.
+
+### New: `RerankerConfigLoader`
+
+`llm4s-rag`'s `reference.conf` has bound `llm4s.rerank` since #337, but no code read it.
+`org.llm4s.config.RerankerConfigLoader.load(source)` / `.default()` now does, returning
+`Result[Option[RerankProviderConfig]]` for `RAG.build(..., resolveRerankerConfig = ...)` or
+`RerankerFactory.fromConfig`.
+
+### Explicit keys in production
+
+`llm4s-config-policy`'s `prod` preset (`ConfigPolicy.prodSafeDefaults`) gains the rule
+`ownApiKey` (`ConfigPolicy.withOwnApiKeyRequired`, checked by
+`ConfigPolicyEngine.checkApiKeySources` and run by `CheckPolicies`): every chat section whose
+provider requires a key must set its own `apiKey`, so a section meant for a second account cannot
+silently bill the default one. A `prod` check of a config that relies on the shared key now fails;
+add `apiKey = ${?VAR}` to each section. `Llm4sConfig.apiKeySources()` / `apiKeySourcesFrom(source)`
+report each section's `ApiKeySource` (`Section(path)` or `Credentials(path)`) for checks of your own.
+
+### Source breaks
+
+These are deliberate removals ahead of the MiMa baseline:
+
+1. **`EmbeddingConfigSpec.apiKeyPath` is removed**, with the loader code that resolved it. The
+   shared `llm4s.credentials.<id>.apiKey` replaces it for every provider: bind your vendor's
+   variable there in your module's `reference.conf` instead of declaring a path.
+2. **`EmbeddingConfigSpec.apiKeyEnv` is a `Seq[String]`**, not an `Option[String]`:
+   `apiKeyEnv = Some("X")` becomes `apiKeyEnv = Seq("X")`. It lists the variables your module
+   binds to `llm4s.credentials.<id>.apiKey`, highest precedence first, and is used only to word
+   the missing-key error.
+3. **`ProviderConfigSpec` gained `apiKeyEnv: Seq[String]`** (last, with a default), and
+   `ProviderConfigSpec.apiKeyAndDefaultBaseUrl` an optional second parameter for it. Positional
+   construction still compiles; a pattern match on `ProviderConfigSpec` needs one more binder.
+4. **`OpenAIConfigKeys.AZURE_API_KEY` is now `AZURE_OPENAI_API_KEY`**, with the value
+   `"AZURE_OPENAI_API_KEY"`.
+5. **The missing-`apiKey` messages changed.** Chat: `apiKey: set <VAR>, or set apiKey under
+   llm4s.providers.<name> in application.conf`. Embeddings: `Missing <id> embeddings apiKey: set
+   <VAR>, or set apiKey under llm4s.embeddings.<id> in application.conf`. Code matching the old
+   text needs updating.
+
+For provider authors: bind `llm4s.credentials.<id>.apiKey = ${?<VENDOR>_API_KEY}` in your module's
+`reference.conf`, using the name the vendor's own SDK or docs use, and declare the same variable
+as `apiKeyEnv` on your `ProviderConfigSpec` or `EmbeddingConfigSpec`. Your module's round-trip spec
+should prove the two agree.
+
 ## Slice 6: tracing backends are discovered, and agent state is a `TraceEvent`
 
 The first slice 6 change ([#1133](https://github.com/llm4s/llm4s/issues/1133)) lands the extension
@@ -87,6 +210,11 @@ are available.
 4. **`TracingMode.fromString` returns `Named(...)`, not `NoOp`, for an unrecognised value.**
 
 ## From `LLM_MODEL` to named provider sections
+
+> **API keys: superseded** by [Vendor credentials](#vendor-credentials-a-shared-api-key-per-provider).
+> Provider modules now bind each vendor's API-key variable (`OPENAI_API_KEY`, ...), so the
+> `apiKey = ${?OPENAI_API_KEY}` lines below, and the embeddings binding, are optional. What this
+> note says about `LLM_MODEL` and base-URL variables still holds.
 
 Since [#903](https://github.com/llm4s/llm4s/pull/903) (in 0.3.2) removed legacy single-provider
 loading, **nothing in llm4s reads `LLM_MODEL`**, nor a provider's API-key or base-URL variable
@@ -257,8 +385,8 @@ What you may notice:
 ### `OPENAI_COMPATIBLE_BASE_URL` and `OPENAI_COMPATIBLE_API_KEY`
 
 These are now the conventional variables for a generic endpoint, named by
-`OpenAICompatibleConfigKeys`. `Llm4sConfig` does not read them - it reads no provider's variables
-and no `LLM_MODEL` - so bind them in a section (`baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}`). The
+`OpenAICompatibleConfigKeys`. `Llm4sConfig` does not read them - the generic provider has no vendor
+and so no shared credentials key, and nothing reads `LLM_MODEL` - so bind them in a section (`baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}`). The
 chat-tui sample accepts `LLM_MODEL=openai-compatible/<model>` with them, and the config-policy
 env check reads `OPENAI_COMPATIBLE_BASE_URL` as that provider's endpoint instead of
 `OPENAI_BASE_URL`.
@@ -1115,6 +1243,11 @@ llm4s.embeddings."acme.embeddings" { apiKey = ${?ACME_API_KEY} }
 
 ### A key that lives somewhere else
 
+> **Superseded:** `apiKeyPath` was removed in favour of the shared
+> `llm4s.credentials.<id>.apiKey` - see
+> [Vendor credentials](#vendor-credentials-a-shared-api-key-per-provider). `apiKeyEnv` is now a
+> `Seq[String]`.
+
 A provider whose key is kept outside its own `llm4s.embeddings.<id>` section declares where to
 look instead of the loader special-casing it, and that declaration is also what makes the error
 name the place the key is really set:
@@ -1617,7 +1750,9 @@ Provider 'my-azure' (provider = azure) is missing required fields:
 ```
 
 The per-field guidance underneath is unchanged, including the `${?AZURE_API_KEY}` substitution
-hint. Only the leading sentence differs, because it used to be generated from a hard-coded
+hint. (Since superseded: the `apiKey` line now names the variable the provider module binds -
+`AZURE_OPENAI_API_KEY` for Azure - see
+[Vendor credentials](#vendor-credentials-a-shared-api-key-per-provider).) Only the leading sentence differs, because it used to be generated from a hard-coded
 display name per provider.
 
 ### Bug fix: `provider = "vertexai"` now works at all

@@ -54,9 +54,12 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
       errorFrom(validate("my-fixture", FixtureChatProvider, section("fixturechat", "fixture-model")))
 
     message should include("Provider 'my-fixture' (provider = fixturechat) is missing required fields")
+    // The fixture declares no variable, so the vendor's shared path is named in its place - never
+    // a variable guessed from the provider id, which nothing would bind.
     message should include(
-      "- apiKey: set it in application.conf under llm4s.providers.my-fixture.apiKey (optionally from an env var, e.g. apiKey = ${?FIXTURECHAT_API_KEY})"
+      "- apiKey: set llm4s.credentials.fixturechat.apiKey, or set apiKey under llm4s.providers.my-fixture in application.conf"
     )
+    (message should not).include("FIXTURECHAT_API_KEY")
   }
 
   it should "name a file llm4s loads, and the section's full path" in {
@@ -67,7 +70,7 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
 
     (message should not).include("llm4s.conf")
     (message should not).include(" providers.my-fixture")
-    message should include("application.conf under llm4s.providers.my-fixture.apiKey")
+    message should include("set apiKey under llm4s.providers.my-fixture in application.conf")
   }
 
   it should "not demand a baseUrl, because the descriptor supplies a default" in {

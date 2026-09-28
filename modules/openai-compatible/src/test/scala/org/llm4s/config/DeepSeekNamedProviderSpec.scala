@@ -76,7 +76,7 @@ class DeepSeekNamedProviderSpec extends AnyWordSpec with Matchers:
         .message
 
       message should include("Provider 'my-deepseek' (provider = deepseek) is missing required fields")
-      message should include("e.g. apiKey = ${?DEEPSEEK_API_KEY}")
+      message should include("- apiKey: set DEEPSEEK_API_KEY, or set apiKey under llm4s.providers.my-deepseek")
       (message should not).include("baseUrl")
       DeepSeekProvider.configSpec.defaultBaseUrl shouldBe Some(DeepSeekConfig.DEFAULT_BASE_URL)
     }

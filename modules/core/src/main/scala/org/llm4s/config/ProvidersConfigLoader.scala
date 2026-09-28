@@ -16,10 +16,13 @@ import pureconfig.ConfigSource
  *
  *  @param selectedProvider the default section's name (`llm4s.providers.provider`), if set
  *  @param sections         each section as read, or the error reading it
+ *  @param credentials      the `llm4s.credentials` block, which a section without an `apiKey`
+ *                          of its own falls back to
  */
 final private[config] case class ProviderSections(
   selectedProvider: Option[ProviderName],
-  sections: Map[ProviderName, Result[RawNamedProviderSection]]
+  sections: Map[ProviderName, Result[RawNamedProviderSection]],
+  credentials: SharedCredentials = SharedCredentials.empty
 ):
 
   /**
@@ -46,7 +49,28 @@ final private[config] case class ProviderSections(
       .get(name)
       .toRight(ConfigurationError(s"Configured provider '${name.asName}' was not found"))
       .flatMap(identity)
-      .flatMap(NamedProviderConfigValidator.validate(name, _))
+      .flatMap(NamedProviderConfigValidator.validate(name, _, credentials))
+
+  /**
+   * Where each section's API key comes from, for sections whose provider requires one.
+   *
+   * Sections that cannot be read, name no registered provider, or belong to a provider that
+   * takes no required key (Ollama, the generic `openai-compatible`) are left out: they cannot
+   * inherit a shared key, and their own problems are reported when they are loaded.
+   */
+  def apiKeySources(using registry: ProviderRegistry): Map[ProviderName, ApiKeySource] =
+    sections.toList.flatMap { case (name, section) =>
+      for
+        raw        <- section.toOption
+        provider   <- raw.provider.map(_.trim).filter(_.nonEmpty)
+        descriptor <- registry.find(registry.canonicalId(provider))
+        if descriptor.configSpec.requiresApiKey
+      yield
+        val source =
+          if raw.apiKey.exists(_.trim.nonEmpty) then ApiKeySource.Section(s"llm4s.providers.${name.asName}.apiKey")
+          else ApiKeySource.Credentials(SharedCredentials.apiKeyPath(descriptor.id))
+        name -> source
+    }.toMap
 
 /** Loads and validates the full providers configuration from a PureConfig source. */
 private[config] object ProvidersConfigLoader:
@@ -70,17 +94,21 @@ private[config] object ProvidersConfigLoader:
    *  @return `Right(ProvidersConfig)` on success, or `Left` with a `ConfigurationError`
    */
   def load(source: ConfigSource)(using ProviderRegistry): Result[ProvidersConfig] =
-    RawProvidersConfigLoader.load(source).flatMap(validate)
+    RawProvidersConfigLoader.load(source).flatMap(validate(_, SharedCredentials.read(source)))
 
   /**
    * Validates a `RawProvidersConfig` by normalizing all named providers and checking the selected provider.
    *
-   *  @param raw the raw providers config to validate
+   *  @param raw         the raw providers config to validate
+   *  @param credentials the `llm4s.credentials` block sections without a key fall back to
    *  @return `Right(ProvidersConfig)` on success, or `Left` with a `ConfigurationError`
    */
-  def validate(raw: RawProvidersConfig)(using ProviderRegistry): Result[ProvidersConfig] =
+  def validate(
+    raw: RawProvidersConfig,
+    credentials: SharedCredentials = SharedCredentials.empty
+  )(using ProviderRegistry): Result[ProvidersConfig] =
     for
-      namedProviders <- validateNamedProviders(raw.namedProviders)
+      namedProviders <- validateNamedProviders(raw.namedProviders, credentials)
       _              <- validateSelectedProvider(raw.selectedProvider, namedProviders)
     yield ProvidersConfig(
       selectedProvider = raw.selectedProvider,
@@ -88,13 +116,14 @@ private[config] object ProvidersConfigLoader:
     )
 
   private def validateNamedProviders(
-    rawNamedProviders: Map[ProviderName, RawNamedProviderSection]
+    rawNamedProviders: Map[ProviderName, RawNamedProviderSection],
+    credentials: SharedCredentials
   )(using ProviderRegistry): Result[Map[ProviderName, NamedProviderConfig]] =
     rawNamedProviders.foldLeft[Result[Map[ProviderName, NamedProviderConfig]]](Right(Map.empty)):
       case (accResult, (providerName, rawSection)) =>
         for
           acc        <- accResult
-          normalized <- NamedProviderConfigValidator.validate(providerName, rawSection)
+          normalized <- NamedProviderConfigValidator.validate(providerName, rawSection, credentials)
         yield acc.updated(providerName, normalized)
 
   private def validateSelectedProvider(

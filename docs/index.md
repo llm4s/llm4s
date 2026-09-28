@@ -149,8 +149,8 @@ they have moved to modules of their own (`llm4s-openai`, `llm4s-anthropic`, `llm
 ### Configuration
 
 Define a named provider section in `src/main/resources/application.conf` and select it as the
-default. The API key comes from an environment variable only because the section binds it with
-`${?OPENAI_API_KEY}` - llm4s does not read `LLM_MODEL` or API-key variables on its own:
+default. The section needs no API key line: `llm4s-openai` reads `OPENAI_API_KEY` for any
+OpenAI section that sets no `apiKey` of its own. llm4s does not read `LLM_MODEL`:
 
 ```hocon
 llm4s {
@@ -160,7 +160,6 @@ llm4s {
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"
-      apiKey   = ${?OPENAI_API_KEY}
     }
   }
 }

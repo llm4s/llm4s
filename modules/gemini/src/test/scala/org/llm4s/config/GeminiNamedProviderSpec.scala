@@ -73,7 +73,9 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
       ) match
         case Left(err) =>
           err.message should include("Provider 'broken-gemini' (provider = gemini) is missing required fields")
-          err.message should include("- apiKey: set it in application.conf under llm4s.providers.broken-gemini.apiKey")
+          err.message should include(
+            "- apiKey: set GOOGLE_API_KEY or GEMINI_API_KEY, or set apiKey under llm4s.providers.broken-gemini"
+          )
         case Right(cfg) =>
           fail(s"Expected a missing-apiKey failure, got config: $cfg")
     }

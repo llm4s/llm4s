@@ -1,15 +1,25 @@
 package org.llm4s.configpolicy
 
+import org.llm4s.config.ApiKeySource
+import org.llm4s.config.ProvidersConfigModel.ProviderName
 import org.llm4s.llmconnect.config._
 
 import scala.util.{ Failure, Success, Try }
 import scala.util.matching.Regex
 
+/**
+ * @param ownApiKeyRequiredIn environments in which every named chat section whose provider needs
+ *                            a key must set its own `apiKey`, rather than inherit its vendor's
+ *                            shared `llm4s.credentials.<providerId>.apiKey`. A section meant for
+ *                            a second account that forgets its key would otherwise bill the
+ *                            default account without a word.
+ */
 final case class ConfigPolicy(
   allowedProviders: Set[String] = Set.empty,
   allowedModelPatterns: List[String] = Nil,
   maxContextWindowByEnv: Map[CatalogEnvironment, Int] = Map.empty,
-  requiredBaseUrlPatternByEnv: Map[CatalogEnvironment, String] = Map.empty
+  requiredBaseUrlPatternByEnv: Map[CatalogEnvironment, String] = Map.empty,
+  ownApiKeyRequiredIn: Set[CatalogEnvironment] = Set.empty
 ) {
   def withAllowedProviders(values: String*): ConfigPolicy =
     copy(allowedProviders = values.map(_.toLowerCase).toSet)
@@ -22,6 +32,10 @@ final case class ConfigPolicy(
 
   def withRequiredBaseUrlPattern(environment: CatalogEnvironment, pattern: String): ConfigPolicy =
     copy(requiredBaseUrlPatternByEnv = requiredBaseUrlPatternByEnv + (environment -> pattern))
+
+  /** Requires, in `environment`, that every chat section set its own `apiKey`; see [[ownApiKeyRequiredIn]]. */
+  def withOwnApiKeyRequired(environment: CatalogEnvironment): ConfigPolicy =
+    copy(ownApiKeyRequiredIn = ownApiKeyRequiredIn + environment)
 }
 
 object ConfigPolicy {
@@ -40,6 +54,9 @@ object ConfigPolicy {
    * Prod: named providers with pinned model patterns. The generic `openai-compatible` provider is
    * deliberately '''not''' allowed: it can point at any endpoint, so production must opt in by
    * adding it (ideally with `withRequiredBaseUrlPattern` for the endpoints it may use).
+   *
+   * Every chat section must also set its own `apiKey` in prod (`withOwnApiKeyRequired`): which
+   * account a section bills should be written down, not inherited from `OPENAI_API_KEY`.
    */
   val prodSafeDefaults: ConfigPolicy =
     ConfigPolicy()
@@ -53,6 +70,7 @@ object ConfigPolicy {
         "deepseek/deepseek-chat"
       )
       .withMaxContextWindow(CatalogEnvironment.Prod, 128000)
+      .withOwnApiKeyRequired(CatalogEnvironment.Prod)
 
   def preset(name: String): Option[ConfigPolicy] =
     name.toLowerCase match {
@@ -148,4 +166,28 @@ object ConfigPolicyEngine {
 
     providerViolations ++ modelViolations ++ maxContextViolations ++ baseUrlViolations
   }
+
+  /**
+   * Checks where each named chat section's API key comes from (`Llm4sConfig.apiKeySources`).
+   *
+   * Where the policy requires it for `environment`, a section that sets no `apiKey` of its own -
+   * and so would use its vendor's shared `llm4s.credentials.<providerId>.apiKey`, whether or not
+   * that is set where the check runs - is a `ownApiKey` violation.
+   */
+  def checkApiKeySources(
+    sources: Map[ProviderName, ApiKeySource],
+    policy: ConfigPolicy,
+    environment: CatalogEnvironment
+  ): List[PolicyViolation] =
+    if (!policy.ownApiKeyRequiredIn.contains(environment)) Nil
+    else
+      sources.toList
+        .sortBy(_._1.asName)
+        .collect { case (name, ApiKeySource.Credentials(path)) =>
+          PolicyViolation(
+            "ownApiKey",
+            s"llm4s.providers.${name.asName} sets no apiKey, so it would use the shared $path; " +
+              s"set llm4s.providers.${name.asName}.apiKey to the key for the account it should bill"
+          )
+        }
 }

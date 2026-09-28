@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig, ZaiConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
@@ -13,7 +14,7 @@ object ZaiProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("zai")
 
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(ZaiConfig.DEFAULT_BASE_URL)
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(ZaiConfig.DEFAULT_BASE_URL, Seq(OpenAICompatibleConfigKeys.ZAI_API_KEY))
 
   def buildConfig(providerName: String, section: NamedProviderConfig)(using
     ContextWindowResolver

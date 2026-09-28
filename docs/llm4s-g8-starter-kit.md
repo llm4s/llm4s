@@ -70,9 +70,9 @@ Run the app
    ```bash
    export OPENAI_API_KEY=sk-xxxxxx
    ```
-   llm4s itself does not read this variable. The generated project's
-   `src/main/resources/application.conf` binds it in its `openai-main` named provider section
-   (`apiKey = ${?OPENAI_API_KEY}`), which is also the default (`llm4s.providers.provider`,
+   `llm4s-openai` binds it to OpenAI's shared key, `llm4s.credentials.openai.apiKey`, which the
+   generated project's `openai-main` named provider section in
+   `src/main/resources/application.conf` uses; that section is also the default (`llm4s.providers.provider`,
    overridable with the template's own `LLM4S_PROVIDER` binding). To use another provider,
    uncomment its section there. See the
    [configuration guide](getting-started/configuration.md#named-provider-sections).

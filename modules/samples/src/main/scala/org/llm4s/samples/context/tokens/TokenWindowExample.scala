@@ -17,7 +17,7 @@ import org.slf4j.LoggerFactory
  * ```bash
  * # Add a section for your provider to the samples' application.local.conf
  * # (docs/getting-started/configuration.md#running-the-samples) - e.g. `provider = "openai"`,
- * # "anthropic" or "azure" with apiKey = ${?OPENAI_API_KEY} and so on - and select it:
+ * # "anthropic" or "azure" and a model, keyed by OPENAI_API_KEY, ANTHROPIC_API_KEY and so on - and select it:
  * export OPENAI_API_KEY=sk-...
  * export LLM4S_PROVIDER=openai-main
  *

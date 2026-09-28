@@ -420,7 +420,6 @@ llm4s {
     openai-main {
       provider = "openai"
       model    = "gpt-4o-mini"
-      apiKey   = ${?OPENAI_API_KEY}
     }
   }
 }
@@ -430,8 +429,9 @@ llm4s {
 export OPENAI_API_KEY=sk-...
 ```
 
-Setting `OPENAI_API_KEY` alone does nothing: llm4s reads it only because the section binds it,
-and nothing reads `LLM_MODEL`. The [Configuration guide](configuration#named-provider-sections)
+The section needs no `apiKey` line: `llm4s-openai` binds `OPENAI_API_KEY` to OpenAI's shared
+key, which a section without a key of its own uses (see
+[API keys](configuration#api-keys) for a second account). Nothing reads `LLM_MODEL`. The [Configuration guide](configuration#named-provider-sections)
 shows sections for every provider, how to [switch between them](configuration#switching-providers),
 and which [environment variables llm4s reads](configuration#environment-variables-llm4s-reads)
 without any binding.
@@ -533,9 +533,10 @@ Response: LLM4S is working!
 **Problem**: the provider section has no API key.
 
 **Solution**:
-1. Check the section binds the key: `apiKey = ${?OPENAI_API_KEY}`
-2. Check the variable is set in the shell that starts the JVM: `echo $OPENAI_API_KEY`
-   (if you use a `.env` file, `source .env` first)
+1. Check the vendor's variable is set in the shell that starts the JVM: `echo $OPENAI_API_KEY`
+   (if you use a `.env` file, `source .env` first), and that the provider's module
+   (`llm4s-openai`) is a dependency - it is what binds the variable
+2. If the section sets its own `apiKey = ${?SOME_VAR}`, check that variable too
 3. Check the error names the section you meant to load - only that section is validated, so
    if it names another, `llm4s.providers.provider` points somewhere you did not expect
 

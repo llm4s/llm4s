@@ -101,7 +101,7 @@ class Llm4sConfigProviderSpec extends AnyWordSpec with Matchers:
             "Provider 'broken-fixturechat' (provider = fixturechat) is missing required fields"
           )
           err.message should include(
-            "- apiKey: set it in application.conf under llm4s.providers.broken-fixturechat.apiKey"
+            "- apiKey: set llm4s.credentials.fixturechat.apiKey, or set apiKey under llm4s.providers.broken-fixturechat"
           )
         case Right(cfg) =>
           fail(s"Expected the invalid provider itself to fail, got config: $cfg")

@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.config.{ DeepSeekModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, DeepSeekConfig, ProviderConfig }
@@ -14,7 +15,10 @@ object DeepSeekProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("deepseek")
 
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DeepSeekConfig.DEFAULT_BASE_URL)
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(
+      DeepSeekConfig.DEFAULT_BASE_URL,
+      Seq(OpenAICompatibleConfigKeys.DEEPSEEK_API_KEY)
+    )
 
   override val modelLister: Option[ProviderModelLister] = Some(DeepSeekModelLister)
 

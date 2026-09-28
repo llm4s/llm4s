@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.provider
 
+import org.llm4s.config.{ CredentialsRoundTrip, GeminiConfigKeys }
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.config.ContextWindowResolver
@@ -122,5 +123,39 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers:
       VertexAIProvider.features.streaming shouldBe true
       GeminiProvider.modelLister shouldBe defined
       VertexAIProvider.modelLister shouldBe None
+    }
+  }
+
+  "the llm4s-gemini reference.conf" should {
+
+    given ProviderRegistry = ProviderRegistry.default
+
+    "bind GOOGLE_API_KEY and GEMINI_API_KEY to llm4s.credentials.gemini.apiKey" in {
+      GeminiProvider.configSpec.apiKeyEnv shouldBe Seq(GeminiConfigKeys.GOOGLE_API_KEY, GeminiConfigKeys.GEMINI_API_KEY)
+      CredentialsRoundTrip.chatBindings(GeminiProvider) shouldBe Map(
+        "GOOGLE_API_KEY" -> Right(Some("key-from-GOOGLE_API_KEY")),
+        "GEMINI_API_KEY" -> Right(Some("key-from-GEMINI_API_KEY"))
+      )
+    }
+
+    "prefer GOOGLE_API_KEY when both are set, as Google's SDKs do" in {
+      CredentialsRoundTrip.chatSectionKey(
+        "gemini",
+        Map("GOOGLE_API_KEY" -> "from-google", "GEMINI_API_KEY" -> "from-gemini")
+      ) shouldBe Right(Some("from-google"))
+    }
+
+    "give the google alias the gemini key" in {
+      CredentialsRoundTrip.chatSectionKey("google", Map("GEMINI_API_KEY" -> "from-gemini")) shouldBe
+        Right(Some("from-gemini"))
+    }
+
+    "bind nothing for Vertex AI, which authenticates with OAuth2" in {
+      VertexAIProvider.configSpec.apiKeyEnv shouldBe empty
+      CredentialsRoundTrip.chatSectionKey(
+        "vertexai",
+        Map("GOOGLE_API_KEY" -> "k", "GEMINI_API_KEY" -> "k"),
+        """project = "p""""
+      ) shouldBe Right(None)
     }
   }

@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.config.{ AnthropicModelLister, ProviderModelLister }
+import org.llm4s.config.{ AnthropicConfigKeys, AnthropicModelLister, ProviderModelLister }
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
@@ -13,8 +13,12 @@ import org.llm4s.types.Result
 object AnthropicProvider extends ProviderDescriptor:
   val id: ProviderId = ProviderId("anthropic")
 
+  /** The key falls back to `llm4s.credentials.anthropic.apiKey`, bound to `ANTHROPIC_API_KEY`. */
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(AnthropicConfig.DEFAULT_BASE_URL)
+    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(
+      AnthropicConfig.DEFAULT_BASE_URL,
+      Seq(AnthropicConfigKeys.ANTHROPIC_API_KEY)
+    )
 
   override val modelLister: Option[ProviderModelLister] = Some(AnthropicModelLister)
 
