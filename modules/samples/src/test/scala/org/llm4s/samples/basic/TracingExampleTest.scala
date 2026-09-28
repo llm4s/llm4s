@@ -4,11 +4,11 @@ import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.trace.{ Tracing, TracingComposer, TraceEvent, TracingMode }
 import org.llm4s.llmconnect.model.TokenUsage
-import org.llm4s.llmconnect.config.{ TracingSettings, LangfuseConfig }
+import org.llm4s.llmconnect.config.TracingSettings
 
 class TracingExampleTest extends AnyFunSuite with Matchers {
 
-  private val baseSettings = TracingSettings(TracingMode.Console, LangfuseConfig())
+  private val baseSettings = TracingSettings(TracingMode.Console)
 
   test("should create basic enhanced tracing with console mode") {
     val basicTracer = Tracing.create(baseSettings.copy(mode = TracingMode.Console))
@@ -83,7 +83,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
   }
 
   test("should create tracers for all tracing modes") {
-    val modes = Seq(TracingMode.Console, TracingMode.NoOp, TracingMode.Langfuse)
+    val modes = Seq(TracingMode.Console, TracingMode.NoOp, TracingMode.Named("langfuse"))
     modes.foreach { mode =>
       val tracer = Tracing.create(baseSettings.copy(mode = mode))
       tracer shouldBe a[Tracing]
@@ -181,7 +181,7 @@ class TracingExampleTest extends AnyFunSuite with Matchers {
     // Test typed factory via settings
     val consoleTracer1  = Tracing.create(baseSettings.copy(mode = TracingMode.Console))
     val noOpTracer1     = Tracing.create(baseSettings.copy(mode = TracingMode.NoOp))
-    val langfuseTracer1 = Tracing.create(baseSettings.copy(mode = TracingMode.Langfuse))
+    val langfuseTracer1 = Tracing.create(baseSettings.copy(mode = TracingMode.Named("langfuse")))
     val defaultTracer   = Tracing.create(baseSettings) // Console
 
     Seq(consoleTracer1, noOpTracer1, langfuseTracer1, defaultTracer).foreach(tracer => tracer shouldBe a[Tracing])

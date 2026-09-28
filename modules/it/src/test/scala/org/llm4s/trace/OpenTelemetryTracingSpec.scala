@@ -14,9 +14,9 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
   val tracing = new OpenTelemetryTracing("test-service", "http://localhost:4317", Map.empty)
 
   "TracingMode" should "parse opentelemetry strings correctly" in {
-    TracingMode.fromString("opentelemetry") shouldBe TracingMode.OpenTelemetry
-    TracingMode.fromString("otel") shouldBe TracingMode.OpenTelemetry
-    TracingMode.fromString("OpenTelemetry") shouldBe TracingMode.OpenTelemetry
+    TracingMode.fromString("opentelemetry") shouldBe TracingMode.Named("opentelemetry")
+    TracingMode.fromString("otel") shouldBe TracingMode.Named("opentelemetry")
+    TracingMode.fromString("OpenTelemetry") shouldBe TracingMode.Named("opentelemetry")
   }
 
   "OpenTelemetryTracing" should "assign correct SpanKind for events" in {
@@ -110,16 +110,10 @@ class OpenTelemetryTracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "be loaded correctly via Tracing.create when configured" in {
-    import org.llm4s.llmconnect.config.LangfuseConfig
-
+    // The llm4s.tracing.opentelemetry block, as core hands it to the backend (#1133).
     val settings = TracingSettings(
-      mode = TracingMode.OpenTelemetry,
-      langfuse = LangfuseConfig(),
-      openTelemetry = OpenTelemetryConfig(
-        serviceName = "integration-test",
-        endpoint = "http://localhost:4317",
-        headers = Map.empty
-      )
+      mode = TracingMode.fromString("opentelemetry"),
+      extras = Map("serviceName" -> "integration-test", "endpoint" -> "http://localhost:4317")
     )
 
     val tracingInstance = Tracing.create(settings)

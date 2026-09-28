@@ -14,13 +14,14 @@ import scala.util.control.NonFatal
  *
  * Provides a functional approach to tracing with `Result[Unit]` return types
  * for proper error handling and composition. Supports multiple backends
- * including console output, Langfuse, and custom implementations.
+ * including console output, Langfuse, OpenTelemetry and custom implementations.
  *
  * == Implementations ==
  *
- *  - [[LangfuseTracing]] - Production observability via Langfuse
- *  - [[ConsoleTracing]] - Colored console output for development
- *  - [[NoOpTracing]] - Silent implementation for testing/disabled tracing
+ *  - [[ConsoleTracing]] - Colored console output for development (core)
+ *  - [[NoOpTracing]] - Silent implementation for testing/disabled tracing (core)
+ *  - `LangfuseTracing` - Production observability via Langfuse (`llm4s-observability`)
+ *  - `OpenTelemetryTracing` - OTLP export (`llm4s-observability-otel`)
  *
  * == Usage ==
  *
@@ -277,11 +278,12 @@ private class TransformedTracing(underlying: Tracing, transform: TraceEvent => T
 /**
  * Selects a tracing backend.
  *
- * `NoOp` and `Console` are built by core itself. Every other mode is served by a
- * [[org.llm4s.trace.spi.TracingBackend]] found on the classpath: `Langfuse` by core's
- * own until it is carved into `llm4s-observability`, `OpenTelemetry` by
- * `llm4s-observability-otel`, and a backend core knows nothing about by
- * [[TracingMode.Named]] (D2, #1133).
+ * `NoOp` and `Console` are built by core itself, and are the only modes core has a
+ * case for. Every other mode is a [[TracingMode.Named]] served by a
+ * [[org.llm4s.trace.spi.TracingBackend]] found on the classpath: `Named("langfuse")`
+ * by `llm4s-observability`, `Named("opentelemetry")` by `llm4s-observability-otel`,
+ * and any third-party backend the same way (D2, #1133). `TracingMode.Langfuse` and
+ * `TracingMode.OpenTelemetry` were removed when their backends left core.
  *
  * The `TRACING_MODE` environment variable (`llm4s.tracing.mode`) is the standard
  * way to select a mode; see `Llm4sConfig.tracing`.
@@ -295,17 +297,17 @@ sealed trait TracingMode extends Product with Serializable {
 object TracingMode {
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
-  case object Langfuse      extends TracingMode { val name = "langfuse"      }
-  case object Console       extends TracingMode { val name = "console"       }
-  case object OpenTelemetry extends TracingMode { val name = "opentelemetry" }
-  case object NoOp          extends TracingMode { val name = "noop"          }
+  case object Console extends TracingMode { val name = "console" }
+  case object NoOp    extends TracingMode { val name = "noop"    }
 
   /**
-   * A mode served by a [[org.llm4s.trace.spi.TracingBackend]] that core has no case for.
+   * A mode served by a [[org.llm4s.trace.spi.TracingBackend]] rather than by core.
    *
-   * This is what makes the set of modes open: a third-party backend declares
+   * This is what makes the set of modes open: a backend declares
    * `TracingMode.Named("datadog")` and `TRACING_MODE=datadog` selects it, with no
-   * edit to core. Matching against a backend is case-insensitive.
+   * edit to core. Langfuse (`Named("langfuse")`, in `llm4s-observability`) and
+   * OpenTelemetry (`Named("opentelemetry")`, in `llm4s-observability-otel`) are
+   * registered exactly this way. Matching against a backend is case-insensitive.
    *
    * @param name the mode's config value; [[fromString]] produces it lower-cased
    */
@@ -314,8 +316,9 @@ object TracingMode {
   /**
    * Parses a mode string into a `TracingMode`, case-insensitively.
    *
-   * Accepts `"langfuse"`, `"console"`, `"print"`, `"opentelemetry"`, `"otel"`,
-   * `"noop"`, and `"none"`. Any other non-blank value becomes [[Named]], lower-cased,
+   * `"console"` and `"print"` give `Console`; `"noop"` and `"none"` give `NoOp`.
+   * `"otel"` is kept as an alias for `Named("opentelemetry")`. Any other non-blank
+   * value, `"langfuse"` and `"opentelemetry"` included, becomes [[Named]], lower-cased,
    * for a backend outside core to claim; whether one does is decided when the
    * tracer is built, by `Tracing.fromSettings`. A blank value logs a warning and
    * returns `NoOp`.
@@ -324,10 +327,9 @@ object TracingMode {
    * @return the matching `TracingMode`
    */
   def fromString(mode: String): TracingMode = mode.trim.toLowerCase(Locale.ROOT) match {
-    case "langfuse"               => Langfuse
-    case "console" | "print"      => Console
-    case "opentelemetry" | "otel" => OpenTelemetry
-    case "noop" | "none"          => NoOp
+    case "console" | "print" => Console
+    case "noop" | "none"     => NoOp
+    case "otel"              => Named("opentelemetry")
     case "" =>
       logger.warn("Blank tracing mode, falling back to NoOp")
       NoOp
@@ -356,6 +358,13 @@ object TracingMode {
 object Tracing {
 
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
+
+  // The llm4s artifact that registers each well-known mode, named in the missing-backend
+  // error. A hint only: dispatch never consults it, and a third-party mode needs no entry.
+  private val knownArtifacts: Map[String, String] = Map(
+    "langfuse"      -> "llm4s-observability",
+    "opentelemetry" -> "llm4s-observability-otel"
+  )
 
   /**
    * Create a tracing instance from configuration settings.
@@ -429,10 +438,9 @@ object Tracing {
   // scalafix:on DisableSyntax.NoKeywordCatch
 
   private def missingBackend(mode: TracingMode, backends: TracingBackends): ConfigurationError = {
-    val hint = mode match {
-      case TracingMode.OpenTelemetry => " Add the 'org.llm4s' %% 'llm4s-observability-otel' dependency."
-      case _                         => ""
-    }
+    val hint = knownArtifacts
+      .get(mode.name.toLowerCase(Locale.ROOT))
+      .fold("")(artifact => s" Add the 'org.llm4s' %% '$artifact' dependency.")
     val registered = backends.modes.map(_.name) ++ Seq(TracingMode.Console.name, TracingMode.NoOp.name)
     val failures =
       if (backends.failures.isEmpty) ""

@@ -1,0 +1,3 @@
+# Tracing backends in llm4s-observability (#1133). Depending on this module registers
+# Langfuse for TRACING_MODE=langfuse; llm4s-core builds only NoOp and Console itself.
+org.llm4s.trace.LangfuseTracingBackend

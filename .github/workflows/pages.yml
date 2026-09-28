@@ -130,6 +130,9 @@ jobs:
             if [ ! -d "$SCALADOC_DIR/org/llm4s/$pkg" ]; then missing="$missing $pkg"; fi
           done
           if [ ! -d "$SCALADOC_DIR/org/llm4s/agent/memory" ]; then missing="$missing agent.memory"; fi
+          # `trace` itself stays in core (the contract); these two are llm4s-observability's.
+          if [ ! -d "$SCALADOC_DIR/org/llm4s/trace/store" ]; then missing="$missing trace.store"; fi
+          if [ ! -d "$SCALADOC_DIR/org/llm4s/trace/model" ]; then missing="$missing trace.model"; fi
           if [ -n "$missing" ]; then
             echo "::error::Aggregate Scaladoc is missing package(s):$missing"
             echo "::error::Add the owning module to the \`docs\` project in build.sbt."

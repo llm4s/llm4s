@@ -1,87 +1,35 @@
 package org.llm4s.llmconnect.config
 
-import org.llm4s.config.DefaultConfig
 import org.llm4s.trace.TracingMode
-import org.llm4s.util.Redaction
 
 /**
- * Connection and metadata settings for the Langfuse tracing backend.
+ * Tracing configuration used by [[org.llm4s.trace.Tracing]].
  *
- * Normally obtained via [[org.llm4s.config.Llm4sConfig]] which reads
- * `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, and `LANGFUSE_BASE_URL`
- * from the environment.
- *
- * `toString` redacts both keys so that the config can be safely logged.
- *
- * @param url       Langfuse ingestion endpoint; defaults to `https://cloud.langfuse.com/api/public/ingestion`
- * @param publicKey Langfuse public API key; `None` disables tracing with a warning
- * @param secretKey Langfuse secret API key; redacted in `toString`
- * @param env       deployment environment tag attached to every trace; defaults to `"production"`
- * @param release   application release identifier forwarded to Langfuse; defaults to `"1.0.0"`
- * @param version   SDK/integration version forwarded to Langfuse; defaults to `"1.0.0"`
- */
-case class LangfuseConfig(
-  url: String = DefaultConfig.DEFAULT_LANGFUSE_URL,
-  publicKey: Option[String] = None,
-  secretKey: Option[String] = None,
-  env: String = DefaultConfig.DEFAULT_LANGFUSE_ENV,
-  release: String = DefaultConfig.DEFAULT_LANGFUSE_RELEASE,
-  version: String = DefaultConfig.DEFAULT_LANGFUSE_VERSION
-) {
-  override def toString: String =
-    s"LangfuseConfig(url=$url, publicKey=${Redaction.secretOpt(publicKey)}, secretKey=${Redaction.secretOpt(secretKey)}, " +
-      s"env=$env, release=$release, version=$version)"
-}
-
-/**
- * Connection settings for an OpenTelemetry collector.
- *
- * Spans are exported via OTLP/gRPC to `endpoint`.  Set `OTEL_EXPORTER_OTLP_ENDPOINT`
- * in the environment (picked up by [[org.llm4s.config.Llm4sConfig]]) to override the
- * default local collector address.
- *
- * @param serviceName logical service name attached to every span as `service.name`;
- *                    defaults to `"llm4s-agent"`
- * @param endpoint    OTLP/gRPC collector address; defaults to `"http://localhost:4317"`
- * @param headers     additional HTTP headers sent with each OTLP export request
- *                    (e.g. authentication tokens for hosted collectors)
- */
-case class OpenTelemetryConfig(
-  serviceName: String = "llm4s-agent",
-  endpoint: String = "http://localhost:4317",
-  headers: Map[String, String] = Map.empty
-)
-
-/**
- * Combined tracing configuration used by [[org.llm4s.trace.Tracing]].
- *
- * `mode` selects the active backend; the other fields supply backend-specific
- * connection details.  Only the sub-config matching the active mode is used —
- * e.g. when `mode = TracingMode.Langfuse`, `openTelemetry` is ignored.
- *
- * A backend registered through [[org.llm4s.trace.spi.TracingBackend]] receives
- * the whole of these settings from `Tracing.fromSettings`. A backend outside core
- * reads its own keys from `extras`: the block `llm4s.tracing.<mode>` for the
- * selected mode, whose defaults the backend's module ships in its own
+ * `mode` selects the backend. Core builds `NoOp` and `Console` itself and needs
+ * nothing more; every other mode is served by a [[org.llm4s.trace.spi.TracingBackend]]
+ * on the classpath, which reads its own keys from `extras`: the block
+ * `llm4s.tracing.<mode>` for the selected mode, flattened to strings. The backend's
+ * module ships that block's defaults and `${?VAR}` bindings in its own
  * `reference.conf` - the arrangement provider descriptors have with
- * `NamedProviderConfig.extras`.
+ * `NamedProviderConfig.extras`. So `llm4s-observability` reads
+ * `llm4s.tracing.langfuse` (`LangfuseConfig.fromExtras`) and
+ * `llm4s-observability-otel` reads `llm4s.tracing.opentelemetry`.
+ *
+ * Until slice 6 (#1133) this class also carried typed `langfuse` and
+ * `openTelemetry` fields; they left core with their backends.
  *
  * `toString` redacts the `extras` values, which may be credentials.
  *
- * @param mode          selects the tracing backend (`Langfuse`, `OpenTelemetry`, `Console`, `NoOp`,
- *                      or `Named` for a backend outside core)
- * @param langfuse      Langfuse connection details; only used when `mode = TracingMode.Langfuse`
- * @param openTelemetry OpenTelemetry collector details; only used when `mode = TracingMode.OpenTelemetry`
- * @param extras        every value under `llm4s.tracing.<mode>` for the selected mode, as a string,
- *                      keyed by its path within that block (`site`, `tags.team`); a list or object
- *                      value is rendered as HOCON. Empty when the block is absent.
+ * @param mode   selects the tracing backend: `Console`, `NoOp`, or `Named` for a backend
+ *               outside core (`Named("langfuse")`, `Named("opentelemetry")`, ...)
+ * @param extras every value under `llm4s.tracing.<mode>` for the selected mode, as a string,
+ *               keyed by its path within that block (`publicKey`, `headers.Authorization`); a
+ *               list or object value is rendered as HOCON. Empty when the block is absent.
  */
 case class TracingSettings(
   mode: TracingMode,
-  langfuse: LangfuseConfig,
-  openTelemetry: OpenTelemetryConfig = OpenTelemetryConfig(),
   extras: Map[String, String] = Map.empty
 ) {
   override def toString: String =
-    s"TracingSettings($mode,$langfuse,$openTelemetry,${extras.keys.map(k => s"$k -> ***").mkString("Map(", ", ", ")")})"
+    s"TracingSettings($mode,${extras.keys.map(k => s"$k -> ***").mkString("Map(", ", ", ")")})"
 }

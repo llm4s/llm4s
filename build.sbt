@@ -190,6 +190,7 @@ lazy val llm4s = (project in file("."))
     workspaceRunner,
     workspaceClient,
     workspaceSamples,
+    observability,
     traceOpentelemetry,
     knowledgegraphNeo4j,
     benchmarks,
@@ -268,8 +269,9 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
-    // Measured 74.65% statement coverage with every provider client gone - Mistral, Cohere and
-    // Voyage were the last (`sbt coverage core/test core/coverageReport`); it was 75.32% after
+    // Measured 73.59% statement coverage after the `observability` carve took Langfuse, the trace
+    // collector and `CostTracker` (94.52% covered) out (#1133); 74.65% with every provider client
+    // gone - Mistral, Cohere and Voyage were the last (`sbt coverage core/test core/coverageReport`); it was 75.32% after
     // `openai-compatible`, 75.57% after `openai`, 75.15% after `anthropic`, 75.27% after `gemini`, 75.86%
     // after `ollama`, 74.33% with slice 3 complete, 74.89% after `image`, 74.05% after `mcp`,
     // 73.85% after slice 2 and 72.42% on main @ 5a62e2ac before any of them. A carve moves the
@@ -353,7 +355,9 @@ lazy val rag = (project in file("modules/rag"))
   // `openai` is test-only: `RAGConfig.default` names the `openai` embedding provider, which
   // left core with `llm4s-openai` (#1132), and the mocked RAG suites build from that default.
   // `llm4s-rag` itself does not depend on it - a user names whichever provider they ship.
-  .dependsOn(media, core % "compile->compile;test->test", knowledgegraph, openai % "test->compile")
+  // `observability` is for `RAGASLangfuseObserver`, which sends through Langfuse's batch sender;
+  // it carries no third-party dependency, so it costs a RAG user nothing (#1133).
+  .dependsOn(media, core % "compile->compile;test->test", knowledgegraph, observability, openai % "test->compile")
   .settings(
     name := "llm4s-rag",
     commonSettings,
@@ -781,7 +785,8 @@ lazy val samples = (project in file("modules//samples"))
     openai,
     openaiCompatible,
     voyage,
-    knowledgegraphNeo4j
+    knowledgegraphNeo4j,
+    observability
   )
   .settings(
     name := "llm4s-samples",
@@ -828,17 +833,49 @@ lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples
     coverageDisabled
   )
 
+// ---- slice 6 of the modularisation programme (#1133) ----
+// `llm4s-observability` carries the tracing integrations that need nothing beyond core:
+// Langfuse (registered as a `TracingBackend` through its own services entry), the trace
+// collector with its model and store, and `CostTracker`. No third-party dependency, which is
+// what lets `rag` depend on it for `RAGASLangfuseObserver` without passing anything on.
+//
+// What stays in core is the contract (D1 to D5): `Tracing`, `TraceEvent`, `TracingComposer`,
+// `TracingMode` (`Console`, `NoOp`, `Named`), the `TracingBackend` SPI, `NoOpTracing`,
+// `ConsoleTracing`, `TracingSettings`, and `MetricsCollector`. The `llm4s.tracing.langfuse`
+// block moved with its reader into this module's `reference.conf`; core reads only
+// `llm4s.tracing.mode` and hands the selected mode's block to its backend as `extras`.
+//
+// Test depends on core's tests for `MockHttpClient`/`FailingHttpClient` and `ReferenceConfig`.
+
+lazy val observability = (project in file("modules/observability"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    name := "llm4s-observability",
+    commonSettings,
+    // Measured 94.52% statement coverage (`sbt coverage observability/test
+    // observability/coverageReport`) on the code as carved out of core. Floor is the measured
+    // value rounded down to the nearest 5. Never lower it.
+    coverageFloor(90),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty
+  )
+
 lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
-  .dependsOn(core)
+  // Test depends on core's tests for `ReferenceConfig`, which proves this module's
+  // `reference.conf` binds `OTEL_*` under `llm4s.tracing.opentelemetry` (#1133).
+  .dependsOn(core % "compile->compile;test->test")
   .settings(
     name := "llm4s-observability-otel",
     commonSettings,
-    // Measured 29.20% statement coverage (`sbt coverage traceOpentelemetry/test
-    // traceOpentelemetry/coverageReport`) from its one in-module suite,
-    // OpenTelemetryTracingBackendSpec (#1133), which covers the backend's registration and
-    // startup; span export is exercised by modules/it/.../OpenTelemetryTracingSpec, which
-    // this number does not include. Floor is the measured value rounded down to the nearest 5.
-    coverageFloor(25),
+    // Measured 34.15% statement coverage (`sbt coverage traceOpentelemetry/test
+    // traceOpentelemetry/coverageReport`) from its in-module suites: OpenTelemetryTracingBackendSpec
+    // (#1133), which covers the backend's registration and startup, and
+    // OpenTelemetryTracingConfigSpec, which came with `OpenTelemetryConfig` and the
+    // `llm4s.tracing.opentelemetry` block in the `observability` carve (29.20% before it). Span
+    // export is exercised by modules/it/.../OpenTelemetryTracingSpec, which this number does not
+    // include. Floor is the measured value rounded down to the nearest 5.
+    coverageFloor(30),
     libraryDependencies ++= Seq(
       Deps.opentelemetryApi,
       Deps.opentelemetrySdk,
@@ -892,6 +929,7 @@ lazy val it = (project in file("modules/it"))
     voyage,
     knowledgegraphNeo4j,
     workspaceClient,
+    observability,
     traceOpentelemetry
   )
   .settings(
@@ -963,6 +1001,7 @@ lazy val docs = (project in file("modules/docs"))
     voyage,
     workspaceShared,
     workspaceClient,
+    observability,
     traceOpentelemetry,
     knowledgegraphNeo4j
   )
@@ -990,6 +1029,7 @@ lazy val docs = (project in file("modules/docs"))
         (voyage / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
+        (observability / Compile / sources).value ++
         (traceOpentelemetry / Compile / sources).value ++
         (knowledgegraphNeo4j / Compile / sources).value
     },

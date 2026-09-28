@@ -14,33 +14,15 @@ package org.llm4s.config
  *    own by default; it uses its vendor's `llm4s.credentials.<id>.apiKey`, which
  *    the provider's module binds to the vendor's variable (`llm4s-openai` binds
  *    `OPENAI_API_KEY`, see `OpenAIConfigKeys`). Nothing reads `LLM_MODEL`.
- *  - `TRACING_MODE` — optional; `langfuse`, `opentelemetry`, `console`, or `none`.
+ *  - `TRACING_MODE` — optional; `console` (default) or `none`, or a backend module's mode:
+ *    `langfuse` (`llm4s-observability`), `opentelemetry` (`llm4s-observability-otel`).
  *  - `EMBEDDING_MODEL` — required when using embeddings; format `provider/model`.
  */
 object ConfigKeys {
   // OpenAI, Requesty and Azure OpenAI keys are `OpenAIConfigKeys` in `llm4s-openai`, and the
   // OpenRouter, DeepSeek and Mistral keys `OpenAICompatibleConfigKeys` in
   // `llm4s-openai-compatible`, and the Voyage keys `VoyageConfigKeys` in `llm4s-voyage` (#1132).
-
-  // ---- Langfuse tracing ---------------------------------------------------
-
-  /** Langfuse server URL. Defaults to `"https://cloud.langfuse.com"` when not set. */
-  val LANGFUSE_URL = "LANGFUSE_URL"
-
-  /** Langfuse public key (`pk-lf-...`). */
-  val LANGFUSE_PUBLIC_KEY = "LANGFUSE_PUBLIC_KEY"
-
-  /** Langfuse secret key (`sk-lf-...`). */
-  val LANGFUSE_SECRET_KEY = "LANGFUSE_SECRET_KEY"
-
-  /** Optional Langfuse environment tag (e.g. `"production"`, `"staging"`). */
-  val LANGFUSE_ENV = "LANGFUSE_ENV"
-
-  /** Optional Langfuse release version tag. */
-  val LANGFUSE_RELEASE = "LANGFUSE_RELEASE"
-
-  /** Optional Langfuse SDK version override. */
-  val LANGFUSE_VERSION = "LANGFUSE_VERSION"
+  // The Langfuse keys are `LangfuseConfigKeys` in `llm4s-observability` (#1133).
 
   // ---- Embeddings: provider selection -------------------------------------
 

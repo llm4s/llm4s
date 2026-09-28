@@ -80,7 +80,7 @@ LLM4S is under active pre-1.0 development. The latest published release is [v0.4
 
 The framework already provides multi-provider clients, agents and tool calling, RAG and vector stores, memory, guardrails, tracing and metrics, reliability wrappers, workspace isolation, MCP support, and image and speech APIs.
 
-On `main`, the first four modularization slices are complete: RAG, knowledge graph, memory, MCP, shared media types, image, and speech have been carved out of `llm4s-core` into focused modules with smaller dependency footprints, and providers now register through an SPI. Provider clients have moved into modules of their own - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint) and `llm4s-voyage` - and `llm4s-core` holds none. These split modules are in the build but have not yet been published as separate artifacts; v0.4.1 still ships this functionality through `llm4s-core`. See the [1.0 scope](https://llm4s.org/reference/v1-scope) and [migration guide](https://github.com/llm4s/llm4s/blob/main/docs/reference/migration.md) for module maturity and upgrade details.
+On `main`, the first four modularization slices are complete: RAG, knowledge graph, memory, MCP, shared media types, image, and speech have been carved out of `llm4s-core` into focused modules with smaller dependency footprints, and providers now register through an SPI. Provider clients have moved into modules of their own - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (DeepSeek, Z.ai, OpenRouter, Mistral, Cohere and any OpenAI-compatible endpoint) and `llm4s-voyage` - and `llm4s-core` holds none. Slice 6 has begun: Langfuse tracing, the trace collector and store, and `CostTracker` are in `llm4s-observability`, leaving `llm4s-core` with only the tracing contract, console and no-op tracing. These split modules are in the build but have not yet been published as separate artifacts; v0.4.1 still ships this functionality through `llm4s-core`. See the [1.0 scope](https://llm4s.org/reference/v1-scope) and [migration guide](https://github.com/llm4s/llm4s/blob/main/docs/reference/migration.md) for module maturity and upgrade details.
 
 The path to 1.0 is focused on stable API boundaries, provider capability parity and contract tests, Java/Kotlin/Spring/Gradle interoperability, security hardening, deterministic CI, production observability and cost controls, runnable documentation, and maintained reference applications. See the [roadmap](https://llm4s.org/reference/roadmap) for the full stabilization plan.
 
@@ -359,16 +359,18 @@ Tools run in a protected Docker container environment to prevent accidental syst
 Tracing isn’t just for debugging - it’s the backbone of understanding model behavior.LLM4S’s observability layer includes:
 
 - Detailed token usage reporting
-- Multi-backend trace output (Langfuse, console, none)
+- Multi-backend trace output (console and none in `llm4s-core`; Langfuse from `llm4s-observability`, OpenTelemetry from `llm4s-observability-otel`)
 - Agent state visualization
 - Integration with monitoring dashboards
 
 ### Tracing Modes
 
-Configure tracing behavior using the `TRACING_MODE` environment variable:
+Configure tracing behavior using the `TRACING_MODE` environment variable. Console output
+(the default) and no tracing are built into `llm4s-core`; every other mode comes from a
+backend module you add as a dependency:
 
 ```bash
-# Send traces to Langfuse (default)
+# Send traces to Langfuse - needs "org.llm4s" %% "llm4s-observability"
 TRACING_MODE=langfuse
 LANGFUSE_PUBLIC_KEY=pk-lf-your-key
 LANGFUSE_SECRET_KEY=sk-lf-your-secret
@@ -474,8 +476,8 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
   - Loader: `Llm4sConfig.defaultProvider()` or `Llm4sConfig.provider("name")` + `LLMConnect.getClient(...)`
 
 - Tracing configuration
-  - Keys: `llm4s.tracing.mode` | `TRACING_MODE`, `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION`
-  - Type: `TracingSettings`
+  - Keys: `llm4s.tracing.mode` | `TRACING_MODE` (`llm4s-core`); `llm4s.tracing.langfuse.*` | `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION` (bound by `llm4s-observability`); `llm4s.tracing.opentelemetry.*` | `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` (bound by `llm4s-observability-otel`)
+  - Type: `TracingSettings` (the mode, plus the selected mode's block as `extras`); `LangfuseConfig` via `LangfuseConfigLoader.default()`
   - Loader: `Llm4sConfig.tracing()` → then `Tracing.fromSettings` or `Tracing.create`
 
 - Workspace settings (samples)
@@ -509,13 +511,14 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
 
 Tracing
 
-- Configure mode via `llm4s.tracing.mode` (default: `console`). Supported: `langfuse`, `opentelemetry`
-  (with `llm4s-observability-otel`), `console`, `noop`, and any mode a `TracingBackend` on the classpath registers.
+- Configure mode via `llm4s.tracing.mode` (default: `console`). Supported: `console` and `noop` (built into
+  `llm4s-core`), `langfuse` (with `llm4s-observability`), `opentelemetry` (with `llm4s-observability-otel`),
+  and any mode a `TracingBackend` on the classpath registers.
 - Override with env: `TRACING_MODE=langfuse` (or system property `-Dllm4s.tracing.mode=langfuse`).
 - Build tracers:
   - Checked: `Llm4sConfig.tracing().flatMap(Tracing.fromSettings)` → `Result[Tracing]`
   - Falling back to no tracing: `Llm4sConfig.tracing().map(Tracing.create)`
-  - Low-level: `LangfuseTracing.from(langfuseConfig)`
+  - Low-level: `LangfuseConfigLoader.default().map(LangfuseTracing.from)` (`llm4s-observability`)
 
 Example (no application.conf required):
 

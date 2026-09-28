@@ -84,9 +84,10 @@ llm4s {
     }
   }
 
-  # Tracing already binds TRACING_MODE, LANGFUSE_* and OTEL_SERVICE_NAME /
-  # OTEL_EXPORTER_OTLP_ENDPOINT in llm4s-core's reference.conf. OTLP exporter
-  # headers come from this map, not from OTEL_EXPORTER_OTLP_HEADERS:
+  # Tracing already binds TRACING_MODE (llm4s-core), LANGFUSE_* (llm4s-observability)
+  # and OTEL_SERVICE_NAME / OTEL_EXPORTER_OTLP_ENDPOINT (llm4s-observability-otel) in
+  # each module's reference.conf. OTLP exporter headers come from this map, not from
+  # OTEL_EXPORTER_OTLP_HEADERS:
   # tracing.opentelemetry.headers { Authorization = ${?OTEL_AUTH_HEADER} }
 }
 ```
@@ -172,8 +173,8 @@ This pattern makes testing easier and keeps configuration concerns at the edges.
 
 For Kubernetes deployments, use Secrets and reference them in your pod spec. The variable names are
 the ones your sections bind (`apiKey = ${?OPENAI_API_KEY}`) - or, for a section without its own
-`apiKey`, the vendor's variable its provider module binds; `TRACING_MODE` and
-`LANGFUSE_*` are bound by llm4s-core's `reference.conf`. Supply the key of each section the
+`apiKey`, the vendor's variable its provider module binds; `TRACING_MODE` is bound by
+llm4s-core's `reference.conf` and `LANGFUSE_*` by llm4s-observability's. Supply the key of each section the
 deployment loads: with the file above and `openai-main` as the default, `OPENAI_API_KEY`, plus
 `ANTHROPIC_API_KEY` if it also calls `Llm4sConfig.provider("claude")`.
 
@@ -421,7 +422,9 @@ LLM4S supports four tracing modes:
 
 ### Langfuse Setup
 
-Langfuse provides production-grade LLM observability:
+Langfuse provides production-grade LLM observability. Its backend ships in `llm4s-observability`
+(`"org.llm4s" %% "llm4s-observability" % llm4sVersion`); on 0.4.1 and earlier it is part of
+`llm4s-core`:
 
 ```bash
 TRACING_MODE=langfuse
@@ -429,6 +432,10 @@ LANGFUSE_PUBLIC_KEY=<your-langfuse-public-key>
 LANGFUSE_SECRET_KEY=<your-langfuse-secret-key>
 LANGFUSE_URL=https://cloud.langfuse.com  # or self-hosted
 ```
+
+Both keys are required: with either unset, `Tracing.create` logs a `ConfigurationError` naming it
+(`llm4s.tracing.langfuse.publicKey (LANGFUSE_PUBLIC_KEY)`) and falls back to no tracing, so check
+startup logs, or build the tracer with `Tracing.fromSettings` to fail fast.
 
 What gets traced:
 

@@ -79,17 +79,36 @@ At `DEBUG` level (not recommended for production):
 
 LLM4S supports five tracing backends:
 
-| Mode | Use Case | Configuration |
-|------|----------|---------------|
-| `langfuse` | Production LLM observability | `TRACING_MODE=langfuse` |
-| `opentelemetry` | Integration with existing APM | `TRACING_MODE=opentelemetry` |
-| `console` | Local development/debugging | `TRACING_MODE=console` |
-| `noop` | Disabled | `TRACING_MODE=noop` |
-| `collector` | In-process queryable store | Programmatic (see below) |
+| Mode | Use Case | Configuration | Module |
+|------|----------|---------------|--------|
+| `langfuse` | Production LLM observability | `TRACING_MODE=langfuse` | `llm4s-observability` |
+| `opentelemetry` | Integration with existing APM | `TRACING_MODE=opentelemetry` | `llm4s-observability-otel` |
+| `console` | Local development/debugging | `TRACING_MODE=console` | `llm4s-core` |
+| `noop` | Disabled | `TRACING_MODE=noop` | `llm4s-core` |
+| `collector` | In-process queryable store | Programmatic (see below) | `llm4s-observability` |
 
 All backends implement the `Tracing` trait and can be composed with `TracingComposer.combine()`.
+`llm4s-core` holds the contract - `Tracing`, `TraceEvent`, `TracingComposer`, `TracingMode`, the
+`TracingBackend` SPI - and builds only `console` and `noop` itself. Every other mode is a
+`TracingMode.Named` (`TracingMode.Named("langfuse")`, `TracingMode.Named("opentelemetry")`) served
+by a backend its module registers, so adding the dependency is all it takes:
+
+```scala
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-observability"      % llm4sVersion, // Langfuse, trace collector/store, CostTracker
+  "org.llm4s" %% "llm4s-observability-otel" % llm4sVersion  // OpenTelemetry
+)
+```
+
+On `0.4.1` and earlier, Langfuse, the collector and `CostTracker` ship inside `llm4s-core`.
 
 ### Configuration
+
+Core reads only `llm4s.tracing.mode`, and hands the selected mode's block to its backend as
+`TracingSettings.extras`. Each block, with its variable bindings, ships in the `reference.conf`
+of the module that reads it - `langfuse` in `llm4s-observability`, `opentelemetry` in
+`llm4s-observability-otel` - so the keys and variables below are unchanged, and apply once the
+module is on the classpath:
 
 ```hocon
 llm4s {
@@ -112,7 +131,7 @@ llm4s {
 
 ### OpenTelemetry Integration
 
-For teams with existing APM infrastructure (Jaeger, Grafana Tempo, Datadog), the `opentelemetry` mode exports traces via OTLP:
+For teams with existing APM infrastructure (Jaeger, Grafana Tempo, Datadog), the `opentelemetry` mode (alias `otel`) exports traces via OTLP:
 
 ```bash
 TRACING_MODE=opentelemetry
@@ -127,12 +146,13 @@ libraryDependencies += "org.llm4s" %% "llm4s-observability-otel" % llm4sVersion
 ```
 
 The module registers itself for `opentelemetry` through a `META-INF/services` entry, so the
-dependency is all it takes.
+dependency is all it takes. Its backend builds an `OpenTelemetryConfig` from the
+`llm4s.tracing.opentelemetry` block with `OpenTelemetryConfig.fromExtras`.
 
 ### Adding a Tracing Backend
 
-A backend is a `TracingBackend` - the extension point `llm4s-observability-otel` uses - so adding
-one needs no change to llm4s:
+A backend is a `TracingBackend` - the extension point `llm4s-observability` and
+`llm4s-observability-otel` use - so adding one needs no change to llm4s:
 
 ```scala
 import org.llm4s.error.ConfigurationError
@@ -180,7 +200,8 @@ services files do not survive packaging (some shaded jars), register the backend
 ## In-Process Trace Collection
 
 `TraceCollectorTracing` + `InMemoryTraceStore` provide a fully queryable trace store
-that runs entirely within the JVM — no external service required. Recorded spans can be
+that runs entirely within the JVM — no external service required. They ship in
+`llm4s-observability` (`org.llm4s.trace`, `org.llm4s.trace.store`, `org.llm4s.trace.model`). Recorded spans can be
 filtered, paginated, and serialized to JSON.
 
 This is the primary backend for **unit testing** and for **in-process analytics** (latency
@@ -308,7 +329,8 @@ Use this to keep a local in-process snapshot while also forwarding to Langfuse o
 ```scala
 val store     = InMemoryTraceStore()
 val collector = TraceCollectorTracing(store).getOrElse(sys.error("tracing init failed"))
-val langfuse  = LangfuseTracing(langfuseConfig)
+// LangfuseConfigLoader reads llm4s.tracing.langfuse whatever TRACING_MODE selects
+val langfuse  = LangfuseTracing.from(LangfuseConfigLoader.default().getOrElse(sys.error("bad langfuse config")))
 
 val tracer = TracingComposer.combine(collector, langfuse)
 agent.run("query", tools, tracing = tracer)
@@ -367,12 +389,25 @@ Trace: "RAG Query Processing"
 
 ### Environment Setup
 
+Langfuse is served by `llm4s-observability`:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-observability" % llm4sVersion
+```
+
 ```bash
 TRACING_MODE=langfuse
 LANGFUSE_PUBLIC_KEY=<your-langfuse-public-key>
 LANGFUSE_SECRET_KEY=<your-langfuse-secret-key>
 LANGFUSE_URL=https://cloud.langfuse.com  # or self-hosted URL
 ```
+
+Both keys are required. With either missing, `Tracing.fromSettings` returns a
+`ConfigurationError` naming what is unset - e.g. `llm4s.tracing.langfuse.publicKey
+(LANGFUSE_PUBLIC_KEY)` - and `Tracing.create` logs that error and falls back to `NoOpTracing`.
+Without `llm4s-observability` on the classpath, the error names the artifact to add instead.
+To read the Langfuse settings whatever `TRACING_MODE` selects (for example to combine Langfuse with
+another tracer), use `LangfuseConfigLoader.default()` from `org.llm4s.config`.
 
 ### Tracing API
 

@@ -31,7 +31,7 @@ Slice order — each is an issue with its own scope and gotchas:
 | 3 ✅ | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` |
 | 4 ✅ | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
 | 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (incl. Mistral, Cohere), `llm4s-voyage`; core holds no client |
-| 6 🚧 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability`, then 0.4.0 + MiMa |
+| 6 🚧 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `TracingBackend` SPI; `llm4s-observability` (Langfuse, trace collector/model/store, `CostTracker`); next `llm4s-observability-prometheus`; then 0.5.0 + MiMa |
 
 **Invariants for every carve:**
 
@@ -97,11 +97,12 @@ llm4s/
 │   ├── openai-compatible/     # One SDK-free chat-completions client: DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, generic (published)
 │   ├── providers/             # Community provider modules, one `llm4s-<name>` each (published)
 │   │   └── voyage/            # Voyage AI embedding provider
+│   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── samples/               # Usage examples
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI
 │   ├── knowledgegraph-neo4j/  # Neo4j graph store
-│   ├── trace-opentelemetry/   # OpenTelemetry tracing
+│   ├── trace-opentelemetry/   # OpenTelemetry tracing backend, `llm4s-observability-otel` (published)
 │   ├── benchmarks/            # JMH benchmarks
 │   └── it/                    # Integration tests
 ├── docs/                # Documentation
@@ -184,6 +185,27 @@ allow-lists, secret patterns) stay. `llm4s-rag`'s
 `RAGConfig.default` embeds with `openai`, so `rag` has a **test-only** dependency on `openai`;
 never make it a compile one - that would put the OpenAI SDK on every RAG user's classpath.
 
+Slice 6 has begun. #1233 added the tracing extension point: `Tracing.create` builds `Console`
+and `NoOp` itself and dispatches every other mode to an `org.llm4s.trace.spi.TracingBackend`
+declared in `META-INF/services/org.llm4s.trace.spi.TracingBackend` (a `class`, never an `object`),
+selected by `TracingMode.Named(name)`. `modules/observability` (`llm4s-observability`, no
+third-party dependency) then took Langfuse (`LangfuseTracing`, `LangfuseBatchSender`,
+`LangfuseTracingBackend`, `LangfuseConfig`, `LangfuseConfigLoader`, `LangfuseConfigKeys`), the
+trace collector (`TraceCollectorTracing`, `trace.model`, `trace.store`) and `CostTracker`, and
+`OpenTelemetryConfig` went to `modules/trace-opentelemetry` (`llm4s-observability-otel`). **Core
+keeps only the tracing contract** - `Tracing`, `TraceEvent`, `TracingComposer`, `TracingMode`
+(`Console`, `NoOp`, `Named`), the SPI, `NoOpTracing`, `ConsoleTracing`, `TracingSettings(mode,
+extras)` - and **registers no backend and reads no backend's keys**: `TracingConfigLoader` reads
+`llm4s.tracing.mode` and hands the selected mode's `llm4s.tracing.<mode>` block to the backend as
+`TracingSettings.extras`, which each backend parses itself (`LangfuseConfig.fromExtras`,
+`OpenTelemetryConfig.fromExtras`), as provider descriptors read their section. Never add a
+`TracingMode` case object, a backend config field on `TracingSettings`, or a backend's
+`reference.conf` block back to core; a backend module ships its own block, services entry and
+`<Name>TracingBackendSpec` (discovery, explicit registration, a config round trip).
+`llm4s-rag` depends on `llm4s-observability` for `RAGASLangfuseObserver`. Prometheus
+(`PrometheusMetrics`, `PrometheusEndpoint`, `Llm4sConfig.metrics()`) is still in core until the
+`llm4s-observability-prometheus` carve.
+
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must
 not depend on each other.
@@ -204,7 +226,8 @@ Core's dependency on it is temporary and leaves with the `llm4s-image` carve.
 - `llmconnect/` - LLM client and providers
 - `agent/` - Agent framework, guardrails, handoffs (memory lives in `modules/memory`)
 - `toolapi/` - Tool calling, built-in tools
-- `trace/` - Observability
+- `trace/` - Tracing contract: `Tracing`, `TraceEvent`, `TracingMode`, the `TracingBackend` SPI,
+  Console/NoOp (backends live in `modules/observability` and `modules/trace-opentelemetry`)
 
 ## Common Commands
 
@@ -288,10 +311,12 @@ llm4s {
 Variables that *are* bound by some module's `reference.conf`:
 
 ```bash
-# Tracing (llm4s-core)
-TRACING_MODE=langfuse                # langfuse, opentelemetry, console (default), none, or a TracingBackend's own mode
+# Tracing mode (llm4s-core): console (default), none, or a TracingBackend's mode from its module
+TRACING_MODE=langfuse                # langfuse (llm4s-observability), opentelemetry | otel (llm4s-observability-otel)
+# Langfuse (llm4s-observability) -> llm4s.tracing.langfuse.*; also LANGFUSE_URL, _ENV, _RELEASE, _VERSION
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
+# OpenTelemetry (llm4s-observability-otel) -> llm4s.tracing.opentelemetry.*
 OTEL_SERVICE_NAME=llm4s-agent        # OTLP headers: llm4s.tracing.opentelemetry.headers, not OTEL_EXPORTER_OTLP_HEADERS
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 

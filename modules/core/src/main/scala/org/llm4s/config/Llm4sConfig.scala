@@ -267,11 +267,15 @@ object Llm4sConfig {
   /**
    * Loads tracing configuration from the current environment.
    *
-   * Reads `TRACING_MODE` (`langfuse`, `opentelemetry`, `console`, or `none`)
-   * and the backend-specific variables (Langfuse keys, OTLP endpoint, etc.).
+   * Reads `TRACING_MODE` (`console`, `none`, or a backend module's mode such as
+   * `langfuse` or `opentelemetry`) and hands the selected mode's
+   * `llm4s.tracing.<mode>` block to its backend as `TracingSettings.extras`. The
+   * backend's own module binds that block's variables (`LANGFUSE_*` in
+   * `llm4s-observability`, `OTEL_*` in `llm4s-observability-otel`) and validates it
+   * when `Tracing.fromSettings` builds the tracer.
    *
    * @return the tracing settings, or a [[org.llm4s.error.ConfigurationError]]
-   *         when a required backend variable is missing.
+   *         when the `llm4s.tracing` tree cannot be parsed.
    */
   def tracing(): Result[TracingSettings] =
     org.llm4s.config.TracingConfigLoader.load(ConfigSource.default)

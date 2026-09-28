@@ -193,6 +193,7 @@ jobs:
           openai/test openai/coverageReport
           openaiCompatible/test openaiCompatible/coverageReport
           voyage/test voyage/coverageReport
+          observability/test observability/coverageReport
           coverageAggregate
 
       # One upload per measured module, each carrying that module's flag - Codecov attributes
@@ -344,6 +345,16 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: modules/providers/voyage/target/scala-3.7.1/scoverage-report/scoverage.xml
           flags: voyage
+          slug: llm4s/llm4s
+          fail_ci_if_error: false
+          verbose: true
+
+      - name: Upload observability coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: modules/observability/target/scala-3.7.1/scoverage-report/scoverage.xml
+          flags: observability
           slug: llm4s/llm4s
           fail_ci_if_error: false
           verbose: true

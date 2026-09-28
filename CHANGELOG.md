@@ -104,6 +104,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`llm4s-observability`: Langfuse, the trace collector and `CostTracker` leave `llm4s-core`** -
+  the slice 6 carve ([#1133](https://github.com/llm4s/llm4s/issues/1133),
+  [#1126](https://github.com/llm4s/llm4s/issues/1126)). The new module holds `LangfuseTracing`,
+  `LangfuseBatchSender`, `LangfuseTracingBackend` (now registered by the module's own
+  `META-INF/services` entry; core's temporary one is deleted), `TraceCollectorTracing`,
+  `org.llm4s.trace.model`, `org.llm4s.trace.store`, `CostTracker` and `LangfuseConfig`, and no
+  third-party dependency; `llm4s-rag` depends on it for `RAGASLangfuseObserver`. Package names
+  are unchanged. Core keeps the contract - `Tracing`, `TraceEvent`, `TracingComposer`,
+  `TracingMode`, the `TracingBackend` SPI, `NoOpTracing`, `ConsoleTracing`, `TracingSettings`,
+  `MetricsCollector` - and builds only `Console` and `NoOp` itself. The `llm4s.tracing.langfuse`
+  block and its `LANGFUSE_*` bindings moved to `llm4s-observability`'s `reference.conf`, and
+  `llm4s.tracing.opentelemetry` with its `OTEL_*` bindings (and `OpenTelemetryConfig`) to
+  `llm4s-observability-otel`'s; each backend reads its block from `TracingSettings.extras`. Keys
+  and variables are unchanged: a Langfuse user adds the dependency and changes no config. New:
+  `LangfuseConfigLoader` (`load(source)` / `default()`), reading `llm4s.tracing.langfuse` whatever
+  the mode; `LangfuseConfig.fromExtras`, `OpenTelemetryConfig.fromExtras`; `LangfuseConfigKeys`.
+
+  Behaviour: `TRACING_MODE=langfuse` without the module gives `NoOpTracing` and an error naming
+  `llm4s-observability`, as OpenTelemetry without its module already did; with the module but
+  without `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`, the backend refuses to start with an
+  error naming the missing keys, rather than building a tracer that drops every batch.
+
+  Source breaks (pre-MiMa): `TracingMode.Langfuse` and `TracingMode.OpenTelemetry` are removed -
+  they are `TracingMode.Named("langfuse")` / `Named("opentelemetry")`, which `fromString` returns;
+  `TracingSettings` loses its `langfuse` and `openTelemetry` fields (now `TracingSettings(mode,
+  extras)`); `LangfuseConfig` and `OpenTelemetryConfig` move module; `DefaultConfig` is removed
+  (its constants are `LangfuseConfig.DEFAULT_*`); `ConfigKeys.LANGFUSE_*` are
+  `LangfuseConfigKeys.LANGFUSE_*`; `RAGASLangfuseObserver.fromTracingSettings` is removed. See the
+  [migration note](docs/reference/migration.md#slice-6-llm4s-observability---langfuse-the-trace-collector-and-costtracker-leave-core).
 - **Tracing backends are discovered, and agent state is a `TraceEvent`** - the tracing extension
   point, landed ahead of the slice 6 carve as slice 4 did for providers
   ([#1133](https://github.com/llm4s/llm4s/issues/1133), decisions D2 and D5).

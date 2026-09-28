@@ -2,13 +2,14 @@ package org.llm4s.samples.basic
 
 import org.llm4s.core.safety.Safety
 import org.llm4s.agent.{ Agent, AgentState, AgentStatus }
-import org.llm4s.llmconnect.config.TracingSettings
+import org.llm4s.config.LangfuseConfigLoader
+import org.llm4s.llmconnect.config.LangfuseConfig
 import org.llm4s.error.LLMError
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.samples.util.{ BenchmarkUtil, TracingUtil }
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.builtin.core.CalculatorTool
-import org.llm4s.trace.{ Tracing, TracingComposer, TracingMode }
+import org.llm4s.trace.{ ConsoleTracing, LangfuseTracing, NoOpTracing, Tracing, TracingComposer }
 import org.llm4s.types.Result
 import org.slf4j.LoggerFactory
 
@@ -39,13 +40,16 @@ object AgentLLMCallingExample {
     logger.info("=" * 50)
     val result = for {
       settings <- org.llm4s.config.Llm4sConfig.tracing()
-      tracing  <- createComprehensiveTracing(settings)
+      // Read the Langfuse block whatever TRACING_MODE selects: this demo always combines it
+      // with Console. llm4s-observability binds the LANGFUSE_* variables to it.
+      langfuse <- LangfuseConfigLoader.default()
+      tracing  <- createComprehensiveTracing(langfuse)
       _ = {
         logger.info("🔍 Tracing Configuration:")
         logger.info(s"   • Mode: ${settings.mode}")
-        logger.info(s"   • Langfuse URL: ${settings.langfuse.url}")
-        logger.info(s"   • Langfuse Public Key: ${settings.langfuse.publicKey.fold("NOT SET")(_ => "SET")}")
-        logger.info(s"   • Langfuse Secret Key: ${settings.langfuse.secretKey.fold("NOT SET")(_ => "SET")}")
+        logger.info(s"   • Langfuse URL: ${langfuse.url}")
+        logger.info(s"   • Langfuse Public Key: ${langfuse.publicKey.fold("NOT SET")(_ => "SET")}")
+        logger.info(s"   • Langfuse Secret Key: ${langfuse.secretKey.fold("NOT SET")(_ => "SET")}")
 
         logger.info("🧪 Testing tracing...")
         TracingUtil.traceDemoStart(tracing, "Calculator Tool Agent")
@@ -65,12 +69,12 @@ object AgentLLMCallingExample {
   /**
    * Create comprehensive tracing with all three modes combined
    */
-  private def createComprehensiveTracing(settings: TracingSettings): Result[Tracing] = Safety.fromTry {
+  private def createComprehensiveTracing(langfuse: LangfuseConfig): Result[Tracing] = Safety.fromTry {
     Try {
-      // Create individual tracers using typed settings
-      val langfuseTracing = Tracing.create(settings.copy(mode = TracingMode.Langfuse))
-      val consoleTracing  = Tracing.create(settings.copy(mode = TracingMode.Console))
-      val noOpTracing     = Tracing.create(settings.copy(mode = TracingMode.NoOp))
+      // Create individual tracers directly: Langfuse from its own config, the others from core
+      val langfuseTracing = LangfuseTracing.from(langfuse)
+      val consoleTracing  = new ConsoleTracing()
+      val noOpTracing     = new NoOpTracing()
 
       logger.info("✅ All tracing modes initialized successfully")
 

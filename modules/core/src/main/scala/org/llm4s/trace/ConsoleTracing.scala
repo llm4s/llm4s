@@ -33,7 +33,7 @@ import scala.util.Try
  * }}}
  *
  * @see [[NoOpTracing]] for silent tracing
- * @see [[LangfuseTracing]] for production observability
+ * @see `LangfuseTracing` in `llm4s-observability` for production observability
  * @see [[AnsiColors]] for color constants used
  */
 class ConsoleTracing extends Tracing {

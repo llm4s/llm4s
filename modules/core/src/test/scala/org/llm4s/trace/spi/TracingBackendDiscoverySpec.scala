@@ -1,9 +1,9 @@
 package org.llm4s.trace.spi
 
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.{ LangfuseConfig, TracingSettings }
+import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.trace.spi.fixtures.{ FixtureTracing, FixtureTracingBackend, OtherFixtureTracingBackend }
-import org.llm4s.trace.{ ConsoleTracing, LangfuseTracing, NoOpTracing, Tracing, TracingMode }
+import org.llm4s.trace.{ ConsoleTracing, NoOpTracing, Tracing, TracingMode }
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -18,8 +18,10 @@ import java.net.URLClassLoader
  * Each case builds a class loader over one fixture directory under
  * `src/test/resources/tracing-discovery`. They live in subdirectories rather than
  * at the resource root so that no fixture backend is on every test's classpath.
- * The loaders delegate to the test class loader, so core's own services entry
- * (Langfuse, until it is carved into `llm4s-observability`) is visible too.
+ * The loaders delegate to the test class loader, which holds no backend at all:
+ * core registers none since Langfuse moved to `llm4s-observability` (#1133). Each
+ * backend module proves its own registration (`LangfuseTracingBackendSpec`,
+ * `OpenTelemetryTracingBackendSpec`).
  */
 class TracingBackendDiscoverySpec extends AnyWordSpec with Matchers with EitherValues:
 
@@ -30,30 +32,29 @@ class TracingBackendDiscoverySpec extends AnyWordSpec with Matchers with EitherV
     new URLClassLoader(Array(url), parent)
 
   private def settings(mode: TracingMode): TracingSettings =
-    TracingSettings(mode = mode, langfuse = LangfuseConfig())
+    TracingSettings(mode = mode)
 
   "TracingBackends.discover" should {
 
-    "find core's Langfuse backend through its services entry" in {
+    "find no backend in core, which registers none since Langfuse left it (#1133)" in {
       val backends = TracingBackends.discover(getClass.getClassLoader)
 
       backends.discovered shouldBe true
-      backends.find(TracingMode.Langfuse).map(_.getClass.getName) shouldBe Some(
-        "org.llm4s.trace.LangfuseTracingBackend"
-      )
+      backends.modes shouldBe empty
       backends.failures shouldBe empty
     }
 
-    "not find an OpenTelemetry backend in core, which does not depend on llm4s-observability-otel" in {
-      TracingBackends.discover(getClass.getClassLoader).find(TracingMode.OpenTelemetry) shouldBe None
+    "not find a Langfuse or OpenTelemetry backend in core, which depends on neither module" in {
+      val backends = TracingBackends.discover(getClass.getClassLoader)
+
+      backends.find(TracingMode.Named("langfuse")) shouldBe None
+      backends.find(TracingMode.Named("opentelemetry")) shouldBe None
     }
 
     "find a backend that llm4s-core knows nothing about, under a Named mode" in {
       val backends = TracingBackends.discover(loaderFor("good"))
 
       backends.find(TracingMode.Named("fixture")).map(_.getClass) shouldBe Some(classOf[FixtureTracingBackend])
-      // The new backend arrives without displacing core's own.
-      backends.find(TracingMode.Langfuse) should not be empty
     }
 
     "match a Named mode case-insensitively" in {
@@ -89,7 +90,7 @@ class TracingBackendDiscoverySpec extends AnyWordSpec with Matchers with EitherV
 
       backends.discovered shouldBe false
       backends.find(TracingMode.Named("fixture")) should not be empty
-      backends.find(TracingMode.Langfuse) shouldBe None
+      backends.find(TracingMode.Named("langfuse")) shouldBe None
     }
 
     "let an explicit backend replace a discovered one for the same mode" in {
@@ -110,11 +111,7 @@ class TracingBackendDiscoverySpec extends AnyWordSpec with Matchers with EitherV
       Tracing
         .fromSettings(settings(TracingMode.Named("Console")), TracingBackends.empty)
         .value shouldBe a[ConsoleTracing]
-      Tracing.fromSettings(settings(TracingMode.Named("langfuse"))).value shouldBe a[LangfuseTracing]
-    }
-
-    "dispatch Langfuse to the discovered backend" in {
-      Tracing.fromSettings(settings(TracingMode.Langfuse)).value shouldBe a[LangfuseTracing]
+      Tracing.fromSettings(settings(TracingMode.Named("NOOP")), TracingBackends.empty).value shouldBe a[NoOpTracing]
     }
 
     "dispatch a Named mode to the backend registered for it, passing the settings through" in {
@@ -126,11 +123,19 @@ class TracingBackendDiscoverySpec extends AnyWordSpec with Matchers with EitherV
     }
 
     "fail with a ConfigurationError naming the artifact when OpenTelemetry has no backend" in {
-      val error = Tracing.fromSettings(settings(TracingMode.OpenTelemetry)).left.value
+      val error = Tracing.fromSettings(settings(TracingMode.fromString("otel"))).left.value
 
       error shouldBe a[ConfigurationError]
       error.message should include("opentelemetry")
       error.message should include("llm4s-observability-otel")
+    }
+
+    "fail with a ConfigurationError naming the artifact when Langfuse has no backend" in {
+      val error = Tracing.fromSettings(settings(TracingMode.fromString("langfuse"))).left.value
+
+      error shouldBe a[ConfigurationError]
+      error.message should include("'langfuse'")
+      error.message should include("'llm4s-observability'")
     }
 
     "fail with a ConfigurationError listing what is registered when a Named mode has no backend" in {
@@ -138,7 +143,8 @@ class TracingBackendDiscoverySpec extends AnyWordSpec with Matchers with EitherV
 
       error shouldBe a[ConfigurationError]
       error.message should include("datadog")
-      error.message should include("langfuse")
+      error.message should include("Available modes: console, noop")
+      (error.message should not).include("Add the")
     }
 
     "turn a backend that throws into an error rather than an exception" in {
@@ -152,11 +158,8 @@ class TracingBackendDiscoverySpec extends AnyWordSpec with Matchers with EitherV
   "Tracing.create" should {
 
     "fall back to NoOp when the configured backend is missing" in {
-      Tracing.create(settings(TracingMode.OpenTelemetry)) shouldBe a[NoOpTracing]
+      Tracing.create(settings(TracingMode.Named("opentelemetry"))) shouldBe a[NoOpTracing]
+      Tracing.create(settings(TracingMode.Named("langfuse"))) shouldBe a[NoOpTracing]
       Tracing.create(settings(TracingMode.Named("datadog"))) shouldBe a[NoOpTracing]
-    }
-
-    "use the discovered backend when one is present" in {
-      Tracing.create(settings(TracingMode.Langfuse)) shouldBe a[LangfuseTracing]
     }
   }

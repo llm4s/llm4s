@@ -491,12 +491,25 @@ Output appears in stdout:
 
 ### Langfuse (Production)
 
+Langfuse tracing needs the `llm4s-observability` module on the classpath:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-observability" % "<version>"
+```
+
 ```bash
 TRACING_MODE=langfuse
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
 LANGFUSE_URL=https://cloud.langfuse.com
 ```
+
+That module's `reference.conf` binds the `LANGFUSE_*` variables under
+`llm4s.tracing.langfuse`, so they can equally be set there in `application.conf`. Both keys are
+required: without one, `Tracing.fromSettings` returns a `ConfigurationError` naming
+`llm4s.tracing.langfuse.publicKey (LANGFUSE_PUBLIC_KEY)` and/or `secretKey`, and
+`Tracing.create` logs it and traces nothing. Without the module, `TRACING_MODE=langfuse` gives
+an error naming the `llm4s-observability` artifact.
 
 Get keys from [Langfuse](https://langfuse.com):
 
@@ -622,8 +635,8 @@ val result = for {
 
 `console` and `none` are built into `llm4s-core`; every other mode is served by a
 `org.llm4s.trace.spi.TracingBackend` that a module registers in
-`META-INF/services/org.llm4s.trace.spi.TracingBackend` - `opentelemetry` by
-`llm4s-observability-otel`, for instance. A mode llm4s has no name for, such as
+`META-INF/services/org.llm4s.trace.spi.TracingBackend` - `langfuse` by `llm4s-observability`,
+`opentelemetry` by `llm4s-observability-otel`. A mode llm4s has no name for, such as
 `TRACING_MODE=datadog`, is read as `TracingMode.Named("datadog")` and goes to whichever backend
 declares that mode. With no such backend, `Tracing.create` logs an error listing the available
 modes and traces nothing. See the
@@ -645,9 +658,9 @@ also set in `application.conf` or with `-D`.
 
 | Variable | Config key | Bound by |
 |---|---|---|
-| `TRACING_MODE` | `llm4s.tracing.mode` (`langfuse`, `opentelemetry`, `console` - the default - `none`, or the mode of any `TracingBackend` on the classpath) | `llm4s-core` |
-| `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION` | `llm4s.tracing.langfuse.*` | `llm4s-core` |
-| `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `llm4s.tracing.opentelemetry.serviceName`, `.endpoint` | `llm4s-core` |
+| `TRACING_MODE` | `llm4s.tracing.mode` (`console` - the default - or `none`, both built in; `langfuse`, `opentelemetry`, or the mode of any other `TracingBackend` on the classpath) | `llm4s-core` |
+| `LANGFUSE_URL`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION` | `llm4s.tracing.langfuse.*` | `llm4s-observability` |
+| `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` | `llm4s.tracing.opentelemetry.serviceName`, `.endpoint` | `llm4s-observability-otel` |
 | `EMBEDDING_MODEL` (or legacy `EMBEDDING_PROVIDER`) | `llm4s.embeddings.model` (`.provider`) | `llm4s-core` |
 | `CHUNK_SIZE`, `CHUNK_OVERLAP`, `CHUNKING_ENABLED` | `llm4s.embeddings.chunking.*` | `llm4s-core` |
 | `LLM4S_EXCHANGE_LOGGING_ENABLED`, `LLM4S_EXCHANGE_LOGGING_DIR` | `llm4s.exchangeLogging.*` | `llm4s-core` |
@@ -713,7 +726,7 @@ llm4s {
       apiKey   = ${?ANTHROPIC_API_KEY}   # explicit in production: which account this bills
     }
   }
-  tracing.mode = "langfuse"            # LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY from the environment
+  tracing.mode = "langfuse"            # llm4s-observability; LANGFUSE_PUBLIC_KEY / LANGFUSE_SECRET_KEY from the environment
 }
 ```
 

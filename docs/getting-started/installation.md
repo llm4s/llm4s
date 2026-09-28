@@ -384,6 +384,29 @@ only if you name these types in your own signatures. It replaces three overlappi
 types that used to ship in `llm4s-core`, which is a source break — see the
 [migration note](../reference/migration.md#slice-3-llm4s-media).
 
+### For tracing (Langfuse, OpenTelemetry, in-process trace store)
+
+{: .note }
+> Not yet published. `llm4s-observability` exists in the build as of
+> [#1133](https://github.com/llm4s/llm4s/issues/1133) but ships in the next release;
+> in `0.4.1` and earlier this code is still inside `llm4s-core`.
+
+```scala
+// same version as llm4s-core
+libraryDependencies ++= Seq(
+  "org.llm4s" %% "llm4s-observability"      % llm4sVersion, // TRACING_MODE=langfuse
+  "org.llm4s" %% "llm4s-observability-otel" % llm4sVersion  // TRACING_MODE=opentelemetry
+)
+```
+
+`llm4s-core` builds only the `console` (default) and `noop` tracers. `llm4s-observability`
+registers Langfuse and carries the in-process trace collector and store
+(`TraceCollectorTracing`, `org.llm4s.trace.store`, `org.llm4s.trace.model`) and `CostTracker`,
+with no third-party dependency; `llm4s-observability-otel` registers OpenTelemetry and brings the
+OpenTelemetry SDK. Adding the dependency is all the registration there is, and the
+`LANGFUSE_*` / `OTEL_*` variables keep their names. Package names are unchanged. See the
+[migration note](../reference/migration.md#slice-6-llm4s-observability---langfuse-the-trace-collector-and-costtracker-leave-core).
+
 ### For Workspace (Containerized Execution)
 
 ```scala

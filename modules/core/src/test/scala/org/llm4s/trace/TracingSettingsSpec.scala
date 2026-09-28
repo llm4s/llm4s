@@ -6,16 +6,16 @@ import org.scalatest.wordspec.AnyWordSpec
 
 class TracingSettingsSpec extends AnyWordSpec with Matchers {
 
-  private def isLangfuseConfigured: Boolean =
-    Option(System.getenv("LANGFUSE_PUBLIC_KEY")).exists(_.nonEmpty) ||
-      Option(System.getenv("TRACING_MODE")).exists(_.equalsIgnoreCase("langfuse")) ||
-      Option(System.getProperty("llm4s.tracing.mode")).exists(_.equalsIgnoreCase("langfuse"))
+  // Only the mode decides: LANGFUSE_PUBLIC_KEY is bound by llm4s-observability, not core.
+  private def isTracingModeSet: Boolean =
+    Option(System.getenv("TRACING_MODE")).exists(_.trim.nonEmpty) ||
+      Option(System.getProperty("llm4s.tracing.mode")).exists(_.trim.nonEmpty)
 
   "Llm4sConfig.tracing + Tracing.create" should {
     "return Console tracing by default" in {
-      // Skip test if Langfuse is configured in environment
-      if (isLangfuseConfigured) {
-        cancel("Test skipped: Langfuse is configured in environment (LANGFUSE_PUBLIC_KEY or TRACING_MODE=langfuse)")
+      // Skip test if a tracing mode is configured in the environment
+      if (isTracingModeSet) {
+        cancel("Test skipped: TRACING_MODE or llm4s.tracing.mode is set in the environment")
       }
 
       val res = Llm4sConfig.tracing().map(Tracing.create)

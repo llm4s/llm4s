@@ -1,6 +1,6 @@
 package org.llm4s.rag.evaluation
 
-import org.llm4s.llmconnect.config.{ LangfuseConfig, TracingSettings }
+import org.llm4s.llmconnect.config.LangfuseConfig
 import org.llm4s.trace.{ LangfuseBatchSender, LangfuseHttpApiCaller }
 import org.slf4j.LoggerFactory
 
@@ -11,7 +11,8 @@ import java.util.UUID
 /**
  * Observer that logs RAGAS evaluation results to Langfuse.
  *
- * Integrates with existing Langfuse tracing infrastructure to log:
+ * Integrates with the Langfuse tracing infrastructure in `llm4s-observability`, which
+ * `llm4s-rag` depends on for it, to log:
  * - Individual metric scores
  * - Composite RAGAS scores
  * - Evaluation details and metadata
@@ -25,12 +26,13 @@ import java.util.UUID
  *
  * @example
  * {{{{
- * val observer = RAGASLangfuseObserver.fromTracingSettings(tracingSettings)
+ * val observer = LangfuseConfigLoader.default().map(RAGASLangfuseObserver.from)
  *
  * val result = evaluator.evaluate(sample)
- * result.foreach { evalResult =>
- *   observer.logEvaluation(evalResult)
- * }
+ * for {
+ *   obs        <- observer
+ *   evalResult <- result
+ * } obs.logEvaluation(evalResult)
  * }}}}
  */
 class RAGASLangfuseObserver(
@@ -266,6 +268,11 @@ object RAGASLangfuseObserver {
   /**
    * Create an observer from Langfuse configuration.
    *
+   * `org.llm4s.config.LangfuseConfigLoader.default()` reads it from
+   * `llm4s.tracing.langfuse` (the `LANGFUSE_*` variables) whatever `TRACING_MODE` is.
+   * This replaced `fromTracingSettings(TracingSettings)` when the typed
+   * `TracingSettings.langfuse` field left core (#1133).
+   *
    * @param config The Langfuse configuration
    * @return A configured observer
    */
@@ -278,12 +285,6 @@ object RAGASLangfuseObserver {
       release = config.release,
       version = config.version
     )
-
-  /**
-   * Create an observer from tracing settings.
-   */
-  def fromTracingSettings(tracing: TracingSettings): RAGASLangfuseObserver =
-    from(tracing.langfuse)
 
   /**
    * Create an observer with explicit credentials.

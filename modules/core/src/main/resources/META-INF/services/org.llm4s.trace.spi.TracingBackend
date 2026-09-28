@@ -1,4 +1,0 @@
-# Tracing backends in llm4s-core. NoOp and Console need no entry: Tracing.create builds them
-# itself. Langfuse is here only until it is carved into llm4s-observability (#1133), when this
-# entry moves with it.
-org.llm4s.trace.LangfuseTracingBackend

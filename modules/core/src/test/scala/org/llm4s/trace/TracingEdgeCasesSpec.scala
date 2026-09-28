@@ -1,7 +1,7 @@
 package org.llm4s.trace
 
 import org.llm4s.agent.{ AgentState, AgentStatus }
-import org.llm4s.llmconnect.config.{ LangfuseConfig, OpenTelemetryConfig, TracingSettings }
+import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.llmconnect.model._
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
@@ -16,14 +16,14 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   // TracingMode - OpenTelemetry parsing
   // =========================================================================
 
-  "TracingMode.fromString" should "parse opentelemetry mode" in {
-    TracingMode.fromString("opentelemetry") shouldBe TracingMode.OpenTelemetry
-    TracingMode.fromString("OPENTELEMETRY") shouldBe TracingMode.OpenTelemetry
+  "TracingMode.fromString" should "parse opentelemetry as Named, since its backend is outside core" in {
+    TracingMode.fromString("opentelemetry") shouldBe TracingMode.Named("opentelemetry")
+    TracingMode.fromString("OPENTELEMETRY") shouldBe TracingMode.Named("opentelemetry")
   }
 
-  it should "parse otel alias" in {
-    TracingMode.fromString("otel") shouldBe TracingMode.OpenTelemetry
-    TracingMode.fromString("OTEL") shouldBe TracingMode.OpenTelemetry
+  it should "keep otel as an alias for opentelemetry" in {
+    TracingMode.fromString("otel") shouldBe TracingMode.Named("opentelemetry")
+    TracingMode.fromString("OTEL") shouldBe TracingMode.Named("opentelemetry")
   }
 
   // =========================================================================
@@ -31,11 +31,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   // =========================================================================
 
   "Tracing.create" should "fall back to NoOpTracing for OpenTelemetry when module not on classpath" in {
-    val settings = TracingSettings(
-      mode = TracingMode.OpenTelemetry,
-      langfuse = LangfuseConfig(),
-      openTelemetry = OpenTelemetryConfig()
-    )
+    val settings = TracingSettings(mode = TracingMode.Named("opentelemetry"))
 
     val tracing = Tracing.create(settings)
     // OpenTelemetryTracing class is not on the classpath in core tests, so it falls back

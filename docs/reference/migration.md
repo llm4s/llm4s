@@ -123,6 +123,119 @@ For provider authors: bind `llm4s.credentials.<id>.apiKey = ${?<VENDOR>_API_KEY}
 as `apiKeyEnv` on your `ProviderConfigSpec` or `EmbeddingConfigSpec`. Your module's round-trip spec
 should prove the two agree.
 
+## Slice 6: `llm4s-observability` - Langfuse, the trace collector and `CostTracker` leave core
+
+The slice 6 carve ([#1133](https://github.com/llm4s/llm4s/issues/1133),
+[#1126](https://github.com/llm4s/llm4s/issues/1126)) moves the tracing integrations that need
+nothing beyond core into a new module, **`llm4s-observability`**. Package names are unchanged, so
+no import changes; code that uses any of the types below adds one dependency:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-observability" % "<version>"
+```
+
+| Moved to `llm4s-observability` | Package |
+|---|---|
+| `LangfuseTracing`, `LangfuseBatchSender`, `DefaultLangfuseBatchSender`, `LangfuseHttpApiCaller`, `LangfuseTracingBackend` | `org.llm4s.trace` |
+| `TraceCollectorTracing` and the rest of `TraceCollector.scala` | `org.llm4s.trace` |
+| `Trace`, `Span`, `SpanId`, `SpanKind`, `SpanStatus`, `SpanEvent`, `SpanValue`, `TraceModelJson` | `org.llm4s.trace.model` |
+| `TraceStore`, `InMemoryTraceStore`, `TraceQuery` | `org.llm4s.trace.store` |
+| `CostTracker` | `org.llm4s.metrics` |
+| `LangfuseConfig` (was in core) | `org.llm4s.llmconnect.config` |
+| `LangfuseConfigKeys`, `LangfuseConfigLoader` (new) | `org.llm4s.config` |
+
+`OpenTelemetryConfig` moves, in the same package, to `llm4s-observability-otel`, beside the
+backend that reads it.
+
+**What stays in `llm4s-core`** is the tracing contract (decisions D1 to D5 in #1133): `Tracing`,
+`TraceEvent`, `TracingComposer`, `TracingMode`, the `TracingBackend` SPI, `NoOpTracing`,
+`ConsoleTracing` (the default mode, so a core-only application still traces), `TracingSettings`,
+and `MetricsCollector`. `llmconnect`, the agent runtime and every provider module use only these,
+so none of them needs the new module. `llm4s-rag` depends on it, for `RAGASLangfuseObserver`; it
+carries no third-party dependency, so this adds nothing else to a RAG user's classpath.
+
+### Configuration is unchanged
+
+The keys and variables are the same: `TRACING_MODE=langfuse`, `LANGFUSE_PUBLIC_KEY`,
+`LANGFUSE_SECRET_KEY`, `LANGFUSE_URL`, `LANGFUSE_ENV`, `LANGFUSE_RELEASE`, `LANGFUSE_VERSION`
+under `llm4s.tracing.langfuse.*`, and `TRACING_MODE=opentelemetry` (or `otel`),
+`OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT` and `llm4s.tracing.opentelemetry.headers`.
+Only the module that binds them changed: the `llm4s.tracing.langfuse` block moved from core's
+`reference.conf` to `llm4s-observability`'s, and `llm4s.tracing.opentelemetry` to
+`llm4s-observability-otel`'s, each with the code that reads it. Core now reads only
+`llm4s.tracing.mode`, and hands the selected mode's block to its backend as
+`TracingSettings.extras`.
+
+So an application that sets `TRACING_MODE=langfuse` adds `llm4s-observability` and changes no
+config. Without it, `Tracing.create` logs an error naming the artifact and traces nothing -
+exactly what `TRACING_MODE=opentelemetry` without `llm4s-observability-otel` already did:
+
+```text
+Tracing mode 'langfuse' is configured but no TracingBackend for it is on the classpath.
+Add the 'org.llm4s' %% 'llm4s-observability' dependency. Available modes: console, noop.
+```
+
+### Behaviour change: Langfuse without keys does not start
+
+`TRACING_MODE=langfuse` without `LANGFUSE_PUBLIC_KEY` or `LANGFUSE_SECRET_KEY` used to build a
+`LangfuseTracing` that logged a warning and dropped every batch. The backend now refuses to start:
+`Tracing.fromSettings` returns
+
+```text
+Langfuse tracing is selected but llm4s.tracing.langfuse.publicKey (LANGFUSE_PUBLIC_KEY) and
+llm4s.tracing.langfuse.secretKey (LANGFUSE_SECRET_KEY) are not set.
+```
+
+and `Tracing.create` logs that once and returns `NoOpTracing`. Either way nothing reaches
+Langfuse, as before; the difference is one clear error instead of a warning per batch.
+`LangfuseTracing.from(config)` built directly is unchanged.
+
+### Reading Langfuse settings yourself
+
+`TracingSettings` no longer has a `langfuse` field, and `extras` holds only the *selected* mode's
+block. To read `llm4s.tracing.langfuse` whatever `TRACING_MODE` is - to combine Langfuse with
+Console, or for `RAGASLangfuseObserver` - use the new loader:
+
+```scala
+import org.llm4s.config.LangfuseConfigLoader
+
+// before
+Llm4sConfig.tracing().map(settings => LangfuseTracing.from(settings.langfuse))
+RAGASLangfuseObserver.fromTracingSettings(settings)
+
+// after
+LangfuseConfigLoader.default().map(LangfuseTracing.from)
+LangfuseConfigLoader.default().map(RAGASLangfuseObserver.from)
+```
+
+### Source breaks
+
+These are taken before 0.5.0 sets the MiMa baseline, and none of them changes a package name.
+
+1. **Langfuse, the collector, its model and store, and `CostTracker` need `llm4s-observability`**
+   (table above).
+2. **`TracingMode.Langfuse` and `TracingMode.OpenTelemetry` are removed.** Core keeps a case only
+   for what it builds itself, `Console` and `NoOp`; the others are `TracingMode.Named("langfuse")`
+   and `TracingMode.Named("opentelemetry")`, which `TracingMode.fromString` returns for
+   `"langfuse"` and for `"opentelemetry"` / `"otel"`. `LangfuseConfig.Mode` and
+   `OpenTelemetryConfig.Mode` name them. A `match` on the old case objects matches on
+   `TracingMode.Named("langfuse")` instead.
+3. **`TracingSettings` is `TracingSettings(mode, extras)`.** The `langfuse: LangfuseConfig` and
+   `openTelemetry: OpenTelemetryConfig` fields are removed. A backend reads its block from
+   `extras` - `LangfuseConfig.fromExtras(settings.extras)`,
+   `OpenTelemetryConfig.fromExtras(settings.extras)` - and code that built settings by hand passes
+   `extras = Map("publicKey" -> ..., "secretKey" -> ...)` for Langfuse, or
+   `Map("serviceName" -> ..., "endpoint" -> ..., "headers.Authorization" -> ...)` for OpenTelemetry.
+4. **`LangfuseConfig` moves to `llm4s-observability`**, and **`OpenTelemetryConfig` to
+   `llm4s-observability-otel`**, in the same package.
+5. **`DefaultConfig` is removed.** Its last four constants moved to `LangfuseConfig`:
+   `DEFAULT_LANGFUSE_URL`, `_ENV`, `_RELEASE` and `_VERSION` are `LangfuseConfig.DEFAULT_URL`,
+   `DEFAULT_ENV`, `DEFAULT_RELEASE` and `DEFAULT_VERSION`.
+6. **`ConfigKeys.LANGFUSE_*` are `LangfuseConfigKeys.LANGFUSE_*`** in `llm4s-observability`.
+7. **`RAGASLangfuseObserver.fromTracingSettings(TracingSettings)` is removed**: it read the removed
+   `TracingSettings.langfuse`. Use `RAGASLangfuseObserver.from(config)` with
+   `LangfuseConfigLoader.default()`, as above.
+
 ## Slice 6: tracing backends are discovered, and agent state is a `TraceEvent`
 
 The first slice 6 change ([#1133](https://github.com/llm4s/llm4s/issues/1133)) lands the extension
@@ -161,7 +274,8 @@ every other mode to an `org.llm4s.trace.spi.TracingBackend` registered in
   `Class.forName` reflection core used to find it is gone. Adding the dependency is all it takes,
   as before.
 - **Langfuse**: registered by core's own services entry until it is carved into
-  `llm4s-observability`.
+  `llm4s-observability` - which has since happened; see
+  [the carve's note](#slice-6-llm4s-observability---langfuse-the-trace-collector-and-costtracker-leave-core).
 - **Anything else**: implement `TracingBackend` (a `class` with a public no-arg constructor, not an
   `object`) with `mode = TracingMode.Named("yourmode")`, declare it in the services file, and
   `TRACING_MODE=yourmode` selects it.

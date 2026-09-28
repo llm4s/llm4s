@@ -92,6 +92,10 @@ flags:
     paths:
       - modules/knowledgegraph-neo4j/src/main/scala
     carryforward: true
+  observability:
+    paths:
+      - modules/observability/src/main/scala
+    carryforward: true
   trace-opentelemetry:
     paths:
       - modules/trace-opentelemetry/src/main/scala

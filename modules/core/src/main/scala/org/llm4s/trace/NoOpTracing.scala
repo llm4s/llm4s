@@ -26,7 +26,7 @@ import org.llm4s.types.Result
  *  - Default fallback when no tracing is configured
  *
  * @see [[ConsoleTracing]] for development/debugging
- * @see [[LangfuseTracing]] for production observability
+ * @see `LangfuseTracing` in `llm4s-observability` for production observability
  */
 class NoOpTracing extends Tracing {
 

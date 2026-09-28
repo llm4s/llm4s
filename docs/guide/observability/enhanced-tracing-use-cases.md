@@ -15,6 +15,10 @@ The new `TraceCollectorTracing` + `TraceStore` layer adds structured, queryable,
 trace storage as a standard `Tracing` implementation — composable with any existing backend via
 `TracingComposer.combine()`.
 
+These types ship in `llm4s-observability` (`"org.llm4s" %% "llm4s-observability"`), with
+Langfuse; the `Tracing` contract, `ConsoleTracing` and `NoOpTracing` stay in `llm4s-core`.
+Package names are unchanged. On `0.4.1` and earlier they are part of `llm4s-core`.
+
 ---
 
 ## Use Cases

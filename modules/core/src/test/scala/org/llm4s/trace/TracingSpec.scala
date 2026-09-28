@@ -2,7 +2,7 @@ package org.llm4s.trace
 
 import org.llm4s.agent.{ AgentState, AgentStatus }
 import org.llm4s.llmconnect.model._
-import org.llm4s.llmconnect.config.{ LangfuseConfig, TracingSettings }
+import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
@@ -17,10 +17,10 @@ class TracingSpec extends AnyFlatSpec with Matchers {
 
   // ============ TracingMode ============
 
-  "TracingMode.fromString" should "parse langfuse mode" in {
-    TracingMode.fromString("langfuse") shouldBe TracingMode.Langfuse
-    TracingMode.fromString("LANGFUSE") shouldBe TracingMode.Langfuse
-    TracingMode.fromString("Langfuse") shouldBe TracingMode.Langfuse
+  "TracingMode.fromString" should "parse langfuse as Named, since its backend left core (#1133)" in {
+    TracingMode.fromString("langfuse") shouldBe TracingMode.Named("langfuse")
+    TracingMode.fromString("LANGFUSE") shouldBe TracingMode.Named("langfuse")
+    TracingMode.fromString("Langfuse") shouldBe TracingMode.Named("langfuse")
   }
 
   it should "parse console mode" in {
@@ -48,15 +48,19 @@ class TracingSpec extends AnyFlatSpec with Matchers {
   }
 
   "TracingMode.name" should "be the canonical config value of each mode" in {
-    TracingMode.Langfuse.name shouldBe "langfuse"
     TracingMode.Console.name shouldBe "console"
-    TracingMode.OpenTelemetry.name shouldBe "opentelemetry"
     TracingMode.NoOp.name shouldBe "noop"
     TracingMode.Named("datadog").name shouldBe "datadog"
   }
 
   it should "round-trip through fromString" in {
-    Seq(TracingMode.Langfuse, TracingMode.Console, TracingMode.OpenTelemetry, TracingMode.NoOp, TracingMode.Named("x"))
+    Seq(
+      TracingMode.Console,
+      TracingMode.NoOp,
+      TracingMode.Named("langfuse"),
+      TracingMode.Named("opentelemetry"),
+      TracingMode.Named("x")
+    )
       .foreach(mode => TracingMode.fromString(mode.name) shouldBe mode)
   }
 
@@ -132,10 +136,7 @@ class TracingSpec extends AnyFlatSpec with Matchers {
   // ============ Tracing.create ============
 
   "Tracing.create" should "create NoOp tracing for NoOp mode" in {
-    val settings = TracingSettings(
-      mode = TracingMode.NoOp,
-      langfuse = LangfuseConfig()
-    )
+    val settings = TracingSettings(mode = TracingMode.NoOp)
 
     val tracing = Tracing.create(settings)
 
@@ -143,32 +144,20 @@ class TracingSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "create Console tracing for Console mode" in {
-    val settings = TracingSettings(
-      mode = TracingMode.Console,
-      langfuse = LangfuseConfig()
-    )
+    val settings = TracingSettings(mode = TracingMode.Console)
 
     val tracing = Tracing.create(settings)
 
     tracing shouldBe a[ConsoleTracing]
   }
 
-  it should "create Langfuse tracing for Langfuse mode" in {
+  it should "fall back to NoOp for langfuse, whose backend is in llm4s-observability, not core (#1133)" in {
     val settings = TracingSettings(
-      mode = TracingMode.Langfuse,
-      langfuse = LangfuseConfig(
-        url = "https://api.langfuse.com",
-        publicKey = Some("pk-test"),
-        secretKey = Some("sk-test"),
-        env = "test",
-        release = "1.0.0",
-        version = "1.0.0"
-      )
+      mode = TracingMode.fromString("langfuse"),
+      extras = Map("publicKey" -> "pk-test", "secretKey" -> "sk-test")
     )
 
-    val tracing = Tracing.create(settings)
-
-    tracing shouldBe a[LangfuseTracing]
+    Tracing.create(settings) shouldBe a[NoOpTracing]
   }
 
   // ============ TracingComposer ============

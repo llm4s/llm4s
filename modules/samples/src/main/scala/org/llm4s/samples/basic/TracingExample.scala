@@ -132,7 +132,8 @@ object TracingExample {
   private def example7(settings: TracingSettings): Unit = {
     // Example 7: Type-safe mode creation
     logger.info("7. Type-Safe Mode Creation")
-    val modes = Seq(TracingMode.Console, TracingMode.NoOp, TracingMode.Langfuse)
+    // Langfuse is a Named mode served by llm4s-observability; without keys it falls back to NoOp.
+    val modes = Seq(TracingMode.Console, TracingMode.NoOp, TracingMode.Named("langfuse"))
     modes.foreach { mode =>
       val tracer = Tracing.create(settings.copy(mode = mode))
       logger.info(s"Created tracer for mode: $mode - ${tracer.getClass.getSimpleName}")

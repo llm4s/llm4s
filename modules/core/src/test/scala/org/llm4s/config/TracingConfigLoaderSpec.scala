@@ -1,100 +1,35 @@
 package org.llm4s.config
 
-// scalafix:off DisableSyntax.NoConfigFactory
-import com.typesafe.config.{ ConfigFactory, ConfigResolveOptions }
-// scalafix:on DisableSyntax.NoConfigFactory
 import org.llm4s.trace.TracingMode
 import pureconfig.ConfigSource
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import org.scalatest.EitherValues
 
-import scala.jdk.CollectionConverters.*
-
 /**
- * Comprehensive unit tests for TracingConfigLoader validation and parsing.
+ * Unit tests for TracingConfigLoader: the mode, and the selected mode's block as `extras`.
  *
  * These tests use ConfigSource.string() to provide deterministic HOCON input
  * without relying on environment variables or external configuration files.
+ *
+ * Core reads no backend's keys since slice 6 (#1133). The Langfuse field tests moved to
+ * `llm4s-observability` (`LangfuseTracingConfigSpec`) and the OpenTelemetry header tests to
+ * `llm4s-observability-otel` (`OpenTelemetryTracingConfigSpec`), each with the
+ * `reference.conf` block it proves.
  */
 class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValues {
 
-  // --------------------------------------------------------------------------
-  // Successful Parsing Tests
-  // --------------------------------------------------------------------------
+  private def load(hocon: String) = TracingConfigLoader.load(ConfigSource.string(hocon))
 
   "TracingConfigLoader" should {
 
-    "successfully load valid tracing config with all fields" in {
-      val hocon =
-        """
-          |llm4s {
-          |  tracing {
-          |    mode = "langfuse"
-          |    langfuse {
-          |      url = "https://custom.langfuse.com/api/public/ingestion"
-          |      publicKey = "pk-test-123"
-          |      secretKey = "sk-test-456"
-          |      env = "staging"
-          |      release = "2.0.0"
-          |      version = "2.1.0"
-          |    }
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      val settings = result.value
-      settings.mode shouldBe TracingMode.Langfuse
-      settings.langfuse.url shouldBe "https://custom.langfuse.com/api/public/ingestion"
-      settings.langfuse.publicKey shouldBe Some("pk-test-123")
-      settings.langfuse.secretKey shouldBe Some("sk-test-456")
-      settings.langfuse.env shouldBe "staging"
-      settings.langfuse.release shouldBe "2.0.0"
-      settings.langfuse.version shouldBe "2.1.0"
-    }
-
-    "use default values when tracing section is missing" in {
-      val hocon =
-        """
-          |llm4s {
-          |}
-          |""".stripMargin
-
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      val settings = result.value
+    "use console when the tracing section is missing" in {
+      val settings = load("llm4s {}").value
       settings.mode shouldBe TracingMode.Console
-      settings.langfuse.url shouldBe DefaultConfig.DEFAULT_LANGFUSE_URL
-      settings.langfuse.env shouldBe DefaultConfig.DEFAULT_LANGFUSE_ENV
-      settings.langfuse.release shouldBe DefaultConfig.DEFAULT_LANGFUSE_RELEASE
-      settings.langfuse.version shouldBe DefaultConfig.DEFAULT_LANGFUSE_VERSION
-      settings.langfuse.publicKey shouldBe None
-      settings.langfuse.secretKey shouldBe None
+      settings.extras shouldBe empty
     }
 
-    "use default values when langfuse section is missing" in {
-      val hocon =
-        """
-          |llm4s {
-          |  tracing {
-          |    mode = "console"
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      val settings = result.value
-      settings.mode shouldBe TracingMode.Console
-      settings.langfuse.url shouldBe DefaultConfig.DEFAULT_LANGFUSE_URL
-    }
-
-    "use default mode when mode is not specified" in {
+    "use console when mode is not specified" in {
       val hocon =
         """
           |llm4s {
@@ -106,12 +41,10 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
           |}
           |""".stripMargin
 
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      val settings = result.value
+      val settings = load(hocon).value
       settings.mode shouldBe TracingMode.Console // Default
-      settings.langfuse.publicKey shouldBe Some("pk-test")
+      // The langfuse block belongs to a mode that is not selected, so it is not read.
+      settings.extras shouldBe empty
     }
   }
 
@@ -122,185 +55,36 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
   "TracingConfigLoader mode parsing" should {
 
     "parse 'console' mode correctly" in {
-      val hocon =
-        """
-          |llm4s {
-          |  tracing { mode = "console" }
-          |}
-          |""".stripMargin
-
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      result.value.mode shouldBe TracingMode.Console
+      load("llm4s { tracing { mode = \"console\" } }").value.mode shouldBe TracingMode.Console
     }
 
-    "parse 'langfuse' mode correctly" in {
-      val hocon =
-        """
-          |llm4s {
-          |  tracing { mode = "langfuse" }
-          |}
-          |""".stripMargin
+    "parse 'langfuse' as Named, for llm4s-observability's backend to claim" in {
+      load("llm4s { tracing { mode = \"langfuse\" } }").value.mode shouldBe TracingMode.Named("langfuse")
+    }
 
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      result.value.mode shouldBe TracingMode.Langfuse
+    "parse 'opentelemetry' and 'otel' as Named(opentelemetry)" in {
+      load("llm4s { tracing { mode = \"opentelemetry\" } }").value.mode shouldBe TracingMode.Named("opentelemetry")
+      load("llm4s { tracing { mode = \"otel\" } }").value.mode shouldBe TracingMode.Named("opentelemetry")
     }
 
     "parse 'noop' mode correctly" in {
-      val hocon =
-        """
-          |llm4s {
-          |  tracing { mode = "noop" }
-          |}
-          |""".stripMargin
-
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      result.value.mode shouldBe TracingMode.NoOp
+      load("llm4s { tracing { mode = \"noop\" } }").value.mode shouldBe TracingMode.NoOp
     }
 
     "handle mode with mixed case" in {
-      val hocon =
-        """
-          |llm4s {
-          |  tracing { mode = "LANGFUSE" }
-          |}
-          |""".stripMargin
-
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      result.value.mode shouldBe TracingMode.Langfuse
+      load("llm4s { tracing { mode = \"LANGFUSE\" } }").value.mode shouldBe TracingMode.Named("langfuse")
     }
 
     "read a mode core has no case for as Named, for a backend outside core (D2, #1133)" in {
-      val hocon =
-        """
-          |llm4s {
-          |  tracing { mode = "Unknown-Mode" }
-          |}
-          |""".stripMargin
+      val result = load("llm4s { tracing { mode = \"Unknown-Mode\" } }")
 
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
       result.value.mode shouldBe TracingMode.Named("unknown-mode")
       // With no backend registered for it, building the tracer still degrades to NoOp.
       org.llm4s.trace.Tracing.create(result.value) shouldBe a[org.llm4s.trace.NoOpTracing]
     }
 
     "handle empty mode string by using default" in {
-      val hocon =
-        """
-          |llm4s {
-          |  tracing { mode = "  " }
-          |}
-          |""".stripMargin
-
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      result.value.mode shouldBe TracingMode.Console
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // Langfuse Configuration Tests
-  // --------------------------------------------------------------------------
-
-  "TracingConfigLoader Langfuse fields" should {
-
-    "load partial langfuse config with only required fields" in {
-      val hocon =
-        """
-          |llm4s {
-          |  tracing {
-          |    mode = "langfuse"
-          |    langfuse {
-          |      publicKey = "pk-minimal"
-          |      secretKey = "sk-minimal"
-          |    }
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      val settings = result.value
-      settings.langfuse.publicKey shouldBe Some("pk-minimal")
-      settings.langfuse.secretKey shouldBe Some("sk-minimal")
-      // Other fields should have defaults
-      settings.langfuse.url shouldBe DefaultConfig.DEFAULT_LANGFUSE_URL
-      settings.langfuse.env shouldBe DefaultConfig.DEFAULT_LANGFUSE_ENV
-    }
-
-    "handle langfuse config with custom URL only" in {
-      val hocon =
-        """
-          |llm4s {
-          |  tracing {
-          |    langfuse {
-          |      url = "https://self-hosted.langfuse.local/api"
-          |    }
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      val settings = result.value
-      settings.langfuse.url shouldBe "https://self-hosted.langfuse.local/api"
-      settings.langfuse.publicKey shouldBe None
-      settings.langfuse.secretKey shouldBe None
-    }
-
-    "trim whitespace from langfuse string values" in {
-      val hocon =
-        """
-          |llm4s {
-          |  tracing {
-          |    langfuse {
-          |      publicKey = "  pk-with-spaces  "
-          |      env = "  development  "
-          |    }
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      val settings = result.value
-      settings.langfuse.publicKey shouldBe Some("pk-with-spaces")
-      settings.langfuse.env shouldBe "development"
-    }
-
-    "treat empty strings as missing values" in {
-      val hocon =
-        """
-          |llm4s {
-          |  tracing {
-          |    langfuse {
-          |      publicKey = ""
-          |      secretKey = "   "
-          |    }
-          |  }
-          |}
-          |""".stripMargin
-
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isRight shouldBe true
-      val settings = result.value
-      // Empty or whitespace-only strings should be treated as None
-      settings.langfuse.publicKey shouldBe None
-      settings.langfuse.secretKey shouldBe None
+      load("llm4s { tracing { mode = \"  \" } }").value.mode shouldBe TracingMode.Console
     }
   }
 
@@ -318,28 +102,16 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
           |}
           |""".stripMargin
 
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isLeft shouldBe true
-      val error = result.left.value
-      error.message should include("Failed to load llm4s tracing config via PureConfig")
+      load(hocon).left.value.message should include("Failed to load llm4s tracing config via PureConfig")
     }
 
     "fail gracefully when tracing section has wrong structure" in {
-      val hocon =
-        """
-          |llm4s {
-          |  tracing = "invalid-scalar-value"
-          |}
-          |""".stripMargin
-
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isLeft shouldBe true
-      result.left.value.message should include("Failed to load llm4s tracing config via PureConfig")
+      load("llm4s { tracing = \"invalid-scalar-value\" }").left.value.message should include(
+        "Failed to load llm4s tracing config via PureConfig"
+      )
     }
 
-    "fail gracefully when langfuse section has wrong structure" in {
+    "leave a malformed backend block to its backend, rather than failing the whole load" in {
       val hocon =
         """
           |llm4s {
@@ -350,10 +122,9 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
           |}
           |""".stripMargin
 
-      val result = TracingConfigLoader.load(ConfigSource.string(hocon))
-
-      result.isLeft shouldBe true
-      result.left.value.message should include("PureConfig")
+      val settings = load(hocon).value
+      settings.mode shouldBe TracingMode.Named("langfuse")
+      settings.extras shouldBe empty
     }
   }
 
@@ -378,7 +149,7 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
           |}
           |""".stripMargin
 
-      val settings = TracingConfigLoader.load(ConfigSource.string(hocon)).value
+      val settings = load(hocon).value
 
       settings.mode shouldBe TracingMode.Named("datadog")
       settings.extras shouldBe Map(
@@ -388,6 +159,18 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
         "tags.team" -> "ml",
         "hosts"     -> """["a","b"]"""
       )
+    }
+
+    "carry the canonical block for an alias: otel reads llm4s.tracing.opentelemetry" in {
+      val hocon =
+        """
+          |llm4s.tracing {
+          |  mode = "otel"
+          |  opentelemetry { endpoint = "http://collector:4317" }
+          |}
+          |""".stripMargin
+
+      load(hocon).value.extras shouldBe Map("endpoint" -> "http://collector:4317")
     }
 
     "read only the selected mode's block" in {
@@ -400,73 +183,24 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
           |}
           |""".stripMargin
 
-      TracingConfigLoader.load(ConfigSource.string(hocon)).value.extras shouldBe Map("site" -> "datadoghq.eu")
+      load(hocon).value.extras shouldBe Map("site" -> "datadoghq.eu")
     }
 
     "be empty when the selected mode has no block, or its key is not an object" in {
       val noBlock = "llm4s.tracing.mode = \"datadog\""
       val scalar  = "llm4s.tracing { mode = \"datadog\", datadog = \"on\" }"
 
-      TracingConfigLoader.load(ConfigSource.string(noBlock)).value.extras shouldBe empty
-      TracingConfigLoader.load(ConfigSource.string(scalar)).value.extras shouldBe empty
-      TracingConfigLoader.load(ConfigSource.string("llm4s {}")).value.extras shouldBe empty
+      load(noBlock).value.extras shouldBe empty
+      load(scalar).value.extras shouldBe empty
+      load("llm4s {}").value.extras shouldBe empty
     }
 
     "redact the extras values in toString" in {
       val hocon = "llm4s.tracing { mode = \"datadog\", datadog.apiKey = \"dd-secret\" }"
-      val shown = TracingConfigLoader.load(ConfigSource.string(hocon)).value.toString
+      val shown = load(hocon).value.toString
 
       shown should include("apiKey -> ***")
       (shown should not).include("dd-secret")
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // OpenTelemetry headers
-  // --------------------------------------------------------------------------
-
-  "TracingConfigLoader OpenTelemetry headers" should {
-
-    // Every reference.conf on the classpath plus `hocon`, resolved against `env` as if it were
-    // the process environment and only that.
-    def withReference(hocon: String, env: Map[String, String]): ConfigSource =
-      ConfigSource.fromConfig(
-        ConfigFactory
-          .parseString(hocon)
-          .withFallback(ConfigFactory.parseResourcesAnySyntax("reference"))
-          .withFallback(ConfigFactory.parseMap(env.asJava))
-          .resolve(ConfigResolveOptions.defaults().setUseSystemEnvironment(false))
-      )
-
-    "load the headers map from llm4s.tracing.opentelemetry.headers" in {
-      val hocon =
-        """
-          |llm4s.tracing.opentelemetry.headers {
-          |  Authorization = ${?OTEL_AUTH_HEADER}
-          |  X-Team = "search"
-          |}
-          |""".stripMargin
-
-      val settings =
-        TracingConfigLoader.load(withReference(hocon, Map("OTEL_AUTH_HEADER" -> "Bearer t"))).value
-
-      settings.openTelemetry.headers shouldBe Map("Authorization" -> "Bearer t", "X-Team" -> "search")
-    }
-
-    "not read OTEL_EXPORTER_OTLP_HEADERS, as reference.conf says" in {
-      // reference.conf binds the service name and endpoint to the standard OTel variables,
-      // but not the headers one: a comma-separated string cannot fill a map.
-      val env = Map(
-        "OTEL_SERVICE_NAME"           -> "svc-from-env",
-        "OTEL_EXPORTER_OTLP_ENDPOINT" -> "http://collector:4317",
-        "OTEL_EXPORTER_OTLP_HEADERS"  -> "Authorization=Bearer t"
-      )
-
-      val otel = TracingConfigLoader.load(withReference("", env)).value.openTelemetry
-
-      otel.serviceName shouldBe "svc-from-env"
-      otel.endpoint shouldBe "http://collector:4317"
-      otel.headers shouldBe empty
     }
   }
 }
