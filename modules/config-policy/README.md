@@ -65,6 +65,10 @@ With an explicit config file (recommended for reproducible checks):
 sbt "configPolicy/runMain org.llm4s.configpolicy.CheckPolicies --env=dev --config config/examples/application-policy-smoke.conf"
 ```
 
+The file takes the place of `application.conf` and is layered as the application would layer it:
+`-D` system properties over the file over every module's `reference.conf`. So the check sees the
+same vendor key bindings (`llm4s.credentials.<id>.apiKey`) a real load does.
+
 `CheckPolicies` evaluates the named provider sections under `llm4s.providers` (see the
 [configuration guide](../../docs/getting-started/configuration.md#named-provider-sections)); any
 environment variables it sees are the ones those sections bind with `${?VAR}`, plus the vendor
