@@ -47,32 +47,11 @@ final class PgVectorStore private (
   // Initialize schema on creation
   initializeSchema()
 
+  // The table's DDL is shared with PgSearchIndex, which writes to the same table (see PgVectorTableSchema).
   private def initializeSchema(): Unit =
     withConnection { conn =>
       Using.resource(conn.createStatement()) { stmt =>
-        // Enable pgvector extension
-        stmt.execute("CREATE EXTENSION IF NOT EXISTS vector")
-
-        // Main vectors table with vector column
-        stmt.execute(s"""
-          CREATE TABLE IF NOT EXISTS $tableName (
-            id TEXT PRIMARY KEY,
-            embedding vector,
-            embedding_dim INTEGER NOT NULL,
-            content TEXT,
-            metadata JSONB DEFAULT '{}',
-            created_at TIMESTAMPTZ DEFAULT NOW()
-          )
-        """)
-
-        // Index for dimension queries
-        stmt.execute(s"CREATE INDEX IF NOT EXISTS idx_${tableName}_dim ON $tableName(embedding_dim)")
-
-        // Index for created_at ordering
-        stmt.execute(s"CREATE INDEX IF NOT EXISTS idx_${tableName}_created ON $tableName(created_at)")
-
-        // GIN index for JSONB metadata queries
-        stmt.execute(s"CREATE INDEX IF NOT EXISTS idx_${tableName}_metadata ON $tableName USING GIN(metadata)")
+        PgVectorTableSchema.statements(tableName).foreach(sql => stmt.execute(sql))
       }
       ()
     }

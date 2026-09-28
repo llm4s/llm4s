@@ -2,6 +2,8 @@ package org.llm4s.rag.permissions.pg
 
 import org.llm4s.error.ProcessingError
 import org.llm4s.types.Result
+import org.llm4s.util.SqlIdentifier
+import org.llm4s.vectorstore.PgVectorTableSchema
 
 import java.sql.Connection
 import scala.util.{ Try, Using }
@@ -89,7 +91,12 @@ object PgSchemaManager {
   }.toEither.left.map(e => ProcessingError("pg-schema-init", s"Failed to initialize schema: ${e.getMessage}"))
 
   /**
-   * Extend an existing vectors table with permission columns.
+   * Create or upgrade the vectors table and add the permission columns to it.
+   *
+   * The table itself is the one `PgVectorStore` uses - both run
+   * `org.llm4s.vectorstore.PgVectorTableSchema`, so a table created here can be opened by a
+   * `PgVectorStore` and vice versa. That also upgrades a table this method created before the
+   * two definitions were unified (see `PgVectorTableSchema`).
    *
    * Adds:
    * - collection_id column (foreign key to llm4s_collections)
@@ -97,22 +104,15 @@ object PgSchemaManager {
    * - Indexes for efficient filtering
    *
    * @param conn Database connection
-   * @param tableName The name of the vectors table to extend
+   * @param tableName The name of the vectors table to extend; must be a valid SQL identifier
    * @return Success or error
    */
-  def extendVectorsTable(conn: Connection, tableName: String): Result[Unit] = Try {
+  def extendVectorsTable(conn: Connection, tableName: String): Result[Unit] =
+    SqlIdentifier.validate(tableName, "pg-schema-extend").flatMap(_ => extendValidatedVectorsTable(conn, tableName))
+
+  private def extendValidatedVectorsTable(conn: Connection, tableName: String): Result[Unit] = Try {
     Using.resource(conn.createStatement()) { stmt =>
-      // Create vectors table if it doesn't exist (for standalone permission testing)
-      // Uses vector without dimension for flexibility in tests
-      stmt.execute(s"""
-        CREATE TABLE IF NOT EXISTS $tableName (
-          id TEXT PRIMARY KEY,
-          content TEXT NOT NULL,
-          embedding vector,
-          embedding_dim INTEGER,
-          metadata JSONB DEFAULT '{}'
-        )
-      """)
+      PgVectorTableSchema.statements(tableName).foreach(sql => stmt.execute(sql))
 
       // Add collection_id column if not exists
       stmt.execute(s"""

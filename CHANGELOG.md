@@ -738,6 +738,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unreadable object is still skipped. `S3LoaderExample` now reports the failure and stops,
   instead of querying an empty index. See the
   [migration note](docs/reference/migration.md#a-failed-listing-fails-the-sync).
+- **`RAG.build` failed on a vectors table created by `PgSearchIndex`** with
+  `column "created_at" does not exist` (found in [#1231](https://github.com/llm4s/llm4s/pull/1231)).
+  `RAGConfig.withSearchIndex` points `PgVectorStore` at the `PgSearchIndex` table, but the two had
+  separate `CREATE TABLE` statements: `PgSchemaManager.extendVectorsTable` omitted `created_at`
+  and made `content` `NOT NULL`, so after `PgSearchIndex.initializeSchema()` the vector store's
+  `created_at` index failed. Both now create the table from one definition
+  (`org.llm4s.vectorstore.PgVectorTableSchema`, internal). Existing tables created by the old
+  permission DDL are upgraded in place when either side opens them: `created_at` is added (existing
+  rows get the upgrade time) and `content` becomes nullable. Each step checks the catalog first, so
+  an up-to-date table is not locked, and the column is added with `ADD COLUMN IF NOT EXISTS`, so
+  replicas initialising at once do not fail on a duplicate column. `PgSchemaManager.extendVectorsTable` now also rejects a table
+  name that is not a valid SQL identifier, as `PgSearchIndex` and `PgVectorStore` already did.
 - **The docs taught a configuration route that no longer exists.** Since
   [#903](https://github.com/llm4s/llm4s/pull/903) (0.3.2) nothing in llm4s reads `LLM_MODEL` or a
   provider's API-key variable, yet the README, CLAUDE.md, every getting-started page and most
