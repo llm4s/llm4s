@@ -44,8 +44,8 @@ case class LangfuseHttpApiCaller(
  * Default implementation of [[LangfuseBatchSender]] using HTTP requests.
  *
  * Sends trace events to Langfuse using basic authentication with
- * the provided public and secret keys. Handles both successful
- * responses (200-299) and partial success responses (207).
+ * the provided public and secret keys. A 2xx response is a success; a 207 Multi-Status
+ * response is read per event, and any events it lists as rejected are logged as an error.
  *
  * Logs warnings if credentials are not configured and errors
  * if the HTTP request fails.
@@ -89,13 +89,18 @@ class DefaultLangfuseBatchSender(
         timeout = 30000
       )
 
-      if (response.statusCode == 207 || (response.statusCode >= 200 && response.statusCode < 300)) {
-        logger.info(s"[Langfuse] Batch export successful: ${response.statusCode}")
-        if (response.statusCode == 207) {
-          logger.info(
-            s"[Langfuse] Partial success response: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
-          )
+      if (response.statusCode == 207) {
+        // Multi-Status: per-event results. Events listed under `errors` were dropped.
+        LangfuseIngestionResponse.rejections(response.body) match {
+          case Right(rejected) if rejected.nonEmpty =>
+            logger.error(s"[Langfuse] ${LangfuseIngestionResponse.summary(rejected, events.length)}")
+          case Right(_) =>
+            logger.info("[Langfuse] Batch export successful: 207, every event accepted")
+          case Left(reason) =>
+            logger.warn(s"[Langfuse] Batch export returned 207 with an $reason; treating it as accepted")
         }
+      } else if (response.statusCode >= 200 && response.statusCode < 300) {
+        logger.info(s"[Langfuse] Batch export successful: ${response.statusCode}")
       } else {
         logger.error(s"[Langfuse] Batch export failed: ${response.statusCode}")
         logger.error(s"[Langfuse] Response body: ${org.llm4s.util.Redaction.truncateForLog(response.body)}")

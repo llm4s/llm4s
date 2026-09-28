@@ -80,7 +80,7 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
     mockClient.lastUrl shouldBe Some("https://langfuse.example.com/api/public/ingestion")
   }
 
-  it should "return Right on 207 partial success" in {
+  it should "return Right on a 207 that lists no rejected events" in {
     val mockClient = new MockHttpClient(HttpResponse(207, """{"successes":1,"errors":0}"""))
     val tracing    = makeTracing(mockClient)
 
@@ -88,6 +88,34 @@ class LangfuseTracingSpec extends AnyFlatSpec with Matchers {
 
     result.isRight shouldBe true
     mockClient.postCallCount shouldBe 1
+  }
+
+  it should "return Right on a 207 in Langfuse's per-event format when every event was accepted" in {
+    val body       = """{"successes":[{"id":"e1","status":201}],"errors":[]}"""
+    val mockClient = new MockHttpClient(HttpResponse(207, body))
+
+    makeTracing(mockClient).traceEvent(simpleEvent) shouldBe Right(())
+  }
+
+  it should "return Left naming the rejected events when a 207 reports a partial failure" in {
+    // Langfuse answers 207 with per-event results; events under `errors` were dropped.
+    val body =
+      """{"successes":[{"id":"e1","status":201}],
+        | "errors":[{"id":"e2","status":400,"message":"Invalid request data"}]}""".stripMargin
+    val mockClient = new MockHttpClient(HttpResponse(207, body))
+
+    val result = makeTracing(mockClient).traceEvent(simpleEvent)
+
+    result.isLeft shouldBe true
+    val message = result.left.toOption.get.message
+    message should include("rejected 1 of")
+    message should include("e2 (400: Invalid request data)")
+  }
+
+  it should "treat a 207 whose body cannot be read as accepted, rather than fail tracing" in {
+    val mockClient = new MockHttpClient(HttpResponse(207, "not json"))
+
+    makeTracing(mockClient).traceEvent(simpleEvent) shouldBe Right(())
   }
 
   it should "return Left on non-2xx response" in {

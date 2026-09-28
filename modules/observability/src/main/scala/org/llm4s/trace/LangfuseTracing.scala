@@ -123,13 +123,23 @@ class LangfuseTracing(
         timeout = 30000
       )
 
-      if (response.statusCode == 207 || (response.statusCode >= 200 && response.statusCode < 300)) {
-        logger.info(s"[Langfuse] Batch export successful: ${response.statusCode}")
-        if (response.statusCode == 207) {
-          logger.info(
-            s"[Langfuse] Partial success response: ${org.llm4s.util.Redaction.truncateForLog(response.body)}"
-          )
+      if (response.statusCode == 207) {
+        // Multi-Status: per-event results. Events listed under `errors` were dropped.
+        LangfuseIngestionResponse.rejections(response.body) match {
+          case Right(rejected) if rejected.nonEmpty =>
+            val summary = LangfuseIngestionResponse.summary(rejected, events.length)
+            logger.error(s"[Langfuse] $summary")
+            Left(UnknownError(summary, new RuntimeException(summary)))
+          case Right(_) =>
+            logger.info("[Langfuse] Batch export successful: 207, every event accepted")
+            Right(())
+          case Left(reason) =>
+            // Cannot tell which events were accepted; do not fail tracing on an unexpected shape.
+            logger.warn(s"[Langfuse] Batch export returned 207 with an $reason; treating it as accepted")
+            Right(())
         }
+      } else if (response.statusCode >= 200 && response.statusCode < 300) {
+        logger.info(s"[Langfuse] Batch export successful: ${response.statusCode}")
         Right(())
       } else {
         logger.error(s"[Langfuse] Batch export failed: ${response.statusCode}")

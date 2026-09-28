@@ -757,6 +757,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **A Langfuse batch that was only partly accepted was reported as a successful export.** The
+  ingestion endpoint answers `207 Multi-Status` with a result per event, and events listed under
+  `errors` are dropped; `LangfuseTracing` returned `Right(())` and `DefaultLangfuseBatchSender`
+  logged "successful" for any 207. Both now read the body: a 207 that lists rejected events is a
+  `Left` from `LangfuseTracing` (and an error log from the batch sender) naming each event, its
+  status and message. A 207 with no rejections is still a success, and one whose body cannot be
+  read is treated as accepted with a warning, so tracing does not fail on an unexpected shape
+  (found in review of [#1239](https://github.com/llm4s/llm4s/pull/1239)).
+
 - **An S3 listing that failed was reported as a successful sync of 0 documents, and could wipe
   the index** ([#1231](https://github.com/llm4s/llm4s/pull/1231)). With no AWS credentials, a
   missing bucket or access denied, `S3DocumentSource` returned the listing error, but
