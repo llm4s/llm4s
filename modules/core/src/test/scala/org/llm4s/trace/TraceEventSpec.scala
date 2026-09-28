@@ -301,33 +301,6 @@ class TraceEventSpec extends AnyFlatSpec with Matchers {
     json.obj.contains("total_cost_usd") shouldBe false
   }
 
-  // ============ createTraceEvent Factory ============
-
-  "TraceEvent.createTraceEvent" should "create a trace creation event" in {
-    val event = TraceEvent.createTraceEvent(
-      traceId = "trace-123",
-      now = "2024-01-15T10:30:00Z",
-      environment = "production",
-      release = "1.0.0",
-      version = "1.0.0",
-      traceInput = "User query",
-      traceOutput = "Agent response",
-      modelName = "gpt-4",
-      messageCount = 5
-    )
-
-    event("type").str shouldBe "trace-create"
-    event("timestamp").str shouldBe "2024-01-15T10:30:00Z"
-    event("body")("id").str shouldBe "trace-123"
-    event("body")("environment").str shouldBe "production"
-    event("body")("release").str shouldBe "1.0.0"
-    event("body")("input").str shouldBe "User query"
-    event("body")("output").str shouldBe "Agent response"
-    event("body")("model").str shouldBe "gpt-4"
-    event("body")("metadata")("messageCount").num shouldBe 5
-    event("body")("tags").arr.map(_.str) should contain("llm4s")
-  }
-
   // ============ TraceEvent Trait ============
 
   "TraceEvent" should "have timestamp on all events" in {

@@ -11,7 +11,7 @@ This page states which parts of the LLM4S API are safe to build on ahead of a 1.
 
 Until 0.4.1 all of it shipped in one `core` Maven artifact of roughly 84k lines — agent runtime, RAG, MCP, speech, image, knowledge graph, and eleven provider clients together. There was no way to tell from the artifact alone which parts of that surface are meant to be a long-term contract and which are still moving fast.
 
-This page describes the **target state** of the in-progress modularisation programme tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126). Most of it is still a destination rather than a description: except where the table says otherwise, a package still ships inside `llm4s-core`, and the target-module column says where it is heading, not where it lives today.
+This page describes the **target state** of the in-progress modularisation programme tracked in [#1126](https://github.com/llm4s/llm4s/issues/1126). Rows marked **carved** below already live in their target module; every other row still ships inside `llm4s-core`, and its target-module column says where it is heading, not where it lives today.
 
 What has actually moved so far, in the build but not yet in a release:
 
@@ -20,9 +20,11 @@ What has actually moved so far, in the build but not yet in a release:
 | [1](https://github.com/llm4s/llm4s/issues/1128) | `llm4s-rag`, `llm4s-knowledgegraph` | in the build, unpublished |
 | [2](https://github.com/llm4s/llm4s/issues/1129) | `llm4s-memory`, `llm4s-memory-postgres` | in the build, unpublished |
 | [3](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` | in the build, unpublished |
+| [4](https://github.com/llm4s/llm4s/issues/1131) | none - the provider registration SPI (`ProviderDescriptor`, discovered through `META-INF/services`) that slice 5's modules register through | in the build, unpublished |
 | [5](https://github.com/llm4s/llm4s/issues/1132) | `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (with Mistral and Cohere), `llm4s-voyage` - `llm4s-core` now holds no provider client | in the build, unpublished |
+| [6](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability` (Langfuse, the trace collector, `CostTracker`); `OpenTelemetryConfig` joins the existing `llm4s-observability-otel`. The tracing contract stays in `llm4s-core`; Prometheus is still in core until its own carve | in the build, unpublished |
 
-The latest release tag is `v0.4.1`, which is still a single `llm4s-core`. The first release to publish separate module artifacts will be the next one.
+The latest release tag is `v0.4.1`, which is still a single `llm4s-core` (0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). The first release to publish separate module artifacts will be **0.5.0**, after slice 6; it is also the MiMa baseline.
 
 ## Maturity Legend
 
@@ -58,8 +60,11 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `reliability` | `llm4s-core` | Frozen at 1.0 |
 | `agent` (excludes `agent/memory`) | `llm4s-agent` | Frozen at 1.0 |
 | `assistant` | `llm4s-agent` | Beta |
-| `trace` | `llm4s-observability` | Frozen at 1.0 |
-| `metrics` | `llm4s-observability` | Frozen at 1.0 |
+| `trace` — the contract: `Tracing`, `TraceEvent`, `TracingComposer`, `TracingMode`, the `trace/spi` `TracingBackend` SPI, `NoOpTracing`, `ConsoleTracing`, and `TracingSettings` (in `llmconnect/config`) | `llm4s-core` | Frozen at 1.0 |
+| `metrics` — the contract: `MetricsCollector` | `llm4s-core` | Frozen at 1.0 |
+| `trace` — Langfuse (`LangfuseTracing`, its batch sender and `TracingBackend`), `TraceCollectorTracing`, `trace/model`, `trace/store`; `metrics` — `CostTracker` — **carved** | `llm4s-observability` | Beta |
+| `trace` — OpenTelemetry (`OpenTelemetryTracing`, `OpenTelemetryConfig`) — **carved** | `llm4s-observability-otel` (`modules/trace-opentelemetry`) | Beta |
+| `metrics` — Prometheus (`PrometheusMetrics`, `PrometheusEndpoint`) | `llm4s-observability-prometheus` | Beta |
 | `llmconnect/provider` — OpenAI, Azure and Requesty (the providers sharing `OpenAIClient`) — **carved** | `llm4s-openai` | Frozen at 1.0 |
 | `llmconnect/provider` — OpenRouter, DeepSeek, Z.ai and the generic `openai-compatible` provider, on one SDK-free `OpenAICompatibleClient` — **carved** | `llm4s-openai-compatible` | Frozen at 1.0 |
 | `llmconnect/provider` — Anthropic — **carved** | `llm4s-anthropic` | Frozen at 1.0 |
@@ -80,7 +85,8 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 
 Notes:
 
-- The `llmconnect/provider` directory today also holds shared plumbing (cost estimation, HTTP error mapping, metrics recording, embedding provider trait) alongside the per-provider clients. [Slice 4](https://github.com/llm4s/llm4s/issues/1131) is designing a provider registration SPI to replace the current central-file registration; that design decides where this shared plumbing ends up (most likely `llm4s-core`), so treat its exact home as unsettled until #1131 lands.
+- `llmconnect/provider` in `llm4s-core` now holds only the plumbing every provider module shares - cost estimation, HTTP error mapping, metrics recording, the `EmbeddingProvider` trait, exchange recording - and no client. That is part of the frozen `llmconnect` API, as is the provider registration SPI in `llmconnect/spi` from [slice 4](https://github.com/llm4s/llm4s/issues/1131): a provider is a `ProviderDescriptor` listed in its own module's `Llm4sProviderModule`, so adding one adds a dependency and edits nothing in core. Vendor API keys (`llm4s.credentials.<provider>.apiKey`) are read by core's `config`, but each key is bound in its provider module's `reference.conf`, beside the descriptor that uses it.
+- The tracing and metrics **contracts** stay in `llm4s-core`, and they are what is frozen: `llmconnect`, the agent runtime and every provider module trace and record metrics through them alone. The **integrations** are separate modules that plug into that contract - a tracing backend is a `TracingBackend` registered in `META-INF/services`, discovered by `TRACING_MODE`, the way a provider is a `ProviderDescriptor`. They are Beta, like every integration module other than the frozen provider modules: Langfuse's ingestion format and OpenTelemetry's SDK move on their vendors' schedule, not ours, and a new tracing backend should be a new module rather than a change to the frozen surface. See the [migration guide](migration#slice-6-llm4s-observability---langfuse-the-trace-collector-and-costtracker-leave-core).
 - Rows marked **carved** already live in their target sbt module. Their package names are unchanged, so this is a build-file change for users, not an import rewrite — with one exception, `org.llm4s.extract`, described in the [migration guide](migration#slice-1-llm4s-rag-and-llm4s-knowledgegraph).
 - `org.llm4s.media` is a new package, not a carve. It consolidates the three overlapping image-format enumerations `llm4s-core` had accumulated, so that `llm4s-image` and `llm4s-speech` carve as pure file moves rather than moves plus a vocabulary change. It is the one part of slice 3 with a source break, described in the [migration guide](migration#slice-3-llm4s-media); it is deliberate and taken now rather than after 1.0.
 - `org.llm4s.extract` is a new package name, not a rename of an existing one — see [Slice 1](https://github.com/llm4s/llm4s/issues/1128) for why the two extractors were consolidated rather than just moved.
@@ -91,13 +97,13 @@ Notes:
 
 ## What Frozen means
 
-- **Source and binary compatible within 1.x.** Once `0.4.0` publishes the split modules, `mimaPreviousArtifacts` enforces binary compatibility on every Frozen module for all subsequent 1.x releases.
+- **Source and binary compatible within 1.x.** Once `0.5.0` publishes the split modules, `mimaPreviousArtifacts` enforces binary compatibility on every Frozen module for all subsequent 1.x releases.
 - **Deprecate before removing.** A Frozen API is only removed after a deprecation cycle, never dropped outright in a minor release.
 - **Beta and Experimental can move faster.** They may change in a minor release, but a migration note ships with the change in the same release's CHANGELOG.
 
 ## Scala and JDK support
 
-1.0 targets **Scala 3 only (3.7.1)**. Scala 2.13 support is deferred to post-1.0 and, if it happens, would target the frozen spine (`llm4s-core`, `llm4s-agent`, `llm4s-observability`, and the frozen provider modules) rather than the full tree. JDK 21 is used in CI.
+1.0 targets **Scala 3 only (3.7.1)**. Scala 2.13 support is deferred to post-1.0 and, if it happens, would target the frozen spine (`llm4s-core`, `llm4s-agent`, and the frozen provider modules) rather than the full tree. The tracing and metrics contracts are part of `llm4s-core`; the observability integration modules are not in the spine. JDK 21 is used in CI.
 
 See [#1126](https://github.com/llm4s/llm4s/issues/1126) for the reasoning behind the Scala-3-only decision.
 

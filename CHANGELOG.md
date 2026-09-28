@@ -124,14 +124,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Behaviour: `TRACING_MODE=langfuse` without the module gives `NoOpTracing` and an error naming
   `llm4s-observability`, as OpenTelemetry without its module already did; with the module but
   without `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY`, the backend refuses to start with an
-  error naming the missing keys, rather than building a tracer that drops every batch.
+  error naming the missing keys, rather than building a tracer that drops every batch. And when
+  the selected mode's `llm4s.tracing.<mode>` is present but not an object (say `opentelemetry =
+  "http://collector:4317"`), or cannot be read, `Llm4sConfig.tracing()` returns a
+  `ConfigurationError` naming the path, where it used to pass the backend an empty block and let
+  it start on its defaults; an absent block is still empty.
 
   Source breaks (pre-MiMa): `TracingMode.Langfuse` and `TracingMode.OpenTelemetry` are removed -
   they are `TracingMode.Named("langfuse")` / `Named("opentelemetry")`, which `fromString` returns;
   `TracingSettings` loses its `langfuse` and `openTelemetry` fields (now `TracingSettings(mode,
   extras)`); `LangfuseConfig` and `OpenTelemetryConfig` move module; `DefaultConfig` is removed
   (its constants are `LangfuseConfig.DEFAULT_*`); `ConfigKeys.LANGFUSE_*` are
-  `LangfuseConfigKeys.LANGFUSE_*`; `RAGASLangfuseObserver.fromTracingSettings` is removed. See the
+  `LangfuseConfigKeys.LANGFUSE_*`; `RAGASLangfuseObserver.fromTracingSettings` is removed; and
+  two unused Langfuse JSON builders are deleted from core rather than moved,
+  `TraceEvent.createTraceEvent` and `org.llm4s.llmconnect.model.TraceHelper`. See the
   [migration note](docs/reference/migration.md#slice-6-llm4s-observability---langfuse-the-trace-collector-and-costtracker-leave-core).
 - **Tracing backends are discovered, and agent state is a `TraceEvent`** - the tracing extension
   point, landed ahead of the slice 6 carve as slice 4 did for providers

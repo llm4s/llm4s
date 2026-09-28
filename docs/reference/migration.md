@@ -190,6 +190,24 @@ and `Tracing.create` logs that once and returns `NoOpTracing`. Either way nothin
 Langfuse, as before; the difference is one clear error instead of a warning per batch.
 `LangfuseTracing.from(config)` built directly is unchanged.
 
+### Behaviour change: a selected block that is not an object is an error
+
+`TracingSettings.extras` is the selected mode's block, `llm4s.tracing.<mode>`. When that key was
+present but was not an object - `llm4s.tracing { mode = opentelemetry, opentelemetry =
+"http://collector:4317" }` - it was treated as absent, so the backend started on its defaults
+(here, a collector on localhost) and the operator's setting was silently ignored. Read failures
+were swallowed the same way. `Llm4sConfig.tracing()` now returns a `ConfigurationError` naming
+the path instead:
+
+```text
+llm4s.tracing.opentelemetry must be an object, but is a string. It holds the settings for
+tracing mode 'opentelemetry': write it as llm4s.tracing.opentelemetry { ... }.
+```
+
+A block that is absent (or `null`) is still an empty `extras`, and the backend applies its
+defaults. Only the selected mode's block is checked: a malformed block for a mode that is not
+selected is still ignored.
+
 ### Reading Langfuse settings yourself
 
 `TracingSettings` no longer has a `langfuse` field, and `extras` holds only the *selected* mode's
@@ -235,6 +253,13 @@ These are taken before 0.5.0 sets the MiMa baseline, and none of them changes a 
 7. **`RAGASLangfuseObserver.fromTracingSettings(TracingSettings)` is removed**: it read the removed
    `TracingSettings.langfuse`. Use `RAGASLangfuseObserver.from(config)` with
    `LangfuseConfigLoader.default()`, as above.
+8. **`TraceEvent.createTraceEvent` and `org.llm4s.llmconnect.model.TraceHelper` are removed.**
+   Both built Langfuse ingestion JSON - a `"trace-create"` batch envelope, and
+   `event-create` / `generation-create` / `span-create` envelopes per conversation message - and
+   nothing in llm4s called either; `LangfuseTracing` builds its own batches. They were
+   Langfuse's wire format sitting in the core contract, so they are deleted rather than moved. Code
+   that called them builds the JSON itself, or traces through `LangfuseTracing` (`llm4s-observability`),
+   which sends the same event types.
 
 ## Slice 6: tracing backends are discovered, and agent state is a `TraceEvent`
 

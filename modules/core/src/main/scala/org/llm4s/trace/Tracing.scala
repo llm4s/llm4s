@@ -392,7 +392,9 @@ object Tracing {
    * [[org.llm4s.trace.spi.TracingBackend]] discovered for it on the classpath.
    *
    * @return the tracer, or a [[org.llm4s.error.ConfigurationError]] when no backend
-   *         is registered for the mode, or the backend's own error when it cannot start
+   *         is registered for the mode - naming the llm4s module to add for `langfuse`
+   *         (`llm4s-observability`) and `opentelemetry` (`llm4s-observability-otel`) - or
+   *         the backend's own error when it cannot start
    */
   def fromSettings(settings: TracingSettings): Result[Tracing] =
     resolve(settings, TracingBackends.discover())

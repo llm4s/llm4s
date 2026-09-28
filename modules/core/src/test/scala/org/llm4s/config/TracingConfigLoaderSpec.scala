@@ -111,7 +111,7 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
       )
     }
 
-    "leave a malformed backend block to its backend, rather than failing the whole load" in {
+    "reject the selected mode's block when it is not an object, naming the path" in {
       val hocon =
         """
           |llm4s {
@@ -122,9 +122,15 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
           |}
           |""".stripMargin
 
-      val settings = load(hocon).value
-      settings.mode shouldBe TracingMode.Named("langfuse")
-      settings.extras shouldBe empty
+      val error = load(hocon).left.value
+      error shouldBe a[org.llm4s.error.ConfigurationError]
+      error.message should include("llm4s.tracing.langfuse")
+      error.message should include("must be an object, but is a string")
+    }
+
+    "ignore a malformed block for a mode that is not selected" in {
+      val hocon = "llm4s.tracing { mode = \"datadog\", datadog.site = \"eu\", langfuse = \"oops\" }"
+      load(hocon).value.extras shouldBe Map("site" -> "eu")
     }
   }
 
@@ -186,13 +192,29 @@ class TracingConfigLoaderSpec extends AnyWordSpec with Matchers with EitherValue
       load(hocon).value.extras shouldBe Map("site" -> "datadoghq.eu")
     }
 
-    "be empty when the selected mode has no block, or its key is not an object" in {
-      val noBlock = "llm4s.tracing.mode = \"datadog\""
-      val scalar  = "llm4s.tracing { mode = \"datadog\", datadog = \"on\" }"
-
-      load(noBlock).value.extras shouldBe empty
-      load(scalar).value.extras shouldBe empty
+    "be empty when the selected mode has no block" in {
+      load("llm4s.tracing.mode = \"datadog\"").value.extras shouldBe empty
+      load("llm4s.tracing { mode = \"datadog\", datadog = null }").value.extras shouldBe empty
       load("llm4s {}").value.extras shouldBe empty
+    }
+
+    "fail, naming the path, when the selected mode's key is present but not an object" in {
+      // Codex review on #1237: treated as absent, this started the backend on its
+      // defaults and silently ignored the operator's endpoint.
+      val scalar = load("llm4s.tracing { mode = \"opentelemetry\", opentelemetry = \"http://collector:4317\" }")
+      val list   = load("llm4s.tracing { mode = \"datadog\", datadog = [\"a\"] }")
+
+      scalar.left.value.message should include("llm4s.tracing.opentelemetry must be an object, but is a string")
+      // The misplaced value is not echoed: it may be a secret.
+      (scalar.left.value.message should not).include("collector:4317")
+      list.left.value.message should include("llm4s.tracing.datadog must be an object, but is a list")
+    }
+
+    "check the canonical block when the mode is an alias" in {
+      // The alias resolves to the canonical block, and that block is checked too.
+      load("llm4s.tracing { mode = \"otel\", opentelemetry = 4317 }").left.value.message should include(
+        "llm4s.tracing.opentelemetry must be an object, but is a number"
+      )
     }
 
     "redact the extras values in toString" in {

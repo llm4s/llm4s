@@ -275,7 +275,9 @@ object Llm4sConfig {
    * when `Tracing.fromSettings` builds the tracer.
    *
    * @return the tracing settings, or a [[org.llm4s.error.ConfigurationError]]
-   *         when the `llm4s.tracing` tree cannot be parsed.
+   *         when the `llm4s.tracing` tree cannot be parsed, or when the selected
+   *         mode's `llm4s.tracing.<mode>` is present but is not an object (an absent
+   *         block is fine: the backend applies its defaults).
    */
   def tracing(): Result[TracingSettings] =
     org.llm4s.config.TracingConfigLoader.load(ConfigSource.default)

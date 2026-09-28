@@ -639,7 +639,16 @@ val result = for {
 `opentelemetry` by `llm4s-observability-otel`. A mode llm4s has no name for, such as
 `TRACING_MODE=datadog`, is read as `TracingMode.Named("datadog")` and goes to whichever backend
 declares that mode. With no such backend, `Tracing.create` logs an error listing the available
-modes and traces nothing. See the
+modes and traces nothing. For `langfuse` and `opentelemetry` the error also names the module to
+add, since llm4s knows which of its own modules serves them:
+
+```text
+Tracing mode 'opentelemetry' is configured but no TracingBackend for it is on the classpath.
+Add the 'org.llm4s' %% 'llm4s-observability-otel' dependency. Available modes: console, noop.
+```
+
+That hint is only a message: dispatch never consults it, and a third-party mode needs no entry in
+it. See the
 [observability guide](../guide/observability/index.md#adding-a-tracing-backend) to write one.
 
 ### Disable Tracing
