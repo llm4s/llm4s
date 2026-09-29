@@ -2,7 +2,7 @@ package org.llm4s.toolapi.builtin.search
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import org.llm4s.config.{ BraveSearchToolConfig, Llm4sConfig }
+import org.llm4s.config.{ BraveSearchToolConfig, ToolsConfigLoader }
 import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 
 class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
@@ -47,7 +47,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
   }
 
   "BraveSearchTool" should "expose accurate name and description for each search category" in {
-    val braveConfigResult = Llm4sConfig.loadBraveSearchTool()
+    val braveConfigResult = ToolsConfigLoader.loadBraveSearchTool()
 
     braveConfigResult match {
       case Right(config) =>

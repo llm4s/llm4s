@@ -2,7 +2,7 @@
 package org.llm4s.samples.agent
 
 import org.llm4s.agent.Agent
-import org.llm4s.config.Llm4sConfig
+import org.llm4s.config.{ Llm4sConfig, ToolsConfigLoader }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.toolapi.builtin.search.{ BraveSearchTool, SafeSearch }
@@ -53,7 +53,7 @@ object ResearcherAgentExample {
       client <- LLMConnect.getClient(providerCfg)
     } yield client
 
-    val braveConfigResult = Llm4sConfig.loadBraveSearchTool()
+    val braveConfigResult = ToolsConfigLoader.loadBraveSearchTool()
 
     (clientResult, braveConfigResult) match {
       case (Left(error), _) =>

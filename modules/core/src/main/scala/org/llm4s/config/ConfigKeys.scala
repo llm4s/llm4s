@@ -54,10 +54,4 @@ object ConfigKeys {
 
   /** Enables or disables document chunking (`true`/`false`). Default: `true`. */
   val CHUNKING_ENABLED = "CHUNKING_ENABLED"
-
-  // Tool API Keys
-  // ---- Tool API keys ------------------------------------------------------
-
-  /** Brave Search API key. Required when using the Brave web-search tool. */
-  val BRAVE_SEARCH_API_KEY = "BRAVE_SEARCH_API_KEY"
 }

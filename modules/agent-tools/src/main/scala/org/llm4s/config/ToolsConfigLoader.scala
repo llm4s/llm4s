@@ -1,3 +1,4 @@
+// scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.config
 
 import org.llm4s.types.Result
@@ -7,7 +8,7 @@ import pureconfig.{ ConfigReader => PureConfigReader, ConfigSource }
 /**
  * Configuration data for Brave Search tool.
  *
- * This configuration is loaded from application.conf at the edge (via Llm4sConfig)
+ * This configuration is loaded from application.conf at the edge (via [[ToolsConfigLoader]])
  * and passed to BraveSearchTool.create() when instantiating the tool.
  *
  * @param apiKey The Brave Search API key
@@ -25,7 +26,7 @@ final case class BraveSearchToolConfig(
 /**
  * Configuration data for DuckDuckGo Search tool.
  *
- * This configuration is loaded from application.conf at the edge (via Llm4sConfig)
+ * This configuration is loaded from application.conf at the edge (via [[ToolsConfigLoader]])
  * and passed to DuckDuckGoSearchTool.create() when instantiating the tool.
  *
  * @param apiUrl The base URL for the DuckDuckGo API (default: https://api.duckduckgo.com)
@@ -135,23 +136,25 @@ object ExaSearchToolConfig {
 }
 
 /**
- * Internal PureConfig-based loader for tools configuration.
+ * Loads the search tools' configuration from `llm4s.tools.*`.
  *
- * This loader follows the "config at the edge" pattern used throughout llm4s:
- * - Configuration loading happens at the application boundary via Llm4sConfig
- * - Tool implementations receive pre-loaded config objects as constructor parameters
- * - This keeps tool code pure and testable without direct config dependencies
+ * This follows the "config at the edge" pattern used throughout llm4s: the application loads a
+ * tool's config here and passes it to the tool's `create()`, so the tools themselves never read
+ * configuration.
  *
- * Architecture:
- * 1. Application code calls Llm4sConfig.loadBraveSearchTool() or loadDuckDuckGoSearchTool()
- * 2. Llm4sConfig delegates to this loader to read from application.conf
- * 3. The loaded config is passed to the tool's create() method
- * 4. Tool operates with the provided configuration
+ * {{{
+ * for
+ *   config <- ToolsConfigLoader.loadBraveSearchTool()
+ *   tool   <- BraveSearchTool.create(config)
+ * yield tool
+ * }}}
  *
- * External code should use Llm4sConfig.loadBraveSearchTool() and Llm4sConfig.loadDuckDuckGoSearchTool()
- * rather than this object directly.
+ * It replaces `Llm4sConfig.loadBraveSearchTool()`, `loadDuckDuckGoSearchTool()` and
+ * `loadExaSearchTool()`, which left `llm4s-core` with the tools (#1242): the calls are the same,
+ * on this object. The `llm4s.tools` block and its `BRAVE_SEARCH_*` / `EXA_*` bindings ship in
+ * `llm4s-agent-tools`' `reference.conf`.
  */
-private[config] object ToolsConfigLoader {
+object ToolsConfigLoader {
 
   implicit private val braveSectionReader: PureConfigReader[BraveSearchToolConfig] =
     PureConfigReader.forProduct4("apiKey", "apiUrl", "count", "safeSearch")(BraveSearchToolConfig.apply)
@@ -167,8 +170,6 @@ private[config] object ToolsConfigLoader {
       "searchType",
       "maxCharacters"
     )(ExaSearchToolConfig.apply)
-
-  // ---- Public API used by Llm4sConfig ----
 
   /**
    * Load Brave Search tool configuration from `llm4s.tools.brave`.
@@ -211,4 +212,16 @@ private[config] object ToolsConfigLoader {
         ConfigurationError(s"Failed to load Exa Search tool config: $msg")
       }
       .flatMap(ExaSearchToolConfig.validated)
+
+  /** `loadBraveSearchTool(source)` against the current environment: system properties, `application.conf` and every `reference.conf`. */
+  def loadBraveSearchTool(): Result[BraveSearchToolConfig] =
+    loadBraveSearchTool(ConfigSource.default)
+
+  /** `loadDuckDuckGoSearchTool(source)` against the current environment. */
+  def loadDuckDuckGoSearchTool(): Result[DuckDuckGoSearchToolConfig] =
+    loadDuckDuckGoSearchTool(ConfigSource.default)
+
+  /** `loadExaSearchTool(source)` against the current environment. */
+  def loadExaSearchTool(): Result[ExaSearchToolConfig] =
+    loadExaSearchTool(ConfigSource.default)
 }

@@ -32,6 +32,7 @@ Slice order — each is an issue with its own scope and gotchas:
 | 4 ✅ | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
 | 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (incl. Mistral, Cohere), `llm4s-voyage`; core holds no client |
 | 6 🚧 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `TracingBackend` SPI; `llm4s-observability` (Langfuse, trace collector/model/store, `CostTracker`); `llm4s-observability-prometheus`; then 0.5.0 + MiMa |
+| 7 🚧 | [#1242](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (built-in tools + their config); then `llm4s-agent` (`agent`, `assistant`). Blocks 0.5.0 |
 
 **Invariants for every carve:**
 
@@ -99,6 +100,7 @@ llm4s/
 │   │   └── voyage/            # Voyage AI embedding provider
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)
+│   ├── agent-tools/           # Built-in tools: core utilities, filesystem, HTTP, shell, web search (published)
 │   ├── samples/               # Usage examples
 │   ├── workspace/             # Containerized execution
 │   ├── config-policy/         # Config policy checks + CLI
@@ -212,6 +214,15 @@ and HTTP server, so **core declares no observability dependency** and keeps only
 Prometheus on; `image` has it as a **test-only** dependency, for `ImageGenerationCostTrackingSpec` -
 never make it a compile one.
 
+Slice 7 (#1242) carves what the spine audit found left in core. `modules/agent-tools`
+(`llm4s-agent-tools`) took `toolapi/builtin`, `toolapi/tools/WeatherTool`, `ToolsConfigLoader`
+(public; its no-argument `load*SearchTool()` replaced the removed `Llm4sConfig` methods), the
+`*SearchToolConfig` types, `ToolsConfigKeys` and the `llm4s.tools` `reference.conf` block. It
+depends on **core only, never on the agent runtime** - the tools serve plain `ToolRegistry` tool
+calling too. Core keeps the tool API (`ToolFunction`, `ToolRegistry`, schemas, execution).
+`UsageSummary`/`ModelUsage` moved to `org.llm4s.llmconnect.model` so `llm4s-observability` need not
+depend on `llm4s-agent`, which comes next.
+
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must
 not depend on each other.
@@ -231,7 +242,7 @@ Core's dependency on it is temporary and leaves with the `llm4s-image` carve.
 - `config/` - Llm4sConfig + typed loaders
 - `llmconnect/` - LLM client and providers
 - `agent/` - Agent framework, guardrails, handoffs (memory lives in `modules/memory`)
-- `toolapi/` - Tool calling, built-in tools
+- `toolapi/` - Tool calling API (the built-in tools are in `modules/agent-tools`)
 - `trace/` - Tracing contract: `Tracing`, `TraceEvent`, `TracingMode`, the `TracingBackend` SPI,
   Console/NoOp (backends live in `modules/observability` and `modules/trace-opentelemetry`)
 
@@ -408,6 +419,9 @@ for {
 ```
 
 ### Built-in Tools
+
+In `llm4s-agent-tools` (`modules/agent-tools`), which depends on core only - not on the agent
+runtime. Search tool config comes from `ToolsConfigLoader.load*SearchTool()`.
 
 ```scala
 import org.llm4s.toolapi.builtin.BuiltinTools

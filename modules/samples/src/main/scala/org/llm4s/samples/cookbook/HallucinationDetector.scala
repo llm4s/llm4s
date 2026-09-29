@@ -1,7 +1,7 @@
 // scalafix:off DisableSyntax.NoPureConfigDefault
 package org.llm4s.samples.cookbook
 
-import org.llm4s.config.Llm4sConfig
+import org.llm4s.config.{ Llm4sConfig, ToolsConfigLoader }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.samples.config.SamplesConfigLoader
 import org.llm4s.toolapi.ToolRegistry
@@ -23,7 +23,7 @@ object HallucinationDetector {
       client <- LLMConnect.getClient(providerCfg)
     } yield client
 
-    val exaConfigResult      = Llm4sConfig.loadExaSearchTool()
+    val exaConfigResult      = ToolsConfigLoader.loadExaSearchTool()
     val detectorConfigResult = SamplesConfigLoader.loadHallucinationDetector(ConfigSource.default)
 
     (clientResult, exaConfigResult, detectorConfigResult) match {

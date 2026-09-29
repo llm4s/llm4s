@@ -5,7 +5,7 @@ package org.llm4s.toolapi.builtin
  *
  * These tools provide web search capabilities using various search engines.
  * All search tools follow the "config at the edge" pattern where configuration
- * is loaded at the application boundary via [[org.llm4s.config.Llm4sConfig]]
+ * is loaded at the application boundary via [[org.llm4s.config.ToolsConfigLoader]]
  * and passed to the tool's create() method.
  *
  * == Available Tools ==
@@ -36,7 +36,7 @@ package org.llm4s.toolapi.builtin
  *
  * @example
  * {{{
- * import org.llm4s.config.Llm4sConfig
+ * import org.llm4s.config.ToolsConfigLoader
  * import org.llm4s.toolapi.builtin.search._
  * import org.llm4s.toolapi.ToolRegistry
  * import org.llm4s.types.Result
@@ -44,15 +44,15 @@ package org.llm4s.toolapi.builtin
  * // Load and create all search tools using Result
  * val toolsResult: Result[ToolRegistry] = for {
  *   // Load DuckDuckGo configuration and create tool
- *   duckDuckGoConfig <- Llm4sConfig.loadDuckDuckGoSearchTool()
+ *   duckDuckGoConfig <- ToolsConfigLoader.loadDuckDuckGoSearchTool()
  *   duckDuckGoTool   <- DuckDuckGoSearchTool.create(duckDuckGoConfig)
  *
  *   // Load Brave Search configuration and create tool
- *   braveConfig <- Llm4sConfig.loadBraveSearchTool()
+ *   braveConfig <- ToolsConfigLoader.loadBraveSearchTool()
  *   braveTool   <- BraveSearchTool.create(braveConfig)
  *
  *   // Load Exa Search configuration and create tool
- *   exaConfig <- Llm4sConfig.loadExaSearchTool()
+ *   exaConfig <- ToolsConfigLoader.loadExaSearchTool()
  *   exaTool   <- ExaSearchTool.create(exaConfig)
  *
  *   // Register all tools
@@ -80,7 +80,7 @@ package org.llm4s.toolapi.builtin
  *
  * // Load just Exa Search
  * val exaToolResult = for {
- *   config <- Llm4sConfig.loadExaSearchTool()
+ *   config <- ToolsConfigLoader.loadExaSearchTool()
  *   tool   <- ExaSearchTool.create(config)
  * } yield tool
  *

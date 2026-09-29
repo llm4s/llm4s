@@ -104,6 +104,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`llm4s-agent-tools`: the built-in tools leave `llm4s-core`** - the first slice 7 carve
+  ([#1242](https://github.com/llm4s/llm4s/issues/1242), decisions D2 and D3). `BuiltinTools` and
+  all of `org.llm4s.toolapi.builtin` (DateTime, Calculator, UUID, JSON, filesystem, HTTP, shell, and
+  the Brave, DuckDuckGo and Exa search tools) and the demo `org.llm4s.toolapi.tools.WeatherTool`
+  move to a new module; package names are unchanged. They are integrations with third-party APIs,
+  so they leave the frozen spine and version as Beta; core keeps the tool API they implement
+  (`ToolFunction`, `ToolRegistry`, schemas, execution). The module depends on `llm4s-core` only,
+  not on the agent runtime, so plain `ToolRegistry` tool calling can use the tools without it.
+  The search tools' config moves with them: `ToolsConfigLoader` (now public), the three
+  `*SearchToolConfig` types, and the `llm4s.tools` block of `reference.conf`, whose keys, defaults
+  and `BRAVE_SEARCH_*` / `EXA_*` / `DUCK_DUCK_GO_SEARCH_API_URL` bindings are unchanged.
+
+  Source breaks (pre-MiMa): `Llm4sConfig.loadBraveSearchTool()`, `loadDuckDuckGoSearchTool()` and
+  `loadExaSearchTool()` are removed - they returned types that left core; call the same methods on
+  `ToolsConfigLoader`. `ConfigKeys.BRAVE_SEARCH_API_KEY` is `ToolsConfigKeys.BRAVE_SEARCH_API_KEY`
+  (with `EXA_API_KEY` beside it). See the
+  [migration note](docs/reference/migration.md#slice-7-llm4s-agent-tools---the-built-in-tools-leave-core).
 - **`UsageSummary` and `ModelUsage` move to `org.llm4s.llmconnect.model`** - the preparation
   step of slice 7 ([#1242](https://github.com/llm4s/llm4s/issues/1242), decision D1), which carves
   the agent runtime into `llm4s-agent`. They were in `org.llm4s.agent`, but depend only on

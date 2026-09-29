@@ -384,6 +384,23 @@ only if you name these types in your own signatures. It replaces three overlappi
 types that used to ship in `llm4s-core`, which is a source break — see the
 [migration note](../reference/migration.md#slice-3-llm4s-media).
 
+### For built-in tools (web search, HTTP, filesystem, shell)
+
+{: .note }
+> Not yet published. `llm4s-agent-tools` exists in the build as of
+> [#1242](https://github.com/llm4s/llm4s/issues/1242) but ships in the next release;
+> in `0.4.1` and earlier this code is still inside `llm4s-core`.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-agent-tools" % llm4sVersion // same version as llm4s-core
+```
+
+`BuiltinTools` and everything under `org.llm4s.toolapi.builtin` - DateTime, Calculator, UUID,
+JSON, file access, HTTP, shell, and the Brave, DuckDuckGo and Exa search tools - live here, with
+`ToolsConfigLoader` and the `llm4s.tools` settings the search tools read. `llm4s-core` keeps the
+tool API they implement (`ToolFunction`, `ToolRegistry`). Package names are unchanged. See the
+[migration note](../reference/migration.md#slice-7-llm4s-agent-tools---the-built-in-tools-leave-core).
+
 ### For tracing and metrics (Langfuse, OpenTelemetry, in-process trace store, Prometheus)
 
 {: .note }

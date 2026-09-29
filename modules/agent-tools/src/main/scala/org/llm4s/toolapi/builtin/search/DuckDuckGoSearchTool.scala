@@ -69,7 +69,7 @@ case class DuckDuckGoSearchConfig(
  *
  * Architecture:
  * This tool follows the "config at the edge" pattern:
- * 1. Configuration is loaded at the application boundary via Llm4sConfig.loadDuckDuckGoSearchTool()
+ * 1. Configuration is loaded at the application boundary via ToolsConfigLoader.loadDuckDuckGoSearchTool()
  * 2. The loaded DuckDuckGoSearchToolConfig is passed to create() method
  * 3. The tool operates with the provided configuration
  *
@@ -77,11 +77,11 @@ case class DuckDuckGoSearchConfig(
  *
  * @example
  * {{{
- * import org.llm4s.config.Llm4sConfig
+ * import org.llm4s.config.ToolsConfigLoader
  * import org.llm4s.toolapi.builtin.search._
  *
  * // Load configuration at the application edge
- * val toolConfigResult = Llm4sConfig.loadDuckDuckGoSearchTool()
+ * val toolConfigResult = ToolsConfigLoader.loadDuckDuckGoSearchTool()
  *
  * toolConfigResult match {
  *   case Right(toolConfig) =>
@@ -120,14 +120,14 @@ object DuckDuckGoSearchTool {
    * This method follows the "config at the edge" pattern where configuration is loaded
    * at the application boundary and passed in as a parameter.
    *
-   * @param toolConfig The tool configuration containing API URL (loaded via Llm4sConfig.loadDuckDuckGoSearchTool())
+   * @param toolConfig The tool configuration containing API URL (loaded via ToolsConfigLoader.loadDuckDuckGoSearchTool())
    * @param config Optional runtime configuration for timeout, maxResults, and safeSearch settings
    * @return A configured ToolFunction ready to be registered with the agent
    *
    * @example
    * {{{
    * // Load config at application edge
-   * val toolConfig = Llm4sConfig.loadDuckDuckGoSearchTool().getOrElse(
+   * val toolConfig = ToolsConfigLoader.loadDuckDuckGoSearchTool().getOrElse(
    *   throw new RuntimeException("Failed to load DuckDuckGo config")
    * )
    *

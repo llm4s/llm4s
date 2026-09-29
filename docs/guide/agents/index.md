@@ -249,7 +249,16 @@ agent.runWithEvents(query, tools) {
 
 ## Built-in Tools
 
-LLM4S provides pre-built tools for common tasks:
+LLM4S provides pre-built tools for common tasks, in the `llm4s-agent-tools` module (they work with
+plain tool calling through `ToolRegistry` too, without an `Agent`):
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-agent-tools" % llm4sVersion
+```
+
+The search tools read their settings with `ToolsConfigLoader` - for example
+`ToolsConfigLoader.loadBraveSearchTool()` - from `llm4s.tools.*`, whose `BRAVE_SEARCH_*` and
+`EXA_*` bindings ship in that module.
 
 ```scala
 import org.llm4s.toolapi.builtin.BuiltinTools

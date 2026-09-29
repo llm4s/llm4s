@@ -133,6 +133,8 @@ jobs:
           # `trace` itself stays in core (the contract); these two are llm4s-observability's.
           if [ ! -d "$SCALADOC_DIR/org/llm4s/trace/store" ]; then missing="$missing trace.store"; fi
           if [ ! -d "$SCALADOC_DIR/org/llm4s/trace/model" ]; then missing="$missing trace.model"; fi
+          # `toolapi` itself stays in core (the tool API); `builtin` is llm4s-agent-tools'.
+          if [ ! -d "$SCALADOC_DIR/org/llm4s/toolapi/builtin" ]; then missing="$missing toolapi.builtin"; fi
           if [ -n "$missing" ]; then
             echo "::error::Aggregate Scaladoc is missing package(s):$missing"
             echo "::error::Add the owning module to the \`docs\` project in build.sbt."

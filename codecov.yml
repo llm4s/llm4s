@@ -100,6 +100,10 @@ flags:
     paths:
       - modules/observability-prometheus/src/main/scala
     carryforward: true
+  agent-tools:
+    paths:
+      - modules/agent-tools/src/main/scala
+    carryforward: true
   trace-opentelemetry:
     paths:
       - modules/trace-opentelemetry/src/main/scala

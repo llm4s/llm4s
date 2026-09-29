@@ -1,5 +1,55 @@
 # Migration Guide
 
+## Slice 7: `llm4s-agent-tools` - the built-in tools leave core
+
+The first slice 7 carve ([#1242](https://github.com/llm4s/llm4s/issues/1242), decisions D2 and D3)
+moves the ready-made tools into a new module, **`llm4s-agent-tools`**. Package names are unchanged,
+so no import changes; code that uses any of them adds one dependency:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-agent-tools" % "<version>"
+```
+
+| Moved to `llm4s-agent-tools` | Package |
+|---|---|
+| `BuiltinTools` and every tool under it: `core` (DateTime, Calculator, UUID, JSON), `filesystem`, `http`, `shell`, `search` (Brave, DuckDuckGo, Exa) | `org.llm4s.toolapi.builtin.*` |
+| `WeatherTool` | `org.llm4s.toolapi.tools` |
+| `ToolsConfigLoader` (was `private[config]`, now public), `BraveSearchToolConfig`, `DuckDuckGoSearchToolConfig`, `ExaSearchToolConfig` | `org.llm4s.config` |
+| `ToolsConfigKeys` (new) | `org.llm4s.config` |
+
+**What stays in `llm4s-core`** is the tool API: `ToolFunction`, `ToolRegistry`, `ToolBuilder`,
+`Schema`, the execution strategies and `SafeParameterExtractor`. Your own tools need nothing new.
+`llm4s-agent-tools` depends on `llm4s-core` only - not on the agent runtime - so the tools work
+with plain tool calling through `ToolRegistry` as well as with `Agent`.
+
+### Configuration is unchanged
+
+The `llm4s.tools.brave`, `.duckduckgo` and `.exa` keys, their defaults, and the
+`BRAVE_SEARCH_API_KEY`, `BRAVE_SEARCH_COUNT`, `BRAVE_SEARCH_API_URL`, `BRAVE_SAFE_SEARCH`,
+`DUCK_DUCK_GO_SEARCH_API_URL` and `EXA_*` variables are the same. The block moved from core's
+`reference.conf` to the module's, beside the code that reads it.
+
+### Source breaks
+
+1. **The tools need `llm4s-agent-tools`** (table above).
+2. **`Llm4sConfig.loadBraveSearchTool()`, `loadDuckDuckGoSearchTool()` and `loadExaSearchTool()`
+   are removed.** They returned config types that left core. The same methods are on
+   `ToolsConfigLoader`:
+
+   ```scala
+   import org.llm4s.config.ToolsConfigLoader
+
+   // before
+   val braveConfig = Llm4sConfig.loadBraveSearchTool()
+
+   // after
+   val braveConfig = ToolsConfigLoader.loadBraveSearchTool()
+   ```
+
+   Each also takes a `ConfigSource`, to read from one of your own.
+3. **`ConfigKeys.BRAVE_SEARCH_API_KEY` is `ToolsConfigKeys.BRAVE_SEARCH_API_KEY`**, with
+   `ToolsConfigKeys.EXA_API_KEY` beside it.
+
 ## Slice 7: `UsageSummary` and `ModelUsage` move to `org.llm4s.llmconnect.model`
 
 Not in a release yet; the preparation step of slice 7

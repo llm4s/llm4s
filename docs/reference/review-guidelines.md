@@ -386,7 +386,7 @@ Core code should not read configuration directly. Configuration loading belongs 
 // BAD - Reading config in tool/core code
 class BraveSearchTool {
   def search(query: String): Result[String] = {
-    val config = Llm4sConfig.loadBraveSearchTool()  // DON'T DO THIS
+    val config = ToolsConfigLoader.loadBraveSearchTool()  // DON'T DO THIS
     // ...
   }
 }
@@ -399,7 +399,7 @@ object BraveSearchTool {
 
 // At app edge (samples/CLI):
 for {
-  config <- Llm4sConfig.loadBraveSearchTool()
+  config <- ToolsConfigLoader.loadBraveSearchTool()
   tool = BraveSearchTool.create(config)
 } yield tool
 ```
@@ -758,7 +758,7 @@ class OpenAIClient(config: OpenAIConfig) // Injected from Llm4sConfig
 // BAD - Tool reading config directly
 class BraveSearchTool {
   def search(query: String): Result[String] = {
-    val config = Llm4sConfig.loadBraveSearchTool() // DON'T DO THIS
+    val config = ToolsConfigLoader.loadBraveSearchTool() // DON'T DO THIS
     // ...
   }
 }
@@ -771,7 +771,7 @@ object BraveSearchTool {
 
 // At app edge (samples/CLI):
 for {
-  config <- Llm4sConfig.loadBraveSearchTool()
+  config <- ToolsConfigLoader.loadBraveSearchTool()
   tool = BraveSearchTool.create(config)
 } yield tool
 ```

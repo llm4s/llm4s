@@ -7,9 +7,9 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
 /**
- * Tests for zero-coverage Llm4sConfig facade methods: metrics, embeddingsUi,
- * loadBraveSearchTool, loadDuckDuckGoSearchTool, loadExaSearchTool, and
- * experimentalStubsEnabled.
+ * Tests for zero-coverage Llm4sConfig facade methods: embeddingsUi and
+ * experimentalStubsEnabled. (`metrics()` and the three `load*SearchTool()` methods left core with
+ * their modules; their cases are in `llm4s-observability-prometheus` and `llm4s-agent-tools`.)
  */
 class Llm4sConfigFacadeSpec extends AnyWordSpec with Matchers {
 
@@ -59,79 +59,6 @@ class Llm4sConfigFacadeSpec extends AnyWordSpec with Matchers {
         ui.showGlobalTop shouldBe false
         ui.colorEnabled shouldBe true
         ui.tableWidth shouldBe 120
-      }
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // Brave Search Tool
-  // --------------------------------------------------------------------------
-
-  "Llm4sConfig.loadBraveSearchTool" should {
-
-    "load Brave search config" in {
-      val props = Map(
-        "llm4s.tools.brave.apiKey"     -> "brave-test-key",
-        "llm4s.tools.brave.apiUrl"     -> "https://api.search.brave.com/res/v1",
-        "llm4s.tools.brave.count"      -> "10",
-        "llm4s.tools.brave.safeSearch" -> "moderate"
-      )
-
-      withProps(props) {
-        val result = Llm4sConfig.loadBraveSearchTool()
-        result.isRight shouldBe true
-        val cfg = result.getOrElse(fail("expected Right"))
-        cfg.apiKey shouldBe "brave-test-key"
-        cfg.count shouldBe 10
-        cfg.safeSearch shouldBe "moderate"
-      }
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // DuckDuckGo Search Tool
-  // --------------------------------------------------------------------------
-
-  "Llm4sConfig.loadDuckDuckGoSearchTool" should {
-
-    "load DuckDuckGo search config" in {
-      val props = Map(
-        "llm4s.tools.duckduckgo.apiUrl" -> "https://api.duckduckgo.com"
-      )
-
-      withProps(props) {
-        val result = Llm4sConfig.loadDuckDuckGoSearchTool()
-        result.isRight shouldBe true
-        val cfg = result.getOrElse(fail("expected Right"))
-        cfg.apiUrl shouldBe "https://api.duckduckgo.com"
-      }
-    }
-  }
-
-  // --------------------------------------------------------------------------
-  // Exa Search Tool
-  // --------------------------------------------------------------------------
-
-  "Llm4sConfig.loadExaSearchTool" should {
-
-    "load Exa search config" in {
-      val props = Map(
-        "llm4s.tools.exa.apiKey"        -> "exa-test-key",
-        "llm4s.tools.exa.apiUrl"        -> "https://api.exa.ai",
-        "llm4s.tools.exa.numResults"    -> "10",
-        "llm4s.tools.exa.searchType"    -> "auto",
-        "llm4s.tools.exa.maxCharacters" -> "3000"
-      )
-
-      withProps(props) {
-        val result = Llm4sConfig.loadExaSearchTool()
-        result.isRight shouldBe true
-        val cfg = result.getOrElse(fail("expected Right"))
-        cfg.apiKey shouldBe "exa-test-key"
-        cfg.apiUrl shouldBe "https://api.exa.ai"
-        cfg.numResults shouldBe 10
-        cfg.searchType shouldBe "auto"
-        cfg.maxCharacters shouldBe 3000
       }
     }
   }
