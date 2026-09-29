@@ -4,7 +4,7 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.concurrent.duration.FiniteDuration
 
-import org.llm4s.agent.{ ModelUsage, UsageSummary }
+import org.llm4s.llmconnect.model.{ ModelUsage, UsageSummary }
 
 /**
  * In-process cost and usage tracker that implements [[MetricsCollector]].

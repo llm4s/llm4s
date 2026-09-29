@@ -1,5 +1,30 @@
 # Migration Guide
 
+## Slice 7: `UsageSummary` and `ModelUsage` move to `org.llm4s.llmconnect.model`
+
+Not in a release yet; the preparation step of slice 7
+([#1242](https://github.com/llm4s/llm4s/issues/1242), decision D1).
+
+Slice 7 carves the agent runtime out of `llm4s-core` into `llm4s-agent`. `UsageSummary` and
+`ModelUsage` were in `org.llm4s.agent`, but they depend only on `TokenUsage`, and
+`llm4s-observability`'s `CostTracker` builds them too. Leaving them in the agent package would make
+`llm4s-observability` depend on the agent runtime; moving the file to core while keeping its
+package would split `org.llm4s.agent` across two jars. So they move to `org.llm4s.llmconnect.model`,
+beside `TokenUsage`, and stay in `llm4s-core`.
+
+This is the one change to an import in the slice; every other move keeps its package.
+
+```scala
+// before
+import org.llm4s.agent.{ ModelUsage, UsageSummary }
+
+// after
+import org.llm4s.llmconnect.model.{ ModelUsage, UsageSummary }
+```
+
+Code that only reads `AgentState.usageSummary` or `CostTracker.snapshot` needs no change. The JSON
+form is unchanged, so an `AgentState` saved before the move still loads.
+
 ## llm4s no longer brings a logging backend
 
 Not in a release yet; found by the slice 6 spine audit

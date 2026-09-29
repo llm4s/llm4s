@@ -104,6 +104,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`UsageSummary` and `ModelUsage` move to `org.llm4s.llmconnect.model`** - the preparation
+  step of slice 7 ([#1242](https://github.com/llm4s/llm4s/issues/1242), decision D1), which carves
+  the agent runtime into `llm4s-agent`. They were in `org.llm4s.agent`, but depend only on
+  `TokenUsage`, and `llm4s-observability`'s `CostTracker` builds them: left in the agent package,
+  the carve would make observability - and through it every `llm4s-rag` user - depend on the agent
+  runtime. They stay in `llm4s-core`, beside `TokenUsage`. Their JSON form is unchanged, so saved
+  `AgentState`s still load.
+
+  Source break (pre-MiMa): import `org.llm4s.llmconnect.model.{ UsageSummary, ModelUsage }`
+  instead of `org.llm4s.agent.{ UsageSummary, ModelUsage }`. `AgentState.usageSummary` is
+  unchanged. See the
+  [migration note](docs/reference/migration.md#slice-7-usagesummary-and-modelusage-move-to-orgllm4sllmconnectmodel).
 - **llm4s artifacts no longer choose your logging backend** - found by the slice 6 spine audit
   ([#1133](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5878475544)). Every published
   module declared `logback-classic` and the `log4j-to-slf4j` bridge at compile scope, so depending

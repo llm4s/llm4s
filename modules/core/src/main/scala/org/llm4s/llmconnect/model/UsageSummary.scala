@@ -1,6 +1,5 @@
-package org.llm4s.agent
+package org.llm4s.llmconnect.model
 
-import org.llm4s.llmconnect.model.TokenUsage
 import upickle.default.{ ReadWriter => RW, macroRW, readwriter }
 
 /**
@@ -77,6 +76,10 @@ object ModelUsage {
  * `totalCost` uses [[BigDecimal]] rather than `Double` to keep cumulative sums
  * deterministic regardless of the number of requests.
  *
+ * The agent runtime's `AgentState` carries one for a whole run; `CostTracker`
+ * (`llm4s-observability`) builds one from recorded metrics. It lives here, beside
+ * [[TokenUsage]], so that neither needs the other (#1242).
+ *
  * @param requestCount   total API calls across all models
  * @param inputTokens    total prompt tokens sent across all models
  * @param outputTokens   total completion tokens received across all models
@@ -85,7 +88,6 @@ object ModelUsage {
  * @param byModel        per-model breakdown; keyed by the model identifier string
  *
  * @see [[ModelUsage]] for the per-model record type
- * @see [[org.llm4s.agent.AgentState]] which carries a [[UsageSummary]] for the whole run
  */
 case class UsageSummary(
   requestCount: Long = 0L,

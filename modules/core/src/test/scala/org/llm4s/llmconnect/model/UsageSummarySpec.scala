@@ -1,6 +1,5 @@
-package org.llm4s.agent
+package org.llm4s.llmconnect.model
 
-import org.llm4s.llmconnect.model.TokenUsage
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default.{ read, write }
