@@ -1,0 +1,2 @@
+# A second module that claims the same embedding id as the one in provider-discovery/embeddings.
+org.llm4s.llmconnect.spi.fixtures.CollidingEmbeddingModule

@@ -114,6 +114,17 @@ object CollidingProvider extends ProviderDescriptor:
 final class CollidingProviderModule extends Llm4sProviderModule:
   override def chatProviders: Seq[ProviderDescriptor] = Seq(CollidingProvider)
 
+/** An embedding provider that collides with [[FixtureEmbeddings]]'s id, to exercise collision reporting. */
+object CollidingEmbeddings extends EmbeddingProviderDescriptor:
+  val id: ProviderId = ProviderId("fixtureembed")
+
+  def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+    Left(ConfigurationError("colliding embedding provider builds no embedding provider"))
+
+/** A second module claiming `fixtureembed`, the same id [[FixtureEmbeddingModule]] supplies. */
+final class CollidingEmbeddingModule extends Llm4sProviderModule:
+  override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(CollidingEmbeddings)
+
 /**
  * A module whose embedding half throws while its chat half is fine.
  *

@@ -2,8 +2,9 @@ package org.llm4s.llmconnect.spi
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
-import org.llm4s.llmconnect.spi.fixtures.CollidingProvider
+import org.llm4s.llmconnect.config.{ ContextWindowResolver, EmbeddingProviderConfig, ProviderConfig }
+import org.llm4s.llmconnect.provider.EmbeddingProvider
+import org.llm4s.llmconnect.spi.fixtures.{ CollidingEmbeddings, CollidingProvider }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
 import org.llm4s.types.ProviderModelTypes.ProviderId
@@ -34,6 +35,13 @@ class ProviderRegistryCollisionSpec extends AnyWordSpec with Matchers:
       ModelRegistryService
     ): Result[LLMClient] = Left(ConfigurationError(s"stub $name"))
 
+  /** An embedding descriptor with no provider behind it: enough to exercise registration. */
+  final private class StubEmbeddingProvider(name: String) extends EmbeddingProviderDescriptor:
+    val id: ProviderId = ProviderId(name)
+
+    def build(config: EmbeddingProviderConfig): Result[EmbeddingProvider] =
+      Left(ConfigurationError(s"stub $name"))
+
   "ProviderRegistry.of" should {
     "report a collision when two descriptors share an id, and still let the last one win" in {
       val first  = new StubProvider("acme")
@@ -48,6 +56,21 @@ class ProviderRegistryCollisionSpec extends AnyWordSpec with Matchers:
 
     "report no collision when every id is unique" in {
       ProviderRegistry.of(new StubProvider("acme"), new StubProvider("beta")).report.hasCollisions shouldBe false
+    }
+  }
+
+  "ProviderRegistry.ofEmbeddings" should {
+    "report a collision when two embedding descriptors share an id, and still let the last one win" in {
+      val first  = new StubEmbeddingProvider("acme")
+      val second = new StubEmbeddingProvider("acme")
+
+      val registry = ProviderRegistry.ofEmbeddings(first, second)
+
+      registry.findEmbedding(ProviderId("acme")) shouldBe Some(second)
+      registry.report.hasCollisions shouldBe true
+      registry.report.collisions shouldBe Seq(
+        ProviderIdCollision("embedding", "acme", "explicit registration", None)
+      )
     }
   }
 
@@ -80,6 +103,27 @@ class ProviderRegistryCollisionSpec extends AnyWordSpec with Matchers:
       val loader = new URLClassLoader(Array(url), parent)
 
       ProviderRegistry.discover(loader).report.hasCollisions shouldBe false
+    }
+
+    "name both modules when two service entries claim the same embedding id" in {
+      val parent = getClass.getClassLoader
+      def urlFor(directory: String) =
+        Option(parent.getResource(s"provider-discovery/$directory/"))
+          .getOrElse(fail(s"fixture directory 'provider-discovery/$directory/' is missing from test resources"))
+      val loader = new URLClassLoader(Array(urlFor("embeddings"), urlFor("colliding-embeddings")), parent)
+
+      val registry = ProviderRegistry.discover(loader)
+
+      registry.findEmbedding(ProviderId("fixtureembed")) shouldBe Some(CollidingEmbeddings)
+      registry.report.hasCollisions shouldBe true
+
+      val collision = registry.report.collisions
+        .find(_.id == "fixtureembed")
+        .getOrElse(fail(s"no collision reported: ${registry.report.describe}"))
+
+      collision.kind shouldBe "embedding"
+      collision.keptModule shouldBe "org.llm4s.llmconnect.spi.fixtures.CollidingEmbeddingModule"
+      collision.droppedModule shouldBe Some("org.llm4s.llmconnect.spi.fixtures.FixtureEmbeddingModule")
     }
   }
 
