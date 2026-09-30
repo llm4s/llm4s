@@ -1,9 +1,7 @@
 package org.llm4s.trace
 
-import org.llm4s.agent.{ AgentState, AgentStatus }
 import org.llm4s.llmconnect.config.TracingSettings
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -82,13 +80,13 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val events2  = mutable.Buffer.empty[TraceEvent]
     val combined = TracingComposer.combine(new RecordingTracing(events1), new RecordingTracing(events2))
 
-    val state = createAgentState()
-    combined.traceEvent(state.toTraceEvent) shouldBe Right(())
+    val event = agentStateEvent()
+    combined.traceEvent(event) shouldBe Right(())
 
     events1 should have size 1
     events2 should have size 1
     events1.head shouldBe a[TraceEvent.AgentStateUpdated]
-    events1.head.asInstanceOf[TraceEvent.AgentStateUpdated].messages shouldBe state.conversation.messages
+    events1.head.asInstanceOf[TraceEvent.AgentStateUpdated].messages shouldBe event.messages
   }
 
   it should "delegate traceToolCall to all tracers" in {
@@ -161,7 +159,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val tracer   = new RecordingTracing(events)
     val filtered = TracingComposer.filter(tracer)(_.eventType != "agent_state_updated")
 
-    filtered.traceEvent(createAgentState().toTraceEvent) shouldBe Right(())
+    filtered.traceEvent(agentStateEvent()) shouldBe Right(())
     events shouldBe empty
   }
 
@@ -204,7 +202,7 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
       case other                           => other
     }
 
-    transformed.traceEvent(createAgentState().toTraceEvent) shouldBe Right(())
+    transformed.traceEvent(agentStateEvent()) shouldBe Right(())
     events should have size 1
     events.head.asInstanceOf[TraceEvent.AgentStateUpdated].messages shouldBe empty
   }
@@ -296,13 +294,12 @@ class TracingEdgeCasesSpec extends AnyFlatSpec with Matchers {
   // Helpers
   // =========================================================================
 
-  private def createAgentState(): AgentState =
-    AgentState(
-      conversation = Conversation(Seq(UserMessage("Hello"))),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.InProgress,
-      logs = Vector("log1")
-    )
+  /**
+   * The event an in-progress agent's `AgentState#toTraceEvent` produces, built directly: these
+   * specs are about the composers, and the agent runtime is in `llm4s-agent` (#1242).
+   */
+  private def agentStateEvent(): TraceEvent.AgentStateUpdated =
+    TraceEvent.AgentStateUpdated("InProgress", messageCount = 1, logCount = 1, messages = Seq(UserMessage("Hello")))
 
   private def createCompletion(): Completion =
     Completion(

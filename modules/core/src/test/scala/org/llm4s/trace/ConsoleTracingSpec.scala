@@ -1,13 +1,8 @@
 package org.llm4s.trace
 
-import org.llm4s.agent.{ Agent, AgentContext, AgentState, AgentStatus }
-import org.llm4s.llmconnect.LLMClient
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.{ Schema, ToolBuilder, ToolRegistry }
-import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-import upickle.default.{ macroRW, ReadWriter }
 
 import java.io.ByteArrayOutputStream
 
@@ -15,9 +10,12 @@ import java.io.ByteArrayOutputStream
  * Tests for ConsoleTracing.
  *
  * The first sections check that each call succeeds. "What ConsoleTracing prints" captures stdout
- * and checks the content: each event's header and fields, truncation, and the order of the
- * events a whole agent run with a tool call prints (#1003). Based on the console suite in #1035
- * by @kannupriyakalra, deduplicated against the cases above.
+ * and checks the content: each event's header and fields, and truncation (#1003). Based on the
+ * console suite in #1035 by @kannupriyakalra, deduplicated against the cases above.
+ *
+ * What an agent run prints - `AgentState#toTraceEvent`, and the order of the events a whole run
+ * with a tool call produces - is in `llm4s-agent`'s `AgentRunTracingSpec`, with the agent
+ * runtime (#1242).
  */
 class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
 
@@ -62,84 +60,50 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
 
   it should "trace agent state with minimal configuration" in {
     val tracing = new ConsoleTracing()
-    val state = AgentState(
-      conversation = Conversation(Seq.empty),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.InProgress
-    )
+    val event   = TraceEvent.AgentStateUpdated("InProgress", messageCount = 0, logCount = 0)
 
-    noException should be thrownBy tracing.traceEvent(state.toTraceEvent)
+    noException should be thrownBy tracing.traceEvent(event)
   }
 
   it should "trace agent state with full configuration" in {
     val tracing = new ConsoleTracing()
-    val state = AgentState(
-      conversation = Conversation(
-        Seq(
-          UserMessage("Hello, how are you?"),
-          AssistantMessage(Some("I'm doing well, thanks!"), Seq.empty),
-          UserMessage("Great to hear!")
-        )
-      ),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.Complete,
-      initialQuery = Some("Test query"),
-      logs = Vector("[assistant] Generated response", "[tool] Executed tool")
+    val messages = Seq(
+      UserMessage("Hello, how are you?"),
+      AssistantMessage(Some("I'm doing well, thanks!"), Seq.empty),
+      UserMessage("Great to hear!")
     )
+    val event = TraceEvent.AgentStateUpdated("Complete", messages.size, logCount = 2, messages)
 
-    noException should be thrownBy tracing.traceEvent(state.toTraceEvent)
+    noException should be thrownBy tracing.traceEvent(event)
   }
 
   it should "trace agent state with system message" in {
-    val tracing = new ConsoleTracing()
-    val state = AgentState(
-      conversation = Conversation(
-        Seq(
-          SystemMessage("You are a helpful assistant"),
-          UserMessage("Hello")
-        )
-      ),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.InProgress
-    )
+    val tracing  = new ConsoleTracing()
+    val messages = Seq(SystemMessage("You are a helpful assistant"), UserMessage("Hello"))
+    val event    = TraceEvent.AgentStateUpdated("InProgress", messages.size, logCount = 0, messages)
 
-    noException should be thrownBy tracing.traceEvent(state.toTraceEvent)
+    noException should be thrownBy tracing.traceEvent(event)
   }
 
   it should "trace agent state with assistant tool calls" in {
     val tracing  = new ConsoleTracing()
     val toolCall = ToolCall("call-123", "calculator", ujson.Obj("a" -> 1, "b" -> 2))
-    val state = AgentState(
-      conversation = Conversation(
-        Seq(
-          UserMessage("Calculate 1+2"),
-          AssistantMessage(Some("Let me calculate that."), Seq(toolCall)),
-          ToolMessage("3", "call-123")
-        )
-      ),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.Complete
+    val messages = Seq(
+      UserMessage("Calculate 1+2"),
+      AssistantMessage(Some("Let me calculate that."), Seq(toolCall)),
+      ToolMessage("3", "call-123")
     )
+    val event = TraceEvent.AgentStateUpdated("Complete", messages.size, logCount = 0, messages)
 
-    noException should be thrownBy tracing.traceEvent(state.toTraceEvent)
+    noException should be thrownBy tracing.traceEvent(event)
   }
 
   it should "trace agent state with various log types" in {
     val tracing = new ConsoleTracing()
-    val state = AgentState(
-      conversation = Conversation(Seq.empty),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.InProgress,
-      logs = Vector(
-        "[assistant] Generated response",
-        "[tool] Executed calculator",
-        "[tools] Available: calculator, web_search",
-        "[system] Agent initialized",
-        "Unformatted log entry"
-      )
-    )
+    // `AgentStateUpdated` carries the number of log lines, not the lines themselves.
+    val event = TraceEvent.AgentStateUpdated("InProgress", messageCount = 0, logCount = 5)
 
-    noException should be thrownBy tracing.traceEvent(state.toTraceEvent)
+    noException should be thrownBy tracing.traceEvent(event)
   }
 
   // ==========================================================================
@@ -360,87 +324,4 @@ class ConsoleTracingSpec extends AnyFlatSpec with Matchers {
     output should include("Message: boom")
     output should include("Context: agent step")
   }
-
-  it should "show the status and counts of the AgentStateUpdated built by AgentState#toTraceEvent" in {
-    val state = AgentState(
-      conversation = Conversation(Seq(UserMessage("hi"), AssistantMessage("hello"), UserMessage("bye"))),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.Failed("tool crashed"),
-      logs = Vector("one", "two")
-    )
-
-    val output = printed(new ConsoleTracing().traceEvent(state.toTraceEvent))
-
-    output should include("--- AGENT STATE UPDATED ---")
-    output should include("Status: Failed(tool crashed)")
-    output should include("Messages: 3")
-    output should include("Logs: 2")
-  }
-
-  it should "print an agent run with a tool call in the order it happened" in {
-    val toolCall = ToolCall("call-1", "echo", ujson.Obj("message" -> "hello"))
-    val client = new SequencedClient(
-      Seq(
-        Completion("turn-1", 0L, "", "test-model", AssistantMessage("", Seq(toolCall)), List(toolCall), usage1),
-        Completion("turn-2", 0L, "Echoed.", "test-model", AssistantMessage("Echoed."), usage = usage2)
-      )
-    )
-
-    var result: Result[AgentState] = Right(AgentState(Conversation(Seq.empty), ToolRegistry.empty))
-    val output = printed {
-      result = echoTool.flatMap { tool =>
-        new Agent(client)
-          .run("Echo hello", new ToolRegistry(Seq(tool)), context = AgentContext(tracing = Some(new ConsoleTracing())))
-      }
-    }
-
-    result.map(_.status) shouldBe Right(AgentStatus.Complete)
-
-    val firstCompletion  = output.indexOf("ID: turn-1")
-    val tool             = output.indexOf("Tool: echo")
-    val secondCompletion = output.indexOf("ID: turn-2")
-    val lastState        = output.lastIndexOf("--- AGENT STATE UPDATED ---")
-
-    Seq(firstCompletion, tool, secondCompletion, lastState).foreach(_ should be >= 0)
-    firstCompletion should be < tool       // the model asks for the tool...
-    tool should be < secondCompletion      // ...the tool runs before the model is called again...
-    secondCompletion should be < lastState // ...and the run ends with its final state.
-    output should include("""Input: {"message":"hello"}""")
-    output should include("Prompt Tokens: 20")
-    output.substring(lastState) should include("Status: Complete")
-  }
-
-  private def usage1 = Some(TokenUsage(promptTokens = 20, completionTokens = 10, totalTokens = 30))
-  private def usage2 = Some(TokenUsage(promptTokens = 30, completionTokens = 5, totalTokens = 35))
-
-  /** Returns each completion in turn, then the last one again. */
-  private class SequencedClient(completions: Seq[Completion]) extends LLMClient {
-    private var calls = 0
-
-    override def complete(conversation: Conversation, options: CompletionOptions): Result[Completion] = {
-      val completion = completions(calls.min(completions.size - 1))
-      calls += 1
-      Right(completion)
-    }
-
-    override def streamComplete(
-      conversation: Conversation,
-      options: CompletionOptions,
-      onChunk: StreamedChunk => Unit
-    ): Result[Completion] = complete(conversation, options)
-
-    override def getContextWindow(): Int     = 4096
-    override def getReserveCompletion(): Int = 1024
-  }
-
-  private case class EchoResult(echo: String)
-  private object EchoResult {
-    implicit val rw: ReadWriter[EchoResult] = macroRW
-  }
-
-  private def echoTool = ToolBuilder[Map[String, Any], EchoResult](
-    "echo",
-    "Echoes the supplied message back",
-    Schema.`object`[Map[String, Any]]("Echo parameters").withRequiredField("message", Schema.string("The message"))
-  ).withHandler(_.getString("message").map(EchoResult(_))).buildSafe()
 }

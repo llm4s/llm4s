@@ -33,6 +33,12 @@ The LLM4S Agent Framework provides a production-ready foundation for building LL
 
 ## Quick Start
 
+The agent runtime is the `llm4s-agent` module, alongside `llm4s-core` and a provider module:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-agent" % llm4sVersion
+```
+
 ### Basic Agent
 
 ```scala

@@ -3,9 +3,7 @@ package org.llm4s.trace
 import ch.qos.logback.classic.spi.ILoggingEvent
 import ch.qos.logback.classic.{ Level, Logger => LogbackLogger }
 import ch.qos.logback.core.read.ListAppender
-import org.llm4s.agent.{ AgentState, AgentStatus }
 import org.llm4s.llmconnect.model._
-import org.llm4s.toolapi.ToolRegistry
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.slf4j.LoggerFactory
@@ -23,8 +21,7 @@ import scala.util.Try
  *
  * `TracingSpec` already checks that each method returns `Right(())` once, and
  * `TracingEdgeCasesSpec` that `shutdown()` does not throw. This spec covers what those do not:
- * every `TraceEvent` variant, including the `AgentStateUpdated` built by
- * `AgentState#toTraceEvent`; that `NoOpTracing` never reads what it is given; that it writes
+ * every `TraceEvent` variant, including `AgentStateUpdated`; that `NoOpTracing` never reads what it is given; that it writes
  * nothing to stdout, stderr or the log; repeated and concurrent calls; and calls after
  * `shutdown()`.
  *
@@ -37,22 +34,21 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
 
   private val toolCall = ToolCall("call-1", "calculator", ujson.Obj("a" -> 1, "b" -> 2))
 
-  /** An agent state with every kind of message in it, as an agent run leaves it. */
-  private val agentState = AgentState(
-    conversation = Conversation(
-      Seq(
-        SystemMessage("You are a calculator."),
-        UserMessage("What is 1 + 2?"),
-        AssistantMessage(None, Seq(toolCall)),
-        ToolMessage("""{"result":3}""", "call-1"),
-        AssistantMessage("3")
-      )
-    ),
-    tools = ToolRegistry.empty,
-    initialQuery = Some("What is 1 + 2?"),
-    status = AgentStatus.Complete,
-    logs = Vector("[tool] calculator", "[assistant] 3")
+  /** Every kind of message, as an agent run leaves its conversation. */
+  private val runMessages = Seq(
+    SystemMessage("You are a calculator."),
+    UserMessage("What is 1 + 2?"),
+    AssistantMessage(None, Seq(toolCall)),
+    ToolMessage("""{"result":3}""", "call-1"),
+    AssistantMessage("3")
   )
+
+  /**
+   * The event a completed agent's `AgentState#toTraceEvent` produces, built directly: the agent
+   * runtime is in `llm4s-agent`, whose `AgentRunTracingSpec` covers `toTraceEvent` (#1242).
+   */
+  private val agentStateEvent =
+    TraceEvent.AgentStateUpdated("Complete", runMessages.size, logCount = 2, messages = runMessages)
 
   private val completionWithToolCalls = Completion(
     id = "completion-1",
@@ -74,7 +70,7 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
     TraceEvent.ToolExecuted("calculator", "{}", "missing argument 'a'", duration = 1L, success = false),
     TraceEvent.ErrorOccurred(new IllegalStateException("boom", new RuntimeException("cause")), "agent step"),
     TraceEvent.TokenUsageRecorded(usage, "test-model", "completion"),
-    agentState.toTraceEvent,
+    agentStateEvent,
     TraceEvent.CustomEvent("custom", ujson.Obj("nested" -> ujson.Arr(1, 2, 3))),
     TraceEvent.EmbeddingUsageRecorded(EmbeddingUsage(100, 100), "embed-model", "indexing", inputCount = 4),
     TraceEvent.CostRecorded(0.002, "test-model", "completion", tokenCount = 20, costType = "total"),
@@ -131,7 +127,7 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
     (out.toString, err.toString, appender.list.asScala.toList.filter(_.getThreadName == thread))
   }
 
-  "NoOpTracing" should "accept every TraceEvent variant, including AgentStateUpdated from AgentState#toTraceEvent" in {
+  "NoOpTracing" should "accept every TraceEvent variant, including AgentStateUpdated" in {
     val tracing = new NoOpTracing()
 
     everyEvent.foreach(event => withClue(event.eventType)(tracing.traceEvent(event) shouldBe Right(())))
@@ -141,12 +137,12 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
 
   it should "trace agent state as an ordinary event, whatever the state holds" in {
     val tracing = new NoOpTracing()
-    val empty   = AgentState(Conversation(Seq.empty), ToolRegistry.empty)
-    val failed  = agentState.copy(status = AgentStatus.Failed("tool crashed"))
+    val empty   = TraceEvent.AgentStateUpdated("InProgress", messageCount = 0, logCount = 0)
+    val failed  = agentStateEvent.copy(status = "Failed(tool crashed)")
 
-    tracing.traceEvent(agentState.toTraceEvent) shouldBe Right(())
-    tracing.traceEvent(empty.toTraceEvent) shouldBe Right(())
-    tracing.traceEvent(failed.toTraceEvent) shouldBe Right(())
+    tracing.traceEvent(agentStateEvent) shouldBe Right(())
+    tracing.traceEvent(empty) shouldBe Right(())
+    tracing.traceEvent(failed) shouldBe Right(())
   }
 
   it should "succeed for failed tool calls and empty tool call arguments" in {

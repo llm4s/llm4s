@@ -104,6 +104,10 @@ flags:
     paths:
       - modules/agent-tools/src/main/scala
     carryforward: true
+  agent:
+    paths:
+      - modules/agent/src/main/scala
+    carryforward: true
   trace-opentelemetry:
     paths:
       - modules/trace-opentelemetry/src/main/scala

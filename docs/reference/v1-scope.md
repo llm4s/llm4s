@@ -23,7 +23,7 @@ What has actually moved so far, in the build but not yet in a release:
 | [4](https://github.com/llm4s/llm4s/issues/1131) | none - the provider registration SPI (`ProviderDescriptor`, discovered through `META-INF/services`) that slice 5's modules register through | in the build, unpublished |
 | [5](https://github.com/llm4s/llm4s/issues/1132) | `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (with Mistral and Cohere), `llm4s-voyage` - `llm4s-core` now holds no provider client | in the build, unpublished |
 | [6](https://github.com/llm4s/llm4s/issues/1133) | `llm4s-observability` (Langfuse, the trace collector, `CostTracker`); `OpenTelemetryConfig` joins the existing `llm4s-observability-otel`; `llm4s-observability-prometheus` (Prometheus). The tracing and metrics contracts stay in `llm4s-core`, which declares no observability dependency | in the build, unpublished |
-| [7](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (the built-in tools and their config); `llm4s-agent` to follow | in the build, unpublished |
+| [7](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (the built-in tools and their config), `llm4s-agent` (`agent`, `assistant`) | in the build, unpublished |
 
 The latest release tag is `v0.4.1`, which is still a single `llm4s-core` (0.4.0 was the artifact rename only, [#1141](https://github.com/llm4s/llm4s/issues/1141)). The first release to publish separate module artifacts will be **0.5.0**, after slice 6; it is also the MiMa baseline.
 
@@ -60,8 +60,8 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `security` | `llm4s-core` | Frozen at 1.0 |
 | `llmconnect` (API only — see provider split below) | `llm4s-core` | Frozen at 1.0 |
 | `reliability` | `llm4s-core` | Frozen at 1.0 |
-| `agent` (excludes `agent/memory`) | `llm4s-agent` | Frozen at 1.0 |
-| `assistant` | `llm4s-agent` | Beta |
+| `agent` (excludes `agent/memory`) — **carved** | `llm4s-agent` | Frozen at 1.0 |
+| `assistant` — **carved** | `llm4s-agent` | Beta |
 | `trace` — the contract: `Tracing`, `TraceEvent`, `TracingComposer`, `TracingMode`, the `trace/spi` `TracingBackend` SPI, `NoOpTracing`, `ConsoleTracing`, and `TracingSettings` (in `llmconnect/config`) | `llm4s-core` | Frozen at 1.0 |
 | `metrics` — the contract: `MetricsCollector` | `llm4s-core` | Frozen at 1.0 |
 | `trace` — Langfuse (`LangfuseTracing`, its batch sender and `TracingBackend`), `TraceCollectorTracing`, `trace/model`, `trace/store`; `metrics` — `CostTracker` — **carved** | `llm4s-observability` | Beta |

@@ -1,9 +1,7 @@
 package org.llm4s.trace
 
-import org.llm4s.agent.{ AgentState, AgentStatus }
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.config.TracingSettings
-import org.llm4s.toolapi.ToolRegistry
 import org.llm4s.types.Result
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -70,7 +68,7 @@ class TracingSpec extends AnyFlatSpec with Matchers {
     val tracing = new NoOpTracing()
 
     tracing.traceEvent(TraceEvent.CustomEvent("test", ujson.Obj())) shouldBe Right(())
-    tracing.traceEvent(createTestAgentState().toTraceEvent) shouldBe Right(())
+    tracing.traceEvent(agentStateEvent()) shouldBe Right(())
     tracing.traceToolCall("tool", "input", "output") shouldBe Right(())
     tracing.traceError(new RuntimeException("test")) shouldBe Right(())
     tracing.traceCompletion(createTestCompletion(), "gpt-4") shouldBe Right(())
@@ -99,9 +97,7 @@ class TracingSpec extends AnyFlatSpec with Matchers {
 
   it should "handle agent state tracing" in {
     val tracing = new ConsoleTracing()
-    val state   = createTestAgentState()
-
-    tracing.traceEvent(state.toTraceEvent).isRight shouldBe true
+    tracing.traceEvent(agentStateEvent()).isRight shouldBe true
   }
 
   it should "handle completion tracing" in {
@@ -298,14 +294,13 @@ class TracingSpec extends AnyFlatSpec with Matchers {
 
   // ============ Helper Methods and Classes ============
 
-  private def createTestAgentState(): AgentState =
-    AgentState(
-      conversation = Conversation(Seq(UserMessage("Hello"))),
-      tools = ToolRegistry.empty,
-      status = AgentStatus.InProgress,
-      initialQuery = Some("test query"),
-      logs = Vector("log1")
-    )
+  /**
+   * The event an in-progress agent's `AgentState#toTraceEvent` produces. Built directly, as the
+   * tracing contract sees it: the agent runtime is in `llm4s-agent`, whose specs cover
+   * `toTraceEvent` itself (#1242).
+   */
+  private def agentStateEvent(): TraceEvent.AgentStateUpdated =
+    TraceEvent.AgentStateUpdated("InProgress", messageCount = 1, logCount = 1, messages = Seq(UserMessage("Hello")))
 
   private def createTestCompletion(): Completion =
     Completion(

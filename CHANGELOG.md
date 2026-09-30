@@ -104,6 +104,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus `MediaExtractor` matching on raw MIME prefixes with no type to name the answer.
 
 ### Changed
+- **`llm4s-agent`: the agent runtime leaves `llm4s-core`** - the second slice 7 carve
+  ([#1242](https://github.com/llm4s/llm4s/issues/1242), decision D4). `org.llm4s.agent` - `Agent`,
+  `AgentState`, `AgentContext`, guardrails, handoffs, orchestration and streaming events - and
+  `org.llm4s.assistant`, the console assistant (Beta), move to a new module; package names are
+  unchanged. `agent.memory` was already `llm4s-memory`, which does not depend on the new module.
+  Nothing in `llm4s-core` referred to either package, and neither reads configuration, so the
+  carve is a move: core keeps what the agent is built on - `LLMClient`, the tool API, and the
+  tracing contract, which takes the `TraceEvent.AgentStateUpdated` that `AgentState#toTraceEvent`
+  builds. `fansi`, used only by the assistant, leaves core with it. `llm4s-workspace-client`
+  gains the dependency for its `codegen` package.
+
+  Source break (pre-MiMa): code that uses the agent runtime adds `llm4s-agent`; no import
+  changes. See the
+  [migration note](docs/reference/migration.md#slice-7-llm4s-agent---the-agent-runtime-leaves-core).
 - **`llm4s-agent-tools`: the built-in tools leave `llm4s-core`** - the first slice 7 carve
   ([#1242](https://github.com/llm4s/llm4s/issues/1242), decisions D2 and D3). `BuiltinTools` and
   all of `org.llm4s.toolapi.builtin` (DateTime, Calculator, UUID, JSON, filesystem, HTTP, shell, and

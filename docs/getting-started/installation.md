@@ -384,6 +384,24 @@ only if you name these types in your own signatures. It replaces three overlappi
 types that used to ship in `llm4s-core`, which is a source break — see the
 [migration note](../reference/migration.md#slice-3-llm4s-media).
 
+### For agents (`Agent`, guardrails, handoffs, orchestration)
+
+{: .note }
+> Not yet published. `llm4s-agent` exists in the build as of
+> [#1242](https://github.com/llm4s/llm4s/issues/1242) but ships in the next release;
+> in `0.4.1` and earlier this code is still inside `llm4s-core`.
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-agent" % llm4sVersion // same version as llm4s-core
+```
+
+The agent runtime - `org.llm4s.agent` (`Agent`, `AgentState`, guardrails, handoffs,
+orchestration, streaming events) and the console assistant, `org.llm4s.assistant` - lives here.
+Agent memory is the separate `llm4s-memory`; the ready-made tools are `llm4s-agent-tools`.
+`llm4s-core` keeps what the agent is built on: `LLMClient`, the tool API and the tracing
+contract. Package names are unchanged. See the
+[migration note](../reference/migration.md#slice-7-llm4s-agent---the-agent-runtime-leaves-core).
+
 ### For built-in tools (web search, HTTP, filesystem, shell)
 
 {: .note }

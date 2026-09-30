@@ -32,7 +32,7 @@ Slice order — each is an issue with its own scope and gotchas:
 | 4 ✅ | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
 | 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (incl. Mistral, Cohere), `llm4s-voyage`; core holds no client |
 | 6 🚧 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `TracingBackend` SPI; `llm4s-observability` (Langfuse, trace collector/model/store, `CostTracker`); `llm4s-observability-prometheus`; then 0.5.0 + MiMa |
-| 7 🚧 | [#1242](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (built-in tools + their config); then `llm4s-agent` (`agent`, `assistant`). Blocks 0.5.0 |
+| 7 🚧 | [#1242](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (built-in tools + their config); `llm4s-agent` (`agent`, `assistant`); then the spine re-audit. Blocks 0.5.0 |
 
 **Invariants for every carve:**
 
@@ -100,6 +100,7 @@ llm4s/
 │   │   └── voyage/            # Voyage AI embedding provider
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)
+│   ├── agent/                 # Agent runtime: Agent, guardrails, handoffs, orchestration, streaming; assistant (published)
 │   ├── agent-tools/           # Built-in tools: core utilities, filesystem, HTTP, shell, web search (published)
 │   ├── samples/               # Usage examples
 │   ├── workspace/             # Containerized execution
@@ -221,7 +222,12 @@ Slice 7 (#1242) carves what the spine audit found left in core. `modules/agent-t
 depends on **core only, never on the agent runtime** - the tools serve plain `ToolRegistry` tool
 calling too. Core keeps the tool API (`ToolFunction`, `ToolRegistry`, schemas, execution).
 `UsageSummary`/`ModelUsage` moved to `org.llm4s.llmconnect.model` so `llm4s-observability` need not
-depend on `llm4s-agent`, which comes next.
+depend on `llm4s-agent`. `modules/agent` (`llm4s-agent`) then took `org.llm4s.agent` (bar
+`agent.memory`, already in `llm4s-memory`, which does not depend on it) and `org.llm4s.assistant`,
+with fansi. **Nothing in core may import either package** - the tracing contract takes a
+`TraceEvent.AgentStateUpdated`, which `AgentState#toTraceEvent` builds, so core's trace specs
+build that event directly and `AgentRunTracingSpec` in the agent module covers `toTraceEvent`.
+`workspaceClient` depends on `llm4s-agent` for `codegen`; `observability` only in Test scope.
 
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must
@@ -241,10 +247,11 @@ Core's dependency on it is temporary and leaves with the `llm4s-image` carve.
 - `types/` - Result type, newtypes
 - `config/` - Llm4sConfig + typed loaders
 - `llmconnect/` - LLM client and providers
-- `agent/` - Agent framework, guardrails, handoffs (memory lives in `modules/memory`)
 - `toolapi/` - Tool calling API (the built-in tools are in `modules/agent-tools`)
 - `trace/` - Tracing contract: `Tracing`, `TraceEvent`, `TracingMode`, the `TracingBackend` SPI,
   Console/NoOp (backends live in `modules/observability` and `modules/trace-opentelemetry`)
+
+The agent runtime (`org.llm4s.agent`, `org.llm4s.assistant`) is in `modules/agent/src/main/scala/org/llm4s/`.
 
 ## Common Commands
 

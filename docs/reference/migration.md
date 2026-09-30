@@ -1,5 +1,35 @@
 # Migration Guide
 
+## Slice 7: `llm4s-agent` - the agent runtime leaves core
+
+The second slice 7 carve ([#1242](https://github.com/llm4s/llm4s/issues/1242), decision D4)
+moves the agent runtime into a new module, **`llm4s-agent`**. Package names are unchanged, so no
+import changes; code that uses the agent adds one dependency:
+
+```scala
+libraryDependencies += "org.llm4s" %% "llm4s-agent" % "<version>"
+```
+
+| Moved to `llm4s-agent` | Package |
+|---|---|
+| `Agent`, `AgentState`, `AgentStatus`, `AgentContext`, `Handoff`, `ContextWindowConfig`, `AgentTraceFormatter` | `org.llm4s.agent` |
+| Guardrails - the traits, `CompositeGuardrail`, the built-in validators, the LLM-as-judge and RAG guardrails, PII patterns | `org.llm4s.agent.guardrails.*` |
+| DAG orchestration | `org.llm4s.agent.orchestration` |
+| Streaming events (`AgentEvent` and its cases) | `org.llm4s.agent.streaming` |
+| The console assistant: `AssistantAgent`, `SessionManager`, `ConsoleInterface` (Beta) | `org.llm4s.assistant` |
+
+**Not moved:** agent memory (`org.llm4s.agent.memory`) is already `llm4s-memory`, which does not
+depend on `llm4s-agent`. `UsageSummary` and `ModelUsage` moved to `org.llm4s.llmconnect.model` in
+`llm4s-core` just before this (see below). The ready-made tools are `llm4s-agent-tools`.
+
+**What stays in `llm4s-core`** is what the agent is built on: `LLMClient` and `LLMConnect`, the
+tool API (`ToolFunction`, `ToolRegistry`), and the tracing contract. An agent run is traced through
+`TraceEvent.AgentStateUpdated`, built by `AgentState#toTraceEvent`, so tracing backends need
+nothing from the agent module.
+
+Other modules: `llm4s-workspace-client` now depends on `llm4s-agent`, for its `codegen` package.
+`fansi` leaves `llm4s-core` with the assistant, its only user.
+
 ## Slice 7: `llm4s-agent-tools` - the built-in tools leave core
 
 The first slice 7 carve ([#1242](https://github.com/llm4s/llm4s/issues/1242), decisions D2 and D3)

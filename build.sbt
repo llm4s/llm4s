@@ -202,6 +202,7 @@ lazy val llm4s = (project in file("."))
     observability,
     observabilityPrometheus,
     traceOpentelemetry,
+    agent,
     agentTools,
     knowledgegraphNeo4j,
     benchmarks,
@@ -280,8 +281,9 @@ lazy val core = (project in file("modules/core"))
   .settings(
     name := "llm4s-core",
     commonSettings,
-    // Measured 75.90% statement coverage after the `agent-tools` carve took the built-in tools
-    // (66.18% covered) out (#1242); 74.09% after the `observability-prometheus` carve took
+    // Measured 73.67% statement coverage after the `agent` carve took the agent runtime (80.80%
+    // covered) out (#1242); 75.90% after the `agent-tools` carve took the built-in tools
+    // (66.18% covered) out; 74.09% after the `observability-prometheus` carve took
     // `PrometheusMetrics`, `PrometheusEndpoint` and `MetricsConfigLoader` (70.56% covered) out
     // (#1133); 73.59% after the `observability` carve took Langfuse, the trace
     // collector and `CostTracker` (94.52% covered) out; 74.65% with every provider client
@@ -294,10 +296,9 @@ lazy val core = (project in file("modules/core"))
     // and `openai` (62.34%) carves pushed it up. Floor is the measured value rounded down to
     // the nearest 5; ratchet it up, never down.
     //
-    // Held at 70 rather than ratcheted to 75 while carves are in flight: each one moves this
-    // number in whichever direction the departing code sat, and a floor with under a point of
-    // headroom would force a lowering the rule above forbids. Slice 5 is done; slice 7's
-    // `llm4s-agent` carve (#1242) is the last. Ratchet it when that has landed.
+    // It was held at 70 while carves were in flight, since each moved this number in whichever
+    // direction the departing code sat. With `agent` gone, the last carve has landed, and 73.67%
+    // rounds down to 70 anyway: from here the rule above applies as written.
     coverageFloor(70),
     Test / fork := true,
     Test / javaOptions ++= Seq(
@@ -338,8 +339,6 @@ lazy val core = (project in file("modules/core"))
       Deps.scalatest % Test,
       Deps.scalamock % Test,
       Deps.ujson,
-      // For `assistant.ConsoleInterface`, the only user of fansi.
-      Deps.fansi,
       Deps.config
     )
   )
@@ -734,7 +733,8 @@ lazy val workspaceShared = (project in file("modules/workspace/workspaceShared")
   )
 
 lazy val workspaceClient = (project in file("modules/workspace/workspaceClient"))
-  .dependsOn(workspaceShared, core)
+  // `agent` is for `codegen.CodeWorker` and `CodeGenExample`, which drive an `Agent` (#1242).
+  .dependsOn(workspaceShared, core, agent)
   .settings(
     name := "llm4s-workspace-client",
     commonSettings,
@@ -804,6 +804,7 @@ lazy val samples = (project in file("modules//samples"))
     knowledgegraphNeo4j,
     observability,
     observabilityPrometheus,
+    agent,
     agentTools
   )
   .settings(
@@ -868,7 +869,9 @@ lazy val workspaceSamples = (project in file("modules/workspace/workspaceSamples
 // Test depends on core's tests for `MockHttpClient`/`FailingHttpClient` and `ReferenceConfig`.
 
 lazy val observability = (project in file("modules/observability"))
-  .dependsOn(core % "compile->compile;test->test")
+  // `agent % Test` is for the Langfuse specs that trace a real `Agent` run. Test scope only:
+  // `CostTracker` builds a `UsageSummary`, which stayed in core for this reason (D1, #1242).
+  .dependsOn(core % "compile->compile;test->test", agent % Test)
   .settings(
     name := "llm4s-observability",
     commonSettings,
@@ -931,6 +934,36 @@ lazy val traceOpentelemetry = (project in file("modules/trace-opentelemetry"))
   )
 
 // ---- slice 7 of the modularisation programme (#1242) ----
+// `llm4s-agent` is the agent runtime: `org.llm4s.agent` (the `Agent`, `AgentState`, guardrails,
+// handoffs, orchestration and streaming events) and `org.llm4s.assistant` (the console
+// assistant, tiered Beta, and the only user of fansi). `agent.memory` was already carved into
+// `llm4s-memory`, which does not depend on this module. Package names are unchanged.
+//
+// Nothing in core imports either package, and neither reads config, so the carve is a move.
+// `UsageSummary` and `ModelUsage` went down to `llmconnect.model` first (D1, #1243) so that
+// `llm4s-observability` need not depend on the agent runtime. Core keeps the contracts the
+// agent is built on: `LLMClient`, `ToolRegistry`, `Tracing` and `TraceEvent`.
+//
+// Test depends on core's tests for `MockLLMClient`, `StubLLMClient` and the shared fixtures.
+lazy val agent = (project in file("modules/agent"))
+  .dependsOn(core % "compile->compile;test->test")
+  .settings(
+    name := "llm4s-agent",
+    commonSettings,
+    // Measured 80.80% statement coverage (`sbt coverage agent/test agent/coverageReport`) on the
+    // code as carved out of core. Floor is the measured value rounded down to the nearest 5.
+    // Never lower it.
+    coverageFloor(80),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.ujson,
+      Deps.fansi,
+      Deps.scalamock % Test
+    )
+  )
+
 // `llm4s-agent-tools` carries the ready-made tools: `org.llm4s.toolapi.builtin` (core utilities,
 // filesystem, HTTP, shell, and the Brave, DuckDuckGo and Exa search clients) and the demo
 // `toolapi.tools.WeatherTool`. They are integrations with third-party APIs, so they leave the
@@ -1010,7 +1043,8 @@ lazy val it = (project in file("modules/it"))
     workspaceClient,
     observability,
     observabilityPrometheus,
-    traceOpentelemetry
+    traceOpentelemetry,
+    agent
   )
   .settings(
     name := "llm4s-it",
@@ -1084,6 +1118,7 @@ lazy val docs = (project in file("modules/docs"))
     observability,
     observabilityPrometheus,
     traceOpentelemetry,
+    agent,
     agentTools,
     knowledgegraphNeo4j
   )
@@ -1114,6 +1149,7 @@ lazy val docs = (project in file("modules/docs"))
         (observability / Compile / sources).value ++
         (observabilityPrometheus / Compile / sources).value ++
         (traceOpentelemetry / Compile / sources).value ++
+        (agent / Compile / sources).value ++
         (agentTools / Compile / sources).value ++
         (knowledgegraphNeo4j / Compile / sources).value
     },
