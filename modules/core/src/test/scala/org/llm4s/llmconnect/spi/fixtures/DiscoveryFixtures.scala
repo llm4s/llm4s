@@ -95,6 +95,25 @@ final class FixtureBothHalvesModule extends Llm4sProviderModule:
   override def chatProviders: Seq[ProviderDescriptor]               = Seq(FixtureProvider)
   override def embeddingProviders: Seq[EmbeddingProviderDescriptor] = Seq(FixtureEmbeddings)
 
+/** A provider that collides with [[FixtureProvider]]'s id, to exercise collision reporting. */
+object CollidingProvider extends ProviderDescriptor:
+  val id: ProviderId                 = ProviderId("fixturecloud")
+  val configSpec: ProviderConfigSpec = ProviderConfigSpec(requiresApiKey = true)
+
+  def buildConfig(providerName: String, section: NamedProviderConfig)(using
+    ContextWindowResolver
+  ): Result[ProviderConfig] =
+    Left(ConfigurationError("colliding provider builds no config"))
+
+  def buildClient(config: ProviderConfig, options: LlmClientOptions)(using
+    ModelRegistryService
+  ): Result[LLMClient] =
+    Left(ConfigurationError("colliding provider builds no client"))
+
+/** A second module claiming `fixturecloud`, the same id [[FixtureProviderModule]] supplies. */
+final class CollidingProviderModule extends Llm4sProviderModule:
+  override def chatProviders: Seq[ProviderDescriptor] = Seq(CollidingProvider)
+
 /**
  * A module whose embedding half throws while its chat half is fine.
  *

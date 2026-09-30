@@ -1,0 +1,2 @@
+# A second module that claims the same id as the one in provider-discovery/good.
+org.llm4s.llmconnect.spi.fixtures.CollidingProviderModule
