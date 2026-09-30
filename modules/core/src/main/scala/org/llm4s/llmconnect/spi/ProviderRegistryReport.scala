@@ -41,6 +41,27 @@ final case class ProviderDiscoveryFailure(
 )
 
 /**
+ * A chat or embedding provider id two descriptors both registered; the later
+ * one won.
+ *
+ * `ProviderRegistry` has always resolved this by keeping the last
+ * registration, silently - this is what makes that resolution visible instead
+ * of invisible.
+ *
+ * @param kind          `"chat"` or `"embedding"`.
+ * @param id            the id two descriptors both claimed.
+ * @param keptModule    the module (or `"explicit registration"`) whose
+ *                       descriptor won.
+ * @param droppedModule the module that lost, when discovery can name it.
+ */
+final case class ProviderIdCollision(
+  kind: String,
+  id: String,
+  keptModule: String,
+  droppedModule: Option[String]
+)
+
+/**
  * How a [[ProviderRegistry]] came to hold what it holds.
  *
  * This is the debuggability half of classpath discovery. "Provider openai is
@@ -53,15 +74,20 @@ final case class ProviderDiscoveryFailure(
  *                   different from discovery running and finding nothing.
  * @param modules    the modules discovery loaded, in the order it saw them.
  * @param failures   the service entries it could not use.
+ * @param collisions the ids two descriptors both registered.
  */
 final case class ProviderRegistryReport(
   discovered: Boolean,
   modules: Seq[ProviderModuleReport] = Nil,
-  failures: Seq[ProviderDiscoveryFailure] = Nil
+  failures: Seq[ProviderDiscoveryFailure] = Nil,
+  collisions: Seq[ProviderIdCollision] = Nil
 ):
 
   /** True when any service entry failed to load. */
   def hasFailures: Boolean = failures.nonEmpty
+
+  /** True when two descriptors registered the same id. */
+  def hasCollisions: Boolean = collisions.nonEmpty
 
   /**
    * One line describing the scan, suitable for appending to an error message.
@@ -75,9 +101,10 @@ final case class ProviderRegistryReport(
       val failureDetail =
         if failures.isEmpty then "0 failed"
         else s"${failures.size} failed: ${failures.map(_.detail).mkString("; ")}"
-      s"Discovery scanned ${modules.size} ${if modules.size == 1 then "module" else "modules"}; $failureDetail."
+      val collisionDetail = if collisions.isEmpty then "" else s" ${collisions.size} id collision(s)."
+      s"Discovery scanned ${modules.size} ${if modules.size == 1 then "module" else "modules"}; $failureDetail.$collisionDetail"
 
-  /** A multi-line description of every module and failure, for logs and diagnostics. */
+  /** A multi-line description of every module, failure and collision, for logs and diagnostics. */
   def describe: String =
     val header =
       if discovered then summary
@@ -90,7 +117,12 @@ final case class ProviderRegistryReport(
 
     val failureLines = failures.map(failure => s"  ! ${failure.detail}")
 
-    (header +: (moduleLines ++ failureLines)).mkString("\n")
+    val collisionLines = collisions.map { collision =>
+      val dropped = collision.droppedModule.getOrElse("an earlier registration")
+      s"  * ${collision.kind} id '${collision.id}' registered by both $dropped and ${collision.keptModule}; ${collision.keptModule} won."
+    }
+
+    (header +: (moduleLines ++ failureLines ++ collisionLines)).mkString("\n")
 
 object ProviderRegistryReport:
 

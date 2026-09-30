@@ -210,15 +210,32 @@ object ProviderRegistry:
   ): ProviderRegistry =
     // Deduplicate by id keeping the *last* registration, so `withProvider` overrides rather
     // than silently losing to what is already there - a user-supplied descriptor must be able
-    // to replace a discovered one of the same name.
-    new ProviderRegistry(
-      lastWins(descriptors)(_.id.asString),
-      lastWins(embeddingDescriptors)(_.id.asString),
-      report
+    // to replace a discovered one of the same name. Outside `discover()` there is no module to
+    // blame a dropped id on, so collisions found here are reported against "explicit
+    // registration"; `discover()` computes its own, module-attributed collisions instead of
+    // going through this path.
+    val (dedupedChat, chatCollisionIds)            = lastWins(descriptors)(_.id.asString)
+    val (dedupedEmbeddings, embeddingCollisionIds) = lastWins(embeddingDescriptors)(_.id.asString)
+    val collisions =
+      chatCollisionIds.map(id => ProviderIdCollision("chat", id, "explicit registration", None)) ++
+        embeddingCollisionIds.map(id => ProviderIdCollision("embedding", id, "explicit registration", None))
+    build(
+      dedupedChat,
+      dedupedEmbeddings,
+      if collisions.isEmpty then report else report.copy(collisions = report.collisions ++ collisions)
     )
 
-  private def lastWins[A](values: Vector[A])(key: A => String): Vector[A] =
-    values.reverse.distinctBy(key).reverse
+  private def build(
+    descriptors: Vector[ProviderDescriptor],
+    embeddingDescriptors: Vector[EmbeddingProviderDescriptor],
+    report: ProviderRegistryReport
+  ): ProviderRegistry =
+    new ProviderRegistry(descriptors, embeddingDescriptors, report)
+
+  /** Deduplicates by `key`, last registration wins; also returns which keys collided. */
+  private def lastWins[A](values: Vector[A])(key: A => String): (Vector[A], Vector[String]) =
+    val duplicateKeys = values.groupBy(key).collect { case (k, vs) if vs.sizeIs > 1 => k }.toVector
+    (values.reverse.distinctBy(key).reverse, duplicateKeys)
 
   /**
    * Every provider on `loader`'s classpath, found through `META-INF/services`.
@@ -284,13 +301,41 @@ object ProviderRegistry:
                 )
               )
 
-    val scan   = loop(Scan())
-    val report = ProviderRegistryReport(discovered = true, scan.modules, scan.failures)
+    val scan = loop(Scan())
 
+    val (dedupedChat, chatCollisionIds)            = lastWins(scan.descriptors)(_.id.asString)
+    val (dedupedEmbeddings, embeddingCollisionIds) = lastWins(scan.embeddingDescriptors)(_.id.asString)
+    val collisions =
+      collisionsOf(scan.modules, chatCollisionIds, "chat", _.providerIds) ++
+        collisionsOf(scan.modules, embeddingCollisionIds, "embedding", _.embeddingProviderIds)
+
+    val report = ProviderRegistryReport(discovered = true, scan.modules, scan.failures, collisions)
+
+    collisions.foreach { collision =>
+      val dropped = collision.droppedModule.getOrElse("an earlier registration")
+      logger.warn(
+        s"Provider discovery: duplicate ${collision.kind} id '${collision.id}' registered by both " +
+          s"$dropped and ${collision.keptModule}; ${collision.keptModule} won."
+      )
+    }
     scan.failures.foreach(failure => logger.warn(s"Provider discovery: ${failure.detail}"))
     logger.debug(s"Provider discovery complete.\n${report.describe}")
 
-    fromDescriptors(scan.descriptors, scan.embeddingDescriptors, report)
+    build(dedupedChat, dedupedEmbeddings, report)
+
+  /** Turns duplicate ids into [[ProviderIdCollision]]s, naming the modules that supplied them. */
+  private def collisionsOf(
+    modules: Vector[ProviderModuleReport],
+    duplicateIds: Vector[String],
+    kind: String,
+    idsOf: ProviderModuleReport => Seq[String]
+  ): Vector[ProviderIdCollision] =
+    duplicateIds.map { id =>
+      val moduleNames = modules.filter(module => idsOf(module).contains(id)).map(_.moduleClass)
+      val kept        = moduleNames.lastOption.getOrElse("unknown module")
+      val dropped     = moduleNames.init.lastOption
+      ProviderIdCollision(kind, id, kept, dropped)
+    }
 
   /** What one pass of [[discover]] has accumulated so far. */
   final private case class Scan(
