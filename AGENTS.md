@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Modules
-- Core framework lives in `modules/core` (agents, LLM connectors, guardrails, tracing). Workspace support sits in `modules/workspace` (runner/client/shared), and runnable demos are in `modules/samples`. `docs/` stores documentation; `hooks/` provides the pre-commit installer. Sources live in `src/main/scala`; add version-specific sources under `src/main/scala-3` when needed. See also [szork](https://github.com/llm4s/szork) - a demo game showcasing LLM4S agents.
+- `modules/core` is the frozen spine (LLM client API, config, tool API, tracing and metrics contracts). The agent runtime and guardrails are `modules/agent`, the built-in tools `modules/agent-tools`, providers their own modules (`modules/openai`, `modules/anthropic`, …), and RAG, memory, MCP, image, speech and observability likewise; `build.sbt` lists them all. A new module must also be added to `hooks/pre-commit`. Workspace support sits in `modules/workspace` (runner/client/shared), and runnable demos are in `modules/samples`. `docs/` stores documentation; `hooks/` provides the pre-commit installer. Sources live in `src/main/scala`; add version-specific sources under `src/main/scala-3` when needed. See also [szork](https://github.com/llm4s/szork) - a demo game showcasing LLM4S agents.
 
 ## Build, Test, and Development Commands
 - Compile: `sbt compile`. Run examples via `sbt "samples/runMain org.llm4s.samples.basic.BasicLLMCallingExample"`.

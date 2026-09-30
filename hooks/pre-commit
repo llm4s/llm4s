@@ -84,16 +84,42 @@ PROJECT_CHANGED=""
 PROJECT_SRC=""
 PROJECT_TEST=""
 
+# Generated from build.sbt: every project with sources, keyed by its directory. Longer paths
+# come first so a nested module (modules/providers/voyage) wins over any prefix. A new module
+# must be added here - a staged Scala file under modules/ that maps to nothing fails the hook
+# rather than skipping it (see below).
 map_file_to_project() {
   local file="$1"
   case "$file" in
-    modules/core/*)                              echo "core" ;;
-    modules/samples/*)                           echo "samples" ;;
-    modules/trace-opentelemetry/*)               echo "traceOpentelemetry" ;;
-    modules/workspace/workspaceShared/*)          echo "workspaceShared" ;;
-    modules/workspace/workspaceClient/*)          echo "workspaceClient" ;;
-    modules/workspace/workspaceRunner/*)          echo "workspaceRunner" ;;
-    modules/workspace/workspaceSamples/*)         echo "workspaceSamples" ;;
+    modules/workspace/workspaceSamples/*) echo "workspaceSamples" ;;
+    modules/workspace/workspaceShared/*)  echo "workspaceShared" ;;
+    modules/workspace/workspaceClient/*)  echo "workspaceClient" ;;
+    modules/workspace/workspaceRunner/*)  echo "workspaceRunner" ;;
+    modules/observability-prometheus/*)   echo "observabilityPrometheus" ;;
+    modules/knowledgegraph-neo4j/*)       echo "knowledgegraphNeo4j" ;;
+    modules/trace-opentelemetry/*)        echo "traceOpentelemetry" ;;
+    modules/openai-compatible/*)          echo "openaiCompatible" ;;
+    modules/providers/voyage/*)           echo "voyage" ;;
+    modules/memory-postgres/*)            echo "memoryPostgres" ;;
+    modules/knowledgegraph/*)             echo "knowledgegraph" ;;
+    modules/config-policy/*)              echo "configPolicy" ;;
+    modules/observability/*)              echo "observability" ;;
+    modules/agent-tools/*)                echo "agentTools" ;;
+    modules/benchmarks/*)                 echo "benchmarks" ;;
+    modules/anthropic/*)                  echo "anthropic" ;;
+    modules/samples/*)                    echo "samples" ;;
+    modules/memory/*)                     echo "memory" ;;
+    modules/speech/*)                     echo "speech" ;;
+    modules/ollama/*)                     echo "ollama" ;;
+    modules/gemini/*)                     echo "gemini" ;;
+    modules/openai/*)                     echo "openai" ;;
+    modules/media/*)                      echo "media" ;;
+    modules/image/*)                      echo "image" ;;
+    modules/agent/*)                      echo "agent" ;;
+    modules/core/*)                       echo "core" ;;
+    modules/rag/*)                        echo "rag" ;;
+    modules/mcp/*)                        echo "mcp" ;;
+    modules/it/*)                         echo "it" ;;
     *) echo "" ;;
   esac
 }
@@ -106,10 +132,14 @@ is_test_file() {
   esac
 }
 
+UNMAPPED=""
 while IFS= read -r file; do
   case "$file" in
     *.scala)
       proj=$(map_file_to_project "$file")
+      case "$file" in
+        modules/*) [ -z "$proj" ] && UNMAPPED="${UNMAPPED:+$UNMAPPED }$file" ;;
+      esac
       if [ -n "$proj" ]; then
         set_add PROJECT_CHANGED "$proj"
         if is_test_file "$file"; then
@@ -122,43 +152,201 @@ while IFS= read -r file; do
   esac
 done <<< "$STAGED_FILES"
 
+# A module the hook does not know would otherwise be skipped silently - which is how every module
+# carved from core between slices 1 and 7 went unchecked (#1252).
+if [ -n "$UNMAPPED" ]; then
+  echo "Error: hooks/pre-commit maps no sbt project to: $UNMAPPED"
+  echo "Add the module to map_file_to_project and propagate_downstream in hooks/pre-commit."
+  exit 1
+fi
+
 if set_is_empty PROJECT_CHANGED; then
   echo "No Scala files in known subprojects — skipping pre-commit checks."
   exit 0
 fi
 
 # ── Downstream compile propagation ───────────────────────────────────────────
-# When source files change in a project, downstream dependents must compile.
+# When a project changes, its dependents must still compile - main and test code. A test-source
+# change counts too: dependents on `test->test` (most carved modules) use core's test fixtures.
 
 DOWNSTREAM_COMPILE=""
 
+# Generated from build.sbt: for each project, every project that depends on it, directly or
+# transitively, in any configuration - a Test-scoped edge (observability -> agent % Test) can
+# break a dependent's tests just as a compile edge breaks its main code. `docs` is left out: it
+# has no sources of its own and is built by CI's ScalaDoc job.
 propagate_downstream() {
   local proj="$1"
   case "$proj" in
-    core)
+    media)
+      set_add DOWNSTREAM_COMPILE rag
+      set_add DOWNSTREAM_COMPILE image
       set_add DOWNSTREAM_COMPILE samples
-      set_add DOWNSTREAM_COMPILE traceOpentelemetry
-      set_add DOWNSTREAM_COMPILE workspaceClient
       set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      set_add DOWNSTREAM_COMPILE benchmarks
+      ;;
+    core)
+      set_add DOWNSTREAM_COMPILE knowledgegraph
+      set_add DOWNSTREAM_COMPILE rag
+      set_add DOWNSTREAM_COMPILE memory
+      set_add DOWNSTREAM_COMPILE memoryPostgres
+      set_add DOWNSTREAM_COMPILE mcp
+      set_add DOWNSTREAM_COMPILE speech
+      set_add DOWNSTREAM_COMPILE image
+      set_add DOWNSTREAM_COMPILE ollama
+      set_add DOWNSTREAM_COMPILE gemini
+      set_add DOWNSTREAM_COMPILE anthropic
+      set_add DOWNSTREAM_COMPILE openaiCompatible
+      set_add DOWNSTREAM_COMPILE voyage
+      set_add DOWNSTREAM_COMPILE openai
+      set_add DOWNSTREAM_COMPILE workspaceClient
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE observability
+      set_add DOWNSTREAM_COMPILE observabilityPrometheus
+      set_add DOWNSTREAM_COMPILE traceOpentelemetry
+      set_add DOWNSTREAM_COMPILE agent
+      set_add DOWNSTREAM_COMPILE agentTools
+      set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
+      set_add DOWNSTREAM_COMPILE it
+      set_add DOWNSTREAM_COMPILE benchmarks
+      ;;
+    knowledgegraph)
+      set_add DOWNSTREAM_COMPILE rag
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
+      set_add DOWNSTREAM_COMPILE it
+      set_add DOWNSTREAM_COMPILE benchmarks
+      ;;
+    rag)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      set_add DOWNSTREAM_COMPILE benchmarks
+      ;;
+    memory)
+      set_add DOWNSTREAM_COMPILE memoryPostgres
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    memoryPostgres)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    mcp)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    speech)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    image)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    ollama)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    gemini)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    anthropic)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    openaiCompatible)
+      set_add DOWNSTREAM_COMPILE rag
+      set_add DOWNSTREAM_COMPILE openai
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      set_add DOWNSTREAM_COMPILE benchmarks
+      ;;
+    voyage)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    openai)
+      set_add DOWNSTREAM_COMPILE rag
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      set_add DOWNSTREAM_COMPILE benchmarks
       ;;
     workspaceShared)
       set_add DOWNSTREAM_COMPILE workspaceClient
       set_add DOWNSTREAM_COMPILE workspaceRunner
       set_add DOWNSTREAM_COMPILE workspaceSamples
-      ;;
-    samples)
-      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
       ;;
     workspaceClient)
       set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
       ;;
     workspaceRunner)
       set_add DOWNSTREAM_COMPILE workspaceSamples
       ;;
+    samples)
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
+    observability)
+      set_add DOWNSTREAM_COMPILE rag
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      set_add DOWNSTREAM_COMPILE benchmarks
+      ;;
+    observabilityPrometheus)
+      set_add DOWNSTREAM_COMPILE image
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    traceOpentelemetry)
+      set_add DOWNSTREAM_COMPILE it
+      ;;
+    agent)
+      set_add DOWNSTREAM_COMPILE rag
+      set_add DOWNSTREAM_COMPILE workspaceClient
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE observability
+      set_add DOWNSTREAM_COMPILE it
+      set_add DOWNSTREAM_COMPILE benchmarks
+      ;;
+    agentTools)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
+    knowledgegraphNeo4j)
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      ;;
   esac
 }
 
-for proj in $PROJECT_SRC; do
+for proj in $PROJECT_CHANGED; do
   propagate_downstream "$proj"
 done
 
@@ -182,10 +370,10 @@ for proj in $PROJECT_CHANGED; do
   fi
 done
 
-# 3) compile-only for downstream dependents (that aren't already being compiled)
+# 3) compile (main and test) for downstream dependents that aren't already being tested
 for proj in $DOWNSTREAM_COMPILE; do
   if ! set_contains PROJECT_CHANGED "$proj"; then
-    SBT_CMDS+=("${proj}/compile")
+    SBT_CMDS+=("${proj}/Test/compile")
   fi
 done
 
