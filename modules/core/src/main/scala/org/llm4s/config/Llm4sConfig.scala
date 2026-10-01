@@ -272,7 +272,9 @@ object Llm4sConfig {
     apiKeySourcesFrom(ConfigSource.default)
 
   /** [[apiKeySources()*]] for a custom PureConfig source, as [[providerFrom]] is for the default provider. */
-  private[llm4s] def apiKeySourcesFrom(source: ConfigSource)(using ProviderRegistry): Result[Map[ProviderName, ApiKeySource]] =
+  private[llm4s] def apiKeySourcesFrom(source: ConfigSource)(using
+    ProviderRegistry
+  ): Result[Map[ProviderName, ApiKeySource]] =
     org.llm4s.config.ProvidersConfigLoader.loadSections(source).map(_.apiKeySources)
 
   /**
