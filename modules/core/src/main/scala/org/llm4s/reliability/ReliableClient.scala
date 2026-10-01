@@ -28,13 +28,18 @@ import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference 
  * @param providerName Explicit provider name for stable metrics labels
  * @param config Reliability configuration
  * @param collector Optional metrics collector for observability
+ * @param clock milliseconds since the epoch, for deadlines and the circuit's recovery timeout;
+ *              injectable for tests
+ * @param sleep how the client waits between attempts; injectable so a test can record the
+ *              delays chosen, or throw `InterruptedException` to simulate an interrupted wait
  */
 final class ReliableClient(
   underlying: LLMClient,
   providerName: String,
   config: ReliabilityConfig,
   collector: Option[MetricsCollector] = None,
-  clock: () => Long = () => System.currentTimeMillis()
+  clock: () => Long = () => System.currentTimeMillis(),
+  sleep: Duration => Unit = delay => Thread.sleep(delay.toMillis)
 ) extends LLMClient {
 
   // Local rate limit, consulted on every attempt (retries included) before the call is made
@@ -175,7 +180,7 @@ final class ReliableClient(
               } else {
                 // Sleep and retry
                 try
-                  Thread.sleep(delay.toMillis)
+                  sleep(delay)
                 catch {
                   case _: InterruptedException =>
                     return interruptedDuringRetryDelay(error) {
@@ -236,7 +241,7 @@ final class ReliableClient(
             collector.foreach(_.recordRetryAttempt(providerName, attemptNumber))
 
             try
-              Thread.sleep(delay.toMillis)
+              sleep(delay)
             catch {
               case _: InterruptedException =>
                 return interruptedDuringRetryDelay(error) {

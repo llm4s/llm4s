@@ -160,16 +160,20 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 600, burstCapacity = 1))
       .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
       .withoutDeadline
-    val client = new ReliableClient(underlying, "test-provider", config)
+    val waits = scala.collection.mutable.Buffer.empty[Duration]
+    val client = new ReliableClient(
+      underlying,
+      "test-provider",
+      config,
+      sleep = delay => { waits += delay; Thread.sleep(delay.toMillis) }
+    )
 
     client.complete(conversation).isRight shouldBe true
-    // The bucket is now empty: the retry is scheduled for the next token (~100ms), not the
-    // 30s a RateLimitError otherwise suggests.
-    client.decideRetry(1, RateLimitError.local("test-provider")) match {
-      case RetryDecision.Retry(delay) => delay.toMillis should be <= 100L
-      case other                      => fail(s"expected a retry, got $other")
-    }
+    // The bucket is now empty: the client waits for the next token (~100ms, rounded up to whole
+    // milliseconds), not the 30s a RateLimitError otherwise suggests, and then succeeds.
     client.complete(conversation).isRight shouldBe true
+    waits should not be empty
+    all(waits.map(_.toMillis)) should ((be > 0L).and(be <= 100L))
     underlying.callCount.get() shouldBe 2
   }
 
@@ -207,22 +211,35 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     config: ReliabilityConfig
   ): (Result[Completion], Boolean, CircuitState) = {
     val underlying = new CountingClient(ok)
-    val client     = new ReliableClient(underlying, "test-provider", config)
+    // The wait for the next token is interrupted.
+    val client = new ReliableClient(
+      underlying,
+      "test-provider",
+      config,
+      sleep = _ => throw new InterruptedException("cancelled")
+    )
     client.complete(conversation).isRight shouldBe true // spend the only token
 
-    // The next call waits ~1s for a token; interrupt it while it sleeps.
-    @volatile var outcome: Option[(Result[Completion], Boolean)] = None
-    val caller = new Thread(() => {
-      val r = client.complete(conversation)
-      outcome = Some((r, Thread.currentThread().isInterrupted))
-    })
-    caller.start()
-    Thread.sleep(200)
-    caller.interrupt()
-    caller.join(5000)
+    val result      = client.complete(conversation)
+    val interrupted = Thread.interrupted() // reads and clears the flag, so it can't leak
     underlying.callCount.get() shouldBe 1
-    val (result, flag) = outcome.getOrElse(fail("the call did not return"))
-    (result, flag, client.currentCircuitState)
+    (result, interrupted, client.currentCircuitState)
+  }
+
+  it should "report an interrupted wait to retry a provider error as an interruption" in {
+    val underlying = new CountingClient(timingOut)
+    val config = ReliabilityConfig.default
+      .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
+      .withoutDeadline
+    val client = new ReliableClient(
+      underlying,
+      "test-provider",
+      config,
+      sleep = _ => throw new InterruptedException("cancelled")
+    )
+    val result = client.complete(conversation)
+    Thread.interrupted() shouldBe true
+    result.left.toOption.get shouldBe a[org.llm4s.error.ExecutionError]
   }
 
   private def waitsForToken = ReliabilityConfig.default
