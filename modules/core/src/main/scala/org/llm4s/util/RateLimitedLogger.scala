@@ -13,13 +13,11 @@ import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong }
  * Multiple threads may pass shouldLog check, but compareAndSet ensures only one logs.
  * Minor event count drift is acceptable for best-effort logging.
  *
- * SLF4J dependency provided transitively via logback-classic.
- *
  * @param logger SLF4J logger instance
  * @param throttleSeconds Minimum seconds between log messages
  * @param throttleCount Maximum events before forcing a log
  */
-final class RateLimitedLogger(
+final private[llm4s] class RateLimitedLogger(
   logger: Logger,
   throttleSeconds: Long = 60,
   throttleCount: Int = 100
@@ -62,7 +60,7 @@ final class RateLimitedLogger(
   }
 }
 
-object RateLimitedLogger {
+private[llm4s] object RateLimitedLogger {
 
   /** Create rate limiter with default thresholds (60s, 100 events) */
   def apply(logger: Logger): RateLimitedLogger =

@@ -118,22 +118,9 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
       nonRecoverable should have size 2 // AuthenticationError, ValidationError
     }
 
-    "integrate with cats Show" in {
-      // Test cats integration
-      val error = AuthenticationError("openai", "invalid key")
-      val shown = error.show
-
-      shown should include("AuthenticationError")
-      shown should include("Authentication failed for openai")
-      shown should include("invalid key[provider=openai]")
-    }
-
     "maintain backward compatibility" in {
       // Ensure old patterns still work
       val error = ValidationError("field", "reason")
-
-      // Old isRecoverable method should still work (with deprecation warning)
-      error.isRecoverable shouldBe false
 
       // Formatted method should work
       error.formatted should include("ValidationError")

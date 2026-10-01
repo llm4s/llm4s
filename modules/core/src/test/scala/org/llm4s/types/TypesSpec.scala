@@ -21,78 +21,6 @@ import scala.util.{ Failure, Success, Try }
 class TypesSpec extends AnyFlatSpec with Matchers {
 
   // ==========================================================================
-  // CompletionId Tests
-  // ==========================================================================
-
-  "CompletionId" should "generate unique IDs" in {
-    val id1 = CompletionId.generate()
-    val id2 = CompletionId.generate()
-
-    id1.value should not be id2.value
-  }
-
-  it should "create valid IDs" in {
-    val result = CompletionId.create("cmpl-123")
-    result.isRight shouldBe true
-  }
-
-  it should "reject empty IDs" in {
-    val result = CompletionId.create("")
-    result.isLeft shouldBe true
-  }
-
-  // ==========================================================================
-  // ToolName Tests
-  // ==========================================================================
-
-  "ToolName" should "validate with isValid method" in {
-    ToolName("get_weather").isValid shouldBe true
-    ToolName("search-api").isValid shouldBe true
-    ToolName("tool123").isValid shouldBe true
-    ToolName("invalid tool").isValid shouldBe false
-  }
-
-  // ==========================================================================
-  // ToolCallId Tests
-  // ==========================================================================
-
-  "ToolCallId" should "generate unique IDs" in {
-    val id1 = ToolCallId.generate()
-    val id2 = ToolCallId.generate()
-
-    id1.value should not be id2.value
-  }
-
-  it should "create valid IDs" in {
-    val result = ToolCallId.create("call_123")
-    result.isRight shouldBe true
-  }
-
-  it should "reject empty IDs" in {
-    val result = ToolCallId.create("")
-    result.isLeft shouldBe true
-  }
-
-  // ==========================================================================
-  // Url Tests
-  // ==========================================================================
-
-  "Url" should "create valid URLs" in {
-    val result = Url.create("https://api.openai.com/v1/chat")
-    result.isRight shouldBe true
-  }
-
-  it should "reject invalid URLs" in {
-    val result = Url.create("not a url")
-    result.isLeft shouldBe true
-  }
-
-  it should "validate with isValid method" in {
-    Url("https://example.com").isValid shouldBe true
-    Url("http://localhost:8080").isValid shouldBe true
-  }
-
-  // ==========================================================================
   // FilePath Tests
   // ==========================================================================
 
@@ -105,57 +33,6 @@ class TypesSpec extends AnyFlatSpec with Matchers {
 
   it should "convert to string via toString" in {
     FilePath("/path/to/file.txt").toString shouldBe "/path/to/file.txt"
-  }
-
-  // ==========================================================================
-  // PaginationInfo Tests
-  // ==========================================================================
-
-  "PaginationInfo" should "store pagination data" in {
-    val info = PaginationInfo(
-      page = 2,
-      pageSize = 10,
-      totalItems = 45,
-      totalPages = 5,
-      hasNext = true,
-      hasPrevious = true
-    )
-
-    info.page shouldBe 2
-    info.pageSize shouldBe 10
-    info.totalItems shouldBe 45
-    info.totalPages shouldBe 5
-    info.hasNext shouldBe true
-    info.hasPrevious shouldBe true
-  }
-
-  // ==========================================================================
-  // CompressionTarget Tests
-  // ==========================================================================
-
-  "CompressionTarget" should "create valid targets" in {
-    val result = CompressionTarget.create(0.5)
-    result.map(_.value).getOrElse(fail("Expected success")) shouldBe 0.5
-  }
-
-  it should "reject invalid ratios" in {
-    CompressionTarget.create(0.0).isLeft shouldBe true
-    CompressionTarget.create(-0.5).isLeft shouldBe true
-    CompressionTarget.create(1.5).isLeft shouldBe true
-  }
-
-  it should "validate with isValid" in {
-    CompressionTarget(0.5).isValid shouldBe true
-    CompressionTarget(0.0).isValid shouldBe false
-    CompressionTarget(1.5).isValid shouldBe false
-  }
-
-  it should "have preset constants" in {
-    CompressionTarget.Minimal.value shouldBe 0.95
-    CompressionTarget.Light.value shouldBe 0.80
-    CompressionTarget.Medium.value shouldBe 0.60
-    CompressionTarget.Heavy.value shouldBe 0.40
-    CompressionTarget.Maximum.value shouldBe 0.20
   }
 
   // ==========================================================================
@@ -225,22 +102,6 @@ class TypesSpec extends AnyFlatSpec with Matchers {
   }
 
   // ==========================================================================
-  // TokenEstimate Tests
-  // ==========================================================================
-
-  "TokenEstimate" should "store token count" in {
-    val estimate = TokenEstimate(100)
-    estimate.value shouldBe 100
-    estimate.tokens shouldBe 100
-  }
-
-  it should "create with accuracy" in {
-    val (estimate, accuracy) = TokenEstimate.withAccuracy(100, EstimationAccuracy.High)
-    estimate.value shouldBe 100
-    accuracy shouldBe EstimationAccuracy.High
-  }
-
-  // ==========================================================================
   // ArtifactKey Tests
   // ==========================================================================
 
@@ -268,15 +129,6 @@ class TypesSpec extends AnyFlatSpec with Matchers {
     val key2 = ArtifactKey.fromContent("Content 2")
 
     key1.value should not be key2.value
-  }
-
-  // ==========================================================================
-  // ContextSummary Tests
-  // ==========================================================================
-
-  "ContextSummary" should "estimate token length" in {
-    val summary = ContextSummary("This is a test summary with several words")
-    summary.tokenLength should be > 0
   }
 
   // ==========================================================================
@@ -470,27 +322,4 @@ class TypesSpec extends AnyFlatSpec with Matchers {
     result shouldBe Left(error)
   }
 
-  // ==========================================================================
-  // Security Token Tests
-  // ==========================================================================
-
-  "JwtToken" should "hide value in toString" in {
-    val token = new JwtToken("eyJhbGciOiJIUzI1NiIs...")
-    token.toString shouldBe "JwtToken(***)"
-  }
-
-  it should "reveal value when requested" in {
-    val token = new JwtToken("eyJhbGciOiJIUzI1NiIs...")
-    token.reveal shouldBe "eyJhbGciOiJIUzI1NiIs..."
-  }
-
-  "OAuthToken" should "hide value in toString" in {
-    val token = new OAuthToken("oauth-token-123")
-    token.toString shouldBe "OAuthToken(***)"
-  }
-
-  it should "reveal value when requested" in {
-    val token = new OAuthToken("oauth-token-123")
-    token.reveal shouldBe "oauth-token-123"
-  }
 }

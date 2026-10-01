@@ -25,6 +25,4 @@ trait RecoverableError extends LLMError {
 
   /** Maximum number of retry attempts recommended. */
   def maxRetries: Int = 3
-
-  final override def isRecoverable: Boolean = true
 }

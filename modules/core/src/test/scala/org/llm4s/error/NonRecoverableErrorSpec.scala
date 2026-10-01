@@ -547,10 +547,7 @@ class NonRecoverableErrorSpec extends AnyFlatSpec with Matchers {
       SimpleError("m")
     )
 
-    errors.foreach { error =>
-      error.isRecoverable shouldBe false
-      LLMError.isRecoverable(error) shouldBe false
-    }
+    errors.foreach(error => LLMError.isRecoverable(error) shouldBe false)
   }
 
   // ============ LLMError Companion Object ============

@@ -204,7 +204,7 @@ object MessageType {
 }
 
 // Show instances for error types
-object ShowInstances {
+private[assistant] object ShowInstances {
   implicit val showAssistantError: Show[AssistantError] = Show.show {
     case AssistantError.IOError(message, _, _)      => s"IO Error: $message"
     case AssistantError.EOFError(message, _)        => s"EOF Error: $message"

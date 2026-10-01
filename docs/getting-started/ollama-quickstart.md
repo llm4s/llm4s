@@ -462,11 +462,11 @@ object OllamaTools extends App {
       // Mock implementation
       WeatherResult(s"Weather in $location: Sunny, 72F")
     }
-  }.build()
-
-  val tools = new ToolRegistry(Seq(getWeather))
+  }.buildSafe()
 
   val result = for {
+    weatherTool    <- getWeather
+    tools          = new ToolRegistry(Seq(weatherTool))
     providerConfig <- Llm4sConfig.defaultProvider()
     registry       <- Llm4sConfig.modelRegistryService()
     given ModelRegistryService = registry

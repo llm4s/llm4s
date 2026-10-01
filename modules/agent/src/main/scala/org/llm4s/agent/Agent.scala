@@ -411,14 +411,6 @@ class Agent(client: LLMClient) {
         Right(state)
     }
 
-  @deprecated("Use runStep(state, context)", "0.3.0")
-  def runStep(state: AgentState, debug: Boolean): Result[AgentState] =
-    runStep(state, AgentContext(debug = debug))
-
-  @deprecated("Use runStep(state, context)", "0.3.0")
-  def runStep(state: AgentState, tracing: Option[Tracing], debug: Boolean): Result[AgentState] =
-    runStep(state, AgentContext(tracing = tracing, debug = debug))
-
   /**
    * Renders the agent state as a human-readable markdown document.
    *
@@ -655,32 +647,6 @@ class Agent(client: LLMClient) {
       validatedState <- GuardrailApplicator.validateOutput(finalState, outputGuardrails)
     } yield validatedState
 
-  @deprecated("Use run(..., context = AgentContext(...))", "0.3.0")
-  def run(
-    query: String,
-    tools: ToolRegistry,
-    inputGuardrails: Seq[InputGuardrail],
-    outputGuardrails: Seq[OutputGuardrail],
-    handoffs: Seq[Handoff],
-    maxSteps: Option[Int],
-    traceLogPath: Option[String],
-    systemPromptAddition: Option[String],
-    completionOptions: CompletionOptions,
-    debug: Boolean,
-    tracing: Option[Tracing]
-  ): Result[AgentState] =
-    runWithContext(
-      query,
-      tools,
-      inputGuardrails,
-      outputGuardrails,
-      handoffs,
-      maxSteps,
-      systemPromptAddition,
-      completionOptions,
-      AgentContext(tracing = tracing, debug = debug, traceLogPath = traceLogPath)
-    )
-
   /**
    * Appends a new user message to an existing conversation and runs the agent to completion.
    *
@@ -765,28 +731,6 @@ class Agent(client: LLMClient) {
     } yield validatedState
   }
 
-  @deprecated("Use continueConversation(..., context = AgentContext(...))", "0.3.0")
-  def continueConversation(
-    previousState: AgentState,
-    newUserMessage: String,
-    inputGuardrails: Seq[InputGuardrail],
-    outputGuardrails: Seq[OutputGuardrail],
-    maxSteps: Option[Int],
-    traceLogPath: Option[String],
-    contextWindowConfig: Option[ContextWindowConfig],
-    debug: Boolean,
-    tracing: Option[Tracing]
-  ): Result[AgentState] =
-    continueConversation(
-      previousState,
-      newUserMessage,
-      inputGuardrails,
-      outputGuardrails,
-      maxSteps,
-      contextWindowConfig,
-      AgentContext(tracing = tracing, debug = debug, traceLogPath = traceLogPath)
-    )
-
   /**
    * Run multiple conversation turns sequentially.
    * Each turn waits for the previous to complete before starting.
@@ -851,29 +795,6 @@ class Agent(client: LLMClient) {
       }
     }
   }
-
-  @deprecated("Use runMultiTurn(..., context = AgentContext(...))", "0.3.0")
-  def runMultiTurn(
-    initialQuery: String,
-    followUpQueries: Seq[String],
-    tools: ToolRegistry,
-    maxStepsPerTurn: Option[Int],
-    systemPromptAddition: Option[String],
-    completionOptions: CompletionOptions,
-    contextWindowConfig: Option[ContextWindowConfig],
-    debug: Boolean,
-    tracing: Option[Tracing]
-  ): Result[AgentState] =
-    runMultiTurn(
-      initialQuery,
-      followUpQueries,
-      tools,
-      maxStepsPerTurn,
-      systemPromptAddition,
-      completionOptions,
-      contextWindowConfig,
-      AgentContext(tracing = tracing, debug = debug)
-    )
 
   // ============================================================
   // Streaming Event-based Execution — delegates to AgentStreamingExecutor
@@ -1008,77 +929,6 @@ class Agent(client: LLMClient) {
       context
     )
 
-  @deprecated("Use runWithEvents(..., context = AgentContext(...))", "0.3.0")
-  def runWithEvents(
-    query: String,
-    tools: ToolRegistry,
-    onEvent: AgentEvent => Unit,
-    inputGuardrails: Seq[InputGuardrail],
-    outputGuardrails: Seq[OutputGuardrail],
-    handoffs: Seq[Handoff],
-    maxSteps: Option[Int],
-    traceLogPath: Option[String],
-    systemPromptAddition: Option[String],
-    completionOptions: CompletionOptions,
-    debug: Boolean,
-    tracing: Option[Tracing]
-  ): Result[AgentState] =
-    runWithEvents(
-      query,
-      tools,
-      onEvent,
-      inputGuardrails,
-      outputGuardrails,
-      handoffs,
-      maxSteps,
-      systemPromptAddition,
-      completionOptions,
-      AgentContext(tracing = tracing, debug = debug, traceLogPath = traceLogPath)
-    )
-
-  @deprecated("Use continueConversationWithEvents(..., context = AgentContext(...))", "0.3.0")
-  def continueConversationWithEvents(
-    previousState: AgentState,
-    newUserMessage: String,
-    onEvent: AgentEvent => Unit,
-    inputGuardrails: Seq[InputGuardrail],
-    outputGuardrails: Seq[OutputGuardrail],
-    maxSteps: Option[Int],
-    traceLogPath: Option[String],
-    contextWindowConfig: Option[ContextWindowConfig],
-    debug: Boolean,
-    tracing: Option[Tracing]
-  ): Result[AgentState] =
-    continueConversationWithEvents(
-      previousState,
-      newUserMessage,
-      onEvent,
-      inputGuardrails,
-      outputGuardrails,
-      maxSteps,
-      contextWindowConfig,
-      AgentContext(tracing = tracing, debug = debug, traceLogPath = traceLogPath)
-    )
-
-  @deprecated("Use runCollectingEvents(..., context = AgentContext(...))", "0.3.0")
-  def runCollectingEvents(
-    query: String,
-    tools: ToolRegistry,
-    maxSteps: Option[Int],
-    systemPromptAddition: Option[String],
-    completionOptions: CompletionOptions,
-    debug: Boolean,
-    tracing: Option[Tracing]
-  ): Result[(AgentState, Seq[AgentEvent])] =
-    runCollectingEvents(
-      query,
-      tools,
-      maxSteps,
-      systemPromptAddition,
-      completionOptions,
-      AgentContext(tracing = tracing, debug = debug)
-    )
-
   // ============================================================
   // Async Tool Execution with Configurable Strategy — delegates to AgentStreamingExecutor
   // ============================================================
@@ -1151,34 +1001,6 @@ class Agent(client: LLMClient) {
       context
     )
 
-  @deprecated("Use runWithStrategy(..., context = AgentContext(...))", "0.3.0")
-  def runWithStrategy(
-    query: String,
-    tools: ToolRegistry,
-    toolExecutionStrategy: ToolExecutionStrategy,
-    inputGuardrails: Seq[InputGuardrail],
-    outputGuardrails: Seq[OutputGuardrail],
-    handoffs: Seq[Handoff],
-    maxSteps: Option[Int],
-    traceLogPath: Option[String],
-    systemPromptAddition: Option[String],
-    completionOptions: CompletionOptions,
-    debug: Boolean,
-    tracing: Option[Tracing]
-  )(implicit ec: ExecutionContext): Result[AgentState] =
-    runWithStrategy(
-      query,
-      tools,
-      toolExecutionStrategy,
-      inputGuardrails,
-      outputGuardrails,
-      handoffs,
-      maxSteps,
-      systemPromptAddition,
-      completionOptions,
-      AgentContext(tracing = tracing, debug = debug, traceLogPath = traceLogPath)
-    )
-
   /**
    * Continue a conversation with a configurable tool execution strategy.
    *
@@ -1214,29 +1036,6 @@ class Agent(client: LLMClient) {
       context
     )
 
-  @deprecated("Use continueConversationWithStrategy(..., context = AgentContext(...))", "0.3.0")
-  def continueConversationWithStrategy(
-    previousState: AgentState,
-    newUserMessage: String,
-    toolExecutionStrategy: ToolExecutionStrategy,
-    inputGuardrails: Seq[InputGuardrail],
-    outputGuardrails: Seq[OutputGuardrail],
-    maxSteps: Option[Int],
-    traceLogPath: Option[String],
-    contextWindowConfig: Option[ContextWindowConfig],
-    debug: Boolean,
-    tracing: Option[Tracing]
-  )(implicit ec: ExecutionContext): Result[AgentState] =
-    continueConversationWithStrategy(
-      previousState,
-      newUserMessage,
-      toolExecutionStrategy,
-      inputGuardrails,
-      outputGuardrails,
-      maxSteps,
-      contextWindowConfig,
-      AgentContext(tracing = tracing, debug = debug, traceLogPath = traceLogPath)
-    )
 }
 
 object Agent {

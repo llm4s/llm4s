@@ -1,8 +1,6 @@
 package org.llm4s.core.safety
 
-import cats.data.ValidatedNec
 import cats.syntax.either._
-import cats.syntax.apply._
 import org.llm4s.error.LLMError
 import org.llm4s.types.Result
 
@@ -11,7 +9,7 @@ import scala.util.{ Failure, Success, Try }
 
 /**
  * Pure helpers for safe, typed error handling.
- * All helpers return Either-based results or cats ValidatedNec for aggregation.
+ * All helpers return Either-based results.
  */
 object Safety {
 
@@ -32,12 +30,6 @@ object Safety {
 
   def mapError[A](r: Result[A])(f: LLMError => LLMError): Result[A] =
     r.leftMap(f)
-
-  /** Sequence results and accumulate all errors using ValidatedNec. */
-  def sequenceV[A](xs: List[Result[A]]): ValidatedNec[LLMError, List[A]] =
-    xs.foldRight(cats.data.Validated.validNec[LLMError, List[A]](Nil)) { (r, acc) =>
-      (cats.data.Validated.fromEither(r).toValidatedNec, acc).mapN(_ :: _)
-    }
 
   /**
    * Minimal Future helpers

@@ -23,7 +23,6 @@ class ContextManagerSpec extends AnyFlatSpec with Matchers {
     val invalidConfig = ContextConfig(
       headroomPercent = HeadroomPercent(1.5), // Invalid: > 1.0
       maxSemanticBlocks = 5,
-      enableRollingSummary = false,
       enableDeterministicCompression = true,
       enableLLMCompression = false
     )
@@ -217,21 +216,6 @@ class ContextManagerSpec extends AnyFlatSpec with Matchers {
     config.enableLLMCompression shouldBe true
     config.summaryTokenTarget shouldBe 400
     config.enableSubjectiveEdits shouldBe false
-  }
-
-  "ContextConfig.legacy" should "support backward compatible configuration" in {
-    val config = ContextConfig.legacy(
-      headroomPercent = HeadroomPercent(0.10),
-      maxSemanticBlocks = 3,
-      enableRollingSummary = true,
-      enableDeterministicCompression = true,
-      enableLLMCompression = false
-    )
-
-    config.headroomPercent shouldBe HeadroomPercent(0.10)
-    config.maxSemanticBlocks shouldBe 3
-    config.enableRollingSummary shouldBe true
-    config.enableLLMCompression shouldBe false
   }
 
   // ============ Edge Cases ============

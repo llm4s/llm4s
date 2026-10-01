@@ -1,6 +1,5 @@
 package org.llm4s.error
 
-import cats.Show
 import org.slf4j.MDC
 
 /**
@@ -32,13 +31,6 @@ trait LLMError extends Product with Serializable {
   /** Error correlation IDs for debugging */
   def correlationId: Option[String] = Option(MDC.get("correlationId"))
 
-  /** DEPRECATED: Use type-level markers instead */
-  @deprecated("Use pattern matching on RecoverableError/NonRecoverableError traits", "0.1.9")
-  def isRecoverable: Boolean = this match {
-    case _: RecoverableError    => true
-    case _: NonRecoverableError => false
-  }
-
   /** Formatted error message with context */
   def formatted: String = {
     val contextStr = context.toList.map { case (k, v) => s"$k=$v" }.mkString("[", ",", "]")
@@ -50,19 +42,6 @@ trait LLMError extends Product with Serializable {
 }
 
 object LLMError {
-  @deprecated("Use ThrowableOps.RichThrowable#toLLMError with an ErrorMapper", since = "0.1.10")
-  def fromThrowable(throwable: Throwable): LLMError = throwable match {
-    case _: java.net.SocketTimeoutException =>
-      NetworkError("Request timeout", Some(throwable), "unknown")
-    case _: java.net.ConnectException =>
-      NetworkError("Connection failed", Some(throwable), "unknown")
-    case ex if Option(ex.getMessage).exists(_.contains("401")) =>
-      AuthenticationError("unknown", "Authentication failed")
-    case ex if Option(ex.getMessage).exists(_.contains("429")) =>
-      RateLimitError("unknown")
-    case ex =>
-      UnknownError(Option(ex.getMessage).getOrElse("Unknown error"), ex)
-  }
 
   /**
    * Type-safe recoverability checks
@@ -87,14 +66,6 @@ object LLMError {
 
   /** Static show method - always works */
   def show(error: LLMError): String = error.formatted
-
-  /** Extension methods for ergonomic usage */
-  implicit class LLMErrorDisplayOps(error: LLMError) {
-    def show: String    = error.formatted
-    def display: String = error.formatted
-  }
-
-  implicit val llmErrorShow: Show[LLMError] = Show.show(_.formatted)
 
   // Smart constructors for backward compatibility
   def processingFailed(operation: String, message: String, cause: Option[Throwable] = None): ProcessingError =

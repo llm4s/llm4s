@@ -385,10 +385,7 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
       SystemError("m")
     )
 
-    errors.foreach { error =>
-      error.isRecoverable shouldBe true
-      LLMError.isRecoverable(error) shouldBe true
-    }
+    errors.foreach(error => LLMError.isRecoverable(error) shouldBe true)
   }
 
   // ============ Formatting ============

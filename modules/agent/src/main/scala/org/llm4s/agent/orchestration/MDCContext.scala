@@ -11,7 +11,7 @@ import scala.concurrent.{ ExecutionContext, Future }
  * This utility captures, restores, and propagates MDC state to ensure consistent
  * logging context in Future-based and ExecutionContext-based pipelines.
  */
-object MDCContext {
+private[agent] object MDCContext {
 
   /**
    * Capture the current thread's MDC context as an immutable map.

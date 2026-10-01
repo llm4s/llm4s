@@ -28,7 +28,7 @@ object ProvidersConfigModel:
    *                     descriptor declares in `ProviderConfigSpec.extras`, and anything unknown,
    *                     which validation reports and drops
    */
-  final case class RawNamedProviderSection(
+  final private[llm4s] case class RawNamedProviderSection(
     provider: Option[String],
     model: Option[String],
     baseUrl: Option[String],
@@ -48,7 +48,7 @@ object ProvidersConfigModel:
    *  @param selectedProvider the name of the default provider, if set
    *  @param namedProviders   map of provider name to its raw section
    */
-  final case class RawProvidersConfig(
+  final private[llm4s] case class RawProvidersConfig(
     selectedProvider: Option[ProviderName],
     namedProviders: Map[ProviderName, RawNamedProviderSection]
   )

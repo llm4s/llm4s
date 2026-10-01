@@ -31,8 +31,8 @@ Slice order — each is an issue with its own scope and gotchas:
 | 3 ✅ | [#1130](https://github.com/llm4s/llm4s/issues/1130) | `llm4s-mcp`, `llm4s-media`, `llm4s-image`, `llm4s-speech` |
 | 4 ✅ | [#1131](https://github.com/llm4s/llm4s/issues/1131) | provider registration SPI |
 | 5 🚧 | [#1132](https://github.com/llm4s/llm4s/issues/1132) | provider modules - `llm4s-ollama`, `llm4s-gemini`, `llm4s-anthropic`, `llm4s-openai`, `llm4s-openai-compatible` (incl. Mistral, Cohere), `llm4s-voyage`; core holds no client |
-| 6 🚧 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `TracingBackend` SPI; `llm4s-observability` (Langfuse, trace collector/model/store, `CostTracker`); `llm4s-observability-prometheus`; then 0.5.0 + MiMa |
-| 7 🚧 | [#1242](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (built-in tools + their config); `llm4s-agent` (`agent`, `assistant`); then the spine re-audit. Blocks 0.5.0 |
+| 6 🚧 | [#1133](https://github.com/llm4s/llm4s/issues/1133) | `TracingBackend` SPI; `llm4s-observability` (Langfuse, trace collector/model/store, `CostTracker`); `llm4s-observability-prometheus`; pre-baseline API cleanup; then 0.5.0 + MiMa |
+| 7 ✅ | [#1242](https://github.com/llm4s/llm4s/issues/1242) | `llm4s-agent-tools` (built-in tools + their config); `llm4s-agent` (`agent`, `assistant`); spine re-audit (core 20.7k lines) |
 
 **Invariants for every carve:**
 
@@ -119,9 +119,9 @@ Slices 0 to 3 have landed. `modules/rag`, `modules/knowledgegraph`, `modules/mem
 are carved, so `modules/core` no longer holds `rag`, `vectorstore` (bar `PostgresVectorHelpers`,
 see below), `chunking`, `reranker`, `eval`, `knowledgegraph`, `agent/memory`, `mcp`,
 `imagegeneration`, `imageprocessing` or `speech`, nor any Tika/POI/PDFBox/jsoup/AWS, HikariCP,
-Postgres, SQLite, Java-WebSocket, Vosk or JNA dependency. What remains in core is the agent
-runtime, `llmconnect`, `toolapi`, `config`, `trace` and the provider clients - which slices 4
-to 6 address.
+Postgres, SQLite, Java-WebSocket, Vosk or JNA dependency. Slices 4 to 7 then took the
+provider clients, the observability integrations, the built-in tools and the agent runtime, so core
+is now the ~20k-line spine (see below).
 Those three JDBC dependencies also left `commonSettings`, which used to put them on every
 module's classpath - declare them per-module if you add database code. The build now has **no
 third-party resolvers at all**: the "Vosk Repository" at alphacephei.com was the last one, and
@@ -228,6 +228,22 @@ with fansi. **Nothing in core may import either package** - the tracing contract
 `TraceEvent.AgentStateUpdated`, which `AgentState#toTraceEvent` builds, so core's trace specs
 build that event directly and `AgentRunTracingSpec` in the agent module covers `toTraceEvent`.
 `workspaceClient` depends on `llm4s-agent` for `codegen`; `observability` only in Test scope.
+
+With slice 7, `llm4s-core` is the spine: 20.7k lines at the re-audit, 19.5k after cleanup pass 1 (`types`, `error`, `config`, `model`,
+`toolapi`, `context`, `llmconnect`, the `trace`/`metrics` contracts, `util`, `http`, `reliability`,
+`core/safety`, `security`, `resource`, `syntax`, `identity`), on cats, upickle, slf4j-api, Typesafe
+Config, pureconfig and jtokkit only ([re-audit](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540)).
+Before 0.5.0 freezes it under MiMa, **pre-baseline cleanup passes** remove what should not be
+frozen. Pass 1 removed the unused `org.llm4s.types` vocabulary (it keeps `Result`, its syntax and
+the newtypes the library takes), every `@deprecated` member of core and `Agent`, `ContextConfig`'s
+legacy field, `ClientStatus`, `StreamingOptions`, `RuntimeId`/`ModelId`, and cats `Show`/`Validated`
+on the API. Do not add them back: **a frozen module gains no speculative public types and no
+`@deprecated` members before the baseline** - delete instead, with a migration note - and a
+helper only llm4s modules use is `private[llm4s]`. Later passes take the open decisions on #1133:
+`NamedProviderConfig`'s OpenAI/Azure fields, OpenAI rules in `DefaultRequestTransformer` and
+`ProviderModelLister`, the `ToolRegistry` provider switch, single-consumer utilities
+(`SqlIdentifier`, `ChunkingUtils`, `SimilarityUtils`, `ManagedResource`), the `middleware`
+package, and whether the provider-plumbing classes are a frozen provider-author SPI.
 
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must

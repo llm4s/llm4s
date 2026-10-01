@@ -366,18 +366,6 @@ class ToolRegistry(initialTools: Seq[ToolFunction[_, _]]) {
     case "gemini"    => Right(getOpenAITools())
     case _           => Left(ValidationError("provider", s"Unsupported LLM provider: $provider"))
   }
-
-  /**
-   * Generate a specific format of tool definitions for a particular LLM provider.
-   *
-   * @param provider Provider name (case-insensitive): `"openai"`, `"anthropic"`, `"gemini"`
-   * @throws java.lang.IllegalArgumentException for unsupported provider names
-   */
-  @deprecated("Use getToolDefinitionsSafe() which returns Result[ujson.Value] for safe error handling", "0.2.9")
-  def getToolDefinitions(provider: String): ujson.Value = getToolDefinitionsSafe(provider) match {
-    case Right(tools) => tools
-    case Left(e)      => throw new IllegalArgumentException(e.formatted)
-  }
 }
 
 object ToolRegistry {

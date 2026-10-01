@@ -797,6 +797,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules inseparable; moving that one file broke the cycle.
 
 ### Removed
+- **Pre-baseline API cleanup, pass 1: dead, deprecated and accidental public API leaves the
+  spine** ([#1133](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540)). Before
+  0.5.0 sets the MiMa baseline, `llm4s-core` and `llm4s-agent` drop what nothing used or what was
+  already deprecated, so it is not frozen:
+  - `org.llm4s.types` keeps the `Result` type and its syntax and the newtypes the library uses;
+    117 speculative aliases and wrappers go (MCP, image, audio, video, fine-tuning, plugin,
+    workflow, code-gen, cache, metrics, HTTP and auth types, `Map[String, Any]` aliases, and
+    `CompletionId`, `ToolName`, `ToolCallId`, `Url`, `PaginationInfo`, `CompressionTarget`,
+    `TokenEstimate`, `ContextSummary`, `JwtToken`, `OAuthToken`). Several shadowed real types
+    (`CancellationToken`, `CacheConfig`) or `scala.concurrent.duration.Duration`.
+  - `llmconnect.utils.{ConnectionStatus, ProviderCapabilities, ClientHealth}`,
+    `llmconnect.streaming.StreamingOptions` and `identity.{RuntimeId, ModelId}`: never used.
+  - Deprecated members: `Result.fromTry`, `LLMError#isRecoverable` (use
+    `LLMError.isRecoverable(e)` or match on `RecoverableError`), `LLMError.fromThrowable`,
+    `ToolBuilder#build()`, `ToolRegistry#getToolDefinitions`, `LLMCompressor.compress` with
+    `LLMCompressedConversation`, and the ten `Agent` overloads taking `debug`/`tracing`/
+    `traceLogPath` instead of an `AgentContext`.
+  - `ContextConfig.enableRollingSummary`, which nothing read, and `ContextConfig.legacy`.
+  - cats on the public surface: `Safety.sequenceV`, the implicit `LLMError.llmErrorShow` and
+    `LLMErrorDisplayOps` (`.show`/`.display`; use `formatted`).
+  - Now `private[llm4s]`: `RateLimitedLogger`, `ProvidersConfigModel.RawNamedProviderSection` and
+    `RawProvidersConfig`; in `llm4s-agent`, `MDCContext` and `assistant.ShowInstances`.
+
+  Source break (pre-MiMa); see the
+  [migration note](docs/reference/migration.md#pre-baseline-api-cleanup-pass-1).
 - **`org.llm4s.rag.EmbeddingProvider` is gone; RAG names embedding providers by id** - the last
   closed provider list, deferred from slice 4 ([#1131](https://github.com/llm4s/llm4s/issues/1131)).
   `llm4s-rag` kept its own `OpenAI` / `Voyage` / `Ollama` ADT alongside the `ProviderRegistry`,

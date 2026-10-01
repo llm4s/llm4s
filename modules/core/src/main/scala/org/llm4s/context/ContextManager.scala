@@ -272,41 +272,20 @@ object ContextManager {
 case class ContextConfig(
   headroomPercent: HeadroomPercent,
   maxSemanticBlocks: ContextWindowSize,
-  enableRollingSummary: Boolean, // @deprecated - kept for backward compatibility
   enableDeterministicCompression: Boolean,
   enableLLMCompression: Boolean,
-  summaryTokenTarget: Int = 400,         // New: target tokens for digest summaries
-  enableSubjectiveEdits: Boolean = false // New: gates filler/repetition/truncate rules
+  summaryTokenTarget: Int = 400,         // target tokens for digest summaries
+  enableSubjectiveEdits: Boolean = false // gates filler/repetition/truncate rules
 )
 
 object ContextConfig {
   val default: ContextConfig = ContextConfig(
     headroomPercent = HeadroomPercent.Standard, // 8% headroom
     maxSemanticBlocks = 5,                      // Keep last 5 semantic blocks for history compression
-    enableRollingSummary = false,               // Deprecated in favor of history compression
     enableDeterministicCompression = true,
     enableLLMCompression = true,
     summaryTokenTarget = 400,
     enableSubjectiveEdits = false // Conservative default - no subjective text edits
-  )
-
-  /**
-   * Create config with backward compatibility for existing usage
-   */
-  def legacy(
-    headroomPercent: HeadroomPercent = HeadroomPercent.Standard,
-    maxSemanticBlocks: ContextWindowSize = 5,
-    enableRollingSummary: Boolean = true,
-    enableDeterministicCompression: Boolean = true,
-    enableLLMCompression: Boolean = true
-  ): ContextConfig = ContextConfig(
-    headroomPercent = headroomPercent,
-    maxSemanticBlocks = maxSemanticBlocks,
-    enableRollingSummary = enableRollingSummary,
-    enableDeterministicCompression = enableDeterministicCompression,
-    enableLLMCompression = enableLLMCompression,
-    summaryTokenTarget = 400,
-    enableSubjectiveEdits = false
   )
 }
 
