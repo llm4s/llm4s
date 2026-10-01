@@ -144,7 +144,7 @@ class AnthropicModelListerSpec extends AnyFunSuite with Matchers:
 
     AnthropicModelLister.listModels(config, Llm4sHttpClient.create()) match
       case Left(err) =>
-        err.message should include("Model discovery is not supported yet")
+        err.message should include("provider section, but it is configured for")
         err.message should include("openai")
       case Right(models) =>
         fail(s"Expected unsupported provider error, got models: $models")

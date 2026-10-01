@@ -797,6 +797,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules inseparable; moving that one file broke the cycle.
 
 ### Removed
+- **Pre-baseline API cleanup, pass 3** ([#1133](https://github.com/llm4s/llm4s/issues/1133)).
+  `llmconnect.middleware` (pipeline, caching, logging, metrics, redaction, sanitisation,
+  request-id and rate-limiting middleware) is removed: it had no users and duplicated `caching`
+  and the metrics every client records. `ReliableProviders`, `ReliabilitySyntax` and
+  `ReliableClient`'s companion factories go too; use `new ReliableClient(...)`. OpenAI's
+  o-series and `max_completion_tokens` rules move from core's `RequestTransformer` to
+  `llm4s-openai` (`requiresMaxCompletionTokens` leaves the trait and `TransformationResult`;
+  `DefaultRequestTransformer` is package-private; new `RequestTransformer.adjusted` hook).
+  `ResponseFormatMapper` and `ToolCallDeserializer` move to `llm4s-openai-compatible`;
+  `ProviderResultOps` is `private[llm4s]`. The remaining provider plumbing is documented as a
+  frozen provider-author SPI (`docs/guide/writing-a-provider.md`). Source break (pre-MiMa); see
+  the [migration note](docs/reference/migration.md#pre-baseline-api-cleanup-pass-3).
 - **Pre-baseline API cleanup, pass 2** ([#1133](https://github.com/llm4s/llm4s/issues/1133)).
   `ToolRegistry#getToolDefinitionsSafe(provider)`, core's last switch over provider names, is
   removed: use `getOpenAITools()`. `CancellationToken`'s `cancellationFuture`,
@@ -864,6 +876,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `llm4s-core`. The loader keeps its `org.llm4s.config` package and its `load(source)` method.
 
 ### Fixed
+- **Voyage embeddings post to the right URL.** The default base URL (and the documented
+  `VOYAGE_EMBEDDING_BASE_URL`) end in `/v1`, and the client appended `/v1/embeddings`, so every
+  request went to `/v1/v1/embeddings`. It now appends `/embeddings`.
+- **`ReliableClient` applies `ReliabilityConfig.rateLimit`**
+  ([#1133](https://github.com/llm4s/llm4s/issues/1133)). Only `ReliableProviders.wrap` honoured
+  it, so `new ReliableClient(...)` with rate limiting enabled made every call unthrottled. The
+  token bucket is now part of `ReliableClient`, consulted before every attempt, retries included.
 - **A `PlanRunner` node cancelled while running is reported as cancelled**
   ([#1133](https://github.com/llm4s/llm4s/issues/1133)). The race against cancellation mapped a
   future that only ever failed, so the "Node <id> cancelled" `PlanExecutionError` was never

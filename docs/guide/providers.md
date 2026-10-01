@@ -38,6 +38,8 @@ LLM4S supports these LLM providers, plus any endpoint that speaks the OpenAI cha
 | **Cohere** | Cloud | Command models, RAG | Easy |
 | **Ollama** | Local | Private, no API key, offline | Easy |
 
+Missing a vendor? See [Writing a Provider](writing-a-provider.md) to publish your own provider module.
+
 ---
 
 ## Provider Selection

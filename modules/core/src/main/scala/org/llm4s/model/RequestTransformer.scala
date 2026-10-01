@@ -8,14 +8,14 @@ import org.slf4j.LoggerFactory
 /**
  * Handles model-specific parameter validation and transformation.
  *
- * Uses ModelCapabilities from ModelRegistryService to apply constraints based on
- * what each model supports. This mirrors LiteLLM's approach to handling
- * model-specific quirks (e.g., O-series temperature restrictions).
+ * Uses [[ModelCapabilities]] from [[ModelRegistryService]] to apply constraints based on
+ * what each model supports, as LiteLLM does. Rules a vendor knows but the registry does not
+ * record live in that vendor's provider module, layered on with [[RequestTransformer.adjusted]].
  *
  * Example usage:
  * {{{
- *   val transformer = RequestTransformer.default
- *   val result = transformer.transformOptions("o1", options, dropUnsupported = true)
+ *   val transformer = RequestTransformer.default(registryService)
+ *   val result = transformer.transformOptions("gpt-4o", options, dropUnsupported = true)
  *   result match {
  *     case Right(transformed) => // use transformed options
  *     case Left(error) => // handle validation error
@@ -44,8 +44,8 @@ trait RequestTransformer {
   /**
    * Transform messages for model-specific requirements.
    *
-   * For example, O-series models that don't support system messages will have
-   * their system messages converted to user messages with a "[System]:" prefix.
+   * For example, a model whose capabilities say it does not support system messages will have
+   * its system messages converted to user messages with a "[System]:" prefix.
    *
    * @param modelId The model identifier
    * @param messages The messages to transform
@@ -59,25 +59,13 @@ trait RequestTransformer {
   /**
    * Check if streaming needs to be faked for this model.
    *
-   * Some models (like O1) don't support native streaming and require
-   * the client to simulate streaming by returning the full response
-   * as a single chunk.
+   * A model whose capabilities say it does not support native streaming requires the client
+   * to simulate streaming by returning the full response as a single chunk.
    *
    * @param modelId The model identifier
    * @return true if the model requires fake streaming
    */
   def requiresFakeStreaming(modelId: String): Boolean
-
-  /**
-   * Check if this model requires max_completion_tokens instead of max_tokens.
-   *
-   * Some models (like O-series reasoning models) require the use of
-   * max_completion_tokens parameter instead of the standard max_tokens.
-   *
-   * @param modelId The model identifier
-   * @return true if the model requires max_completion_tokens
-   */
-  def requiresMaxCompletionTokens(modelId: String): Boolean
 
   /**
    * Get the set of parameters that are not supported by this model.
@@ -93,24 +81,40 @@ object RequestTransformer {
   /**
    * Default implementation using ModelRegistryService for capability lookups.
    */
-  def default(service: ModelRegistryService): RequestTransformer = DefaultRequestTransformer(Map.empty, service)
+  def default(service: ModelRegistryService): RequestTransformer =
+    new DefaultRequestTransformer(Map.empty, service, (_, capabilities) => capabilities)
 
   /**
    * Create a transformer with custom model overrides.
    * Useful for testing or for models not yet in the registry.
    */
   def withOverrides(overrides: Map[String, ModelCapabilities], service: ModelRegistryService): RequestTransformer =
-    new DefaultRequestTransformer(overrides, service)
+    new DefaultRequestTransformer(overrides, service, (_, capabilities) => capabilities)
+
+  /**
+   * A transformer whose looked-up capabilities pass through `adjust` before they are applied.
+   *
+   * This is how a provider module layers on rules it knows but the registry does not record,
+   * such as constraints that follow from a vendor's model naming, without core knowing them.
+   *
+   * @param adjust given the model id and the registry's capabilities for it, the capabilities to use
+   */
+  def adjusted(service: ModelRegistryService)(
+    adjust: (String, ModelCapabilities) => ModelCapabilities
+  ): RequestTransformer =
+    new DefaultRequestTransformer(Map.empty, service, adjust)
 }
 
 /**
  * Default implementation that uses ModelRegistryService for capability lookups.
  *
- * @param overrides Optional map of model-specific capability overrides
+ * @param overrides model-specific capability overrides, checked before the registry
+ * @param adjust    applied to the capabilities found, whatever their source
  */
-class DefaultRequestTransformer(
-  private val overrides: Map[String, ModelCapabilities] = Map.empty,
-  service: ModelRegistryService
+final private[model] class DefaultRequestTransformer(
+  overrides: Map[String, ModelCapabilities],
+  service: ModelRegistryService,
+  adjust: (String, ModelCapabilities) => ModelCapabilities
 ) extends RequestTransformer {
 
   private val logger = LoggerFactory.getLogger(getClass)
@@ -242,76 +246,20 @@ class DefaultRequestTransformer(
     !capabilities.supportsNativeStreaming.getOrElse(true)
   }
 
-  override def requiresMaxCompletionTokens(modelId: String): Boolean = {
-    val normalized = modelId.toLowerCase
-    isOSeriesModel(modelId) ||
-    normalized.contains("gpt-5") ||
-    normalized.contains("gpt5")
-  }
-
   override def getDisallowedParams(modelId: String): Set[String] = {
     val capabilities = getCapabilities(modelId)
     capabilities.disallowedParams.getOrElse(Set.empty)
   }
 
-  /**
-   * Get capabilities for a model, checking overrides first, then registry.
-   * O-series models get special constraints merged regardless of source.
-   */
-  private def getCapabilities(modelId: String): ModelCapabilities = {
-    // Check overrides first, then registry, then default
-    val baseCapabilities = overrides
-      .get(modelId)
-      .orElse {
-        // Then check registry
-        service.lookup(modelId).toOption.map(_.capabilities)
-      }
-      .getOrElse(ModelCapabilities())
-
-    // For O-series reasoning models, merge special constraints
-    // O-series models have strict requirements not always in metadata
-    if (isOSeriesModel(modelId)) {
-      mergeWithOSeriesConstraints(baseCapabilities)
-    } else {
-      baseCapabilities
-    }
-  }
-
-  /**
-   * Merge base capabilities with O-series specific constraints.
-   * O-series constraints take precedence where specified.
-   */
-  private def mergeWithOSeriesConstraints(base: ModelCapabilities): ModelCapabilities =
-    base.copy(
-      supportsReasoning = base.supportsReasoning.orElse(oSeriesCapabilities.supportsReasoning),
-      supportsNativeStreaming = oSeriesCapabilities.supportsNativeStreaming, // Always override
-      supportsSystemMessages = oSeriesCapabilities.supportsSystemMessages,   // Always override
-      temperatureConstraint = oSeriesCapabilities.temperatureConstraint,     // Always override
-      disallowedParams = oSeriesCapabilities.disallowedParams                // Always override
+  /** Capabilities for a model: overrides first, then the registry, then none; then `adjust`. */
+  private def getCapabilities(modelId: String): ModelCapabilities =
+    adjust(
+      modelId,
+      overrides
+        .get(modelId)
+        .orElse(service.lookup(modelId).toOption.map(_.capabilities))
+        .getOrElse(ModelCapabilities())
     )
-
-  /**
-   * Check if a model is an O-series reasoning model based on naming patterns.
-   */
-  private def isOSeriesModel(modelId: String): Boolean = {
-    val normalized = modelId.toLowerCase
-    normalized.startsWith("o1") ||
-    normalized.startsWith("o3") ||
-    normalized.contains("/o1") ||
-    normalized.contains("/o3")
-  }
-
-  /**
-   * Default capabilities for O-series models.
-   * These models have strict parameter requirements.
-   */
-  private val oSeriesCapabilities = ModelCapabilities(
-    supportsReasoning = Some(true),
-    supportsNativeStreaming = Some(false),
-    supportsSystemMessages = Some(false),
-    temperatureConstraint = Some((1.0, 1.0)),
-    disallowedParams = Some(Set("top_p", "presence_penalty", "frequency_penalty", "logprobs"))
-  )
 }
 
 /**
@@ -321,8 +269,7 @@ case class TransformationResult(
   options: CompletionOptions,
   messages: Seq[Message],
   warnings: Seq[String] = Seq.empty,
-  requiresFakeStreaming: Boolean = false,
-  requiresMaxCompletionTokens: Boolean = false
+  requiresFakeStreaming: Boolean = false
 )
 
 object TransformationResult {
@@ -341,8 +288,7 @@ object TransformationResult {
       TransformationResult(
         options = transformedOptions,
         messages = transformer.transformMessages(modelId, messages),
-        requiresFakeStreaming = transformer.requiresFakeStreaming(modelId),
-        requiresMaxCompletionTokens = transformer.requiresMaxCompletionTokens(modelId)
+        requiresFakeStreaming = transformer.requiresFakeStreaming(modelId)
       )
     }
 }

@@ -4,7 +4,7 @@ package org.llm4s.error
  * Where a [[RateLimitError]] originated. Distinguishes a request that never left the
  * process (rejected by a local token bucket) from one the provider itself rejected with
  * an HTTP 429 - the two need different treatment when a caller has already recorded a
- * metrics event for the local case, e.g. `org.llm4s.llmconnect.middleware.RateLimitingMiddleware`.
+ * metrics event for the local case, e.g. `org.llm4s.reliability.ReliableClient`'s rate limit.
  */
 enum RateLimitOrigin {
   case LocalThrottle, UpstreamProvider

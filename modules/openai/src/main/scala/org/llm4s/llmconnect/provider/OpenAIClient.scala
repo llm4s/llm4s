@@ -166,13 +166,13 @@ class OpenAIClient private[provider] (
         options,
         conversation.messages,
         dropUnsupported = true,
-        org.llm4s.model.RequestTransformer.default(registryService)
+        OpenAIModelRules.transformer(registryService)
       )
       transformedConversation = conversation.copy(messages = transformed.messages)
       params <- buildParams(
         transformedConversation,
         transformed.options,
-        transformed.requiresMaxCompletionTokens,
+        OpenAIModelRules.requiresMaxCompletionTokens(model),
         streaming = false
       )
       response <- call("completion")(transport.createChatCompletion(params))
@@ -203,7 +203,7 @@ class OpenAIClient private[provider] (
         options,
         conversation.messages,
         dropUnsupported = true,
-        org.llm4s.model.RequestTransformer.default(registryService)
+        OpenAIModelRules.transformer(registryService)
       )
       .flatMap { transformed =>
         val transformedConversation = conversation.copy(messages = transformed.messages)
@@ -211,7 +211,7 @@ class OpenAIClient private[provider] (
         buildParams(
           transformedConversation,
           transformed.options,
-          transformed.requiresMaxCompletionTokens,
+          OpenAIModelRules.requiresMaxCompletionTokens(model),
           streaming = !transformed.requiresFakeStreaming
         ).map(params => (transformed, params))
       }

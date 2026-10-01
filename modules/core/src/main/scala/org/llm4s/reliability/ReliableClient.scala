@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference 
  * - Retry with configurable policies (exponential backoff, linear, fixed)
  * - Circuit breaker to fail fast when service is down
  * - Deadline enforcement to prevent hanging operations
+ * - Local token-bucket rate limiting ([[RateLimitConfig]]), checked before every attempt
  * - Metrics tracking for retry attempts and circuit breaker state
  *
  * Thread-safety: Uses AtomicInteger/AtomicReference for circuit breaker state management
@@ -36,14 +37,23 @@ final class ReliableClient(
   clock: () => Long = () => System.currentTimeMillis()
 ) extends LLMClient {
 
-  /** Binary-compatible auxiliary constructor matching the pre-clock 4-param signature. */
-  def this(
-    underlying: LLMClient,
-    providerName: String,
-    config: ReliabilityConfig,
-    collector: Option[MetricsCollector]
-  ) =
-    this(underlying, providerName, config, collector, () => System.currentTimeMillis())
+  // Local rate limit, consulted on every attempt (retries included) before the call is made
+  private val rateLimiter: Option[TokenBucket] =
+    Option.when(config.rateLimit.enabled)(
+      new TokenBucket(config.rateLimit.requestsPerMinute, config.rateLimit.burstCapacity)
+    )
+
+  private def rateLimited[A](operation: () => Result[A]): () => Result[A] =
+    rateLimiter match {
+      case None => operation
+      case Some(bucket) =>
+        () =>
+          if (bucket.tryAcquire()) operation()
+          else {
+            collector.foreach(_.recordError(ErrorKind.RateLimit, providerName))
+            Left(RateLimitError.local(providerName))
+          }
+    }
 
   // Circuit breaker state (thread-safe via atomic references)
   private val circuitState    = new AtomicReference[CircuitState](CircuitState.Closed)
@@ -59,9 +69,9 @@ final class ReliableClient(
     options: CompletionOptions = CompletionOptions()
   ): Result[Completion] =
     if (!config.enabled) {
-      underlying.complete(conversation, options)
+      rateLimited(() => underlying.complete(conversation, options))()
     } else {
-      executeWithReliability(() => underlying.complete(conversation, options))
+      executeWithReliability(rateLimited(() => underlying.complete(conversation, options)))
     }
 
   override def streamComplete(
@@ -70,9 +80,9 @@ final class ReliableClient(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     if (!config.enabled) {
-      underlying.streamComplete(conversation, options, onChunk)
+      rateLimited(() => underlying.streamComplete(conversation, options, onChunk))()
     } else {
-      executeWithReliability(() => underlying.streamComplete(conversation, options, onChunk))
+      executeWithReliability(rateLimited(() => underlying.streamComplete(conversation, options, onChunk)))
     }
 
   override def getContextWindow(): Int     = underlying.getContextWindow()
@@ -280,8 +290,8 @@ final class ReliableClient(
    * Record the outcome metric for an attempt that exhausted retries.
    *
    * Skips [[RateLimitError]]s of [[RateLimitOrigin.LocalThrottle]] origin: those were
-   * rejected by a rate-limiting middleware composed inside this retry loop (see
-   * `ReliableProviders.withRateLimiting`), which already recorded its own
+   * rejected by this client's own token bucket inside the retry loop (see `rateLimited`),
+   * which already recorded its own
    * [[ErrorKind.RateLimit]] event at the point of rejection. Recording it again here
    * would double-count the same event. Upstream-provider rate limits (the default
    * origin) are never recorded anywhere else, so they still go through.
@@ -409,47 +419,6 @@ final class ReliableClient(
     lastFailureTime.set(0L)
     probePermit.set(false)
   }
-}
-
-object ReliableClient {
-
-  /**
-   * Wrap a client with default reliability configuration.
-   * Provider name derived from client class name (use withProviderName for custom).
-   */
-  def apply(client: LLMClient): ReliableClient = {
-    val providerName = client.getClass.getSimpleName.replace("Client", "").toLowerCase
-    new ReliableClient(client, providerName, ReliabilityConfig.default, None)
-  }
-
-  /**
-   * Wrap a client with custom reliability configuration.
-   * Provider name derived from client class name (use withProviderName for custom).
-   */
-  def apply(client: LLMClient, config: ReliabilityConfig): ReliableClient = {
-    val providerName = client.getClass.getSimpleName.replace("Client", "").toLowerCase
-    new ReliableClient(client, providerName, config, None)
-  }
-
-  /**
-   * Wrap a client with reliability + metrics.
-   * Provider name derived from client class name (use withProviderName for custom).
-   */
-  def apply(client: LLMClient, config: ReliabilityConfig, collector: MetricsCollector): ReliableClient = {
-    val providerName = client.getClass.getSimpleName.replace("Client", "").toLowerCase
-    new ReliableClient(client, providerName, config, Some(collector))
-  }
-
-  /**
-   * Wrap a client with explicit provider name (recommended for production).
-   */
-  def withProviderName(
-    client: LLMClient,
-    providerName: String,
-    config: ReliabilityConfig = ReliabilityConfig.default,
-    collector: Option[MetricsCollector] = None
-  ): ReliableClient =
-    new ReliableClient(client, providerName, config, collector)
 }
 
 /**

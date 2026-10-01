@@ -42,7 +42,6 @@ User Input ──► Agent ──► LLM Provider (API key in header)
 **Mitigation (implemented):**
 - `HttpErrorMapper.sanitize()` runs `Redaction.redact()` on the raw provider error body before constructing any `LLMError`. This strips OpenAI, Anthropic, Google, Voyage, Langfuse, AWS, and JWT patterns.
 - `Redaction.scala` and `SecretPatterns.scala` maintain the canonical set of credential regexes used across the codebase.
-- `LoggingMiddleware` applies `ContentRedactor` to message content before logging (when `includeMessages = true`).
 - Provider `ProviderConfig` `toString` implementations mask API keys with `***`.
 
 **Residual risk:** Plain-text secrets not matching any known regex pattern would not be redacted.

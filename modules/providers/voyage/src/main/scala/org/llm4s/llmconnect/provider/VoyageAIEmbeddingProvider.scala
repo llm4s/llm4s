@@ -19,7 +19,7 @@ import scala.util.control.NonFatal
  * Embedding provider implementation for the Voyage AI embedding API.
  *
  * Generates text embeddings by posting batched input to the Voyage AI
- * `/v1/embeddings` endpoint. Unlike Ollama, Voyage accepts multiple inputs
+ * `<baseUrl>/embeddings` endpoint (the default base URL is `https://api.voyageai.com/v1`). Unlike Ollama, Voyage accepts multiple inputs
  * in a single request, so all texts are sent in one HTTP call.
  *
  * Requires a valid Voyage AI API key in the provider configuration.
@@ -90,7 +90,7 @@ object VoyageAIEmbeddingProvider extends EmbeddingProviderDescriptor {
           "model" -> model
         )
 
-        val url = s"${cfg.baseUrl}/v1/embeddings"
+        val url = s"${cfg.baseUrl.stripSuffix("/")}/embeddings"
         logger.debug(s"[VoyageAIEmbeddingProvider] POST $url model=$model inputs=${input.size}")
 
         val headers = Map(

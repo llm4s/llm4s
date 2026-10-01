@@ -244,9 +244,17 @@ takes), replaced `CancellationToken`'s exception-throwing members with `whenCanc
 Future[Unit]`, and moved single-consumer utilities to their consumer, keeping packages:
 `SqlIdentifier`, `ChunkingUtils` and `RateLimitedLogger` to `llm4s-rag`, `ManagedResource` to
 `llm4s-speech`, `LiftToResult` to `llm4s-observability`. **A utility with one consuming module
-lives in that module, not core.** The open decisions on #1133: `NamedProviderConfig`'s
-OpenAI/Azure fields, OpenAI rules in `DefaultRequestTransformer` and `ProviderModelLister`, the
-`middleware` package and `ReliableProviders`, and the scope of the provider-author SPI.
+lives in that module, not core.** Pass 3 deleted `llmconnect.middleware`, `ReliableProviders`,
+`ReliabilitySyntax` and `ReliableClient`'s factories (`new ReliableClient(...)` is the one way in,
+and it applies `rateLimit` itself through a private `TokenBucket`); moved OpenAI's o-series and
+`max_completion_tokens` rules out of core's `RequestTransformer` into `llm4s-openai`'s
+`OpenAIModelRules` - **vendor model rules live in the vendor's module**, layered on with
+`RequestTransformer.adjusted`, as Anthropic's temperature rule already did; and settled the
+provider plumbing as a **public, frozen provider-author SPI** (`docs/guide/writing-a-provider.md`),
+with `ResponseFormatMapper` and `ToolCallDeserializer` moved to `llm4s-openai-compatible` and
+`ProviderResultOps` made `private[llm4s]`. Pass 4 moves `NamedProviderConfig`'s vendor fields
+(`organization`, `endpoint`, `apiVersion`, `contextWindow`, `reserveCompletion`) into
+descriptor-declared extras.
 
 `org.llm4s.vectorstore.PostgresVectorHelpers` is the one file in that package still in core:
 it is a pure pgvector text codec shared by `llm4s-rag` and `llm4s-memory-postgres`, which must

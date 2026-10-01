@@ -677,7 +677,7 @@ object AnthropicClient {
    * anthropic-java 2.42 deprecated `temperature`: models released after Claude Opus 4.6
    * accept only `1.0` and return a 400 for any other value. We detect those models by name
    * (Claude Opus 4.7+ and any Opus 5+) so the parameter can be omitted; this mirrors the
-   * name-based handling of O-series models in [[org.llm4s.model.DefaultRequestTransformer]].
+   * name-based handling of o-series models in `llm4s-openai`'s `OpenAIModelRules`.
    * Other models can be flagged via a registry `disallowedParams = ["temperature"]` override.
    *
    * Model identifiers may carry a provider prefix and/or a date suffix

@@ -1,5 +1,57 @@
 # Migration Guide
 
+## Pre-baseline API cleanup, pass 3
+
+Not in a release yet; continues pass 2 below.
+
+### `llmconnect.middleware`, `ReliableProviders` and `ReliabilitySyntax` are removed
+
+The middleware package had no users outside its own tests and duplicated `caching` and the
+metrics every provider client already records. `LLMClient` is a trait, so a decorator is a class
+that implements it and delegates. `ReliableProviders.wrap` and `.withReliability(...)` were
+shorthand for one constructor:
+
+```scala
+// before
+val reliable = ReliableProviders.wrap(client, "openai", config)
+val other    = client.withReliability("openai")
+
+// after
+val reliable = new ReliableClient(client, "openai", config)
+val other    = new ReliableClient(client, "openai", ReliabilityConfig.default)
+```
+
+`ReliableClient`'s companion factories (`ReliableClient(client)`, `ReliableClient(client, config)`,
+`ReliableClient(client, config, metrics)`, `ReliableClient.withProviderName`) go too: three of them
+guessed the provider name from the client's class name. Use the constructor. For a client built
+from config, the name is `providerConfig.providerId.asString`.
+
+Behaviour fix: **`ReliableClient` now applies `ReliabilityConfig.rateLimit` itself**, before every
+attempt, retries included. Before, only `ReliableProviders.wrap` honoured it, so a
+`new ReliableClient(...)` with rate limiting enabled was not rate limited.
+
+### OpenAI's model rules leave `RequestTransformer`
+
+`RequestTransformer.default` now applies only the registry's capabilities. The o-series
+constraints (no system message, no native streaming, temperature 1, no sampling penalties) and
+the `max_completion_tokens` rule for o-series and gpt-5 moved into `llm4s-openai`, which is the
+only client that needs them; the Anthropic and Gemini clients no longer apply them to models
+named like OpenAI's.
+
+| Removed | Use instead |
+|---|---|
+| `RequestTransformer#requiresMaxCompletionTokens`, `TransformationResult.requiresMaxCompletionTokens` | none in core; it is an OpenAI wire parameter |
+| `DefaultRequestTransformer` (now package-private) | `RequestTransformer.default(service)` or `withOverrides(...)` |
+| (new) | `RequestTransformer.adjusted(service)((modelId, capabilities) => ...)`, for a provider module's own rules on top of the registry |
+
+### Provider-author SPI
+
+The plumbing provider modules build on is a public, frozen SPI; see
+[Writing a provider](../guide/writing-a-provider). Two OpenAI-format helpers moved to
+`llm4s-openai-compatible`, with unchanged packages: `org.llm4s.llmconnect.model.ResponseFormatMapper`
+and `org.llm4s.llmconnect.serialization.{ToolCallDeserializer, StandardToolCallDeserializer}`.
+`ProviderResultOps` (`tapRight` / `tapLeft`) is now `private[llm4s]`.
+
 ## Pre-baseline API cleanup, pass 2
 
 Not in a release yet; continues pass 1 below.

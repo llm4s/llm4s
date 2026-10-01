@@ -119,7 +119,7 @@ object ProvidersConfigModel:
       else
         Left(
           ConfigurationError(
-            s"Model discovery is not supported yet for provider '${provider.asString}'"
+            s"Expected a '${expected.asString}' provider section, but it is configured for '${provider.asString}'"
           )
         )
 

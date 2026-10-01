@@ -1,30 +1,14 @@
-package org.llm4s.model
+package org.llm4s.llmconnect.provider
 
-import org.llm4s.llmconnect.model.{ CompletionOptions, ResponseFormat, SystemMessage, UserMessage }
+import org.llm4s.llmconnect.model.{ CompletionOptions, SystemMessage, UserMessage }
+import org.llm4s.model.{ ModelRegistryService, RequestTransformer, TransformationResult }
 import org.scalatest.EitherValues
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 
-class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues {
+class OpenAIModelRulesSpec extends AnyFunSuite with Matchers with EitherValues {
 
-  // A fixture vendor rule, applied through `adjusted`, standing in for a provider module's own
-  // rules (llm4s-openai's o-series constraints are tested in its OpenAIModelRulesSpec): models
-  // named like the o-series get a constrained capability set, as a provider module would supply.
-  private val constrained = ModelCapabilities(
-    supportsReasoning = Some(true),
-    supportsNativeStreaming = Some(false),
-    supportsSystemMessages = Some(false),
-    temperatureConstraint = Some((1.0, 1.0)),
-    disallowedParams = Some(Set("top_p", "presence_penalty", "frequency_penalty", "logprobs"))
-  )
-
-  private def isConstrained(modelId: String): Boolean = {
-    val m = modelId.toLowerCase
-    m.startsWith("o1") || m.startsWith("o3") || m.contains("/o1") || m.contains("/o3")
-  }
-
-  def transformer(service: ModelRegistryService): RequestTransformer =
-    RequestTransformer.adjusted(service)((id, caps) => if (isConstrained(id)) constrained else caps)
+  def transformer(service: ModelRegistryService): RequestTransformer = OpenAIModelRules.transformer(service)
 
   // ============================================
   // Temperature constraint tests
@@ -309,127 +293,6 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
   }
 
   // ============================================
-  // Response format (structured output) tests
-  // ============================================
-
-  test("should drop Json responseFormat when supportsResponseSchema=false and dropUnsupported=true") {
-    org.llm4s.model.ModelRegistryTestSupport.defaultServiceResult() match
-      case Left(error) =>
-        fail(error.message)
-      case Right(service) =>
-        val customCaps        = ModelCapabilities(supportsResponseSchema = Some(false))
-        val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps), service)
-        val options           = CompletionOptions().withResponseFormat(ResponseFormat.Json)
-        val result            = customTransformer.transformOptions("test-model", options, dropUnsupported = true)
-        result.isRight shouldBe true
-        result.toOption.get.responseFormat shouldBe None
-  }
-
-  test("should keep Json responseFormat when supportsResponseSchema=false and dropUnsupported=false") {
-    org.llm4s.model.ModelRegistryTestSupport.defaultServiceResult() match
-      case Left(error) =>
-        fail(error.message)
-      case Right(service) =>
-        val customCaps        = ModelCapabilities(supportsResponseSchema = Some(false))
-        val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps), service)
-        val options           = CompletionOptions().withResponseFormat(ResponseFormat.Json)
-
-        val result = customTransformer.transformOptions("test-model", options, dropUnsupported = false)
-
-        result.isRight shouldBe true
-        result.toOption.get.responseFormat shouldBe Some(ResponseFormat.Json)
-  }
-
-  test(
-    "should return error for JsonSchema responseFormat when supportsResponseSchema=false and dropUnsupported=false"
-  ) {
-    org.llm4s.model.ModelRegistryTestSupport.defaultServiceResult() match
-      case Left(error) =>
-        fail(error.message)
-      case Right(service) =>
-        val customCaps        = ModelCapabilities(supportsResponseSchema = Some(false))
-        val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps), service)
-        val schema            = ujson.Obj("type" -> "object")
-        val options           = CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))
-
-        val result = customTransformer.transformOptions("test-model", options, dropUnsupported = false)
-
-        result.isLeft shouldBe true
-        result.left.value.message should include("Structured output")
-        result.left.value.message should include("JSON schema")
-  }
-
-  test("should drop JsonSchema when supportsResponseSchema=false and dropUnsupported=true") {
-    org.llm4s.model.ModelRegistryTestSupport.defaultServiceResult() match
-      case Left(error) =>
-        fail(error.message)
-      case Right(service) =>
-        val customCaps        = ModelCapabilities(supportsResponseSchema = Some(false))
-        val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps), service)
-        val schema            = ujson.Obj("type" -> "object")
-        val options           = CompletionOptions().withResponseFormat(ResponseFormat.JsonSchema(schema))
-
-        val result = customTransformer.transformOptions("test-model", options, dropUnsupported = true)
-
-        result.isRight shouldBe true
-        result.toOption.get.responseFormat shouldBe None
-  }
-
-  test("should preserve responseFormat when supportsResponseSchema=true") {
-    org.llm4s.model.ModelRegistryTestSupport.defaultServiceResult() match
-      case Left(error) =>
-        fail(error.message)
-      case Right(service) =>
-        val customCaps        = ModelCapabilities(supportsResponseSchema = Some(true))
-        val customTransformer = RequestTransformer.withOverrides(Map("test-model" -> customCaps), service)
-        val options           = CompletionOptions().withResponseFormat(ResponseFormat.Json)
-
-        val result = customTransformer.transformOptions("test-model", options, dropUnsupported = false)
-
-        result.isRight shouldBe true
-        result.toOption.get.responseFormat shouldBe Some(ResponseFormat.Json)
-  }
-
-  test("should preserve responseFormat when supportsResponseSchema=None (unknown)") {
-    org.llm4s.model.ModelRegistryTestSupport.defaultServiceResult() match
-      case Left(error) =>
-        fail(error.message)
-      case Right(service) =>
-        val customCaps        = ModelCapabilities(supportsResponseSchema = None)
-        val customTransformer = RequestTransformer.withOverrides(Map("unknown-model" -> customCaps), service)
-        val options           = CompletionOptions().withResponseFormat(ResponseFormat.Json)
-
-        val result = customTransformer.transformOptions("unknown-model", options, dropUnsupported = false)
-
-        result.isRight shouldBe true
-        result.toOption.get.responseFormat shouldBe Some(ResponseFormat.Json)
-  }
-
-  // ============================================
-  // Custom overrides tests
-  // ============================================
-
-  test("custom overrides should take precedence over registry") {
-    org.llm4s.model.ModelRegistryTestSupport.defaultServiceResult() match
-      case Left(error) =>
-        fail(error.message)
-      case Right(service) =>
-        val customCaps = ModelCapabilities(
-          temperatureConstraint = Some((0.0, 0.5)),
-          disallowedParams = Some(Set("max_tokens"))
-        )
-
-        val customTransformer = RequestTransformer.withOverrides(Map("my-custom-model" -> customCaps), service)
-        val options           = CompletionOptions(temperature = 0.7)
-
-        val result = customTransformer.transformOptions("my-custom-model", options, dropUnsupported = false)
-
-        result.isLeft shouldBe true
-        result.left.value.message should include("Temperature")
-        result.left.value.message should include("0.5")
-  }
-
-  // ============================================
   // TransformationResult convenience method tests
   // ============================================
 
@@ -482,33 +345,41 @@ class RequestTransformerSpec extends AnyFunSuite with Matchers with EitherValues
   }
 
   // ============================================
-  // default applies no vendor rules
+  // requiresMaxCompletionTokens tests
   // ============================================
 
-  test("default should apply only the registry's capabilities, with no name-based vendor rules") {
+  test("requiresMaxCompletionTokens should correctly identify models requiring max_completion_tokens") {
     org.llm4s.model.ModelRegistryTestSupport.defaultServiceResult() match
       case Left(error) =>
         fail(error.message)
-      case Right(service) =>
-        val withOverride = RequestTransformer.withOverrides(Map("o1" -> ModelCapabilities()), service)
-        val options      = CompletionOptions(temperature = 0.7, topP = 0.9)
+      case Right(_) =>
+        val testCases = Seq(
+          // O-series models require max_completion_tokens
+          ("o1", true),
+          ("o1-preview", true),
+          ("o1-mini", true),
+          ("o3", true),
+          ("openai/o1", true),
+          ("openai/o3", true),
+          // GPT-5 family requires max_completion_tokens
+          ("gpt-5", true),
+          ("gpt5", true),
+          ("openai/gpt-5", true),
+          // Standard models do NOT require max_completion_tokens
+          ("gpt-4o", false),
+          ("claude-3", false),
+          ("gemini-2.0", false),
+          // Case-insensitive detection
+          ("O1", true),
+          ("GPT-5", true),
+          // Unknown models should default to false (safe default)
+          ("unknown-model", false)
+        )
 
-        withOverride.transformOptions("o1", options, dropUnsupported = false) shouldBe Right(options)
-        withOverride.requiresFakeStreaming("o1") shouldBe false
-        withOverride.transformMessages("o1", Seq(SystemMessage("s"))) shouldBe Seq(SystemMessage("s"))
-  }
-
-  test("adjusted should receive the model id and the capabilities found for it") {
-    org.llm4s.model.ModelRegistryTestSupport.defaultServiceResult() match
-      case Left(error) =>
-        fail(error.message)
-      case Right(service) =>
-        var seen: Option[(String, ModelCapabilities)] = None
-        val t = RequestTransformer.adjusted(service) { (id, caps) =>
-          seen = Some(id -> caps)
-          caps
+        testCases.foreach { case (modelId, expected) =>
+          withClue(s"Model '$modelId' should return $expected for requiresMaxCompletionTokens: ") {
+            OpenAIModelRules.requiresMaxCompletionTokens(modelId) shouldBe expected
+          }
         }
-        t.getDisallowedParams("some-model")
-        seen.map(_._1) shouldBe Some("some-model")
   }
 }
