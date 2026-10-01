@@ -14,13 +14,20 @@ used, or that was already deprecated, is removed now rather than frozen.
 | `LLMError.fromThrowable(t)` | `t.toLLMError` (`org.llm4s.error.ThrowableOps.RichThrowable`) |
 | `ToolBuilder#build()` | `buildSafe()`, which returns `Result[ToolFunction]` |
 | `ToolRegistry#getToolDefinitions(p)` | `getToolDefinitionsSafe(p)` |
-| `LLMCompressor.compress(...)`, `LLMCompressedConversation` | `LLMCompressor.squeezeDigest(...)` |
+| `LLMCompressor.compress(...)`, `LLMCompressedConversation` | `ContextManager.withDefaults(tokenCounter, Some(llmClient))` then `manageContext(conversation, budget)`; no direct equivalent (see below) |
 | `Agent` overloads taking `debug`, `tracing` or `traceLogPath` (`run`, `runStep`, `continueConversation`, `runMultiTurn`, `runWithEvents`, `continueConversationWithEvents`, `runCollectingEvents`, `runWithStrategy`, `continueConversationWithStrategy`) | the same method with `context = AgentContext(debug = ..., tracing = ..., traceLogPath = ...)` |
 | `ContextConfig(..., enableRollingSummary = ..., ...)`, `ContextConfig.legacy(...)` | drop the argument (nothing read it); `ContextConfig(...)` or `ContextConfig.default.copy(...)` |
-| `Safety.sequenceV` | `Result.sequence`, or cats' `Validated` directly |
+| `Safety.sequenceV(xs)` | `xs.traverse(_.toValidatedNec)` with `import cats.syntax.all.*`, which keeps every error; or, given items and a validator, `Result.validateAll(items)(validate)`. Not `Result.sequence`, which stops at the first error |
 | `LLMError.llmErrorShow`, `error.show`, `error.display` | `error.formatted` |
 | `org.llm4s.types` aliases and wrappers the library never used (`CompletionId`, `ToolName`, `ToolCallId`, `Url`, `MessageId`, `WorkspaceId`, `Json`, `Timeout`, `TokenCount`, the MCP/image/audio/video/plugin/workflow/metrics types, ...) | the underlying type, e.g. `String`, `ujson.Value`, `Long`, `Int` |
 | `ConnectionStatus`, `ProviderCapabilities`, `ClientHealth`, `StreamingOptions`, `RuntimeId`, `ModelId` | none; nothing used them |
+
+`LLMCompressor.compress` summarised a whole conversation with one LLM call, optionally with a
+custom prompt. Nothing replaces it one-for-one: `LLMCompressor.squeezeDigest` only shrinks messages
+already marked `[HISTORY_SUMMARY]` and returns any other conversation unchanged, so do not swap
+one call for the other. `ContextManager.manageContext` is the supported path - it builds the
+digests, compresses them and trims to the budget (`ContextConfig.enableLLMCompression` gates the
+LLM step); the custom prompt has no counterpart.
 
 `RateLimitedLogger`, `ProvidersConfigModel.RawNamedProviderSection` / `RawProvidersConfig`,
 `agent.orchestration.MDCContext` and `assistant.ShowInstances` are now package-private.
