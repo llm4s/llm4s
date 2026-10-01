@@ -76,7 +76,7 @@ private[llm4s] object NamedProviderSectionValidator:
                 s"Provider '$name' (provider = $id) is missing required fields:\n" + problems.mkString("\n")
               )
             )
-          else Right((normalized.copy(extras = extras.values), extras.warnings))
+          else Right((normalized.withExtras(extras.values), extras.warnings))
 
   /**
    * A descriptor bug rather than a user one: an extra key may not shadow a built-in field, and a
@@ -248,7 +248,7 @@ private[llm4s] object NamedProviderConfigValidator:
       validated <- NamedProviderSectionValidator.validate(
         providerName,
         descriptor,
-        normalized.copy(apiKey = resolved.map(key => ApiKey(key.value)))
+        normalized.withApiKey(resolved.map(key => ApiKey(key.value)))
       )
     yield
       resolved.foreach(SharedCredentials.logSource(sectionPath, _))

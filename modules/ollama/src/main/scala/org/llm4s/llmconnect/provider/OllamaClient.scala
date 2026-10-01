@@ -199,7 +199,7 @@ class OllamaClient(
           .flatMap(_ => accumulator.toCompletion)
           .map { c =>
             val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            c.copy(model = config.model, estimatedCost = cost)
+            c.withModel(config.model).withEstimatedCost(cost)
           }
 
         recordingExchange(startedAt, requestText, rawResponse.result())(result)

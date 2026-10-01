@@ -17,11 +17,18 @@ package org.llm4s.llmconnect.spi
  * @param streaming   whether `LLMClient.streamComplete` is implemented.
  * @param toolCalling whether the provider accepts tool/function definitions.
  */
-final case class ProviderFeatures(
-  streaming: Boolean = true,
-  toolCalling: Boolean = true
-)
+final case class ProviderFeatures private (
+  streaming: Boolean,
+  toolCalling: Boolean
+) {
+  def withStreaming(streaming: Boolean): ProviderFeatures     = copy(streaming = streaming)
+  def withToolCalling(toolCalling: Boolean): ProviderFeatures = copy(toolCalling = toolCalling)
+}
 
 object ProviderFeatures:
+  /** Creates a [[ProviderFeatures]]. Named arguments are the supported way to construct one. */
+  def apply(streaming: Boolean = true, toolCalling: Boolean = true): ProviderFeatures =
+    new ProviderFeatures(streaming, toolCalling)
+
   /** Full interface support: streaming and tool calling both implemented. */
   val default: ProviderFeatures = ProviderFeatures()

@@ -287,7 +287,7 @@ class OpenAIClient private[provider] (
         accumulator.toCompletion.map { c =>
           val finalUsage = usage.orElse(c.usage)
           val cost       = finalUsage.flatMap(u => CostEstimator.estimate(model, u))
-          c.copy(model = model, toolCalls = c.message.toolCalls.toList, usage = finalUsage, estimatedCost = cost)
+          c.withModel(model).withToolCalls(c.message.toolCalls.toList).withUsage(finalUsage).withEstimatedCost(cost)
         }
       )
     }(
@@ -381,7 +381,7 @@ class OpenAIClient private[provider] (
     onChunk: StreamedChunk => Unit
   ): Unit = {
     def emit(chunk: StreamedChunk, raw: String): Unit = {
-      accumulator.addChunk(chunk.copy(toolCall = chunk.toolCall.map(_.copy(arguments = ujson.Str(raw)))))
+      accumulator.addChunk(chunk.withToolCall(chunk.toolCall.map(_.copy(arguments = ujson.Str(raw)))))
       onChunk(chunk)
     }
 

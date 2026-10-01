@@ -22,7 +22,7 @@ import upickle.default._
  * @param pricing Detailed pricing information
  * @param deprecationDate Optional deprecation date (YYYY-MM-DD)
  */
-case class ModelMetadata(
+final case class ModelMetadata private (
   modelId: String,
   provider: String,
   mode: ModelMode,
@@ -34,6 +34,25 @@ case class ModelMetadata(
   pricing: ModelPricing,
   deprecationDate: Option[String]
 ) {
+  def withModelId(modelId: String): ModelMetadata                      = copy(modelId = modelId)
+  def withProvider(provider: String): ModelMetadata                    = copy(provider = provider)
+  def withMode(mode: ModelMode): ModelMetadata                         = copy(mode = mode)
+  def withMaxInputTokens(maxInputTokens: Int): ModelMetadata           = copy(maxInputTokens = Some(maxInputTokens))
+  def withMaxInputTokens(maxInputTokens: Option[Int]): ModelMetadata   = copy(maxInputTokens = maxInputTokens)
+  def withMaxOutputTokens(maxOutputTokens: Int): ModelMetadata         = copy(maxOutputTokens = Some(maxOutputTokens))
+  def withMaxOutputTokens(maxOutputTokens: Option[Int]): ModelMetadata = copy(maxOutputTokens = maxOutputTokens)
+  def withInputCostPerToken(inputCostPerToken: Double): ModelMetadata =
+    copy(inputCostPerToken = Some(inputCostPerToken))
+  def withInputCostPerToken(inputCostPerToken: Option[Double]): ModelMetadata =
+    copy(inputCostPerToken = inputCostPerToken)
+  def withOutputCostPerToken(outputCostPerToken: Double): ModelMetadata =
+    copy(outputCostPerToken = Some(outputCostPerToken))
+  def withOutputCostPerToken(outputCostPerToken: Option[Double]): ModelMetadata =
+    copy(outputCostPerToken = outputCostPerToken)
+  def withCapabilities(capabilities: ModelCapabilities): ModelMetadata = copy(capabilities = capabilities)
+  def withPricing(pricing: ModelPricing): ModelMetadata                = copy(pricing = pricing)
+  def withDeprecationDate(deprecationDate: String): ModelMetadata      = copy(deprecationDate = Some(deprecationDate))
+  def withDeprecationDate(deprecationDate: Option[String]): ModelMetadata = copy(deprecationDate = deprecationDate)
 
   /**
    * Get the effective context window size.
@@ -100,6 +119,33 @@ case class ModelMetadata(
 }
 
 object ModelMetadata {
+
+  /** Creates a [[ModelMetadata]]. Named arguments are the supported way to construct one. */
+  def apply(
+    modelId: String,
+    provider: String,
+    mode: ModelMode,
+    maxInputTokens: Option[Int],
+    maxOutputTokens: Option[Int],
+    inputCostPerToken: Option[Double],
+    outputCostPerToken: Option[Double],
+    capabilities: ModelCapabilities,
+    pricing: ModelPricing,
+    deprecationDate: Option[String]
+  ): ModelMetadata =
+    new ModelMetadata(
+      modelId,
+      provider,
+      mode,
+      maxInputTokens,
+      maxOutputTokens,
+      inputCostPerToken,
+      outputCostPerToken,
+      capabilities,
+      pricing,
+      deprecationDate
+    )
+
   implicit val rw: ReadWriter[ModelMetadata] = macroRW
 
   /**
@@ -201,7 +247,7 @@ object ModelMode {
  * @param disallowedParams Set of parameter names that are not supported by this model
  * @param temperatureConstraint Temperature constraint: None = any, Some((min, max)) = restricted range
  */
-case class ModelCapabilities(
+final case class ModelCapabilities private (
   supportsFunctionCalling: Option[Boolean] = None,
   supportsParallelFunctionCalling: Option[Boolean] = None,
   supportsVision: Option[Boolean] = None,
@@ -220,9 +266,123 @@ case class ModelCapabilities(
   supportedRegions: Option[List[String]] = None,
   disallowedParams: Option[Set[String]] = None,
   temperatureConstraint: Option[(Double, Double)] = None
-)
+) {
+  def withSupportsFunctionCalling(supportsFunctionCalling: Boolean): ModelCapabilities =
+    copy(supportsFunctionCalling = Some(supportsFunctionCalling))
+  def withSupportsFunctionCalling(supportsFunctionCalling: Option[Boolean]): ModelCapabilities =
+    copy(supportsFunctionCalling = supportsFunctionCalling)
+  def withSupportsParallelFunctionCalling(supportsParallelFunctionCalling: Boolean): ModelCapabilities =
+    copy(supportsParallelFunctionCalling = Some(supportsParallelFunctionCalling))
+  def withSupportsParallelFunctionCalling(supportsParallelFunctionCalling: Option[Boolean]): ModelCapabilities =
+    copy(supportsParallelFunctionCalling = supportsParallelFunctionCalling)
+  def withSupportsVision(supportsVision: Boolean): ModelCapabilities = copy(supportsVision = Some(supportsVision))
+  def withSupportsVision(supportsVision: Option[Boolean]): ModelCapabilities = copy(supportsVision = supportsVision)
+  def withSupportsPromptCaching(supportsPromptCaching: Boolean): ModelCapabilities =
+    copy(supportsPromptCaching = Some(supportsPromptCaching))
+  def withSupportsPromptCaching(supportsPromptCaching: Option[Boolean]): ModelCapabilities =
+    copy(supportsPromptCaching = supportsPromptCaching)
+  def withSupportsReasoning(supportsReasoning: Boolean): ModelCapabilities =
+    copy(supportsReasoning = Some(supportsReasoning))
+  def withSupportsReasoning(supportsReasoning: Option[Boolean]): ModelCapabilities =
+    copy(supportsReasoning = supportsReasoning)
+  def withSupportsResponseSchema(supportsResponseSchema: Boolean): ModelCapabilities =
+    copy(supportsResponseSchema = Some(supportsResponseSchema))
+  def withSupportsResponseSchema(supportsResponseSchema: Option[Boolean]): ModelCapabilities =
+    copy(supportsResponseSchema = supportsResponseSchema)
+  def withSupportsSystemMessages(supportsSystemMessages: Boolean): ModelCapabilities =
+    copy(supportsSystemMessages = Some(supportsSystemMessages))
+  def withSupportsSystemMessages(supportsSystemMessages: Option[Boolean]): ModelCapabilities =
+    copy(supportsSystemMessages = supportsSystemMessages)
+  def withSupportsPdfInput(supportsPdfInput: Boolean): ModelCapabilities =
+    copy(supportsPdfInput = Some(supportsPdfInput))
+  def withSupportsPdfInput(supportsPdfInput: Option[Boolean]): ModelCapabilities =
+    copy(supportsPdfInput = supportsPdfInput)
+  def withSupportsAudioInput(supportsAudioInput: Boolean): ModelCapabilities =
+    copy(supportsAudioInput = Some(supportsAudioInput))
+  def withSupportsAudioInput(supportsAudioInput: Option[Boolean]): ModelCapabilities =
+    copy(supportsAudioInput = supportsAudioInput)
+  def withSupportsAudioOutput(supportsAudioOutput: Boolean): ModelCapabilities =
+    copy(supportsAudioOutput = Some(supportsAudioOutput))
+  def withSupportsAudioOutput(supportsAudioOutput: Option[Boolean]): ModelCapabilities =
+    copy(supportsAudioOutput = supportsAudioOutput)
+  def withSupportsWebSearch(supportsWebSearch: Boolean): ModelCapabilities =
+    copy(supportsWebSearch = Some(supportsWebSearch))
+  def withSupportsWebSearch(supportsWebSearch: Option[Boolean]): ModelCapabilities =
+    copy(supportsWebSearch = supportsWebSearch)
+  def withSupportsComputerUse(supportsComputerUse: Boolean): ModelCapabilities =
+    copy(supportsComputerUse = Some(supportsComputerUse))
+  def withSupportsComputerUse(supportsComputerUse: Option[Boolean]): ModelCapabilities =
+    copy(supportsComputerUse = supportsComputerUse)
+  def withSupportsAssistantPrefill(supportsAssistantPrefill: Boolean): ModelCapabilities =
+    copy(supportsAssistantPrefill = Some(supportsAssistantPrefill))
+  def withSupportsAssistantPrefill(supportsAssistantPrefill: Option[Boolean]): ModelCapabilities =
+    copy(supportsAssistantPrefill = supportsAssistantPrefill)
+  def withSupportsToolChoice(supportsToolChoice: Boolean): ModelCapabilities =
+    copy(supportsToolChoice = Some(supportsToolChoice))
+  def withSupportsToolChoice(supportsToolChoice: Option[Boolean]): ModelCapabilities =
+    copy(supportsToolChoice = supportsToolChoice)
+  def withSupportsNativeStreaming(supportsNativeStreaming: Boolean): ModelCapabilities =
+    copy(supportsNativeStreaming = Some(supportsNativeStreaming))
+  def withSupportsNativeStreaming(supportsNativeStreaming: Option[Boolean]): ModelCapabilities =
+    copy(supportsNativeStreaming = supportsNativeStreaming)
+  def withSupportedRegions(supportedRegions: List[String]): ModelCapabilities =
+    copy(supportedRegions = Some(supportedRegions))
+  def withSupportedRegions(supportedRegions: Option[List[String]]): ModelCapabilities =
+    copy(supportedRegions = supportedRegions)
+  def withDisallowedParams(disallowedParams: Set[String]): ModelCapabilities =
+    copy(disallowedParams = Some(disallowedParams))
+  def withDisallowedParams(disallowedParams: Option[Set[String]]): ModelCapabilities =
+    copy(disallowedParams = disallowedParams)
+  def withTemperatureConstraint(temperatureConstraint: (Double, Double)): ModelCapabilities =
+    copy(temperatureConstraint = Some(temperatureConstraint))
+  def withTemperatureConstraint(temperatureConstraint: Option[(Double, Double)]): ModelCapabilities =
+    copy(temperatureConstraint = temperatureConstraint)
+}
 
 object ModelCapabilities {
+
+  /** Creates a [[ModelCapabilities]]. Named arguments are the supported way to construct one. */
+  def apply(
+    supportsFunctionCalling: Option[Boolean] = None,
+    supportsParallelFunctionCalling: Option[Boolean] = None,
+    supportsVision: Option[Boolean] = None,
+    supportsPromptCaching: Option[Boolean] = None,
+    supportsReasoning: Option[Boolean] = None,
+    supportsResponseSchema: Option[Boolean] = None,
+    supportsSystemMessages: Option[Boolean] = None,
+    supportsPdfInput: Option[Boolean] = None,
+    supportsAudioInput: Option[Boolean] = None,
+    supportsAudioOutput: Option[Boolean] = None,
+    supportsWebSearch: Option[Boolean] = None,
+    supportsComputerUse: Option[Boolean] = None,
+    supportsAssistantPrefill: Option[Boolean] = None,
+    supportsToolChoice: Option[Boolean] = None,
+    supportsNativeStreaming: Option[Boolean] = None,
+    supportedRegions: Option[List[String]] = None,
+    disallowedParams: Option[Set[String]] = None,
+    temperatureConstraint: Option[(Double, Double)] = None
+  ): ModelCapabilities =
+    new ModelCapabilities(
+      supportsFunctionCalling,
+      supportsParallelFunctionCalling,
+      supportsVision,
+      supportsPromptCaching,
+      supportsReasoning,
+      supportsResponseSchema,
+      supportsSystemMessages,
+      supportsPdfInput,
+      supportsAudioInput,
+      supportsAudioOutput,
+      supportsWebSearch,
+      supportsComputerUse,
+      supportsAssistantPrefill,
+      supportsToolChoice,
+      supportsNativeStreaming,
+      supportedRegions,
+      disallowedParams,
+      temperatureConstraint
+    )
+
   implicit val rw: ReadWriter[ModelCapabilities] = macroRW
 
   def fromJson(data: ujson.Value): ModelCapabilities = {

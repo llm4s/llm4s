@@ -317,7 +317,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
 
     val result = client.complete(
       Conversation(Seq(UserMessage("Hi"))),
-      CompletionOptions().copy(maxTokens = Some(512))
+      CompletionOptions().withMaxTokens(Some(512))
     )
 
     result.isRight shouldBe true
@@ -366,7 +366,7 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
       case Right(tool) =>
         val result = client.complete(
           Conversation(Seq(UserMessage("Hi"))),
-          CompletionOptions().copy(tools = Seq(tool))
+          CompletionOptions().withTools(Seq(tool))
         )
         result.isRight shouldBe true
         ujson.read(capturedBody)("tools")(0)("functionDeclarations")(0)("name").str shouldBe "search"

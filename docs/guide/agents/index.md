@@ -353,7 +353,7 @@ import org.llm4s.llmconnect.model.{CompletionOptions, ReasoningEffort}
 
 val options = CompletionOptions()
   .withReasoning(ReasoningEffort.High)  // None, Low, Medium, High
-  .copy(maxTokens = Some(4096))
+  .withMaxTokens(4096)
 
 // Use with agent
 agent.run(query, tools, completionOptions = Some(options))

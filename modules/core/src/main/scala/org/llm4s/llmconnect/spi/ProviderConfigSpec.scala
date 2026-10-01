@@ -110,20 +110,49 @@ object ProviderConfigKey:
  * know, unlike the instance name. So with `OPENAI_API_KEY` set, a section needs only
  * `provider` and `model`; a section for a second account sets `apiKey` itself.
  */
-final case class ProviderConfigSpec(
-  requiresApiKey: Boolean = false,
-  requiresBaseUrl: Boolean = false,
-  defaultBaseUrl: Option[String] = None,
-  baseUrlExample: String = "e.g. https://api.example.com/",
-  baseUrlEnv: Option[String] = None,
-  extras: Seq[ProviderConfigKey] = Seq.empty,
-  apiKeyEnv: Seq[String] = Seq.empty
+final case class ProviderConfigSpec private (
+  requiresApiKey: Boolean,
+  requiresBaseUrl: Boolean,
+  defaultBaseUrl: Option[String],
+  baseUrlExample: String,
+  baseUrlEnv: Option[String],
+  extras: Seq[ProviderConfigKey],
+  apiKeyEnv: Seq[String]
 ):
+  def withRequiresApiKey(requiresApiKey: Boolean): ProviderConfigSpec   = copy(requiresApiKey = requiresApiKey)
+  def withRequiresBaseUrl(requiresBaseUrl: Boolean): ProviderConfigSpec = copy(requiresBaseUrl = requiresBaseUrl)
+  def withDefaultBaseUrl(defaultBaseUrl: String): ProviderConfigSpec    = copy(defaultBaseUrl = Some(defaultBaseUrl))
+  def withDefaultBaseUrl(defaultBaseUrl: Option[String]): ProviderConfigSpec = copy(defaultBaseUrl = defaultBaseUrl)
+  def withBaseUrlExample(baseUrlExample: String): ProviderConfigSpec         = copy(baseUrlExample = baseUrlExample)
+  def withBaseUrlEnv(baseUrlEnv: String): ProviderConfigSpec                 = copy(baseUrlEnv = Some(baseUrlEnv))
+  def withBaseUrlEnv(baseUrlEnv: Option[String]): ProviderConfigSpec         = copy(baseUrlEnv = baseUrlEnv)
+  def withExtras(extras: Seq[ProviderConfigKey]): ProviderConfigSpec         = copy(extras = extras)
+  def withApiKeyEnv(apiKeyEnv: Seq[String]): ProviderConfigSpec              = copy(apiKeyEnv = apiKeyEnv)
 
   /** The declared provider-specific key called `name`, if any. */
   def extra(name: String): Option[ProviderConfigKey] = extras.find(_.name == name)
 
 object ProviderConfigSpec:
+
+  /** Creates a [[ProviderConfigSpec]]. Named arguments are the supported way to construct one. */
+  def apply(
+    requiresApiKey: Boolean = false,
+    requiresBaseUrl: Boolean = false,
+    defaultBaseUrl: Option[String] = None,
+    baseUrlExample: String = "e.g. https://api.example.com/",
+    baseUrlEnv: Option[String] = None,
+    extras: Seq[ProviderConfigKey] = Seq.empty,
+    apiKeyEnv: Seq[String] = Seq.empty
+  ): ProviderConfigSpec =
+    new ProviderConfigSpec(
+      requiresApiKey,
+      requiresBaseUrl,
+      defaultBaseUrl,
+      baseUrlExample,
+      baseUrlEnv,
+      extras,
+      apiKeyEnv
+    )
 
   /**
    * The fields every named provider section may carry, whatever its provider.

@@ -373,7 +373,7 @@ curl https://api.anthropic.com/v1/messages \
         val result = attempt.flatMap(_ =>
           accumulator.toCompletion.map { c =>
             val cost = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-            c.copy(model = config.model, estimatedCost = cost)
+            c.withModel(config.model).withEstimatedCost(cost)
           }
         )
 

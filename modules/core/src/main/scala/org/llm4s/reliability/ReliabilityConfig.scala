@@ -14,13 +14,14 @@ import scala.concurrent.duration.{ Duration, DurationInt }
  * @param deadline Maximum time to wait for operation completion
  * @param enabled Whether reliability features are enabled (for opt-out)
  */
-final case class ReliabilityConfig(
-  retryPolicy: RetryPolicy = RetryPolicy.exponentialBackoff(),
-  circuitBreaker: CircuitBreakerConfig = CircuitBreakerConfig.default,
-  rateLimit: RateLimitConfig = RateLimitConfig.disabled,
-  deadline: Option[Duration] = Some(5.minutes),
-  enabled: Boolean = true
+final case class ReliabilityConfig private (
+  retryPolicy: RetryPolicy,
+  circuitBreaker: CircuitBreakerConfig,
+  rateLimit: RateLimitConfig,
+  deadline: Option[Duration],
+  enabled: Boolean
 ) {
+  def withEnabled(enabled: Boolean): ReliabilityConfig = copy(enabled = enabled)
 
   /** Disable all reliability features */
   def disabled: ReliabilityConfig =
@@ -42,12 +43,24 @@ final case class ReliabilityConfig(
   def withDeadline(duration: Duration): ReliabilityConfig =
     copy(deadline = Some(duration))
 
+  def withDeadline(deadline: Option[Duration]): ReliabilityConfig = copy(deadline = deadline)
+
   /** Remove deadline */
   def withoutDeadline: ReliabilityConfig =
     copy(deadline = None)
 }
 
 object ReliabilityConfig {
+
+  /** Creates a [[ReliabilityConfig]]. Named arguments are the supported way to construct one. */
+  def apply(
+    retryPolicy: RetryPolicy = RetryPolicy.exponentialBackoff(),
+    circuitBreaker: CircuitBreakerConfig = CircuitBreakerConfig.default,
+    rateLimit: RateLimitConfig = RateLimitConfig.disabled,
+    deadline: Option[Duration] = Some(5.minutes),
+    enabled: Boolean = true
+  ): ReliabilityConfig =
+    new ReliabilityConfig(retryPolicy, circuitBreaker, rateLimit, deadline, enabled)
 
   /**
    * Default configuration: exponential backoff + circuit breaker + 5 min deadline.
@@ -86,10 +99,10 @@ object ReliabilityConfig {
  * @param recoveryTimeout Time to wait before attempting recovery (half-open state)
  * @param successThreshold Number of successes in half-open state to close circuit
  */
-final case class CircuitBreakerConfig(
-  failureThreshold: Int = 5,
-  recoveryTimeout: Duration = 30.seconds,
-  successThreshold: Int = 2
+final case class CircuitBreakerConfig private (
+  failureThreshold: Int,
+  recoveryTimeout: Duration,
+  successThreshold: Int
 ) {
 
   /** Set failure threshold */
@@ -106,6 +119,14 @@ final case class CircuitBreakerConfig(
 }
 
 object CircuitBreakerConfig {
+
+  /** Creates a [[CircuitBreakerConfig]]. Named arguments are the supported way to construct one. */
+  def apply(
+    failureThreshold: Int = 5,
+    recoveryTimeout: Duration = 30.seconds,
+    successThreshold: Int = 2
+  ): CircuitBreakerConfig =
+    new CircuitBreakerConfig(failureThreshold, recoveryTimeout, successThreshold)
 
   /** Default circuit breaker: 5 failures, 30s recovery */
   val default: CircuitBreakerConfig = CircuitBreakerConfig()
@@ -137,10 +158,10 @@ object CircuitBreakerConfig {
  * @param requestsPerMinute Sustained request rate once the bucket is empty
  * @param burstCapacity Maximum tokens the bucket can hold, i.e. the largest burst allowed
  */
-final case class RateLimitConfig(
-  enabled: Boolean = false,
-  requestsPerMinute: Int = 60,
-  burstCapacity: Int = 60
+final case class RateLimitConfig private (
+  enabled: Boolean,
+  requestsPerMinute: Int,
+  burstCapacity: Int
 ) {
 
   /** Set requests per minute */
@@ -157,6 +178,10 @@ final case class RateLimitConfig(
 }
 
 object RateLimitConfig {
+
+  /** Creates a [[RateLimitConfig]]. Named arguments are the supported way to construct one. */
+  def apply(enabled: Boolean = false, requestsPerMinute: Int = 60, burstCapacity: Int = 60): RateLimitConfig =
+    new RateLimitConfig(enabled, requestsPerMinute, burstCapacity)
 
   /** Default: enabled, 60 requests/minute, burst of 60 */
   val default: RateLimitConfig = RateLimitConfig(enabled = true)

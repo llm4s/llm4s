@@ -269,16 +269,46 @@ object ContextManager {
 /**
  * Configuration for context management pipeline
  */
-case class ContextConfig(
+final case class ContextConfig private (
   headroomPercent: HeadroomPercent,
   maxSemanticBlocks: ContextWindowSize,
   enableDeterministicCompression: Boolean,
   enableLLMCompression: Boolean,
-  summaryTokenTarget: Int = 400,         // target tokens for digest summaries
-  enableSubjectiveEdits: Boolean = false // gates filler/repetition/truncate rules
-)
+  summaryTokenTarget: Int,       // target tokens for digest summaries
+  enableSubjectiveEdits: Boolean // gates filler/repetition/truncate rules
+) {
+  def withHeadroomPercent(headroomPercent: HeadroomPercent): ContextConfig = copy(headroomPercent = headroomPercent)
+  def withMaxSemanticBlocks(maxSemanticBlocks: ContextWindowSize): ContextConfig =
+    copy(maxSemanticBlocks = maxSemanticBlocks)
+  def withEnableDeterministicCompression(enableDeterministicCompression: Boolean): ContextConfig =
+    copy(enableDeterministicCompression = enableDeterministicCompression)
+  def withEnableLLMCompression(enableLLMCompression: Boolean): ContextConfig =
+    copy(enableLLMCompression = enableLLMCompression)
+  def withSummaryTokenTarget(summaryTokenTarget: Int): ContextConfig = copy(summaryTokenTarget = summaryTokenTarget)
+  def withEnableSubjectiveEdits(enableSubjectiveEdits: Boolean): ContextConfig =
+    copy(enableSubjectiveEdits = enableSubjectiveEdits)
+}
 
 object ContextConfig {
+
+  /** Creates a [[ContextConfig]]. Named arguments are the supported way to construct one. */
+  def apply(
+    headroomPercent: HeadroomPercent,
+    maxSemanticBlocks: ContextWindowSize,
+    enableDeterministicCompression: Boolean,
+    enableLLMCompression: Boolean,
+    summaryTokenTarget: Int = 400,
+    enableSubjectiveEdits: Boolean = false
+  ): ContextConfig =
+    new ContextConfig(
+      headroomPercent,
+      maxSemanticBlocks,
+      enableDeterministicCompression,
+      enableLLMCompression,
+      summaryTokenTarget,
+      enableSubjectiveEdits
+    )
+
   val default: ContextConfig = ContextConfig(
     headroomPercent = HeadroomPercent.Standard, // 8% headroom
     maxSemanticBlocks = 5,                      // Keep last 5 semantic blocks for history compression

@@ -32,7 +32,7 @@ object OpenRouterProvider extends ProviderDescriptor:
   val configSpec: ProviderConfigSpec =
     ProviderConfigSpec
       .apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(OpenAICompatibleConfigKeys.OPENROUTER_API_KEY))
-      .copy(extras = Seq(OpenAIConfig.OrganizationConfigKey))
+      .withExtras(Seq(OpenAIConfig.OrganizationConfigKey))
 
   override val modelLister: Option[ProviderModelLister] = Some(OpenRouterModelLister)
 

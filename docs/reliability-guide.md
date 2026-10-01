@@ -418,9 +418,7 @@ def configForProvider(provider: String): ReliabilityConfig = provider match {
     
   case "ollama" =>
     // Local service: more aggressive retries, no circuit breaker
-    ReliabilityConfig.aggressive.copy(
-      circuitBreaker = CircuitBreakerConfig.disabled
-    )
+    ReliabilityConfig.aggressive.withCircuitBreaker(CircuitBreakerConfig.disabled)
     
   case _ =>
     ReliabilityConfig.default

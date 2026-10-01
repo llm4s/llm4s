@@ -263,7 +263,7 @@ class Agent(client: LLMClient) {
   def runStep(state: AgentState, context: AgentContext = AgentContext.Default): Result[AgentState] =
     state.status match {
       case AgentStatus.InProgress =>
-        val options = state.completionOptions.copy(tools = state.tools.tools)
+        val options = state.completionOptions.withTools(state.tools.tools)
 
         if (context.debug) {
           logger.debug("Running completion step")

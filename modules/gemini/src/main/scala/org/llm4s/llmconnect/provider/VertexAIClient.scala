@@ -182,7 +182,7 @@ class VertexAIClient(
                 .flatMap(_ =>
                   accumulator.toCompletion.map { c =>
                     val cost       = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
-                    val completion = c.copy(model = config.model, estimatedCost = cost)
+                    val completion = c.withModel(config.model).withEstimatedCost(cost)
                     recordExchange(startedAt, requestText, Some(rawStream.result()), Right(completion))
                     completion
                   }

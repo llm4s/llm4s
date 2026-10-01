@@ -75,7 +75,7 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
     val options = CompletionOptions()
       .withReasoning(ReasoningEffort.Medium)
       .withBudgetTokens(10000)
-      .copy(maxTokens = Some(4096))
+      .withMaxTokens(4096)
 
     options.reasoning shouldBe Some(ReasoningEffort.Medium)
     options.budgetTokens shouldBe Some(10000)
@@ -140,10 +140,10 @@ class ReasoningModesSpec extends AnyFlatSpec with Matchers {
     )
     withoutThinking.hasThinking shouldBe false
 
-    val withEmptyThinking = withoutThinking.copy(thinking = Some(""))
+    val withEmptyThinking = withoutThinking.withThinking(Some(""))
     withEmptyThinking.hasThinking shouldBe false
 
-    val withThinking = withoutThinking.copy(thinking = Some("I need to think about this..."))
+    val withThinking = withoutThinking.withThinking(Some("I need to think about this..."))
     withThinking.hasThinking shouldBe true
   }
 

@@ -57,7 +57,7 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
     model = "test-model",
     message = AssistantMessage(None, Seq(toolCall)),
     toolCalls = List(toolCall),
-    usage = Some(usage.copy(thinkingTokens = Some(4), cachedTokens = Some(2))),
+    usage = Some(usage.withThinkingTokens(Some(4)).withCachedTokens(Some(2))),
     thinking = Some("add them"),
     estimatedCost = Some(0.0001)
   )
@@ -165,7 +165,7 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
     val tracing = new NoOpTracing()
 
     tracing.traceCompletion(completionWithToolCalls, "test-model") shouldBe Right(())
-    tracing.traceCompletion(completionWithToolCalls.copy(usage = None, thinking = None), "") shouldBe Right(())
+    tracing.traceCompletion(completionWithToolCalls.withUsage(None).withThinking(None), "") shouldBe Right(())
   }
 
   it should "succeed for zero and extreme token usage" in {
@@ -173,7 +173,7 @@ class NoOpTracingSpec extends AnyFlatSpec with Matchers {
 
     tracing.traceTokenUsage(TokenUsage(0, 0, 0), "test-model", "completion") shouldBe Right(())
     tracing.traceTokenUsage(TokenUsage(Int.MaxValue, Int.MaxValue, Int.MaxValue), "m", "op") shouldBe Right(())
-    tracing.traceTokenUsage(usage.copy(thinkingTokens = Some(1), cacheCreationTokens = Some(3)), "m", "op") shouldBe
+    tracing.traceTokenUsage(usage.withThinkingTokens(Some(1)).withCacheCreationTokens(Some(3)), "m", "op") shouldBe
       Right(())
   }
 

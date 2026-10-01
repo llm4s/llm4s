@@ -520,7 +520,7 @@ for {
 ```scala
 val options = CompletionOptions()
   .withReasoning(ReasoningEffort.High)  // None, Low, Medium, High
-  .copy(maxTokens = Some(4096))
+  .withMaxTokens(4096)
 
 client.complete(conversation, options)
 ```

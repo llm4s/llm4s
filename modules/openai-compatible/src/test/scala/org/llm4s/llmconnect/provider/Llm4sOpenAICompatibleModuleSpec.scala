@@ -137,7 +137,7 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
         withClue(s"${descriptor.id.asString}: ") {
           withServer("/")(exchange => sendSseResponse(exchange, openAISseBody(Seq("Hi")))) { baseUrl =>
             val client = descriptor
-              .buildConfig("test-instance", section(descriptor).copy(baseUrl = Some(BaseUrl(baseUrl))))
+              .buildConfig("test-instance", section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))))
               .flatMap(config => descriptor.buildClient(config, LlmClientOptions.default))
               .getOrElse(fail(s"${descriptor.id.asString} failed to build a client for the streaming proof"))
 

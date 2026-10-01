@@ -124,7 +124,7 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers:
     "actually stream, not silently fall back to complete()" in {
       withServer("/v1/messages")(exchange => sendSseResponse(exchange, streamingBody)) { baseUrl =>
         val client = AnthropicProvider
-          .buildConfig("test-instance", section.copy(baseUrl = Some(BaseUrl(baseUrl))))
+          .buildConfig("test-instance", section.withBaseUrl(Some(BaseUrl(baseUrl))))
           .flatMap(config => AnthropicProvider.buildClient(config, LlmClientOptions.default))
           .getOrElse(fail("failed to build a client for the streaming proof"))
 

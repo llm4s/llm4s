@@ -136,7 +136,7 @@ final private[model] class DefaultRequestTransformer(
           logger.debug(
             s"Model $modelId: adjusting temperature from ${options.temperature} to $min (allowed range: $min-$max)"
           )
-          transformed = transformed.copy(temperature = min)
+          transformed = transformed.withTemperature(min)
         } else {
           errors += s"Temperature ${options.temperature} not allowed for $modelId (must be between $min and $max)"
         }
@@ -149,7 +149,7 @@ final private[model] class DefaultRequestTransformer(
       if (disallowed.contains("top_p") && options.topP != 1.0) {
         if (dropUnsupported) {
           logger.debug(s"Model $modelId: dropping top_p (not supported)")
-          transformed = transformed.copy(topP = 1.0)
+          transformed = transformed.withTopP(1.0)
         } else {
           errors += s"top_p parameter not supported for $modelId"
         }
@@ -159,7 +159,7 @@ final private[model] class DefaultRequestTransformer(
       if (disallowed.contains("presence_penalty") && options.presencePenalty != 0.0) {
         if (dropUnsupported) {
           logger.debug(s"Model $modelId: dropping presence_penalty (not supported)")
-          transformed = transformed.copy(presencePenalty = 0.0)
+          transformed = transformed.withPresencePenalty(0.0)
         } else {
           errors += s"presence_penalty parameter not supported for $modelId"
         }
@@ -169,7 +169,7 @@ final private[model] class DefaultRequestTransformer(
       if (disallowed.contains("frequency_penalty") && options.frequencyPenalty != 0.0) {
         if (dropUnsupported) {
           logger.debug(s"Model $modelId: dropping frequency_penalty (not supported)")
-          transformed = transformed.copy(frequencyPenalty = 0.0)
+          transformed = transformed.withFrequencyPenalty(0.0)
         } else {
           errors += s"frequency_penalty parameter not supported for $modelId"
         }
@@ -180,7 +180,7 @@ final private[model] class DefaultRequestTransformer(
     if (options.tools.nonEmpty && !capabilities.supportsFunctionCalling.getOrElse(true)) {
       if (dropUnsupported) {
         logger.debug(s"Model $modelId: dropping tools (function calling not supported)")
-        transformed = transformed.copy(tools = Seq.empty)
+        transformed = transformed.withTools(Seq.empty)
       } else {
         errors += s"Function calling not supported for $modelId"
       }
@@ -198,7 +198,7 @@ final private[model] class DefaultRequestTransformer(
           case Some(false) =>
             if (dropUnsupported) {
               logger.debug(s"Model $modelId: dropping responseFormat (structured output not supported)")
-              transformed = transformed.copy(responseFormat = None)
+              transformed = transformed.withResponseFormat(None)
             }
           // else: keep and send (Json is allowed fallback; provider may ignore or accept)
           case _ => () // true or None: keep and send
@@ -208,7 +208,7 @@ final private[model] class DefaultRequestTransformer(
           case Some(false) =>
             if (dropUnsupported) {
               logger.debug(s"Model $modelId: dropping JsonSchema responseFormat (not supported)")
-              transformed = transformed.copy(responseFormat = None)
+              transformed = transformed.withResponseFormat(None)
             } else {
               errors += s"Structured output (JSON schema) not supported for model $modelId"
             }

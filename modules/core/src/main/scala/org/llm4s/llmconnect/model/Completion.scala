@@ -16,17 +16,29 @@ package org.llm4s.llmconnect.model
  * @param estimatedCost Optional estimated cost of this completion in USD.
  *                      Computed from token usage and model pricing when available.
  */
-case class Completion(
+final case class Completion private (
   id: String,
   created: Long,
   content: String,
   model: String,
   message: AssistantMessage,
-  toolCalls: List[ToolCall] = List.empty,
-  usage: Option[TokenUsage] = None,
-  thinking: Option[String] = None,
-  estimatedCost: Option[Double] = None
+  toolCalls: List[ToolCall],
+  usage: Option[TokenUsage],
+  thinking: Option[String],
+  estimatedCost: Option[Double]
 ) {
+  def withId(id: String): Completion                               = copy(id = id)
+  def withCreated(created: Long): Completion                       = copy(created = created)
+  def withContent(content: String): Completion                     = copy(content = content)
+  def withModel(model: String): Completion                         = copy(model = model)
+  def withMessage(message: AssistantMessage): Completion           = copy(message = message)
+  def withToolCalls(toolCalls: List[ToolCall]): Completion         = copy(toolCalls = toolCalls)
+  def withUsage(usage: TokenUsage): Completion                     = copy(usage = Some(usage))
+  def withUsage(usage: Option[TokenUsage]): Completion             = copy(usage = usage)
+  def withThinking(thinking: String): Completion                   = copy(thinking = Some(thinking))
+  def withThinking(thinking: Option[String]): Completion           = copy(thinking = thinking)
+  def withEstimatedCost(estimatedCost: Double): Completion         = copy(estimatedCost = Some(estimatedCost))
+  def withEstimatedCost(estimatedCost: Option[Double]): Completion = copy(estimatedCost = estimatedCost)
 
   /**
    * Extract content as text (for compatibility)
@@ -55,6 +67,23 @@ case class Completion(
   }
 }
 
+object Completion {
+
+  /** Creates a [[Completion]]. Named arguments are the supported way to construct one. */
+  def apply(
+    id: String,
+    created: Long,
+    content: String,
+    model: String,
+    message: AssistantMessage,
+    toolCalls: List[ToolCall] = List.empty,
+    usage: Option[TokenUsage] = None,
+    thinking: Option[String] = None,
+    estimatedCost: Option[Double] = None
+  ): Completion =
+    new Completion(id, created, content, model, message, toolCalls, usage, thinking, estimatedCost)
+}
+
 /**
  * Token usage statistics for a completion request.
  *
@@ -70,14 +99,25 @@ case class Completion(
  *                            When present, these tokens are billed at the cache-creation rate,
  *                            which is typically higher than the normal input rate.
  */
-case class TokenUsage(
+final case class TokenUsage private (
   promptTokens: Int,
   completionTokens: Int,
   totalTokens: Int,
-  thinkingTokens: Option[Int] = None,
-  cachedTokens: Option[Int] = None,
-  cacheCreationTokens: Option[Int] = None
+  thinkingTokens: Option[Int],
+  cachedTokens: Option[Int],
+  cacheCreationTokens: Option[Int]
 ) {
+  def withPromptTokens(promptTokens: Int): TokenUsage             = copy(promptTokens = promptTokens)
+  def withCompletionTokens(completionTokens: Int): TokenUsage     = copy(completionTokens = completionTokens)
+  def withTotalTokens(totalTokens: Int): TokenUsage               = copy(totalTokens = totalTokens)
+  def withThinkingTokens(thinkingTokens: Int): TokenUsage         = copy(thinkingTokens = Some(thinkingTokens))
+  def withThinkingTokens(thinkingTokens: Option[Int]): TokenUsage = copy(thinkingTokens = thinkingTokens)
+  def withCachedTokens(cachedTokens: Int): TokenUsage             = copy(cachedTokens = Some(cachedTokens))
+  def withCachedTokens(cachedTokens: Option[Int]): TokenUsage     = copy(cachedTokens = cachedTokens)
+  def withCacheCreationTokens(cacheCreationTokens: Int): TokenUsage =
+    copy(cacheCreationTokens = Some(cacheCreationTokens))
+  def withCacheCreationTokens(cacheCreationTokens: Option[Int]): TokenUsage =
+    copy(cacheCreationTokens = cacheCreationTokens)
 
   /**
    * Total output tokens including thinking.
@@ -90,6 +130,20 @@ case class TokenUsage(
    * Check if thinking tokens were used.
    */
   def hasThinkingTokens: Boolean = thinkingTokens.exists(_ > 0)
+}
+
+object TokenUsage {
+
+  /** Creates a [[TokenUsage]]. Named arguments are the supported way to construct one. */
+  def apply(
+    promptTokens: Int,
+    completionTokens: Int,
+    totalTokens: Int,
+    thinkingTokens: Option[Int] = None,
+    cachedTokens: Option[Int] = None,
+    cacheCreationTokens: Option[Int] = None
+  ): TokenUsage =
+    new TokenUsage(promptTokens, completionTokens, totalTokens, thinkingTokens, cachedTokens, cacheCreationTokens)
 }
 
 /**
@@ -113,13 +167,22 @@ case class EmbeddingUsage(
  * @param thinkingDelta Optional thinking/reasoning content delta.
  *                      Present when streaming extended thinking content.
  */
-case class StreamedChunk(
+final case class StreamedChunk private (
   id: String,
   content: Option[String],
-  toolCall: Option[ToolCall] = None,
-  finishReason: Option[String] = None,
-  thinkingDelta: Option[String] = None
+  toolCall: Option[ToolCall],
+  finishReason: Option[String],
+  thinkingDelta: Option[String]
 ) {
+  def withId(id: String): StreamedChunk                               = copy(id = id)
+  def withContent(content: String): StreamedChunk                     = copy(content = Some(content))
+  def withContent(content: Option[String]): StreamedChunk             = copy(content = content)
+  def withToolCall(toolCall: ToolCall): StreamedChunk                 = copy(toolCall = Some(toolCall))
+  def withToolCall(toolCall: Option[ToolCall]): StreamedChunk         = copy(toolCall = toolCall)
+  def withFinishReason(finishReason: String): StreamedChunk           = copy(finishReason = Some(finishReason))
+  def withFinishReason(finishReason: Option[String]): StreamedChunk   = copy(finishReason = finishReason)
+  def withThinkingDelta(thinkingDelta: String): StreamedChunk         = copy(thinkingDelta = Some(thinkingDelta))
+  def withThinkingDelta(thinkingDelta: Option[String]): StreamedChunk = copy(thinkingDelta = thinkingDelta)
 
   /**
    * Check if this chunk contains thinking content.
@@ -130,6 +193,19 @@ case class StreamedChunk(
    * Check if this chunk contains main content.
    */
   def hasContent: Boolean = content.exists(_.nonEmpty)
+}
+
+object StreamedChunk {
+
+  /** Creates a [[StreamedChunk]]. Named arguments are the supported way to construct one. */
+  def apply(
+    id: String,
+    content: Option[String],
+    toolCall: Option[ToolCall] = None,
+    finishReason: Option[String] = None,
+    thinkingDelta: Option[String] = None
+  ): StreamedChunk =
+    new StreamedChunk(id, content, toolCall, finishReason, thinkingDelta)
 }
 
 /**

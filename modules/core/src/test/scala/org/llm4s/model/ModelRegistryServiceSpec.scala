@@ -169,7 +169,7 @@ class ModelRegistryServiceSpec extends AnyFlatSpec with Matchers:
 
   it should "allow later models to override earlier models in a snapshot" in:
     val embeddedModel = defaultService().lookup("gpt-4o").toOption.get
-    val overrideModel = embeddedModel.copy(maxInputTokens = Some(999999))
+    val overrideModel = embeddedModel.withMaxInputTokens(Some(999999))
 
     val service = ModelRegistryService.fromModels(List(embeddedModel, overrideModel))
 

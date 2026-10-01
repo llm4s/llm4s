@@ -125,7 +125,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     "default Azure's API version when the section sets none" in {
       AzureProvider.buildConfig(
         "test-instance",
-        section(AzureProvider).copy(extras = section(AzureProvider).extras - AzureProvider.ApiVersionKey)
+        section(AzureProvider).withExtras(section(AzureProvider).extras - AzureProvider.ApiVersionKey)
       ) match
         case Right(azure: AzureConfig) => azure.apiVersion shouldBe AzureConfig.DEFAULT_API_VERSION
         case other                     => fail(s"Expected AzureConfig, got $other")

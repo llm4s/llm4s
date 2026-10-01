@@ -210,7 +210,7 @@ final private[agent] class AgentStreamingExecutor(
       case AgentStatus.InProgress =>
         onEvent(AgentEvent.stepStarted(currentStep))
 
-        val options     = state.completionOptions.copy(tools = state.tools.tools)
+        val options     = state.completionOptions.withTools(state.tools.tools)
         val accumulator = StreamingAccumulator.create()
 
         val streamResult = client.streamComplete(

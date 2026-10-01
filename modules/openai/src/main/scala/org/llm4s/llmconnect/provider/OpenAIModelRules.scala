@@ -19,13 +19,12 @@ private[llm4s] object OpenAIModelRules {
   /** Applies the o-series constraints on top of `capabilities`; other models pass through. */
   def adjust(modelId: String, capabilities: ModelCapabilities): ModelCapabilities =
     if (isOSeriesModel(modelId))
-      capabilities.copy(
-        supportsReasoning = capabilities.supportsReasoning.orElse(Some(true)),
-        supportsNativeStreaming = Some(false),
-        supportsSystemMessages = Some(false),
-        temperatureConstraint = Some((1.0, 1.0)),
-        disallowedParams = Some(Set("top_p", "presence_penalty", "frequency_penalty", "logprobs"))
-      )
+      capabilities
+        .withSupportsReasoning(capabilities.supportsReasoning.orElse(Some(true)))
+        .withSupportsNativeStreaming(Some(false))
+        .withSupportsSystemMessages(Some(false))
+        .withTemperatureConstraint(Some((1.0, 1.0)))
+        .withDisallowedParams(Some(Set("top_p", "presence_penalty", "frequency_penalty", "logprobs")))
     else capabilities
 
   /** Whether the model takes `max_completion_tokens` instead of `max_tokens`. */

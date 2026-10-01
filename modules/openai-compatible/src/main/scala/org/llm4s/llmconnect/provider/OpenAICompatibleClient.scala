@@ -148,7 +148,7 @@ class OpenAICompatibleClient(
               // a fragment that is itself valid JSON, such as `"Paris"`, parses to the bare
               // string and would lose its quotes.
               accumulator.addChunk(
-                chunk.copy(toolCall = chunk.toolCall.map(_.copy(arguments = ujson.Str(rawArguments))))
+                chunk.withToolCall(chunk.toolCall.map(_.copy(arguments = ujson.Str(rawArguments))))
               )
               onChunk(chunk)
             }
@@ -159,12 +159,10 @@ class OpenAICompatibleClient(
     // non-streaming `complete` also reports them as `Completion.toolCalls`, so this does too.
     accumulator.toCompletion.map { c =>
       val finalUsage = usage.orElse(c.usage)
-      c.copy(
-        model = settings.model,
-        toolCalls = c.message.toolCalls.toList,
-        usage = finalUsage,
-        estimatedCost = finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u))
-      )
+      c.withModel(settings.model)
+        .withToolCalls(c.message.toolCalls.toList)
+        .withUsage(finalUsage)
+        .withEstimatedCost(finalUsage.flatMap(u => CostEstimator.estimate(settings.model, u)))
     }
   }
 

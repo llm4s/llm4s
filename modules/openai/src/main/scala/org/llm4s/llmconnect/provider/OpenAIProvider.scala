@@ -25,7 +25,7 @@ object OpenAIProvider extends ProviderDescriptor:
   val configSpec: ProviderConfigSpec =
     ProviderConfigSpec
       .apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(OpenAIConfigKeys.OPENAI_API_KEY))
-      .copy(extras = Seq(OpenAIConfig.OrganizationConfigKey))
+      .withExtras(Seq(OpenAIConfig.OrganizationConfigKey))
 
   override val modelLister: Option[ProviderModelLister] = Some(OpenAIModelLister)
 

@@ -157,7 +157,7 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory:
     "actually stream, not silently fall back to complete()" in {
       withServer("/")(exchange => sendSseResponse(exchange, geminiSseBody)) { baseUrl =>
         val client = GeminiProvider
-          .buildConfig("test-instance", section(GeminiProvider).copy(baseUrl = Some(BaseUrl(baseUrl))))
+          .buildConfig("test-instance", section(GeminiProvider).withBaseUrl(Some(BaseUrl(baseUrl))))
           .flatMap(config => GeminiProvider.buildClient(config, LlmClientOptions.default))
           .getOrElse(fail("failed to build a client for the streaming proof"))
 
@@ -175,7 +175,7 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory:
     "actually stream, not silently fall back to complete()" in {
       // No apiKey: that field doubles as a credential file path for Vertex, and a
       // nonexistent one would fail auth before the mocked HTTP client is ever reached.
-      val config = VertexAIProvider.buildConfig("test-instance", section(VertexAIProvider).copy(apiKey = None)) match
+      val config = VertexAIProvider.buildConfig("test-instance", section(VertexAIProvider).withApiKey(None)) match
         case Right(c: VertexAIConfig) => c
         case other                    => fail(s"expected a VertexAIConfig, got $other")
 

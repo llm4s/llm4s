@@ -62,14 +62,23 @@ object ProvidersConfigModel:
    *                      `contextWindow` and `reserveCompletion` - so that this type does not
    *                      change as providers come and go.
    */
-  final case class NamedProviderConfig(
+  final case class NamedProviderConfig private (
     provider: ProviderId,
     model: ModelName,
     baseUrl: Option[BaseUrl],
     apiKey: Option[ApiKey],
-    headers: Map[String, String] = Map.empty,
-    extras: Map[String, String] = Map.empty
+    headers: Map[String, String],
+    extras: Map[String, String]
   ):
+
+    def withProvider(provider: ProviderId): NamedProviderConfig        = copy(provider = provider)
+    def withModel(model: ModelName): NamedProviderConfig               = copy(model = model)
+    def withBaseUrl(baseUrl: BaseUrl): NamedProviderConfig             = copy(baseUrl = Some(baseUrl))
+    def withBaseUrl(baseUrl: Option[BaseUrl]): NamedProviderConfig     = copy(baseUrl = baseUrl)
+    def withApiKey(apiKey: ApiKey): NamedProviderConfig                = copy(apiKey = Some(apiKey))
+    def withApiKey(apiKey: Option[ApiKey]): NamedProviderConfig        = copy(apiKey = apiKey)
+    def withHeaders(headers: Map[String, String]): NamedProviderConfig = copy(headers = headers)
+    def withExtras(extras: Map[String, String]): NamedProviderConfig   = copy(extras = extras)
     // The API key, header values and extra values may be credentials (`x-api-key`, a gateway
     // token, a provider-declared secret), so all are redacted; names are kept because they are
     // what a user needs to debug a section.
@@ -125,6 +134,20 @@ object ProvidersConfigModel:
      */
     def requireApiKey: Result[ApiKey] =
       apiKey.toRight(ConfigurationError("Configured provider is missing required field `apiKey`"))
+
+  object NamedProviderConfig {
+
+    /** Creates a [[NamedProviderConfig]]. Named arguments are the supported way to construct one. */
+    def apply(
+      provider: ProviderId,
+      model: ModelName,
+      baseUrl: Option[BaseUrl],
+      apiKey: Option[ApiKey],
+      headers: Map[String, String] = Map.empty,
+      extras: Map[String, String] = Map.empty
+    ): NamedProviderConfig =
+      new NamedProviderConfig(provider, model, baseUrl, apiKey, headers, extras)
+  }
 
   /**
    * Validated top-level providers configuration, including all named provider entries.

@@ -36,17 +36,28 @@ import org.llm4s.toolapi.ToolFunction
  * val jsonOptions = CompletionOptions().withResponseFormat(ResponseFormat.Json)
  * }}}
  */
-case class CompletionOptions(
-  temperature: Double = 0.7,
-  topP: Double = 1.0,
-  maxTokens: Option[Int] = None,
-  presencePenalty: Double = 0.0,
-  frequencyPenalty: Double = 0.0,
-  tools: Seq[ToolFunction[_, _]] = Seq.empty,
-  reasoning: Option[ReasoningEffort] = None,
-  budgetTokens: Option[Int] = None,
-  responseFormat: Option[ResponseFormat] = None
+final case class CompletionOptions private (
+  temperature: Double,
+  topP: Double,
+  maxTokens: Option[Int],
+  presencePenalty: Double,
+  frequencyPenalty: Double,
+  tools: Seq[ToolFunction[_, _]],
+  reasoning: Option[ReasoningEffort],
+  budgetTokens: Option[Int],
+  responseFormat: Option[ResponseFormat]
 ) {
+  def withTemperature(temperature: Double): CompletionOptions              = copy(temperature = temperature)
+  def withTopP(topP: Double): CompletionOptions                            = copy(topP = topP)
+  def withMaxTokens(maxTokens: Int): CompletionOptions                     = copy(maxTokens = Some(maxTokens))
+  def withMaxTokens(maxTokens: Option[Int]): CompletionOptions             = copy(maxTokens = maxTokens)
+  def withPresencePenalty(presencePenalty: Double): CompletionOptions      = copy(presencePenalty = presencePenalty)
+  def withFrequencyPenalty(frequencyPenalty: Double): CompletionOptions    = copy(frequencyPenalty = frequencyPenalty)
+  def withTools(tools: Seq[ToolFunction[_, _]]): CompletionOptions         = copy(tools = tools)
+  def withReasoning(reasoning: Option[ReasoningEffort]): CompletionOptions = copy(reasoning = reasoning)
+  def withBudgetTokens(budgetTokens: Option[Int]): CompletionOptions       = copy(budgetTokens = budgetTokens)
+  def withResponseFormat(responseFormat: Option[ResponseFormat]): CompletionOptions =
+    copy(responseFormat = responseFormat)
 
   /**
    * Enable reasoning with the specified effort level.
@@ -93,4 +104,31 @@ case class CompletionOptions(
    */
   def withResponseFormat(format: ResponseFormat): CompletionOptions =
     copy(responseFormat = Some(format))
+}
+
+object CompletionOptions {
+
+  /** Creates a [[CompletionOptions]]. Named arguments are the supported way to construct one. */
+  def apply(
+    temperature: Double = 0.7,
+    topP: Double = 1.0,
+    maxTokens: Option[Int] = None,
+    presencePenalty: Double = 0.0,
+    frequencyPenalty: Double = 0.0,
+    tools: Seq[ToolFunction[_, _]] = Seq.empty,
+    reasoning: Option[ReasoningEffort] = None,
+    budgetTokens: Option[Int] = None,
+    responseFormat: Option[ResponseFormat] = None
+  ): CompletionOptions =
+    new CompletionOptions(
+      temperature,
+      topP,
+      maxTokens,
+      presencePenalty,
+      frequencyPenalty,
+      tools,
+      reasoning,
+      budgetTokens,
+      responseFormat
+    )
 }

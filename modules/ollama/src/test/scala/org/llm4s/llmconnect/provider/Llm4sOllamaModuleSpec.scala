@@ -102,7 +102,7 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers:
     "actually stream, not silently fall back to complete()" in {
       withServer("/")(exchange => sendJsonResponse(exchange, 200, ndjsonBody)) { baseUrl =>
         val client = OllamaProvider
-          .buildConfig("test-instance", section.copy(baseUrl = Some(BaseUrl(baseUrl))))
+          .buildConfig("test-instance", section.withBaseUrl(Some(BaseUrl(baseUrl))))
           .flatMap(config => OllamaProvider.buildClient(config, LlmClientOptions.default))
           .getOrElse(fail("failed to build a client for the streaming proof"))
 

@@ -111,7 +111,7 @@ object ReasoningModesExample {
     // Create options with medium reasoning
     val options = CompletionOptions()
       .withReasoning(ReasoningEffort.Medium)
-      .copy(maxTokens = Some(1024))
+      .withMaxTokens(Some(1024))
 
     logger.info("Testing completion with reasoning effort: {}", options.reasoning.map(_.name))
     logger.info("Effective budget tokens: {}", options.effectiveBudgetTokens)

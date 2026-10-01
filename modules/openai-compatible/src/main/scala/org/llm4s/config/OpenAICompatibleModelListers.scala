@@ -59,7 +59,7 @@ object MistralModelLister extends ProviderModelLister:
     // The same normalisation chat applies, so a base URL that already carries `/v1` does not
     // list `/v1/v1/models`.
     val apiBase = config.baseUrl.map(url => BaseUrl(MistralConfig.apiBaseUrl(url.asUrl)))
-    delegate.listModels(config.copy(baseUrl = apiBase), httpClient)
+    delegate.listModels(config.withBaseUrl(apiBase), httpClient)
 
 /**
  * Model lister for the generic `openai-compatible` provider: `GET <baseUrl>/models`.
@@ -80,5 +80,5 @@ object OpenAICompatibleModelLister extends ProviderModelLister:
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
     config.requireBaseUrl.flatMap { baseUrl =>
       // Strip a trailing slash as `OpenAICompatibleConfig.fromValues` does for chat.
-      delegate.listModels(config.copy(baseUrl = Some(BaseUrl(baseUrl.asUrl.stripSuffix("/")))), httpClient)
+      delegate.listModels(config.withBaseUrl(Some(BaseUrl(baseUrl.asUrl.stripSuffix("/")))), httpClient)
     }

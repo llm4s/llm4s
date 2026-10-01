@@ -93,7 +93,7 @@ class ContextManagerSpec extends AnyFlatSpec with Matchers {
   // ============ Step Behavior ============
 
   it should "skip deterministic compression when disabled" in {
-    val config  = ContextConfig.default.copy(enableDeterministicCompression = false)
+    val config  = ContextConfig.default.withEnableDeterministicCompression(false)
     val manager = ContextManager.create(counter, config).toOption.get
 
     val conversation = ContextTestFixtures.conversationWithTools
@@ -110,7 +110,7 @@ class ContextManagerSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "skip LLM compression when disabled" in {
-    val config  = ContextConfig.default.copy(enableLLMCompression = false)
+    val config  = ContextConfig.default.withEnableLLMCompression(false)
     val manager = ContextManager.create(counter, config).toOption.get
 
     val conversation = ContextTestFixtures.largeConversation

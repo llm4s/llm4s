@@ -63,16 +63,38 @@ final case class EmbeddingProviderSection(
  *                       shared key, and the error then names the shared path instead.
  * @param modelEnv       the variable the module binds to the model, named likewise.
  */
-final case class EmbeddingConfigSpec(
-  requiresApiKey: Boolean = false,
-  defaultBaseUrl: Option[String] = None,
-  defaultModel: Option[String] = None,
-  defaultApiKey: Option[String] = None,
-  apiKeyEnv: Seq[String] = Seq.empty,
-  modelEnv: Option[String] = None
-)
+final case class EmbeddingConfigSpec private (
+  requiresApiKey: Boolean,
+  defaultBaseUrl: Option[String],
+  defaultModel: Option[String],
+  defaultApiKey: Option[String],
+  apiKeyEnv: Seq[String],
+  modelEnv: Option[String]
+) {
+  def withRequiresApiKey(requiresApiKey: Boolean): EmbeddingConfigSpec = copy(requiresApiKey = requiresApiKey)
+  def withDefaultBaseUrl(defaultBaseUrl: String): EmbeddingConfigSpec  = copy(defaultBaseUrl = Some(defaultBaseUrl))
+  def withDefaultBaseUrl(defaultBaseUrl: Option[String]): EmbeddingConfigSpec = copy(defaultBaseUrl = defaultBaseUrl)
+  def withDefaultModel(defaultModel: String): EmbeddingConfigSpec             = copy(defaultModel = Some(defaultModel))
+  def withDefaultModel(defaultModel: Option[String]): EmbeddingConfigSpec     = copy(defaultModel = defaultModel)
+  def withDefaultApiKey(defaultApiKey: String): EmbeddingConfigSpec         = copy(defaultApiKey = Some(defaultApiKey))
+  def withDefaultApiKey(defaultApiKey: Option[String]): EmbeddingConfigSpec = copy(defaultApiKey = defaultApiKey)
+  def withApiKeyEnv(apiKeyEnv: Seq[String]): EmbeddingConfigSpec            = copy(apiKeyEnv = apiKeyEnv)
+  def withModelEnv(modelEnv: String): EmbeddingConfigSpec                   = copy(modelEnv = Some(modelEnv))
+  def withModelEnv(modelEnv: Option[String]): EmbeddingConfigSpec           = copy(modelEnv = modelEnv)
+}
 
 object EmbeddingConfigSpec:
+
+  /** Creates a [[EmbeddingConfigSpec]]. Named arguments are the supported way to construct one. */
+  def apply(
+    requiresApiKey: Boolean = false,
+    defaultBaseUrl: Option[String] = None,
+    defaultModel: Option[String] = None,
+    defaultApiKey: Option[String] = None,
+    apiKeyEnv: Seq[String] = Seq.empty,
+    modelEnv: Option[String] = None
+  ): EmbeddingConfigSpec =
+    new EmbeddingConfigSpec(requiresApiKey, defaultBaseUrl, defaultModel, defaultApiKey, apiKeyEnv, modelEnv)
 
   /**
    * The config path of a provider's section, e.g. `llm4s.embeddings.openai`.
