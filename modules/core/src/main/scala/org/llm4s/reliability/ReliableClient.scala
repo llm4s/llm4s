@@ -8,7 +8,7 @@ import org.llm4s.error._
 import org.llm4s.metrics.{ MetricsCollector, ErrorKind }
 
 import scala.annotation.tailrec
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.{ Duration, MILLISECONDS }
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference }
 
 /**
@@ -147,6 +147,7 @@ final class ReliableClient(
           operation()
         catch {
           case _: InterruptedException =>
+            Thread.currentThread().interrupt()
             Left(
               TimeoutError(
                 message = s"Operation interrupted after $attemptNumber attempts",
@@ -177,13 +178,13 @@ final class ReliableClient(
                   Thread.sleep(delay.toMillis)
                 catch {
                   case _: InterruptedException =>
-                    return Left(
+                    return interruptedDuringRetryDelay(error) {
                       TimeoutError(
                         message = s"Operation interrupted during retry delay after $attemptNumber attempts",
                         timeoutDuration = deadline,
                         operation = "reliable-client.complete"
                       )
-                    )
+                    }
                 }
                 loop(attemptNumber + 1, Some(error))
               }
@@ -215,6 +216,7 @@ final class ReliableClient(
         operation()
       catch {
         case _: InterruptedException =>
+          Thread.currentThread().interrupt()
           Left(
             ExecutionError(
               message = s"Operation interrupted after $attemptNumber attempts",
@@ -237,12 +239,12 @@ final class ReliableClient(
               Thread.sleep(delay.toMillis)
             catch {
               case _: InterruptedException =>
-                return Left(
+                return interruptedDuringRetryDelay(error) {
                   ExecutionError(
                     message = s"Operation interrupted during retry delay after $attemptNumber attempts",
                     operation = "reliable-client.complete"
                   )
-                )
+                }
             }
 
             // Retry
@@ -271,13 +273,26 @@ final class ReliableClient(
         // does not. A bucket that never refills is not worth retrying.
         case e: RateLimitError if isLocalThrottle(e) && rateLimiter.isDefined =>
           rateLimiter.flatMap(_.nanosUntilNextToken) match {
-            case Some(nanos) => RetryDecision.Retry(Duration.fromNanos(nanos))
+            // Rounded up: the retry sleeps whole milliseconds, and waking a fraction early
+            // finds the bucket still empty
+            case Some(nanos) => RetryDecision.Retry(Duration(math.ceil(nanos / 1e6).toLong, MILLISECONDS))
             case None        => RetryDecision.DoNotRetry
           }
         case _ => RetryDecision.Retry(config.retryPolicy.delayFor(attemptNumber, error))
       }
     else
       RetryDecision.DoNotRetry
+
+  /**
+   * The outcome when the thread is interrupted while waiting to retry `pending`. The interrupt is
+   * restored for the caller. If `pending` is a local throttle, no provider call failed - the
+   * wait was for our own token - so it is returned as itself and stays out of the circuit;
+   * otherwise the interruption is reported as `interrupted`.
+   */
+  private def interruptedDuringRetryDelay[A](pending: LLMError)(interrupted: => LLMError): Result[A] = {
+    Thread.currentThread().interrupt()
+    if (isLocalThrottle(pending)) Left(pending) else Left(interrupted)
+  }
 
   private def isLocalThrottle(error: LLMError): Boolean = error match {
     case e: RateLimitError => e.origin == RateLimitOrigin.LocalThrottle

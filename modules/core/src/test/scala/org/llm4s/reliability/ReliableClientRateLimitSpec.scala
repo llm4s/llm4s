@@ -202,4 +202,45 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     client.complete(conversation).left.toOption.get shouldBe a[RateLimitError]
     client.currentCircuitState shouldBe CircuitState.Closed
   }
+
+  private def interruptedWhileWaitingForToken(
+    config: ReliabilityConfig
+  ): (Result[Completion], Boolean, CircuitState) = {
+    val underlying = new CountingClient(ok)
+    val client     = new ReliableClient(underlying, "test-provider", config)
+    client.complete(conversation).isRight shouldBe true // spend the only token
+
+    // The next call waits ~1s for a token; interrupt it while it sleeps.
+    @volatile var outcome: Option[(Result[Completion], Boolean)] = None
+    val caller = new Thread(() => {
+      val r = client.complete(conversation)
+      outcome = Some((r, Thread.currentThread().isInterrupted))
+    })
+    caller.start()
+    Thread.sleep(200)
+    caller.interrupt()
+    caller.join(5000)
+    underlying.callCount.get() shouldBe 1
+    val (result, flag) = outcome.getOrElse(fail("the call did not return"))
+    (result, flag, client.currentCircuitState)
+  }
+
+  private def waitsForToken = ReliabilityConfig.default
+    .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 60, burstCapacity = 1))
+    .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
+    .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 1))
+
+  it should "keep an interrupted wait for a local token out of the circuit, and keep the interrupt" in {
+    val (result, interrupted, state) = interruptedWhileWaitingForToken(waitsForToken.withoutDeadline)
+    result.left.toOption.get shouldBe a[RateLimitError]
+    interrupted shouldBe true
+    state shouldBe CircuitState.Closed
+  }
+
+  it should "do the same under a deadline" in {
+    val (result, interrupted, state) = interruptedWhileWaitingForToken(waitsForToken.withDeadline(30.seconds))
+    result.left.toOption.get shouldBe a[RateLimitError]
+    interrupted shouldBe true
+    state shouldBe CircuitState.Closed
+  }
 }
