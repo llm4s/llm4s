@@ -803,7 +803,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cachedCancellationFuture`, `throwIfCancelled()` and `CancellationException` give way to
   `whenCancelled: Future[Unit]`. `SqlIdentifier`, `ChunkingUtils` and `RateLimitedLogger` move to
   `llm4s-rag`, `ManagedResource` to `llm4s-speech` and `LiftToResult` to `llm4s-observability`,
-  their only consumers, with unchanged packages. Source break (pre-MiMa); see the
+  their only consumers, with unchanged packages; `ManagedResource` keeps only the factories speech
+  uses, and loses `map`/`flatMap`, which never released the underlying resource. Source break
+  (pre-MiMa); see the
   [migration note](docs/reference/migration.md#pre-baseline-api-cleanup-pass-2).
 - **Pre-baseline API cleanup, pass 1: dead, deprecated and accidental public API leaves the
   spine** ([#1133](https://github.com/llm4s/llm4s/issues/1133#issuecomment-5935792540)). Before

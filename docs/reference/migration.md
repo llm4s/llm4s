@@ -9,6 +9,8 @@ Not in a release yet; continues pass 1 below.
 | `ToolRegistry#getToolDefinitionsSafe(provider)` | `getOpenAITools()`. It returned the same JSON for every provider it accepted and failed for the rest; every client takes this format |
 | `CancellationToken#cancellationFuture`, `cachedCancellationFuture` | `whenCancelled`, a shared `Future[Unit]` that *succeeds* on cancel: `token.whenCancelled.map(_ => Left(myError))` |
 | `CancellationToken#throwIfCancelled()`, `orchestration.CancellationException` | `if (token.isCancelled) Left(...)` |
+| `ManagedResource.fileInputStream`, `dataOutputStream`, `byteArrayInputStream` | `ManagedResource.fromTry(() => Try(new ...), s => Try(s.close()))`, or `scala.util.Using` |
+| `ManagedResource` `map` / `flatMap` (`ManagedResourceOps`) | none: they never released the underlying resource. Nest `use` calls instead |
 
 Behaviour fix: a `PlanRunner` node cancelled while running now fails the plan with
 `OrchestrationError.PlanExecutionError("Node <id> cancelled", ...)`. It used to surface as a
