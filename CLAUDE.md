@@ -181,8 +181,11 @@ depending on `core % "test->test"`; core's test `application.conf` default is
 (id `fixtureembedding`, alias, API key, default base URL, env-var names, declared dimensions,
 canned vectors), registered the same way; use it wherever a spec needs "some embedding
 provider", as core's embedding config, registry and dimension specs do. A spec that builds its own registry passes
-it to `ProviderRegistry.of`/`.withProvider`, and a provider spec proving it refuses a foreign
-config uses a `FixtureChatConfig`. When a stand-in test checked a real provider's own facts in
+it to `ProviderRegistry.of`/`.withProvider`. A provider module's own `Llm4s<Name>ModuleSpec` uses
+the published `llm4s-provider-testkit` (`org.llm4s.testkit.ProviderModuleChecks`: discovery, sole
+supplier, explicit registration, the config-to-client round trip, `assertRefusesForeignConfig`,
+`assertStreams`, `assertCredentialBindings`), so in-repo providers prove themselves exactly as an
+external one must; `CredentialsRoundTrip` and `LocalProviderTestServer` live there too. When a stand-in test checked a real provider's own facts in
 passing, those move to that provider's spec (`DeepSeekNamedProviderSpec`, now in
 `llm4s-openai-compatible`). Strings that do not reach a client
 (model-registry data, config-policy allow-lists, secret patterns) stay. `llm4s-rag`'s

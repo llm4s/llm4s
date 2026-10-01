@@ -256,7 +256,7 @@ object Llm4sConfig {
    * specific config source (for example, file overlays in CI). The source must
    * define named providers under `llm4s.providers` with a selected default.
    */
-  def providerFrom(source: ConfigSource)(using ProviderRegistry): Result[ProviderConfig] =
+  private[llm4s] def providerFrom(source: ConfigSource)(using ProviderRegistry): Result[ProviderConfig] =
     defaultProvider(source)
 
   /**
@@ -272,7 +272,7 @@ object Llm4sConfig {
     apiKeySourcesFrom(ConfigSource.default)
 
   /** [[apiKeySources()*]] for a custom PureConfig source, as [[providerFrom]] is for the default provider. */
-  def apiKeySourcesFrom(source: ConfigSource)(using ProviderRegistry): Result[Map[ProviderName, ApiKeySource]] =
+  private[llm4s] def apiKeySourcesFrom(source: ConfigSource)(using ProviderRegistry): Result[Map[ProviderName, ApiKeySource]] =
     org.llm4s.config.ProvidersConfigLoader.loadSections(source).map(_.apiKeySources)
 
   /**
