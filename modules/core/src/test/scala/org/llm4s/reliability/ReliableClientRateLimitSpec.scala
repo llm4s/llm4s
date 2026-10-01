@@ -260,4 +260,39 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     interrupted shouldBe true
     state shouldBe CircuitState.Closed
   }
+
+  // One token, so the first attempt reaches the provider and fails, and its retry is throttled
+  // locally. The call ends as a local throttle, but the provider did fail: that must count.
+  private def providerFailsThenThrottled(requestsPerMinute: Int) = ReliabilityConfig.default
+    .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = requestsPerMinute, burstCapacity = 1))
+    .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
+    .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 1))
+
+  private def circuitAfterProviderFailure(config: ReliabilityConfig, sleep: Duration => Unit = _ => ()) = {
+    val underlying = new CountingClient(timingOut)
+    val client     = new ReliableClient(underlying, "test-provider", config, sleep = sleep)
+    val result     = client.complete(conversation)
+    underlying.callCount.get() shouldBe 1
+    result.left.toOption.get shouldBe a[RateLimitError]
+    client.currentCircuitState
+  }
+
+  it should "count a provider failure whose retry is then throttled locally" in {
+    circuitAfterProviderFailure(providerFailsThenThrottled(0).withoutDeadline) shouldBe CircuitState.Open
+  }
+
+  it should "count it when the deadline then cuts off the wait for a token" in {
+    // The next token is ~1s away, past the 200ms deadline
+    circuitAfterProviderFailure(providerFailsThenThrottled(60).withDeadline(200.millis)) shouldBe CircuitState.Open
+  }
+
+  it should "count it when the wait for a token is then interrupted" in {
+    // The provider backoff (1ms) sleeps; the ~1s wait for a token is interrupted
+    val state = circuitAfterProviderFailure(
+      providerFailsThenThrottled(60).withoutDeadline,
+      sleep = delay => if (delay > 100.millis) throw new InterruptedException("cancelled")
+    )
+    Thread.interrupted() shouldBe true
+    state shouldBe CircuitState.Open
+  }
 }

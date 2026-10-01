@@ -107,20 +107,33 @@ final class ReliableClient(
       case Right(_) => // Continue
     }
 
+    // Whether any attempt reached the provider and failed. The final result alone cannot say:
+    // a provider failure whose retry is then throttled locally ends as a local throttle.
+    val providerFailed = new java.util.concurrent.atomic.AtomicBoolean(false)
+    val tracked: () => Result[A] = () => {
+      val attempt = operation()
+      attempt match {
+        case Left(e) if !isLocalThrottle(e) => providerFailed.set(true)
+        case _                              => ()
+      }
+      attempt
+    }
+
     // Apply deadline if configured
     val result = config.deadline match {
       case Some(deadline) =>
-        executeWithDeadlineAndRetry(operation, deadline)
+        executeWithDeadlineAndRetry(tracked, deadline)
       case None =>
-        executeWithRetry(operation, attemptNumber = 1)
+        executeWithRetry(tracked, attemptNumber = 1)
     }
 
-    // Update circuit breaker state based on result. A local throttle says nothing about the
-    // provider's health, so it counts as neither; it only hands back a half-open probe permit.
+    // Update circuit breaker state based on result. A call that only ever met the local rate
+    // limit says nothing about the provider's health, so it counts as neither; it only hands
+    // back a half-open probe permit.
     result match {
       case Right(_) =>
         onSuccess()
-      case Left(e) if isLocalThrottle(e) =>
+      case Left(e) if isLocalThrottle(e) && !providerFailed.get() =>
         onLocallyThrottled()
       case Left(_) =>
         onFailure()
