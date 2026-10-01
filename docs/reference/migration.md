@@ -29,6 +29,33 @@ Every field has a `withX`. An `Option` field's setter takes either the value or 
 (`withMaxTokens(500)`, `withMaxTokens(None)`). Match these types by name (`c.usage`), not by
 position: a positional pattern breaks when a field is added.
 
+### `Llm4sHttpClient` returns `Result` and takes `FiniteDuration`
+
+Every request method (`get`, `post`, `postBytes`, `postMultipart`, `put`, `delete`, `postRaw`,
+`postStream`) returns `Result[...]` and never throws for a transport failure: a timeout is a
+`TimeoutError`, a connection or I/O failure a `NetworkError`, an invalid URL, header or timeout a
+`ValidationError`, an interruption an `ExecutionError` (with the interrupt flag restored). A
+non-2xx status is still a `Right`. `getResult` is removed - `get` is now a `Result` itself.
+
+```scala
+// before
+val response = Try(http.post(url, headers, body, timeout = 120000)).toResult
+// after
+import scala.concurrent.duration.*
+val response: Result[HttpResponse] = http.post(url, headers, body, timeout = 120.seconds)
+```
+
+`HttpRawResponse` and `StreamingHttpResponse` carry `headers`, and every response type has a
+case-insensitive `header(name)`. Pass the headers to `HttpErrorMapper.mapHttpError(status, body,
+provider, headers)` so a 429's `Retry-After` (seconds or an HTTP date) becomes the
+`RateLimitError`'s delay; every built-in provider does.
+
+**Test doubles that implement the trait** return `Result[...]` and take `FiniteDuration`; return a
+`Left` to simulate a failure instead of throwing. With ScalaMock, `.returns(resp)` becomes
+`.returns(Right(resp))` and `.throws(e)` becomes `.returns(Left(error))`; type the timeout in
+`onCall`/`where` lambdas as `FiniteDuration` - a lambda typed `_: Int` still compiles but fails at
+runtime.
+
 ### `StreamingAccumulator`
 
 | Before | After |

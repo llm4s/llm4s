@@ -816,7 +816,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prefix, and `snapshot()`/`AccumulatorSnapshot`/`withInitialState` go.
   `TransformationResult.warnings` (never filled) goes, `transform` takes `transformer` before
   `dropUnsupported`, and `getDisallowedParams` is `disallowedParams`. `Llm4sConfig.providerFrom` /
-  `apiKeySourcesFrom`, which exposed pureconfig, are internal. See the
+  `apiKeySourcesFrom`, which exposed pureconfig, are internal. `Llm4sHttpClient` returns `Result`
+  from every request method and never throws for a transport failure (`TimeoutError`,
+  `NetworkError`, `ValidationError`, `ExecutionError`); timeouts are `FiniteDuration`;
+  `HttpRawResponse` and `StreamingHttpResponse` carry headers; `getResult` is removed.
+  `HttpErrorMapper.mapHttpError` takes the response headers, and a 429's `Retry-After` (seconds or
+  HTTP date) becomes the `RateLimitError`'s delay for every built-in provider. See the
   [migration note](docs/reference/migration.md#pre-baseline-api-cleanup-pass-5).
 - **`NamedProviderConfig` carries no vendor-specific fields** - pre-baseline API cleanup, pass 4
   ([#1133](https://github.com/llm4s/llm4s/issues/1133)). `organization`, `endpoint`, `apiVersion`,
