@@ -285,12 +285,18 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.message should include("Rate limited by openai")
   }
 
+  it should "take its retry delay in milliseconds, as retryDelay reports it" in {
+    val error = RateLimitError("anthropic", 1500L)
+    error.retryDelay shouldBe Some(1500L)
+    error.message should include("1500ms")
+  }
+
   it should "create with retry delay" in {
     val error = RateLimitError("anthropic", 60L)
 
     error.retryAfter shouldBe Some(60L)
     error.context should contain("retryAfter" -> "60")
-    error.message should include("Retry after 60 seconds")
+    error.message should include("Retry after 60ms")
   }
 
   it should "be a RecoverableError" in {

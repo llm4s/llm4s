@@ -152,4 +152,50 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     client.complete(conversation).left.toOption.get shouldBe a[RateLimitError]
     underlying.callCount.get() shouldBe 1
   }
+
+  it should "retry a local throttle when the next token arrives, not after a fixed backoff" in {
+    // 600 RPM: the next token is ~100ms away. A 30s provider-style backoff would blow the bound.
+    val underlying = new CountingClient(ok)
+    val config = ReliabilityConfig.default
+      .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 600, burstCapacity = 1))
+      .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
+      .withoutDeadline
+    val client = new ReliableClient(underlying, "test-provider", config)
+
+    client.complete(conversation).isRight shouldBe true
+    val start = System.nanoTime()
+    client.complete(conversation).isRight shouldBe true
+    (System.nanoTime() - start).nanos should be < 5.seconds
+    underlying.callCount.get() shouldBe 2
+  }
+
+  it should "not retry a local throttle when the bucket never refills" in {
+    val underlying = new CountingClient(ok)
+    val config = ReliabilityConfig.default
+      .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
+      .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
+      .withoutDeadline
+    val client = new ReliableClient(underlying, "test-provider", config)
+
+    client.complete(conversation).isRight shouldBe true
+    val start = System.nanoTime()
+    client.complete(conversation).left.toOption.get shouldBe a[RateLimitError]
+    (System.nanoTime() - start).nanos should be < 1.second
+  }
+
+  it should "report a local throttle cut off by the deadline as a local throttle, not a provider timeout" in {
+    // 60 RPM: the next token is ~1s away, past the 200ms deadline. The call must come back as
+    // the local throttle - a TimeoutError would count against the provider's circuit.
+    val underlying = new CountingClient(ok)
+    val config = ReliabilityConfig.default
+      .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 60, burstCapacity = 1))
+      .withRetryPolicy(RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.millis))
+      .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 1))
+      .withDeadline(200.millis)
+    val client = new ReliableClient(underlying, "test-provider", config)
+
+    client.complete(conversation).isRight shouldBe true
+    client.complete(conversation).left.toOption.get shouldBe a[RateLimitError]
+    client.currentCircuitState shouldBe CircuitState.Closed
+  }
 }

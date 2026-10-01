@@ -18,7 +18,8 @@ enum RateLimitOrigin {
  * It provides intelligent retry delays, utilizing provider hints when available.
  *
  * @param message human-readable description of the rate limit
- * @param retryAfter optional delay hint in seconds from the provider (e.g., from Retry-After header)
+ * @param retryAfter optional delay hint in milliseconds from the provider (an HTTP `Retry-After` header,
+ *                   which is in seconds, must be converted)
  * @param provider the name of the LLM provider (e.g., "openai", "anthropic")
  * @param requestsRemaining optional number of requests remaining in the current window
  * @param resetTime optional timestamp (in milliseconds) when the rate limit will reset
@@ -38,7 +39,7 @@ final case class RateLimitError private (
 
   override val maxRetries: Int = 5
 
-  // Intelligent retry delay calculation
+  // Intelligent retry delay calculation (milliseconds, as `retryAfter`)
   override def retryDelay: Option[Long] = retryAfter.orElse {
     Some(Math.min(30000, 1000 * Math.pow(2, maxRetries).toLong)) // Exponential backoff, max 30s
   }
@@ -56,9 +57,9 @@ object RateLimitError {
   def apply(provider: String): RateLimitError =
     RateLimitError(s"Rate limited by $provider", None, provider)
 
-  /** Create rate limit error with retry delay */
+  /** Create rate limit error with a retry delay in milliseconds */
   def apply(provider: String, retryAfter: Long): RateLimitError =
-    RateLimitError(s"Rate limited by $provider. Retry after $retryAfter seconds", Some(retryAfter), provider)
+    RateLimitError(s"Rate limited by $provider. Retry after ${retryAfter}ms", Some(retryAfter), provider)
 
   /**
    * Create a rate limit error for a request rejected locally (e.g. by a token-bucket

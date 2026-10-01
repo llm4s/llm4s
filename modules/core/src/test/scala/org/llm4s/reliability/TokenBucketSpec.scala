@@ -56,4 +56,34 @@ class TokenBucketSpec extends AnyFlatSpec with Matchers {
 
     successes.get() shouldBe burst
   }
+
+  it should "keep fractional refill credit between polls while the bucket is not full" in {
+    // 60 RPM = one token a second, capacity 5, drained. Polled every 900ms for ~10s it must
+    // admit one call per second; dropping the fraction on each refill admits one per 1.8s.
+    // (A full bucket banks nothing - that is what capacity means - so the bucket starts empty.)
+    val start  = 0L
+    var now    = start
+    val bucket = new TokenBucket(60, 5, () => now)
+    (1 to 5).foreach(_ => bucket.tryAcquire() shouldBe true)
+
+    val admitted = (1 to 11).count { i =>
+      now = start + i * 900.millis.toNanos
+      bucket.tryAcquire()
+    }
+    admitted shouldBe 9
+  }
+
+  it should "report how long until the next token" in {
+    val start  = 0L
+    var now    = start
+    val bucket = new TokenBucket(60, 1, () => now)
+    bucket.nanosUntilNextToken shouldBe Some(0L)
+    bucket.tryAcquire() shouldBe true
+    now = start + 400.millis.toNanos
+    bucket.nanosUntilNextToken shouldBe Some(600.millis.toNanos)
+    new TokenBucket(0, 1).nanosUntilNextToken shouldBe Some(0L)
+    val empty = new TokenBucket(0, 1)
+    empty.tryAcquire()
+    empty.nanosUntilNextToken shouldBe None
+  }
 }

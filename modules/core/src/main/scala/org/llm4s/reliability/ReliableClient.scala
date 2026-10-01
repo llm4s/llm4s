@@ -115,7 +115,7 @@ final class ReliableClient(
     result match {
       case Right(_) =>
         onSuccess()
-      case Left(e: RateLimitError) if e.origin == RateLimitOrigin.LocalThrottle =>
+      case Left(e) if isLocalThrottle(e) =>
         onLocallyThrottled()
       case Left(_) =>
         onFailure()
@@ -138,18 +138,7 @@ final class ReliableClient(
 
       // Check if deadline already exceeded
       if (remainingTime <= 0) {
-        collector.foreach(_.recordError(ErrorKind.Timeout, providerName))
-        return Left(
-          TimeoutError(
-            message = lastError match {
-              case Some(err) =>
-                s"Operation exceeded deadline of ${deadline.toSeconds}s after $attemptNumber attempts. Last error: ${err.message}"
-              case None => s"Operation exceeded deadline of ${deadline.toSeconds}s before first attempt"
-            },
-            timeoutDuration = deadline,
-            operation = "reliable-client.complete"
-          )
-        )
+        return deadlineExceeded(attemptNumber, lastError, deadline)
       }
 
       // Execute operation with interruption handling
@@ -181,15 +170,7 @@ final class ReliableClient(
 
               if (remainingAfterDelay <= 0) {
                 // Not enough time for retry
-                collector.foreach(_.recordError(ErrorKind.Timeout, providerName))
-                Left(
-                  TimeoutError(
-                    message =
-                      s"Operation exceeded deadline of ${deadline.toSeconds}s after $attemptNumber attempts. Last error: ${error.message}",
-                    timeoutDuration = deadline,
-                    operation = "reliable-client.complete"
-                  )
-                )
+                deadlineExceeded(attemptNumber, Some(error), deadline)
               } else {
                 // Sleep and retry
                 try
@@ -285,9 +266,46 @@ final class ReliableClient(
    */
   private[reliability] def decideRetry(attemptNumber: Int, error: LLMError): RetryDecision =
     if (attemptNumber < config.retryPolicy.maxAttempts && config.retryPolicy.isRetryable(error))
-      RetryDecision.Retry(config.retryPolicy.delayFor(attemptNumber, error))
+      error match {
+        // Our own bucket knows exactly when the next token arrives; a provider-style backoff
+        // does not. A bucket that never refills is not worth retrying.
+        case e: RateLimitError if isLocalThrottle(e) && rateLimiter.isDefined =>
+          rateLimiter.flatMap(_.nanosUntilNextToken) match {
+            case Some(nanos) => RetryDecision.Retry(Duration.fromNanos(nanos))
+            case None        => RetryDecision.DoNotRetry
+          }
+        case _ => RetryDecision.Retry(config.retryPolicy.delayFor(attemptNumber, error))
+      }
     else
       RetryDecision.DoNotRetry
+
+  private def isLocalThrottle(error: LLMError): Boolean = error match {
+    case e: RateLimitError => e.origin == RateLimitOrigin.LocalThrottle
+    case _                 => false
+  }
+
+  /**
+   * The outcome when the deadline leaves no time for another attempt. A local throttle is
+   * returned as itself: no provider call failed, so it must not read as a provider timeout
+   * (which would count against the circuit).
+   */
+  private def deadlineExceeded[A](attemptNumber: Int, lastError: Option[LLMError], deadline: Duration): Result[A] =
+    lastError match {
+      case Some(e) if isLocalThrottle(e) => Left(e)
+      case _ =>
+        collector.foreach(_.recordError(ErrorKind.Timeout, providerName))
+        Left(
+          TimeoutError(
+            message = lastError match {
+              case Some(err) =>
+                s"Operation exceeded deadline of ${deadline.toSeconds}s after $attemptNumber attempts. Last error: ${err.message}"
+              case None => s"Operation exceeded deadline of ${deadline.toSeconds}s before first attempt"
+            },
+            timeoutDuration = deadline,
+            operation = "reliable-client.complete"
+          )
+        )
+    }
 
   /**
    * Record the outcome metric for an attempt that exhausted retries.
