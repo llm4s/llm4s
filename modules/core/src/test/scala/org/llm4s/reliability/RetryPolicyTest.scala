@@ -33,7 +33,7 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
     val policy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second)
     val rateLimitError = RateLimitError(
       provider = "test",
-      retryAfter = 5000L // 5 seconds in millis
+      retryAfter = 5.seconds
     )
 
     // Should use server delay instead of exponential
@@ -66,7 +66,7 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
     val policy = RetryPolicy.noRetry
 
     policy.maxAttempts shouldBe 1
-    policy.isRetryable(RateLimitError("test", 60L)) shouldBe false
+    policy.isRetryable(RateLimitError("test", 60.seconds)) shouldBe false
     policy.isRetryable(TimeoutError("test", 1.second, "test")) shouldBe false
     policy.isRetryable(NetworkError("test", None, "test")) shouldBe false
   }
@@ -93,7 +93,7 @@ class RetryPolicyTest extends AnyFunSuite with Matchers {
 
   test("isRetryable returns true for RateLimitError") {
     val policy = RetryPolicy.exponentialBackoff()
-    val error  = RateLimitError("test", 60L)
+    val error  = RateLimitError("test", 60.seconds)
 
     policy.isRetryable(error) shouldBe true
   }

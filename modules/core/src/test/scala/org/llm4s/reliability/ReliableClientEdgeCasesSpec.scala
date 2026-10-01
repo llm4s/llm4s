@@ -10,6 +10,7 @@ import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration._
+import java.time.Instant
 
 class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
@@ -187,7 +188,8 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
     var fakeTime = 0L
     val metrics  = new TestMetricsCollector()
-    val reliable = new ReliableClient(mockClient, "test", config, Some(metrics), clock = () => fakeTime)
+    val reliable =
+      new ReliableClient(mockClient, "test", config, Some(metrics), clock = () => Instant.ofEpochMilli(fakeTime))
 
     // Open the circuit
     reliable.complete(testConversation)
@@ -217,7 +219,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
     )
 
     var fakeTime = 0L
-    val reliable = new ReliableClient(mockClient, "test", config, None, clock = () => fakeTime)
+    val reliable = new ReliableClient(mockClient, "test", config, None, clock = () => Instant.ofEpochMilli(fakeTime))
 
     // Open the circuit
     reliable.complete(testConversation)
@@ -256,7 +258,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
       clock = () => {
         val t = fakeTime
         fakeTime += 100 // advance 100ms per clock read
-        t
+        Instant.ofEpochMilli(t)
       }
     )
 
@@ -272,7 +274,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "ReliableClient without deadline" should "exhaust all retry attempts" in {
-    val mockClient = new MockClient(() => Left(RateLimitError("test", 1L)))
+    val mockClient = new MockClient(() => Left(RateLimitError("test", 1.milli)))
 
     val config = ReliabilityConfig(
       retryPolicy = RetryPolicy.fixedDelay(maxAttempts = 3, delay = 10.millis),
@@ -338,7 +340,7 @@ class ReliableClientEdgeCasesSpec extends AnyFlatSpec with Matchers {
     var attempt = 0
     val mockClient = new MockClient(() => {
       attempt += 1
-      if (attempt < 2) Left(RateLimitError("test", 100L))
+      if (attempt < 2) Left(RateLimitError("test", 100.millis))
       else Right(testCompletion)
     })
 

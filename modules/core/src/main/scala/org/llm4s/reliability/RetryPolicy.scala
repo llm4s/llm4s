@@ -114,7 +114,7 @@ private class ExponentialBackoff(
   override def delayFor(attemptNumber: Int, error: LLMError): Duration = {
     // Check for server-provided retry delay (e.g., Retry-After header)
     val serverDelay = error match {
-      case re: RateLimitError => re.retryDelay.map(millis => Duration.fromNanos(millis * 1000000))
+      case re: RateLimitError => re.retryDelay
       case _                  => None
     }
 
@@ -136,7 +136,7 @@ private class LinearBackoff(
   override def delayFor(attemptNumber: Int, error: LLMError): Duration = {
     // Check for server-provided retry delay
     val serverDelay = error match {
-      case re: RateLimitError => re.retryDelay.map(millis => Duration.fromNanos(millis * 1000000))
+      case re: RateLimitError => re.retryDelay
       case _                  => None
     }
 
@@ -155,7 +155,7 @@ private class FixedDelay(
   override def delayFor(attemptNumber: Int, error: LLMError): Duration = {
     // Check for server-provided retry delay
     val serverDelay = error match {
-      case re: RateLimitError => re.retryDelay.map(millis => Duration.fromNanos(millis * 1000000))
+      case re: RateLimitError => re.retryDelay
       case _                  => None
     }
 

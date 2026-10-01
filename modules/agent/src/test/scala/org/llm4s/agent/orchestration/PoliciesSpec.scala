@@ -76,6 +76,9 @@ class PoliciesSpec extends AnyFlatSpec with Matchers with ScalaFutures {
       result.swap
         .getOrElse(throw new RuntimeException("Expected Left"))
         .shouldBe(a[OrchestrationError.AgentTimeoutError])
+      result.swap.toOption.collect { case e: OrchestrationError.AgentTimeoutError => e.timeout } shouldBe Some(
+        100.millis
+      )
     }
   }
 

@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import scala.concurrent.duration.{ DurationInt, FiniteDuration }
+
 /**
  * Service-level errors from LLM providers
  */
@@ -11,8 +13,8 @@ final case class ServiceError private (
 ) extends LLMError
     with RecoverableError {
 
-  override val code: Option[String]     = Some(httpStatus.toString)
-  override val retryDelay: Option[Long] = Some(2000)
+  override val code: Option[String]               = Some(httpStatus.toString)
+  override val retryDelay: Option[FiniteDuration] = Some(2.seconds)
 
   override val context: Map[String, String] = Map(
     "httpStatus" -> httpStatus.toString,

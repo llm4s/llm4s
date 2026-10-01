@@ -10,6 +10,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.OptionValues._
 import scala.collection.mutable.ListBuffer
 import org.llm4s.model.ModelRegistryService
+import scala.concurrent.duration._
 
 /**
  * Local HTTP server tests for DeepSeekClient (Tier 1).
@@ -116,7 +117,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
       sendJsonResponse(exchange, 429, """{"error":"Rate limit exceeded"}""")
     } { baseUrl =>
       new DeepSeekClient(localConfig(baseUrl)).complete(conversation, CompletionOptions()) match {
-        case Left(err: RateLimitError) => err.retryDelay shouldBe Some(5000L)
+        case Left(err: RateLimitError) => err.retryDelay shouldBe Some(5.seconds)
         case other                     => fail(s"Expected RateLimitError, got: $other")
       }
     }
@@ -127,7 +128,7 @@ class DeepSeekClientHttpSpec extends AnyFlatSpec with Matchers {
       sendJsonResponse(exchange, 429, """{"error":"Rate limit exceeded"}""")
     } { baseUrl =>
       new DeepSeekClient(localConfig(baseUrl)).streamComplete(conversation, CompletionOptions(), _ => ()) match {
-        case Left(err: RateLimitError) => err.retryDelay shouldBe Some(7000L)
+        case Left(err: RateLimitError) => err.retryDelay shouldBe Some(7.seconds)
         case other                     => fail(s"Expected RateLimitError, got: $other")
       }
     }

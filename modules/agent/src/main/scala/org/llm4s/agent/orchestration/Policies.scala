@@ -158,7 +158,7 @@ object Policies {
           new Runnable {
             def run(): Unit =
               timeoutPromise.trySuccess(
-                Future.successful(Left(OrchestrationError.AgentTimeoutError(agent.name, timeout.toMillis)))
+                Future.successful(Left(OrchestrationError.AgentTimeoutError(agent.name, timeout)))
               )
           },
           timeout.toMillis,

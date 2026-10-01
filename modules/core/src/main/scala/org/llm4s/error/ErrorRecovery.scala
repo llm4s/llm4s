@@ -4,7 +4,8 @@ import org.llm4s.Result
 import org.llm4s.types._
 
 import scala.annotation.tailrec
-import scala.concurrent.duration.{ Duration, DurationInt, DurationLong }
+import java.time.Instant
+import scala.concurrent.duration.{ Duration, DurationInt, FiniteDuration }
 
 /**
  * Advanced pattern matching for error recovery and intelligent retry logic.
@@ -14,20 +15,24 @@ import scala.concurrent.duration.{ Duration, DurationInt, DurationLong }
  */
 object ErrorRecovery {
 
-  /** Binary-compatible overload — delegates to the full version with Thread.sleep. */
+  /** Binary-compatible overload — delegates to the full version, sleeping the calling thread. */
   def recoverWithBackoff[A](
     operation: () => Result[A],
     maxAttempts: Int,
-    baseDelay: Duration
+    baseDelay: FiniteDuration
   ): Result[A] =
-    recoverWithBackoff(operation, maxAttempts, baseDelay, Thread.sleep)
+    recoverWithBackoff(operation, maxAttempts, baseDelay, threadSleep)
 
-  /** Intelligent error recovery with exponential backoff */
+  /**
+   * Intelligent error recovery with exponential backoff.
+   *
+   * @param sleepFn pauses between attempts (default: sleeps the calling thread); override for testing
+   */
   def recoverWithBackoff[A](
     operation: () => Result[A],
     maxAttempts: Int = 3,
-    baseDelay: Duration = 1.second,
-    sleepFn: Long => Unit = Thread.sleep
+    baseDelay: FiniteDuration = 1.second,
+    sleepFn: FiniteDuration => Unit = threadSleep
   ): Result[A] = {
 
     @tailrec
@@ -40,16 +45,16 @@ object ErrorRecovery {
         case Left(error) if attemptNumber < maxAttempts =>
           error match {
             case re: RateLimitError =>
-              val delay = re.retryDelay.map(_.millis).getOrElse(baseDelay * Math.pow(2, attemptNumber).doubleValue)
-              sleepFn(delay.toMillis)
+              val delay = re.retryDelay.getOrElse(baseDelay * Math.pow(2, attemptNumber).toLong)
+              sleepFn(delay)
               attempt(attemptNumber + 1)
 
             case _: ServiceError with RecoverableError =>
-              sleepFn(baseDelay.toMillis * attemptNumber)
+              sleepFn(baseDelay * attemptNumber.toLong)
               attempt(attemptNumber + 1)
 
             case _: TimeoutError =>
-              sleepFn(baseDelay.toMillis)
+              sleepFn(baseDelay)
               attempt(attemptNumber + 1)
 
             case _ => Left(error) // Non-recoverable
@@ -68,17 +73,24 @@ object ErrorRecovery {
     attempt(1)
   }
 
-  /** Circuit breaker pattern for service resilience */
+  /** Pauses the calling thread for `delay`; the default `sleepFn`. */
+  private def threadSleep(delay: FiniteDuration): Unit = Thread.sleep(delay.toMillis)
+
+  /**
+   * Circuit breaker pattern for service resilience.
+   *
+   * @param clock the current time; injectable for tests
+   */
   class CircuitBreaker[A](
     failureThreshold: Int = 5,
     recoveryTimeout: Duration = 30.seconds,
-    clock: () => Long = () => System.currentTimeMillis()
+    clock: () => Instant = () => Instant.now()
   ) {
 
     // All fields are accessed only inside `synchronized` blocks.
-    private var state: CircuitState           = Closed
-    private var failures: Int                 = 0
-    private var lastFailureTime: Option[Long] = None
+    private var state: CircuitState              = Closed
+    private var failures: Int                    = 0
+    private var lastFailureTime: Option[Instant] = None
 
     // Atomically decide what to do and, when transitioning Open→HalfOpen, claim
     // the exclusive probe slot.  Returns the state we committed to running as,
@@ -91,7 +103,7 @@ object ErrorRecovery {
         case Open =>
           val now = clock()
           lastFailureTime match {
-            case Some(t) if (now - t) > recoveryTimeout.toMillis =>
+            case Some(t) if java.time.Duration.between(t, now).toMillis > recoveryTimeout.toMillis =>
               state = HalfOpen // exactly one thread wins this assignment
               Some(HalfOpen)
             case _ => None

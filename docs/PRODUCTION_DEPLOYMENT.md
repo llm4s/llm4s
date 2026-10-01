@@ -221,22 +221,23 @@ LLM providers enforce rate limits. In production, expect and handle `429 Too Man
 
 ```scala
 import org.llm4s.error.{RateLimitError, LLMError}
+import scala.concurrent.duration._
 
 def callWithBackoff(
   client: LLMClient,
   conversation: Conversation,
   maxRetries: Int = 3
 ): Result[Completion] = {
-  def attempt(remaining: Int, delay: Long): Result[Completion] = {
+  def attempt(remaining: Int, delay: FiniteDuration): Result[Completion] = {
     client.complete(conversation) match {
       case Left(RateLimitError(_, retryAfter, _)) if remaining > 0 =>
-        val waitMs = retryAfter.fold(delay)(_ * 1000L)
-        Thread.sleep(waitMs)
+        // retryAfter is the provider's Retry-After hint, already a FiniteDuration
+        Thread.sleep(retryAfter.getOrElse(delay).toMillis)
         attempt(remaining - 1, delay * 2)
       case other => other
     }
   }
-  attempt(maxRetries, 1000L)
+  attempt(maxRetries, 1.second)
 }
 ```
 

@@ -275,7 +275,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
       .returns(Right(HttpResponse(429, "slow down", Map("retry-after" -> Seq("5")))))
 
     mkClient(mockHttp).complete(conversation("Hello"), CompletionOptions()) match {
-      case Left(err: RateLimitError) => assert(err.retryDelay.contains(5000L))
+      case Left(err: RateLimitError) => assert(err.retryDelay.contains(5.seconds))
       case other                     => fail(s"Expected RateLimitError, got: $other")
     }
   }
@@ -453,7 +453,7 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
       .returns(Right(StreamingHttpResponse(429, body, Map("retry-after" -> Seq("9")))))
 
     mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions(), _ => ()) match {
-      case Left(err: RateLimitError) => assert(err.retryDelay.contains(9000L))
+      case Left(err: RateLimitError) => assert(err.retryDelay.contains(9.seconds))
       case other                     => fail(s"Expected RateLimitError, got: $other")
     }
   }
@@ -515,15 +515,15 @@ class OllamaClientRateLimitSpec extends AnyFunSuite with org.scalatest.BeforeAnd
   test("complete() turns a 429 with Retry-After: 5 into a RateLimitError with a 5 second delay") {
     client.complete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions()) match {
       case Left(err: RateLimitError) =>
-        assert(err.retryAfter.contains(5000L))
-        assert(err.retryDelay.contains(5000L))
+        assert(err.retryAfter.contains(5.seconds))
+        assert(err.retryDelay.contains(5.seconds))
       case other => fail(s"Expected RateLimitError, got: $other")
     }
   }
 
   test("streamComplete() turns a 429 with Retry-After: 5 into a RateLimitError with a 5 second delay") {
     client.streamComplete(Conversation(Seq(UserMessage("Hello"))), CompletionOptions(), _ => ()) match {
-      case Left(err: RateLimitError) => assert(err.retryDelay.contains(5000L))
+      case Left(err: RateLimitError) => assert(err.retryDelay.contains(5.seconds))
       case other                     => fail(s"Expected RateLimitError, got: $other")
     }
   }

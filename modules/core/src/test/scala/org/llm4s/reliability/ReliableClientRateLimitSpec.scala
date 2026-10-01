@@ -11,6 +11,7 @@ import org.scalatest.matchers.should.Matchers
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable
 import scala.concurrent.duration._
+import java.time.Instant
 
 class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
 
@@ -141,7 +142,7 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
       .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
       .withRetryPolicy(noRetry)
       .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 1, recoveryTimeout = 1.second))
-    val client = new ReliableClient(underlying, "test-provider", config, None, () => now)
+    val client = new ReliableClient(underlying, "test-provider", config, None, () => Instant.ofEpochMilli(now))
 
     client.complete(conversation).isLeft shouldBe true
     client.currentCircuitState shouldBe CircuitState.Open

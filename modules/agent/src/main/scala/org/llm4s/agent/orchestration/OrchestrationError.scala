@@ -1,6 +1,9 @@
 package org.llm4s.agent.orchestration
 
 import org.llm4s.error.LLMError
+import org.llm4s.util.DurationText
+
+import scala.concurrent.duration.FiniteDuration
 
 /**
  * Orchestration-specific error types following LLM4S error patterns
@@ -154,18 +157,18 @@ object OrchestrationError {
   final case class AgentTimeoutError private (
     override val message: String,
     agentName: String,
-    timeoutMs: Long
+    timeout: FiniteDuration
   ) extends OrchestrationError {
 
     override val context: Map[String, String] = Map(
       "component" -> "agent-timeout",
       "agentName" -> agentName,
-      "timeoutMs" -> timeoutMs.toString
+      "timeout"   -> DurationText(timeout)
     )
   }
 
   object AgentTimeoutError {
-    def apply(agentName: String, timeoutMs: Long): AgentTimeoutError =
-      new AgentTimeoutError(s"Agent '$agentName' timed out after ${timeoutMs}ms", agentName, timeoutMs)
+    def apply(agentName: String, timeout: FiniteDuration): AgentTimeoutError =
+      new AgentTimeoutError(s"Agent '$agentName' timed out after ${DurationText(timeout)}", agentName, timeout)
   }
 }

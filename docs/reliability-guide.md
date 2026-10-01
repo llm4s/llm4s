@@ -652,7 +652,7 @@ class ReliabilityIntegrationTest extends AnyFlatSpec {
     val mockClient = new LLMClient {
       override def complete(conv: Conversation, opts: CompletionOptions) = {
         attempts += 1
-        if (attempts < 3) Left(RateLimitError("test", 1000L)) // retry after 1000ms
+        if (attempts < 3) Left(RateLimitError("test", 1.second)) // retry after 1s
         else Right(mockCompletion)
       }
       // ... other methods

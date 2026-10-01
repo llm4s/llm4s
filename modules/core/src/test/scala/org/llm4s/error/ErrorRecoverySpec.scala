@@ -7,6 +7,7 @@ import org.scalatest.matchers.should.Matchers
 import scala.concurrent.duration._
 import java.util.concurrent.{ CountDownLatch, CyclicBarrier, Executors, TimeUnit }
 import java.util.concurrent.atomic.AtomicInteger
+import java.time.Instant
 
 /**
  * Tests for ErrorRecovery utilities: backoff retry logic and CircuitBreaker pattern
@@ -33,7 +34,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     val operation = () => {
       callCount += 1
       if (callCount < 3) {
-        Result.failure[String](RateLimitError("provider", 10L))
+        Result.failure[String](RateLimitError("provider", 10.millis))
       } else {
         Result.success("success after retries")
       }
@@ -92,14 +93,14 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
 
   it should "use retry delay from RateLimitError when available" in {
     var callCount      = 0
-    var observedDelays = List.empty[Long]
+    var observedDelays = List.empty[FiniteDuration]
 
-    val capturingSleepFn: Long => Unit = ms => observedDelays = observedDelays :+ ms
+    val capturingSleepFn: FiniteDuration => Unit = d => observedDelays = observedDelays :+ d
 
     val operation = () => {
       callCount += 1
       if (callCount < 2) {
-        Result.failure[String](RateLimitError("provider", 10L)) // 10ms retry delay
+        Result.failure[String](RateLimitError("provider", 10.millis)) // 10ms retry delay
       } else {
         Result.success("success")
       }
@@ -110,7 +111,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
 
     result shouldBe Right("success")
     // Should have used the provider's 10ms delay, not the 100ms baseDelay
-    observedDelays shouldBe List(10L)
+    observedDelays shouldBe List(10.millis)
   }
 
   // ============ CircuitBreaker ============
@@ -182,7 +183,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
       recoveryTimeout = 50.millis,
-      clock = () => fakeTime
+      clock = () => Instant.ofEpochMilli(fakeTime)
     )
 
     // Open the circuit
@@ -202,7 +203,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
       recoveryTimeout = 50.millis,
-      clock = () => fakeTime
+      clock = () => Instant.ofEpochMilli(fakeTime)
     )
 
     // Open the circuit
@@ -227,7 +228,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
       recoveryTimeout = 50.millis,
-      clock = () => fakeTime
+      clock = () => Instant.ofEpochMilli(fakeTime)
     )
 
     // Open the circuit
@@ -432,7 +433,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
       recoveryTimeout = 60.millis,
-      clock = () => fakeTime
+      clock = () => Instant.ofEpochMilli(fakeTime)
     )
 
     // Open the circuit
@@ -484,7 +485,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
       recoveryTimeout = 50.millis,
-      clock = () => fakeTime
+      clock = () => Instant.ofEpochMilli(fakeTime)
     )
 
     // Open the circuit
@@ -518,7 +519,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
       recoveryTimeout = recoveryMs.millis,
-      clock = () => fakeTime
+      clock = () => Instant.ofEpochMilli(fakeTime)
     )
 
     // Open the circuit
@@ -558,7 +559,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
       recoveryTimeout = 50.millis,
-      clock = () => fakeTime
+      clock = () => Instant.ofEpochMilli(fakeTime)
     )
 
     // Open the circuit
@@ -586,7 +587,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
       recoveryTimeout = recoveryMs.millis,
-      clock = () => fakeTime
+      clock = () => Instant.ofEpochMilli(fakeTime)
     )
 
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
@@ -608,7 +609,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 2,
       recoveryTimeout = recoveryMs.millis,
-      clock = () => fakeTime
+      clock = () => Instant.ofEpochMilli(fakeTime)
     )
 
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
@@ -635,7 +636,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 1,
       recoveryTimeout = recoveryMs.millis,
-      clock = () => fakeTime
+      clock = () => Instant.ofEpochMilli(fakeTime)
     )
 
     cb.execute(() => Result.failure(ServiceError(500, "p", "error")))
@@ -669,7 +670,7 @@ class ErrorRecoverySpec extends AnyFlatSpec with Matchers {
     val cb = new ErrorRecovery.CircuitBreaker[String](
       failureThreshold = 1,
       recoveryTimeout = recoveryMs.millis,
-      clock = () => fakeTime
+      clock = () => Instant.ofEpochMilli(fakeTime)
     )
 
     // First open

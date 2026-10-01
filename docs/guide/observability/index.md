@@ -506,7 +506,7 @@ import org.llm4s.error._
 
 def logProviderFailure(error: LLMError): Unit = error match {
   case rle: RateLimitError =>
-    logger.warn(s"Rate limited: ${rle.message}, retry after: ${rle.retryAfter.getOrElse("unknown")}s")
+    logger.warn(s"Rate limited: ${rle.message}, retry after: ${rle.retryAfter.fold("unknown")(_.toString)}")
     
   case ServiceError(message, httpStatus, provider, requestId) =>
     logger.error(s"Provider API error [$httpStatus]: $message")

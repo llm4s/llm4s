@@ -6,7 +6,7 @@ import org.llm4s.llmconnect.model._
 import org.llm4s.types.Result
 
 import scala.annotation.tailrec
-import scala.concurrent.duration.{ FiniteDuration, DurationInt }
+import scala.concurrent.duration.{ Duration, DurationInt, DurationLong, FiniteDuration }
 
 /**
  * Stateless helper functions for retrying LLM completion and streaming calls.
@@ -21,12 +21,12 @@ import scala.concurrent.duration.{ FiniteDuration, DurationInt }
  */
 object LLMClientRetry {
 
-  /** Maximum retry delay in milliseconds; all delays (provider hint or computed) are capped at this. */
-  private val maxBackoffMs = 30000L
+  /** Maximum retry delay; all delays (provider hint or computed) are capped at this. */
+  private val maxBackoff: FiniteDuration = 30.seconds
 
   /**
    * Calls `client.complete` with retries on recoverable errors.
-   * Binary-compatible overload that delegates to the full version with Thread.sleep.
+   * Binary-compatible overload that delegates to the full version, sleeping the calling thread.
    */
   def completeWithRetry(
     client: LLMClient,
@@ -35,7 +35,7 @@ object LLMClientRetry {
     maxAttempts: Int,
     baseDelay: FiniteDuration
   ): Result[Completion] =
-    completeWithRetry(client, conversation, options, maxAttempts, baseDelay, Thread.sleep)
+    completeWithRetry(client, conversation, options, maxAttempts, baseDelay, threadSleep)
 
   /**
    * Calls `client.complete` with retries on recoverable errors.
@@ -45,7 +45,7 @@ object LLMClientRetry {
    * @param options      completion options (default: CompletionOptions())
    * @param maxAttempts  maximum attempts including the first (default: 3); must be positive
    * @param baseDelay    base delay for backoff when provider retry-delay hints are absent (default: 1 second); must be positive
-   * @param sleepFn      function used to pause between retries (default: Thread.sleep); override for testing
+   * @param sleepFn      function used to pause between retries (default: sleeps the calling thread); override for testing
    * @return Right(Completion) on success, Left(error) when retries exhausted, non-recoverable error, invalid input, or interrupted
    */
   def completeWithRetry(
@@ -54,7 +54,7 @@ object LLMClientRetry {
     options: CompletionOptions = CompletionOptions(),
     maxAttempts: Int = 3,
     baseDelay: FiniteDuration = 1.second,
-    sleepFn: Long => Unit = Thread.sleep
+    sleepFn: FiniteDuration => Unit = threadSleep
   ): Result[Completion] =
     validateRetryParams(maxAttempts, baseDelay) match {
       case Left(err) => Left(err)
@@ -79,7 +79,7 @@ object LLMClientRetry {
 
   /**
    * Calls `client.streamComplete` with retries only when failure occurs before any chunk is emitted.
-   * Binary-compatible overload that delegates to the full version with Thread.sleep.
+   * Binary-compatible overload that delegates to the full version, sleeping the calling thread.
    */
   def streamCompleteWithRetry(
     client: LLMClient,
@@ -88,7 +88,7 @@ object LLMClientRetry {
     maxAttempts: Int,
     baseDelay: FiniteDuration
   )(onChunk: StreamedChunk => Unit): Result[Completion] =
-    streamCompleteWithRetry(client, conversation, options, maxAttempts, baseDelay, Thread.sleep)(onChunk)
+    streamCompleteWithRetry(client, conversation, options, maxAttempts, baseDelay, threadSleep)(onChunk)
 
   /**
    * Calls `client.streamComplete` with retries only when failure occurs before any chunk is emitted.
@@ -99,7 +99,7 @@ object LLMClientRetry {
    * @param options      completion options (default: CompletionOptions())
    * @param maxAttempts  maximum attempts including the first (default: 3); must be positive
    * @param baseDelay    base delay for backoff when provider retry-delay hints are absent (default: 1 second); must be positive
-   * @param sleepFn      function used to pause between retries (default: Thread.sleep); override for testing
+   * @param sleepFn      function used to pause between retries (default: sleeps the calling thread); override for testing
    * @param onChunk      callback for each streamed chunk
    * @return Right(Completion) on success, Left(error) when retries exhausted, non-recoverable error, invalid input, or interrupted
    */
@@ -109,7 +109,7 @@ object LLMClientRetry {
     options: CompletionOptions = CompletionOptions(),
     maxAttempts: Int = 3,
     baseDelay: FiniteDuration = 1.second,
-    sleepFn: Long => Unit = Thread.sleep
+    sleepFn: FiniteDuration => Unit = threadSleep
   )(onChunk: StreamedChunk => Unit): Result[Completion] =
     validateRetryParams(maxAttempts, baseDelay) match {
       case Left(err) => Left(err)
@@ -160,7 +160,7 @@ object LLMClientRetry {
       Right(())
 
   /**
-   * Chooses retry delay in milliseconds: provider hint when valid, else exponential backoff; always capped.
+   * Chooses the retry delay: provider hint when valid, else exponential backoff; always capped.
    *
    * Provider retry-delay is read only from existing error types that expose it (`retryDelay` on
    * [[org.llm4s.error.RateLimitError]], [[org.llm4s.error.ServiceError]]). Missing, zero, or negative values are treated as "not present" and we fall back
@@ -169,15 +169,15 @@ object LLMClientRetry {
    * Precedence: (1) use provider delay if present and > 0; (2) else use exponential backoff. Final delay is
    * capped at 30 seconds to keep waits bounded regardless of provider or attempt number.
    */
-  private def delayMsForError(e: LLMError, attemptNumber: Int, baseDelay: FiniteDuration): Long = {
-    val providerMs = e match {
+  private def delayForError(e: LLMError, attemptNumber: Int, baseDelay: FiniteDuration): FiniteDuration = {
+    val providerDelay = e match {
       case r: RateLimitError => r.retryDelay
       case s: ServiceError   => s.retryDelay
       case _                 => None
     }
     // Treat missing, zero, or negative as not present → fall back to backoff
-    val ms = providerMs.filter(_ > 0).getOrElse(backoffMs(attemptNumber, baseDelay))
-    Math.min(ms, maxBackoffMs)
+    val delay = providerDelay.filter(_ > Duration.Zero).getOrElse(backoff(attemptNumber, baseDelay))
+    delay.min(maxBackoff)
   }
 
   /**
@@ -188,11 +188,11 @@ object LLMClientRetry {
     e: LLMError,
     attemptNumber: Int,
     baseDelay: FiniteDuration,
-    sleepFn: Long => Unit
+    sleepFn: FiniteDuration => Unit
   ): Result[Unit] = {
-    val delayMs = delayMsForError(e, attemptNumber, baseDelay)
+    val delay = delayForError(e, attemptNumber, baseDelay)
     try {
-      sleepFn(delayMs)
+      sleepFn(delay)
       Right(())
     } catch {
       case _: InterruptedException =>
@@ -205,8 +205,11 @@ object LLMClientRetry {
     }
   }
 
-  private def backoffMs(attemptNumber: Int, baseDelay: FiniteDuration): Long = {
-    val d = (baseDelay.toMillis * Math.pow(2, attemptNumber - 1)).toLong
-    Math.min(d, maxBackoffMs)
+  private def backoff(attemptNumber: Int, baseDelay: FiniteDuration): FiniteDuration = {
+    val millis = (baseDelay.toMillis * Math.pow(2, attemptNumber - 1)).toLong
+    Math.min(millis, maxBackoff.toMillis).millis
   }
+
+  /** Pauses the calling thread for `delay`; the default `sleepFn`. */
+  private def threadSleep(delay: FiniteDuration): Unit = Thread.sleep(delay.toMillis)
 }

@@ -136,7 +136,7 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
   it should "provide retry delay" in {
     val error = ServiceError(503, "provider", "unavailable")
 
-    error.retryDelay shouldBe Some(2000)
+    error.retryDelay shouldBe Some(2.seconds)
   }
 
   it should "identify recoverable HTTP status codes" in {
@@ -285,18 +285,22 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
     error.message should include("Rate limited by openai")
   }
 
-  it should "take its retry delay in milliseconds, as retryDelay reports it" in {
-    val error = RateLimitError("anthropic", 1500L)
-    error.retryDelay shouldBe Some(1500L)
-    error.message should include("1500ms")
+  it should "take its retry delay as a duration, as retryDelay reports it" in {
+    val error = RateLimitError("anthropic", 1500.millis)
+    error.retryDelay shouldBe Some(1500.millis)
+    error.message should include("Retry after 1.5s")
+  }
+
+  it should "render a sub-second retry delay in milliseconds" in {
+    RateLimitError("anthropic", 250.millis).message should include("Retry after 250ms")
   }
 
   it should "create with retry delay" in {
-    val error = RateLimitError("anthropic", 60L)
+    val error = RateLimitError("anthropic", 60.seconds)
 
-    error.retryAfter shouldBe Some(60L)
-    error.context should contain("retryAfter" -> "60")
-    error.message should include("Retry after 60ms")
+    error.retryAfter shouldBe Some(60.seconds)
+    error.context should contain("retryAfter" -> "60s")
+    error.message should include("Retry after 60s")
   }
 
   it should "be a RecoverableError" in {
@@ -313,22 +317,21 @@ class RecoverableErrorSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "calculate intelligent retry delay" in {
-    val errorWithDelay = RateLimitError("p", 30L)
-    errorWithDelay.retryDelay shouldBe Some(30L)
+    val errorWithDelay = RateLimitError("p", 30.millis)
+    errorWithDelay.retryDelay shouldBe Some(30.millis)
 
-    val errorWithoutDelay = RateLimitError("p")
-    errorWithoutDelay.retryDelay.isDefined shouldBe true
-    // Should use exponential backoff calculation
-    errorWithoutDelay.retryDelay.get should be <= 30000L
+    // Without a provider hint, the default backoff applies
+    RateLimitError("p").retryDelay shouldBe Some(RateLimitError.DefaultRetryDelay)
+    RateLimitError.DefaultRetryDelay shouldBe 30.seconds
   }
 
   it should "support pattern matching" in {
-    val error = RateLimitError("openai", 60L)
+    val error = RateLimitError("openai", 60.seconds)
 
     error match {
       case RateLimitError(msg, retryAfter, provider) =>
         msg should include("Rate limited")
-        retryAfter shouldBe Some(60L)
+        retryAfter shouldBe Some(60.seconds)
         provider shouldBe "openai"
       case _ => fail("Pattern matching failed")
     }

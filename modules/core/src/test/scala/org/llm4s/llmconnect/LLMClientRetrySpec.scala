@@ -31,7 +31,7 @@ class LLMClientRetrySpec extends AnyFlatSpec with Matchers {
   )
 
   /** No-op sleep for deterministic tests. */
-  private val noSleep: Long => Unit = _ => ()
+  private val noSleep: FiniteDuration => Unit = _ => ()
 
   /** Stub client that returns a sequence of results for complete() and streamComplete(). */
   private def stubClient(

@@ -1,5 +1,10 @@
 package org.llm4s.error
 
+import org.llm4s.util.DurationText
+
+import java.time.Instant
+import scala.concurrent.duration.{ DurationInt, FiniteDuration }
+
 /**
  * Where a [[RateLimitError]] originated. Distinguishes a request that never left the
  * process (rejected by a local token bucket) from one the provider itself rejected with
@@ -18,48 +23,49 @@ enum RateLimitOrigin {
  * It provides intelligent retry delays, utilizing provider hints when available.
  *
  * @param message human-readable description of the rate limit
- * @param retryAfter optional delay hint in milliseconds from the provider (an HTTP `Retry-After` header,
- *                   which is in seconds, must be converted)
+ * @param retryAfter optional delay the provider asked for before retrying (e.g. an HTTP
+ *                   `Retry-After` header)
  * @param provider the name of the LLM provider (e.g., "openai", "anthropic")
  * @param requestsRemaining optional number of requests remaining in the current window
- * @param resetTime optional timestamp (in milliseconds) when the rate limit will reset
+ * @param resetTime optional instant at which the rate limit window resets
  * @param origin whether this was rejected locally (never reached the provider) or by the
  *               provider itself; defaults to [[RateLimitOrigin.UpstreamProvider]] since every
  *               existing constructor call maps a provider-side rejection
  */
 final case class RateLimitError private (
   override val message: String,
-  retryAfter: Option[Long],
+  retryAfter: Option[FiniteDuration],
   provider: String,
   requestsRemaining: Option[Int] = None,
-  resetTime: Option[Long] = None,
+  resetTime: Option[Instant] = None,
   origin: RateLimitOrigin = RateLimitOrigin.UpstreamProvider
 ) extends LLMError
     with RecoverableError {
 
   override val maxRetries: Int = 5
 
-  // Intelligent retry delay calculation (milliseconds, as `retryAfter`)
-  override def retryDelay: Option[Long] = retryAfter.orElse {
-    Some(Math.min(30000, 1000 * Math.pow(2, maxRetries).toLong)) // Exponential backoff, max 30s
-  }
+  /** The provider's `retryAfter` hint when it gave one, else [[RateLimitError.DefaultRetryDelay]]. */
+  override def retryDelay: Option[FiniteDuration] = retryAfter.orElse(Some(RateLimitError.DefaultRetryDelay))
 
   override val context: Map[String, String] = Map(
     "provider" -> provider
-  ) ++ retryAfter.map("retryAfter" -> _.toString) ++
+  ) ++ retryAfter.map(d => "retryAfter" -> DurationText(d)) ++
     requestsRemaining.map("requestsRemaining" -> _.toString) ++
     resetTime.map("resetTime" -> _.toString)
 }
 
 object RateLimitError {
 
+  /** The delay [[RateLimitError.retryDelay]] suggests when the provider gave no `retryAfter` hint. */
+  val DefaultRetryDelay: FiniteDuration = 30.seconds
+
   /** Create basic rate limit error */
   def apply(provider: String): RateLimitError =
     RateLimitError(s"Rate limited by $provider", None, provider)
 
-  /** Create rate limit error with a retry delay in milliseconds */
-  def apply(provider: String, retryAfter: Long): RateLimitError =
-    RateLimitError(s"Rate limited by $provider. Retry after ${retryAfter}ms", Some(retryAfter), provider)
+  /** Create rate limit error with the delay the provider asked for before retrying */
+  def apply(provider: String, retryAfter: FiniteDuration): RateLimitError =
+    RateLimitError(s"Rate limited by $provider. Retry after ${DurationText(retryAfter)}", Some(retryAfter), provider)
 
   /**
    * Create a rate limit error for a request rejected locally (e.g. by a token-bucket
@@ -77,6 +83,6 @@ object RateLimitError {
     )
 
   /** Unapply extractor for pattern matching */
-  def unapply(error: RateLimitError): Option[(String, Option[Long], String)] =
+  def unapply(error: RateLimitError): Option[(String, Option[FiniteDuration], String)] =
     Some((error.message, error.retryAfter, error.provider))
 }

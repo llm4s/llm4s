@@ -13,7 +13,7 @@ class RetryPolicyEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   "linearBackoff" should "use server-provided Retry-After when available" in {
     val policy         = RetryPolicy.linearBackoff(maxAttempts = 3, baseDelay = 2.seconds)
-    val rateLimitError = RateLimitError("test", 5000L)
+    val rateLimitError = RateLimitError("test", 5.seconds)
 
     // Should use server delay (5 seconds) instead of linear calculation
     policy.delayFor(1, rateLimitError) shouldBe 5.seconds
@@ -35,7 +35,7 @@ class RetryPolicyEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
   "fixedDelay" should "use server-provided Retry-After when available" in {
     val policy         = RetryPolicy.fixedDelay(maxAttempts = 3, delay = 2.seconds)
-    val rateLimitError = RateLimitError("test", 10000L)
+    val rateLimitError = RateLimitError("test", 10.seconds)
 
     policy.delayFor(1, rateLimitError) shouldBe 10.seconds
   }
@@ -63,7 +63,7 @@ class RetryPolicyEdgeCasesSpec extends AnyFlatSpec with Matchers {
   it should "report nothing as retryable" in {
     val policy = RetryPolicy.noRetry
 
-    policy.isRetryable(RateLimitError("test", 60L)) shouldBe false
+    policy.isRetryable(RateLimitError("test", 60.seconds)) shouldBe false
     policy.isRetryable(TimeoutError("test", 1.second, "test")) shouldBe false
     policy.isRetryable(ServiceError(500, "test", "error")) shouldBe false
     policy.isRetryable(NetworkError("test", None, "test")) shouldBe false
@@ -78,7 +78,7 @@ class RetryPolicyEdgeCasesSpec extends AnyFlatSpec with Matchers {
     val policy = RetryPolicy.exponentialBackoff(maxAttempts = 3, baseDelay = 1.second, maxDelay = 32.seconds)
     // RateLimitError always has a retryDelay due to its retryDelay method fallback
     // so this will use the server-provided delay
-    val rateLimitError = RateLimitError("test", 3000L)
+    val rateLimitError = RateLimitError("test", 3.seconds)
     policy.delayFor(1, rateLimitError) shouldBe 3.seconds
   }
 
@@ -98,7 +98,7 @@ class RetryPolicyEdgeCasesSpec extends AnyFlatSpec with Matchers {
 
     policy.isRetryable(AuthenticationError("test", "test")) shouldBe true
     policy.isRetryable(TimeoutError("timeout", 1.second, "test")) shouldBe false
-    policy.isRetryable(RateLimitError("test", 60L)) shouldBe false
+    policy.isRetryable(RateLimitError("test", 60.seconds)) shouldBe false
   }
 
   it should "use custom delay function" in {

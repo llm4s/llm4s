@@ -19,6 +19,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.duration._
 import scala.concurrent.{ ExecutionContext, Future }
+import java.time.Instant
 
 class ReliableClientTest extends AnyFunSuite with Matchers {
 
@@ -227,9 +228,10 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    var fakeTime       = 0L
-    val metrics        = new TestMetricsCollector()
-    val reliableClient = new ReliableClient(mockClient, "test", config, Some(metrics), clock = () => fakeTime)
+    var fakeTime = 0L
+    val metrics  = new TestMetricsCollector()
+    val reliableClient =
+      new ReliableClient(mockClient, "test", config, Some(metrics), clock = () => Instant.ofEpochMilli(fakeTime))
 
     // Open the circuit
     reliableClient.complete(testConversation)
@@ -264,9 +266,10 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    var fakeTime       = 0L
-    val metrics        = new TestMetricsCollector()
-    val reliableClient = new ReliableClient(mockClient, "test", config, Some(metrics), clock = () => fakeTime)
+    var fakeTime = 0L
+    val metrics  = new TestMetricsCollector()
+    val reliableClient =
+      new ReliableClient(mockClient, "test", config, Some(metrics), clock = () => Instant.ofEpochMilli(fakeTime))
 
     // Open the circuit
     reliableClient.complete(testConversation)
@@ -296,8 +299,9 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = None
     )
 
-    var fakeTime       = 0L
-    val reliableClient = new ReliableClient(mockClient, "test", config, None, clock = () => fakeTime)
+    var fakeTime = 0L
+    val reliableClient =
+      new ReliableClient(mockClient, "test", config, None, clock = () => Instant.ofEpochMilli(fakeTime))
 
     // Open the circuit
     reliableClient.complete(testConversation) // fail #1
@@ -389,8 +393,9 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
       deadline = Some(150.millis)
     )
 
-    val reliableClient = new ReliableClient(mockClient, "test", config, None, clock = () => times.dequeue())
-    val result         = reliableClient.complete(testConversation)
+    val reliableClient =
+      new ReliableClient(mockClient, "test", config, None, clock = () => Instant.ofEpochMilli(times.dequeue()))
+    val result = reliableClient.complete(testConversation)
 
     result match {
       case Left(_: TimeoutError) => succeed
@@ -572,7 +577,7 @@ class ReliableClientTest extends AnyFunSuite with Matchers {
   }
 
   test("ReliableClient preserves original error type after retries") {
-    val rateLimitError = RateLimitError("test", 1)
+    val rateLimitError = RateLimitError("test", 1.milli)
     val mockClient     = new MockClient(() => Left(rateLimitError))
 
     val config = ReliabilityConfig(

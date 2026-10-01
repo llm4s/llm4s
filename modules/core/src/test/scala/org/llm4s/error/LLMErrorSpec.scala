@@ -2,6 +2,7 @@ package org.llm4s.error
 
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+import scala.concurrent.duration._
 
 /**
  * Comprehensive tests to LLMError
@@ -29,7 +30,7 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
     }
 
     "support pattern matching for all error types" in {
-      val rateError       = RateLimitError("anthropic", 30L)
+      val rateError       = RateLimitError("anthropic", 30.seconds)
       val validationError = ValidationError("email", List("too short", "invalid"))
       val networkError    = NetworkError("timeout", None, "https://api.example.com")
 
@@ -37,7 +38,7 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
       rateError match {
         case RateLimitError(_, retryAfter, provider) =>
           provider shouldBe "anthropic"
-          retryAfter shouldBe Some(30L)
+          retryAfter shouldBe Some(30.seconds)
         case _ => fail("RateLimitError pattern matching failed")
       }
 
@@ -62,9 +63,9 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
       error1.provider shouldBe "openai"
       error1.retryAfter shouldBe None
 
-      val error2 = RateLimitError("anthropic", 60L)
-      error2.retryAfter shouldBe Some(60L)
-      error2.context should contain("retryAfter" -> "60")
+      val error2 = RateLimitError("anthropic", 60.seconds)
+      error2.retryAfter shouldBe Some(60.seconds)
+      error2.context should contain("retryAfter" -> "60s")
     }
 
     "properly categorize errors with trait-based inheritance" in {
@@ -164,9 +165,9 @@ class LLMErrorSpec extends AnyWordSpec with Matchers {
       val error1 = RateLimitError("openai")
       error1.retryAfter shouldBe None
 
-      val error2 = RateLimitError("openai", 60L)
-      error2.retryAfter shouldBe Some(60L)
-      error2.context should contain("retryAfter" -> "60")
+      val error2 = RateLimitError("openai", 60.seconds)
+      error2.retryAfter shouldBe Some(60.seconds)
+      error2.context should contain("retryAfter" -> "60s")
     }
   }
 

@@ -23,6 +23,7 @@ import org.scalatest.matchers.should.Matchers
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable.ListBuffer
+import scala.concurrent.duration._
 
 /**
  * `OpenAIClient` over the real `openai-java` transport, against a local HTTP server: the URL,
@@ -359,7 +360,7 @@ final class OpenAIClientWireSpec extends AnyFlatSpec with Matchers with EitherVa
       .headers(com.openai.core.http.Headers.builder().put("Retry-After", "5").build())
       .build()
     OpenAIClient.mapError(limited, "openai") match {
-      case err: org.llm4s.error.RateLimitError => err.retryDelay shouldBe Some(5000L)
+      case err: org.llm4s.error.RateLimitError => err.retryDelay shouldBe Some(5.seconds)
       case other                               => fail(s"Expected RateLimitError, got: $other")
     }
   }

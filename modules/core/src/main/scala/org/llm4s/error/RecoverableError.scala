@@ -1,5 +1,7 @@
 package org.llm4s.error
 
+import scala.concurrent.duration.FiniteDuration
+
 /**
  * Marker trait for errors that may succeed on retry.
  *
@@ -20,8 +22,8 @@ package org.llm4s.error
  */
 trait RecoverableError extends LLMError {
 
-  /** Suggested delay in milliseconds before retrying. */
-  def retryDelay: Option[Long] = None
+  /** Suggested delay before retrying. */
+  def retryDelay: Option[FiniteDuration] = None
 
   /** Maximum number of retry attempts recommended. */
   def maxRetries: Int = 3

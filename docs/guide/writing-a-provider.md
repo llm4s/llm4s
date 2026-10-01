@@ -423,7 +423,7 @@ Maps a non-2xx response to the standard error types - 401/403 `AuthenticationErr
 `RateLimitError`, 400 `ValidationError`, anything else `ServiceError` - pulling a message out of
 common JSON error shapes, redacted and truncated. Retry and fallback logic keys off these types,
 so use it rather than inventing your own. Pass the response's `headers`: a 429's `Retry-After`
-(delta-seconds or an HTTP-date) becomes the `RateLimitError`'s retry delay, in milliseconds, so
+(delta-seconds or an HTTP-date) becomes the `RateLimitError`'s `retryAfter`, a `FiniteDuration`, so
 retries wait as long as the provider asked rather than a guessed backoff.
 
 ### `CostEstimator`

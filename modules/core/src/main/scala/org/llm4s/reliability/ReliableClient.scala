@@ -7,6 +7,7 @@ import org.llm4s.types.Result
 import org.llm4s.error._
 import org.llm4s.metrics.{ MetricsCollector, ErrorKind }
 
+import java.time.Instant
 import scala.annotation.tailrec
 import scala.concurrent.duration.{ Duration, MILLISECONDS }
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference }
@@ -28,8 +29,7 @@ import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong, AtomicReference 
  * @param providerName Explicit provider name for stable metrics labels
  * @param config Reliability configuration
  * @param collector Optional metrics collector for observability
- * @param clock milliseconds since the epoch, for deadlines and the circuit's recovery timeout;
- *              injectable for tests
+ * @param clock the current time, read for deadlines and circuit-breaker recovery; injectable for tests
  * @param sleep how the client waits between attempts; injectable so a test can record the
  *              delays chosen, or throw `InterruptedException` to simulate an interrupted wait
  */
@@ -38,9 +38,12 @@ final class ReliableClient(
   providerName: String,
   config: ReliabilityConfig,
   collector: Option[MetricsCollector] = None,
-  clock: () => Long = () => System.currentTimeMillis(),
+  clock: () => Instant = () => Instant.now(),
   sleep: Duration => Unit = delay => Thread.sleep(delay.toMillis)
 ) extends LLMClient {
+
+  // Deadline and circuit-breaker arithmetic is in epoch milliseconds internally
+  private def nowMillis(): Long = clock().toEpochMilli
 
   // Local rate limit, consulted on every attempt (retries included) before the call is made
   private val rateLimiter: Option[TokenBucket] =
@@ -147,12 +150,12 @@ final class ReliableClient(
    * Single retry loop that checks deadline before each attempt.
    */
   private def executeWithDeadlineAndRetry[A](operation: () => Result[A], deadline: Duration): Result[A] = {
-    val startTime  = clock()
+    val startTime  = nowMillis()
     val deadlineMs = startTime + deadline.toMillis
 
     @tailrec
     def loop(attemptNumber: Int, lastError: Option[LLMError]): Result[A] = {
-      val remainingTime = deadlineMs - clock()
+      val remainingTime = deadlineMs - nowMillis()
 
       // Check if deadline already exceeded
       if (remainingTime <= 0) {
@@ -185,7 +188,7 @@ final class ReliableClient(
               collector.foreach(_.recordRetryAttempt(providerName, attemptNumber))
 
               // Recompute remaining time after operation to avoid a stale value
-              val remainingAfterDelay = (deadlineMs - clock()) - delay.toMillis
+              val remainingAfterDelay = (deadlineMs - nowMillis()) - delay.toMillis
 
               if (remainingAfterDelay <= 0) {
                 // Not enough time for retry
@@ -365,7 +368,7 @@ final class ReliableClient(
         Right(())
 
       case CircuitState.Open =>
-        val now = clock()
+        val now = nowMillis()
         if ((now - lastFailureTime.get()) > config.circuitBreaker.recoveryTimeout.toMillis) {
           // Transition to half-open
           if (circuitState.compareAndSet(CircuitState.Open, CircuitState.HalfOpen)) {
@@ -436,7 +439,7 @@ final class ReliableClient(
    * Handle failed operation.
    */
   private def onFailure(): Unit = {
-    lastFailureTime.set(clock())
+    lastFailureTime.set(nowMillis())
 
     circuitState.get() match {
       case CircuitState.Closed =>

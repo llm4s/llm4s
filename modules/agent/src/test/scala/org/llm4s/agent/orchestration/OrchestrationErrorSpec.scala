@@ -3,6 +3,7 @@ package org.llm4s.agent.orchestration
 import org.llm4s.error.LLMError
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import scala.concurrent.duration._
 
 class OrchestrationErrorSpec extends AnyFlatSpec with Matchers {
 
@@ -148,18 +149,18 @@ class OrchestrationErrorSpec extends AnyFlatSpec with Matchers {
   // ==========================================================================
 
   "AgentTimeoutError" should "capture agent and timeout info" in {
-    val error = OrchestrationError.AgentTimeoutError("slow-agent", 30000L)
+    val error = OrchestrationError.AgentTimeoutError("slow-agent", 30.seconds)
     error.agentName shouldBe "slow-agent"
-    error.timeoutMs shouldBe 30000L
+    error.timeout shouldBe 30.seconds
     error.message should include("slow-agent")
-    error.message should include("30000ms")
+    error.message should include("timed out after 30s")
   }
 
   it should "include details in context" in {
-    val error = OrchestrationError.AgentTimeoutError("agent-1", 5000L)
+    val error = OrchestrationError.AgentTimeoutError("agent-1", 5.seconds)
     error.context("component") shouldBe "agent-timeout"
     error.context("agentName") shouldBe "agent-1"
-    error.context("timeoutMs") shouldBe "5000"
+    error.context("timeout") shouldBe "5s"
   }
 
   // ==========================================================================
@@ -172,7 +173,7 @@ class OrchestrationErrorSpec extends AnyFlatSpec with Matchers {
       OrchestrationError.NodeExecutionError("n", "N", "msg"),
       OrchestrationError.PlanExecutionError("test"),
       OrchestrationError.TypeMismatchError("a", "b", "X", "Y"),
-      OrchestrationError.AgentTimeoutError("a", 100L)
+      OrchestrationError.AgentTimeoutError("a", 100.millis)
     )
 
     errors.foreach { error =>

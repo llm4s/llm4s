@@ -9,7 +9,7 @@ import scala.concurrent.duration._
 class ErrorKindMappingTest extends AnyFunSuite with Matchers {
 
   test("fromLLMError maps RateLimitError to RateLimit") {
-    val error = RateLimitError("test", 1000)
+    val error = RateLimitError("test", 1.second)
     ErrorKind.fromLLMError(error) shouldBe ErrorKind.RateLimit
   }
 
