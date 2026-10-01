@@ -883,6 +883,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ([#1133](https://github.com/llm4s/llm4s/issues/1133)). Only `ReliableProviders.wrap` honoured
   it, so `new ReliableClient(...)` with rate limiting enabled made every call unthrottled. The
   token bucket is now part of `ReliableClient`, consulted before every attempt, retries included.
+  A local rejection does not count as a provider failure for the circuit breaker, and
+  `ReliabilityConfig.disabled` turns rate limiting off with everything else.
 - **A `PlanRunner` node cancelled while running is reported as cancelled**
   ([#1133](https://github.com/llm4s/llm4s/issues/1133)). The race against cancellation mapped a
   future that only ever failed, so the "Node <id> cancelled" `PlanExecutionError` was never

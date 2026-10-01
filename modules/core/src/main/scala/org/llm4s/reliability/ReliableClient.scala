@@ -69,7 +69,7 @@ final class ReliableClient(
     options: CompletionOptions = CompletionOptions()
   ): Result[Completion] =
     if (!config.enabled) {
-      rateLimited(() => underlying.complete(conversation, options))()
+      underlying.complete(conversation, options)
     } else {
       executeWithReliability(rateLimited(() => underlying.complete(conversation, options)))
     }
@@ -80,7 +80,7 @@ final class ReliableClient(
     onChunk: StreamedChunk => Unit
   ): Result[Completion] =
     if (!config.enabled) {
-      rateLimited(() => underlying.streamComplete(conversation, options, onChunk))()
+      underlying.streamComplete(conversation, options, onChunk)
     } else {
       executeWithReliability(rateLimited(() => underlying.streamComplete(conversation, options, onChunk)))
     }
@@ -110,10 +110,13 @@ final class ReliableClient(
         executeWithRetry(operation, attemptNumber = 1)
     }
 
-    // Update circuit breaker state based on result
+    // Update circuit breaker state based on result. A local throttle says nothing about the
+    // provider's health, so it counts as neither; it only hands back a half-open probe permit.
     result match {
       case Right(_) =>
         onSuccess()
+      case Left(e: RateLimitError) if e.origin == RateLimitOrigin.LocalThrottle =>
+        onLocallyThrottled()
       case Left(_) =>
         onFailure()
     }
@@ -373,6 +376,10 @@ final class ReliableClient(
       case CircuitState.Open =>
       // Should not happen
     }
+
+  /** A call the local rate limit rejected never reached the provider: release a half-open probe. */
+  private def onLocallyThrottled(): Unit =
+    if (circuitState.get() == CircuitState.HalfOpen) probePermit.set(false)
 
   /**
    * Handle failed operation.

@@ -106,4 +106,50 @@ class ReliableClientRateLimitSpec extends AnyFlatSpec with Matchers {
     // Recorded once, by the limiter; the terminal-error metric skips a local throttle
     errors.toList shouldBe List(ErrorKind.RateLimit -> "test-provider")
   }
+
+  it should "not rate limit when reliability is disabled" in {
+    val underlying = new CountingClient(ok)
+    val config = ReliabilityConfig.default
+      .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
+      .disabled
+    val client = new ReliableClient(underlying, "test-provider", config)
+
+    (1 to 3).foreach(_ => client.complete(conversation).isRight shouldBe true)
+    underlying.callCount.get() shouldBe 3
+  }
+
+  it should "not count local throttles as provider failures for the circuit breaker" in {
+    val underlying = new CountingClient(ok)
+    val config = ReliabilityConfig.default
+      .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
+      .withRetryPolicy(noRetry)
+      .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 2))
+    val client = new ReliableClient(underlying, "test-provider", config)
+
+    client.complete(conversation).isRight shouldBe true
+    (1 to 5).foreach(_ => client.complete(conversation).left.toOption.get shouldBe a[RateLimitError])
+    client.currentCircuitState shouldBe CircuitState.Closed
+  }
+
+  it should "release a half-open probe when the probe is throttled locally" in {
+    // One token: the first call spends it and fails upstream, opening the circuit. After the
+    // recovery timeout every call is a half-open probe that the empty bucket rejects locally;
+    // each must give the probe back, or the next would fail as "probe already in progress".
+    var now        = 0L
+    val underlying = new CountingClient(timingOut)
+    val config = ReliabilityConfig.default
+      .withRateLimit(RateLimitConfig(enabled = true, requestsPerMinute = 0, burstCapacity = 1))
+      .withRetryPolicy(noRetry)
+      .withCircuitBreaker(CircuitBreakerConfig(failureThreshold = 1, recoveryTimeout = 1.second))
+    val client = new ReliableClient(underlying, "test-provider", config, None, () => now)
+
+    client.complete(conversation).isLeft shouldBe true
+    client.currentCircuitState shouldBe CircuitState.Open
+
+    now = 2000L
+    client.complete(conversation).left.toOption.get shouldBe a[RateLimitError]
+    client.currentCircuitState shouldBe CircuitState.HalfOpen
+    client.complete(conversation).left.toOption.get shouldBe a[RateLimitError]
+    underlying.callCount.get() shouldBe 1
+  }
 }
