@@ -194,8 +194,7 @@ The spec says what a section needs. The fields a provider author uses:
 
 `ProviderConfigSpec.apiKeyAndDefaultBaseUrl(defaultBaseUrl, apiKeyEnv)` builds the common shape.
 
-Anything beyond the built-in fields (`provider`, `model`, `baseUrl`, `apiKey`, `organization`,
-`endpoint`, `apiVersion`, `contextWindow`, `reserveCompletion`, `headers` -
+Anything beyond the built-in fields (`provider`, `model`, `baseUrl`, `apiKey`, `headers` -
 `ProviderConfigSpec.BuiltinKeys`) is declared as an extra rather than smuggled through a built-in
 field:
 
@@ -465,7 +464,9 @@ trait ProviderModelLister:
 
 Return one from `ProviderDescriptor.modelLister` if the vendor has a model-listing endpoint. If
 it serves the OpenAI `/models` shape, `ProviderModelListers.openAICompatible(provider,
-defaultBaseUrl, ...)` builds one for you.
+defaultBaseUrl, ...)` in `llm4s-openai-compatible` builds one for you (add that dependency);
+its `sectionHeaders` parameter derives request headers from the section, e.g. from one of your
+extras.
 
 ### Redaction
 
@@ -573,7 +574,7 @@ class Llm4sAcmeModuleSpec extends AnyWordSpec with Matchers:
 
   private val section = NamedProviderConfig(
     provider = AcmeProvider.id, model = ModelName("acme-large"), baseUrl = None,
-    apiKey = Some(ApiKey("test-key")), organization = None, endpoint = None, apiVersion = None,
+    apiKey = Some(ApiKey("test-key")),
     extras = Map("region" -> "eu-west") // built in code, so no validation fills the default
   )
 

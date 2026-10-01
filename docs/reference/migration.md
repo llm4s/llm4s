@@ -1,5 +1,51 @@
 # Migration Guide
 
+## Pre-baseline API cleanup, pass 4
+
+Not in a release yet; continues pass 3 below. Vendor fields leave `NamedProviderConfig`.
+
+**Config files: no change.** `organization`, `endpoint`, `apiVersion`, `contextWindow` and
+`reserveCompletion` keep their names in `llm4s.providers.<name>` sections. What changed is who owns
+them: each is now a provider-specific key that only its provider declares.
+
+| Key | Declared by |
+|---|---|
+| `organization` | `openai`, `requesty`, `openrouter` |
+| `endpoint` (required), `apiVersion` (default `V2025_01_01_PREVIEW`) | `azure` |
+| `contextWindow`, `reserveCompletion` | `openai-compatible` |
+
+In a section for any other provider these keys used to be read and silently ignored; they are now
+reported once as unknown keys, with a warning, and dropped - delete them. Vertex AI's deprecated
+`endpoint`/`organization` aliases for `project`/`location` work exactly as before. A non-numeric
+`contextWindow`/`reserveCompletion` is now reported when the section is resolved, naming the key
+(`llm4s.providers.<name>.contextWindow must be a positive whole number, got '...'`), rather than as a
+type error while reading the block.
+
+**Scala callers:**
+
+1. `NamedProviderConfig` no longer has `organization`, `endpoint`, `apiVersion`, `contextWindow` or
+   `reserveCompletion`. Read the validated value from the section's extras:
+   `config.organization` → `config.extra("organization")` (or `OpenAIConfig.OrganizationKey`),
+   `config.endpoint` → `config.extra(AzureProvider.EndpointKey)`,
+   `config.apiVersion` → `config.extra(AzureProvider.ApiVersionKey)`,
+   `config.contextWindow` → `config.extra(OpenAICompatibleProvider.ContextWindowKey).map(_.toInt)`
+   (likewise `ReserveCompletionKey`). Values are strings.
+2. Code constructing `NamedProviderConfig(...)` drops those arguments; pass them in
+   `extras = Map("endpoint" -> ..., ...)` if the descriptor needs them. Positional calls
+   `NamedProviderConfig(id, model, baseUrl, apiKey, org, endpoint, apiVersion)` become
+   `NamedProviderConfig(id, model, baseUrl, apiKey)`.
+3. `ProviderConfigSpec(requiresEndpoint = true, endpointDescription = "...")` →
+   `ProviderConfigSpec(extras = Seq(ProviderConfigKey.required("endpoint", "...")))`.
+   `ProviderConfigSpec.BuiltinKeys` is now `provider, model, baseUrl, apiKey, headers`, and
+   `BuiltinAliasKeys` is `baseUrl, apiKey` - a `deprecatedAliases` entry naming one of the moved keys
+   still works, resolved from the section's extras.
+4. `ProviderModelListers.openAICompatible` is now in `llm4s-openai-compatible` (package
+   `org.llm4s.config` unchanged): a provider module calling it adds that dependency. It no longer
+   sends `OpenAI-Organization` from the section; pass
+   `sectionHeaders = ProviderModelListers.openAIOrganizationHeader` (and declare
+   `OpenAIConfig.OrganizationConfigKey`) to keep it, or any `NamedProviderConfig => Map[String, String]`
+   to derive other headers. `ProviderModelLister` and `DiscoveredModel` stay in `llm4s-core`.
+
 ## Pre-baseline API cleanup, pass 3
 
 Not in a release yet; continues pass 2 below.
