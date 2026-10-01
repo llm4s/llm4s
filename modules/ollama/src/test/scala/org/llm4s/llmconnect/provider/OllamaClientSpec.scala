@@ -350,6 +350,24 @@ class OllamaClientHttpSpec extends AnyFunSuite with MockFactory {
     assert(completion.content.contains("world"))
   }
 
+  test("a stream that fails mid-read is a recoverable NetworkError, so streamCompleteWithRetry retries it") {
+    // The connection resets after the 200 arrives, before the first chunk.
+    val resetting = new java.io.InputStream {
+      override def read(): Int = throw new java.io.IOException("Connection reset")
+    }
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, resetting)))
+
+    val result = mkClient(mockHttp).streamComplete(conversation("Hello"), CompletionOptions(), _ => ())
+
+    result match {
+      case Left(e: NetworkError) =>
+        assert(e.message.contains("Connection reset"))
+        assert(org.llm4s.error.LLMError.isRecoverable(e))
+      case other => fail(s"expected a NetworkError, got $other")
+    }
+  }
+
   test("streamComplete() parses token counts from the done=true line") {
     val jsonLines =
       "{\"message\":{\"content\":\"Done\"},\"done\":true,\"prompt_eval_count\":15,\"eval_count\":7}\n"

@@ -301,6 +301,19 @@ private[llm4s] object HttpFailures {
     }
   }
 
+  /**
+   * A failure while reading a response body that is already open - a streamed reply cut off
+   * mid-read. An I/O failure is classified as it would be during the request (a reset or
+   * dropped connection is a recoverable [[NetworkError]], a socket timeout a [[TimeoutError]]),
+   * so retry logic treats it the same; anything else, such as a malformed chunk, keeps the
+   * default mapping.
+   */
+  def streamReadError(t: Throwable, url: String, timeout: FiniteDuration): LLMError =
+    t match {
+      case e: IOException => toLLMError(e, "POST", url, timeout)
+      case e              => org.llm4s.error.ThrowableOps.RichThrowable(e).toLLMError
+    }
+
   /** Scheme, host, port and path of `url`; never its query string or user info. */
   def safeEndpoint(url: String): String =
     Try(URI.create(url)).toOption

@@ -99,6 +99,7 @@ map_file_to_project() {
     modules/knowledgegraph-neo4j/*)       echo "knowledgegraphNeo4j" ;;
     modules/trace-opentelemetry/*)        echo "traceOpentelemetry" ;;
     modules/openai-compatible/*)          echo "openaiCompatible" ;;
+    modules/provider-testkit/*)           echo "providerTestkit" ;;
     modules/providers/voyage/*)           echo "voyage" ;;
     modules/memory-postgres/*)            echo "memoryPostgres" ;;
     modules/knowledgegraph/*)             echo "knowledgegraph" ;;
@@ -210,6 +211,7 @@ propagate_downstream() {
       set_add DOWNSTREAM_COMPILE agent
       set_add DOWNSTREAM_COMPILE agentTools
       set_add DOWNSTREAM_COMPILE knowledgegraphNeo4j
+      set_add DOWNSTREAM_COMPILE providerTestkit
       set_add DOWNSTREAM_COMPILE it
       set_add DOWNSTREAM_COMPILE benchmarks
       ;;
@@ -337,6 +339,20 @@ propagate_downstream() {
     agentTools)
       set_add DOWNSTREAM_COMPILE samples
       set_add DOWNSTREAM_COMPILE workspaceSamples
+      ;;
+    providerTestkit)
+      set_add DOWNSTREAM_COMPILE rag
+      set_add DOWNSTREAM_COMPILE samples
+      set_add DOWNSTREAM_COMPILE workspaceSamples
+      set_add DOWNSTREAM_COMPILE it
+      set_add DOWNSTREAM_COMPILE benchmarks
+      set_add DOWNSTREAM_COMPILE ollama
+      set_add DOWNSTREAM_COMPILE configPolicy
+      set_add DOWNSTREAM_COMPILE gemini
+      set_add DOWNSTREAM_COMPILE anthropic
+      set_add DOWNSTREAM_COMPILE openaiCompatible
+      set_add DOWNSTREAM_COMPILE openai
+      set_add DOWNSTREAM_COMPILE voyage
       ;;
     knowledgegraphNeo4j)
       set_add DOWNSTREAM_COMPILE samples

@@ -632,4 +632,25 @@ class VertexAICoverageSpec extends AnyFlatSpec with Matchers with MockFactory {
     val result = VertexAIClient(testConfig, org.llm4s.metrics.MetricsCollector.noop, ProviderExchangeLogging.Disabled)
     result.isRight shouldBe true
   }
+
+  it should "return a recoverable NetworkError when the stream fails mid-read" in {
+    val resetting = new java.io.InputStream {
+      override def read(): Int = throw new java.io.IOException("Connection reset")
+    }
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.post _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.get _).when(*, *, *, *).returns(Right(HttpResponse(200, tokenBody, Map.empty)))
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, resetting)))
+
+    val client = new VertexAIClient(
+      testConfig,
+      org.llm4s.metrics.MetricsCollector.noop,
+      ProviderExchangeLogging.Disabled,
+      mockHttp
+    )
+    client.streamComplete(Conversation(Seq(UserMessage("Hi"))), CompletionOptions(), _ => ()) match {
+      case Left(e: org.llm4s.error.NetworkError) => org.llm4s.error.LLMError.isRecoverable(e) shouldBe true
+      case other                                 => fail(s"expected a NetworkError, got $other")
+    }
+  }
 }

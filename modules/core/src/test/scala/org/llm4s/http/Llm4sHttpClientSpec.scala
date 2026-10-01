@@ -574,6 +574,24 @@ class Llm4sHttpClientSpec extends AnyFlatSpec with Matchers with BeforeAndAfterA
     interrupted shouldBe true
   }
 
+  "HttpFailures.streamReadError" should "classify a body read failure as the transport would" in {
+    val url = "https://api.example.com/v1/stream?key=secret"
+    HttpFailures.streamReadError(new java.io.IOException("Connection reset"), url, 3.seconds) match {
+      case e: org.llm4s.error.NetworkError =>
+        e.message should include("Connection reset")
+        (e.message should not).include("secret")
+        org.llm4s.error.LLMError.isRecoverable(e) shouldBe true
+      case other => fail(s"expected NetworkError, got $other")
+    }
+    HttpFailures.streamReadError(new java.net.SocketTimeoutException("read timed out"), url, 3.seconds) shouldBe a[
+      org.llm4s.error.TimeoutError
+    ]
+    // Not an I/O failure (e.g. a malformed chunk): the default mapping, unchanged
+    HttpFailures.streamReadError(new IllegalStateException("bad chunk"), url, 3.seconds) shouldBe a[
+      org.llm4s.error.UnknownError
+    ]
+  }
+
   "HttpFailures.toLLMError" should "map each transport failure to its error type" in {
     val url               = "https://user:pw@api.example.com:8443/v1/x?key=secret#frag"
     def map(t: Throwable) = HttpFailures.toLLMError(t, "POST", url, 3.seconds)

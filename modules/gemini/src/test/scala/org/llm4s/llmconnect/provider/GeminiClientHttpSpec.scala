@@ -390,4 +390,19 @@ class GeminiClientHttpSpec extends AnyFlatSpec with Matchers with MockFactory {
       case Left(err) => fail(s"Tool build failed: ${err.message}")
     }
   }
+
+  "GeminiClient.streamComplete()" should "return a recoverable NetworkError when the stream fails mid-read" in {
+    val resetting = new java.io.InputStream {
+      override def read(): Int = throw new java.io.IOException("Connection reset")
+    }
+    val mockHttp = stub[Llm4sHttpClient]
+    (mockHttp.postStream _).when(*, *, *, *).returns(Right(StreamingHttpResponse(200, resetting)))
+
+    mkClient(mockHttp).streamComplete(conversation("Hi"), CompletionOptions(), _ => ()) match {
+      case Left(e: org.llm4s.error.NetworkError) =>
+        org.llm4s.error.LLMError.isRecoverable(e) shouldBe true
+        (e.message should not).include("key=")
+      case other => fail(s"expected a NetworkError, got $other")
+    }
+  }
 }

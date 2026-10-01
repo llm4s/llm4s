@@ -1,6 +1,6 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.OllamaConfig
@@ -171,7 +171,7 @@ class OllamaClient(
                 }
               }
             }
-        }.toResult
+        }.toEither.left.map(HttpFailures.streamReadError(_, url, 10.minutes))
 
         val result = processResult
           .flatMap(_ => accumulator.toCompletion)

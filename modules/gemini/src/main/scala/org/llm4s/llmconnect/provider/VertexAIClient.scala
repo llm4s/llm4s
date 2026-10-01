@@ -1,7 +1,7 @@
 package org.llm4s.llmconnect.provider
 
 import org.llm4s.error.ThrowableOps._
-import org.llm4s.http.Llm4sHttpClient
+import org.llm4s.http.{ HttpFailures, Llm4sHttpClient }
 import org.llm4s.llmconnect.BaseLifecycleLLMClient
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.VertexAIConfig
@@ -171,7 +171,7 @@ class VertexAIClient(
                   }
                 }
               }.toEither.left
-                .map(_.toLLMError)
+                .map(HttpFailures.streamReadError(_, url, 10.minutes))
                 .flatMap(_ =>
                   accumulator.toCompletion.map { c =>
                     val cost       = c.usage.flatMap(u => CostEstimator.estimate(config.model, u))
