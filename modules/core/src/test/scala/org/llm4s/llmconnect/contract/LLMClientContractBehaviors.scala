@@ -190,4 +190,23 @@ trait LLMClientContractBehaviors { this: AnyWordSpec with Matchers =>
       }
     }
   }
+
+  /**
+   * Asserts a client actually streams more than zero chunks, rather than a declared
+   * `features.streaming = true` nobody checked - the gap behind #925 (Cohere and Mistral's
+   * streaming flag going stale relative to what the client did).
+   *
+   * Call this from inside a test that already built `client` from the provider's own
+   * descriptor against a stub transport rigged to emit more than one chunk - a client that
+   * silently falls back to a single complete()-style response fails this the same way a
+   * never-streaming client would. Takes the client rather than a factory because most
+   * descriptor-built clients need a local stub server alive for the call, which only the
+   * calling module's test can own the lifecycle of.
+   */
+  def assertHonoursStreaming(client: LLMClient): Unit = {
+    val chunks = ListBuffer.empty[StreamedChunk]
+    val result = client.streamComplete(validConversation, onChunk = chunks += _)
+    result.isRight shouldBe true
+    chunks should not be empty
+  }
 }
