@@ -4,9 +4,10 @@ import org.llm4s.config.{ CredentialsRoundTrip, OpenAICompatibleConfigKeys }
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.config.ContextWindowResolver
+import org.llm4s.llmconnect.contract.LLMClientContractBehaviors
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
-import org.llm4s.testutil.FixtureChatConfig
+import org.llm4s.testutil.{ FixtureChatConfig, LocalProviderTestServer }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -20,7 +21,7 @@ import org.scalatest.wordspec.AnyWordSpec
  * that only a carved module has to prove: that depending on it is enough - the services
  * entry is found and the descriptors arrive.
  */
-class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
+class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with LLMClientContractBehaviors:
 
   private val registryService         = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
   private given ModelRegistryService  = registryService
@@ -49,6 +50,10 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
       endpoint = None,
       apiVersion = None
     )
+
+  /** A section pointed at a local stub server instead of the provider's real base URL. */
+  private def streamingSection(descriptor: ProviderDescriptor, serverUrl: String): NamedProviderConfig =
+    section(descriptor).copy(baseUrl = Some(BaseUrl(serverUrl)))
 
   "the llm4s-openai-compatible services entry" should {
 
@@ -129,6 +134,25 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
       // Z.ai and Cohere had no lister in core either.
       ZaiProvider.modelLister shouldBe None
       CohereProvider.modelLister shouldBe None
+    }
+
+    "actually stream, for every descriptor that declares it does" in {
+      expectations.foreach { (descriptor, _, _) =>
+        withClue(s"${descriptor.id.asString}: ")(descriptor.features.streaming shouldBe true)
+
+        LocalProviderTestServer.withServer("/") { exchange =>
+          LocalProviderTestServer.sendSseResponse(exchange, LocalProviderTestServer.openAISseBody(Seq("Hi", " there")))
+        } { serverUrl =>
+          val client =
+            descriptor
+              .buildConfig("test-instance", streamingSection(descriptor, serverUrl))
+              .flatMap(config => descriptor.buildClient(config, LlmClientOptions.default))
+              .getOrElse(fail(s"${descriptor.id.asString} failed to build a streaming client"))
+
+          withClue(s"${descriptor.id.asString}: ")(assertHonoursStreaming(client))
+          client.close()
+        }
+      }
     }
   }
 
