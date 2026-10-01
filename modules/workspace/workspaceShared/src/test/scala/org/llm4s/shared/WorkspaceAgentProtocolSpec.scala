@@ -1,5 +1,7 @@
 package org.llm4s.shared
 
+import scala.concurrent.duration.*
+
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import upickle.default._
@@ -184,7 +186,7 @@ class WorkspaceAgentProtocolSpec extends AnyFlatSpec with Matchers {
       commandId = "exec-1",
       command = "ls -la",
       workingDirectory = Some("/home"),
-      timeout = Some(30000),
+      timeout = Some(30.seconds),
       environment = Some(Map("PATH" -> "/usr/bin", "HOME" -> "/home"))
     )
     val json   = write(cmd)
@@ -192,6 +194,8 @@ class WorkspaceAgentProtocolSpec extends AnyFlatSpec with Matchers {
 
     parsed.command shouldBe "ls -la"
     parsed.workingDirectory shouldBe Some("/home")
+    parsed.timeout shouldBe Some(30.seconds)
+    ujson.read(json)("timeout").num shouldBe 30 // whole seconds on the wire, as the runner reads it
     parsed.environment.get("PATH") shouldBe "/usr/bin"
   }
 

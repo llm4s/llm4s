@@ -1,6 +1,9 @@
 package org.llm4s.shared
 
+import org.llm4s.shared.WireDurations.wholeSecondsRW
 import upickle.default.{ ReadWriter, macroRW }
+
+import scala.concurrent.duration.FiniteDuration
 
 /**
  * Core trait for all workspace agent commands.
@@ -283,7 +286,7 @@ case class ExecuteCommandCommand(
   commandId: String,
   command: String,
   workingDirectory: Option[String] = None,
-  timeout: Option[Int] = None,
+  timeout: Option[FiniteDuration] = None,
   environment: Option[Map[String, String]] = None
 ) extends WorkspaceAgentCommand
 

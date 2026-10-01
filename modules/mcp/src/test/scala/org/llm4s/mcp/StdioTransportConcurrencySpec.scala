@@ -4,6 +4,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.{ CountDownLatch, Executors, TimeUnit }
+import scala.concurrent.duration.*
 
 /**
  * Tests for StdioTransportImpl concurrent request handling.
@@ -39,7 +40,7 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
          done"""
     )
 
-    val transport = new StdioTransportImpl(scriptCommand, startupTimeoutMs = 500, name = "echo-server")
+    val transport = new StdioTransportImpl(scriptCommand, startupTimeout = 500.millis, name = "echo-server")
 
     // Warm up: send a single request to ensure the process is started before concurrent access
     // This prevents the race condition where multiple threads try to start the process simultaneously
@@ -123,7 +124,7 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
          done"""
     )
 
-    val transport   = new StdioTransportImpl(scriptCommand, startupTimeoutMs = 500, name = "sequential-server")
+    val transport   = new StdioTransportImpl(scriptCommand, startupTimeout = 500.millis, name = "sequential-server")
     val numRequests = 20
 
     // Send requests sequentially but rapidly
@@ -169,7 +170,7 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
          done"""
     )
 
-    val transport = new StdioTransportImpl(scriptCommand, startupTimeoutMs = 500, name = "mixed-server")
+    val transport = new StdioTransportImpl(scriptCommand, startupTimeout = 500.millis, name = "mixed-server")
 
     // Warm up: send a single request to ensure the process is started before concurrent access
     val warmupRequest = JsonRpcRequest("2.0", "warmup", "test/warmup", None)
@@ -240,7 +241,7 @@ class StdioTransportConcurrencySpec extends AnyFlatSpec with Matchers {
          done"""
     )
 
-    val transport = new StdioTransportImpl(scriptCommand, startupTimeoutMs = 500, name = "notification-server")
+    val transport = new StdioTransportImpl(scriptCommand, startupTimeout = 500.millis, name = "notification-server")
 
     // Send a notification (no response expected)
     val notification = JsonRpcNotification(

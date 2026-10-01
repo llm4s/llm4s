@@ -98,7 +98,7 @@ object Category {
  * Runtime configuration for Exa Search requests.
  * Allows overriding defaults and providing advanced parameters via extraParams.
  *
- * @param timeoutMs Request timeout in milliseconds
+ * @param timeout Request timeout, between 1 second and 5 minutes
  * @param numResults Number of results (mandatory, default 10)
  * @param searchType Search type (mandatory, default Auto)
  * @param maxCharacters Max text characters (mandatory, default 500)
@@ -106,11 +106,11 @@ object Category {
  * @param category Data category (optional, default None)
  * @param additionalQueries Additional queries for deep search (optional, default None)
  * @param userLocation User location for local search (optional, default None)
- * @param livecrawlTimeout Timeout for livecrawl (optional, default None)
+ * @param livecrawlTimeout Timeout for livecrawl (optional, default None); sent to Exa in milliseconds
  * @param extraParams Advanced parameters merged into the request body
  */
 case class ExaSearchConfig(
-  timeoutMs: Int = 10000,
+  timeout: FiniteDuration = 10.seconds,
   numResults: Int = 10,
   searchType: SearchType = SearchType.Auto,
   maxCharacters: Int = 500,
@@ -118,7 +118,7 @@ case class ExaSearchConfig(
   category: Option[Category] = None,
   additionalQueries: Option[List[String]] = None,
   userLocation: Option[String] = None,
-  livecrawlTimeout: Option[Int] = None,
+  livecrawlTimeout: Option[FiniteDuration] = None,
   extraParams: Map[String, ujson.Value] = Map.empty
 )
 
@@ -241,9 +241,9 @@ object ExaSearchTool {
     else Left(ValidationError.required("query"))
   }
 
-  private[llm4s] def validateTimeoutMs(timeout: Int): Result[Int] =
-    if (timeout >= 1000 && timeout <= 300000) Right(timeout)
-    else Left(ValidationError.invalid("timeoutMs", s"must be between 1000 and 300000 (1s to 5min), got $timeout"))
+  private[llm4s] def validateTimeout(timeout: FiniteDuration): Result[FiniteDuration] =
+    if (timeout >= 1.second && timeout <= 5.minutes) Right(timeout)
+    else Left(ValidationError.invalid("timeout", s"must be between 1 second and 5 minutes, got $timeout"))
   private[llm4s] def validateUserLocation(location: Option[String]): Result[Option[String]] =
     location match {
       case Some(loc) =>
@@ -304,13 +304,13 @@ object ExaSearchTool {
    */
   private def validateSearchConfig(config: ExaSearchConfig): Result[ExaSearchConfig] =
     for {
-      validatedTimeoutMs         <- validateTimeoutMs(config.timeoutMs)
+      validatedTimeout           <- validateTimeout(config.timeout)
       validatedNumResults        <- validateNumResults(config.numResults)
       validatedMaxCharacters     <- validateMaxCharacters(config.maxCharacters)
       validatedUserLocation      <- validateUserLocation(config.userLocation)
       validatedAdditionalQueries <- validateAdditionalQueries(config.additionalQueries)
     } yield config.copy(
-      timeoutMs = validatedTimeoutMs,
+      timeout = validatedTimeout,
       numResults = validatedNumResults,
       maxCharacters = validatedMaxCharacters,
       userLocation = validatedUserLocation,
@@ -430,10 +430,10 @@ object ExaSearchTool {
             "User-Agent"   -> "llm4s-exa-search/1.0"
           ),
           body = ujson.write(body),
-          timeout = config.timeoutMs.millis
+          timeout = config.timeout
         )
         .left
-        .map(describeTransportFailure(_, config.timeoutMs))
+        .map(describeTransportFailure(_, config.timeout))
 
     responseEither.flatMap { response =>
       if (response.statusCode == 200) {
@@ -469,7 +469,7 @@ object ExaSearchTool {
       "text" -> ujson.Obj("maxCharacters" -> ujson.Num(config.maxCharacters))
     )
     contents("maxAgeHours") = ujson.Num(config.maxAgeHours)
-    config.livecrawlTimeout.foreach(timeout => contents("livecrawlTimeout") = ujson.Num(timeout))
+    config.livecrawlTimeout.foreach(timeout => contents("livecrawlTimeout") = ujson.Num(timeout.toMillis.toDouble))
 
     val body = ujson.Obj(
       "query"      -> ujson.Str(query),

@@ -1,5 +1,7 @@
 package org.llm4s.shared
 
+import scala.concurrent.duration.FiniteDuration
+
 import java.util.UUID
 import scala.util.Try
 
@@ -163,14 +165,14 @@ class WorkspaceAgentInterfaceRemote(handler: WorkspaceAgentCommand => WorkspaceA
    *
    * @param command Command to execute
    * @param workingDirectory Working directory (default: workspace root)
-   * @param timeout Timeout in milliseconds
+   * @param timeout Timeout; sent to the runner in whole seconds, rounded up
    * @param environment Environment variables
    * @return Response with command execution result
    */
   override def executeCommand(
     command: String,
     workingDirectory: Option[String] = None,
-    timeout: Option[Int] = None,
+    timeout: Option[FiniteDuration] = None,
     environment: Option[Map[String, String]] = None
   ): ExecuteCommandResponse = {
     val cmd = ExecuteCommandCommand(

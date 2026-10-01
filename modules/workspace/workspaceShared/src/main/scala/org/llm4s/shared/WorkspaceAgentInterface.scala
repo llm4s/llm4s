@@ -1,5 +1,7 @@
 package org.llm4s.shared
 
+import scala.concurrent.duration.FiniteDuration
+
 /**
  * Exception thrown when a workspace agent command fails
  */
@@ -99,14 +101,14 @@ trait WorkspaceAgentInterface {
    *
    * @param command Command to execute
    * @param workingDirectory Working directory (default: workspace root)
-   * @param timeout Timeout in milliseconds
+   * @param timeout Timeout (default: the sandbox's `defaultCommandTimeout`)
    * @param environment Environment variables
    * @return Response with command execution result
    */
   def executeCommand(
     command: String,
     workingDirectory: Option[String] = None,
-    timeout: Option[Int] = None,
+    timeout: Option[FiniteDuration] = None,
     environment: Option[Map[String, String]] = None
   ): ExecuteCommandResponse
 

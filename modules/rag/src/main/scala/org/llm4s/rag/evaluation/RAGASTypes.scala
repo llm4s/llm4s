@@ -2,6 +2,8 @@ package org.llm4s.rag.evaluation
 
 import org.llm4s.error.LLMError
 
+import scala.concurrent.duration.*
+
 /**
  * Core data types for RAGAS (Retrieval Augmented Generation Assessment) evaluation.
  *
@@ -146,10 +148,10 @@ object EvaluationError {
  *
  * @param parallelEvaluation Whether to evaluate metrics in parallel
  * @param maxConcurrency Maximum concurrent metric evaluations
- * @param timeoutMs Timeout per metric evaluation in milliseconds
+ * @param timeout Timeout per metric evaluation
  */
 final case class EvaluatorOptions(
   parallelEvaluation: Boolean = false, // Sequential by default for predictable behavior
   maxConcurrency: Int = 4,
-  timeoutMs: Long = 30000
+  timeout: FiniteDuration = 30.seconds
 )

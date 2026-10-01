@@ -236,17 +236,17 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     val sdConfig = StableDiffusionConfig()
     sdConfig.baseUrl shouldBe "http://localhost:7860"
     sdConfig.apiKey shouldBe None
-    sdConfig.timeout shouldBe 60000
+    sdConfig.timeout shouldBe 60000.millis
     sdConfig.provider shouldBe ImageGenerationProvider.StableDiffusion
 
     val hfConfig = HuggingFaceConfig(apiKey = "test-key")
     hfConfig.model shouldBe "stabilityai/stable-diffusion-xl-base-1.0"
-    hfConfig.timeout shouldBe 120000
+    hfConfig.timeout shouldBe 120000.millis
     hfConfig.provider shouldBe ImageGenerationProvider.HuggingFace
 
     val openAIConfig = OpenAIConfig(apiKey = "test-key")
     openAIConfig.model shouldBe "dall-e-2"
-    openAIConfig.timeout shouldBe 30000
+    openAIConfig.timeout shouldBe 30000.millis
     openAIConfig.provider shouldBe ImageGenerationProvider.DALLE
   }
 
@@ -254,21 +254,21 @@ class ImageGenerationTest extends AnyFunSuite with Matchers {
     val customSdConfig = StableDiffusionConfig(
       baseUrl = "http://custom:9000",
       apiKey = Some("custom-key"),
-      timeout = 120000
+      timeout = 120000.millis
     )
 
     customSdConfig.baseUrl shouldBe "http://custom:9000"
     customSdConfig.apiKey shouldBe Some("custom-key")
-    customSdConfig.timeout shouldBe 120000
+    customSdConfig.timeout shouldBe 120000.millis
 
     val customHfConfig = HuggingFaceConfig(
       apiKey = "custom-key",
       model = "custom-model",
-      timeout = 120000
+      timeout = 120000.millis
     )
 
     customHfConfig.model shouldBe "custom-model"
-    customHfConfig.timeout shouldBe 120000
+    customHfConfig.timeout shouldBe 120000.millis
   }
 
   // ===== MOCK CLIENT TESTS =====

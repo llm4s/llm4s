@@ -3,6 +3,8 @@ package org.llm4s.rag.evaluation
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import scala.concurrent.duration.*
+
 class RAGASTypesSpec extends AnyFlatSpec with Matchers {
 
   // ==========================================================================
@@ -231,13 +233,13 @@ class RAGASTypesSpec extends AnyFlatSpec with Matchers {
     val opts = EvaluatorOptions()
     opts.parallelEvaluation shouldBe false
     opts.maxConcurrency shouldBe 4
-    opts.timeoutMs shouldBe 30000
+    opts.timeout shouldBe 30.seconds
   }
 
   it should "allow customization" in {
-    val opts = EvaluatorOptions(parallelEvaluation = true, maxConcurrency = 8, timeoutMs = 60000)
+    val opts = EvaluatorOptions(parallelEvaluation = true, maxConcurrency = 8, timeout = 60.seconds)
     opts.parallelEvaluation shouldBe true
     opts.maxConcurrency shouldBe 8
-    opts.timeoutMs shouldBe 60000
+    opts.timeout shouldBe 60.seconds
   }
 }

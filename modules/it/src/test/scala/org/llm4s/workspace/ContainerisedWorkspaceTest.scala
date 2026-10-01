@@ -93,7 +93,7 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
     val response = workspace.executeCommand(
       "echo 'Starting long command'; sleep 3; echo 'Command completed'",
       None,
-      Some(10)
+      Some(10.seconds)
     )
 
     val duration = System.currentTimeMillis() - startTime
@@ -140,7 +140,7 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
     val response = workspace.executeCommand(
       "echo 'Step 1'; echo 'Step 2'; echo 'Step 3'",
       None,
-      Some(10)
+      Some(10.seconds)
     )
 
     response.exitCode shouldBe 0
@@ -152,7 +152,7 @@ class ContainerisedWorkspaceTest extends AnyFunSuite with Matchers with BeforeAn
   test("WebSocket workspace handles errors gracefully") {
     Tier.require(isDockerAvailable, "Docker not available or LLM4S_DOCKER_TESTS!=true")
 
-    val response = workspace.executeCommand("exit 1", None, Some(5))
+    val response = workspace.executeCommand("exit 1", None, Some(5.seconds))
     response.exitCode shouldBe 1
 
     assertThrows[WorkspaceAgentException] {
@@ -196,7 +196,7 @@ object ContainerisedWorkspaceTest {
       val response = workspace.executeCommand(
         "echo 'Starting long operation'; sleep 8; echo 'Long operation completed'",
         None,
-        Some(15)
+        Some(15.seconds)
       )
 
       val duration = System.currentTimeMillis() - startTime

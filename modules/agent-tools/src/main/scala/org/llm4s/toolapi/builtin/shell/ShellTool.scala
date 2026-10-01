@@ -92,7 +92,7 @@ object ShellTool {
       name = "shell_command",
       description = s"Execute shell commands. " +
         s"Allowed commands: ${config.allowedCommands.mkString(", ")}. " +
-        s"Timeout: ${config.timeoutMs}ms. " +
+        s"Timeout: ${config.timeout.toMillis}ms. " +
         config.workingDirectory.map(d => s"Working directory: $d").getOrElse(""),
       schema = createSchema
     ).withHandler { extractor =>
@@ -165,7 +165,7 @@ object ShellTool {
       stderrReader.start()
 
       // Wait for process to complete with timeout
-      val completed = process.waitFor(config.timeoutMs, TimeUnit.MILLISECONDS)
+      val completed = process.waitFor(config.timeout.toMillis, TimeUnit.MILLISECONDS)
 
       val (exitCode, timedOut) = if (!completed) {
         process.destroyForcibly()

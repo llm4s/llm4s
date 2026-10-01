@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.utils
 
 import org.scalatest.funsuite.AnyFunSuite
+import scala.concurrent.duration.*
 import org.scalatest.matchers.should.Matchers
 
 class ChunkingUtilsSpec extends AnyFunSuite with Matchers {
@@ -60,7 +61,7 @@ class ChunkingUtilsSpec extends AnyFunSuite with Matchers {
   test("chunkAudio should window audio samples correctly") {
     val samples    = Array.fill(100)(0.5f)
     val sampleRate = 10 // 10 samples per second
-    val chunks     = ChunkingUtils.chunkAudio(samples, sampleRate, windowSeconds = 5, overlapRatio = 0.0)
+    val chunks     = ChunkingUtils.chunkAudio(samples, sampleRate, window = 5.seconds, overlapRatio = 0.0)
     // 100 samples, 5 second window at 10 samples/sec = 50 samples per window
     chunks.length shouldBe 2
     chunks.head.length shouldBe 50
@@ -71,7 +72,7 @@ class ChunkingUtilsSpec extends AnyFunSuite with Matchers {
     val samples    = Array.fill(75)(0.5f)
     val sampleRate = 10
     val chunks =
-      ChunkingUtils.chunkAudio(samples, sampleRate, windowSeconds = 5, overlapRatio = 0.0, padToWindow = true)
+      ChunkingUtils.chunkAudio(samples, sampleRate, window = 5.seconds, overlapRatio = 0.0, padToWindow = true)
     // 75 samples, 50 per window
     // First window: 0-50, second would be 50-75 (25 samples), padded to 50
     chunks.length shouldBe 2
@@ -84,7 +85,7 @@ class ChunkingUtilsSpec extends AnyFunSuite with Matchers {
   test("chunkAudio should handle overlap correctly") {
     val samples    = Array.fill(100)(0.5f)
     val sampleRate = 10
-    val chunks     = ChunkingUtils.chunkAudio(samples, sampleRate, windowSeconds = 5, overlapRatio = 0.5)
+    val chunks     = ChunkingUtils.chunkAudio(samples, sampleRate, window = 5.seconds, overlapRatio = 0.5)
     // 50 samples per window, 50% overlap = 25 step
     // Windows at: 0-50, 25-75, 50-100, 75-100 (padded) = 4 windows
     chunks.length shouldBe 4
@@ -92,19 +93,19 @@ class ChunkingUtilsSpec extends AnyFunSuite with Matchers {
 
   test("chunkAudio should throw for invalid sample rate") {
     an[IllegalArgumentException] should be thrownBy {
-      ChunkingUtils.chunkAudio(Array(0.5f), sampleRate = 0, windowSeconds = 1, overlapRatio = 0.0)
+      ChunkingUtils.chunkAudio(Array(0.5f), sampleRate = 0, window = 1.seconds, overlapRatio = 0.0)
     }
   }
 
-  test("chunkAudio should throw for invalid window seconds") {
+  test("chunkAudio should throw for invalid window") {
     an[IllegalArgumentException] should be thrownBy {
-      ChunkingUtils.chunkAudio(Array(0.5f), sampleRate = 10, windowSeconds = 0, overlapRatio = 0.0)
+      ChunkingUtils.chunkAudio(Array(0.5f), sampleRate = 10, window = 0.seconds, overlapRatio = 0.0)
     }
   }
 
   test("chunkAudio should throw for invalid overlap ratio") {
     an[IllegalArgumentException] should be thrownBy {
-      ChunkingUtils.chunkAudio(Array(0.5f), sampleRate = 10, windowSeconds = 1, overlapRatio = 1.0)
+      ChunkingUtils.chunkAudio(Array(0.5f), sampleRate = 10, window = 1.seconds, overlapRatio = 1.0)
     }
   }
 
@@ -112,7 +113,7 @@ class ChunkingUtilsSpec extends AnyFunSuite with Matchers {
 
   test("chunkVideo should split frames into clips") {
     val frames = (1 to 100).toSeq
-    val clips  = ChunkingUtils.chunkVideo(frames, fps = 10, clipSeconds = 5, overlapRatio = 0.0)
+    val clips  = ChunkingUtils.chunkVideo(frames, fps = 10, clip = 5.seconds, overlapRatio = 0.0)
     // 100 frames, 10 fps, 5 second clips = 50 frames per clip
     clips.length shouldBe 2
     clips.head.length shouldBe 50
@@ -121,7 +122,7 @@ class ChunkingUtilsSpec extends AnyFunSuite with Matchers {
 
   test("chunkVideo should handle overlap correctly") {
     val frames = (1 to 100).toSeq
-    val clips  = ChunkingUtils.chunkVideo(frames, fps = 10, clipSeconds = 5, overlapRatio = 0.5)
+    val clips  = ChunkingUtils.chunkVideo(frames, fps = 10, clip = 5.seconds, overlapRatio = 0.5)
     // 50 frames per clip, 50% overlap = 25 frame step
     // Clips at: 0-50, 25-75, 50-100, 75-100 = 4 clips
     clips.length shouldBe 4
@@ -129,27 +130,27 @@ class ChunkingUtilsSpec extends AnyFunSuite with Matchers {
 
   test("chunkVideo should handle fewer frames than clip size") {
     val frames = (1 to 20).toSeq
-    val clips  = ChunkingUtils.chunkVideo(frames, fps = 10, clipSeconds = 5, overlapRatio = 0.0)
+    val clips  = ChunkingUtils.chunkVideo(frames, fps = 10, clip = 5.seconds, overlapRatio = 0.0)
     clips.length shouldBe 1
     clips.head.length shouldBe 20
   }
 
   test("chunkVideo should throw for invalid fps") {
     an[IllegalArgumentException] should be thrownBy {
-      ChunkingUtils.chunkVideo(Seq(1), fps = 0, clipSeconds = 1, overlapRatio = 0.0)
+      ChunkingUtils.chunkVideo(Seq(1), fps = 0, clip = 1.seconds, overlapRatio = 0.0)
     }
   }
 
-  test("chunkVideo should throw for invalid clip seconds") {
+  test("chunkVideo should throw for invalid clip") {
     an[IllegalArgumentException] should be thrownBy {
-      ChunkingUtils.chunkVideo(Seq(1), fps = 10, clipSeconds = 0, overlapRatio = 0.0)
+      ChunkingUtils.chunkVideo(Seq(1), fps = 10, clip = 0.seconds, overlapRatio = 0.0)
     }
   }
 
   test("chunkVideo handles generic types") {
     case class Frame(data: String)
     val frames = Seq(Frame("a"), Frame("b"), Frame("c"))
-    val clips  = ChunkingUtils.chunkVideo(frames, fps = 1, clipSeconds = 2, overlapRatio = 0.0)
+    val clips  = ChunkingUtils.chunkVideo(frames, fps = 1, clip = 2.seconds, overlapRatio = 0.0)
     clips.length shouldBe 2
     clips.head shouldBe Seq(Frame("a"), Frame("b"))
     clips(1) shouldBe Seq(Frame("c"))

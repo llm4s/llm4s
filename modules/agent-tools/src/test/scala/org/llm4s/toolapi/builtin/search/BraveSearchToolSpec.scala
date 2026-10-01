@@ -1,5 +1,7 @@
 package org.llm4s.toolapi.builtin.search
 
+import scala.concurrent.duration.*
+
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.config.{ BraveSearchToolConfig, ToolsConfigLoader }
@@ -16,21 +18,21 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
   "BraveSearchConfig" should "initialize with valid default parameters" in {
     val config = BraveSearchConfig()
 
-    config.timeoutMs shouldBe 10000
+    config.timeout shouldBe 10000.millis
     config.count shouldBe 5
     config.extraParams shouldBe Map.empty
     config.safeSearch shouldBe SafeSearch.Strict
   }
   it should "allow overriding defaults with custom values" in {
     val config = BraveSearchConfig(
-      timeoutMs = 5000,
+      timeout = 5000.millis,
       count = 5,
       extraParams = Map(
         "some key" -> "value"
       ),
       safeSearch = SafeSearch.Moderate
     )
-    config.timeoutMs shouldBe 5000
+    config.timeout shouldBe 5000.millis
     config.count shouldBe 5
     config.extraParams shouldBe Map(
       "some key" -> ujson.Str("value")
@@ -475,7 +477,7 @@ class BraveSearchToolSpec extends AnyFlatSpec with Matchers {
 
     val result = BraveSearchTool.search(
       "test",
-      BraveSearchConfig(timeoutMs = 5000),
+      BraveSearchConfig(timeout = 5000.millis),
       testToolConfig,
       BraveSearchCategory.Web,
       failingClient,

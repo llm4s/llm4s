@@ -192,7 +192,7 @@ val devConfig = ShellConfig.development()
 // Custom allowlist
 val customConfig = ShellConfig(
   allowedCommands = Seq("ls", "cat", "pwd", "echo"),
-  timeoutMs = 5000,
+  timeout = 5.seconds,
   maxOutputSize = 10000,
   workingDirectory = Some("/home/user/project")
 )
@@ -214,7 +214,7 @@ val customConfig = HttpConfig(
   allowedMethods = Seq("GET", "POST"),
   allowedDomains = Some(Seq("api.example.com")),
   blockedDomains = Seq("localhost", "127.0.0.1"),
-  timeoutMs = 30000,
+  timeout = 30.seconds,
   maxResponseSize = 1024 * 1024
 )
 ```

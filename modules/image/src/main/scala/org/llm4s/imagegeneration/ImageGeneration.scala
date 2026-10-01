@@ -1,6 +1,7 @@
 package org.llm4s.imagegeneration
 
 import java.time.Instant
+import scala.concurrent.duration.*
 import org.llm4s.media.{ ImageMediaType, MediaType }
 import java.nio.file.Path
 import org.llm4s.imagegeneration.provider.{
@@ -185,7 +186,9 @@ object ImageGenerationProvider {
 trait ImageGenerationConfig {
   def provider: ImageGenerationProvider
   def model: String
-  def timeout: Int = 30000 // 30 seconds default
+
+  /** Request timeout */
+  def timeout: FiniteDuration = 30.seconds
 }
 
 /** Configuration for Stable Diffusion */
@@ -196,8 +199,8 @@ case class StableDiffusionConfig(
   apiKey: Option[String] = None,
   /** Model name (informational for Stable Diffusion web UI) */
   model: String = "stable-diffusion-v1-5",
-  /** Request timeout in milliseconds */
-  override val timeout: Int = 60000 // 60 seconds for image generation
+  /** Request timeout */
+  override val timeout: FiniteDuration = 60.seconds
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.StableDiffusion
   override def toString: String =
@@ -209,15 +212,15 @@ case class StableDiffusionConfig(
  *
  * @param apiKey Your HuggingFace API token. This is required for authentication.
  * @param model The identifier of the model to use on the HuggingFace Hub, e.g., "runwayml/stable-diffusion-v1-5".
- * @param timeout Request timeout in milliseconds. Defaults to a higher value suitable for cloud APIs.
+ * @param timeout Request timeout. Defaults to a higher value suitable for cloud APIs.
  */
 case class HuggingFaceConfig(
   /** HuggingFace API token */
   apiKey: String,
   /** Model to use (default: stable-diffusion-xl-base-1.0) */
   model: String = "stabilityai/stable-diffusion-xl-base-1.0",
-  /** Request timeout in milliseconds */
-  override val timeout: Int = 120000 // 2 minutes for cloud generation
+  /** Request timeout */
+  override val timeout: FiniteDuration = 2.minutes
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.HuggingFace
   override def toString: String         = s"HuggingFaceConfig(apiKey=***, model=$model, timeout=$timeout)"
@@ -228,7 +231,7 @@ case class HuggingFaceConfig(
  *
  * @param apiKey Your OpenAI API key. This is required for authentication.
  * @param model The DALL-E model version to use (dall-e-2 or dall-e-3).
- * @param timeout Request timeout in milliseconds.
+ * @param timeout Request timeout.
  */
 case class OpenAIConfig(
   /** OpenAI API key */
@@ -237,8 +240,8 @@ case class OpenAIConfig(
   model: String = "dall-e-2",
   /** Base URL for OpenAI API */
   baseUrl: String = "https://api.openai.com/v1",
-  /** Request timeout in milliseconds */
-  override val timeout: Int = 30000 // 30 seconds for image generation
+  /** Request timeout */
+  override val timeout: FiniteDuration = 30.seconds
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.DALLE
   override def toString: String         = s"OpenAIConfig(apiKey=***, model=$model, baseUrl=$baseUrl, timeout=$timeout)"
@@ -250,14 +253,14 @@ case class OpenAIConfig(
  * @param apiKey Your Stability AI API key. This is required for authentication.
  * @param model The engine/model ID to use (e.g., "stable-diffusion-xl-1024-v1-0", "stable-diffusion-v1-6").
  * @param baseUrl Base URL for Stability AI API (default: https://api.stability.ai).
- * @param timeout Request timeout in milliseconds.
+ * @param timeout Request timeout.
  */
 case class StabilityAIConfig(
   apiKey: String,
   model: String = "stable-diffusion-xl-1024-v1-0",
   baseUrl: String = "https://api.stability.ai",
-  /** Request timeout in milliseconds */
-  override val timeout: Int = 120000 // 2 minutes for cloud generation
+  /** Request timeout */
+  override val timeout: FiniteDuration = 2.minutes
 ) extends ImageGenerationConfig {
   def provider: ImageGenerationProvider = ImageGenerationProvider.StabilityAI
   override def toString: String = s"StabilityAIConfig(apiKey=***, model=$model, baseUrl=$baseUrl, timeout=$timeout)"

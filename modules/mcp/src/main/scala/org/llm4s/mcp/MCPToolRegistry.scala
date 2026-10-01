@@ -50,7 +50,7 @@ import scala.util.chaining.scalaUtilChainingOps
 class MCPToolRegistry(
   mcpServers: Seq[MCPServerConfig],
   localTools: Seq[ToolFunction[_, _]] = Seq.empty,
-  cacheTTL: Duration = 10.minutes,
+  cacheTTL: FiniteDuration = 10.minutes,
   initializeOnStartup: Boolean = true
 ) extends ToolRegistry(localTools)
     with AutoCloseable {
@@ -299,6 +299,6 @@ object MCPToolRegistry {
 
 // Helper case class for cleaner caching
 private case class CachedTools(tools: Seq[ToolFunction[_, _]], timestamp: Long) {
-  def isExpired(now: Long, ttl: Duration): Boolean =
+  def isExpired(now: Long, ttl: FiniteDuration): Boolean =
     (now - timestamp) >= ttl.toMillis
 }

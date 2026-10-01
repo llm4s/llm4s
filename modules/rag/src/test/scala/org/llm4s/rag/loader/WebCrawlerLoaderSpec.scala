@@ -2,6 +2,8 @@ package org.llm4s.rag.loader
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
+import scala.concurrent.duration.*
 import org.scalatest.BeforeAndAfterEach
 import org.llm4s.rag.loader.internal.{ GlobPatternMatcher, RobotsTxtParser }
 
@@ -38,7 +40,7 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
     val loader = WebCrawlerLoader("http://example.com")
       .withMaxDepth(5)
       .withMaxPages(500)
-      .withDelay(1000)
+      .withDelay(1000.millis)
       .withRobotsTxt(false)
       .withSameDomainOnly(false)
       .withFollowPatterns("example.com/docs/*")
@@ -46,7 +48,7 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
 
     loader.config.maxDepth shouldBe 5
     loader.config.maxPages shouldBe 500
-    loader.config.delayMs shouldBe 1000
+    loader.config.delay shouldBe 1000.millis
     loader.config.respectRobotsTxt shouldBe false
     loader.config.sameDomainOnly shouldBe false
     loader.config.followPatterns shouldBe Seq("example.com/docs/*")
@@ -70,9 +72,9 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
 
   it should "set timeout" in {
     val loader = WebCrawlerLoader("http://example.com")
-      .withTimeout(5000)
+      .withTimeout(5000.millis)
 
-    loader.config.timeoutMs shouldBe 5000
+    loader.config.timeout shouldBe 5000.millis
   }
 
   it should "set query params inclusion" in {
@@ -116,7 +118,7 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
 
     loader.config.maxDepth shouldBe 2
     loader.config.maxPages shouldBe 100
-    loader.config.delayMs shouldBe 1000
+    loader.config.delay shouldBe 1000.millis
     loader.config.respectRobotsTxt shouldBe true
   }
 
@@ -184,7 +186,7 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
 
     config.maxDepth shouldBe 3
     config.maxPages shouldBe 1000
-    config.delayMs shouldBe 500
+    config.delay shouldBe 500.millis
     config.respectRobotsTxt shouldBe true
     config.sameDomainOnly shouldBe true
     config.maxQueueSize shouldBe 10000
@@ -196,7 +198,7 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
 
     config.maxDepth shouldBe 5
     config.maxPages shouldBe 5000
-    config.delayMs shouldBe 100
+    config.delay shouldBe 100.millis
   }
 
   "CrawlerConfig" should "support fluent user agent configuration" in {
@@ -226,40 +228,40 @@ class WebCrawlerLoaderSpec extends AnyFlatSpec with Matchers with BeforeAndAfter
 
   "delayBeforeFetch" should "skip the delay on the first request regardless of configured delay" in {
     WebCrawlerLoader.delayBeforeFetch(
-      configDelayMs = 1000,
-      robotsCrawlDelaySeconds = None,
+      configDelay = 1000.millis,
+      robotsCrawlDelay = None,
       isFirstRequest = true
     ) shouldBe None
   }
 
   it should "use the configured delay when robots.txt sets none" in {
     WebCrawlerLoader.delayBeforeFetch(
-      configDelayMs = 1000,
-      robotsCrawlDelaySeconds = None,
+      configDelay = 1000.millis,
+      robotsCrawlDelay = None,
       isFirstRequest = false
-    ) shouldBe Some(1000)
+    ) shouldBe Some(1000.millis)
   }
 
   it should "use the robots.txt crawl-delay when it is longer than the configured delay" in {
     WebCrawlerLoader.delayBeforeFetch(
-      configDelayMs = 500,
-      robotsCrawlDelaySeconds = Some(2),
+      configDelay = 500.millis,
+      robotsCrawlDelay = Some(2.seconds),
       isFirstRequest = false
-    ) shouldBe Some(2000)
+    ) shouldBe Some(2000.millis)
   }
 
   it should "use the configured delay when it is longer than the robots.txt crawl-delay" in {
     WebCrawlerLoader.delayBeforeFetch(
-      configDelayMs = 3000,
-      robotsCrawlDelaySeconds = Some(1),
+      configDelay = 3000.millis,
+      robotsCrawlDelay = Some(1.seconds),
       isFirstRequest = false
-    ) shouldBe Some(3000)
+    ) shouldBe Some(3000.millis)
   }
 
   it should "skip the delay when both the configured delay and robots.txt crawl-delay are zero" in {
     WebCrawlerLoader.delayBeforeFetch(
-      configDelayMs = 0,
-      robotsCrawlDelaySeconds = None,
+      configDelay = 0.millis,
+      robotsCrawlDelay = None,
       isFirstRequest = false
     ) shouldBe None
   }

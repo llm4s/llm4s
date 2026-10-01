@@ -41,7 +41,7 @@ llm4s.workspace.sandbox {
 | `limits` | WorkspaceLimits | maxFileSize, maxDirectoryEntries, maxSearchResults, maxOutputSize |
 | `excludePatterns` | List[String] | Glob patterns excluded from explore/search (e.g. node_modules, .git) |
 | `shellAllowed` | Boolean | Whether executeCommand is allowed |
-| `defaultCommandTimeoutSeconds` | Int | Default timeout for shell commands |
+| `defaultCommandTimeout` | FiniteDuration | Default timeout for shell commands (more than zero, at most 1 hour) |
 | `readOnlyPaths` | List[String] | Paths under workspace that are read-only (Phase 2) |
 | `allowedPaths` | List[String] | If non-empty, only these paths accessible (Phase 2) |
 | `networkAllowed` | Boolean | Documentation only; Phase 2: enforce network restrictions |

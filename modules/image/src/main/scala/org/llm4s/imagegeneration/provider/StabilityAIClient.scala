@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory
 import java.time.Instant
 import java.nio.file.Path
 import scala.util.Try
+import scala.concurrent.duration.*
 import scala.concurrent.{ Future, ExecutionContext, blocking }
 
 /**
@@ -147,7 +148,7 @@ class StabilityAIClient(config: StabilityAIConfig, httpClient: HttpClient) exten
       .get(
         healthUrl,
         headers = Map("Authorization" -> s"Bearer ${config.apiKey}"),
-        timeout = 5000
+        timeout = 5.seconds
       )
       .toEither
       .left

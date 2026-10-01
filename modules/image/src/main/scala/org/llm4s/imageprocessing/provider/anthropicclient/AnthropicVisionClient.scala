@@ -12,7 +12,8 @@ import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Paths }
-import java.time.{ Duration, Instant }
+import java.time.Instant
+import scala.jdk.DurationConverters.*
 import java.util.Base64
 import scala.util.Try
 import scala.util.control.NonFatal
@@ -29,7 +30,7 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
 
   private val httpClient = HttpClient
     .newBuilder()
-    .connectTimeout(Duration.ofSeconds(config.connectTimeoutSeconds))
+    .connectTimeout(config.connectTimeout.toJava)
     .build()
 
   /**
@@ -206,7 +207,7 @@ class AnthropicVisionClient(config: AnthropicVisionConfig) extends org.llm4s.ima
         .header("Content-Type", "application/json")
         .header("x-api-key", config.apiKey)
         .header("anthropic-version", "2023-06-01")
-        .timeout(Duration.ofSeconds(config.requestTimeoutSeconds))
+        .timeout(config.requestTimeout.toJava)
         .POST(HttpRequest.BodyPublishers.ofString(requestBody))
         .build()
 

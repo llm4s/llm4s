@@ -426,7 +426,7 @@ object RunnerMain extends cask.MainRoutes {
                 Future {
                   val exitCode =
                     try {
-                      val timeoutDeadlineMs = cmd.timeout.map(timeoutSec => startTime + (timeoutSec.toLong * 1000L))
+                      val timeoutDeadlineMs = cmd.timeout.map(timeout => startTime + timeout.toMillis)
                       timeoutDeadlineMs match {
                         case Some(deadlineMs) =>
                           var finished = false

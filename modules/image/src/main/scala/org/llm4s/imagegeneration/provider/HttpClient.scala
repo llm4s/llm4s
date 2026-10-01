@@ -9,18 +9,23 @@ import scala.concurrent.duration.*
 import scala.util.{ Failure, Success, Try }
 
 trait HttpClient {
-  def post(url: String, headers: Map[String, String], data: String, timeout: Int): Try[HttpResponse]
-  def postBytes(url: String, headers: Map[String, String], data: Array[Byte], timeout: Int): Try[HttpResponse]
+  def post(url: String, headers: Map[String, String], data: String, timeout: FiniteDuration): Try[HttpResponse]
+  def postBytes(
+    url: String,
+    headers: Map[String, String],
+    data: Array[Byte],
+    timeout: FiniteDuration
+  ): Try[HttpResponse]
   def postMultipart(
     url: String,
     headers: Map[String, String],
     data: Seq[MultipartPart],
-    timeout: Int
+    timeout: FiniteDuration
   ): Try[HttpResponse]
-  def get(url: String, headers: Map[String, String], timeout: Int): Try[HttpResponse]
+  def get(url: String, headers: Map[String, String], timeout: FiniteDuration): Try[HttpResponse]
 
   /** POST with a string body and return raw bytes, bypassing charset decoding. */
-  def postRaw(url: String, headers: Map[String, String], data: String, timeout: Int): Try[HttpRawResponse]
+  def postRaw(url: String, headers: Map[String, String], data: String, timeout: FiniteDuration): Try[HttpRawResponse]
 }
 
 object HttpClient {
@@ -39,41 +44,51 @@ object HttpClient {
 class SimpleHttpClient(llm4sClient: Llm4sHttpClient) extends HttpClient {
   private val logger = org.slf4j.LoggerFactory.getLogger(getClass)
 
-  override def post(url: String, headers: Map[String, String], data: String, timeout: Int): Try[HttpResponse] = {
+  override def post(
+    url: String,
+    headers: Map[String, String],
+    data: String,
+    timeout: FiniteDuration
+  ): Try[HttpResponse] = {
     logger.debug(s"POST $url")
-    SimpleHttpClient.toTry(llm4sClient.post(url = url, headers = headers, body = data, timeout = timeout.millis))
+    SimpleHttpClient.toTry(llm4sClient.post(url = url, headers = headers, body = data, timeout = timeout))
   }
 
   override def postBytes(
     url: String,
     headers: Map[String, String],
     data: Array[Byte],
-    timeout: Int
+    timeout: FiniteDuration
   ): Try[HttpResponse] = {
     logger.debug(s"POST (bytes) $url")
-    SimpleHttpClient.toTry(llm4sClient.postBytes(url = url, headers = headers, data = data, timeout = timeout.millis))
+    SimpleHttpClient.toTry(llm4sClient.postBytes(url = url, headers = headers, data = data, timeout = timeout))
   }
 
   override def postMultipart(
     url: String,
     headers: Map[String, String],
     data: Seq[MultipartPart],
-    timeout: Int
+    timeout: FiniteDuration
   ): Try[HttpResponse] = {
     logger.debug(s"POST (multipart) $url")
     SimpleHttpClient.toTry(
-      llm4sClient.postMultipart(url = url, headers = headers, parts = data, timeout = timeout.millis)
+      llm4sClient.postMultipart(url = url, headers = headers, parts = data, timeout = timeout)
     )
   }
 
-  override def get(url: String, headers: Map[String, String], timeout: Int): Try[HttpResponse] = {
+  override def get(url: String, headers: Map[String, String], timeout: FiniteDuration): Try[HttpResponse] = {
     logger.debug(s"GET $url")
-    SimpleHttpClient.toTry(llm4sClient.get(url = url, headers = headers, timeout = timeout.millis))
+    SimpleHttpClient.toTry(llm4sClient.get(url = url, headers = headers, timeout = timeout))
   }
 
-  override def postRaw(url: String, headers: Map[String, String], data: String, timeout: Int): Try[HttpRawResponse] = {
+  override def postRaw(
+    url: String,
+    headers: Map[String, String],
+    data: String,
+    timeout: FiniteDuration
+  ): Try[HttpRawResponse] = {
     logger.debug(s"POST (raw bytes) $url")
-    SimpleHttpClient.toTry(llm4sClient.postRaw(url = url, headers = headers, body = data, timeout = timeout.millis))
+    SimpleHttpClient.toTry(llm4sClient.postRaw(url = url, headers = headers, body = data, timeout = timeout))
   }
 }
 

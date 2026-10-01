@@ -1,8 +1,10 @@
 package org.llm4s.vectorstore
 
+import scala.concurrent.duration.*
+
 /** Default HikariCP connection pool timeout settings shared across Postgres-backed stores. */
-object HikariDefaults {
-  val CONNECTION_TIMEOUT_MS: Long = 30000L   // 30 seconds
-  val IDLE_TIMEOUT_MS: Long       = 600000L  // 10 minutes
-  val MAX_LIFETIME_MS: Long       = 1800000L // 30 minutes
+private[llm4s] object HikariDefaults {
+  val ConnectionTimeout: FiniteDuration = 30.seconds
+  val IdleTimeout: FiniteDuration       = 10.minutes
+  val MaxLifetime: FiniteDuration       = 30.minutes
 }

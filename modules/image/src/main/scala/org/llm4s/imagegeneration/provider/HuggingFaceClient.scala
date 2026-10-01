@@ -6,6 +6,7 @@ import java.time.Instant
 import java.nio.file.Path
 import java.util.Base64
 import scala.util.Try
+import scala.concurrent.duration.*
 import scala.concurrent.{ Future, ExecutionContext, blocking }
 
 /**
@@ -209,7 +210,7 @@ class HuggingFaceClient(config: HuggingFaceConfig, httpClient: HttpClient) exten
     )
 
     httpClient
-      .get(testUrl, headers, 10000)
+      .get(testUrl, headers, 10.seconds)
       .toEither
       .left
       .map(e => ServiceError(s"Health check failed: ${e.getMessage}", 0))

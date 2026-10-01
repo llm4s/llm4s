@@ -280,7 +280,7 @@ searchFiles({
 {
   command: string;            // Command to execute
   workingDirectory?: string;  // Working directory (default: workspace root)
-  timeout?: number;           // Timeout in milliseconds
+  timeout?: number;           // Timeout in whole seconds (Scala API: FiniteDuration, rounded up)
   environment?: Record<string, string>; // Environment variables
 }
 ```
@@ -307,7 +307,7 @@ executeCommand({
 // Install a dependency
 executeCommand({
   command: "npm install lodash --save",
-  timeout: 60000
+  timeout: 60
 })
 ```
 

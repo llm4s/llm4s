@@ -1,19 +1,21 @@
 package org.llm4s.toolapi.builtin.shell
 
+import scala.concurrent.duration.*
+
 /**
  * Configuration for shell command tool.
  *
  * @param allowedCommands List of allowed command names (e.g., "ls", "cat", "echo").
  *                        If empty, no commands are allowed.
  * @param workingDirectory Optional working directory for command execution.
- * @param timeoutMs Maximum execution time in milliseconds.
+ * @param timeout Maximum execution time.
  * @param maxOutputSize Maximum output size in characters.
  * @param environment Additional environment variables to set.
  */
 case class ShellConfig(
   allowedCommands: Seq[String] = Seq.empty,
   workingDirectory: Option[String] = None,
-  timeoutMs: Long = 30000,     // 30 seconds
+  timeout: FiniteDuration = 30.seconds,
   maxOutputSize: Int = 100000, // 100KB
   environment: Map[String, String] = Map.empty
 ) {

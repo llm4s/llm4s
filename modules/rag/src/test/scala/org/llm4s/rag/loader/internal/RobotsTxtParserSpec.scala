@@ -2,6 +2,8 @@ package org.llm4s.rag.loader.internal
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
+import scala.concurrent.duration.*
 import org.scalatest.BeforeAndAfterEach
 
 class RobotsTxtParserSpec extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
@@ -60,7 +62,7 @@ class RobotsTxtParserSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
         |""".stripMargin
 
     val robots = RobotsTxtParser.parse(content, "LLM4S-Crawler/1.0")
-    robots.crawlDelay shouldBe Some(10)
+    robots.crawlDelay shouldBe Some(10.seconds)
   }
 
   it should "use specific user-agent rules over wildcard" in {
@@ -241,7 +243,13 @@ class RobotsTxtParserSpec extends AnyFlatSpec with Matchers with BeforeAndAfterE
         |""".stripMargin
 
     val robots = RobotsTxtParser.parse(content, "TestBot")
-    robots.crawlDelay shouldBe Some(2) // Truncated to int
+    robots.crawlDelay shouldBe Some(2500.millis) // Fractional seconds are kept
+  }
+
+  it should "ignore a negative or non-finite crawl-delay" in {
+    Seq("-3", "Infinity", "NaN").foreach { value =>
+      RobotsTxtParser.parse(s"User-agent: *\nCrawl-delay: $value\n", "TestBot").crawlDelay shouldBe None
+    }
   }
 
   it should "handle invalid crawl-delay gracefully" in {

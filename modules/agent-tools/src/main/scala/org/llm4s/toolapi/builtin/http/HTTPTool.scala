@@ -104,7 +104,7 @@ object HTTPTool {
         config.allowedDomains
           .map(d => s"Allowed domains: ${d.mkString(", ")}")
           .getOrElse("All domains allowed (except blocked).") +
-        s" Timeout: ${config.timeoutMs}ms.",
+        s" Timeout: ${config.timeout.toMillis}ms.",
       schema = createSchema
     ).withHandler { extractor =>
       for {
@@ -250,8 +250,9 @@ object HTTPTool {
 
       // Configure connection
       connection.setRequestMethod(method.toUpperCase)
-      connection.setConnectTimeout(config.timeoutMs)
-      connection.setReadTimeout(config.timeoutMs)
+      val timeoutMillis = math.min(config.timeout.toMillis, Int.MaxValue.toLong).toInt
+      connection.setConnectTimeout(timeoutMillis)
+      connection.setReadTimeout(timeoutMillis)
       // Auto-redirects are always disabled; the makeRequest loop handles
       // redirect following with per-hop SSRF validation (Issue #788).
       connection.setInstanceFollowRedirects(false)

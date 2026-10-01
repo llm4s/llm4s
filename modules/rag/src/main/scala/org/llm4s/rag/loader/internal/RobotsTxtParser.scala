@@ -3,6 +3,7 @@ package org.llm4s.rag.loader.internal
 import java.net.{ HttpURLConnection, URI }
 import java.util.regex.Pattern
 import scala.collection.mutable
+import scala.concurrent.duration.*
 import scala.io.Source
 import scala.util.{ Try, Using }
 
@@ -29,7 +30,7 @@ object RobotsTxtParser {
     userAgents: Seq[String],
     allowRules: Seq[String],
     disallowRules: Seq[String],
-    crawlDelay: Option[Int]
+    crawlDelay: Option[FiniteDuration]
   )
 
   /**
@@ -37,12 +38,12 @@ object RobotsTxtParser {
    *
    * @param allowRules Paths that are explicitly allowed
    * @param disallowRules Paths that are disallowed
-   * @param crawlDelay Suggested delay between requests in seconds
+   * @param crawlDelay Suggested delay between requests (robots.txt gives it in seconds, possibly fractional)
    */
   final case class RobotsTxt(
     allowRules: Seq[String] = Seq.empty,
     disallowRules: Seq[String] = Seq.empty,
-    crawlDelay: Option[Int] = None
+    crawlDelay: Option[FiniteDuration] = None
   ) {
 
     /**
@@ -120,13 +121,13 @@ object RobotsTxtParser {
    *
    * @param url URL to check
    * @param userAgent User agent string
-   * @param timeoutMs Request timeout
+   * @param timeout Request timeout
    * @return true if URL is allowed
    */
-  def isAllowed(url: String, userAgent: String, timeoutMs: Int = 30000): Boolean =
+  def isAllowed(url: String, userAgent: String, timeout: FiniteDuration = 30.seconds): Boolean =
     parseUrl(url)
       .map { parsed =>
-        val groups = getOrFetch(parsed, userAgent, timeoutMs)
+        val groups = getOrFetch(parsed, userAgent, timeout)
         val rules  = selectRules(groups, userAgent)
         rules.isAllowed(parsed.path)
       }
@@ -137,13 +138,13 @@ object RobotsTxtParser {
    *
    * @param url URL to check
    * @param userAgent User agent string
-   * @param timeoutMs Request timeout
+   * @param timeout Request timeout
    * @return Parsed rules for this user agent
    */
-  def getRules(url: String, userAgent: String, timeoutMs: Int = 30000): RobotsTxt =
+  def getRules(url: String, userAgent: String, timeout: FiniteDuration = 30.seconds): RobotsTxt =
     parseUrl(url)
       .map { parsed =>
-        val groups = getOrFetch(parsed, userAgent, timeoutMs)
+        val groups = getOrFetch(parsed, userAgent, timeout)
         selectRules(groups, userAgent)
       }
       .getOrElse(RobotsTxt.empty)
@@ -151,7 +152,7 @@ object RobotsTxtParser {
   /**
    * Get cached robots.txt or fetch if expired/missing.
    */
-  private def getOrFetch(parsed: ParsedUrl, userAgent: String, timeoutMs: Int): Seq[RobotsGroup] = {
+  private def getOrFetch(parsed: ParsedUrl, userAgent: String, timeout: FiniteDuration): Seq[RobotsGroup] = {
     val now = System.currentTimeMillis()
     val key = cacheKey(parsed)
 
@@ -159,7 +160,7 @@ object RobotsTxtParser {
       case Some((groups, fetchTime)) if now - fetchTime < cacheTtlMs =>
         groups // Cache hit
       case _ =>
-        val groups = fetch(parsed, userAgent, timeoutMs)
+        val groups = fetch(parsed, userAgent, timeout)
         cache(key) = (groups, now)
         groups
     }
@@ -168,13 +169,14 @@ object RobotsTxtParser {
   /**
    * Fetch and parse robots.txt for a domain.
    */
-  private def fetch(parsed: ParsedUrl, userAgent: String, timeoutMs: Int): Seq[RobotsGroup] =
+  private def fetch(parsed: ParsedUrl, userAgent: String, timeout: FiniteDuration): Seq[RobotsGroup] =
     Try {
       val uri  = new URI(parsed.scheme, null, parsed.host, parsed.port, "/robots.txt", null, null)
       val conn = uri.toURL.openConnection().asInstanceOf[HttpURLConnection]
 
-      conn.setConnectTimeout(timeoutMs)
-      conn.setReadTimeout(timeoutMs)
+      val timeoutMillis = math.min(timeout.toMillis, Int.MaxValue.toLong).toInt
+      conn.setConnectTimeout(timeoutMillis)
+      conn.setReadTimeout(timeoutMillis)
       conn.setRequestProperty("User-Agent", userAgent)
 
       Using.resource(new AutoCloseable {
@@ -203,14 +205,20 @@ object RobotsTxtParser {
       ParsedUrl(scheme, host, port, path)
     }.toOption.filter(_.host.nonEmpty)
 
+  /** A `Crawl-delay` value: seconds, possibly fractional. Negative, non-finite or unparseable values are ignored. */
+  private def parseCrawlDelay(value: String): Option[FiniteDuration] =
+    Try(value.toDouble).toOption
+      .filter(seconds => seconds >= 0 && !seconds.isInfinite)
+      .flatMap(seconds => Try((seconds * 1000).round.millis).toOption)
+
   private def parseAll(content: String): Seq[RobotsGroup] = {
     val groups = mutable.ListBuffer[RobotsGroup]()
 
-    var userAgents              = Vector.empty[String]
-    var allowRules              = Vector.empty[String]
-    var disallowRules           = Vector.empty[String]
-    var crawlDelay: Option[Int] = None
-    var sawDirective            = false
+    var userAgents                         = Vector.empty[String]
+    var allowRules                         = Vector.empty[String]
+    var disallowRules                      = Vector.empty[String]
+    var crawlDelay: Option[FiniteDuration] = None
+    var sawDirective                       = false
 
     def flush(): Unit = {
       if (userAgents.nonEmpty) {
@@ -259,7 +267,7 @@ object RobotsTxtParser {
 
             case "crawl-delay" if userAgents.nonEmpty =>
               sawDirective = true
-              crawlDelay = Try(value.toDouble.toInt).toOption.orElse(crawlDelay)
+              crawlDelay = parseCrawlDelay(value).orElse(crawlDelay)
 
             case _ => // Ignore unknown directives or directives without a group
           }

@@ -1,5 +1,7 @@
 package org.llm4s.imagegeneration.provider
 
+import scala.concurrent.duration.FiniteDuration
+
 import org.llm4s.imagegeneration.{ ImageEditOptions, OpenAIConfig, ProviderImageEditOptions, ValidationError }
 import org.llm4s.http.{ HttpResponse, MultipartPart }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -124,21 +126,26 @@ class OpenAIImageClientEditTest extends AnyFlatSpec with Matchers {
   }
 
   private class MockEditHttpClient(body: String) extends HttpClient {
-    override def post(url: String, headers: Map[String, String], data: String, timeout: Int): Try[HttpResponse] = ???
+    override def post(
+      url: String,
+      headers: Map[String, String],
+      data: String,
+      timeout: FiniteDuration
+    ): Try[HttpResponse] = ???
     override def postBytes(
       url: String,
       headers: Map[String, String],
       data: Array[Byte],
-      timeout: Int
+      timeout: FiniteDuration
     ): Try[HttpResponse] = ???
     override def postMultipart(
       url: String,
       headers: Map[String, String],
       data: Seq[MultipartPart],
-      timeout: Int
+      timeout: FiniteDuration
     ): Try[HttpResponse] =
       Success(HttpResponse(200, body))
-    override def get(url: String, headers: Map[String, String], timeout: Int): Try[HttpResponse] = ???
-    override def postRaw(url: String, headers: Map[String, String], data: String, timeout: Int)  = ???
+    override def get(url: String, headers: Map[String, String], timeout: FiniteDuration): Try[HttpResponse] = ???
+    override def postRaw(url: String, headers: Map[String, String], data: String, timeout: FiniteDuration)  = ???
   }
 }

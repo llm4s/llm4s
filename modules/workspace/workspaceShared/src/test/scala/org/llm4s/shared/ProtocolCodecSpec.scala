@@ -1,5 +1,7 @@
 package org.llm4s.shared
 
+import scala.concurrent.duration.*
+
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -53,7 +55,7 @@ class ProtocolCodecSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "decode ExecuteCommandCommand" in {
-    val command = ExecuteCommandCommand("exec-1", "ls -la", Some("/home"), Some(5000), None)
+    val command = ExecuteCommandCommand("exec-1", "ls -la", Some("/home"), Some(5.seconds), None)
     val json    = ProtocolCodec.encodeAgentCommand(command)
     val decoded = ProtocolCodec.decodeAgentCommand(json)
 
@@ -61,7 +63,7 @@ class ProtocolCodecSpec extends AnyFlatSpec with Matchers {
     val exec = decoded.asInstanceOf[ExecuteCommandCommand]
     exec.command shouldBe "ls -la"
     exec.workingDirectory shouldBe Some("/home")
-    exec.timeout shouldBe Some(5000)
+    exec.timeout shouldBe Some(5.seconds)
   }
 
   it should "decode ModifyFileCommand with operations" in {

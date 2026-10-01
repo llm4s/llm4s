@@ -1,6 +1,7 @@
 package org.llm4s.llmconnect.utils
 
 import scala.collection.mutable.ListBuffer
+import scala.concurrent.duration.FiniteDuration
 
 /**
  * Utilities for splitting text, audio, and video data into fixed-size overlapping chunks.
@@ -9,6 +10,12 @@ import scala.collection.mutable.ListBuffer
  * suitable for embedding pipelines and multimodal processing.
  */
 object ChunkingUtils {
+
+  /** How many samples (or frames) at `perSecond` fall in `span`: at least 1, at most `Int.MaxValue`. */
+  private def unitsIn(span: FiniteDuration, perSecond: Int): Int = {
+    val units = math.round(span.toNanos.toDouble / 1e9 * perSecond)
+    math.max(1L, math.min(units, Int.MaxValue.toLong)).toInt
+  }
 
   // ------------------------------ TEXT CHUNKING ------------------------------
   /**
@@ -43,7 +50,7 @@ object ChunkingUtils {
    *
    * @param samples        Mono PCM samples in [-1, 1].
    * @param sampleRate     Samples per second (> 0).
-   * @param windowSeconds  Window length in seconds (> 0).
+   * @param window         Window length (> 0); at least one sample.
    * @param overlapRatio   Overlap ratio in [0, 1). For example, 0.25 = 25% overlap.
    * @param padToWindow    If true, pad the last segment with zeros to full window length.
    * @return               Sequence of audio windows (each Array[Float] of length windowSamples if padded).
@@ -51,15 +58,15 @@ object ChunkingUtils {
   def chunkAudio(
     samples: Array[Float],
     sampleRate: Int,
-    windowSeconds: Int,
+    window: FiniteDuration,
     overlapRatio: Double,
     padToWindow: Boolean = true
   ): Seq[Array[Float]] = {
     require(sampleRate > 0, "sampleRate must be > 0")
-    require(windowSeconds > 0, "windowSeconds must be > 0")
+    require(window.length > 0, "window must be > 0")
     require(overlapRatio >= 0.0 && overlapRatio < 1.0, "overlapRatio must satisfy 0.0 <= r < 1.0")
 
-    val windowSamples = math.max(1, windowSeconds * sampleRate)
+    val windowSamples = unitsIn(window, sampleRate)
     val step          = math.max(1, math.ceil(windowSamples * (1.0 - overlapRatio)).toInt)
 
     val out   = ListBuffer[Array[Float]]()
@@ -95,21 +102,21 @@ object ChunkingUtils {
    *
    * @param frames        Sequence of frames.
    * @param fps           Frames per second (> 0).
-   * @param clipSeconds   Clip duration in seconds (> 0).
+   * @param clip          Clip duration (> 0); at least one frame.
    * @param overlapRatio  Overlap ratio in [0, 1).
    * @return              Sequence of frame clips (each is a Seq[T]).
    */
   def chunkVideo[T](
     frames: Seq[T],
     fps: Int,
-    clipSeconds: Int,
+    clip: FiniteDuration,
     overlapRatio: Double
   ): Seq[Seq[T]] = {
     require(fps > 0, "fps must be > 0")
-    require(clipSeconds > 0, "clipSeconds must be > 0")
+    require(clip.length > 0, "clip must be > 0")
     require(overlapRatio >= 0.0 && overlapRatio < 1.0, "overlapRatio must satisfy 0.0 <= r < 1.0")
 
-    val clipFrames = math.max(1, fps * clipSeconds)
+    val clipFrames = unitsIn(clip, fps)
     val step       = math.max(1, math.ceil(clipFrames * (1.0 - overlapRatio)).toInt)
 
     val out   = ListBuffer[Seq[T]]()

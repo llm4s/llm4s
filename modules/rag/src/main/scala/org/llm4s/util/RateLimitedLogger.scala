@@ -3,6 +3,7 @@ package org.llm4s.util
 import org.slf4j.Logger
 
 import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong }
+import scala.concurrent.duration.*
 
 /**
  * Thread-safe rate-limited logger to prevent log spam.
@@ -14,12 +15,12 @@ import java.util.concurrent.atomic.{ AtomicInteger, AtomicLong }
  * Minor event count drift is acceptable for best-effort logging.
  *
  * @param logger SLF4J logger instance
- * @param throttleSeconds Minimum seconds between log messages
+ * @param throttle Minimum time between log messages
  * @param throttleCount Maximum events before forcing a log
  */
 final private[llm4s] class RateLimitedLogger(
   logger: Logger,
-  throttleSeconds: Long = 60,
+  throttle: FiniteDuration = 60.seconds,
   throttleCount: Int = 100
 ) {
 
@@ -34,10 +35,10 @@ final private[llm4s] class RateLimitedLogger(
    */
   def warn(message: => String): Boolean = {
     val events  = eventsSinceLastLog.incrementAndGet()
-    val now     = System.currentTimeMillis() / 1000
+    val now     = System.currentTimeMillis()
     val lastLog = lastLogTime.get()
 
-    val shouldLog = (now - lastLog >= throttleSeconds) || (events >= throttleCount)
+    val shouldLog = (now - lastLog >= throttle.toMillis) || (events >= throttleCount)
 
     if (shouldLog && lastLogTime.compareAndSet(lastLog, now)) {
       // CAS succeeded - we won the race to log
@@ -67,6 +68,6 @@ private[llm4s] object RateLimitedLogger {
     new RateLimitedLogger(logger)
 
   /** Create rate limiter with custom thresholds */
-  def apply(logger: Logger, throttleSeconds: Long, throttleCount: Int): RateLimitedLogger =
-    new RateLimitedLogger(logger, throttleSeconds, throttleCount)
+  def apply(logger: Logger, throttle: FiniteDuration, throttleCount: Int): RateLimitedLogger =
+    new RateLimitedLogger(logger, throttle, throttleCount)
 }

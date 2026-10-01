@@ -1,5 +1,7 @@
 package org.llm4s.toolapi.builtin.search
 
+import scala.concurrent.duration.*
+
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.llm4s.config.ExaSearchToolConfig
@@ -144,7 +146,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
 
   "ExaSearchConfig" should "initialize with valid default parameters" in {
     val config = ExaSearchConfig()
-    config.timeoutMs shouldBe 10000
+    config.timeout shouldBe 10000.millis
     config.numResults shouldBe 10
     config.searchType shouldBe SearchType.Auto
     config.maxCharacters shouldBe 500
@@ -158,25 +160,25 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
 
   it should "allow overriding default values" in {
     val config = ExaSearchConfig(
-      timeoutMs = 15000,
+      timeout = 15000.millis,
       numResults = 20,
       searchType = SearchType.Deep,
       maxCharacters = 2000,
       maxAgeHours = 48,
       category = Some(Category.ResearchPaper),
       userLocation = Some("San Francisco, CA"),
-      livecrawlTimeout = Some(5000),
+      livecrawlTimeout = Some(5000.millis),
       additionalQueries = Some(List("query1", "query2")),
       extraParams = Map("custom" -> ujson.Str("value"))
     )
-    config.timeoutMs shouldBe 15000
+    config.timeout shouldBe 15000.millis
     config.numResults shouldBe 20
     config.searchType shouldBe SearchType.Deep
     config.maxCharacters shouldBe 2000
     config.maxAgeHours shouldBe 48
     config.category shouldBe Some(Category.ResearchPaper)
     config.userLocation shouldBe Some("San Francisco, CA")
-    config.livecrawlTimeout shouldBe Some(5000)
+    config.livecrawlTimeout shouldBe Some(5000.millis)
     config.additionalQueries shouldBe Some(List("query1", "query2"))
     config.extraParams shouldBe Map("custom" -> ujson.Str("value"))
   }
@@ -500,7 +502,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       category = Some(Category.ResearchPaper),
       additionalQueries = Some(List("query1", "query2")),
       userLocation = Some("New York, NY"),
-      livecrawlTimeout = Some(5000)
+      livecrawlTimeout = Some(5000.millis)
     )
     val body = ExaSearchTool.buildRequestBody(query, config)
 
@@ -801,7 +803,8 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       maxCharacters = 500
     )
 
-    val result = ExaSearchTool.search("test", ExaSearchConfig(timeoutMs = 5000), toolConfig, failingClient, () => ())
+    val result =
+      ExaSearchTool.search("test", ExaSearchConfig(timeout = 5000.millis), toolConfig, failingClient, () => ())
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse("")
@@ -913,7 +916,7 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
     error.message should include("maxCharacters")
   }
 
-  it should "reject invalid timeoutMs below minimum in override config" in {
+  it should "reject invalid timeout below minimum in override config" in {
     val toolConfig = ExaSearchToolConfig(
       apiKey = "test-key",
       apiUrl = "https://api.exa.ai",
@@ -922,16 +925,16 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       maxCharacters = 500
     )
 
-    val invalidConfig = Some(ExaSearchConfig(timeoutMs = 500)) // too low
+    val invalidConfig = Some(ExaSearchConfig(timeout = 500.millis)) // too low
     val result        = ExaSearchTool.create(toolConfig, invalidConfig)
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse(fail("Expected Left"))
-    error.message should include("timeoutMs")
-    error.message should include("1000")
+    error.message should include("timeout")
+    error.message should include("1 second")
   }
 
-  it should "reject timeoutMs above maximum in override config" in {
+  it should "reject timeout above maximum in override config" in {
     val toolConfig = ExaSearchToolConfig(
       apiKey = "test-key",
       apiUrl = "https://api.exa.ai",
@@ -940,12 +943,12 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
       maxCharacters = 500
     )
 
-    val invalidConfig = Some(ExaSearchConfig(timeoutMs = 500000)) // 500 seconds, too high
+    val invalidConfig = Some(ExaSearchConfig(timeout = 500000.millis)) // 500 seconds, too high
     val result        = ExaSearchTool.create(toolConfig, invalidConfig)
 
     result.isLeft shouldBe true
     val error = result.swap.getOrElse(fail("Expected Left"))
-    error.message should include("timeoutMs")
+    error.message should include("timeout")
   }
 
   it should "reject empty userLocation in override config" in {
@@ -992,12 +995,12 @@ class ExaSearchToolSpec extends AnyFlatSpec with Matchers {
 
     val validConfig = Some(
       ExaSearchConfig(
-        timeoutMs = 15000,
+        timeout = 15000.millis,
         numResults = 20,
         searchType = SearchType.Neural,
         maxCharacters = 1000,
         maxAgeHours = 48,
-        livecrawlTimeout = Some(5000),
+        livecrawlTimeout = Some(5000.millis),
         userLocation = Some("San Francisco"),
         additionalQueries = Some(List("query1", "query2"))
       )

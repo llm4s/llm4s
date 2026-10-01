@@ -185,13 +185,13 @@ object SafeSearch {
 /**
  * Runtime configuration for Brave Search API requests.
  *
- * @param timeoutMs   HTTP request timeout in milliseconds
+ * @param timeout     HTTP request timeout
  * @param count       Number of results to return per request
  * @param safeSearch  Safe-search filtering level (default: [[SafeSearch.Strict]])
  * @param extraParams Additional key-value parameters merged into every request
  */
 case class BraveSearchConfig(
-  timeoutMs: Int = 10000,
+  timeout: FiniteDuration = 10.seconds,
   count: Int = 5,
   safeSearch: SafeSearch = SafeSearch.Strict,
   extraParams: Map[String, ujson.Value] = Map.empty
@@ -385,10 +385,10 @@ object BraveSearchTool {
             "X-Subscription-Token" -> braveTool.apiKey,
             "User-Agent"           -> "llm4s-brave-search/1.0"
           ),
-          timeout = config.timeoutMs.millis
+          timeout = config.timeout
         )
         .left
-        .map(describeTransportFailure(_, config.timeoutMs))
+        .map(describeTransportFailure(_, config.timeout))
 
     responseEither.flatMap { response =>
       if (response.statusCode == 200) {

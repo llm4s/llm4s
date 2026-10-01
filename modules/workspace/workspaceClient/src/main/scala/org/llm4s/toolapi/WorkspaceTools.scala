@@ -1,5 +1,7 @@
 package org.llm4s.toolapi
 
+import scala.concurrent.duration.*
+
 import org.llm4s.shared._
 import org.llm4s.types.Result
 import org.llm4s.workspace.ContainerisedWorkspace
@@ -409,7 +411,7 @@ object WorkspaceTools {
   ): Either[String, ujson.Value] = {
     val command    = params.getString("command").fold(_ => "", identity)
     val workingDir = params.getString("working_directory").fold(_ => "/workspace", identity)
-    val timeout    = params.getInt("timeout").toOption
+    val timeout    = params.getInt("timeout").toOption.map(_.seconds)
 
     {
       logger.info(s"Executing command: $command in directory: $workingDir with timeout: $timeout")

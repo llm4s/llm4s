@@ -39,7 +39,7 @@ package org.llm4s.toolapi.builtin
  * // Full access with custom timeout
  * for {
  *   fullTool <- HTTPTool.createSafe(HttpConfig(
- *     timeoutMs = 60000,
+ *     timeout = 60.seconds,
  *     maxResponseSize = 50 * 1024 * 1024
  *   ))
  * } yield new ToolRegistry(Seq(fullTool))

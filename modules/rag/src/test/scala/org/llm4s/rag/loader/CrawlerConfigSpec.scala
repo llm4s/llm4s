@@ -3,6 +3,8 @@ package org.llm4s.rag.loader
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import scala.concurrent.duration.*
+
 class CrawlerConfigSpec extends AnyFlatSpec with Matchers {
 
   "CrawlerConfig" should "have sensible defaults" in {
@@ -10,8 +12,8 @@ class CrawlerConfigSpec extends AnyFlatSpec with Matchers {
 
     config.maxDepth shouldBe 3
     config.maxPages shouldBe 1000
-    config.delayMs shouldBe 500
-    config.timeoutMs shouldBe 30000
+    config.delay shouldBe 500.millis
+    config.timeout shouldBe 30000.millis
     config.respectRobotsTxt shouldBe true
     config.sameDomainOnly shouldBe true
     config.includeQueryParams shouldBe false
@@ -23,8 +25,8 @@ class CrawlerConfigSpec extends AnyFlatSpec with Matchers {
     val config = CrawlerConfig()
       .withMaxDepth(5)
       .withMaxPages(500)
-      .withDelay(1000)
-      .withTimeout(60000)
+      .withDelay(1000.millis)
+      .withTimeout(60000.millis)
       .withRobotsTxt(false)
       .withSameDomainOnly(false)
       .withQueryParams(true)
@@ -34,8 +36,8 @@ class CrawlerConfigSpec extends AnyFlatSpec with Matchers {
 
     config.maxDepth shouldBe 5
     config.maxPages shouldBe 500
-    config.delayMs shouldBe 1000
-    config.timeoutMs shouldBe 60000
+    config.delay shouldBe 1000.millis
+    config.timeout shouldBe 60000.millis
     config.respectRobotsTxt shouldBe false
     config.sameDomainOnly shouldBe false
     config.includeQueryParams shouldBe true
@@ -49,7 +51,7 @@ class CrawlerConfigSpec extends AnyFlatSpec with Matchers {
 
     config.maxDepth shouldBe 2
     config.maxPages shouldBe 100
-    config.delayMs shouldBe 1000
+    config.delay shouldBe 1000.millis
     config.respectRobotsTxt shouldBe true
   }
 
@@ -58,7 +60,7 @@ class CrawlerConfigSpec extends AnyFlatSpec with Matchers {
 
     config.maxDepth shouldBe 5
     config.maxPages shouldBe 5000
-    config.delayMs shouldBe 100
+    config.delay shouldBe 100.millis
     config.respectRobotsTxt shouldBe true
   }
 

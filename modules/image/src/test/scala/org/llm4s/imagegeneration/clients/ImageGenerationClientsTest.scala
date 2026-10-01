@@ -11,6 +11,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.time.{ Seconds, Span }
 import scala.util.Success
+import scala.concurrent.duration.*
 import java.io.File
 import java.awt.image.BufferedImage
 import javax.imageio.ImageIO
@@ -615,7 +616,7 @@ class ImageGenerationClientsTest
 
   test("HttpClient should return failure on exception") {
     val client = HttpClient.create()
-    val result = client.post("http://0.0.0.0:0/invalid", Map.empty, "", 100)
+    val result = client.post("http://0.0.0.0:0/invalid", Map.empty, "", 100.millis)
     result.isFailure shouldBe true
   }
 

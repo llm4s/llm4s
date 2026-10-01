@@ -1,5 +1,7 @@
 package org.llm4s.imagegeneration.provider
 
+import scala.concurrent.duration.FiniteDuration
+
 import org.llm4s.http.{ HttpResponse, MultipartPart }
 import org.llm4s.imagegeneration.{ ImageGenerationOptions, ImageSize, OpenAIConfig, ValidationError }
 import org.llm4s.media.MediaType
@@ -16,7 +18,12 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
   ) extends HttpClient {
     var lastPostBody: Option[String] = None
 
-    override def post(url: String, headers: Map[String, String], data: String, timeout: Int): Try[HttpResponse] = {
+    override def post(
+      url: String,
+      headers: Map[String, String],
+      data: String,
+      timeout: FiniteDuration
+    ): Try[HttpResponse] = {
       lastPostBody = Some(data)
       Success(postResponse)
     }
@@ -25,23 +32,25 @@ class OpenAIImageClientGenerationValidationTest extends AnyFlatSpec with Matcher
       url: String,
       headers: Map[String, String],
       data: Array[Byte],
-      timeout: Int
+      timeout: FiniteDuration
     ): Try[HttpResponse] = Success(postResponse)
 
     override def postMultipart(
       url: String,
       headers: Map[String, String],
       data: Seq[MultipartPart],
-      timeout: Int
+      timeout: FiniteDuration
     ): Try[HttpResponse] = Success(postResponse)
 
-    override def get(url: String, headers: Map[String, String], timeout: Int): Try[HttpResponse] = Success(getResponse)
+    override def get(url: String, headers: Map[String, String], timeout: FiniteDuration): Try[HttpResponse] = Success(
+      getResponse
+    )
 
     override def postRaw(
       url: String,
       headers: Map[String, String],
       data: String,
-      timeout: Int
+      timeout: FiniteDuration
     ) = scala.util.Failure(new UnsupportedOperationException("not used in this test"))
   }
 

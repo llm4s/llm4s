@@ -1,5 +1,7 @@
 package org.llm4s.toolapi.builtin.search
 
+import scala.concurrent.duration.*
+
 import org.llm4s.config.DuckDuckGoSearchToolConfig
 import org.llm4s.http.{ FailingHttpClient, HttpResponse, MockHttpClient }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -10,18 +12,18 @@ class DuckDuckGoSearchToolSpec extends AnyFlatSpec with Matchers {
   "DuckDuckGoSearchConfig" should "have correct default values" in {
     val config = DuckDuckGoSearchConfig()
 
-    config.timeoutMs shouldBe 10000
+    config.timeout shouldBe 10000.millis
     config.maxResults shouldBe 10
     config.safeSearch shouldBe true
   }
 
   it should "accept custom configuration values" in {
     val config = DuckDuckGoSearchConfig(
-      timeoutMs = 5000,
+      timeout = 5000.millis,
       maxResults = 5,
       safeSearch = false
     )
-    config.timeoutMs shouldBe 5000
+    config.timeout shouldBe 5000.millis
     config.maxResults shouldBe 5
     config.safeSearch shouldBe false
   }
@@ -249,7 +251,7 @@ class DuckDuckGoSearchToolSpec extends AnyFlatSpec with Matchers {
     val result = DuckDuckGoSearchTool.search(
       "https://api.duckduckgo.com",
       "test",
-      DuckDuckGoSearchConfig(timeoutMs = 3000),
+      DuckDuckGoSearchConfig(timeout = 3000.millis),
       failingClient,
       () => ()
     )

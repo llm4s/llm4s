@@ -3,6 +3,8 @@ package org.llm4s.rag.loader
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import scala.concurrent.duration.*
+
 class UrlLoaderSpec extends AnyFlatSpec with Matchers {
 
   // ==========================================================================
@@ -92,9 +94,9 @@ class UrlLoaderSpec extends AnyFlatSpec with Matchers {
   }
 
   "UrlLoader.withTimeout" should "set timeout" in {
-    val loader = UrlLoader("http://a.com").withTimeout(5000)
+    val loader = UrlLoader("http://a.com").withTimeout(5000.millis)
 
-    loader.timeoutMs shouldBe 5000
+    loader.timeout shouldBe 5000.millis
   }
 
   "UrlLoader.withRetries" should "set retry count" in {
@@ -126,7 +128,7 @@ class UrlLoaderSpec extends AnyFlatSpec with Matchers {
   "UrlLoader defaults" should "have sensible values" in {
     val loader = UrlLoader("http://a.com")
 
-    loader.timeoutMs shouldBe 30000
+    loader.timeout shouldBe 30000.millis
     loader.retryCount shouldBe 2
     loader.headers shouldBe empty
     loader.metadata shouldBe empty

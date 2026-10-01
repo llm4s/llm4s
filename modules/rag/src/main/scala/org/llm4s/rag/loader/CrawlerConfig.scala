@@ -1,5 +1,7 @@
 package org.llm4s.rag.loader
 
+import scala.concurrent.duration.*
+
 /**
  * Configuration for web crawling.
  *
@@ -10,8 +12,8 @@ package org.llm4s.rag.loader
  * @param followPatterns URL patterns to follow (glob syntax with asterisk wildcards)
  * @param excludePatterns URL patterns to exclude (glob syntax)
  * @param respectRobotsTxt Whether to respect robots.txt directives
- * @param delayMs Delay between requests in milliseconds (rate limiting)
- * @param timeoutMs HTTP request timeout in milliseconds
+ * @param delay Delay between requests (rate limiting); a robots.txt `Crawl-delay` that is longer wins
+ * @param timeout HTTP connect and read timeout
  * @param userAgent User agent string for HTTP requests
  * @param maxQueueSize Maximum number of URLs to queue (prevents unbounded memory usage)
  * @param includeQueryParams Whether to treat URLs with different query params as distinct pages
@@ -24,8 +26,8 @@ final case class CrawlerConfig(
   followPatterns: Seq[String] = Seq("*"),
   excludePatterns: Seq[String] = Seq.empty,
   respectRobotsTxt: Boolean = true,
-  delayMs: Int = 500,
-  timeoutMs: Int = 30000,
+  delay: FiniteDuration = 500.millis,
+  timeout: FiniteDuration = 30.seconds,
   userAgent: String = "LLM4S-Crawler/1.0",
   maxQueueSize: Int = 10000,
   includeQueryParams: Boolean = false,
@@ -50,12 +52,12 @@ final case class CrawlerConfig(
     copy(excludePatterns = patterns)
 
   /** Set rate limit delay */
-  def withDelay(ms: Int): CrawlerConfig =
-    copy(delayMs = ms)
+  def withDelay(delay: FiniteDuration): CrawlerConfig =
+    copy(delay = delay)
 
   /** Set request timeout */
-  def withTimeout(ms: Int): CrawlerConfig =
-    copy(timeoutMs = ms)
+  def withTimeout(timeout: FiniteDuration): CrawlerConfig =
+    copy(timeout = timeout)
 
   /** Set user agent */
   def withUserAgent(ua: String): CrawlerConfig =
@@ -91,7 +93,7 @@ object CrawlerConfig {
   val polite: CrawlerConfig = CrawlerConfig(
     maxDepth = 2,
     maxPages = 100,
-    delayMs = 1000,
+    delay = 1.second,
     respectRobotsTxt = true
   )
 
@@ -99,7 +101,7 @@ object CrawlerConfig {
   val fast: CrawlerConfig = CrawlerConfig(
     maxDepth = 5,
     maxPages = 5000,
-    delayMs = 100,
+    delay = 100.millis,
     respectRobotsTxt = true
   )
 

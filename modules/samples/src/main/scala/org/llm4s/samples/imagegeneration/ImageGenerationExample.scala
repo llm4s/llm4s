@@ -4,6 +4,7 @@ import org.llm4s.config.Llm4sConfig
 import org.llm4s.imagegeneration._
 import org.slf4j.LoggerFactory
 import java.nio.file.Paths
+import scala.concurrent.duration.*
 
 /**
  * Example demonstrating the Image Generation API for Stable Diffusion.
@@ -71,7 +72,7 @@ object ImageGenerationExample {
 
     val config = StableDiffusionConfig(
       baseUrl = "http://localhost:7860",
-      timeout = 120000
+      timeout = 2.minutes
     )
 
     ImageGeneration.generateImage(prompt, config, options) match {

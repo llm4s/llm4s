@@ -11,7 +11,8 @@ import java.net.URI
 import java.net.http.{ HttpClient, HttpRequest, HttpResponse }
 import java.nio.charset.StandardCharsets
 import java.nio.file.{ Files, Paths }
-import java.time.{ Duration, Instant }
+import java.time.Instant
+import scala.jdk.DurationConverters.*
 import java.util.Base64
 import scala.util.Try
 import scala.util.control.NonFatal
@@ -29,7 +30,7 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
 
   private val httpClient = HttpClient
     .newBuilder()
-    .connectTimeout(Duration.ofSeconds(config.connectTimeoutSeconds))
+    .connectTimeout(config.connectTimeout.toJava)
     .build()
 
   /**
@@ -186,7 +187,7 @@ class OpenAIVisionClient(config: OpenAIVisionConfig) extends org.llm4s.imageproc
         .uri(URI.create(s"${config.baseUrl}/chat/completions"))
         .header("Content-Type", "application/json")
         .header("Authorization", s"Bearer ${config.apiKey}")
-        .timeout(Duration.ofSeconds(config.requestTimeoutSeconds))
+        .timeout(config.requestTimeout.toJava)
         .POST(HttpRequest.BodyPublishers.ofString(requestBody))
         .build()
 

@@ -10,6 +10,7 @@ import java.nio.file.Path
 import java.time.Instant
 import scala.concurrent.{ ExecutionContext, Future, blocking }
 import scala.util.Try
+import scala.concurrent.duration.*
 
 /**
  * OpenAI Images API client for image generation.
@@ -191,7 +192,7 @@ class OpenAIImageClient(config: OpenAIConfig, httpClient: HttpClient) extends Im
       .get(
         healthUrl,
         headers = Map("Authorization" -> s"Bearer ${config.apiKey}"),
-        timeout = 5000
+        timeout = 5.seconds
       )
       .toEither
       .left

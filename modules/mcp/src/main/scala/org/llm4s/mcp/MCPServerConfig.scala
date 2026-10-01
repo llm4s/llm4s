@@ -13,7 +13,7 @@ import scala.concurrent.duration._
 case class MCPServerConfig(
   name: String,
   transport: MCPTransport,
-  timeout: Duration = 30.seconds
+  timeout: FiniteDuration = 30.seconds
 )
 
 object MCPServerConfig {
@@ -28,7 +28,7 @@ object MCPServerConfig {
    * @param timeout Maximum response timeout
    * @return MCPServerConfig configured for stdio transport
    */
-  def stdio(name: String, command: Seq[String], timeout: Duration = 30.seconds): MCPServerConfig =
+  def stdio(name: String, command: Seq[String], timeout: FiniteDuration = 30.seconds): MCPServerConfig =
     MCPServerConfig(name, StdioTransport(command, name), timeout)
 
   /**
@@ -41,7 +41,7 @@ object MCPServerConfig {
    * @param timeout Maximum response timeout
    * @return MCPServerConfig configured for Streamable HTTP transport with automatic fallback
    */
-  def streamableHTTP(name: String, url: String, timeout: Duration = 30.seconds): MCPServerConfig =
+  def streamableHTTP(name: String, url: String, timeout: FiniteDuration = 30.seconds): MCPServerConfig =
     MCPServerConfig(name, StreamableHTTPTransport(url, name), timeout)
 
   /**
@@ -54,6 +54,6 @@ object MCPServerConfig {
    * @param timeout Maximum response timeout
    * @return MCPServerConfig configured for SSE transport with automatic upgrade attempt
    */
-  def sse(name: String, url: String, timeout: Duration = 30.seconds): MCPServerConfig =
+  def sse(name: String, url: String, timeout: FiniteDuration = 30.seconds): MCPServerConfig =
     MCPServerConfig(name, SSETransport(url, name), timeout)
 }

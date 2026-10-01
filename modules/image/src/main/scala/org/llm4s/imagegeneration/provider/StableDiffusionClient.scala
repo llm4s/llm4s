@@ -8,6 +8,7 @@ import upickle.default._
 import java.nio.file.Path
 import java.util.Base64
 import scala.util.Try
+import scala.concurrent.duration.*
 import scala.concurrent.{ Future, ExecutionContext, blocking }
 
 /**
@@ -224,7 +225,7 @@ class StableDiffusionClient(config: StableDiffusionConfig, httpClient: HttpClien
   override def health(): Either[ImageGenerationError, ServiceStatus] = {
     val url = s"${config.baseUrl}/sdapi/v1/options"
     httpClient
-      .get(url, Map.empty, 5000)
+      .get(url, Map.empty, 5.seconds)
       .toEither
       .left
       .map(e => ServiceError(s"Health check failed: ${e.getMessage}", 0))

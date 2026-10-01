@@ -40,7 +40,7 @@ package org.llm4s.toolapi
  *
  * val httpTools = new ToolRegistry(Seq(
  *   HTTPTool.create(HttpConfig(
- *     timeoutMs = 10000,
+ *     timeout = 10.seconds,
  *     allowedDomains = Some(Seq("api.example.com"))
  *   ))
  * ))

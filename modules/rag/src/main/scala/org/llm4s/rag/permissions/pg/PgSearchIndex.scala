@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory
 
 import java.sql.{ Array => SqlArray, Connection, ResultSet }
 import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.duration.*
 import scala.util.{ Try, Using }
 
 /**
@@ -42,7 +43,7 @@ final class PgSearchIndex private (
 ) extends SearchIndex {
 
   private val logger            = LoggerFactory.getLogger(getClass)
-  private val rateLimitedLogger = RateLimitedLogger(logger, throttleSeconds = 60, throttleCount = 100)
+  private val rateLimitedLogger = RateLimitedLogger(logger, throttle = 60.seconds, throttleCount = 100)
 
   /** Expose PostgreSQL configuration for automatic RAG integration */
   override def pgConfig: Option[SearchIndex.PgConfig] = Some(_pgConfig)
@@ -439,9 +440,9 @@ object PgSearchIndex {
         hikariConfig.setPassword(config.password)
         hikariConfig.setMaximumPoolSize(config.maxPoolSize)
         hikariConfig.setMinimumIdle(1)
-        hikariConfig.setConnectionTimeout(HikariDefaults.CONNECTION_TIMEOUT_MS)
-        hikariConfig.setIdleTimeout(HikariDefaults.IDLE_TIMEOUT_MS)
-        hikariConfig.setMaxLifetime(HikariDefaults.MAX_LIFETIME_MS)
+        hikariConfig.setConnectionTimeout(HikariDefaults.ConnectionTimeout.toMillis)
+        hikariConfig.setIdleTimeout(HikariDefaults.IdleTimeout.toMillis)
+        hikariConfig.setMaxLifetime(HikariDefaults.MaxLifetime.toMillis)
 
         val dataSource = new HikariDataSource(hikariConfig)
         new PgSearchIndex(dataSource, config.vectorTableName, config)

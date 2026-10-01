@@ -10,6 +10,7 @@ import java.nio.file.Files
 import java.awt.image.BufferedImage
 import java.awt.Color
 import javax.imageio.ImageIO
+import scala.concurrent.duration.*
 
 import ch.qos.logback.classic.{ Logger => LBLogger }
 import ch.qos.logback.classic.spi.ILoggingEvent
@@ -21,8 +22,8 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
   // waiting for - they only have to outlast the first HTTP call in a cold JVM. At one
   // second they did not on Windows CI: the call timed out before the stubbed 500
   // arrived, which is still a `Left` but logs nothing to assert on.
-  private val RequestTimeoutSeconds = 30
-  private val ConnectTimeoutSeconds = 10
+  private val RequestTimeout = 30.seconds
+  private val ConnectTimeout = 10.seconds
 
   private def createTestImage(width: Int = 10, height: Int = 10): BufferedImage = {
     val image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
@@ -79,8 +80,8 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
         val cfg = org.llm4s.imageprocessing.config.OpenAIVisionConfig(
           apiKey = "x",
           baseUrl = s"http://localhost:$port",
-          requestTimeoutSeconds = RequestTimeoutSeconds,
-          connectTimeoutSeconds = ConnectTimeoutSeconds
+          requestTimeout = RequestTimeout,
+          connectTimeout = ConnectTimeout
         )
         val client = new org.llm4s.imageprocessing.provider.OpenAIVisionClient(cfg)
 
@@ -116,8 +117,8 @@ class VisionClientsSpec extends AnyFunSuite with Matchers {
         val cfg = org.llm4s.imageprocessing.config.AnthropicVisionConfig(
           apiKey = "x",
           baseUrl = s"http://localhost:$port",
-          requestTimeoutSeconds = RequestTimeoutSeconds,
-          connectTimeoutSeconds = ConnectTimeoutSeconds
+          requestTimeout = RequestTimeout,
+          connectTimeout = ConnectTimeout
         )
         val client = new org.llm4s.imageprocessing.provider.anthropicclient.AnthropicVisionClient(cfg)
 

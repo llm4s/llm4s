@@ -1,6 +1,8 @@
 // scalafix:off DisableSyntax.NoKeywordTry, DisableSyntax.NoKeywordFinally
 package org.llm4s.runner
 
+import scala.concurrent.duration.FiniteDuration
+
 import org.llm4s.shared._
 import org.slf4j.LoggerFactory
 
@@ -752,7 +754,7 @@ class WorkspaceAgentInterfaceImpl(
   override def executeCommand(
     command: String,
     workingDirectory: Option[String] = None,
-    timeoutSeconds: Option[Int] = None,
+    timeout: Option[FiniteDuration] = None,
     environment: Option[Map[String, String]] = None
   ): ExecuteCommandResponse = {
     if (!config.shellAllowed) {
@@ -775,7 +777,7 @@ class WorkspaceAgentInterfaceImpl(
       )
     }
 
-    val timeoutMs = (timeoutSeconds.getOrElse(config.defaultCommandTimeoutSeconds) * 1000).toLong
+    val timeoutMs = timeout.getOrElse(config.defaultCommandTimeout).toMillis
     val env       = environment.getOrElse(Map.empty)
 
     // --- Security fix (Issue #787): direct argument-vector execution ----------

@@ -13,7 +13,7 @@ class RateLimitedLoggerSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   "RateLimitedLogger" should "log the first call regardless of rate limit config" in {
     val mockLogger  = mock[Logger]
-    val rateLimited = RateLimitedLogger(mockLogger, throttleSeconds = 60, throttleCount = 100)
+    val rateLimited = RateLimitedLogger(mockLogger, throttle = 60.seconds, throttleCount = 100)
 
     (mockLogger.warn(_: String)).expects("Test message").once()
 
@@ -23,7 +23,7 @@ class RateLimitedLoggerSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "suppress subsequent calls within the time window" in {
     val mockLogger  = mock[Logger]
-    val rateLimited = RateLimitedLogger(mockLogger, throttleSeconds = 60, throttleCount = 100)
+    val rateLimited = RateLimitedLogger(mockLogger, throttle = 60.seconds, throttleCount = 100)
 
     (mockLogger.warn(_: String)).expects("Test message").once()
 
@@ -36,7 +36,7 @@ class RateLimitedLoggerSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "log calls after window reset" in {
     val mockLogger  = mock[Logger]
-    val rateLimited = RateLimitedLogger(mockLogger, throttleSeconds = 60, throttleCount = 100)
+    val rateLimited = RateLimitedLogger(mockLogger, throttle = 60.seconds, throttleCount = 100)
 
     // Both invocations should log without aggregated count because we reset the state
     (mockLogger.warn(_: String)).expects("Test message").twice()
@@ -56,7 +56,7 @@ class RateLimitedLoggerSpec extends AnyFlatSpec with Matchers with MockFactory {
   it should "suppress calls until count threshold is reached" in {
     val mockLogger = mock[Logger]
     // Time window is large, rely on count threshold (3 events max before forcing log)
-    val rateLimited = RateLimitedLogger(mockLogger, throttleSeconds = 3600, throttleCount = 3)
+    val rateLimited = RateLimitedLogger(mockLogger, throttle = 3600.seconds, throttleCount = 3)
 
     (mockLogger.warn(_: String)).expects("Test message").once()
     (mockLogger.warn(_: String)).expects("Test message (3 events since last log)").once()
@@ -74,7 +74,7 @@ class RateLimitedLoggerSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "be thread-safe under concurrent load" in {
     val mockLogger  = mock[Logger]
-    val rateLimited = RateLimitedLogger(mockLogger, throttleSeconds = 3600, throttleCount = 1000)
+    val rateLimited = RateLimitedLogger(mockLogger, throttle = 3600.seconds, throttleCount = 1000)
 
     (mockLogger.warn(_: String)).expects(*).anyNumberOfTimes()
 
@@ -98,7 +98,7 @@ class RateLimitedLoggerSpec extends AnyFlatSpec with Matchers with MockFactory {
 
   it should "never throw exceptions on malformed inputs" in {
     val mockLogger  = mock[Logger]
-    val rateLimited = RateLimitedLogger(mockLogger, throttleSeconds = 60, throttleCount = 100)
+    val rateLimited = RateLimitedLogger(mockLogger, throttle = 60.seconds, throttleCount = 100)
 
     (mockLogger.warn(_: String)).expects(*).once()
 

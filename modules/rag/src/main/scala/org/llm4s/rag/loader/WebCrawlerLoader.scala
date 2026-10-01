@@ -7,6 +7,7 @@ import org.llm4s.rag.loader.internal._
 import java.net.{ HttpURLConnection, URI }
 import scala.annotation.tailrec
 import scala.collection.mutable
+import scala.concurrent.duration.*
 import scala.io.Source
 import scala.util.{ Try, Using }
 
@@ -70,12 +71,12 @@ final case class WebCrawlerLoader(
     copy(config = config.withExcludePatterns(patterns: _*))
 
   /** Set rate limit delay */
-  def withDelay(ms: Int): WebCrawlerLoader =
-    copy(config = config.withDelay(ms))
+  def withDelay(delay: FiniteDuration): WebCrawlerLoader =
+    copy(config = config.withDelay(delay))
 
   /** Set request timeout */
-  def withTimeout(ms: Int): WebCrawlerLoader =
-    copy(config = config.withTimeout(ms))
+  def withTimeout(timeout: FiniteDuration): WebCrawlerLoader =
+    copy(config = config.withTimeout(timeout))
 
   /** Set whether to respect robots.txt */
   def withRobotsTxt(respect: Boolean): WebCrawlerLoader =
@@ -137,7 +138,7 @@ final case class WebCrawlerLoader(
      */
     private def fetchAndProcess(fetchUrl: String, canonicalUrl: String, depth: Int): LoadResult = {
       val robotsRules = if (config.respectRobotsTxt) {
-        Some(RobotsTxtParser.getRules(fetchUrl, config.userAgent, config.timeoutMs))
+        Some(RobotsTxtParser.getRules(fetchUrl, config.userAgent, config.timeout))
       } else {
         None
       }
@@ -147,8 +148,8 @@ final case class WebCrawlerLoader(
       }
 
       WebCrawlerLoader
-        .delayBeforeFetch(config.delayMs, robotsRules.flatMap(_.crawlDelay), isFirstRequest)
-        .foreach(delay => Thread.sleep(delay.toLong))
+        .delayBeforeFetch(config.delay, robotsRules.flatMap(_.crawlDelay), isFirstRequest)
+        .foreach(delay => Thread.sleep(delay.toMillis))
 
       // Fetch the page
       fetchPage(fetchUrl) match {
@@ -216,10 +217,11 @@ final case class WebCrawlerLoader(
       maxRedirects: Int
     ): Either[NetworkError, (String, String, Map[String, String])] = {
       val connResult = Try {
-        val uri  = new URI(url)
-        val conn = uri.toURL.openConnection().asInstanceOf[HttpURLConnection]
-        conn.setConnectTimeout(config.timeoutMs)
-        conn.setReadTimeout(config.timeoutMs)
+        val uri           = new URI(url)
+        val conn          = uri.toURL.openConnection().asInstanceOf[HttpURLConnection]
+        val timeoutMillis = math.min(config.timeout.toMillis, Int.MaxValue.toLong).toInt
+        conn.setConnectTimeout(timeoutMillis)
+        conn.setReadTimeout(timeoutMillis)
         conn.setRequestProperty("User-Agent", config.userAgent)
         conn.setRequestProperty("Accept", "text/html,application/xhtml+xml,*/*;q=0.8")
         conn.setInstanceFollowRedirects(false)
@@ -374,15 +376,14 @@ object WebCrawlerLoader {
 
   /**
    * How long to wait before the next fetch, given the configured delay and any
-   * robots.txt crawl-delay (in seconds). None means fetch immediately.
+   * robots.txt crawl-delay. None means fetch immediately.
    */
   private[loader] def delayBeforeFetch(
-    configDelayMs: Int,
-    robotsCrawlDelaySeconds: Option[Int],
+    configDelay: FiniteDuration,
+    robotsCrawlDelay: Option[FiniteDuration],
     isFirstRequest: Boolean
-  ): Option[Int] = {
-    val robotsDelayMs  = robotsCrawlDelaySeconds.map(_ * 1000).getOrElse(0)
-    val effectiveDelay = math.max(configDelayMs, robotsDelayMs)
-    if (!isFirstRequest && effectiveDelay > 0) Some(effectiveDelay) else None
+  ): Option[FiniteDuration] = {
+    val effectiveDelay = robotsCrawlDelay.fold(configDelay)(_.max(configDelay))
+    if (!isFirstRequest && effectiveDelay > Duration.Zero) Some(effectiveDelay) else None
   }
 }

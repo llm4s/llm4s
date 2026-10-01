@@ -1,5 +1,7 @@
 package org.llm4s.toolapi.builtin.http
 
+import scala.concurrent.duration.*
+
 import com.sun.net.httpserver.{ HttpExchange, HttpServer }
 import org.llm4s.toolapi.SafeParameterExtractor
 import org.scalatest.BeforeAndAfterAll
@@ -453,9 +455,9 @@ class HTTPToolSSRFSpec extends AnyFlatSpec with Matchers with BeforeAndAfterAll 
   }
 
   it should "preserve other settings" in {
-    val config = HttpConfig(maxRedirects = 10, timeoutMs = 5000).withRedirectsEnabled
+    val config = HttpConfig(maxRedirects = 10, timeout = 5000.millis).withRedirectsEnabled
     config.followRedirects shouldBe true
     config.maxRedirects shouldBe 10
-    config.timeoutMs shouldBe 5000
+    config.timeout shouldBe 5000.millis
   }
 }

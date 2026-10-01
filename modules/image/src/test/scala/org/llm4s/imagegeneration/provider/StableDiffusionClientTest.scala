@@ -1,5 +1,7 @@
 package org.llm4s.imagegeneration.provider
 
+import scala.concurrent.duration.FiniteDuration
+
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.concurrent.ScalaFutures
@@ -25,7 +27,12 @@ class StableDiffusionClientTest extends AnyFunSuite with Matchers with ScalaFutu
     var lastHeaders: Map[String, String] = _
     var lastData: String                 = _
 
-    override def post(url: String, headers: Map[String, String], data: String, timeout: Int): Try[HttpResponse] = {
+    override def post(
+      url: String,
+      headers: Map[String, String],
+      data: String,
+      timeout: FiniteDuration
+    ): Try[HttpResponse] = {
       lastUrl = url
       lastHeaders = headers
       lastData = data
@@ -36,23 +43,23 @@ class StableDiffusionClientTest extends AnyFunSuite with Matchers with ScalaFutu
       url: String,
       headers: Map[String, String],
       data: Array[Byte],
-      timeout: Int
+      timeout: FiniteDuration
     ): Try[HttpResponse] = ???
 
     override def postMultipart(
       url: String,
       headers: Map[String, String],
       data: Seq[MultipartPart],
-      timeout: Int
+      timeout: FiniteDuration
     ): Try[HttpResponse] = ???
 
-    override def get(url: String, headers: Map[String, String], timeout: Int): Try[HttpResponse] = {
+    override def get(url: String, headers: Map[String, String], timeout: FiniteDuration): Try[HttpResponse] = {
       lastUrl = url
       lastHeaders = headers
       response
     }
 
-    override def postRaw(url: String, headers: Map[String, String], data: String, timeout: Int) = ???
+    override def postRaw(url: String, headers: Map[String, String], data: String, timeout: FiniteDuration) = ???
   }
 
   // Helper to create a dummy response

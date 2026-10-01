@@ -87,18 +87,12 @@ case class MCPSession(
 class StreamableHTTPTransportImpl(
   url: String,
   override val name: String,
-  timeout: Duration = 30.seconds,
+  timeout: FiniteDuration = 30.seconds,
   httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
 ) extends MCPTransportImpl {
   private val logger                       = LoggerFactory.getLogger(getClass)
   private val requestId                    = new AtomicLong(0)
   private var mcpSessionId: Option[String] = None
-
-  // The HTTP client takes a finite timeout; an infinite one becomes the longest it accepts.
-  private val requestTimeout: FiniteDuration = timeout match {
-    case finite: FiniteDuration => finite
-    case _                      => Int.MaxValue.millis
-  }
 
   logger.info(s"StreamableHTTPTransport($name) initialized for URL: $url with timeout: $timeout")
 
@@ -120,7 +114,7 @@ class StreamableHTTPTransportImpl(
           url = url,
           headers = headers,
           body = requestJson,
-          timeout = requestTimeout
+          timeout = timeout
         )
         .map { response =>
           logger.debug(s"StreamableHTTPTransport($name) received HTTP response: status=${response.statusCode}")
@@ -320,7 +314,7 @@ class StreamableHTTPTransportImpl(
           url = url,
           headers = headers,
           body = notificationJson,
-          timeout = requestTimeout
+          timeout = timeout
         )
         .map { response =>
           logger.debug(
@@ -373,7 +367,7 @@ class StreamableHTTPTransportImpl(
       httpClient.delete(
         url = url,
         headers = Map("mcp-session-id" -> sessionId), // lowercase per spec
-        timeout = requestTimeout
+        timeout = timeout
       ) match {
         case Right(_) =>
           logger.debug(s"StreamableHTTPTransport($name) sent session termination request")
@@ -396,19 +390,13 @@ class StreamableHTTPTransportImpl(
 class SSETransportImpl(
   url: String,
   override val name: String,
-  timeout: Duration = 30.seconds,
+  timeout: FiniteDuration = 30.seconds,
   httpClient: Llm4sHttpClient = Llm4sHttpClient.create()
 ) extends MCPTransportImpl {
   private val logger                       = LoggerFactory.getLogger(getClass)
   private val requestId                    = new AtomicLong(0)
   private var mcpSessionId: Option[String] = None
   private val protocolVersion              = "2024-11-05"
-
-  // The HTTP client takes a finite timeout; an infinite one becomes the longest it accepts.
-  private val requestTimeout: FiniteDuration = timeout match {
-    case finite: FiniteDuration => finite
-    case _                      => Int.MaxValue.millis
-  }
 
   logger.info(s"SSETransport($name) initialized for URL: $url with timeout: $timeout")
 
@@ -428,7 +416,7 @@ class SSETransportImpl(
           url = url, // Remove /sse suffix - MCP servers use base URL
           headers = headers,
           body = requestJson,
-          timeout = requestTimeout
+          timeout = timeout
         )
         .map { response =>
           logger.debug(s"SSETransport($name) received HTTP response: status=${response.statusCode}")
@@ -566,7 +554,7 @@ class SSETransportImpl(
           url = url,
           headers = headers,
           body = notificationJson,
-          timeout = requestTimeout
+          timeout = timeout
         )
         .map { response =>
           logger.debug(s"SSETransport($name) received HTTP response for notification: status=${response.statusCode}")
@@ -617,7 +605,7 @@ class SSETransportImpl(
       httpClient.delete(
         url = url,
         headers = Map("mcp-session-id" -> sessionId), // lowercase per spec
-        timeout = requestTimeout
+        timeout = timeout
       ) match {
         case Right(_) =>
           logger.debug(s"SSETransport($name) sent session termination request")
@@ -645,11 +633,11 @@ class SSETransportImpl(
 class StdioTransportImpl(
   command: Seq[String],
   override val name: String,
-  startupTimeoutMs: Int = 10000
+  startupTimeout: FiniteDuration = 10.seconds
 ) extends MCPTransportImpl {
 
   /** Binary-compatible auxiliary constructor matching the pre-timeout 2-param signature. */
-  def this(command: Seq[String], name: String) = this(command, name, 10000)
+  def this(command: Seq[String], name: String) = this(command, name, 10.seconds)
 
   private val logger                                       = LoggerFactory.getLogger(getClass)
   private var process: Option[Process]                     = None
@@ -669,7 +657,7 @@ class StdioTransportImpl(
   // Timeout for server responses (30 seconds)
   private val RESPONSE_TIMEOUT_MS = 30000L
   // Timeout for server startup
-  private val STARTUP_TIMEOUT_MS = startupTimeoutMs
+  private val STARTUP_TIMEOUT_MS = startupTimeout.toMillis
 
   logger.info(s"StdioTransport($name) initialized with command: ${command.mkString(" ")}")
 

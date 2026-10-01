@@ -1,5 +1,7 @@
 package org.llm4s.toolapi.builtin
 
+import scala.concurrent.duration.*
+
 import org.llm4s.toolapi.SafeParameterExtractor
 import org.llm4s.toolapi.builtin.shell._
 import org.scalatest.flatspec.AnyFlatSpec
@@ -141,7 +143,7 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
 
   it should "respect timeout" in {
     assume(!isWindows, "Unix shell commands not available on Windows")
-    val config = ShellConfig(allowedCommands = Seq("sleep"), timeoutMs = 100)
+    val config = ShellConfig(allowedCommands = Seq("sleep"), timeout = 100.millis)
 
     ShellTool
       .createSafe(config)
@@ -190,7 +192,7 @@ class ShellToolsSpec extends AnyFlatSpec with Matchers {
     assume(!isWindows, "Unix shell commands not available on Windows")
     // Use seq which generates output immediately, and a longer timeout to ensure
     // truncation happens before timeout (avoiding race condition on slow CI)
-    val config = ShellConfig(allowedCommands = Seq("seq"), maxOutputSize = 100, timeoutMs = 5000)
+    val config = ShellConfig(allowedCommands = Seq("seq"), maxOutputSize = 100, timeout = 5000.millis)
 
     ShellTool
       .createSafe(config)

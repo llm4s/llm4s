@@ -1,5 +1,7 @@
 package org.llm4s.shared
 
+import scala.concurrent.duration.*
+
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -20,9 +22,11 @@ class WorkspaceSandboxConfigSpec extends AnyFlatSpec with Matchers {
     WorkspaceSandboxConfig.validate(bad) shouldBe Left("limits.maxFileSize must be positive")
   }
 
-  it should "reject invalid defaultCommandTimeoutSeconds" in {
-    val bad = WorkspaceSandboxConfig.Permissive.copy(defaultCommandTimeoutSeconds = 0)
-    WorkspaceSandboxConfig.validate(bad) shouldBe Left("defaultCommandTimeoutSeconds must be positive")
+  it should "reject invalid defaultCommandTimeout" in {
+    val bad = WorkspaceSandboxConfig.Permissive.copy(defaultCommandTimeout = Duration.Zero)
+    WorkspaceSandboxConfig.validate(bad) shouldBe Left("defaultCommandTimeout must be positive")
+    val tooLong = WorkspaceSandboxConfig.Permissive.copy(defaultCommandTimeout = 61.minutes)
+    WorkspaceSandboxConfig.validate(tooLong) shouldBe Left("defaultCommandTimeout must be at most 1 hour")
   }
 
   it should "have LockedDown with shellAllowed=false" in {

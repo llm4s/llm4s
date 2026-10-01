@@ -1,5 +1,7 @@
 package org.llm4s.workspace
 
+import scala.concurrent.duration.FiniteDuration
+
 import org.java_websocket.client.WebSocketClient
 import org.java_websocket.handshake.ServerHandshake
 import org.llm4s.http.Llm4sHttpClient
@@ -396,8 +398,9 @@ class ContainerisedWorkspace(
   private def responseTimeoutSeconds(command: WorkspaceAgentCommand): Long =
     command match {
       case exec: ExecuteCommandCommand =>
-        val commandTimeoutSec = exec.timeout.getOrElse(DefaultCommandTimeoutSec)
-        (commandTimeoutSec + ResponseTimeoutBufferSec).toLong
+        val commandTimeoutSec =
+          exec.timeout.map(WireDurations.toWholeSeconds).getOrElse(DefaultCommandTimeoutSec.toLong)
+        commandTimeoutSec + ResponseTimeoutBufferSec
       case _ =>
         (DefaultCommandTimeoutSec + ResponseTimeoutBufferSec).toLong
     }
@@ -486,7 +489,7 @@ class ContainerisedWorkspace(
   override def executeCommand(
     command: String,
     workingDirectory: Option[String] = None,
-    timeout: Option[Int] = None,
+    timeout: Option[FiniteDuration] = None,
     environment: Option[Map[String, String]] = None
   ): ExecuteCommandResponse = {
     val cmd = ExecuteCommandCommand(
@@ -513,7 +516,7 @@ class ContainerisedWorkspace(
   def executeCommandWithStreaming(
     command: String,
     workingDirectory: Option[String] = None,
-    timeout: Option[Int] = None,
+    timeout: Option[FiniteDuration] = None,
     environment: Option[Map[String, String]] = None,
     outputHandler: StreamingOutputMessage => Unit = _ => ()
   ): ExecuteCommandResponse = {

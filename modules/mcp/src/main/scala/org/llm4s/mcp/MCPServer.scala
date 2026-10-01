@@ -20,6 +20,7 @@ import java.util.concurrent.{
 }
 
 import scala.collection.concurrent.TrieMap
+import scala.concurrent.duration.*
 import scala.util.{ Failure, Success, Try, Using }
 
 /**
@@ -154,17 +155,23 @@ class MCPServer(
       host == "0:0:0:0:0:0:0:1" ||
       host.equalsIgnoreCase("localhost")
 
-  def stop(delay: Int = 0): Unit = synchronized {
+  /**
+   * Stops the server.
+   *
+   * @param delay the longest to wait for in-flight exchanges to finish before closing; the
+   *              underlying `HttpServer` counts it in whole seconds, so it is rounded up
+   */
+  def stop(delay: FiniteDuration = Duration.Zero): Unit = synchronized {
     server.foreach { s =>
       logger.info("Stopping MCPServer...")
       // Close all open SSE connections gracefully
       sseConnections.values().forEach(conn => Try(conn.queue.put(None)))
       sseConnections.clear()
-      s.stop(delay)
+      s.stop(math.min(math.ceil(delay.toMillis / 1000.0), Int.MaxValue.toDouble).toInt)
       if (executorService != null) {
         executorService.shutdown()
         Try {
-          if (!executorService.awaitTermination((delay + 5).toLong, TimeUnit.SECONDS)) {
+          if (!executorService.awaitTermination(delay.toMillis + 5000L, TimeUnit.MILLISECONDS)) {
             executorService.shutdownNow()
           }
         }.recover { case _: InterruptedException => executorService.shutdownNow() }

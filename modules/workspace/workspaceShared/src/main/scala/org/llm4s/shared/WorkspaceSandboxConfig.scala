@@ -1,6 +1,9 @@
 package org.llm4s.shared
 
+import org.llm4s.shared.WireDurations.wholeSecondsRW
 import upickle.default.{ ReadWriter, macroRW }
+
+import scala.concurrent.duration.*
 
 /**
  * Explicit sandbox configuration for workspace operations.
@@ -15,7 +18,7 @@ import upickle.default.{ ReadWriter, macroRW }
  * @param limits               Resource limits (file size, directory entries, search results, output size)
  * @param excludePatterns      Glob patterns for paths to exclude from explore/search (e.g. node_modules, .git)
  * @param shellAllowed         Whether `executeCommand` is allowed (false = read-only file ops only)
- * @param defaultCommandTimeoutSeconds Default timeout for shell commands
+ * @param defaultCommandTimeout Default timeout for shell commands (more than zero, at most an hour)
  * @param readOnlyPaths        Paths under workspace root that are read-only (writes denied)
  * @param allowedPaths         If non-empty, only these paths are accessible; if empty, whole workspace
  * @param networkAllowed       Documentation: whether network access from commands is assumed (Phase 2: enforce)
@@ -28,7 +31,7 @@ final case class WorkspaceSandboxConfig(
   limits: WorkspaceLimits = WorkspaceSandboxConfig.DefaultLimits,
   excludePatterns: List[String] = WorkspaceSandboxConfig.DefaultExclusions,
   shellAllowed: Boolean = true,
-  defaultCommandTimeoutSeconds: Int = 30,
+  defaultCommandTimeout: FiniteDuration = 30.seconds,
   readOnlyPaths: List[String] = Nil,
   allowedPaths: List[String] = Nil,
   networkAllowed: Boolean = false,
@@ -105,7 +108,7 @@ object WorkspaceSandboxConfig {
     limits = DefaultLimits,
     excludePatterns = DefaultExclusions,
     shellAllowed = false,
-    defaultCommandTimeoutSeconds = 10,
+    defaultCommandTimeout = 10.seconds,
     readOnlyPaths = Nil,
     allowedPaths = Nil,
     networkAllowed = false,
@@ -148,8 +151,8 @@ object WorkspaceSandboxConfig {
       _ <- check(config.limits.maxDirectoryEntries > 0, "limits.maxDirectoryEntries must be positive")
       _ <- check(config.limits.maxSearchResults > 0, "limits.maxSearchResults must be positive")
       _ <- check(config.limits.maxOutputSize > 0, "limits.maxOutputSize must be positive")
-      _ <- check(config.defaultCommandTimeoutSeconds > 0, "defaultCommandTimeoutSeconds must be positive")
-      _ <- check(config.defaultCommandTimeoutSeconds <= 3600, "defaultCommandTimeoutSeconds must be <= 3600")
+      _ <- check(config.defaultCommandTimeout > Duration.Zero, "defaultCommandTimeout must be positive")
+      _ <- check(config.defaultCommandTimeout <= 1.hour, "defaultCommandTimeout must be at most 1 hour")
     } yield ()
   }
 }

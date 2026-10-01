@@ -44,12 +44,12 @@ object DuckDuckGoSearchResult {
 /**
  * Configuration for DuckDuckGo search tool.
  *
- * @param timeoutMs Request timeout in milliseconds.
+ * @param timeout Request timeout.
  * @param maxResults Maximum number of related topics to return.
  * @param safeSearch Whether to enable safe search.
  */
 case class DuckDuckGoSearchConfig(
-  timeoutMs: Int = 10000,
+  timeout: FiniteDuration = 10.seconds,
   maxResults: Int = 10,
   safeSearch: Boolean = true
 )
@@ -136,7 +136,7 @@ object DuckDuckGoSearchTool {
    * val searchTool = DuckDuckGoSearchTool.create(
    *   toolConfig = toolConfig,
    *   config = DuckDuckGoSearchConfig(
-   *     timeoutMs = 5000,
+   *     timeout = 5.seconds,
    *     maxResults = 5,
    *     safeSearch = true
    *   )
@@ -191,10 +191,10 @@ object DuckDuckGoSearchTool {
             "User-Agent" -> "llm4s-duckduckgo-search/1.0"
           ),
           params = params,
-          timeout = config.timeoutMs.millis
+          timeout = config.timeout
         )
         .left
-        .map(describeTransportFailure(_, config.timeoutMs))
+        .map(describeTransportFailure(_, config.timeout))
 
     responseEither.flatMap { response =>
       if (response.statusCode == 200) {

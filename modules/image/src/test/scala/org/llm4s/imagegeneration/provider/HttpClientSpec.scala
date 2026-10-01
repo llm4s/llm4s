@@ -73,16 +73,16 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
       val url     = "https://api.example.com/generate"
       val headers = Map("Authorization" -> "Bearer token", "Content-Type" -> "application/json")
       val data    = """{"prompt": "test"}"""
-      val timeout = 30000
+      val timeout = 30000.millis
 
       (mockLlm4s.post _)
-        .when(url, headers, data, timeout.millis)
+        .when(url, headers, data, timeout)
         .returns(Right(successResponse(200, """{"result":"success"}""")))
 
       val result = client.post(url, headers, data, timeout)
 
       result shouldBe a[Success[_]]
-      (mockLlm4s.post _).verify(url, headers, data, timeout.millis).once()
+      (mockLlm4s.post _).verify(url, headers, data, timeout).once()
     }
 
     "return Success with HttpResponse on successful request" in {
@@ -92,7 +92,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
       val expectedResponse = successResponse(200, """{"status":"ok"}""")
       (mockLlm4s.post _).when(*, *, *, *).returns(Right(expectedResponse))
 
-      val result = client.post("https://api.example.com", Map.empty, "{}", 10000)
+      val result = client.post("https://api.example.com", Map.empty, "{}", 10000.millis)
 
       result shouldBe Success(expectedResponse)
     }
@@ -104,7 +104,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
       val expectedResponse = successResponse(500, """{"error":"server error"}""")
       (mockLlm4s.post _).when(*, *, *, *).returns(Right(expectedResponse))
 
-      val result = client.post("https://api.example.com", Map.empty, "{}", 10000)
+      val result = client.post("https://api.example.com", Map.empty, "{}", 10000.millis)
 
       // SimpleHttpClient doesn't validate status codes, just wraps in Try
       result shouldBe Success(expectedResponse)
@@ -118,7 +118,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
         .when(*, *, *, *)
         .returns(Left(transportFailure(new java.net.http.HttpTimeoutException("Request timed out"))))
 
-      val result = client.post("https://api.example.com", Map.empty, "{}", 10000)
+      val result = client.post("https://api.example.com", Map.empty, "{}", 10000.millis)
 
       result match {
         case Failure(e) => e shouldBe a[java.net.http.HttpTimeoutException]
@@ -134,7 +134,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
         .when(*, *, *, *)
         .returns(Left(transportFailure(new java.net.ConnectException("Connection refused"))))
 
-      val result = client.post("https://api.example.com", Map.empty, "{}", 10000)
+      val result = client.post("https://api.example.com", Map.empty, "{}", 10000.millis)
 
       result match {
         case Failure(e) => e shouldBe a[java.net.ConnectException]
@@ -150,7 +150,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
         .when(*, *, *, *)
         .returns(Left(transportFailure(new java.net.UnknownHostException("unknown.host"))))
 
-      val result = client.post("https://unknown.host", Map.empty, "{}", 10000)
+      val result = client.post("https://unknown.host", Map.empty, "{}", 10000.millis)
 
       result match {
         case Failure(e) => e shouldBe a[java.net.UnknownHostException]
@@ -164,7 +164,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
 
       (mockLlm4s.post _).when(*, *, *, *).returns(Right(successResponse()))
 
-      val result = client.post("https://api.example.com", Map.empty, "{}", 10000)
+      val result = client.post("https://api.example.com", Map.empty, "{}", 10000.millis)
 
       result shouldBe a[Success[_]]
     }
@@ -175,7 +175,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
 
       (mockLlm4s.post _).when(*, *, *, *).returns(Right(successResponse()))
 
-      val result = client.post("https://api.example.com", Map.empty, "", 10000)
+      val result = client.post("https://api.example.com", Map.empty, "", 10000.millis)
 
       result shouldBe a[Success[_]]
     }
@@ -190,16 +190,16 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
       val url     = "https://api.example.com/upload"
       val headers = Map("Content-Type" -> "application/octet-stream")
       val data    = "test data".getBytes
-      val timeout = 30000
+      val timeout = 30000.millis
 
       (mockLlm4s.postBytes _)
-        .when(url, headers, data, timeout.millis)
+        .when(url, headers, data, timeout)
         .returns(Right(successResponse(201, """{"uploaded":true}""")))
 
       val result = client.postBytes(url, headers, data, timeout)
 
       result shouldBe a[Success[_]]
-      (mockLlm4s.postBytes _).verify(url, headers, data, timeout.millis).once()
+      (mockLlm4s.postBytes _).verify(url, headers, data, timeout).once()
     }
 
     "return Success with HttpResponse on successful request" in {
@@ -209,7 +209,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
       val expectedResponse = successResponse(200, """{"bytes_received":100}""")
       (mockLlm4s.postBytes _).when(*, *, *, *).returns(Right(expectedResponse))
 
-      val result = client.postBytes("https://api.example.com", Map.empty, Array[Byte](1, 2, 3), 10000)
+      val result = client.postBytes("https://api.example.com", Map.empty, Array[Byte](1, 2, 3), 10000.millis)
 
       result shouldBe Success(expectedResponse)
     }
@@ -220,7 +220,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
 
       (mockLlm4s.postBytes _).when(*, *, *, *).returns(Right(successResponse()))
 
-      val result = client.postBytes("https://api.example.com", Map.empty, Array.empty[Byte], 10000)
+      val result = client.postBytes("https://api.example.com", Map.empty, Array.empty[Byte], 10000.millis)
 
       result shouldBe a[Success[_]]
     }
@@ -232,7 +232,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
       val largeData = new Array[Byte](1024 * 1024) // 1MB
       (mockLlm4s.postBytes _).when(*, *, *, *).returns(Right(successResponse()))
 
-      val result = client.postBytes("https://api.example.com", Map.empty, largeData, 60000)
+      val result = client.postBytes("https://api.example.com", Map.empty, largeData, 60000.millis)
 
       result shouldBe a[Success[_]]
     }
@@ -243,7 +243,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
 
       (mockLlm4s.postBytes _).when(*, *, *, *).returns(Left(transportFailure(new java.io.IOException("Upload failed"))))
 
-      val result = client.postBytes("https://api.example.com", Map.empty, Array[Byte](1, 2, 3), 10000)
+      val result = client.postBytes("https://api.example.com", Map.empty, Array[Byte](1, 2, 3), 10000.millis)
 
       result match {
         case Failure(e) => e shouldBe a[java.io.IOException]
@@ -265,16 +265,16 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
         MultipartPart.TextField("prompt", "test prompt"),
         MultipartPart.FilePart("image", tempFile, "test.txt")
       )
-      val timeout = 30000
+      val timeout = 30000.millis
 
       (mockLlm4s.postMultipart _)
-        .when(url, headers, parts, timeout.millis)
+        .when(url, headers, parts, timeout)
         .returns(Right(successResponse(200, """{"uploaded":true}""")))
 
       val result = client.postMultipart(url, headers, parts, timeout)
 
       result shouldBe a[Success[_]]
-      (mockLlm4s.postMultipart _).verify(url, headers, parts, timeout.millis).once()
+      (mockLlm4s.postMultipart _).verify(url, headers, parts, timeout).once()
     }
 
     "return Success with HttpResponse on successful request" in {
@@ -285,7 +285,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
       (mockLlm4s.postMultipart _).when(*, *, *, *).returns(Right(expectedResponse))
 
       val parts  = Seq(MultipartPart.TextField("key", "value"))
-      val result = client.postMultipart("https://api.example.com", Map.empty, parts, 10000)
+      val result = client.postMultipart("https://api.example.com", Map.empty, parts, 10000.millis)
 
       result shouldBe Success(expectedResponse)
     }
@@ -296,7 +296,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
 
       (mockLlm4s.postMultipart _).when(*, *, *, *).returns(Right(successResponse()))
 
-      val result = client.postMultipart("https://api.example.com", Map.empty, Seq.empty, 10000)
+      val result = client.postMultipart("https://api.example.com", Map.empty, Seq.empty, 10000.millis)
 
       result shouldBe a[Success[_]]
     }
@@ -312,7 +312,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
         MultipartPart.TextField("field2", "value2"),
         MultipartPart.TextField("field3", "value3")
       )
-      val result = client.postMultipart("https://api.example.com", Map.empty, parts, 10000)
+      val result = client.postMultipart("https://api.example.com", Map.empty, parts, 10000.millis)
 
       result shouldBe a[Success[_]]
     }
@@ -329,7 +329,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
         MultipartPart.FilePart("file", tempFile, "input.txt"),
         MultipartPart.TextField("size", "1024x1024")
       )
-      val result = client.postMultipart("https://api.example.com", Map.empty, parts, 10000)
+      val result = client.postMultipart("https://api.example.com", Map.empty, parts, 10000.millis)
 
       result shouldBe a[Success[_]]
     }
@@ -343,7 +343,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
         .returns(Left(transportFailure(new RuntimeException("Multipart upload failed"))))
 
       val parts  = Seq(MultipartPart.TextField("key", "value"))
-      val result = client.postMultipart("https://api.example.com", Map.empty, parts, 10000)
+      val result = client.postMultipart("https://api.example.com", Map.empty, parts, 10000.millis)
 
       result match {
         case Failure(e) => e.getMessage should include("Multipart upload failed")
@@ -360,16 +360,16 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
 
       val url     = "https://api.example.com/status"
       val headers = Map("Authorization" -> "Bearer token")
-      val timeout = 15000
+      val timeout = 15000.millis
 
       (mockLlm4s.get _)
-        .when(url, headers, *, timeout.millis)
+        .when(url, headers, *, timeout)
         .returns(Right(successResponse(200, """{"status":"running"}""")))
 
       val result = client.get(url, headers, timeout)
 
       result shouldBe a[Success[_]]
-      (mockLlm4s.get _).verify(url, headers, *, timeout.millis).once()
+      (mockLlm4s.get _).verify(url, headers, *, timeout).once()
     }
 
     "return Success with HttpResponse on successful request" in {
@@ -379,7 +379,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
       val expectedResponse = successResponse(200, """{"data":"response"}""")
       (mockLlm4s.get _).when(*, *, *, *).returns(Right(expectedResponse))
 
-      val result = client.get("https://api.example.com", Map.empty, 10000)
+      val result = client.get("https://api.example.com", Map.empty, 10000.millis)
 
       result shouldBe Success(expectedResponse)
     }
@@ -390,7 +390,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
 
       (mockLlm4s.get _).when(*, *, *, *).returns(Right(successResponse()))
 
-      val result = client.get("https://api.example.com", Map.empty, 10000)
+      val result = client.get("https://api.example.com", Map.empty, 10000.millis)
 
       result shouldBe a[Success[_]]
     }
@@ -403,7 +403,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
         .when(*, *, *, *)
         .returns(Left(transportFailure(new java.net.SocketTimeoutException("Read timed out"))))
 
-      val result = client.get("https://api.example.com", Map.empty, 10000)
+      val result = client.get("https://api.example.com", Map.empty, 10000.millis)
 
       result match {
         case Failure(e) => e shouldBe a[java.net.SocketTimeoutException]
@@ -420,7 +420,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
 
       (mockLlm4s.post _).when(*, *, *, *).returns(Left(transportFailure(new RuntimeException("Unexpected error"))))
 
-      val result = client.post("https://api.example.com", Map.empty, "{}", 10000)
+      val result = client.post("https://api.example.com", Map.empty, "{}", 10000.millis)
 
       result match {
         case Failure(e) =>
@@ -438,7 +438,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
 
       // Should not throw, should return Failure
       noException should be thrownBy {
-        client.get("https://api.example.com", Map.empty, 10000)
+        client.get("https://api.example.com", Map.empty, 10000.millis)
       }
     }
 
@@ -449,7 +449,7 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
       val originalException = new java.io.IOException("connection reset")
       (mockLlm4s.postBytes _).when(*, *, *, *).returns(Left(transportFailure(originalException)))
 
-      val result = client.postBytes("https://api.example.com", Map.empty, Array.empty, 10000)
+      val result = client.postBytes("https://api.example.com", Map.empty, Array.empty, 10000.millis)
 
       result match {
         case Failure(e) => e shouldBe originalException
@@ -469,10 +469,10 @@ class HttpClientSpec extends AnyWordSpec with Matchers with MockFactory {
       (mockLlm4s.postBytes _).when(*, *, *, *).returns(Right(successResponse(202, """{"accepted":true}""")))
       (mockLlm4s.postMultipart _).when(*, *, *, *).returns(Right(successResponse(200, """{"uploaded":true}""")))
 
-      val get           = client.get("https://api.example.com", Map.empty, 10000)
-      val post          = client.post("https://api.example.com", Map.empty, "{}", 10000)
-      val postBytes     = client.postBytes("https://api.example.com", Map.empty, Array[Byte](1), 10000)
-      val postMultipart = client.postMultipart("https://api.example.com", Map.empty, Seq.empty, 10000)
+      val get           = client.get("https://api.example.com", Map.empty, 10000.millis)
+      val post          = client.post("https://api.example.com", Map.empty, "{}", 10000.millis)
+      val postBytes     = client.postBytes("https://api.example.com", Map.empty, Array[Byte](1), 10000.millis)
+      val postMultipart = client.postMultipart("https://api.example.com", Map.empty, Seq.empty, 10000.millis)
 
       get shouldBe a[Success[_]]
       post shouldBe a[Success[_]]

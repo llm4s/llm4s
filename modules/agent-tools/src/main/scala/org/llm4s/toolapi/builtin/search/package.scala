@@ -138,14 +138,17 @@ package object search {
    * The user-facing message for a request the HTTP client could not complete. The client has
    * already restored the thread's interrupt flag for an interruption.
    */
-  private[search] def describeTransportFailure(error: org.llm4s.error.LLMError, timeoutMs: Int): String = {
+  private[search] def describeTransportFailure(
+    error: org.llm4s.error.LLMError,
+    timeout: scala.concurrent.duration.FiniteDuration
+  ): String = {
     def causedBy[T <: Throwable](cause: Option[Throwable])(using ct: scala.reflect.ClassTag[T]): Boolean =
       cause.exists(c => Iterator.iterate(c)(_.getCause).takeWhile(_ != null).exists(ct.runtimeClass.isInstance))
     error match {
       case _: org.llm4s.error.ExecutionError =>
         "Search request was cancelled or interrupted."
       case _: org.llm4s.error.TimeoutError =>
-        s"Search request timed out after ${timeoutMs}ms. Please try again with a simpler query."
+        s"Search request timed out after ${timeout.toMillis}ms. Please try again with a simpler query."
       case e: org.llm4s.error.NetworkError if causedBy[java.net.UnknownHostException](e.cause) =>
         "Unable to reach search service. Please check network connectivity."
       case e: org.llm4s.error.NetworkError if causedBy[java.net.ConnectException](e.cause) =>

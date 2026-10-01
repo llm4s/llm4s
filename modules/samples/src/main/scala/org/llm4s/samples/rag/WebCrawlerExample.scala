@@ -2,6 +2,7 @@ package org.llm4s.samples.rag
 
 import org.llm4s.rag.loader._
 import org.slf4j.LoggerFactory
+import scala.concurrent.duration.*
 import scala.util.chaining._
 
 /**
@@ -39,13 +40,13 @@ object WebCrawlerExample extends App {
   logger.info("2. Configuring crawl behavior...")
 
   val configuredCrawler = WebCrawlerLoader("https://docs.example.com")
-    .withMaxDepth(3)    // Follow links up to 3 levels deep
-    .withMaxPages(500)  // Crawl at most 500 pages
-    .withDelay(1000)    // Wait 1 second between requests
-    .withTimeout(30000) // 30 second timeout per request
+    .withMaxDepth(3)         // Follow links up to 3 levels deep
+    .withMaxPages(500)       // Crawl at most 500 pages
+    .withDelay(1.second)     // Wait 1 second between requests
+    .withTimeout(30.seconds) // 30 second timeout per request
     .tap(c => logger.info("   Max depth: {}", c.config.maxDepth))
     .tap(c => logger.info("   Max pages: {}", c.config.maxPages))
-    .tap(c => logger.info("   Delay: {}ms", c.config.delayMs))
+    .tap(c => logger.info("   Delay: {}", c.config.delay))
 
   // ========== 3. URL Pattern Filtering ==========
   logger.info("3. Using URL patterns to control scope...")
@@ -93,7 +94,7 @@ object WebCrawlerExample extends App {
   val politeLoader = WebCrawlerLoader
     .forDocs("https://docs.example.com")
     .tap(l =>
-      logger.info("   forDocs: depth={}, pages={}, delay={}ms", l.config.maxDepth, l.config.maxPages, l.config.delayMs)
+      logger.info("   forDocs: depth={}, pages={}, delay={}", l.config.maxDepth, l.config.maxPages, l.config.delay)
     )
 
   // Single page only (no link following)

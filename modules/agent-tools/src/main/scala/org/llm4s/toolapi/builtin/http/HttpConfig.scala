@@ -2,6 +2,8 @@ package org.llm4s.toolapi.builtin.http
 
 import org.llm4s.core.safety.NetworkSecurity
 
+import scala.concurrent.duration.*
+
 /**
  * Configuration for HTTP tool.
  *
@@ -16,7 +18,7 @@ import org.llm4s.core.safety.NetworkSecurity
  * @param blockedDomains List of domains that are always blocked.
  * @param blockInternalIPs Whether to block requests to internal/private IP ranges (default: true).
  * @param maxResponseSize Maximum response size in bytes.
- * @param timeoutMs Request timeout in milliseconds.
+ * @param timeout Request timeout, applied to both connect and read.
  * @param followRedirects Whether to follow HTTP redirects.  Defaults to `false`; when
  *                        `true` each redirect hop is re-validated against the SSRF filter
  *                        before the next request is issued (open-redirect bypass prevention).
@@ -29,8 +31,8 @@ case class HttpConfig(
   blockedDomains: Seq[String] = HttpConfig.DefaultBlockedDomains,
   blockInternalIPs: Boolean = true,
   maxResponseSize: Long = 10 * 1024 * 1024, // 10 MB
-  timeoutMs: Int = 30000,                   // 30 seconds
-  followRedirects: Boolean = false,         // Secure default: redirects are followed only when explicitly opted-in.
+  timeout: FiniteDuration = 30.seconds,
+  followRedirects: Boolean = false, // Secure default: redirects are followed only when explicitly opted-in.
   maxRedirects: Int = 5,
   allowedMethods: Seq[String] = Seq("GET", "HEAD"), // Safe default: read-only
   userAgent: String = "llm4s-http-tool/1.0"

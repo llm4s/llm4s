@@ -35,7 +35,7 @@ package org.llm4s.toolapi.builtin
  * // Custom restricted shell
  * val customShell = ShellTool.create(ShellConfig(
  *   allowedCommands = Seq("git", "npm"),
- *   timeoutMs = 60000
+ *   timeout = 60.seconds
  * ))
  *
  * val tools = new ToolRegistry(Seq(devShell))
