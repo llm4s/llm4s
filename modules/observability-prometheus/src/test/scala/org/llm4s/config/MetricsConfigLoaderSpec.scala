@@ -1,7 +1,6 @@
 package org.llm4s.config
 
 import org.llm4s.metrics.{ MetricsCollector, PrometheusMetrics }
-import org.llm4s.testutil.ReferenceConfig
 import org.scalatest.funsuite.AnyFunSuite
 import pureconfig.ConfigSource
 import com.typesafe.config.ConfigFactory

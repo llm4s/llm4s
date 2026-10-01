@@ -1,16 +1,14 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.config.{ CredentialsRoundTrip, GeminiConfigKeys }
+import org.llm4s.config.GeminiConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.http.{ HttpResponse, Llm4sHttpClient, StreamingHttpResponse }
-import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.ProviderExchangeLogging
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, VertexAIConfig }
-import org.llm4s.llmconnect.model.{ Conversation, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
-import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
-import org.llm4s.testutil.FixtureChatConfig
-import org.llm4s.testutil.LocalProviderTestServer.{ sendSseResponse, withServer }
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.testkit.LocalProviderTestServer.{ sendSseResponse, withServer }
+import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalamock.scalatest.MockFactory
 import org.scalatest.matchers.should.Matchers
@@ -18,7 +16,6 @@ import org.scalatest.wordspec.AnyWordSpec
 
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
-import scala.collection.mutable.ListBuffer
 
 /**
  * `llm4s-gemini` registers itself, and what it registers works.
@@ -28,9 +25,9 @@ import scala.collection.mutable.ListBuffer
  * depending on it is enough - the services entry is found, both descriptors arrive, and
  * the `google` and `vertex` spellings still resolve.
  */
-class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory:
+class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory with ProviderModuleChecks:
 
-  private val registryService         = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
+  private val registryService         = ProviderModuleChecks.defaultModelRegistry
   private given ModelRegistryService  = registryService
   private given ContextWindowResolver = ContextWindowResolver(registryService)
 
@@ -74,12 +71,8 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory:
 
   "the llm4s-gemini services entry" should {
 
-    "be discovered, contributing gemini and vertexai" in {
-      val registry = ProviderRegistry.discover()
-
-      registry.get(ProviderId("gemini")) shouldBe Right(GeminiProvider)
-      registry.get(ProviderId("vertexai")) shouldBe Right(VertexAIProvider)
-      registry.report.modules.map(_.moduleClass) should contain(classOf[Llm4sGeminiModule].getName)
+    "be discovered, the only supplier of gemini and vertexai, and registrable explicitly" in {
+      assertModule(new Llm4sGeminiModule)
     }
 
     "keep the historical provider spellings" in {
@@ -88,26 +81,7 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory:
     }
 
     "contribute no embedding provider" in {
-      ProviderRegistry.default.findEmbedding(ProviderId("gemini")) shouldBe None
-      ProviderRegistry.default.findEmbedding(ProviderId("vertexai")) shouldBe None
-    }
-
-    "be the only module that supplies gemini and vertexai" in {
-      // Core held these in `BuiltinProviders` until #1132 deleted it; nothing but this
-      // module may supply them now.
-      val modules = ProviderRegistry.default.report.modules
-      Seq("gemini", "vertexai").foreach { id =>
-        modules.filter(_.providerIds.contains(id)).map(_.moduleClass) shouldBe Seq(classOf[Llm4sGeminiModule].getName)
-      }
-    }
-
-    "be registrable explicitly where discovery cannot run" in {
-      val registry = ProviderRegistry.ofModules(new Llm4sGeminiModule)
-
-      registry.get(ProviderId("gemini")) shouldBe Right(GeminiProvider)
-      registry.get(ProviderId("vertexai")) shouldBe Right(VertexAIProvider)
-      registry.canonicalId("google") shouldBe ProviderId("gemini")
-      registry.canonicalId("vertex") shouldBe ProviderId("vertexai")
+      new Llm4sGeminiModule().embeddingProviders shouldBe empty
     }
   }
 
@@ -123,27 +97,12 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory:
 
     "build their own client from the config they produced" in {
       expectations.foreach { (descriptor, _, clientClass) =>
-        val result =
-          descriptor.buildConfig("test-instance", section(descriptor)).flatMap { config =>
-            descriptor.buildClient(config, LlmClientOptions.default)
-          }
-
-        result.map(_.getClass.getSimpleName) shouldBe Right(clientClass)
+        assertBuildsClient(descriptor, section(descriptor)).getClass.getSimpleName shouldBe clientClass
       }
     }
 
     "refuse a config belonging to another provider" in {
-      val foreign = FixtureChatConfig("k", "fixture-model")
-
-      expectations.foreach { (descriptor, _, _) =>
-        descriptor.buildClient(foreign, LlmClientOptions.default) match
-          case Left(error) =>
-            error.message should include(
-              s"Invalid config type FixtureChatConfig for provider ${descriptor.id.asString}"
-            )
-          case Right(client) =>
-            fail(s"${descriptor.id.asString} accepted a FixtureChatConfig and built $client")
-      }
+      expectations.foreach((descriptor, _, _) => assertRefusesForeignConfig(descriptor))
     }
 
     "declare a model lister for Gemini only" in {
@@ -156,16 +115,9 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory:
 
     "actually stream, not silently fall back to complete()" in {
       withServer("/")(exchange => sendSseResponse(exchange, geminiSseBody)) { baseUrl =>
-        val client = GeminiProvider
-          .buildConfig("test-instance", section(GeminiProvider).withBaseUrl(Some(BaseUrl(baseUrl))))
-          .flatMap(config => GeminiProvider.buildClient(config, LlmClientOptions.default))
-          .getOrElse(fail("failed to build a client for the streaming proof"))
-
-        val chunks = ListBuffer.empty[StreamedChunk]
-        val result = client.streamComplete(Conversation(Seq(UserMessage("Hello"))), onChunk = chunks += _)
-
-        result.isRight shouldBe true
-        chunks should not be empty
+        assertStreams(
+          assertBuildsClient(GeminiProvider, section(GeminiProvider).withBaseUrl(Some(BaseUrl(baseUrl))))
+        )
       }
     }
   }
@@ -179,12 +131,7 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory:
         case Right(c: VertexAIConfig) => c
         case other                    => fail(s"expected a VertexAIConfig, got $other")
 
-      val client = vertexClientWithStubbedAuth(config)
-      val chunks = ListBuffer.empty[StreamedChunk]
-      val result = client.streamComplete(Conversation(Seq(UserMessage("Hello"))), onChunk = chunks += _)
-
-      result.isRight shouldBe true
-      chunks should not be empty
+      assertStreams(vertexClientWithStubbedAuth(config))
     }
   }
 
@@ -194,10 +141,7 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory:
 
     "bind GOOGLE_API_KEY and GEMINI_API_KEY to llm4s.credentials.gemini.apiKey" in {
       GeminiProvider.configSpec.apiKeyEnv shouldBe Seq(GeminiConfigKeys.GOOGLE_API_KEY, GeminiConfigKeys.GEMINI_API_KEY)
-      CredentialsRoundTrip.chatBindings(GeminiProvider) shouldBe Map(
-        "GOOGLE_API_KEY" -> Right(Some("key-from-GOOGLE_API_KEY")),
-        "GEMINI_API_KEY" -> Right(Some("key-from-GEMINI_API_KEY"))
-      )
+      assertCredentialBindings(GeminiProvider)
     }
 
     "prefer GOOGLE_API_KEY when both are set, as Google's SDKs do" in {

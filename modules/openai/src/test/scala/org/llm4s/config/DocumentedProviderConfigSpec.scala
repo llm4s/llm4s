@@ -4,7 +4,6 @@ import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.llmconnect.provider.OpenAIProvider
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.testutil.ReferenceConfig
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import pureconfig.ConfigSource

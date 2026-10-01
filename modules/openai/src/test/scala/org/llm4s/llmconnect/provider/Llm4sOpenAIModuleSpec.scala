@@ -1,15 +1,13 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.config.CredentialsRoundTrip
 import org.llm4s.config.OpenAIConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIConfig }
 import org.llm4s.llmconnect.contract.LLMClientContractBehaviors
 import org.llm4s.llmconnect.provider.OpenAISdkFixtures.{ chunk, stream, transport }
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
-import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
-import org.llm4s.testutil.FixtureChatConfig
+import org.llm4s.model.ModelRegistryService
+import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -21,9 +19,9 @@ import org.scalatest.wordspec.AnyWordSpec
  * with the providers (#1132), plus the part that only a carved module has to prove: that
  * depending on it is enough - the services entry is found and the descriptors arrive.
  */
-class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientContractBehaviors:
+class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientContractBehaviors with ProviderModuleChecks:
 
-  private val registryService         = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
+  private val registryService         = ProviderModuleChecks.defaultModelRegistry
   private given ModelRegistryService  = registryService
   private given ContextWindowResolver = ContextWindowResolver(registryService)
 
@@ -33,8 +31,6 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     (RequestyProvider, "OpenAIConfig", "OpenAIClient"),
     (AzureProvider, "AzureConfig", "OpenAIClient")
   )
-
-  private val chatIds = Seq("openai", "azure", "requesty")
 
   /** A section carrying every field any of the three providers asks for. */
   private def section(descriptor: ProviderDescriptor): NamedProviderConfig =
@@ -52,11 +48,14 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
 
   "the llm4s-openai services entry" should {
 
-    "be discovered, contributing openai, azure and requesty" in {
-      val registry = ProviderRegistry.discover()
+    "be discovered, the only supplier of openai, azure and requesty, and registrable explicitly" in {
+      assertModule(new Llm4sOpenAIModule)
+    }
 
-      expectations.foreach((descriptor, _, _) => registry.get(descriptor.id) shouldBe Right(descriptor))
-      registry.report.modules.map(_.moduleClass) should contain(classOf[Llm4sOpenAIModule].getName)
+    "contribute the three chat providers and the OpenAI embedding provider" in {
+      val module = new Llm4sOpenAIModule
+      module.chatProviders should contain theSameElementsAs expectations.map(_._1)
+      module.embeddingProviders shouldBe Seq(OpenAIEmbeddingProvider)
     }
 
     "contribute the OpenAI embedding provider under the same id as the chat provider" in {
@@ -70,26 +69,6 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     "contribute no embedding provider for azure or requesty" in {
       ProviderRegistry.default.findEmbedding(ProviderId("azure")) shouldBe None
       ProviderRegistry.default.findEmbedding(ProviderId("requesty")) shouldBe None
-    }
-
-    "be the only module that supplies them" in {
-      // Core held these in `BuiltinProviders` until #1132 deleted it; nothing but this
-      // module may supply them now.
-      val modules = ProviderRegistry.default.report.modules
-      chatIds.foreach { id =>
-        modules.filter(_.providerIds.contains(id)).map(_.moduleClass) shouldBe Seq(classOf[Llm4sOpenAIModule].getName)
-      }
-      Seq("openai").foreach { id =>
-        modules.filter(_.embeddingProviderIds.contains(id)).map(_.moduleClass) shouldBe
-          Seq(classOf[Llm4sOpenAIModule].getName)
-      }
-    }
-
-    "be registrable explicitly where discovery cannot run" in {
-      val registry = ProviderRegistry.ofModules(new Llm4sOpenAIModule)
-
-      expectations.foreach((descriptor, _, _) => registry.get(descriptor.id) shouldBe Right(descriptor))
-      registry.findEmbedding(ProviderId("openai")) shouldBe Some(OpenAIEmbeddingProvider)
     }
   }
 
@@ -111,14 +90,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
 
     "build their own client from the config they produced" in {
       expectations.foreach { (descriptor, _, clientClass) =>
-        val result =
-          descriptor.buildConfig("test-instance", section(descriptor)).flatMap { config =>
-            descriptor.buildClient(config, LlmClientOptions.default)
-          }
-
-        result match
-          case Right(client) => client.getClass.getSimpleName shouldBe clientClass
-          case Left(error)   => fail(s"${descriptor.id.asString} failed to build a client: ${error.message}")
+        assertBuildsClient(descriptor, section(descriptor)).getClass.getSimpleName shouldBe clientClass
       }
     }
 
@@ -132,17 +104,7 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     }
 
     "refuse a config belonging to another provider" in {
-      val foreign = FixtureChatConfig("k", "fixture-model")
-
-      expectations.foreach { (descriptor, _, _) =>
-        descriptor.buildClient(foreign, LlmClientOptions.default) match
-          case Left(error) =>
-            error.message should include(
-              s"Invalid config type FixtureChatConfig for provider ${descriptor.id.asString}"
-            )
-          case Right(client) =>
-            fail(s"${descriptor.id.asString} accepted a FixtureChatConfig and built $client")
-      }
+      expectations.foreach((descriptor, _, _) => assertRefusesForeignConfig(descriptor))
     }
 
     "declare a model lister where the provider has one" in {
@@ -185,14 +147,9 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       RequestyProvider.configSpec.apiKeyEnv shouldBe Seq(OpenAIConfigKeys.REQUESTY_API_KEY)
       AzureProvider.configSpec.apiKeyEnv shouldBe Seq(OpenAIConfigKeys.AZURE_OPENAI_API_KEY)
 
-      val azureEndpoint = """endpoint = "https://test-resource.openai.azure.com""""
-      val bindings =
-        CredentialsRoundTrip.chatBindings(OpenAIProvider) ++
-          CredentialsRoundTrip.chatBindings(RequestyProvider) ++
-          CredentialsRoundTrip.chatBindings(AzureProvider, azureEndpoint)
-
-      bindings.keySet shouldBe Set("OPENAI_API_KEY", "REQUESTY_API_KEY", "AZURE_OPENAI_API_KEY")
-      bindings.foreach((variable, key) => withClue(s"$variable: ")(key shouldBe Right(Some(s"key-from-$variable"))))
+      assertCredentialBindings(OpenAIProvider)
+      assertCredentialBindings(RequestyProvider)
+      assertCredentialBindings(AzureProvider, """endpoint = "https://test-resource.openai.azure.com"""")
     }
 
     "keep each vendor's key to its own provider" in {
@@ -208,7 +165,6 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
 
     "give OpenAI embeddings the same OPENAI_API_KEY" in {
       OpenAIEmbeddingProvider.configSpec.apiKeyEnv shouldBe Seq(OpenAIConfigKeys.OPENAI_API_KEY)
-      CredentialsRoundTrip.embeddingBindings(OpenAIEmbeddingProvider, "text-embedding-3-small") shouldBe
-        Map("OPENAI_API_KEY" -> Right("key-from-OPENAI_API_KEY"))
+      assertEmbeddingCredentialBindings(OpenAIEmbeddingProvider, "text-embedding-3-small")
     }
   }

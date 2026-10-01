@@ -1,19 +1,14 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.config.{ CredentialsRoundTrip, OpenAICompatibleConfigKeys }
+import org.llm4s.config.OpenAICompatibleConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.config.ContextWindowResolver
-import org.llm4s.llmconnect.model.{ Conversation, StreamedChunk, UserMessage }
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
-import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
-import org.llm4s.testutil.FixtureChatConfig
-import org.llm4s.testutil.LocalProviderTestServer.{ openAISseBody, sendSseResponse, withServer }
+import org.llm4s.testkit.LocalProviderTestServer.{ openAISseBody, sendSseResponse, withServer }
+import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-
-import scala.collection.mutable.ListBuffer
 
 /**
  * `llm4s-openai-compatible` registers itself, and what it registers works.
@@ -24,10 +19,9 @@ import scala.collection.mutable.ListBuffer
  * that only a carved module has to prove: that depending on it is enough - the services
  * entry is found and the descriptors arrive.
  */
-class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
+class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers with ProviderModuleChecks:
 
-  private val registryService         = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
-  private given ModelRegistryService  = registryService
+  private val registryService         = ProviderModuleChecks.defaultModelRegistry
   private given ContextWindowResolver = ContextWindowResolver(registryService)
 
   /** Descriptor, the config class it builds, and the client class that config produces. */
@@ -40,8 +34,6 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
     (CohereProvider, "CohereConfig", "CohereClient")
   )
 
-  private val chatIds = expectations.map(_._1.id.asString)
-
   /** A section carrying every field any of the providers asks for. */
   private def section(descriptor: ProviderDescriptor): NamedProviderConfig =
     NamedProviderConfig(
@@ -53,32 +45,14 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
 
   "the llm4s-openai-compatible services entry" should {
 
-    "be discovered, contributing every provider the module holds" in {
-      val registry = ProviderRegistry.discover()
-
-      expectations.foreach((descriptor, _, _) => registry.get(descriptor.id) shouldBe Right(descriptor))
-      registry.report.modules.map(_.moduleClass) should contain(classOf[Llm4sOpenAICompatibleModule].getName)
+    "be discovered, the only supplier of every provider the module holds, and registrable explicitly" in {
+      assertModule(new Llm4sOpenAICompatibleModule)
     }
 
-    "contribute no embedding providers" in {
-      new Llm4sOpenAICompatibleModule().embeddingProviders shouldBe empty
-    }
-
-    "be the only module that supplies them" in {
-      // Core held these in `BuiltinProviders` until #1132 deleted it; nothing but this
-      // module may supply them now.
-      val modules = ProviderRegistry.default.report.modules
-      chatIds.foreach { id =>
-        modules.filter(_.providerIds.contains(id)).map(_.moduleClass) shouldBe Seq(
-          classOf[Llm4sOpenAICompatibleModule].getName
-        )
-      }
-    }
-
-    "be registrable explicitly where discovery cannot run" in {
-      val registry = ProviderRegistry.ofModules(new Llm4sOpenAICompatibleModule)
-
-      expectations.foreach((descriptor, _, _) => registry.get(descriptor.id) shouldBe Right(descriptor))
+    "contribute exactly the expected providers, and no embedding providers" in {
+      val module = new Llm4sOpenAICompatibleModule
+      module.chatProviders should contain theSameElementsAs expectations.map(_._1)
+      module.embeddingProviders shouldBe empty
     }
   }
 
@@ -94,29 +68,26 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
 
     "build their own client from the config they produced" in {
       expectations.foreach { (descriptor, _, clientClass) =>
-        val result =
-          descriptor.buildConfig("test-instance", section(descriptor)).flatMap { config =>
-            descriptor.buildClient(config, LlmClientOptions.default)
-          }
-
-        result match
-          case Right(client) => client.getClass.getSimpleName shouldBe clientClass
-          case Left(error)   => fail(s"${descriptor.id.asString} failed to build a client: ${error.message}")
+        assertBuildsClient(descriptor, section(descriptor)).getClass.getSimpleName shouldBe clientClass
       }
     }
 
-    "refuse a config belonging to another provider" in {
-      val foreign = FixtureChatConfig("k", "fixture-model")
+    "load the generic provider entirely from a named section, as an application does" in {
+      given ProviderRegistry = ProviderRegistry.default
+      ProviderTestConfig
+        .loadProvider(
+          "local-vllm",
+          """llm4s.providers.local-vllm {
+            |  provider = "openai-compatible"
+            |  model    = "qwen2.5"
+            |  baseUrl  = "http://localhost:8000/v1"
+            |}""".stripMargin
+        )
+        .map(_.getClass.getSimpleName) shouldBe Right("OpenAICompatibleConfig")
+    }
 
-      expectations.foreach { (descriptor, _, _) =>
-        descriptor.buildClient(foreign, LlmClientOptions.default) match
-          case Left(error) =>
-            error.message should include(
-              s"Invalid config type FixtureChatConfig for provider ${descriptor.id.asString}"
-            )
-          case Right(client) =>
-            fail(s"${descriptor.id.asString} accepted a FixtureChatConfig and built $client")
-      }
+    "refuse a config belonging to another provider" in {
+      expectations.foreach((descriptor, _, _) => assertRefusesForeignConfig(descriptor))
     }
 
     "declare a model lister where the provider has one" in {
@@ -136,16 +107,7 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
       expectations.foreach { (descriptor, _, _) =>
         withClue(s"${descriptor.id.asString}: ") {
           withServer("/")(exchange => sendSseResponse(exchange, openAISseBody(Seq("Hi")))) { baseUrl =>
-            val client = descriptor
-              .buildConfig("test-instance", section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl))))
-              .flatMap(config => descriptor.buildClient(config, LlmClientOptions.default))
-              .getOrElse(fail(s"${descriptor.id.asString} failed to build a client for the streaming proof"))
-
-            val chunks = ListBuffer.empty[StreamedChunk]
-            val result = client.streamComplete(Conversation(Seq(UserMessage("Hello"))), onChunk = chunks += _)
-
-            result.isRight shouldBe true
-            chunks should not be empty
+            assertStreams(assertBuildsClient(descriptor, section(descriptor).withBaseUrl(Some(BaseUrl(baseUrl)))))
           }
         }
       }
@@ -167,7 +129,7 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
       expected.foreach { (descriptor, variable) =>
         withClue(s"${descriptor.id.asString}: ") {
           descriptor.configSpec.apiKeyEnv shouldBe Seq(variable)
-          CredentialsRoundTrip.chatBindings(descriptor) shouldBe Map(variable -> Right(Some(s"key-from-$variable")))
+          assertCredentialBindings(descriptor)
         }
       }
     }

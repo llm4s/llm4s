@@ -1,19 +1,14 @@
 package org.llm4s.llmconnect.provider
 
-import org.llm4s.config.{ AnthropicConfigKeys, CredentialsRoundTrip }
+import org.llm4s.config.AnthropicConfigKeys
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.llmconnect.LlmClientOptions
-import org.llm4s.llmconnect.config.{ AnthropicConfig, ContextWindowResolver }
-import org.llm4s.llmconnect.model.{ Conversation, StreamedChunk, UserMessage }
+import org.llm4s.llmconnect.config.AnthropicConfig
 import org.llm4s.llmconnect.spi.ProviderRegistry
-import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
-import org.llm4s.testutil.FixtureChatConfig
-import org.llm4s.testutil.LocalProviderTestServer.{ sendSseResponse, withServer }
+import org.llm4s.testkit.LocalProviderTestServer.{ sendSseResponse, withServer }
+import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
-
-import scala.collection.mutable.ListBuffer
 
 /**
  * `llm4s-anthropic` registers itself, and what it registers works.
@@ -22,11 +17,7 @@ import scala.collection.mutable.ListBuffer
  * (#1132), plus the part that only a carved module has to prove: that depending on it is
  * enough - the services entry is found and the descriptor arrives.
  */
-class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers:
-
-  private val registryService         = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
-  private given ModelRegistryService  = registryService
-  private given ContextWindowResolver = ContextWindowResolver(registryService)
+class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with ProviderModuleChecks:
 
   /** One Anthropic-shaped event stream, served by the shared stub SSE server. */
   private val streamingBody: String = {
@@ -61,32 +52,13 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers:
 
   "the llm4s-anthropic services entry" should {
 
-    "be discovered, contributing anthropic" in {
-      val registry = ProviderRegistry.discover()
-
-      registry.get(ProviderId("anthropic")) shouldBe Right(AnthropicProvider)
-      registry.report.modules.map(_.moduleClass) should contain(classOf[Llm4sAnthropicModule].getName)
+    "be discovered, the only supplier of anthropic, and registrable explicitly" in {
+      assertModule(new Llm4sAnthropicModule)
     }
 
     "contribute no embedding provider" in {
+      new Llm4sAnthropicModule().embeddingProviders shouldBe empty
       ProviderRegistry.default.findEmbedding(ProviderId("anthropic")) shouldBe None
-    }
-
-    "be the only module that supplies anthropic" in {
-      // Core held these in `BuiltinProviders` until #1132 deleted it; nothing but this
-      // module may supply them now.
-      val modules = ProviderRegistry.default.report.modules
-      Seq("anthropic").foreach { id =>
-        modules.filter(_.providerIds.contains(id)).map(_.moduleClass) shouldBe Seq(
-          classOf[Llm4sAnthropicModule].getName
-        )
-      }
-    }
-
-    "be registrable explicitly where discovery cannot run" in {
-      val registry = ProviderRegistry.ofModules(new Llm4sAnthropicModule)
-
-      registry.get(ProviderId("anthropic")) shouldBe Right(AnthropicProvider)
     }
   }
 
@@ -96,22 +68,23 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers:
       AnthropicProvider.configSpec.defaultBaseUrl shouldBe Some(AnthropicConfig.DEFAULT_BASE_URL)
     }
 
-    "build an AnthropicConfig and an AnthropicClient from a config section" in {
-      val result =
-        AnthropicProvider.buildConfig("test-instance", section).flatMap { config =>
-          config.getClass.getSimpleName shouldBe "AnthropicConfig"
-          AnthropicProvider.buildClient(config, LlmClientOptions.default)
-        }
+    "build an AnthropicClient from a config section" in {
+      assertBuildsClient(AnthropicProvider, section).getClass.getSimpleName shouldBe "AnthropicClient"
+    }
 
-      result.map(_.getClass.getSimpleName) shouldBe Right("AnthropicClient")
+    "load an AnthropicConfig from a named section, as an application does" in {
+      given ProviderRegistry = ProviderRegistry.default
+      ProviderTestConfig
+        .loadProvider(
+          "claude",
+          """llm4s.providers.claude { provider = "anthropic", model = "claude-sonnet-4-5" }""",
+          Map("ANTHROPIC_API_KEY" -> "sk-ant-test")
+        )
+        .map(_.getClass.getSimpleName) shouldBe Right("AnthropicConfig")
     }
 
     "refuse a config belonging to another provider" in {
-      val foreign = FixtureChatConfig("k", "fixture-model")
-
-      AnthropicProvider.buildClient(foreign, LlmClientOptions.default) match
-        case Left(error) => error.message should include("Invalid config type FixtureChatConfig for provider anthropic")
-        case Right(client) => fail(s"anthropic accepted a FixtureChatConfig and built $client")
+      assertRefusesForeignConfig(AnthropicProvider)
     }
 
     "declare a model lister" in {
@@ -123,16 +96,7 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers:
 
     "actually stream, not silently fall back to complete()" in {
       withServer("/v1/messages")(exchange => sendSseResponse(exchange, streamingBody)) { baseUrl =>
-        val client = AnthropicProvider
-          .buildConfig("test-instance", section.withBaseUrl(Some(BaseUrl(baseUrl))))
-          .flatMap(config => AnthropicProvider.buildClient(config, LlmClientOptions.default))
-          .getOrElse(fail("failed to build a client for the streaming proof"))
-
-        val chunks = ListBuffer.empty[StreamedChunk]
-        val result = client.streamComplete(Conversation(Seq(UserMessage("Hello"))), onChunk = chunks += _)
-
-        result.isRight shouldBe true
-        chunks should not be empty
+        assertStreams(assertBuildsClient(AnthropicProvider, section.withBaseUrl(Some(BaseUrl(baseUrl)))))
       }
     }
   }
@@ -143,8 +107,7 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers:
 
     "bind ANTHROPIC_API_KEY to llm4s.credentials.anthropic.apiKey" in {
       AnthropicProvider.configSpec.apiKeyEnv shouldBe Seq(AnthropicConfigKeys.ANTHROPIC_API_KEY)
-      CredentialsRoundTrip.chatBindings(AnthropicProvider) shouldBe
-        Map("ANTHROPIC_API_KEY" -> Right(Some("key-from-ANTHROPIC_API_KEY")))
+      assertCredentialBindings(AnthropicProvider)
     }
 
     "let a section's own key win over ANTHROPIC_API_KEY" in {

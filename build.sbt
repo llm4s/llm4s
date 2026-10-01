@@ -193,6 +193,7 @@ lazy val llm4s = (project in file("."))
     openai,
     openaiCompatible,
     voyage,
+    providerTestkit,
     samples,
     configPolicy,
     workspaceShared,
@@ -369,7 +370,7 @@ lazy val rag = (project in file("modules/rag"))
   // `llm4s-rag` itself does not depend on it - a user names whichever provider they ship.
   // `observability` is for `RAGASLangfuseObserver`, which sends through Langfuse's batch sender;
   // it carries no third-party dependency, so it costs a RAG user nothing (#1133).
-  .dependsOn(media, core % "compile->compile;test->test", knowledgegraph, observability, openai % "test->compile")
+  .dependsOn(media, core % "compile->compile;test->test", knowledgegraph, observability, openai % "test->compile", providerTestkit % Test)
   .settings(
     name := "llm4s-rag",
     commonSettings,
@@ -566,7 +567,7 @@ lazy val image = (project in file("modules/image"))
 // as `rag` does.
 
 lazy val ollama = (project in file("modules/ollama"))
-  .dependsOn(core % "compile->compile;test->test")
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
   .settings(
     name := "llm4s-ollama",
     commonSettings,
@@ -593,7 +594,7 @@ lazy val ollama = (project in file("modules/ollama"))
 // shared JSON handling is a separate follow-up, not part of the carve.
 
 lazy val gemini = (project in file("modules/gemini"))
-  .dependsOn(core % "compile->compile;test->test")
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
   .settings(
     name := "llm4s-gemini",
     commonSettings,
@@ -617,7 +618,7 @@ lazy val gemini = (project in file("modules/gemini"))
 // `AnthropicClient` does not use (it streams through the SDK).
 
 lazy val anthropic = (project in file("modules/anthropic"))
-  .dependsOn(core % "compile->compile;test->test")
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
   .settings(
     name := "llm4s-anthropic",
     commonSettings,
@@ -643,7 +644,7 @@ lazy val anthropic = (project in file("modules/anthropic"))
 // that way, so any user of an OpenAI-compatible endpoint can take it without an SDK.
 
 lazy val openaiCompatible = (project in file("modules/openai-compatible"))
-  .dependsOn(core % "compile->compile;test->test")
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
   .settings(
     name := "llm4s-openai-compatible",
     commonSettings,
@@ -670,7 +671,7 @@ lazy val openaiCompatible = (project in file("modules/openai-compatible"))
 // block and model dimensions. No dependency beyond core.
 
 lazy val voyage = (project in file("modules/providers/voyage"))
-  .dependsOn(core % "compile->compile;test->test")
+  .dependsOn(core % "compile->compile;test->test", providerTestkit % Test)
   .settings(
     name := "llm4s-voyage",
     commonSettings,
@@ -688,6 +689,34 @@ lazy val voyage = (project in file("modules/providers/voyage"))
     )
   )
 
+// `llm4s-provider-testkit` (#1133) is what a provider module's `Llm4s<Name>ModuleSpec` is written
+// with: discovery, sole ownership, explicit registration, the config-to-client round trip and
+// the `reference.conf` credential binding, as assertions, plus config loading from a HOCON
+// string and an injected environment and a local stub HTTP server. It is published so that a
+// provider module outside this repository can prove itself the way the in-repo ones do; those
+// helpers used to live in core's test sources, which are not published. A test library, so
+// ScalaTest is a compile dependency. Every in-repo provider module dogfoods it (`% Test`).
+//
+// Core's own tests cannot use it - that would be a project cycle - so anything core's tests
+// share with it lives in core's main sources, `private[llm4s]` (`config.ReferenceConfig`).
+lazy val providerTestkit = (project in file("modules/provider-testkit"))
+  .dependsOn(core)
+  .settings(
+    name := "llm4s-provider-testkit",
+    commonSettings,
+    // Measured 91.54% statement coverage (`sbt coverage providerTestkit/test
+    // providerTestkit/coverageReport`). Floor is the measured value rounded down to the nearest
+    // 5. Never lower it.
+    coverageFloor(90),
+    Test / fork                     := true,
+    Compile / mainClass             := None,
+    Compile / discoveredMainClasses := Seq.empty,
+    libraryDependencies ++= Seq(
+      Deps.scalatest,
+      Deps.ujson
+    )
+  )
+
 // The OpenAI family carves fourth, split by shared client: OpenAI, Azure and Requesty all run
 // on `OpenAIClient`, so they move together and took the SDK out of core - after this core has
 // no vendor SDK at all. That SDK was Microsoft's `azure-ai-openai`, since deprecated; the
@@ -699,7 +728,7 @@ lazy val voyage = (project in file("modules/providers/voyage"))
 // of every OpenAI-compatible user.
 
 lazy val openai = (project in file("modules/openai"))
-  .dependsOn(core % "compile->compile;test->test", openaiCompatible)
+  .dependsOn(core % "compile->compile;test->test", openaiCompatible, providerTestkit % Test)
   .settings(
     name := "llm4s-openai",
     commonSettings,
@@ -1113,6 +1142,7 @@ lazy val docs = (project in file("modules/docs"))
     openai,
     openaiCompatible,
     voyage,
+    providerTestkit,
     workspaceShared,
     workspaceClient,
     observability,
@@ -1144,6 +1174,7 @@ lazy val docs = (project in file("modules/docs"))
         (openai / Compile / sources).value ++
         (openaiCompatible / Compile / sources).value ++
         (voyage / Compile / sources).value ++
+        (providerTestkit / Compile / sources).value ++
         (workspaceShared / Compile / sources).value ++
         (workspaceClient / Compile / sources).value ++
         (observability / Compile / sources).value ++

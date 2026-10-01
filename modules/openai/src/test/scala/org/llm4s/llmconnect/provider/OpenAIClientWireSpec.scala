@@ -15,7 +15,7 @@ import org.llm4s.llmconnect.config.{ AzureConfig, ContextWindowResolver, OpenAIC
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, ReasoningEffort, UserMessage }
 import org.llm4s.metrics.MockMetricsCollector
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.testutil.LocalProviderTestServer
+import org.llm4s.testkit.LocalProviderTestServer
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers

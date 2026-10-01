@@ -57,8 +57,9 @@ object FixtureChatProvider extends ProviderDescriptor:
     ProviderDescriptor.expectConfig[FixtureChatConfig](id, config).map(FixtureChatClient(_))
 
 /**
- * The config [[FixtureChatProvider]] builds, and the "config belonging to another provider"
- * that a provider's own spec hands its descriptor to prove it refuses one.
+ * The config [[FixtureChatProvider]] builds, and the "config belonging to another provider" that
+ * routing specs hand a real provider's factory. A module spec proves its descriptor refuses one
+ * with `llm4s-provider-testkit`'s `assertRefusesForeignConfig` instead.
  */
 final case class FixtureChatConfig(
   apiKey: String,

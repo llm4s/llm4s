@@ -1,0 +1,4 @@
+org.llm4s.testkit.fixtures.Llm4sAcmeModule
+org.llm4s.testkit.fixtures.TwinModuleA
+org.llm4s.testkit.fixtures.TwinModuleB
+org.llm4s.testkit.fixtures.FlawedModule

@@ -60,7 +60,7 @@ Read one of these alongside this page:
 
 ```
 my-llm4s-acme/
-├── build.sbt                      # libraryDependencies += "org.llm4s" %% "llm4s-core" % llm4sVersion
+├── build.sbt                      # "org.llm4s" %% "llm4s-core", and "llm4s-provider-testkit" % Test
 └── src/
     ├── main/
     │   ├── resources/
@@ -563,14 +563,37 @@ expressed with the spec.
 Every provider module in this repository proves its registration in one spec, and yours should
 too - it replaces the exhaustivity check the compiler gave when providers were a closed `enum`.
 It shows that the module is discovered, that it is the only module supplying its ids, that it can
-be registered explicitly, and that each descriptor gets from config to client:
+be registered explicitly, that each descriptor gets from config to client, and that your
+`reference.conf` binds the variable `apiKeyEnv` names.
+
+Those checks ship as **`llm4s-provider-testkit`**, the same ones the in-repo provider modules
+run. Add it in test scope; it brings ScalaTest with it:
 
 ```scala
-class Llm4sAcmeModuleSpec extends AnyWordSpec with Matchers:
+libraryDependencies += "org.llm4s" %% "llm4s-provider-testkit" % llm4sVersion % Test
+```
 
-  private val registryService         = ModelRegistryService.default().toOption.get
-  private given ModelRegistryService  = registryService
-  private given ContextWindowResolver = ContextWindowResolver(registryService)
+It has four parts, all in `org.llm4s.testkit`:
+
+| | What it gives you |
+|---|---|
+| `ProviderModuleChecks` | The checks, as assertions: `assertModule` (= `assertDiscovered` + `assertSoleSupplier` + `assertRegistrableWith`), `assertBuildsClient` / `buildClient`, `assertRefusesForeignConfig`, `assertStreams`, `assertBuildsEmbeddingProvider`, `assertCredentialBindings`, `assertEmbeddingCredentialBindings`. Mix the trait into a spec of any ScalaTest style, or call the companion object. A failure points at the line in your spec. |
+| `ProviderTestConfig` | `loadSection`, `loadProvider` and `loadEmbeddings`: config loaded as an application loads it, from a HOCON string over every `reference.conf` on the classpath, with `${?VAR}` resolved against a `Map` you pass - never the real environment, so an exported `ACME_API_KEY` on your machine cannot make a test pass that fails in CI. |
+| `CredentialsRoundTrip` | `chatSectionKey`, `chatBindings`, `embeddingsKey`, `embeddingBindings`: which key a section or embeddings block with no `apiKey` of its own ends up with, for cases the assertions do not cover - an alias, two variables in precedence order, a variable that must *not* be picked up. |
+| `LocalProviderTestServer` | `withServer(path)(handler)(baseUrl => ...)`, `sendJsonResponse`, `sendSseResponse`, and OpenAI-format bodies: the JDK's HTTP server on an ephemeral port, to point a client at. |
+
+```scala
+package com.acme.llm4s
+
+import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
+import org.llm4s.llmconnect.spi.ProviderRegistry
+import org.llm4s.testkit.{ CredentialsRoundTrip, ProviderModuleChecks, ProviderTestConfig }
+import org.llm4s.testkit.LocalProviderTestServer.{ sendSseResponse, withServer }
+import org.llm4s.types.ProviderModelTypes.*
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.wordspec.AnyWordSpec
+
+class Llm4sAcmeModuleSpec extends AnyWordSpec with Matchers with ProviderModuleChecks:
 
   private val section = NamedProviderConfig(
     provider = AcmeProvider.id, model = ModelName("acme-large"), baseUrl = None,
@@ -578,44 +601,55 @@ class Llm4sAcmeModuleSpec extends AnyWordSpec with Matchers:
     extras = Map("region" -> "eu-west") // built in code, so no validation fills the default
   )
 
+  private val streamBody = "data: {\"delta\":\"Hi\"}\n\ndata: [DONE]\n\n" // Acme's wire format
+
   "the my-llm4s-acme services entry" should {
-    "be discovered" in {
-      val registry = ProviderRegistry.discover()
-      registry.get(ProviderId("acme")) shouldBe Right(AcmeProvider)
-      registry.findEmbedding(ProviderId("acme")) shouldBe Some(AcmeEmbeddings)
-      registry.canonicalId("acme-ai") shouldBe ProviderId("acme")
-    }
-
-    "be the only module that supplies acme" in {
-      ProviderRegistry.default.report.modules
-        .filter(_.providerIds.contains("acme"))
-        .map(_.moduleClass) shouldBe Seq(classOf[Llm4sAcmeModule].getName)
-    }
-
-    "be registrable explicitly" in {
-      ProviderRegistry.ofModules(new Llm4sAcmeModule).get(ProviderId("acme")) shouldBe Right(AcmeProvider)
-    }
+    // Discovered by ProviderRegistry.discover(), every id and alias resolving to your
+    // descriptors; no other module supplying "acme"; and ProviderRegistry.ofModules works.
+    "register the module" in assertModule(new Llm4sAcmeModule)
   }
 
   "AcmeProvider" should {
-    "build an AcmeConfig and an AcmeClient from a section" in {
-      AcmeProvider
-        .buildConfig("test", section)
-        .flatMap(AcmeProvider.buildClient(_, LlmClientOptions.default))
-        .map(_.getClass) shouldBe Right(classOf[AcmeClient])
+    "build an AcmeClient from a section, and refuse another provider's config" in {
+      assertBuildsClient(AcmeProvider, section) shouldBe an[AcmeClient]
+      assertRefusesForeignConfig(AcmeProvider)
     }
 
-    "load from a named section, extras defaulted" in {
-      // src/test/resources/application.conf:
-      //   llm4s.providers.acme-test { provider = "acme", model = "acme-large", apiKey = "k" }
-      Llm4sConfig.provider("acme-test").map(_.asInstanceOf[AcmeConfig].region) shouldBe Right("eu-west")
+    "really stream" in {
+      withServer("/v1/chat")(exchange => sendSseResponse(exchange, streamBody)) { baseUrl =>
+        assertStreams(assertBuildsClient(AcmeProvider, section.copy(baseUrl = Some(BaseUrl(baseUrl)))))
+      }
+    }
+
+    "load from a named section as an application does, extras defaulted" in {
+      given ProviderRegistry = ProviderRegistry.default
+      ProviderTestConfig
+        .loadProvider(
+          "acme-main",
+          """llm4s.providers.acme-main { provider = "acme", model = "acme-large" }""",
+          Map("ACME_API_KEY" -> "test-key")
+        )
+        .map(_.asInstanceOf[AcmeConfig].region) shouldBe Right("eu-west")
+    }
+  }
+
+  "the my-llm4s-acme reference.conf" should {
+    "bind ACME_API_KEY to llm4s.credentials.acme.apiKey, for chat and embeddings" in {
+      assertCredentialBindings(AcmeProvider)
+      assertEmbeddingCredentialBindings(AcmeEmbeddings, "acme-embed-1")
+    }
+
+    "give the acme-ai alias the same key" in {
+      given ProviderRegistry = ProviderRegistry.default
+      CredentialsRoundTrip.chatSectionKey("acme-ai", Map("ACME_API_KEY" -> "k")) shouldBe Right(Some("k"))
     }
   }
 ```
 
-Also test the client itself against a local stub server (the in-repo modules use the JDK's
-`com.sun.net.httpserver.HttpServer`), including that `streamComplete` really streams if
-`features.streaming` is true, and an error status maps to the right `LLMError`.
+`assertCredentialBindings` loads a section with no `apiKey` once per variable in `apiKeyEnv`,
+with only that variable set, so the shared credential is the only place a key can come from; when
+it fails it names the `reference.conf` line that is missing. Test the client itself against
+`LocalProviderTestServer` too, including that an error status maps to the right `LLMError`.
 
 ## Stability
 
@@ -632,6 +666,10 @@ across all 1.x releases, so a provider compiled against 1.0 keeps working. That 
   `ProviderExchangeLogging`, `HttpErrorMapper`, `CostEstimator`, `EmbeddingProvider`,
   `StreamingAccumulator`, `SSEParser`, `StreamingToolArgumentParser`, `Llm4sHttpClient`,
   `ProviderModelLister`, `RequestTransformer` and `TransformationResult`.
+
+`llm4s-provider-testkit` is **Beta**, not part of the frozen SPI: it is a test-scope dependency,
+so a change to it can break your tests but never your users, and it may gain checks in a minor
+release (with a migration note).
 
 Anything `private[llm4s]` - `ProviderResultOps`, for example - is internal, may change in any
 release, and cannot be reached from your package anyway. Do not work around that by declaring
@@ -654,5 +692,5 @@ classpath; for an OpenAI-compatible vendor, contribute a dialect there instead.
 - [ ] client built on `BaseLifecycleLLMClient`, errors via `HttpErrorMapper`, cost via
       `CostEstimator`, exchanges via `ProviderExchangeRecorder`
 - [ ] no exceptions escape, no environment reads
-- [ ] `Llm4s<Name>ModuleSpec` covering discovery, sole ownership, explicit registration and the
-      config-to-client round trip
+- [ ] `Llm4s<Name>ModuleSpec`, on `llm4s-provider-testkit`, covering discovery, sole ownership,
+      explicit registration, the config-to-client round trip and the credential binding

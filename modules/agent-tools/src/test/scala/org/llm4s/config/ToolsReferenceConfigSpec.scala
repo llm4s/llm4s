@@ -3,7 +3,6 @@ package org.llm4s.config
 // scalafix:off DisableSyntax.NoConfigFactory
 import com.typesafe.config.ConfigFactory
 // scalafix:on DisableSyntax.NoConfigFactory
-import org.llm4s.testutil.ReferenceConfig
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec

@@ -8,7 +8,7 @@ import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor, ProviderRegistry }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider, FixtureEmbeddingProvider, ReferenceConfig }
+import org.llm4s.testutil.{ FixtureChatConfig, FixtureChatProvider, FixtureEmbeddingProvider }
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.scalatest.EitherValues

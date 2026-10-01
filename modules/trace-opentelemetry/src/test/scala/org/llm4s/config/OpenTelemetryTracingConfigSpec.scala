@@ -1,7 +1,6 @@
 package org.llm4s.config
 
 import org.llm4s.llmconnect.config.OpenTelemetryConfig
-import org.llm4s.testutil.ReferenceConfig
 import org.llm4s.trace.TracingMode
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers

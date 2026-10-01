@@ -5,7 +5,7 @@ import org.llm4s.llmconnect.config.MistralConfig
 import org.llm4s.llmconnect.model._
 import org.llm4s.llmconnect.{ ProviderExchange, ProviderExchangeLogging, ProviderExchangeSink }
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.testutil.LocalProviderTestServer._
+import org.llm4s.testkit.LocalProviderTestServer._
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers

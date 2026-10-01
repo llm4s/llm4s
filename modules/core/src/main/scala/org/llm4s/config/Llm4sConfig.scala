@@ -133,12 +133,24 @@ object Llm4sConfig {
         val errors = map.map { case (name, _) => name -> (err: LLMError) }
         (errors, Map.empty)
 
-  private[config] def provider(source: ConfigSource, name: String)(using ProviderRegistry): Result[ProviderConfig] =
+  // `private[llm4s]`, not `private[config]`: `llm4s-provider-testkit` loads a provider module's
+  // section through it from a HOCON string and an injected environment. `ConfigSource` stays out
+  // of every public signature.
+  private[llm4s] def provider(source: ConfigSource, name: String)(using ProviderRegistry): Result[ProviderConfig] =
     for
       service <- modelRegistryService(source)
       given ContextWindowResolver = ContextWindowResolver(service)
       config <- org.llm4s.config.NamedProviderLoader.load(source, name)
     yield config
+
+  /**
+   * The named chat section `name` as validation leaves it - shared credentials applied, extras
+   * defaulted - without building the provider's config. Only that section is validated.
+   */
+  private[llm4s] def providerSection(source: ConfigSource, name: String)(using
+    ProviderRegistry
+  ): Result[ProvidersConfigModel.NamedProviderConfig] =
+    org.llm4s.config.ProvidersConfigLoader.loadSections(source).flatMap(_.validated(ProviderName(name)))
 
   /**
    * Loads the full validated named-providers configuration from `llm4s.providers`.
@@ -338,6 +350,12 @@ object Llm4sConfig {
    */
   def embeddings()(using ProviderRegistry): Result[(String, EmbeddingProviderConfig)] =
     org.llm4s.config.EmbeddingsConfigLoader.loadProvider(ConfigSource.default)
+
+  /** [[embeddings()*]] for a given source; `llm4s-provider-testkit` reads embedding blocks through it. */
+  private[llm4s] def embeddings(source: ConfigSource)(using
+    ProviderRegistry
+  ): Result[(String, EmbeddingProviderConfig)] =
+    org.llm4s.config.EmbeddingsConfigLoader.loadProvider(source)
 
   /**
    * Loads configuration for locally-available embedding models from the current environment.

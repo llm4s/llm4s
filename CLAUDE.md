@@ -98,6 +98,7 @@ llm4s/
 │   ├── openai-compatible/     # One SDK-free chat-completions client: DeepSeek, Z.ai, OpenRouter, Mistral, Cohere, generic (published)
 │   ├── providers/             # Community provider modules, one `llm4s-<name>` each (published)
 │   │   └── voyage/            # Voyage AI embedding provider
+│   ├── provider-testkit/      # Checks for a provider module's Llm4s<Name>ModuleSpec, for external authors too (published)
 │   ├── observability/         # Langfuse tracing backend, trace collector/model/store, CostTracker (published)
 │   ├── observability-prometheus/ # Prometheus MetricsCollector + /metrics endpoint + Prometheus client (published)
 │   ├── agent/                 # Agent runtime: Agent, guardrails, handoffs, orchestration, streaming; assistant (published)

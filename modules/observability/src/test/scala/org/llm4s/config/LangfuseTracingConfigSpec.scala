@@ -1,7 +1,6 @@
 package org.llm4s.config
 
 import org.llm4s.llmconnect.config.LangfuseConfig
-import org.llm4s.testutil.ReferenceConfig
 import org.llm4s.trace.{ LangfuseTracing, NoOpTracing, Tracing, TracingMode }
 import org.scalatest.EitherValues
 import org.scalatest.matchers.should.Matchers

@@ -3,7 +3,7 @@ package org.llm4s.llmconnect.provider
 import org.llm4s.llmconnect.config.{ DeepSeekConfig, OpenAICompatibleConfig }
 import org.llm4s.llmconnect.model.{ CompletionOptions, Conversation, UserMessage }
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.testutil.LocalProviderTestServer._
+import org.llm4s.testkit.LocalProviderTestServer._
 import org.scalatest.EitherValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers

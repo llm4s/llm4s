@@ -75,6 +75,7 @@ Every top-level package under `modules/core/src/main/scala/org/llm4s/`, its targ
 | `llmconnect/provider` — Mistral and Cohere, as dialects on `OpenAICompatibleClient` — **carved** | `llm4s-openai-compatible` | Beta |
 | `llmconnect/provider` — Voyage AI embeddings — **carved** | `llm4s-voyage` (`modules/providers/voyage`) | Beta |
 | `llmconnect/provider` — other community providers | `llm4s-openai-compatible` dialects, or `modules/providers/<name>` | Beta |
+| `testkit` — the checks a provider module's `Llm4s<Name>ModuleSpec` makes (`ProviderModuleChecks`, `ProviderTestConfig`, `CredentialsRoundTrip`, `LocalProviderTestServer`), formerly unpublished helpers in core's test sources — **new** | `llm4s-provider-testkit` (`modules/provider-testkit`), a test-scope dependency | Beta |
 | `rag`, `vectorstore`, `chunking`, `reranker`, `eval` — **carved** | `llm4s-rag` | Beta |
 | `extract` (consolidated from `rag/extract` + `llmconnect/extractors`) and `rag/embed` (from `llmconnect/encoding`) — **carved** | `llm4s-rag` | Beta |
 | `agent/memory` (excluding `PostgresMemoryStore`) — **carved** | `llm4s-memory` | Beta |

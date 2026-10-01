@@ -14,7 +14,7 @@ import org.llm4s.llmconnect.model.{
 }
 import org.llm4s.metrics.MockMetricsCollector
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.testutil.LocalProviderTestServer.{ openAISseBody, sendSseResponse }
+import org.llm4s.testkit.LocalProviderTestServer.{ openAISseBody, sendSseResponse }
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.OptionValues._
