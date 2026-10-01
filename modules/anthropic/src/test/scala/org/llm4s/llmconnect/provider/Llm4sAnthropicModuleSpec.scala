@@ -4,9 +4,10 @@ import org.llm4s.config.{ AnthropicConfigKeys, CredentialsRoundTrip }
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.config.{ AnthropicConfig, ContextWindowResolver }
+import org.llm4s.llmconnect.contract.LLMClientContractBehaviors
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
-import org.llm4s.testutil.FixtureChatConfig
+import org.llm4s.testutil.{ FixtureChatConfig, LocalProviderTestServer }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -18,7 +19,7 @@ import org.scalatest.wordspec.AnyWordSpec
  * (#1132), plus the part that only a carved module has to prove: that depending on it is
  * enough - the services entry is found and the descriptor arrives.
  */
-class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers:
+class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers with LLMClientContractBehaviors:
 
   private val registryService         = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
   private given ModelRegistryService  = registryService
@@ -91,9 +92,44 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers:
         case Right(client) => fail(s"anthropic accepted a FixtureChatConfig and built $client")
     }
 
-    "declare streaming and a model lister" in {
-      AnthropicProvider.features.streaming shouldBe true
+    "declare a model lister" in {
       AnthropicProvider.modelLister shouldBe defined
+    }
+
+    "actually stream, proving the declared streaming flag" in {
+      AnthropicProvider.features.streaming shouldBe true
+
+      val events = Seq(
+        "message_start" -> (
+          """{"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant",""" +
+            """"content":[],"model":"claude-sonnet-4-5","stop_reason":null,"stop_sequence":null,""" +
+            """"usage":{"input_tokens":8,"output_tokens":0}}}"""
+        ),
+        "content_block_start" ->
+          """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""",
+        "content_block_delta" ->
+          """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi"}}""",
+        "content_block_stop" -> """{"type":"content_block_stop","index":0}""",
+        "message_delta" -> (
+          """{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},""" +
+            """"usage":{"output_tokens":1}}"""
+        ),
+        "message_stop" -> """{"type":"message_stop"}"""
+      )
+      val body = events.map { case (event, data) => s"event: $event\ndata: $data\n\n" }.mkString
+
+      LocalProviderTestServer.withServer("/v1/messages") { exchange =>
+        LocalProviderTestServer.sendSseResponse(exchange, body)
+      } { baseUrl =>
+        val client =
+          AnthropicProvider
+            .buildConfig("test-instance", section.copy(baseUrl = Some(BaseUrl(baseUrl))))
+            .flatMap(config => AnthropicProvider.buildClient(config, LlmClientOptions.default))
+            .getOrElse(fail("anthropic failed to build a streaming client"))
+
+        assertHonoursStreaming(client)
+        client.close()
+      }
     }
   }
 
