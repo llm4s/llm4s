@@ -4,9 +4,10 @@ import org.llm4s.config.{ CredentialsRoundTrip, GeminiConfigKeys }
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.config.ContextWindowResolver
+import org.llm4s.llmconnect.contract.LLMClientContractBehaviors
 import org.llm4s.llmconnect.spi.{ ProviderDescriptor, ProviderRegistry }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
-import org.llm4s.testutil.FixtureChatConfig
+import org.llm4s.testutil.{ FixtureChatConfig, LocalProviderTestServer }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -19,7 +20,7 @@ import org.scalatest.wordspec.AnyWordSpec
  * depending on it is enough - the services entry is found, both descriptors arrive, and
  * the `google` and `vertex` spellings still resolve.
  */
-class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers:
+class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with LLMClientContractBehaviors:
 
   private val registryService         = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
   private given ModelRegistryService  = registryService
@@ -123,6 +124,30 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers:
       VertexAIProvider.features.streaming shouldBe true
       GeminiProvider.modelLister shouldBe defined
       VertexAIProvider.modelLister shouldBe None
+    }
+
+    "actually stream, proving Gemini's declared streaming flag" in {
+      val sseBody =
+        """data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}
+          |data: {"candidates":[{"content":{"parts":[{"text":" world"}]}}],"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7}}
+          |""".stripMargin
+
+      LocalProviderTestServer.withServer("/") { exchange =>
+        LocalProviderTestServer.sendSseResponse(exchange, sseBody)
+      } { serverUrl =>
+        val client =
+          GeminiProvider
+            .buildConfig("test-instance", section(GeminiProvider).copy(baseUrl = Some(BaseUrl(serverUrl))))
+            .flatMap(config => GeminiProvider.buildClient(config, LlmClientOptions.default))
+            .getOrElse(fail("gemini failed to build a streaming client"))
+
+        assertHonoursStreaming(client)
+        client.close()
+      }
+      // VertexAI's streaming is proven the same way at the client level, where a fake
+      // bearer token and a mocked Llm4sHttpClient stand in for GCP OAuth that a local
+      // stub server cannot satisfy: VertexAIClientHttpSpec, "VertexAIClient.streamComplete()
+      // should parse SSE lines and accumulate into a Completion".
     }
   }
 
