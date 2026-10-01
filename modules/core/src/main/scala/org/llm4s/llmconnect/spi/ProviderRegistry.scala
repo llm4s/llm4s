@@ -391,8 +391,28 @@ object ProviderRegistry:
    *
    * Discovery runs on first use rather than at class-load time, so an
    * application that always passes its own registry never pays for it.
+   *
+   * `discover()` is a `ServiceLoader` classpath scan - an Action, in the sense
+   * that its result depends on what's on the classpath when it runs, not just
+   * on its arguments. This `lazy val` memoizes that Action once per JVM so
+   * every other call site can treat `default` as if it were Data: free to
+   * read, identical on every access. That's deliberate, and it trades away
+   * freshness and determinism for convenience - a provider module added to
+   * the classpath after the first read is never picked up, and a test that
+   * runs after another test has already forced `default` shares that same
+   * JVM-wide scan with it. Callers who need either freshness or isolation
+   * from that shared state - a diagnostic tool re-checking the classpath, or
+   * a test asserting on discovery itself - should not reach for `default`:
+   * call `discover()` directly for a fresh scan, or build an uncached
+   * registry explicitly with [[of]] / [[ofModules]]. [[withProvider]] and
+   * [[withModule]] layer an override onto `default` without forcing one.
    */
   lazy val default: ProviderRegistry = discover()
 
-  /** Resolves to `default` wherever a `using ProviderRegistry` is needed. */
+  /**
+   * Resolves to `default` wherever a `using ProviderRegistry` is needed - and
+   * so inherits exactly the same memoized-Action tradeoff: an implicit
+   * resolution site is as cached and as classpath-order-dependent as calling
+   * `default` by name.
+   */
   given ProviderRegistry = default
