@@ -502,8 +502,9 @@ Use these loaders to convert flat keys and HOCON paths into typed, validated set
     - **Ollama** (local): `OLLAMA_EMBEDDING_BASE_URL` (default: `http://localhost:11434`), `OLLAMA_EMBEDDING_MODEL`
 
 - Provider API keys and endpoints
-  - Keys: `apiKey`, `baseUrl`, `organization`, `endpoint`, `apiVersion`, `project`, `location` inside each
-    `llm4s.providers.<name>` section. A section without `apiKey` uses its vendor's shared
+  - Keys: `apiKey` and `baseUrl` inside each `llm4s.providers.<name>` section, plus the provider's own
+    keys - `organization` (OpenAI, Requesty, OpenRouter), `endpoint` and `apiVersion` (Azure),
+    `project` and `location` (Vertex AI). A section without `apiKey` uses its vendor's shared
     `llm4s.credentials.<provider>.apiKey`, which the provider module binds to `OPENAI_API_KEY`,
     `ANTHROPIC_API_KEY` and so on; a section's own `apiKey` wins
   - Type: concrete `ProviderConfig` (e.g., `OpenAIConfig`, `AnthropicConfig`, `AzureConfig`, `OllamaConfig`, `GeminiConfig`, `DeepSeekConfig`, `CohereConfig`)

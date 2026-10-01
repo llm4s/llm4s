@@ -43,9 +43,11 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
       model = ModelName("test-model"),
       baseUrl = descriptor.configSpec.defaultBaseUrl.map(BaseUrl(_)),
       apiKey = Some(ApiKey("test-key")),
-      organization = Some("test-org"),
-      endpoint = Some("https://test-resource.openai.azure.com"),
-      apiVersion = Some(AzureConfig.DEFAULT_API_VERSION)
+      extras = Map(
+        "organization"              -> "test-org",
+        AzureProvider.EndpointKey   -> "https://test-resource.openai.azure.com",
+        AzureProvider.ApiVersionKey -> AzureConfig.DEFAULT_API_VERSION
+      )
     )
 
   "the llm4s-openai services entry" should {
@@ -121,7 +123,10 @@ class Llm4sOpenAIModuleSpec extends AnyWordSpec with Matchers with LLMClientCont
     }
 
     "default Azure's API version when the section sets none" in {
-      AzureProvider.buildConfig("test-instance", section(AzureProvider).copy(apiVersion = None)) match
+      AzureProvider.buildConfig(
+        "test-instance",
+        section(AzureProvider).copy(extras = section(AzureProvider).extras - AzureProvider.ApiVersionKey)
+      ) match
         case Right(azure: AzureConfig) => azure.apiVersion shouldBe AzureConfig.DEFAULT_API_VERSION
         case other                     => fail(s"Expected AzureConfig, got $other")
     }

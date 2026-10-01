@@ -49,9 +49,6 @@ class Llm4sOpenAICompatibleModuleSpec extends AnyWordSpec with Matchers:
       model = ModelName("test-model"),
       baseUrl = descriptor.configSpec.defaultBaseUrl.orElse(Some("http://localhost:8000/v1")).map(BaseUrl(_)),
       apiKey = Some(ApiKey("test-key")),
-      organization = None,
-      endpoint = None,
-      apiVersion = None
     )
 
   "the llm4s-openai-compatible services entry" should {

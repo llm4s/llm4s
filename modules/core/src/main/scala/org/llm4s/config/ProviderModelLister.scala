@@ -1,13 +1,9 @@
 package org.llm4s.config
 
-import org.llm4s.error.ValidationError
 import org.llm4s.http.Llm4sHttpClient
-import org.llm4s.http.HttpResponse.*
-import org.llm4s.types.{ Result, TryOps }
+import org.llm4s.types.Result
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.llm4s.config.ProvidersConfigModel.{ NamedProviderConfig, ProviderId }
-
-import scala.util.Try
 
 /**
  * A model discovered from a provider's live model-listing endpoint.
@@ -22,7 +18,13 @@ final case class DiscoveredModel(
   metadata: Map[String, String] = Map.empty
 )
 
-/** Discovers available models from a provider's live API endpoint. */
+/**
+ * Discovers available models from a provider's live API endpoint.
+ *
+ * `llm4s-core` ships no provider and so no lister: each provider module supplies one on its
+ * descriptor. Most call `ProviderModelListers.openAICompatible` in `llm4s-openai-compatible`,
+ * the factory for the OpenAI `/models` shape; the rest implement this trait.
+ */
 trait ProviderModelLister:
   /**
    * Fetches the list of available models for the given provider configuration.
@@ -35,118 +37,3 @@ trait ProviderModelLister:
     config: NamedProviderConfig,
     httpClient: Llm4sHttpClient
   ): Result[List[DiscoveredModel]]
-
-/**
- * The factory behind most providers' model listers.
- *
- * `llm4s-core` ships no provider, so it holds no lister of its own: each provider
- * module supplies one on its descriptor - calling [[openAICompatible]] if the
- * provider serves the OpenAI `/models` shape, or implementing
- * [[ProviderModelLister]] if it does not.
- */
-object ProviderModelListers:
-
-  /**
-   * A lister for any provider serving the OpenAI-compatible `/models` endpoint.
-   *
-   * This is the shape most providers have, so a provider module supplying its
-   * own descriptor can usually call this rather than implement
-   * [[ProviderModelLister]] from scratch.
-   *
-   * Every request carries `Authorization: Bearer <apiKey>` when the section has a key, the
-   * section's `organization` as `OpenAI-Organization`, then `extraHeaders`, then the
-   * section's own `headers`.
-   *
-   *  @param provider       the `ProviderId` that owns the returned models; the config section must name it
-   *  @param defaultBaseUrl base URL used when the section does not override it
-   *  @param modelsPath     path of the listing endpoint, relative to the base URL
-   *  @param extraHeaders   headers the provider requires on every request, e.g. OpenRouter's `X-Title`
-   *  @param apiKeyRequired whether a section without an `apiKey` fails; `false` for endpoints,
-   *                        such as a local server, that take unauthenticated requests
-   */
-  def openAICompatible(
-    provider: ProviderId,
-    defaultBaseUrl: String,
-    modelsPath: String = "/models",
-    extraHeaders: Map[String, String] = Map.empty,
-    apiKeyRequired: Boolean = true
-  ): ProviderModelLister =
-    new ProviderModelLister:
-      def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
-        listOpenAICompatibleModels(
-          config = config,
-          provider = provider,
-          defaultBaseUrl = defaultBaseUrl,
-          modelsPath = modelsPath,
-          extraHeaders = extraHeaders,
-          apiKeyRequired = apiKeyRequired,
-          httpClient = httpClient
-        )
-
-  private def listOpenAICompatibleModels(
-    config: NamedProviderConfig,
-    provider: ProviderId,
-    defaultBaseUrl: String,
-    modelsPath: String,
-    extraHeaders: Map[String, String],
-    apiKeyRequired: Boolean,
-    httpClient: Llm4sHttpClient
-  ): Result[List[DiscoveredModel]] =
-    for
-      normalized <- config.requireProvider(provider)
-      apiKey     <- if apiKeyRequired then normalized.requireApiKey.map(Some(_)) else Right(normalized.apiKey)
-      baseUrl = normalized.baseUrlOrDefault(defaultBaseUrl)
-      headers = requestHeaders(normalized, apiKey, extraHeaders)
-      response <- httpClient
-        .getResult(s"${baseUrl.asUrl}$modelsPath", headers = headers, timeout = 10000)
-        .mapServiceError(provider.asString, "Failed to discover models")
-      okResponse   <- response.ensureSuccess(provider.asString)
-      jsonResponse <- okResponse.toJson("responseBody")
-      models       <- parseOpenAICompatibleModels(jsonResponse.body, provider)
-    yield models
-
-  private def requestHeaders(
-    config: NamedProviderConfig,
-    apiKey: Option[org.llm4s.types.ProviderModelTypes.ApiKey],
-    extraHeaders: Map[String, String]
-  ): Map[String, String] =
-    apiKey.map(key => "Authorization" -> s"Bearer ${key.asKey}").toMap ++
-      config.organization.map(org => "OpenAI-Organization" -> org) ++
-      extraHeaders ++
-      config.headers
-
-  private def parseOpenAICompatibleModels(
-    json: ujson.Value,
-    provider: ProviderId
-  ): Result[List[DiscoveredModel]] =
-    val dataResult =
-      Try(json("data").arr.toList).toResult.left
-        .map(err => ValidationError("data", s"Missing or invalid models payload: ${err.message}"))
-
-    dataResult.flatMap: data =>
-      data.foldLeft[Result[List[DiscoveredModel]]](Right(Nil)):
-        case (accResult, modelJson) =>
-          for
-            acc    <- accResult
-            parsed <- parseOpenAICompatibleModel(modelJson, provider)
-          yield parsed match
-            case Some(model) => acc :+ model
-            case None        => acc
-
-  private def parseOpenAICompatibleModel(
-    json: ujson.Value,
-    provider: ProviderId
-  ): Result[Option[DiscoveredModel]] =
-    val obj = json.obj
-    obj.get("id").flatMap(_.strOpt).filter(_.nonEmpty) match
-      case None => Right(None)
-      case Some(id) =>
-        val metadata =
-          List(
-            obj.get("created").flatMap(_.numOpt).map(n => "created" -> n.toLong.toString),
-            obj.get("owned_by").flatMap(_.strOpt).map("ownedBy" -> _),
-            obj.get("name").flatMap(_.strOpt).map("displayName" -> _),
-            obj.get("description").flatMap(_.strOpt).map("description" -> _),
-          ).flatten.toMap
-
-        Right(Some(DiscoveredModel(ModelName(id), provider, metadata)))

@@ -29,9 +29,6 @@ class AnthropicNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("claude-sonnet-4-20250514"),
           baseUrl = Some("https://api.anthropic.com"),
           apiKey = Some("sk-ant-test"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Right(cfg) =>
@@ -50,9 +47,6 @@ class AnthropicNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("claude-sonnet-4-5"),
           baseUrl = None,
           apiKey = None,
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Left(err) =>

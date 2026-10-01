@@ -17,18 +17,15 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             model = Some(" fixture-model "),
             baseUrl = Some(" https://fixturechat.invalid/v2 "),
             apiKey = Some(" sk-fixture-primary "),
-            organization = Some(" org-demo "),
-            endpoint = None,
-            apiVersion = None,
+            // `organization` is OpenAI's key, not a built-in: a provider that does not declare
+            // it, as the fixture does not, gets it reported as unknown and dropped.
+            extras = Map("organization" -> " org-demo ")
           ),
           ProviderName("fixturechat-main") -> RawNamedProviderSection(
             provider = Some("fixturechat"),
             model = Some("fixture-model"),
             baseUrl = Some("https://fixturechat.invalid/v1"),
             apiKey = Some("fixture-key"),
-            organization = None,
-            endpoint = None,
-            apiVersion = None,
           )
         )
       )
@@ -43,7 +40,7 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
           primary.model.asString shouldBe "fixture-model"
           primary.baseUrl.map(_.asUrl) shouldBe Some("https://fixturechat.invalid/v2")
           primary.apiKey.map(_.asKey) shouldBe Some("sk-fixture-primary")
-          primary.organization shouldBe Some("org-demo")
+          primary.extras shouldBe empty
 
           val main = cfg.namedProviders(ProviderName("fixturechat-main"))
           main.provider shouldBe ProviderId("fixturechat")
@@ -62,9 +59,6 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             model = Some("fixture-model"),
             baseUrl = None,
             apiKey = Some("fixture-key"),
-            organization = None,
-            endpoint = None,
-            apiVersion = None,
           )
         )
       )
@@ -87,9 +81,6 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             model = Some("fixture-model"),
             baseUrl = None,
             apiKey = Some("sk-fixture-primary"),
-            organization = None,
-            endpoint = None,
-            apiVersion = None,
           )
         )
       )
@@ -110,9 +101,6 @@ class ProvidersConfigValidatorSpec extends AnyWordSpec with Matchers:
             model = Some("fixture-model"),
             baseUrl = None,
             apiKey = Some("sk-fixture-primary"),
-            organization = None,
-            endpoint = None,
-            apiVersion = None,
           )
         )
       )

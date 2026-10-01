@@ -69,9 +69,6 @@ class Llm4sGeminiModuleSpec extends AnyWordSpec with Matchers with MockFactory:
       model = ModelName("gemini-2.0-flash"),
       baseUrl = descriptor.configSpec.defaultBaseUrl.map(BaseUrl(_)),
       apiKey = Some(ApiKey("test-key")),
-      organization = None,
-      endpoint = None,
-      apiVersion = None,
       extras = Map(VertexAIProvider.ProjectKey -> "my-gcp-project", VertexAIProvider.LocationKey -> "europe-west4")
     )
 

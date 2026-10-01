@@ -2,6 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
+import org.llm4s.llmconnect.config.OpenAIConfig
 import org.llm4s.types.ProviderModelTypes.ModelName
 import org.scalatest.funsuite.AnyFunSuite
 import org.scalatest.matchers.should.Matchers
@@ -25,9 +26,7 @@ class OpenAIModelListerSpec extends AnyFunSuite with Matchers:
       model = ModelName(model),
       baseUrl = baseUrl.map(BaseUrl(_)),
       apiKey = apiKey.map(ApiKey(_)),
-      organization = organization,
-      endpoint = None,
-      apiVersion = None
+      extras = organization.map(OpenAIConfig.OrganizationKey -> _).toMap
     )
 
   private val oneModel =
@@ -63,6 +62,23 @@ class OpenAIModelListerSpec extends AnyFunSuite with Matchers:
     OpenAIModelLister.listModels(config, mockHttp).isRight shouldBe true
     mockHttp.lastHeaders.get should contain("OpenAI-Organization" -> "org-1")
     mockHttp.lastHeaders.get should contain("Authorization" -> "Bearer sk-test")
+  }
+
+  test("OpenAI lister sends no organisation header when the section sets none") {
+    val config   = namedConfig(ProviderId("openai"), "gpt-4o-mini", apiKey = Some("sk-test"))
+    val mockHttp = MockHttpClient(HttpResponse(200, oneModel, Map.empty))
+
+    OpenAIModelLister.listModels(config, mockHttp).isRight shouldBe true
+    mockHttp.lastHeaders.get.keySet should not contain "OpenAI-Organization"
+  }
+
+  test("Requesty lister forwards the organisation header") {
+    val config =
+      namedConfig(ProviderId("requesty"), "openai/gpt-4o-mini", apiKey = Some("rq-key"), organization = Some("org-2"))
+    val mockHttp = MockHttpClient(HttpResponse(200, oneModel, Map.empty))
+
+    RequestyModelLister.listModels(config, mockHttp).isRight shouldBe true
+    mockHttp.lastHeaders.get should contain("OpenAI-Organization" -> "org-2")
   }
 
   test("Requesty lister discovers models from the Requesty router by default") {

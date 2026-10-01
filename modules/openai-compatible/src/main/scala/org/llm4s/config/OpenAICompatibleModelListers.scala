@@ -21,7 +21,8 @@ object DeepSeekModelLister extends ProviderModelLister:
 
 /**
  * Model lister for the OpenRouter provider, sending the `HTTP-Referer` and
- * `X-Title` headers OpenRouter asks for.
+ * `X-Title` headers OpenRouter asks for, and the section's `organization`, if set, as
+ * `OpenAI-Organization`, as it always has.
  *
  * This was `ProviderModelListers.OpenRouter` until the provider moved to
  * `llm4s-openai-compatible` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
@@ -31,7 +32,8 @@ object OpenRouterModelLister extends ProviderModelLister:
     ProviderModelListers.openAICompatible(
       ProviderId("openrouter"),
       OpenRouterProvider.DEFAULT_BASE_URL,
-      extraHeaders = OpenRouterDialect.headers.toMap
+      extraHeaders = OpenRouterDialect.headers.toMap,
+      sectionHeaders = ProviderModelListers.openAIOrganizationHeader
     )
 
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =

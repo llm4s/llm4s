@@ -30,9 +30,6 @@ class OllamaNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("llama3:latest"),
           baseUrl = Some("http://localhost:11434"),
           apiKey = None,
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Right(cfg) =>
@@ -52,9 +49,6 @@ class OllamaNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("llama3:latest"),
           baseUrl = Some("   "),
           apiKey = None,
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Left(err) =>
@@ -68,7 +62,7 @@ class OllamaNamedProviderSpec extends AnyWordSpec with Matchers:
   "NamedProviderSectionValidator" should {
     "mention missing Ollama fields by name" in {
       val name    = ProviderName("my-ollama")
-      val section = RawNamedProviderSection(Some("ollama"), Some("llama3"), None, None, None, None, None)
+      val section = RawNamedProviderSection(Some("ollama"), Some("llama3"), None, None)
       val result = NamedProviderConfigNormalizer
         .normalize(name, section)
         .flatMap(NamedProviderSectionValidator.validate(name, OllamaProvider, _))

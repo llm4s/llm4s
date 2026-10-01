@@ -6,27 +6,37 @@ import org.llm4s.llmconnect.provider.{ OpenAIProvider, RequestyProvider }
 import org.llm4s.types.Result
 
 /**
- * Model lister for the OpenAI provider, using the OpenAI `/models` endpoint.
+ * Model lister for the OpenAI provider, using the OpenAI `/models` endpoint. The section's
+ * `organization`, if set, is sent as the `OpenAI-Organization` header.
  *
  * This was `ProviderModelListers.OpenAI` until the provider moved to
  * `llm4s-openai` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  */
 object OpenAIModelLister extends ProviderModelLister:
   private val delegate =
-    ProviderModelListers.openAICompatible(ProviderId("openai"), OpenAIProvider.DEFAULT_BASE_URL)
+    ProviderModelListers.openAICompatible(
+      ProviderId("openai"),
+      OpenAIProvider.DEFAULT_BASE_URL,
+      sectionHeaders = ProviderModelListers.openAIOrganizationHeader
+    )
 
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
     delegate.listModels(config, httpClient)
 
 /**
- * Model lister for the Requesty provider, using its OpenAI-compatible `/models` endpoint.
+ * Model lister for the Requesty provider, using its OpenAI-compatible `/models` endpoint. The
+ * section's `organization`, if set, is sent as the `OpenAI-Organization` header.
  *
  * This was `ProviderModelListers.Requesty` until the provider moved to
  * `llm4s-openai` ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  */
 object RequestyModelLister extends ProviderModelLister:
   private val delegate =
-    ProviderModelListers.openAICompatible(ProviderId("requesty"), RequestyProvider.DEFAULT_BASE_URL)
+    ProviderModelListers.openAICompatible(
+      ProviderId("requesty"),
+      RequestyProvider.DEFAULT_BASE_URL,
+      sectionHeaders = ProviderModelListers.openAIOrganizationHeader
+    )
 
   def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
     delegate.listModels(config, httpClient)

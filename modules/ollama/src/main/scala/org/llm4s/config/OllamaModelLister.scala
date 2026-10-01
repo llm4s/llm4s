@@ -13,7 +13,7 @@ import scala.util.Try
  * Model lister for the Ollama provider, using the local `/api/tags` endpoint.
  *
  * Ollama does not serve the OpenAI-compatible `/models` shape, so unlike most
- * providers it cannot use [[ProviderModelListers.openAICompatible]]. This was
+ * providers it cannot use `ProviderModelListers.openAICompatible` (in `llm4s-openai-compatible`). This was
  * `ProviderModelListers.Ollama` until the provider moved to `llm4s-ollama`
  * ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  */

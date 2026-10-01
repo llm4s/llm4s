@@ -21,9 +21,6 @@ class AnthropicModelListerSpec extends AnyFunSuite with Matchers:
       model = ModelName(model),
       baseUrl = baseUrl.map(BaseUrl(_)),
       apiKey = apiKey.map(ApiKey(_)),
-      organization = None,
-      endpoint = None,
-      apiVersion = None
     )
 
   test("Anthropic lister discovers models from /v1/models") {

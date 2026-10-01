@@ -57,9 +57,6 @@ class Llm4sAnthropicModuleSpec extends AnyWordSpec with Matchers:
       model = ModelName("claude-sonnet-4-5"),
       baseUrl = AnthropicProvider.configSpec.defaultBaseUrl.map(BaseUrl(_)),
       apiKey = Some(ApiKey("test-key")),
-      organization = None,
-      endpoint = None,
-      apiVersion = None
     )
 
   "the llm4s-anthropic services entry" should {

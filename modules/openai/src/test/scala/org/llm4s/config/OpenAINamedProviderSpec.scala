@@ -3,7 +3,7 @@ package org.llm4s.config
 import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.config.{ AzureConfig, OpenAIConfig }
-import org.llm4s.llmconnect.provider.{ OpenAIProvider, RequestyProvider }
+import org.llm4s.llmconnect.provider.{ AzureProvider, OpenAIProvider, RequestyProvider }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 import pureconfig.ConfigSource
@@ -33,9 +33,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some(" gpt-4o-mini "),
           baseUrl = Some(" https://api.openai.com/v1 "),
           apiKey = Some(" sk-test "),
-          organization = Some(" org-demo "),
-          endpoint = None,
-          apiVersion = None,
+          extras = Map("organization" -> " org-demo ")
         )
       ) match
         case Right(cfg) =>
@@ -43,7 +41,7 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
           cfg.model.asString shouldBe "gpt-4o-mini"
           cfg.baseUrl.map(_.asUrl) shouldBe Some("https://api.openai.com/v1")
           cfg.apiKey.map(_.asKey) shouldBe Some("sk-test")
-          cfg.organization shouldBe Some("org-demo")
+          cfg.extra("organization") shouldBe Some("org-demo")
         case Left(err) =>
           fail(s"Expected OpenAI NamedProviderConfig, got error: ${err.message}")
     }
@@ -56,17 +54,15 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("gpt-4o"),
           baseUrl = None,
           apiKey = Some("azure-key"),
-          organization = None,
-          endpoint = Some("https://my-resource.openai.azure.com"),
-          apiVersion = Some("2024-02-01"),
+          extras = Map("endpoint" -> "https://my-resource.openai.azure.com", "apiVersion" -> "2024-02-01")
         )
       ) match
         case Right(cfg) =>
           cfg.provider shouldBe ProviderId("azure")
           cfg.model.asString shouldBe "gpt-4o"
           cfg.apiKey.map(_.asKey) shouldBe Some("azure-key")
-          cfg.endpoint shouldBe Some("https://my-resource.openai.azure.com")
-          cfg.apiVersion shouldBe Some("2024-02-01")
+          cfg.extra("endpoint") shouldBe Some("https://my-resource.openai.azure.com")
+          cfg.extra("apiVersion") shouldBe Some("2024-02-01")
         case Left(err) =>
           fail(s"Expected Azure NamedProviderConfig, got error: ${err.message}")
     }
@@ -79,9 +75,6 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("gpt-4o-mini"),
           baseUrl = None,
           apiKey = Some("   "),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Left(err) =>
@@ -100,15 +93,37 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("gpt-4o"),
           baseUrl = None,
           apiKey = Some("azure-key"),
-          organization = None,
-          endpoint = Some("   "),
-          apiVersion = None,
+          extras = Map("endpoint" -> "   ")
         )
       ) match
         case Left(err) =>
           err.message should include("- endpoint: the model endpoint/deployment name in your Azure OpenAI resource")
         case Right(cfg) =>
           fail(s"Expected missing Azure endpoint failure, got config: $cfg")
+    }
+
+    // `organization` is declared by OpenAI, Requesty and OpenRouter only. Anywhere else it is an
+    // unknown key, reported and dropped as any other is - it used to be carried, and ignored, by
+    // every provider.
+    "report organization on an Azure section as an unknown key and drop it" in {
+      val name = ProviderName("azure-main")
+      val raw = RawNamedProviderSection(
+        provider = Some("azure"),
+        model = Some("gpt-4o"),
+        baseUrl = None,
+        apiKey = Some("azure-key"),
+        extras = Map("endpoint" -> "https://x.openai.azure.com", "organization" -> "org-1")
+      )
+
+      val (cfg, warnings) = NamedProviderConfigNormalizer
+        .normalize(name, raw)
+        .flatMap(NamedProviderSectionValidator.validateWithWarnings(name, AzureProvider, _))
+        .fold(err => fail(err.message), identity)
+
+      cfg.extra("organization") shouldBe None
+      warnings should have size 1
+      warnings.head should include("llm4s.providers.azure-main has unknown key(s) organization, which are ignored")
+      warnings.head should include("provider = azure also accepts endpoint, apiVersion")
     }
   }
 
@@ -158,6 +173,58 @@ class OpenAINamedProviderSpec extends AnyWordSpec with Matchers:
           requesty.providerId shouldBe ProviderId("requesty")
         case other =>
           fail(s"Expected OpenAIConfig, got $other")
+    }
+
+    "carry a section's organization into the OpenAI and Requesty configs" in {
+      val hocon =
+        """
+          |llm4s.providers {
+          |  openai-main {
+          |    provider = "openai"
+          |    model = "gpt-4o-mini"
+          |    apiKey = "k"
+          |    organization = "org-1"
+          |  }
+          |  requesty-main {
+          |    provider = "requesty"
+          |    model = "openai/gpt-4o-mini"
+          |    apiKey = "k"
+          |    organization = "org-2"
+          |  }
+          |  openai-plain {
+          |    provider = "openai"
+          |    model = "gpt-4o-mini"
+          |    apiKey = "k"
+          |  }
+          |}
+          |""".stripMargin
+
+      def organization(name: String) =
+        Llm4sConfig.provider(ConfigSource.string(hocon), name) match
+          case Right(openai: OpenAIConfig) => openai.organization
+          case other                       => fail(s"Expected OpenAIConfig, got $other")
+
+      organization("openai-main") shouldBe Some("org-1")
+      organization("requesty-main") shouldBe Some("org-2")
+      organization("openai-plain") shouldBe None
+    }
+
+    "fail an Azure section with no endpoint, naming the key" in {
+      val hocon =
+        """
+          |llm4s.providers.azure-main {
+          |  provider = "azure"
+          |  model = "gpt-4o"
+          |  apiKey = "azure-key"
+          |}
+          |""".stripMargin
+
+      Llm4sConfig.provider(ConfigSource.string(hocon), "azure-main") match
+        case Left(err) =>
+          err.message should include("Provider 'azure-main' (provider = azure) is missing required fields")
+          err.message should include("- endpoint:")
+          err.message should include("llm4s.providers.azure-main.endpoint")
+        case Right(cfg) => fail(s"Expected a missing-endpoint failure, got $cfg")
     }
 
     "load an Azure named provider, defaulting the API version" in {

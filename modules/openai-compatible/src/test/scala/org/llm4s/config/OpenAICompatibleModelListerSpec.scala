@@ -9,7 +9,8 @@ import org.scalatest.matchers.should.Matchers
 /**
  * The model listers `llm4s-openai-compatible` ships. The DeepSeek and Mistral cases are core's
  * `ProviderModelListerSpec` cases, moved here with the listers (#1132); the Mistral one is
- * the last, and the core spec went with it.
+ * the last, and the core spec went with it. The `ProviderModelListers.openAICompatible` cases
+ * came with the factory itself, when it left core (#1133).
  */
 class OpenAICompatibleModelListerSpec extends AnyFunSuite with Matchers:
 
@@ -18,17 +19,16 @@ class OpenAICompatibleModelListerSpec extends AnyFunSuite with Matchers:
     model: String,
     baseUrl: Option[String] = None,
     apiKey: Option[String],
-    headers: Map[String, String] = Map.empty
+    headers: Map[String, String] = Map.empty,
+    extras: Map[String, String] = Map.empty
   ): NamedProviderConfig =
     NamedProviderConfig(
       provider = providerId,
       model = ModelName(model),
       baseUrl = baseUrl.map(BaseUrl(_)),
       apiKey = apiKey.map(ApiKey(_)),
-      organization = None,
-      endpoint = None,
-      apiVersion = None,
-      headers = headers
+      headers = headers,
+      extras = extras
     )
 
   private val modelsBody = """{ "data": [ { "id": "some-model", "created": 1710000000, "owned_by": "x" } ] }"""
@@ -197,4 +197,104 @@ class OpenAICompatibleModelListerSpec extends AnyFunSuite with Matchers:
       "Configured provider is missing required field `baseUrl`"
     )
     mockHttp.lastUrl shouldBe None
+  }
+
+  test("OpenRouter lister forwards the section's organization as OpenAI-Organization") {
+    val config = namedConfig(
+      ProviderId("openrouter"),
+      "openai/gpt-4o-mini",
+      apiKey = Some("or-key"),
+      extras = Map("organization" -> "org-1")
+    )
+    val mockHttp = MockHttpClient(HttpResponse(200, modelsBody, Map.empty))
+
+    OpenRouterModelLister.listModels(config, mockHttp).isRight shouldBe true
+    mockHttp.lastHeaders.get should contain("OpenAI-Organization" -> "org-1")
+  }
+
+  test("a lister for a provider that does not declare organization never sends OpenAI-Organization") {
+    // Validation would have dropped the key; even a section built in code with it is not read.
+    val config = namedConfig(
+      ProviderId("deepseek"),
+      "deepseek-chat",
+      apiKey = Some("ds-key"),
+      extras = Map("organization" -> "org-1")
+    )
+    val mockHttp = MockHttpClient(HttpResponse(200, modelsBody, Map.empty))
+
+    DeepSeekModelLister.listModels(config, mockHttp).isRight shouldBe true
+    mockHttp.lastHeaders.get.keySet should not contain "OpenAI-Organization"
+  }
+
+  test("openAICompatible layers the key, section-derived, provider and section headers in that order") {
+    val lister = ProviderModelListers.openAICompatible(
+      ProviderId("layered"),
+      "https://layered.invalid/v1",
+      extraHeaders = Map("X-Provider" -> "provider", "X-Shared" -> "provider"),
+      sectionHeaders = section =>
+        Map("X-From-Section" -> section.model.asString, "X-Shared" -> "section-derived", "Authorization" -> "derived")
+    )
+    val config = namedConfig(
+      ProviderId("layered"),
+      "m-1",
+      apiKey = Some("k"),
+      headers = Map("X-Provider" -> "user")
+    )
+    val mockHttp = MockHttpClient(HttpResponse(200, modelsBody, Map.empty))
+
+    lister.listModels(config, mockHttp).isRight shouldBe true
+    mockHttp.lastHeaders.get shouldBe Map(
+      "Authorization"  -> "derived",
+      "X-From-Section" -> "m-1",
+      "X-Shared"       -> "provider",
+      "X-Provider"     -> "user"
+    )
+  }
+
+  test("openAICompatible keeps each model's metadata and skips entries without an id") {
+    val body =
+      """{ "data": [
+        |  { "id": "a", "created": 1710000000, "owned_by": "x", "name": "A", "description": "first" },
+        |  { "id": "" },
+        |  { "object": "model" },
+        |  "not-an-object",
+        |  { "id": "b" }
+        |] }""".stripMargin
+    val lister   = ProviderModelListers.openAICompatible(ProviderId("meta"), "https://meta.invalid")
+    val mockHttp = MockHttpClient(HttpResponse(200, body, Map.empty))
+
+    lister.listModels(namedConfig(ProviderId("meta"), "m", apiKey = Some("k")), mockHttp) shouldBe Right(
+      List(
+        DiscoveredModel(
+          ModelName("a"),
+          ProviderId("meta"),
+          Map("created" -> "1710000000", "ownedBy" -> "x", "displayName" -> "A", "description" -> "first")
+        ),
+        DiscoveredModel(ModelName("b"), ProviderId("meta"))
+      )
+    )
+  }
+
+  test("openAICompatible fails clearly on a payload with no data array") {
+    val lister   = ProviderModelListers.openAICompatible(ProviderId("meta"), "https://meta.invalid")
+    val mockHttp = MockHttpClient(HttpResponse(200, """{ "models": [] }""", Map.empty))
+
+    lister.listModels(namedConfig(ProviderId("meta"), "m", apiKey = Some("k")), mockHttp).left.map(_.message) match
+      case Left(message) => message should include("Missing or invalid models payload")
+      case Right(models) => fail(s"Expected a payload error, got $models")
+  }
+
+  test("openAICompatible requires an API key unless told otherwise") {
+    val lister   = ProviderModelListers.openAICompatible(ProviderId("meta"), "https://meta.invalid")
+    val mockHttp = MockHttpClient(HttpResponse(200, modelsBody, Map.empty))
+
+    lister.listModels(namedConfig(ProviderId("meta"), "m", apiKey = None), mockHttp).isLeft shouldBe true
+    mockHttp.lastUrl shouldBe None
+  }
+
+  test("openAICompatible reports a non-2xx listing response as an error") {
+    val lister   = ProviderModelListers.openAICompatible(ProviderId("meta"), "https://meta.invalid")
+    val mockHttp = MockHttpClient(HttpResponse(401, """{"error":"nope"}""", Map.empty))
+
+    lister.listModels(namedConfig(ProviderId("meta"), "m", apiKey = Some("k")), mockHttp).isLeft shouldBe true
   }

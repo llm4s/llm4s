@@ -38,9 +38,9 @@ class ProviderConfigRawReadSpec extends AnyWordSpec with Matchers:
           provider.model shouldBe Some("gpt-4o-mini")
           provider.baseUrl shouldBe Some("https://api.openai.com/v1")
           provider.apiKey shouldBe Some("sk-test")
-          provider.organization shouldBe Some("org-demo")
-          provider.endpoint shouldBe None
-          provider.apiVersion shouldBe None
+          // Not a built-in field since #1133: read as a provider-specific key, for the
+          // provider's descriptor to accept or report as unknown.
+          provider.extras shouldBe Map("organization" -> "org-demo")
         case Left(err) =>
           fail(s"Expected RawProvidersConfig, got error: ${err.message}")
     }
@@ -113,10 +113,35 @@ class ProviderConfigRawReadSpec extends AnyWordSpec with Matchers:
           provider.model shouldBe Some("gpt-4o-mini")
           provider.baseUrl shouldBe Some("https://api.openai.com/v1")
           provider.apiKey shouldBe Some("sk-test")
-          provider.organization shouldBe None
-          provider.endpoint shouldBe None
-          provider.apiVersion shouldBe None
+          provider.headers shouldBe None
+          provider.extras shouldBe empty
         case Left(err) =>
           fail(s"Expected RawProvidersConfig, got error: ${err.message}")
+    }
+
+    "read the former built-in fields as strings, numbers included, into extras" in {
+      val hocon =
+        """
+          |llm4s.providers {
+          |  azure-main {
+          |    provider = "azure"
+          |    model = "gpt-4o"
+          |    endpoint = "https://x.openai.azure.com"
+          |    apiVersion = "2024-02-01"
+          |  }
+          |  local {
+          |    provider = "openai-compatible"
+          |    model = "m"
+          |    contextWindow = 131072
+          |    reserveCompletion = 8192
+          |  }
+          |}
+          |""".stripMargin
+
+      val raw = RawProvidersConfigLoader.load(ConfigSource.string(hocon)).fold(err => fail(err.message), identity)
+      raw.namedProviders(ProviderName("azure-main")).extras shouldBe
+        Map("endpoint" -> "https://x.openai.azure.com", "apiVersion" -> "2024-02-01")
+      raw.namedProviders(ProviderName("local")).extras shouldBe
+        Map("contextWindow" -> "131072", "reserveCompletion" -> "8192")
     }
   }

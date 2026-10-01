@@ -119,8 +119,6 @@ private[llm4s] object NamedProviderSectionValidator:
       missing += s"  - baseUrl: set it in application.conf under llm4s.providers.$name.baseUrl (${spec.baseUrlExample}" +
         envHint("baseUrl", spec.baseUrlEnv) + ")"
 
-    if spec.requiresEndpoint && normalized.endpoint.isEmpty then missing += s"  - endpoint: ${spec.endpointDescription}"
-
     missing.result()
 
   // Named sections read no environment variable by themselves, so a declared variable is shown as the
@@ -146,18 +144,14 @@ private[llm4s] object NamedProviderSectionValidator:
   ): ResolvedExtras =
     val section = s"llm4s.providers.$name"
 
-    // A deprecated alias may be a built-in field (Vertex AI's `endpoint`) or a former extra key.
-    // Every built-in in `BuiltinAliasKeys` is read here; `specError` rejects the others.
+    // A deprecated alias may be a built-in field or a former key read from `extras` - as Vertex
+    // AI's `endpoint` and `organization` are, now that neither is built in. Every built-in in
+    // `BuiltinAliasKeys` is read here; `specError` rejects the others.
     def aliasValue(alias: String): Option[String] =
       alias match
-        case "baseUrl"           => normalized.baseUrl.map(_.asUrl)
-        case "apiKey"            => normalized.apiKey.map(_.asKey)
-        case "organization"      => normalized.organization
-        case "endpoint"          => normalized.endpoint
-        case "apiVersion"        => normalized.apiVersion
-        case "contextWindow"     => normalized.contextWindow.map(_.toString)
-        case "reserveCompletion" => normalized.reserveCompletion.map(_.toString)
-        case other               => normalized.extras.get(other)
+        case "baseUrl" => normalized.baseUrl.map(_.asUrl)
+        case "apiKey"  => normalized.apiKey.map(_.asKey)
+        case other     => normalized.extras.get(other)
 
     def resolve(key: ProviderConfigKey): KeyOutcome =
       val aliasHits = key.deprecatedAliases.flatMap(alias => aliasValue(alias).map(alias -> _))

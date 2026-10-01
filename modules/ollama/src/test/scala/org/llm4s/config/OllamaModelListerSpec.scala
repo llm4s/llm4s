@@ -21,9 +21,6 @@ class OllamaModelListerSpec extends AnyFunSuite with Matchers:
       model = ModelName(model),
       baseUrl = baseUrl.map(BaseUrl(_)),
       apiKey = apiKey.map(ApiKey(_)),
-      organization = None,
-      endpoint = None,
-      apiVersion = None
     )
 
   test("Ollama lister discovers models from /api/tags") {

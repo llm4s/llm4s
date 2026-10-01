@@ -399,12 +399,23 @@ is an error. See the [migration note](../reference/migration.md#vertex-ai-endpoi
 
 ## Provider-specific keys
 
-Every named section shares the built-in fields - `provider`, `model`, `baseUrl`, `apiKey`,
-`organization`, `endpoint`, `apiVersion`, `contextWindow`, `reserveCompletion`, `headers` - and a
-provider may declare keys of its own, such as Vertex AI's `project` and `location`. Its section
-of this guide lists them. A required one that is missing fails the config with its name, the
-section and what it means; a key that is neither built-in nor declared is ignored with a warning
-naming it, so a misspelt key shows up in the log rather than silently doing nothing.
+Every named section shares the built-in fields - `provider`, `model`, `baseUrl`, `apiKey` and
+`headers` - and a provider may declare keys of its own. Its section of this guide lists them:
+
+| Provider | Its own keys |
+|---|---|
+| OpenAI, Requesty, OpenRouter | `organization` |
+| Azure OpenAI | `endpoint` (required), `apiVersion` |
+| Vertex AI | `project` (required), `location` |
+| Generic `openai-compatible` | `contextWindow`, `reserveCompletion`, `streamUsage` |
+
+A required one that is missing fails the config with its name, the section and what it means; a
+key that is neither built-in nor declared by the section's provider is ignored with a warning
+naming it, so a misspelt key - or `organization` in an Anthropic section - shows up in the log
+rather than silently doing nothing. `organization`, `endpoint`, `apiVersion`, `contextWindow` and
+`reserveCompletion` were built-in fields that every section carried until
+[#1133](https://github.com/llm4s/llm4s/issues/1133); the HOCON for the providers that use them is
+unchanged.
 
 ---
 

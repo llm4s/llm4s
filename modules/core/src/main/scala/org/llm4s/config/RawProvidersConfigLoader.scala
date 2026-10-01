@@ -13,18 +13,13 @@ import scala.jdk.CollectionConverters.*
 private[config] object RawProvidersConfigLoader:
 
   private val builtinFieldsReader: PureConfigReader[RawNamedProviderSection] =
-    PureConfigReader.forProduct10(
+    PureConfigReader.forProduct5(
       "provider",
       "model",
       "baseUrl",
       "apiKey",
-      "organization",
-      "endpoint",
-      "apiVersion",
-      "contextWindow",
-      "reserveCompletion",
       "headers"
-    )(RawNamedProviderSection(_, _, _, _, _, _, _, _, _, _))
+    )(RawNamedProviderSection(_, _, _, _, _))
 
   /**
    * The built-in fields, plus every other key as a string in `extras`.

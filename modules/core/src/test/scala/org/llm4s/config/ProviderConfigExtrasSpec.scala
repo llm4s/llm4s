@@ -25,8 +25,9 @@ import scala.jdk.CollectionConverters.*
  * and how the section validator checks them.
  *
  * `RegionalProvider` is the shape Bedrock needs - a required `region`, an optional `profile`,
- * and a `tier` with a default - plus a deprecated alias from a repurposed built-in field, as
- * Vertex AI has. It builds a `FixtureChatConfig`, putting the region in the base URL so a
+ * and a `tier` with a default - plus a deprecated alias, `organization`, as Vertex AI has.
+ * `organization` was a built-in field until #1133; it is now an ordinary key that OpenAI-format
+ * providers declare, so an alias of that name is resolved from the section's extras. It builds a `FixtureChatConfig`, putting the region in the base URL so a
  * round trip can show the value reached `buildConfig`.
  */
 class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
@@ -92,7 +93,7 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
         ModelRegistryService
       ): Result[LLMClient] = Left(ConfigurationError("unused"))
 
-  /** A key renamed twice: `proj` (a former extra key), then `organization` (a built-in field). */
+  /** A key renamed twice: `proj`, then `organization` - both former extra keys. */
   private val twoAliases = stub(
     "twoaliases",
     ProviderConfigSpec(extras =
@@ -108,7 +109,14 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
     organization: Option[String] = None,
     extras: Map[String, String] = Map.empty
   ): RawNamedProviderSection =
-    RawNamedProviderSection(Some(provider), Some("m"), None, apiKey, organization, None, None, extras = extras)
+    // `organization` is no longer a built-in field, so the loader puts it in `extras` as it would any other key.
+    RawNamedProviderSection(
+      Some(provider),
+      Some("m"),
+      None,
+      apiKey,
+      extras = extras ++ organization.map("organization" -> _)
+    )
 
   private def validated(
     raw: RawNamedProviderSection,
@@ -276,26 +284,24 @@ class ProviderConfigExtrasSpec extends AnyFlatSpec with Matchers:
 
     val message = error(validated(section(provider = "badalias"), stub("badalias", spec)))
     message should include("Provider 'badalias' declares built-in field(s) model, headers as deprecated aliases")
-    message should include(
-      "only apiKey, apiVersion, baseUrl, contextWindow, endpoint, organization, reserveCompletion can"
-    )
+    message should include("only apiKey, baseUrl can")
   }
 
   "a built-in field as a deprecated alias" should "resolve for every field with a string form, apiKey included" in {
     val spec = ProviderConfigSpec(extras =
       Seq(
         ProviderConfigKey("token", "the access token", required = true, deprecatedAliases = Seq("apiKey")),
-        ProviderConfigKey("window", "the window", deprecatedAliases = Seq("contextWindow"))
+        ProviderConfigKey("host", "the host", deprecatedAliases = Seq("baseUrl"))
       )
     )
-    val raw = section(provider = "tokened", apiKey = Some("secret-token")).copy(contextWindow = Some(4096))
+    val raw = section(provider = "tokened", apiKey = Some("secret-token")).copy(baseUrl = Some("https://h.invalid"))
 
     val (config, warnings) = ok(validated(raw, stub("tokened", spec)))
 
-    config.extras shouldBe Map("token" -> "secret-token", "window" -> "4096")
+    config.extras shouldBe Map("token" -> "secret-token", "host" -> "https://h.invalid")
     warnings.map(_.takeWhile(_ != ';')) shouldBe Seq(
       "llm4s.providers.my-regional.apiKey is deprecated for provider = tokened",
-      "llm4s.providers.my-regional.contextWindow is deprecated for provider = tokened"
+      "llm4s.providers.my-regional.baseUrl is deprecated for provider = tokened"
     )
   }
 

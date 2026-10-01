@@ -4,7 +4,7 @@ import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.http.{ HttpResponse, MockHttpClient }
 import org.llm4s.llmconnect.LLMConnect
 import org.llm4s.llmconnect.config.OpenAICompatibleConfig
-import org.llm4s.llmconnect.provider.OpenAICompatibleProvider
+import org.llm4s.llmconnect.provider.{ DeepSeekProvider, OpenAICompatibleProvider }
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -34,9 +34,6 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("deepseek-chat"),
           baseUrl = Some("https://api.deepseek.com"),
           apiKey = Some("deepseek-key"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Right(cfg) =>
@@ -55,9 +52,6 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("openai/gpt-4o-mini"),
           baseUrl = Some("https://openrouter.ai/api/v1"),
           apiKey = Some("or-key"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Right(cfg) =>
@@ -76,9 +70,6 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("GLM-4.7"),
           baseUrl = Some("https://api.z.ai/api/paas/v4"),
           apiKey = Some("zai-key"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Right(cfg) =>
@@ -97,9 +88,6 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("mistral-large-latest"),
           baseUrl = Some("https://api.mistral.ai"),
           apiKey = Some("mistral-key"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Right(cfg) =>
@@ -118,9 +106,6 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("command-r-plus"),
           baseUrl = Some("https://api.cohere.com"),
           apiKey = Some("cohere-key"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Right(cfg) =>
@@ -139,9 +124,6 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("qwen"),
           baseUrl = Some("http://localhost:8000/v1"),
           apiKey = None,
-          organization = None,
-          endpoint = None,
-          apiVersion = None
         )
       ) match
         case Right(cfg) =>
@@ -159,9 +141,6 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("qwen"),
           baseUrl = None,
           apiKey = None,
-          organization = None,
-          endpoint = None,
-          apiVersion = None
         )
       ).left.toOption.getOrElse(fail("Expected a missing-baseUrl failure")).message
 
@@ -225,6 +204,37 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
       |      model = "m"
       |      contextWindow = 1000
       |      reserveCompletion = 1000
+      |    }
+      |    text-window {
+      |      provider = "openai-compatible"
+      |      baseUrl = "http://localhost:8000/v1"
+      |      model = "m"
+      |      contextWindow = "lots"
+      |    }
+      |    zero-window {
+      |      provider = "openai-compatible"
+      |      baseUrl = "http://localhost:8000/v1"
+      |      model = "m"
+      |      contextWindow = 0
+      |    }
+      |    negative-reserve {
+      |      provider = "openai-compatible"
+      |      baseUrl = "http://localhost:8000/v1"
+      |      model = "m"
+      |      reserveCompletion = -1
+      |    }
+      |    zero-reserve {
+      |      provider = "openai-compatible"
+      |      baseUrl = "http://localhost:8000/v1"
+      |      model = "m"
+      |      contextWindow = 4096
+      |      reserveCompletion = 0
+      |    }
+      |    deepseek-window {
+      |      provider = "deepseek"
+      |      model = "deepseek-chat"
+      |      apiKey = "k"
+      |      contextWindow = 4096
       |    }
       |  }
       |}
@@ -311,6 +321,68 @@ class OpenAICompatibleNamedProviderSpec extends AnyWordSpec with Matchers:
       Llm4sConfig.provider(ConfigSource.string(hocon), "bad-window") match
         case Left(err) => err.message should include("reserveCompletion must be at least 0 and less than contextWindow")
         case other     => fail(s"Expected a configuration error, got $other")
+    }
+
+    // contextWindow and reserveCompletion are this provider's declared keys since #1133, not
+    // fields of NamedProviderConfig: they arrive as strings, so the descriptor parses them.
+    "reject a contextWindow that is not a whole number, naming the key and the section" in {
+      Llm4sConfig.provider(ConfigSource.string(hocon), "text-window") match
+        case Left(err) =>
+          err.message shouldBe "Configured provider 'text-window' has an invalid contextWindow: " +
+            "llm4s.providers.text-window.contextWindow must be a positive whole number, got 'lots'"
+        case other => fail(s"Expected a configuration error, got $other")
+    }
+
+    "reject a contextWindow of zero" in {
+      Llm4sConfig.provider(ConfigSource.string(hocon), "zero-window") match
+        case Left(err) => err.message should include("contextWindow must be a positive whole number, got '0'")
+        case other     => fail(s"Expected a configuration error, got $other")
+    }
+
+    "reject a negative reserveCompletion" in {
+      Llm4sConfig.provider(ConfigSource.string(hocon), "negative-reserve") match
+        case Left(err) =>
+          err.message should include(
+            "llm4s.providers.negative-reserve.reserveCompletion must be a whole number, 0 or more"
+          )
+        case other => fail(s"Expected a configuration error, got $other")
+    }
+
+    "accept a reserveCompletion of zero" in {
+      Llm4sConfig.provider(ConfigSource.string(hocon), "zero-reserve") match
+        case Right(cfg: OpenAICompatibleConfig) =>
+          cfg.contextWindow shouldBe 4096
+          cfg.reserveCompletion shouldBe 0
+        case other => fail(s"Expected OpenAICompatibleConfig, got $other")
+    }
+
+    "read contextWindow and reserveCompletion as declared keys, with no unknown-key warning" in {
+      val raw  = RawProvidersConfigLoader.load(ConfigSource.string(hocon)).fold(e => fail(e.message), identity)
+      val name = ProviderName("groq-main")
+      val (cfg, warnings) = NamedProviderConfigNormalizer
+        .normalize(name, raw.namedProviders(name))
+        .flatMap(NamedProviderSectionValidator.validateWithWarnings(name, OpenAICompatibleProvider, _))
+        .fold(e => fail(e.message), identity)
+
+      cfg.extra(OpenAICompatibleProvider.ContextWindowKey) shouldBe Some("131072")
+      cfg.extra(OpenAICompatibleProvider.ReserveCompletionKey) shouldBe Some("8192")
+      warnings shouldBe empty
+    }
+
+    "report contextWindow on a provider that does not declare it as an unknown key" in {
+      val raw  = RawProvidersConfigLoader.load(ConfigSource.string(hocon)).fold(e => fail(e.message), identity)
+      val name = ProviderName("deepseek-window")
+      val (cfg, warnings) = NamedProviderConfigNormalizer
+        .normalize(name, raw.namedProviders(name))
+        .flatMap(NamedProviderSectionValidator.validateWithWarnings(name, DeepSeekProvider, _))
+        .fold(e => fail(e.message), identity)
+
+      cfg.extras shouldBe empty
+      warnings shouldBe Seq(
+        "llm4s.providers.deepseek-window has unknown key(s) contextWindow, which are ignored. Besides the " +
+          "built-in fields (apiKey, baseUrl, headers, model, provider), provider = deepseek declares no " +
+          "provider-specific keys."
+      )
     }
 
     "build an OpenAICompatibleClient for the default provider" in {
