@@ -197,10 +197,15 @@ config-policy `prod` preset flags any section that does not (see
 | `model` | Required. The model name as the provider spells it, e.g. `gpt-4o-mini` |
 | `apiKey` | The API key; required by every cloud provider. Optional in the section when the vendor's shared key is set ([API keys](#api-keys)) |
 | `baseUrl` | Overrides the provider's default endpoint; **required** for `ollama` and `openai-compatible` |
-| `organization` | OpenAI organisation id |
+| `headers` | Extra HTTP headers; sent by generic `openai-compatible` endpoints and by model listing |
+| `organization` | OpenAI, Requesty and OpenRouter: the OpenAI organisation id, sent as `OpenAI-Organization` |
 | `endpoint`, `apiVersion` | Azure OpenAI: the resource endpoint (required) and API version |
 | `project`, `location` | Vertex AI: the GCP project id (required) and region (default `us-central1`) |
-| `contextWindow`, `reserveCompletion`, `headers`, `streamUsage` | Generic `openai-compatible` endpoints ([details](../guide/providers#openai-compatible-endpoints)) |
+| `contextWindow`, `reserveCompletion`, `streamUsage` | Generic `openai-compatible` endpoints ([details](../guide/providers#openai-compatible-endpoints)) |
+
+The first five keys are shared by every provider. The rest belong to the providers named, which
+declare them ([provider-specific keys](../guide/providers#provider-specific-keys)); in a section for
+any other provider such a key is ignored with a warning naming it, as a misspelt key is.
 
 Each provider module's `reference.conf` has a commented example section, and the
 [provider guide](../guide/providers) covers each provider in detail.

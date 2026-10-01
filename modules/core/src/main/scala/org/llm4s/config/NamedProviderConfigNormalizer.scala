@@ -45,11 +45,6 @@ private[config] object NamedProviderConfigNormalizer:
       model = ModelName(model),
       baseUrl = section.baseUrl.map(_.trim).filter(_.nonEmpty).map(BaseUrl(_)),
       apiKey = section.apiKey.map(_.trim).filter(_.nonEmpty).map(ApiKey(_)),
-      organization = section.organization.map(_.trim).filter(_.nonEmpty),
-      endpoint = section.endpoint.map(_.trim).filter(_.nonEmpty),
-      apiVersion = section.apiVersion.map(_.trim).filter(_.nonEmpty),
-      contextWindow = section.contextWindow,
-      reserveCompletion = section.reserveCompletion,
       headers = section.headers.getOrElse(Map.empty),
       // Trimmed and kept as read. Which of these the provider accepts is decided by
       // `NamedProviderSectionValidator`, which knows the descriptor; this does not.

@@ -65,7 +65,7 @@ class DeepSeekNamedProviderSpec extends AnyWordSpec with Matchers:
     "name DeepSeek's API-key env var, and not demand a baseUrl" in {
       val name = ProviderName("my-deepseek")
       val section =
-        RawNamedProviderSection(Some("deepseek"), Some("deepseek-chat"), None, None, None, None, None)
+        RawNamedProviderSection(Some("deepseek"), Some("deepseek-chat"), None, None)
 
       val message = NamedProviderConfigNormalizer
         .normalize(name, section)

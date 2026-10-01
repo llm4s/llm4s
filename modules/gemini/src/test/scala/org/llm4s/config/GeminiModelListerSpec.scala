@@ -21,9 +21,6 @@ class GeminiModelListerSpec extends AnyFunSuite with Matchers:
       model = ModelName(model),
       baseUrl = baseUrl.map(BaseUrl(_)),
       apiKey = apiKey.map(ApiKey(_)),
-      organization = None,
-      endpoint = None,
-      apiVersion = None
     )
 
   test("Gemini lister discovers models from /models") {

@@ -33,9 +33,6 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers:
     model = ModelName("llama3.1"),
     baseUrl = Some(BaseUrl("http://localhost:11434")),
     apiKey = None,
-    organization = None,
-    endpoint = None,
-    apiVersion = None
   )
 
   /** One NDJSON chat chunk then a done line, standing in for Ollama's API. */

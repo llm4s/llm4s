@@ -14,7 +14,7 @@ import scala.util.Try
  * Model lister for the Anthropic provider, using the paginated `/v1/models` endpoint.
  *
  * Anthropic does not serve the OpenAI-compatible `/models` shape, so it cannot use
- * [[ProviderModelListers.openAICompatible]]. This was
+ * `ProviderModelListers.openAICompatible` (in `llm4s-openai-compatible`). This was
  * `ProviderModelListers.Anthropic` until the provider moved to `llm4s-anthropic`
  * ([[https://github.com/llm4s/llm4s/issues/1132 #1132]]).
  */

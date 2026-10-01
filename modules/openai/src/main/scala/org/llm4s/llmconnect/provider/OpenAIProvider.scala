@@ -23,7 +23,9 @@ object OpenAIProvider extends ProviderDescriptor:
 
   /** The key falls back to `llm4s.credentials.openai.apiKey`, bound to `OPENAI_API_KEY`. */
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(OpenAIConfigKeys.OPENAI_API_KEY))
+    ProviderConfigSpec
+      .apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(OpenAIConfigKeys.OPENAI_API_KEY))
+      .copy(extras = Seq(OpenAIConfig.OrganizationConfigKey))
 
   override val modelLister: Option[ProviderModelLister] = Some(OpenAIModelLister)
 
@@ -33,7 +35,12 @@ object OpenAIProvider extends ProviderDescriptor:
     for
       apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      config  <- OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl)
+      config <- OpenAIConfig.fromValues(
+        section.model.asString,
+        apiKey,
+        section.extra(OpenAIConfig.OrganizationKey),
+        baseUrl
+      )
     yield config
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using

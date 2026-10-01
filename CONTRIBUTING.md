@@ -145,10 +145,15 @@ See [CLAUDE.md](CLAUDE.md) for detailed guidelines. Key points:
 ### Provider-specific config keys
 
 A provider is a `ProviderDescriptor` in its own module (see [CLAUDE.md](CLAUDE.md), invariant 8).
-When its named section needs a setting the built-in fields do not name - a cloud region, a
-project id, a credentials profile - declare it in the descriptor's `ProviderConfigSpec.extras`.
-Do **not** reuse `endpoint`, `organization` or `baseUrl` for something else: that is the
-workaround [#1215](https://github.com/llm4s/llm4s/issues/1215) removed from Vertex AI.
+When its named section needs a setting the built-in fields (`provider`, `model`, `baseUrl`,
+`apiKey`, `headers`) do not name - a cloud region, a project id, a credentials profile - declare
+it in the descriptor's `ProviderConfigSpec.extras`. That holds even for a key another provider
+already uses: Azure's `endpoint` and `apiVersion`, OpenAI's `organization` and the generic
+provider's `contextWindow` are each declared by their own descriptors
+([#1133](https://github.com/llm4s/llm4s/issues/1133)), and never become fields of
+`NamedProviderConfig`, which `llm4s-core` freezes. Do **not** reuse `baseUrl` for something
+else: that is the workaround [#1215](https://github.com/llm4s/llm4s/issues/1215) removed from
+Vertex AI.
 
 ```scala
 val configSpec = ProviderConfigSpec(
@@ -167,8 +172,8 @@ def buildConfig(providerName: String, section: NamedProviderConfig)(using Contex
 
 Validation does the rest before `buildConfig` runs: a missing required key fails with its name,
 the section and your `description`; `default`s are filled in; `deprecatedAliases` let you rename a
-key without breaking configs, with a warning (an alias may be a former extra key or a built-in
-field with a string form, as in `ProviderConfigSpec.BuiltinAliasKeys`); undeclared keys are
+key without breaking configs, with a warning (an alias may be any former key, or `baseUrl` or
+`apiKey`, the built-in fields in `ProviderConfigSpec.BuiltinAliasKeys`); undeclared keys are
 dropped with a warning. Values are strings - parse and reject a malformed one in `buildConfig`.
 Set `env` (or `baseUrlEnv`) to the key's conventional environment variable, if it has one: a
 section's extra keys and `baseUrl` read no variable by themselves, so the missing-key error shows

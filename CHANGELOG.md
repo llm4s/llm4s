@@ -797,6 +797,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   modules inseparable; moving that one file broke the cycle.
 
 ### Removed
+- **`NamedProviderConfig` carries no vendor-specific fields** - pre-baseline API cleanup, pass 4
+  ([#1133](https://github.com/llm4s/llm4s/issues/1133)). `organization`, `endpoint`, `apiVersion`,
+  `contextWindow` and `reserveCompletion` are removed from `NamedProviderConfig` and are now
+  provider-specific keys declared in their providers' `ProviderConfigSpec.extras`: `endpoint`
+  (required) and `apiVersion` by Azure, `organization` by OpenAI, Requesty and OpenRouter,
+  `contextWindow` and `reserveCompletion` by the generic `openai-compatible` provider. HOCON is
+  unchanged; read them with `section.extra("organization")` etc. `ProviderConfigSpec.requiresEndpoint`
+  and `endpointDescription` are removed (declare a required `ProviderConfigKey`); `BuiltinKeys` is
+  now `provider, model, baseUrl, apiKey, headers`. `ProviderModelListers` (`openAICompatible`) moved
+  from `llm4s-core` to `llm4s-openai-compatible`, same package, and gained a `sectionHeaders`
+  parameter; it no longer sends `OpenAI-Organization` by itself
+  (`ProviderModelListers.openAIOrganizationHeader` does, for the providers that declare it). These
+  keys in a section for any other provider are now reported as unknown and ignored. See the
+  [migration note](docs/reference/migration.md#pre-baseline-api-cleanup-pass-4).
 - **Pre-baseline API cleanup, pass 3** ([#1133](https://github.com/llm4s/llm4s/issues/1133)).
   `llmconnect.middleware` (pipeline, caching, logging, metrics, redaction, sanitisation,
   request-id and rate-limiting middleware) is removed: it had no users and duplicated `caching`

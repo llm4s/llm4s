@@ -52,7 +52,7 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
   private val unreadable =
     """      provider = "fixturechat"
       |      model = "fixture-model"
-      |      contextWindow = "not-a-number"""".stripMargin
+      |      headers = "not-a-map"""".stripMargin
 
   private def expectGood(result: org.llm4s.types.Result[?]): Unit =
     result match
@@ -134,7 +134,7 @@ class ProviderSectionIsolationSpec extends AnyWordSpec with Matchers:
       Llm4sConfig.provider(config(unreadable), "bad-one") match
         case Left(err) =>
           err.message should include("llm4s.providers.bad-one")
-          err.message should include("contextWindow")
+          err.message should include("headers")
         case Right(cfg) => fail(s"Expected a read error, got $cfg")
     }
   }

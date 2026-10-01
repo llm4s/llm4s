@@ -28,8 +28,11 @@ object OpenRouterProvider extends ProviderDescriptor:
    */
   val DEFAULT_BASE_URL: String = "https://openrouter.ai/api/v1"
 
+  /** Accepts `organization`, which it passes on in its `OpenAIConfig` as OpenAI and Requesty do. */
   val configSpec: ProviderConfigSpec =
-    ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(OpenAICompatibleConfigKeys.OPENROUTER_API_KEY))
+    ProviderConfigSpec
+      .apiKeyAndDefaultBaseUrl(DEFAULT_BASE_URL, Seq(OpenAICompatibleConfigKeys.OPENROUTER_API_KEY))
+      .copy(extras = Seq(OpenAIConfig.OrganizationConfigKey))
 
   override val modelLister: Option[ProviderModelLister] = Some(OpenRouterModelLister)
 
@@ -39,7 +42,13 @@ object OpenRouterProvider extends ProviderDescriptor:
     for
       apiKey  <- ProviderDescriptor.requireApiKey(providerName, section)
       baseUrl <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      config  <- OpenAIConfig.fromValues(section.model.asString, apiKey, section.organization, baseUrl, Some(id))
+      config <- OpenAIConfig.fromValues(
+        section.model.asString,
+        apiKey,
+        section.extra(OpenAIConfig.OrganizationKey),
+        baseUrl,
+        Some(id)
+      )
     yield config
 
   def buildClient(config: ProviderConfig, options: LlmClientOptions)(using

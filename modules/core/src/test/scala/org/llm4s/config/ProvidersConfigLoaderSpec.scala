@@ -44,7 +44,8 @@ class ProvidersConfigLoaderSpec extends AnyWordSpec with Matchers:
           primary.model.asString shouldBe "fixture-model"
           primary.baseUrl.map(_.asUrl) shouldBe Some("https://fixturechat.invalid/v2")
           primary.apiKey.map(_.asKey) shouldBe Some("sk-fixture-primary")
-          primary.organization shouldBe Some("org-demo")
+          // `organization` is OpenAI's key; the fixture does not declare it, so it is dropped.
+          primary.extras shouldBe empty
 
           val main = cfg.namedProviders(ProviderName("fixturechat-main"))
           main.provider shouldBe ProviderId("fixturechat")

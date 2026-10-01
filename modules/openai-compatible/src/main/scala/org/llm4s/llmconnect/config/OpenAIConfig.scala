@@ -1,5 +1,6 @@
 package org.llm4s.llmconnect.config
 
+import org.llm4s.llmconnect.spi.ProviderConfigKey
 import org.llm4s.types.ProviderModelTypes.ProviderId
 import org.llm4s.types.Result
 import org.llm4s.util.Redaction
@@ -66,6 +67,19 @@ case class OpenAIConfig(
 
 object OpenAIConfig {
   private val standardReserve = 4096
+
+  /**
+   * The provider-specific key naming the OpenAI organisation ID, `organization`.
+   *
+   * It was a field of `NamedProviderConfig` that every provider carried; it is now declared only
+   * by the providers that build an `OpenAIConfig` - OpenAI, Requesty and OpenRouter - and read
+   * with `section.extra(OrganizationKey)` (#1133).
+   */
+  val OrganizationKey: String = "organization"
+
+  /** The declaration of [[OrganizationKey]] each of those providers lists in its `ProviderConfigSpec.extras`. */
+  val OrganizationConfigKey: ProviderConfigKey =
+    ProviderConfigKey.optional(OrganizationKey, "the OpenAI organization ID, sent as the OpenAI-Organization header")
 
   private def openAIFallback(modelName: String): (Int, Int) =
     modelName match {

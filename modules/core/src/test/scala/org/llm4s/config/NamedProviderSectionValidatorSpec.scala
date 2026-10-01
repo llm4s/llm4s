@@ -2,7 +2,7 @@ package org.llm4s.config
 
 import org.llm4s.config.ProvidersConfigModel.*
 import org.llm4s.error.ConfigurationError
-import org.llm4s.llmconnect.spi.{ ProviderConfigSpec, ProviderDescriptor }
+import org.llm4s.llmconnect.spi.{ ProviderConfigKey, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.testutil.FixtureChatProvider
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.flatspec.AnyFlatSpec
@@ -40,11 +40,9 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
     model: String,
     baseUrl: Option[String] = None,
     apiKey: Option[String] = None,
-    organization: Option[String] = None,
-    endpoint: Option[String] = None,
-    apiVersion: Option[String] = None
+    extras: Map[String, String] = Map.empty
   ): RawNamedProviderSection =
-    RawNamedProviderSection(Some(provider), Some(model), baseUrl, apiKey, organization, endpoint, apiVersion)
+    RawNamedProviderSection(Some(provider), Some(model), baseUrl, apiKey, extras = extras)
 
   private def errorFrom(result: org.llm4s.types.Result[NamedProviderConfig]): String =
     result.left.toOption.getOrElse(fail(s"Expected Left, got $result")).asInstanceOf[ConfigurationError].message
@@ -85,8 +83,12 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
     // Nothing here is registered in `llm4s-core` - this is the shape a provider
     // module supplies, and it is validated by the same code path as the built-ins.
     object CustomProvider extends ProviderDescriptor:
-      val id: ProviderId                 = ProviderId("customcloud")
-      val configSpec: ProviderConfigSpec = ProviderConfigSpec(requiresBaseUrl = true, requiresEndpoint = true)
+      val id: ProviderId = ProviderId("customcloud")
+      // An endpoint is a provider-specific key now, as Azure's is, not a built-in requirement.
+      val configSpec: ProviderConfigSpec = ProviderConfigSpec(
+        requiresBaseUrl = true,
+        extras = Seq(ProviderConfigKey.required("endpoint", "the provider endpoint"))
+      )
 
       def buildConfig(providerName: String, section: NamedProviderConfig)(using
         org.llm4s.llmconnect.config.ContextWindowResolver
@@ -107,7 +109,9 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
     )
     // Nothing reads CUSTOMCLOUD_BASE_URL, so it is not suggested (#1215).
     (message should not).include("CUSTOMCLOUD_BASE_URL")
-    message should include("- endpoint: the provider endpoint")
+    message should include(
+      "- endpoint: the provider endpoint (set it in application.conf under llm4s.providers.my-custom.endpoint)"
+    )
   }
 
   "validation" should "return the normalized section when all required fields are present" in {
@@ -136,10 +140,7 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
         "fixturechat",
         "fixture-model",
         baseUrl = Some("  https://api.example.com  "),
-        apiKey = Some("  sk-test-key  "),
-        organization = Some("  org-123  "),
-        endpoint = Some("   "), // whitespace only
-        apiVersion = Some("")   // empty string
+        apiKey = Some("  sk-test-key  ")
       )
     )
 
@@ -147,9 +148,21 @@ class NamedProviderSectionValidatorSpec extends AnyFlatSpec with Matchers {
     config.provider shouldBe ProviderId("fixturechat")
     config.baseUrl.map(_.asUrl) shouldBe Some("https://api.example.com")
     config.apiKey.map(_.asKey) shouldBe Some("sk-test-key")
-    config.organization shouldBe Some("org-123")
-    config.endpoint shouldBe None   // should be filtered out because it's just whitespace
-    config.apiVersion shouldBe None // should be filtered out because it's empty
+  }
+
+  it should "trim provider-specific values and drop blank ones before the descriptor sees them" in {
+    val normalized = NamedProviderConfigNormalizer
+      .normalize(
+        ProviderName("my-trim-test"),
+        section(
+          "fixturechat",
+          "fixture-model",
+          extras = Map("organization" -> "  org-123  ", "endpoint" -> "   ", "apiVersion" -> "")
+        )
+      )
+      .getOrElse(fail("Expected the section to normalise"))
+
+    normalized.extras shouldBe Map("organization" -> "org-123")
   }
 
   it should "reject a section whose provider is not the one being validated against" in {

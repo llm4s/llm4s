@@ -27,9 +27,6 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           model = Some("gpt-4o-mini"),
           baseUrl = None,
           apiKey = None,
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Left(err) =>
@@ -49,9 +46,6 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           model = Some("v1"),
           baseUrl = None,
           apiKey = None,
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Left(err) =>
@@ -70,9 +64,6 @@ class NamedProviderConfigValidatorSpec extends AnyWordSpec with Matchers:
           model = Some("   "),
           baseUrl = None,
           apiKey = Some("sk-test"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Left(err) =>

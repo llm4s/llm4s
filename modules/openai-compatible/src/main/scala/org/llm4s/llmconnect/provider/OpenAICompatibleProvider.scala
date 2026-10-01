@@ -17,9 +17,12 @@ import java.util.Locale
  * speaking the OpenAI `/chat/completions` API, with no module and no code.
  *
  * A named provider section with `provider = "openai-compatible"` needs a
- * `baseUrl` and a `model`; `apiKey` is optional (local servers need none), and
- * `contextWindow`, `reserveCompletion` and `headers` may be set. The
- * provider-specific key `streamUsage` (default `true`) controls whether a streaming
+ * `baseUrl` and a `model`; `apiKey` and `headers` are optional (local servers need
+ * no key). It also accepts three provider-specific keys: `contextWindow` and
+ * `reserveCompletion` (whole numbers; the model's window cannot be known from an
+ * arbitrary endpoint, so these default to [[org.llm4s.llmconnect.config.OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW]]
+ * and a quarter of the window up to [[org.llm4s.llmconnect.config.OpenAICompatibleConfig.DEFAULT_RESERVE_COMPLETION]]),
+ * and `streamUsage` (default `true`), which controls whether a streaming
  * request asks for token usage with `stream_options.include_usage`; set it to
  * `false` for a server that rejects that field. Several sections can use it side
  * by side:
@@ -51,6 +54,15 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
   /** The key that turns `stream_options.include_usage` off for a server that rejects it. */
   val StreamUsageKey: String = "streamUsage"
 
+  /**
+   * The key giving the model's context window. It was a field of `NamedProviderConfig`, read by
+   * this provider alone, until [[https://github.com/llm4s/llm4s/issues/1133 #1133]].
+   */
+  val ContextWindowKey: String = "contextWindow"
+
+  /** The key giving the tokens held back for the reply; a field of `NamedProviderConfig` until #1133. */
+  val ReserveCompletionKey: String = "reserveCompletion"
+
   // `baseUrlEnv` makes a missing-baseUrl error show `baseUrl = ${?OPENAI_COMPATIBLE_BASE_URL}`,
   // the binding that reads the conventional variable. The generic provider has no vendor, so no
   // `llm4s.credentials` block binds its key either: a section sets its own `apiKey`, if any.
@@ -60,6 +72,15 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
       baseUrlExample = "e.g. http://localhost:8000/v1",
       baseUrlEnv = Some(OpenAICompatibleConfigKeys.OPENAI_COMPATIBLE_BASE_URL),
       extras = Seq(
+        ProviderConfigKey.optional(
+          ContextWindowKey,
+          s"the model's context window in tokens, a positive whole number " +
+            s"(default ${OpenAICompatibleConfig.DEFAULT_CONTEXT_WINDOW})"
+        ),
+        ProviderConfigKey.optional(
+          ReserveCompletionKey,
+          "the tokens held back from the prompt for the reply, a whole number less than contextWindow"
+        ),
         ProviderConfigKey.optional(
           StreamUsageKey,
           "whether a streaming request asks for token usage (stream_options.include_usage); " +
@@ -75,18 +96,43 @@ object OpenAICompatibleProvider extends ProviderDescriptor:
     ContextWindowResolver
   ): Result[ProviderConfig] =
     for
-      baseUrl     <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
-      streamUsage <- parseStreamUsage(providerName, section.extra(StreamUsageKey))
+      baseUrl           <- ProviderDescriptor.resolveBaseUrl(providerName, section, configSpec)
+      streamUsage       <- parseStreamUsage(providerName, section.extra(StreamUsageKey))
+      contextWindow     <- parseCount(providerName, section, ContextWindowKey, min = 1, "a positive whole number")
+      reserveCompletion <- parseCount(providerName, section, ReserveCompletionKey, min = 0, "a whole number, 0 or more")
       config <- OpenAICompatibleConfig.fromValues(
         model = section.model.asString,
         baseUrl = baseUrl,
         apiKey = section.apiKey.map(_.asKey),
-        contextWindow = section.contextWindow,
-        reserveCompletion = section.reserveCompletion,
+        contextWindow = contextWindow,
+        reserveCompletion = reserveCompletion,
         headers = section.headers,
         streamUsage = streamUsage
       )
     yield config
+
+  // Extras arrive as strings, so a number written in HOCON arrives as its text. Range checks
+  // between the two counts (the reserve must be less than the window) are `fromValues`'s.
+  private def parseCount(
+    providerName: String,
+    section: NamedProviderConfig,
+    key: String,
+    min: Int,
+    expected: String
+  ): Result[Option[Int]] =
+    section.extra(key) match
+      case None => Right(None)
+      case Some(raw) =>
+        raw.trim.toIntOption
+          .filter(_ >= min)
+          .map(Some(_))
+          .toRight(
+            ConfigurationError(
+              s"Configured provider '$providerName' has an invalid $key: " +
+                s"llm4s.providers.$providerName.$key must be $expected, got '$raw'",
+              List(key)
+            )
+          )
 
   // Extras arrive as strings. HOCON's own boolean spellings are accepted (true/yes/on,
   // false/no/off), so `streamUsage = off` means what it would for any HOCON boolean. A section

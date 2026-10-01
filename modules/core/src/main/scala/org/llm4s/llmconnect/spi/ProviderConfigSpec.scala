@@ -27,11 +27,11 @@ package org.llm4s.llmconnect.spi
  * @param deprecatedAliases older names for this key. A section that sets an alias instead of
  *                          `name` still works, with a deprecation warning per alias used; one
  *                          that sets `name` and an alias, or two aliases, to different values is
- *                          an error. An alias may be a former extra key, or one of the built-in
- *                          fields in [[ProviderConfigSpec.BuiltinAliasKeys]] - which is how a
- *                          provider moves off a repurposed field (Vertex AI's `endpoint` became
- *                          `project`). `provider`, `model` and `headers` cannot be aliases, and
- *                          a spec naming one fails validation.
+ *                          an error. An alias may be any key the section could otherwise carry
+ *                          as an extra - which is how a provider renames one (Vertex AI's
+ *                          `endpoint` became `project`) - or one of the built-in fields in
+ *                          [[ProviderConfigSpec.BuiltinAliasKeys]]. `provider`, `model` and
+ *                          `headers` cannot be aliases, and a spec naming one fails validation.
  */
 final case class ProviderConfigKey(
   name: String,
@@ -88,11 +88,8 @@ object ProviderConfigKey:
  * @param requiresApiKey       the section must carry a non-empty `apiKey`.
  * @param requiresBaseUrl      the section must carry a non-empty `baseUrl`;
  *                             set this only when there is no `defaultBaseUrl`.
- * @param requiresEndpoint     the section must carry a non-empty `endpoint`.
  * @param defaultBaseUrl       base URL used when the section omits one.
  * @param baseUrlExample       example shown when a required `baseUrl` is missing.
- * @param endpointDescription  what this provider means by `endpoint`, shown when
- *                             a required one is missing (Azure: the deployment name).
  * @param baseUrlEnv           the conventional environment variable for `baseUrl`, if the
  *                             provider has one. The missing-`baseUrl` message then shows the
  *                             binding that reads it (`baseUrl = ${?VAR}`); `None` means no
@@ -116,10 +113,8 @@ object ProviderConfigKey:
 final case class ProviderConfigSpec(
   requiresApiKey: Boolean = false,
   requiresBaseUrl: Boolean = false,
-  requiresEndpoint: Boolean = false,
   defaultBaseUrl: Option[String] = None,
   baseUrlExample: String = "e.g. https://api.example.com/",
-  endpointDescription: String = "the provider endpoint",
   baseUrlEnv: Option[String] = None,
   extras: Seq[ProviderConfigKey] = Seq.empty,
   apiKeyEnv: Seq[String] = Seq.empty
@@ -133,27 +128,19 @@ object ProviderConfigSpec:
   /**
    * The fields every named provider section may carry, whatever its provider.
    * An [[ProviderConfigKey]] cannot reuse one of these names.
+   *
+   * Anything vendor-specific - Azure's `endpoint` and `apiVersion`, OpenAI's `organization`, the
+   * generic `openai-compatible` provider's `contextWindow` - is a [[ProviderConfigKey]] its
+   * provider declares, not a built-in, and is unknown to every provider that does not declare it.
    */
-  val BuiltinKeys: Set[String] = Set(
-    "provider",
-    "model",
-    "baseUrl",
-    "apiKey",
-    "organization",
-    "endpoint",
-    "apiVersion",
-    "contextWindow",
-    "reserveCompletion",
-    "headers"
-  )
+  val BuiltinKeys: Set[String] = Set("provider", "model", "baseUrl", "apiKey", "headers")
 
   /**
    * The built-in fields that can be a deprecated alias (`ProviderConfigKey.deprecatedAliases`):
    * those with a string form. `provider` and `model` select and drive every provider, and
    * `headers` is a map, so none of them can stand in for a provider-specific key.
    */
-  val BuiltinAliasKeys: Set[String] =
-    Set("baseUrl", "apiKey", "organization", "endpoint", "apiVersion", "contextWindow", "reserveCompletion")
+  val BuiltinAliasKeys: Set[String] = Set("baseUrl", "apiKey")
 
   /**
    * The common shape: an API key, and a base URL that defaults to the

@@ -1,13 +1,15 @@
 package org.llm4s.testutil
 
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
-import org.llm4s.config.{ ProviderModelLister, ProviderModelListers }
+import org.llm4s.config.{ DiscoveredModel, ProviderModelLister }
+import org.llm4s.error.ValidationError
+import org.llm4s.http.Llm4sHttpClient
 import org.llm4s.llmconnect.config.{ ContextWindowResolver, ProviderConfig }
 import org.llm4s.llmconnect.model.{ AssistantMessage, Completion, CompletionOptions, Conversation, StreamedChunk }
 import org.llm4s.llmconnect.spi.{ Llm4sProviderModule, ProviderConfigSpec, ProviderDescriptor }
 import org.llm4s.llmconnect.{ LLMClient, LlmClientOptions }
 import org.llm4s.model.ModelRegistryService
-import org.llm4s.types.ProviderModelTypes.ProviderId
+import org.llm4s.types.ProviderModelTypes.{ ModelName, ProviderId }
 import org.llm4s.types.Result
 
 /**
@@ -21,8 +23,8 @@ import org.llm4s.types.Result
  *
  * It has the common shape, an API key and a default base URL, and makes no network calls:
  * its client answers every request with [[FixtureChatClient.Reply]], and its base URL is on
- * the reserved `.invalid` domain. Its model lister is the stock OpenAI-compatible one, so a
- * test can drive it with a `MockHttpClient`.
+ * the reserved `.invalid` domain. Its model lister, [[FixtureModelLister]], reads the ids out of
+ * a `GET <baseUrl>/models`, so a test drives it with a `MockHttpClient`.
  *
  * It is registered through `FixtureChatProviderModule` in core's test
  * `META-INF/services`, exactly as a provider module outside core is, so
@@ -38,7 +40,7 @@ object FixtureChatProvider extends ProviderDescriptor:
   val configSpec: ProviderConfigSpec = ProviderConfigSpec.apiKeyAndDefaultBaseUrl(DefaultBaseUrl)
 
   override val modelLister: Option[ProviderModelLister] =
-    Some(ProviderModelListers.openAICompatible(id, DefaultBaseUrl))
+    Some(FixtureModelLister)
 
   def buildConfig(providerName: String, section: NamedProviderConfig)(using
     ContextWindowResolver
@@ -108,3 +110,24 @@ object FixtureChatClient:
 /** The services entry point for [[FixtureChatProvider]]; a `class`, as `ServiceLoader` requires. */
 final class FixtureChatProviderModule extends Llm4sProviderModule:
   override def chatProviders: Seq[ProviderDescriptor] = Seq(FixtureChatProvider)
+
+/**
+ * [[FixtureChatProvider]]'s model lister: `GET <baseUrl>/models` through the HTTP client it is
+ * given, and the `id` of each entry under `data`.
+ *
+ * Core holds no real lister - the OpenAI-format factory, `ProviderModelListers.openAICompatible`,
+ * is in `llm4s-openai-compatible` - so this is just enough for core's specs to prove that
+ * `Llm4sConfig.listModels` resolves a section, reaches its descriptor's lister and passes the
+ * HTTP client through. Tests hand it a `MockHttpClient`; it never touches the network.
+ */
+object FixtureModelLister extends ProviderModelLister:
+  def listModels(config: NamedProviderConfig, httpClient: Llm4sHttpClient): Result[List[DiscoveredModel]] =
+    for
+      section  <- config.requireProvider(FixtureChatProvider.id)
+      _        <- section.requireApiKey
+      response <- httpClient.getResult(s"${section.baseUrlOrDefault(FixtureChatProvider.DefaultBaseUrl).asUrl}/models")
+      ids <- scala.util
+        .Try(ujson.read(response.body)("data").arr.toList.flatMap(_.obj.get("id").flatMap(_.strOpt)))
+        .toOption
+        .toRight(ValidationError("data", "Missing or invalid models payload"))
+    yield ids.map(id => DiscoveredModel(ModelName(id), FixtureChatProvider.id))

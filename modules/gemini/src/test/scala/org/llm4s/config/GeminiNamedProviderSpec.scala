@@ -28,9 +28,6 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("gemini-2.5-flash"),
           baseUrl = Some("https://generativelanguage.googleapis.com/v1beta"),
           apiKey = Some("google-key"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Right(cfg) =>
@@ -49,9 +46,6 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("gemini-2.5-flash"),
           baseUrl = None,
           apiKey = Some("google-key"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Right(cfg) => cfg.provider shouldBe ProviderId("gemini")
@@ -66,9 +60,6 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("gemini-2.5-flash"),
           baseUrl = None,
           apiKey = None,
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Left(err) =>
@@ -91,9 +82,6 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("gemini-2.0-flash"),
           baseUrl = None,
           apiKey = Some("/path/to/credentials.json"),
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
           extras = Map("project" -> "my-gcp-project", "location" -> "europe-west4")
         )
       ) match
@@ -113,15 +101,14 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("gemini-2.0-flash"),
           baseUrl = None,
           apiKey = None,
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
           extras = Map("project" -> "my-gcp-project")
         )
       ).map(_.extra("location")) shouldBe Right(Some(VertexAIConfig.DEFAULT_LOCATION))
     }
 
     // #1215: `endpoint` and `organization` were Vertex's project and location until the keys existed.
+    // Since #1133 neither is a built-in field: the loader reads them into `extras` like any other
+    // key, and the aliases resolve from there, with the same warnings as before.
     "still accept the deprecated endpoint/organization fields, with a deprecation warning each" in {
       val name = ProviderName("vertex-legacy")
       val raw = RawNamedProviderSection(
@@ -129,9 +116,7 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
         model = Some("gemini-2.0-flash"),
         baseUrl = None,
         apiKey = None,
-        organization = Some("europe-west4"),
-        endpoint = Some("my-gcp-project"),
-        apiVersion = None,
+        extras = Map("organization" -> "europe-west4", "endpoint" -> "my-gcp-project")
       )
 
       val (cfg, warnings) = NamedProviderConfigNormalizer
@@ -159,10 +144,7 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("gemini-2.0-flash"),
           baseUrl = None,
           apiKey = None,
-          organization = None,
-          endpoint = Some("old-project"),
-          apiVersion = None,
-          extras = Map("project" -> "new-project")
+          extras = Map("project" -> "new-project", "endpoint" -> "old-project")
         )
       ).left.toOption.getOrElse(fail("Expected a conflict failure")).message
 
@@ -177,9 +159,6 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("gemini-2.0-flash"),
           baseUrl = None,
           apiKey = None,
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
           extras = Map("project" -> "my-gcp-project")
         )
       ) match
@@ -195,9 +174,6 @@ class GeminiNamedProviderSpec extends AnyWordSpec with Matchers:
           model = Some("gemini-2.0-flash"),
           baseUrl = None,
           apiKey = None,
-          organization = None,
-          endpoint = None,
-          apiVersion = None,
         )
       ) match
         case Left(err) =>
