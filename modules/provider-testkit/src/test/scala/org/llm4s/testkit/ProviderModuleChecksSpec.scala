@@ -82,8 +82,8 @@ class ProviderModuleChecksSpec extends AnyWordSpec with Matchers with ProviderMo
     }
 
     "report a section the descriptor rejects" in {
-      buildClient(AcmeProvider, section.copy(apiKey = None)).isLeft shouldBe true
-      failureOf(assertBuildsClient(AcmeProvider, section.copy(apiKey = None))) should include(
+      buildClient(AcmeProvider, section.withApiKey(None)).isLeft shouldBe true
+      failureOf(assertBuildsClient(AcmeProvider, section.withApiKey(None))) should include(
         "acme failed to build a client"
       )
     }
@@ -104,7 +104,7 @@ class ProviderModuleChecksSpec extends AnyWordSpec with Matchers with ProviderMo
     }
 
     "fail for a client that succeeds without a chunk" in {
-      val client = assertBuildsClient(AcmeProvider, section.copy(model = ModelName(AcmeProvider.NonStreamingModel)))
+      val client = assertBuildsClient(AcmeProvider, section.withModel(ModelName(AcmeProvider.NonStreamingModel)))
       failureOf(assertStreams(client)) should include("without delivering a single chunk")
     }
 
