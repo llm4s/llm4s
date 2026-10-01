@@ -4,9 +4,10 @@ import org.llm4s.config.CredentialsRoundTrip
 import org.llm4s.config.ProvidersConfigModel.NamedProviderConfig
 import org.llm4s.llmconnect.LlmClientOptions
 import org.llm4s.llmconnect.config.ContextWindowResolver
+import org.llm4s.llmconnect.contract.LLMClientContractBehaviors
 import org.llm4s.llmconnect.spi.ProviderRegistry
 import org.llm4s.model.{ ModelRegistryConfig, ModelRegistryService }
-import org.llm4s.testutil.FixtureChatConfig
+import org.llm4s.testutil.{ FixtureChatConfig, LocalProviderTestServer }
 import org.llm4s.types.ProviderModelTypes.*
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -18,7 +19,7 @@ import org.scalatest.wordspec.AnyWordSpec
  * provider (#1132), plus the part that only a carved module has to prove: that
  * depending on it is enough - the services entry is found and both halves arrive.
  */
-class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers:
+class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers with LLMClientContractBehaviors:
 
   private val registryService         = ModelRegistryService.fromConfig(ModelRegistryConfig.default).toOption.get
   private given ModelRegistryService  = registryService
@@ -88,6 +89,26 @@ class Llm4sOllamaModuleSpec extends AnyWordSpec with Matchers:
     "declare streaming and a model lister" in {
       OllamaProvider.features.streaming shouldBe true
       OllamaProvider.modelLister shouldBe defined
+    }
+
+    "actually stream, proving the declared streaming flag" in {
+      val ndjsonBody =
+        """{"message":{"content":"Hi"},"done":false}
+          |{"message":{"content":" there"},"done":true,"prompt_eval_count":10,"eval_count":5}
+          |""".stripMargin
+
+      LocalProviderTestServer.withServer("/api/chat") { exchange =>
+        LocalProviderTestServer.sendJsonResponse(exchange, 200, ndjsonBody)
+      } { serverUrl =>
+        val client =
+          OllamaProvider
+            .buildConfig("test-instance", section.copy(baseUrl = Some(BaseUrl(serverUrl))))
+            .flatMap(config => OllamaProvider.buildClient(config, LlmClientOptions.default))
+            .getOrElse(fail("ollama failed to build a streaming client"))
+
+        assertHonoursStreaming(client)
+        client.close()
+      }
     }
   }
 
